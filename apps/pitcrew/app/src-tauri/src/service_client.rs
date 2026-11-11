@@ -48,23 +48,58 @@ fn checked<S: Stream + 'static>(stream: S, verify: impl FnOnce(&S) -> Result<(),
     Ok(Box::new(stream))
 }
 
-/// Connects to the service. On Windows every connection, reads and the event subscription included, is checked first: the pipe
-/// must be owned by SYSTEM or Administrators ([`crate::pipe_server`]). Elsewhere the socket's folder is the user's own.
-fn connect() -> Result<Box<dyn Stream>, ClientError> {
+/// Which engine a connection is for. Windows has two (ADR 0004, second amendment): the SYSTEM **service** (runners in folders only
+/// administrators can change) and the **per-user engine**, the same engine started in the user's own session (runners in folders
+/// the user can change). macOS and Linux have one, the user's own service: [`Engine::System`] there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Engine {
+    /// The service (Windows: SYSTEM, `\\.\pipe\pitcrew`; elsewhere the user's own service).
+    System,
+    /// The per-user engine (Windows only).
+    User,
+}
+
+/// The pipe an engine listens on (Windows).
+#[cfg(windows)]
+fn pipe_of(engine: Engine) -> Result<String, ClientError> {
+    let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
+    match engine {
+        Engine::System => Ok(r"\\.\pipe\pitcrew".to_string()),
+        Engine::User => {
+            let dir = pitcrew_core::service_paths::user_engine_dir(&env)
+                .ok_or_else(|| ClientError::Unavailable("LOCALAPPDATA is not set".into()))?;
+            let installed = pitcrew_core::service_paths::data_dir(pitcrew_core::platform::Os::Windows, &env);
+            Ok(pitcrew_core::service_paths::pipe_name_for(&dir, installed.as_deref()))
+        }
+    }
+}
+
+/// Connects to an engine. On Windows every connection, reads and the event subscription included, is checked first: the pipe must
+/// be owned by SYSTEM or Administrators, or, for the per-user engine's own pipe, by this account ([`crate::pipe_server`]).
+/// Elsewhere the socket's folder is the user's own.
+fn connect(engine: Engine) -> Result<Box<dyn Stream>, ClientError> {
     #[cfg(windows)]
     {
         const ERROR_PIPE_BUSY: i32 = 231;
+        let name = pipe_of(engine)?;
         let started = std::time::Instant::now();
         loop {
-            match pitcrew_core::service_paths::open_pipe_options().open(r"\\.\pipe\pitcrew") {
-                Ok(f) => return checked(f, |f| crate::pipe_server::verify(&crate::pipe_server::PipeOwner(f))),
+            match pitcrew_core::service_paths::open_pipe_options().open(&name) {
+                Ok(f) => {
+                    return checked(f, |f| {
+                        let own = (engine == Engine::User).then(crate::pipe_server::current_user_sid).transpose()?;
+                        crate::pipe_server::verify(&crate::pipe_server::PipeOwner(f), own.as_deref())
+                    })
+                }
                 Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) && started.elapsed() < Duration::from_secs(3) => {
                     std::thread::sleep(Duration::from_millis(50));
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(ClientError::Unavailable(
-                        "it is not installed or not started. Install it from Settings ▸ Service (Windows asks for permission)".into(),
-                    ))
+                    return Err(ClientError::Unavailable(if engine == Engine::User {
+                        "your own runners' engine is not running".into()
+                    } else {
+                        "it is not installed or not started. Install it from Settings ▸ Service (Windows asks for permission)".into()
+                    }))
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
                     return Err(ClientError::Unavailable(
@@ -77,6 +112,9 @@ fn connect() -> Result<Box<dyn Stream>, ClientError> {
     }
     #[cfg(unix)]
     {
+        if engine == Engine::User {
+            return Err(ClientError::Unavailable("only Windows has a per-user engine".into()));
+        }
         let os = if cfg!(target_os = "macos") {
             pitcrew_core::platform::Os::Macos
         } else {
@@ -157,8 +195,24 @@ pub struct LocalServiceClient;
 impl LocalServiceClient {
     /// One request as this process, with whatever rights it has.
     fn request_direct(&self, request: Request) -> Result<Response, ClientError> {
-        let timeout = timeout_for(&request);
-        with_timeout(timeout, move || exchange(connect, &request))
+        request_to(Engine::System, request)
+    }
+}
+
+/// One request to `engine` as this process.
+fn request_to(engine: Engine, request: Request) -> Result<Response, ClientError> {
+    let timeout = timeout_for(&request);
+    with_timeout(timeout, move || exchange(|| connect(engine), &request))
+}
+
+/// The client of the per-user engine (Windows): the user's own engine takes every request from its own user, so nothing is
+/// elevated and nothing is forwarded.
+#[derive(Debug, Default)]
+pub struct UserEngineClient;
+
+impl ServiceClient for UserEngineClient {
+    fn request(&self, request: Request) -> Result<Response, ClientError> {
+        request_to(Engine::User, request)
     }
 }
 
@@ -238,9 +292,18 @@ mod elevated {
 
 /// Subscribes to pushed events and calls `on_event` for each until it returns `false` or the connection ends.
 /// `on_connected` gets the service's version once the subscription stands.
-pub fn subscribe(on_connected: impl FnOnce(String), mut on_event: impl FnMut(Response) -> bool) -> Result<(), ClientError> {
-    let mut s = with_timeout(Duration::from_secs(10), || {
-        let mut s = connect()?;
+pub fn subscribe(on_connected: impl FnOnce(String), on_event: impl FnMut(Response) -> bool) -> Result<(), ClientError> {
+    subscribe_engine(Engine::System, on_connected, on_event)
+}
+
+/// [`subscribe`] to one engine.
+pub fn subscribe_engine(
+    engine: Engine,
+    on_connected: impl FnOnce(String),
+    mut on_event: impl FnMut(Response) -> bool,
+) -> Result<(), ClientError> {
+    let mut s = with_timeout(Duration::from_secs(10), move || {
+        let mut s = connect(engine)?;
         let v = hello(&mut s)?;
         write_frame(&mut s, &Request::Subscribe).map_err(|e| ClientError::Unavailable(e.to_string()))?;
         match read_frame::<Response>(&mut s).map_err(|e| ClientError::Unavailable(e.to_string()))? {
@@ -303,7 +366,7 @@ mod tests {
                 move || {
                     checked(squat, |_| {
                         l.lock().unwrap().push("check");
-                        crate::pipe_server::judge_owner("S-1-5-21-1-2-3-1001")
+                        crate::pipe_server::judge_owner("S-1-5-21-1-2-3-1001", None)
                     })
                 },
                 &request,
@@ -327,7 +390,7 @@ mod tests {
             move || {
                 checked(service, |_| {
                     l.lock().unwrap().push("check");
-                    crate::pipe_server::judge_owner("S-1-5-18")
+                    crate::pipe_server::judge_owner("S-1-5-18", None)
                 })
             },
             &Request::Status,

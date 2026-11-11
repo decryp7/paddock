@@ -84,14 +84,11 @@ Administrators, TrustedInstaller own them and nobody else may write, delete or t
 them). A runner in a folder a user can change is run by the user, in the user's own session, and managed with the user's own
 rights. The service never reads, writes, deletes or runs anything in a folder a user can change.
 
-**Common practice (ER-37).** The GitHub Actions runner has the same shape: the application is installed in a folder owned by the
-account that runs it, `svc.sh` or `config.cmd --runasservice` installs a service that runs it as that account (on Windows the
-default service account is NETWORK SERVICE, not SYSTEM), and GitHub's security guidance tells the administrator that workflow
-code runs with that account's rights and that the runner folder must not be writable by others; a runner that needs a desktop
-(UI tests) is started with `run.cmd` in a logged-on session instead of as a service. Pitcrew's service mode is that service; its
-interactive mode is that `run.cmd`. (Quoted from the GitHub documentation as the author knows it; confirm the wording when the
-user guide is written.) A service that does file work with its own rights inside a folder users write to, as Pitcrew did, is the
-shape OS vendors' guidance calls a confused deputy, and the one a link, a junction or a hard link attacks.
+**Common practice (ER-37), checked against GitHub's documentation on 2026-11-12.**
+- The GitHub Actions runner runs as a service **under an account the administrator chooses**: `./svc.sh install USERNAME` "takes an optional `user` argument to install the service as a different user", and on Windows "the `config` script also asks if you would like to install the self-hosted runner application as a service" (<https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners/configuring-the-self-hosted-runner-application-as-a-service> and <https://docs.github.com/en/actions/how-tos/manage-runners/self-hosted-runners/add-runners>). The runner is installed in a folder of its own (`C:\actions-runner`), not in a folder shared with other accounts, and a runner that needs a user's desktop is the runner started by hand in that user's session rather than as a service.
+- GitHub's own secure-use guide says that self-hosted runners "can be persistently compromised by untrusted code in a workflow" and "do not have guarantees around running in ephemeral clean virtual machines" (<https://docs.github.com/en/actions/reference/security/secure-use>): the runner account is the trust boundary, and the runner's own folder is part of it.
+- Not found in those pages, so not claimed: the default Windows service account, and the name of the foreground script (the runner's own README). The point Pitcrew takes from them is the shape: **service mode for a service account and a protected folder, a session of its own for what needs a user.**
+- Pitcrew's service mode is that service; its per-user engine (below) is that foreground session. A service that does file work with its own rights inside a folder users can write to, as Pitcrew did before this amendment, is the shape OS vendors call a confused deputy, and the one a link, a junction or a hard link attacks.
 
 **What the service does.**
 - The guard is `protected::check_runner_folder` (the shared strict trust rule over the folder and its ancestors, then every
@@ -113,20 +110,39 @@ shape OS vendors' guidance calls a confused deputy, and the one a link, a juncti
   connection, reads and the event subscription included (`pipe_server`, tested with a fake identity that shows nothing is written
   first). The forwarder's hand-off file and folder are opened without following a link.
 
-**What this costs, and what is not built.** A runner in a user's folder is no longer supervised by the SYSTEM service on Windows:
-it is shown blocked, with the reason. Running, updating, cleaning and logging such a runner with the user's own rights is the
-app's side of this decision. The app has no runner supervisor today; the cheapest reuse is the same engine (`pitcrew-service run`)
-started in the user's session at log-on with its own data folder, exactly as on macOS and Linux (where the service already is the
-user's own), and the app talking to both. That is a work package of its own (a design decision for the user: one engine per
-user, or the app hosting it) and is **not** part of this change. Until it lands, an interactive runner must live in an
-administrator-only folder to be supervised by the service at all (and cannot write there), so on Windows the supported supervised
-mode is the service runner.
+**The per-user engine (decided by the user on 2026-11-12: "per-user engine").** On Windows the same engine as the service
+(`pitcrew-service run`, as on macOS and Linux where the service is the user's own) runs **as the user, in the user's session**,
+with its own data folder `%LOCALAPPDATA%\Pitcrew\engine` (`pitcrew_core::service_paths::user_engine_dir`) and its own pipe (the
+name derived from that folder, `pipe_name_for`). It keeps the runners in folders the user can change (`session = interactive`);
+the SYSTEM service keeps the `session = service` runners in administrator-only folders.
+- **Its pipe** admits only its owner and SYSTEM (`PIPE_SDDL_USER`: owner and SYSTEM full control, nobody else); whoever can connect
+  is that user, who may do anything with their own runners, so no caller check is asked (`ServeMode::User`, `Caller::Local`).
+  `ServeMode::System` is the service's, unchanged.
+- **The app** talks to both and shows one list (`engines::RoutingClient`, `Statuses`): a new runner goes to the engine of its
+  session; a request about one runner goes to the engine that has it (the user's is asked first); `Status` and `GetSettings` are
+  merged; `SaveSettings` is split by session and the service is asked only when its part changed, so saving a user's runner never
+  raises a permission prompt. Events: two subscriptions, one merged list for the window and the tray; the user engine not running is
+  not an error. The app starts the user engine (hidden, as the user, no prompt) whenever it finds it not running, and the app
+  itself starts at log-on.
+- **The pipe owner check** (every connection, before anything is written) accepts SYSTEM or Administrators for the service's pipe,
+  and, for the user engine's pipe only, the current user's own SID (`pipe_owner_ok(owner, own_user)`).
+- **Not built here:** a log-on entry that starts the engine without the app (today the app starts it; a runner of the user's does
+  not run while the app has never started since log-on), migration of a runner from the service to the user engine, and the
+  installer wording. The user engine needs the same `pitcrew-service.exe` the service uses.
+
+**What this costs.** A runner in a user's folder is no longer supervised by the SYSTEM service on Windows: it is shown blocked,
+with the reason, until the user's engine has it (or the folder is moved under an administrator-only folder and the runner is
+`session = service`).
 
 **New limits.** (1) A service runner in a folder users can change (such as `C:\actions-runner`) is blocked; move it under
-`C:\Program Files` or `C:\ProgramData\Pitcrew\runners`, which the service locks at start. (2) A user's own runner is not
-supervised by the service (above). (3) Only the folder, its ancestors and its direct children are checked, not every file below:
-an older entry deeper down with a weak ACL would not be detected, and a job that runs as SYSTEM can create what it likes in its own
-folder (that is the nature of a service runner; it is why the folder must be administrator-only). (4) `EnginePrune` and
+`C:\Program Files` or `C:\ProgramData\Pitcrew\runners`, which the service locks at start. (2) A user's own runner is supervised by the per-user engine, not the service (above). (3) **Known gap, not closed here:** only the folder, its ancestors and its direct children are checked. On an upgrade from
+pitcrew-v1.0.1 the folders deeper than the direct children (`work\<repo>\.git\hooks`) keep the right `C:\ProgramData` gave users to
+add to them, so the guard can accept a service runner whose tree a user can still write in. The fix is one shared mechanism that
+adopts a folder tree once (walk without following links, move the disposable trees aside, verify and lock the rest) in
+`paddock-service`, used by Pitcrew and Dyno (`docs/adr-adopt-tree`, in review). Its tests are written first and ignored until it
+lands (`a_service_runner_with_a_user_writable_grandchild_is_not_accepted_until_its_tree_is_adopted`, and the VM row
+`a_grandchild_of_a_settled_service_runner_folder_is_not_writable_by_a_user`); until then **a fresh service runner folder is
+safe and an upgraded one is not**, and the release stays blocked on it. (4) `EnginePrune` and
 `CacheClean` by a standard user are an availability point, not an elevation: they delete what the policy allows, in the
 administrator-only cache folder. (5) UAC on the same desktop is not a boundary against a program of the same user; the service's
 check on who asks is. (6) The container engine (`docker`, `podman`) is found on the service's `PATH` by SYSTEM for the engine

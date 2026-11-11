@@ -4,7 +4,10 @@
 
 use crate::commands::SharedClient;
 use crate::dto::{BackendEvent, ConnectionState, StatusReply};
+use crate::engines::Statuses;
 use crate::service_client::{subscribe, ClientError};
+#[cfg(windows)]
+use crate::service_client::{subscribe_engine, Engine};
 use pitcrew_core::names::RunnerName;
 use pitcrew_core::notify::Notification;
 use pitcrew_core::protocol::{Request, Response, ServiceEvent};
@@ -166,13 +169,71 @@ fn menu_key(s: &StatusReply) -> String {
         .join(";")
 }
 
+/// Shows a merged status: the tray (rebuilt only when what it shows changed), the latest status and the window.
+fn publish_status<R: Runtime>(a: &AppHandle<R>, status: StatusReply) {
+    let key = menu_key(&status);
+    if a.state::<Statuses>().menu_changed(&key) {
+        crate::tray::update(a, &status.runners, true);
+    }
+    a.state::<Latest>().set_status(status.clone());
+    emit(a, BackendEvent::Status { status });
+}
+
+/// The per-user engine's subscription (Windows): its runners join the list; it not running is not an error (nobody has runners
+/// there yet), so it never changes the connection state, and it is started again whenever it is found not running.
+#[cfg(windows)]
+fn start_user_engine_events<R: Runtime>(app: AppHandle<R>) {
+    std::thread::Builder::new()
+        .name("pitcrew-user-engine-events".into())
+        .spawn(move || {
+            let mut backoff = Duration::from_secs(2);
+            loop {
+                if let Err(e) = crate::service_install::start_user_engine() {
+                    eprintln!("pitcrew: the per-user engine could not be started: {e:?}");
+                }
+                let a = app.clone();
+                let result = subscribe_engine(
+                    Engine::User,
+                    |_| {},
+                    |r| {
+                        if let Response::Event { event } = r {
+                            match event {
+                                ServiceEvent::Status { runners, service } => {
+                                    let merged = a.state::<Statuses>().set_user(Some(StatusReply { runners, service }));
+                                    if let Some(merged) = merged {
+                                        publish_status(&a, merged);
+                                    }
+                                }
+                                ServiceEvent::Notification { notification } => {
+                                    notify(&a, &notification);
+                                    emit(&a, BackendEvent::Notification { notification });
+                                }
+                            }
+                        }
+                        true
+                    },
+                );
+                if let Some(merged) = app.state::<Statuses>().set_user(None) {
+                    publish_status(&app, merged);
+                }
+                if result.is_ok() {
+                    backoff = Duration::from_secs(2);
+                }
+                std::thread::sleep(backoff);
+                backoff = (backoff * 2).min(Duration::from_secs(30));
+            }
+        })
+        .ok();
+}
+
 /// Starts the subscription thread.
 pub fn start<R: Runtime>(app: AppHandle<R>) {
+    #[cfg(windows)]
+    start_user_engine_events(app.clone());
     std::thread::Builder::new()
         .name("pitcrew-events".into())
         .spawn(move || {
             let mut backoff = Duration::from_secs(1);
-            let mut last_menu = String::new();
             loop {
                 connection(&app, ConnectionState::Connecting);
                 let a = app.clone();
@@ -184,14 +245,8 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
                         if let Response::Event { event } = r {
                             match event {
                                 ServiceEvent::Status { runners, service } => {
-                                    let status = StatusReply { runners, service };
-                                    let key = menu_key(&status);
-                                    if key != last_menu {
-                                        last_menu = key;
-                                        crate::tray::update(&a, &status.runners, true);
-                                    }
-                                    a.state::<Latest>().set_status(status.clone());
-                                    emit(&a, BackendEvent::Status { status });
+                                    let merged = a.state::<Statuses>().set_system(StatusReply { runners, service });
+                                    publish_status(&a, merged);
                                 }
                                 ServiceEvent::Notification { notification } => {
                                     notify(&a, &notification);
@@ -202,7 +257,7 @@ pub fn start<R: Runtime>(app: AppHandle<R>) {
                         true
                     },
                 );
-                last_menu.clear();
+                app.state::<Statuses>().reset_menu();
                 match result {
                     Err(ClientError::Mismatch(message)) => connection(&app, ConnectionState::Mismatch { message }),
                     Err(e) => connection(&app, ConnectionState::Unavailable { message: e.to_string() }),

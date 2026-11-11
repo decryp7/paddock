@@ -171,6 +171,32 @@ mod imp {
         }
     }
 
+    /// Starts the **per-user engine** (`pitcrew-service run`, hidden, as this user, no prompt) unless it already answers. It keeps
+    /// the runners in folders the user can change (ADR 0004, second amendment); the app starts it whenever it finds it not
+    /// running, and the app itself starts at log-on.
+    pub fn start_user_engine() -> Result<(), CommandError> {
+        use crate::service_client::{ServiceClient, UserEngineClient};
+        if UserEngineClient.request(pitcrew_core::protocol::Request::Status).is_ok() {
+            return Ok(());
+        }
+        let exe = service_exe()?;
+        let op = HSTRING::from("open");
+        let file = HSTRING::from(exe.as_os_str());
+        let params = HSTRING::from("run");
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_NOASYNC,
+            lpVerb: windows::core::PCWSTR(op.as_ptr()),
+            lpFile: windows::core::PCWSTR(file.as_ptr()),
+            lpParameters: windows::core::PCWSTR(params.as_ptr()),
+            nShow: SW_HIDE.0,
+            ..Default::default()
+        };
+        // SAFETY: every pointer in `info` refers to an HSTRING that outlives the call; no process handle is requested.
+        unsafe { ShellExecuteExW(&mut info) }
+            .map_err(|e| CommandError::internal(format!("the engine for your own runners could not be started: {e}")))
+    }
+
     /// Registers and starts the service (the OS asks the user).
     pub fn install() -> Result<(), CommandError> {
         elevated("install")
@@ -572,9 +598,9 @@ mod imp {
     }
 }
 
-#[cfg(windows)]
-pub use imp::run_elevated;
 pub use imp::{install, state, uninstall};
+#[cfg(windows)]
+pub use imp::{run_elevated, start_user_engine};
 
 #[cfg(target_os = "macos")]
 pub use imp::{note_registered, open_login_items, repair_registration, request_repair};

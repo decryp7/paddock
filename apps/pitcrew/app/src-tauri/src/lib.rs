@@ -10,6 +10,7 @@ pub mod credentials;
 pub mod diagnostics;
 pub mod dto;
 pub mod elevated_request;
+pub mod engines;
 pub mod events;
 pub mod gitea;
 pub mod handoff;
@@ -41,6 +42,13 @@ pub fn run() {
             std::time::Duration::from_secs(3600),
         );
     }
+    // Windows has two engines (the SYSTEM service and the per-user engine): requests go to the one that owns what they are about.
+    #[cfg(windows)]
+    let client: SharedClient = Arc::new(engines::RoutingClient::new(
+        Arc::new(service_client::LocalServiceClient),
+        Arc::new(service_client::UserEngineClient),
+    ));
+    #[cfg(not(windows))]
     let client: SharedClient = Arc::new(service_client::LocalServiceClient);
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
@@ -53,6 +61,7 @@ pub fn run() {
         .manage(client.clone())
         .manage(events::PendingNav::default())
         .manage(events::Latest::default())
+        .manage(engines::Statuses::default())
         .manage(events::Actions::new(client))
         .manage(updater::Pending::default())
         .invoke_handler(tauri::generate_handler![
