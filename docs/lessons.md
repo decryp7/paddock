@@ -1764,3 +1764,19 @@ A survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) st
 over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone; Dyno's helper already checked the caller
 per connection. Rule 77 (ER-38): privileged services authorise changing requests by the caller's OS identity, and a
 request that changes what runs elevated needs an administrator caller; user-chosen elevation needs only a risk warning.
+
+## A test's disclaimed fake runner on an external TMPDIR prompted the user once per test (2026-11-11)
+
+The Mac mini showed "gitea-runner would like to access files on a removable volume" again and again. The prompts looked
+like the CI runners', but the tccd log (`AUTHREQ_PROMPTING`, matched to `AUTHREQ_ATTRIBUTION` by msgID) named one
+subject for all 18 prompts from 06:06 on: `/Volumes/d7sst7/dev-targets/pitcrew-tmp/pitcrew-it-<case>-<pid>/runner/bin/gitea-runner`.
+That is Pitcrew's ad-hoc signed `examples/fake_runner.rs`, which `tests/supervision.rs` copies as `gitea-runner` and the
+supervisor starts disclaimed (ADR 0020), so it is its own responsible process. An agent had run the tests locally with
+`TMPDIR` on the external volume, and each test's new path was a new TCC identity, so each test prompted once. CI was not
+affected: `job-tmpdir.sh` already puts the job's `TMPDIR` on the internal disk (lesson of 2026-11-04). Chrome for Testing
+and the build tools never prompted: they run with the runner (which has Full Disk Access) as their responsible process.
+**Lesson (class: a permission belongs to the responsible process, not the parent; second instance after 2026-11-04):** a
+test helper that launches a program disclaimed, or through launchd, keeps that program and its files off removable
+volumes itself, and does not rely on the caller's `TMPDIR`. The supervision harness now uses `getconf
+DARWIN_USER_TEMP_DIR` when `TMPDIR` is under `/Volumes`. Measure prompts with `AUTHREQ_PROMPTING` before you guess the
+binary from the prompt's title: the title shows the file name, and a test fake can share the real program's name.
