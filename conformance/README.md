@@ -129,8 +129,9 @@ every NSIS build).
 `ci/appimage-tools.mjs` pins the linuxdeploy and AppRun that `tauri build --bundles appimage` would download from GitHub (URL
 and SHA-256, following tauri-bundler's `prepare_tools`). `install` verifies each (a cached copy too), downloads only a missing
 or changed one, and copies it into Tauri's tools folder; `key` prints the actions/cache key; `check` warns when Tauri fetched a
-linuxdeploy that is not pinned (the CLI moved on: move the pins). `tauri-bundle.sh` runs `install` and `check` around every
-AppImage build.
+linuxdeploy that is not pinned (the CLI moved on: move the pins), and fails a tag run. A test ties the pins to the lockfile's
+`@tauri-apps/cli`. `tauri-bundle.sh` runs `install` and `check` around every AppImage build. linuxdeploy-plugin-appimage is not
+pinned yet: Tauri downloads it unverified (Dyno 1.1.1 plan, WP-17).
 
 ## Sidecars (`paddock-sidecar`, plan X34)
 

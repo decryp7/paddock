@@ -30,6 +30,8 @@ runs:
   steps:
     # An AppImage build: keep the pinned linuxdeploy and AppRun (conformance/ci/appimage-tools.mjs, SHA-256 checked on every
     # use) in actions/cache under a key made of their versions and hashes, so a warm cache bundles with GitHub unreachable.
+    # ADR 0022's "release jobs bypass every cache" is about running a cached build of our own tool; this cache is allowed on
+    # release and tag runs because every file in it is re-hashed against its pin before use, so it can only save a download.
     - name: AppImage tools cache key
       id: appimage
       if: runner.os == 'Linux' && contains(format(',{0},', inputs.bundles), ',appimage,')

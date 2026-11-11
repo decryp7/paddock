@@ -3,13 +3,13 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { cacheKey, defaultDirs, install, LINUXDEPLOY, main, PINS, unpinned } from '../ci/appimage-tools.mjs';
+import { cacheKey, defaultDirs, install, LINUXDEPLOY, main, PINNED_FOR_CLI, PINS, retryable, unpinned } from '../ci/appimage-tools.mjs';
 import { makeApp } from './helpers.mjs';
 
 const CI = join(dirname(fileURLToPath(import.meta.url)), '..', 'ci');
@@ -92,14 +92,25 @@ test('appimage-tools: a cached copy that does not match its hash is downloaded a
   assert.deepEqual(readFileSync(join(cache, 'AppRun-x86_64')), APPRUN);
 });
 
-test('appimage-tools: a 504 is retried, then fails with one ::error:: naming the URL, the status and the next step', async () => {
+test('appimage-tools: the pins were read from the @tauri-apps/cli the lockfile installs', () => {
+  const lock = JSON.parse(readFileSync(join(CI, '..', '..', 'package-lock.json'), 'utf8'));
+  const cli = lock.packages['node_modules/@tauri-apps/cli']?.version;
+  assert.equal(cli, PINNED_FOR_CLI,
+    `package-lock.json has @tauri-apps/cli ${cli}, the AppImage pins were read from ${PINNED_FOR_CLI}: read its tauri-bundler's prepare_tools ` +
+    '(src/bundle/linux/appimage/linuxdeploy.rs), move the URLs, hashes and file names in conformance/ci/appimage-tools.mjs, then PINNED_FOR_CLI');
+});
+
+test('appimage-tools: a 504 is retried after 2 s and 4 s, then fails with one ::error:: naming the URL, the status and the next step', async () => {
   const s = await serve({ '/AppRun-x86_64': [504, 'Gateway Time-out'] });
   const dir = scratch();
   const log = quiet();
-  const code = await main(['install', '--cache', join(dir, 'c'), '--tools', join(dir, 't')], { HOME: dir, PADDOCK_APPIMAGE_PINS: pinsFile(dir, s.base) }, { log, delayMs: 0 });
+  const sleeps = [];
+  const env = { HOME: dir, PADDOCK_APPIMAGE_PINS: pinsFile(dir, s.base, DEPLOY, {}) };
+  const code = await main(['install', '--cache', join(dir, 'c'), '--tools', join(dir, 't')], env, { log, sleep: async (ms) => sleeps.push(ms) });
   await s.close();
   assert.equal(code, 1);
   assert.equal(s.hits['/AppRun-x86_64'], 3, 'three tries');
+  assert.deepEqual(sleeps, [2000, 4000]);
   const errors = log.lines.filter((l) => l.startsWith('::error::'));
   assert.equal(errors.length, 1, log.lines.join('\n'));
   assert.match(errors[0], new RegExp(`Downloading AppRun \\(apprun-old\\) for the AppImage failed: ${s.base}/AppRun-x86_64 answered HTTP 504\\. Next step: re-run`));
@@ -114,7 +125,44 @@ test('appimage-tools: no answer at all (connection refused) is named as such', a
   const log = quiet();
   const code = await main(['install', '--cache', join(dir, 'c'), '--tools', join(dir, 't')], { HOME: dir, PADDOCK_APPIMAGE_PINS: pinsFile(dir, s.base) }, { log, delayMs: 0 });
   assert.equal(code, 1);
-  assert.match(log.lines.at(-1), new RegExp(`^::error::Downloading AppRun .*${s.base}/AppRun-x86_64 answered no answer \\(ECONNREFUSED\\)\\. Next step:`));
+  assert.match(log.lines.at(-1), new RegExp(`^::error::Downloading AppRun .*${s.base}/AppRun-x86_64 got no answer \\(ECONNREFUSED\\)\\. Next step:`));
+});
+
+test('appimage-tools: a 4xx other than 408 and 429 is not retried', async () => {
+  assert.deepEqual([404, 403, 408, 429, 500, 504, null].map((status) => retryable({ status })), [false, false, true, true, true, true, true]);
+  for (const [status, tries] of [[404, 1], [429, 3]]) {
+    const s = await serve({ '/AppRun-x86_64': [status, 'x'] });
+    const dir = scratch();
+    const log = quiet();
+    assert.equal(await main(['install', '--cache', join(dir, 'c'), '--tools', join(dir, 't')], { HOME: dir, PADDOCK_APPIMAGE_PINS: pinsFile(dir, s.base) }, { log }), 1);
+    await s.close();
+    assert.equal(s.hits['/AppRun-x86_64'], tries, `HTTP ${status}`);
+    assert.match(log.lines.at(-1), new RegExp(`answered HTTP ${status}\\. Next step:`));
+  }
+});
+
+test('appimage-tools: a failed write to the cache leaves no .part file and prints one ::error::', async () => {
+  const s = await serve(routesFor());
+  const dir = scratch();
+  const log = quiet();
+  const write = (path, bytes) => {
+    writeFileSync(path, bytes.subarray(0, 3));
+    throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' });
+  };
+  const code = await main(['install', '--cache', join(dir, 'c'), '--tools', join(dir, 't')], { HOME: dir, PADDOCK_APPIMAGE_PINS: pinsFile(dir, s.base) }, { log, write });
+  await s.close();
+  assert.equal(code, 1);
+  assert.match(log.lines.at(-1), /^::error::Writing AppRun to the cache .* failed: ENOSPC: no space left on device\. Next step:/);
+  assert.deepEqual(readdirSync(join(dir, 'c')), [], 'no .part file and no cached copy');
+});
+
+test('appimage-tools: the pins override is refused in a CI run', async () => {
+  const dir = scratch();
+  const log = quiet();
+  assert.equal(await main(['install'], { HOME: dir, GITHUB_ACTIONS: 'true', PADDOCK_APPIMAGE_PINS: pinsFile(dir, 'http://127.0.0.1:9') }, { log }), 2);
+  assert.deepEqual(log.lines.filter((l) => l.startsWith('::error::')).length, 1);
+  assert.match(log.lines[0], /^::error::PADDOCK_APPIMAGE_PINS is set in a CI run/);
+  assert.ok(!existsSync(join(dir, '.cache', 'tauri')), 'nothing installed');
 });
 
 test('appimage-tools: a download whose hash differs fails loudly and is never used or cached', async () => {
@@ -128,6 +176,7 @@ test('appimage-tools: a download whose hash differs fails loudly and is never us
   assert.match(log.lines.at(-1), new RegExp(`^::error::linuxdeploy from ${s.base}/linuxdeploy-x86_64\\.AppImage has SHA-256 ${sha(Buffer.from('a different linuxdeploy'))}, but ${sha(DEPLOY)} is pinned: the file was not used\\. Next step:`));
   assert.ok(!existsSync(join(dir, 'c', `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`)));
   assert.ok(!existsSync(join(dir, 't', `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`)));
+  assert.deepEqual(readdirSync(join(dir, 'c')).filter((f) => f.endsWith('.part')), [], 'no .part file');
 });
 
 test('appimage-tools: check warns about a linuxdeploy Tauri fetched itself; a host without pins only warns', async () => {
@@ -140,15 +189,18 @@ test('appimage-tools: check warns about a linuxdeploy Tauri fetched itself; a ho
   const log = quiet();
   assert.equal(await main(['check', '--tools', join(dir, 't')], { HOME: dir }, { log, arch: 'x86_64' }), 0);
   assert.match(log.lines.join('\n'), /::warning::Tauri downloaded linuxdeploy-abc1234-x86_64\.AppImage itself \(unpinned/);
+  const tag = quiet();
+  assert.equal(await main(['check', '--tools', join(dir, 't')], { HOME: dir, GITHUB_REF: 'refs/tags/dyno-v1.1.1' }, { log: tag, arch: 'x86_64' }), 1, 'a tag run fails');
+  assert.match(tag.lines.join('\n'), /^::error::Tauri downloaded linuxdeploy-abc1234-x86_64\.AppImage itself/m);
   const other = quiet();
   assert.equal(await main(['install'], { HOME: dir }, { log: other, arch: null }), 0);
   assert.match(other.lines[0], /^::warning::No pinned AppImage tools for /);
   await assert.rejects(main(['install', '--bogus', 'x'], { HOME: dir }, { log: quiet() }), /unknown option --bogus/);
 });
 
-function pinsFile(dir, base, deploy = DEPLOY) {
+function pinsFile(dir, base, deploy = DEPLOY, extra = { retryDelayMs: 0 }) {
   const f = join(dir, 'pins.json');
-  writeFileSync(f, JSON.stringify({ arch: 'x86_64', pins: pinsAt(base, deploy), retryDelayMs: 0 }));
+  writeFileSync(f, JSON.stringify({ arch: 'x86_64', pins: pinsAt(base, deploy), ...extra }));
   return f;
 }
 
@@ -206,11 +258,30 @@ test('tauri-bundle: an AppImage build puts the pinned tools where Tauri looks be
   assert.ok(existsSync(join(root, 'dist/Demo_1.2.3_amd64.AppImage')));
 });
 
+test('tauri-bundle: after an AppImage build it runs check: a linuxdeploy Tauri fetched itself warns, and fails a tag run', () => {
+  const root = appimageRepo(
+    // The stub build behaves like a Tauri whose bundler moved to another linuxdeploy: it downloads that one itself.
+    'touch "$HOME/.cache/tauri/linuxdeploy-abc1234-x86_64.AppImage"\n' +
+      'mkdir -p "$CARGO_TARGET_DIR/dist/bundle/appimage" && touch "$CARGO_TARGET_DIR/dist/bundle/appimage/Demo_1.2.3_amd64.AppImage"',
+  );
+  const cache = join(root, 'kept');
+  mkdirSync(cache);
+  writeFileSync(join(cache, 'AppRun-x86_64'), APPRUN);
+  writeFileSync(join(cache, `linuxdeploy-${LINUXDEPLOY}-x86_64.AppImage`), DEPLOY);
+  const env = { PADDOCK_APPIMAGE_TOOLS: cache, PADDOCK_APPIMAGE_PINS: pinsFile(root, 'http://127.0.0.1:9') };
+  const branch = bundle(root, 'appimage', env);
+  assert.equal(branch.status, 0, branch.stdout + branch.stderr);
+  assert.match(branch.stdout, /::warning::Tauri downloaded linuxdeploy-abc1234-x86_64\.AppImage itself/);
+  const tag = bundle(root, 'appimage', { ...env, GITHUB_REF: 'refs/tags/dyno-v1.1.1' });
+  assert.equal(tag.status, 1);
+  assert.match(tag.stdout, /::error::Tauri downloaded linuxdeploy-abc1234-x86_64\.AppImage itself/);
+});
+
 test('tauri-bundle: a failed tool download stops before the build; a failed build prints one ::error:: with the next step', () => {
   const root = appimageRepo('exit 0');
   const r = bundle(root, 'appimage', { PADDOCK_APPIMAGE_TOOLS: join(root, 'kept'), PADDOCK_APPIMAGE_PINS: pinsFile(root, 'http://127.0.0.1:9') });
   assert.equal(r.status, 1);
-  assert.match(r.stdout, /::error::Downloading AppRun \(apprun-old\) for the AppImage failed: http:\/\/127\.0\.0\.1:9\/AppRun-x86_64 answered no answer/);
+  assert.match(r.stdout, /::error::Downloading AppRun \(apprun-old\) for the AppImage failed: http:\/\/127\.0\.0\.1:9\/AppRun-x86_64 got no answer/);
   assert.ok(!existsSync(join(root, 'calls.log')), 'tauri build never ran');
   const failing = appimageRepo('exit 3');
   const b = bundle(failing, 'deb');

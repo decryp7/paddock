@@ -8,13 +8,18 @@
 //
 //   node appimage-tools.mjs key                                  the actions/cache key of these pins
 //   node appimage-tools.mjs install [--cache <dir>] [--tools <dir>]
-//   node appimage-tools.mjs check [--tools <dir>]                warns when Tauri downloaded a linuxdeploy we do not pin
+//   node appimage-tools.mjs check [--tools <dir>]                a linuxdeploy we do not pin: a warning, an error on a tag
 //
-// The pins follow tauri-bundler's `prepare_tools` (src/bundle/linux/appimage/linuxdeploy.rs, tauri-bundler 2.10.3, the one
-// @tauri-apps/cli 2.12.3 uses): LINUXDEPLOY_COMMIT_HASH and the file names it expects. When the CLI moves to another
-// linuxdeploy, `check` warns after the build (Tauri then downloads it itself, unpinned) and the pins move with it.
-// The optional linuxdeploy-plugin-appimage download (a moving `continuous` release) is not pinned: Tauri falls back to the
-// plugin built into linuxdeploy when it fails, so it cannot fail a bundle.
+// The pins follow tauri-bundler 2.10.3's `prepare_tools` (src/bundle/linux/appimage/linuxdeploy.rs:208-278; @tauri-apps/cli
+// 2.12.3 pins that bundler with `=2.10.3`): LINUXDEPLOY_COMMIT_HASH and the file names it expects. It downloads AppRun and
+// linuxdeploy only when the file is missing (:212, :223) and zeroes linuxdeploy's AppImage magic with `dd` on every call
+// (:267-276), so the copy this script puts there is patched by Tauri each build. A conformance test ties PINNED_FOR_CLI to the
+// lockfile's @tauri-apps/cli; when the CLI moves, `check` also flags a linuxdeploy Tauri fetched itself.
+//
+// Integrity gap: linuxdeploy-plugin-appimage is NOT pinned and NOT verified. Tauri downloads it from linuxdeploy's moving
+// `continuous` release whenever its tools folder lacks it (:248-263) and runs it unchecked; a failed download only falls back
+// to the plugin built into linuxdeploy, so it cannot fail a bundle, but a successful one is unverified code in the build.
+// Closing it (a mirrored build on Gitea's generic packages, pinned here) is a later plan row.
 import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -23,6 +28,9 @@ import { isMain } from '../src/util/is-main.mjs';
 
 /** linuxdeploy's release in tauri-apps/binary-releases (tauri-bundler's LINUXDEPLOY_COMMIT_HASH). */
 export const LINUXDEPLOY = '07333c6';
+
+/** The @tauri-apps/cli version the pins were read from (its tauri-bundler's prepare_tools); package-lock.json must match. */
+export const PINNED_FOR_CLI = '2.12.3';
 
 /**
  * The pinned tools per Tauri tools arch: the release URL, its SHA-256 (measured on download 2026-11-12 and equal to the digest
@@ -65,12 +73,18 @@ export function defaultDirs(env = process.env) {
 }
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Whether a failed download is worth another try: no answer, a 5xx, 408 or 429; never another 4xx. */
+export const retryable = (err) => err.status === null || err.status >= 500 || err.status === 408 || err.status === 429;
+
+/** "answered HTTP 504" or "got no answer (ECONNREFUSED)". */
+const outcome = (err) => (err.status === null ? `got no answer (${err.reason})` : `answered HTTP ${err.status}`);
 
 /** A failed download: the URL, the HTTP status (null when no answer came) and the cause. */
 export class DownloadError extends Error {
   constructor(url, status, cause) {
-    super(`${url}: ${status === null ? `no answer (${cause})` : `HTTP ${status}`}`);
+    super(`${url} ${status === null ? `got no answer (${cause})` : `answered HTTP ${status}`}`);
     this.url = url;
     this.status = status;
     this.reason = cause;
@@ -91,17 +105,19 @@ export async function fetchBytes(url, { timeoutMs = 5 * 60 * 1000 } = {}) {
 
 /** The one-line `::error::` for a failed download (ER-27): the tool, the URL, the status and the next step. */
 export function downloadAnnotation(pin, err, key) {
-  const status = err.status === null ? `no answer (${err.reason})` : `HTTP ${err.status}`;
-  return `::error::Downloading ${pin.name} (${pin.version}) for the AppImage failed: ${pin.url} answered ${status}. ` +
+  return `::error::Downloading ${pin.name} (${pin.version}) for the AppImage failed: ${pin.url} ${outcome(err)}. ` +
     `Next step: re-run the job when github.com answers again; a run that restores the actions/cache key ${key} needs no download.`;
 }
 
 /**
  * Makes each pinned tool of `arch` present and verified in `cache` (a cached copy whose SHA-256 differs is downloaded again),
  * then copies it into `tools` under the name Tauri expects, executable. Downloads try `attempts` times, `delayMs` apart and
- * doubling. Returns a list of { name, source: 'cache' | 'download' }. Throws with `annotation` set on any failure.
+ * doubling (`sleep` is injectable), and only for a retryable failure. Returns a list of { name, source: 'cache' | 'download' }.
+ * Throws with `annotation` set on any failure; no `.part` file is left behind.
  */
-export async function install({ cache, tools, arch = 'x86_64', pins = PINS[arch], fetch: get = fetchBytes, attempts = 3, delayMs = 2000, log = console.log }) {
+export async function install({
+  cache, tools, arch = 'x86_64', pins = PINS[arch], fetch: get = fetchBytes, attempts = 3, delayMs = 2000, sleep = wait, write = writeFileSync, log = console.log,
+}) {
   const key = cacheKey(arch, pins);
   mkdirSync(cache, { recursive: true });
   mkdirSync(tools, { recursive: true });
@@ -122,7 +138,7 @@ export async function install({ cache, tools, arch = 'x86_64', pins = PINS[arch]
           break;
         } catch (e) {
           const err = e instanceof DownloadError ? e : new DownloadError(pin.url, null, e.message);
-          if (i >= attempts) throw Object.assign(new Error(err.message), { annotation: downloadAnnotation(pin, err, key) });
+          if (i >= attempts || !retryable(err)) throw Object.assign(new Error(err.message), { annotation: downloadAnnotation(pin, err, key) });
           log(`appimage-tools: ${err.message}; try ${i + 1} of ${attempts} in ${(delayMs * 2 ** (i - 1)) / 1000} s`);
           await sleep(delayMs * 2 ** (i - 1));
         }
@@ -136,11 +152,17 @@ export async function install({ cache, tools, arch = 'x86_64', pins = PINS[arch]
         });
       }
       const part = `${kept}.part`;
-      writeFileSync(part, bytes);
-      renameSync(part, kept);
+      try {
+        write(part, bytes);
+        renameSync(part, kept);
+      } catch (e) {
+        rmSync(part, { force: true });
+        throw Object.assign(e, { annotation: `::error::Writing ${pin.name} to the cache ${cache} failed: ${e.message}. Next step: check the runner's free disk and the folder's rights.` });
+      }
     }
-    // Always copy over: Tauri patches its linuxdeploy in place (it zeroes the AppImage magic), so the tools folder's copy is
-    // never the pinned bytes after a build; the verified copy in the cache is.
+    // Always copy over: Tauri zeroes linuxdeploy's AppImage magic in place on every build (prepare_tools, :267-276), so the
+    // tools folder's copy is never the pinned bytes after a build; the verified copy in the cache is, and Tauri patches the
+    // fresh copy again before it runs it.
     const dest = join(tools, pin.file);
     copyFileSync(kept, dest);
     chmodSync(dest, 0o755);
@@ -166,7 +188,9 @@ function option(argv, name) {
 
 /**
  * The command line; returns the exit code. `PADDOCK_APPIMAGE_PINS` names a JSON file { arch, pins, retryDelayMs? } that
- * replaces the pins and the host's arch (the tests' local tools; a mirror's URLs).
+ * replaces the pins and the host's arch, for the tests only: under `GITHUB_ACTIONS=true` it is refused (exit 2), so a CI run
+ * always uses the pins above. `check` fails (exit 1) on a tag run (`GITHUB_REF` refs/tags/...), where a release must not ship
+ * an unpinned linuxdeploy.
  */
 export async function main(argv, env = process.env, deps = {}) {
   const [cmd, ...rest] = argv;
@@ -176,10 +200,14 @@ export async function main(argv, env = process.env, deps = {}) {
   const dirs = defaultDirs(env);
   const cache = option(rest, '--cache') ?? dirs.cache;
   const tools = option(rest, '--tools') ?? dirs.tools;
+  const log = deps.log ?? console.log;
+  if (env.PADDOCK_APPIMAGE_PINS && env.GITHUB_ACTIONS === 'true') {
+    log('::error::PADDOCK_APPIMAGE_PINS is set in a CI run: it replaces the pinned AppImage tools and is for the tests only. Next step: remove it from the workflow or the runner environment.');
+    return 2;
+  }
   const override = env.PADDOCK_APPIMAGE_PINS ? JSON.parse(readFileSync(env.PADDOCK_APPIMAGE_PINS, 'utf8')) : null;
   const arch = override ? override.arch : deps.arch === undefined ? toolsArch() : deps.arch;
   const pins = override ? override.pins : PINS[arch];
-  const log = deps.log ?? console.log;
   if (cmd === 'key') {
     log(cacheKey(arch ?? 'x86_64', pins ?? PINS.x86_64));
     return 0;
@@ -190,7 +218,7 @@ export async function main(argv, env = process.env, deps = {}) {
   }
   if (cmd === 'install') {
     try {
-      await install({ cache, tools, arch, pins, log, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(override?.retryDelayMs !== undefined ? { delayMs: override.retryDelayMs } : {}), ...(deps.delayMs !== undefined ? { delayMs: deps.delayMs } : {}) });
+      await install({ cache, tools, arch, pins, log, ...(deps.fetch ? { fetch: deps.fetch } : {}), ...(override?.retryDelayMs !== undefined ? { delayMs: override.retryDelayMs } : {}), ...(deps.delayMs !== undefined ? { delayMs: deps.delayMs } : {}), ...(deps.sleep ? { sleep: deps.sleep } : {}), ...(deps.write ? { write: deps.write } : {}) });
       return 0;
     } catch (e) {
       log(e.annotation ?? `::error::Preparing the AppImage tools failed: ${e.message}. Next step: see conformance/ci/appimage-tools.mjs.`);
@@ -198,11 +226,13 @@ export async function main(argv, env = process.env, deps = {}) {
     }
   }
   if (cmd === 'check') {
-    for (const f of unpinned(tools, pins)) {
-      log(`::warning::Tauri downloaded ${f} itself (unpinned, from GitHub): its linuxdeploy is no longer ${LINUXDEPLOY}. ` +
+    const tag = (env.GITHUB_REF ?? '').startsWith('refs/tags/');
+    const found = unpinned(tools, pins);
+    for (const f of found) {
+      log(`::${tag ? 'error' : 'warning'}::Tauri downloaded ${f} itself (unpinned, from GitHub): its linuxdeploy is no longer ${LINUXDEPLOY}. ` +
         'Next step: pin the new build in conformance/ci/appimage-tools.mjs (URL and SHA-256 from tauri-bundler\'s prepare_tools).');
     }
-    return 0;
+    return tag && found.length ? 1 : 0;
   }
   throw new Error('usage: appimage-tools.mjs key | install [--cache <dir>] [--tools <dir>] | check [--tools <dir>]');
 }
