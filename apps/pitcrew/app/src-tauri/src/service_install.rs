@@ -5,6 +5,33 @@
 
 use crate::dto::{CommandError, CommandErrorCode, ServiceInstall};
 
+/// What to do about the per-user engine when the app looks for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineStart {
+    /// It answers: nothing to do.
+    Running,
+    /// Start it, as this user, hidden.
+    Start,
+    /// This app runs elevated: starting it from here would start it elevated, and it must never run so (it takes requests from the
+    /// user's own programs). Not started; the window says to start Pitcrew normally.
+    SkipElevated,
+}
+
+/// Decides. Pure; the engine's own start refuses an elevated token too, so this is the first of two checks.
+pub fn engine_start_decision(running: bool, app_elevated: bool) -> EngineStart {
+    if running {
+        EngineStart::Running
+    } else if app_elevated {
+        EngineStart::SkipElevated
+    } else {
+        EngineStart::Start
+    }
+}
+
+/// What the window says when the app skipped the engine because it runs elevated.
+pub const ELEVATED_SKIP_NOTICE: &str =
+    "Pitcrew is running as administrator, so it does not start the engine for your own runners (that engine must never run elevated). Close Pitcrew and start it normally to use them.";
+
 /// The installed service binary next to the app's executable (Tauri puts sidecars there).
 pub fn service_exe() -> Result<std::path::PathBuf, CommandError> {
     let exe = std::env::current_exe().map_err(|e| CommandError::internal(format!("the app's folder cannot be found: {e}")))?;
@@ -171,13 +198,45 @@ mod imp {
         }
     }
 
+    /// Whether this app runs with an elevated token.
+    pub fn app_is_elevated() -> bool {
+        use windows::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+        use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        let mut token = HANDLE::default();
+        // SAFETY: the pseudo handle of this process and a valid out pointer; the token is closed below.
+        if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
+            return true; // not knowing is not "not elevated"
+        }
+        let mut info = TOKEN_ELEVATION::default();
+        let mut returned = 0u32;
+        // SAFETY: `info` is a TOKEN_ELEVATION of the size passed; `token` is valid.
+        let read = unsafe {
+            GetTokenInformation(
+                token,
+                TokenElevation,
+                Some((&mut info as *mut TOKEN_ELEVATION).cast()),
+                std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+                &mut returned,
+            )
+        };
+        // SAFETY: the handle opened above, closed once.
+        unsafe {
+            let _ = CloseHandle(token);
+        }
+        read.is_err() || info.TokenIsElevated != 0
+    }
+
     /// Starts the **per-user engine** (`pitcrew-service run`, hidden, as this user, no prompt) unless it already answers. It keeps
     /// the runners in folders the user can change (ADR 0004, second amendment); the app starts it whenever it finds it not
     /// running, and the app itself starts at log-on.
     pub fn start_user_engine() -> Result<(), CommandError> {
         use crate::service_client::{ServiceClient, UserEngineClient};
-        if UserEngineClient.request(pitcrew_core::protocol::Request::Status).is_ok() {
-            return Ok(());
+        let running = UserEngineClient.request(pitcrew_core::protocol::Request::Status).is_ok();
+        match engine_start_decision(running, app_is_elevated()) {
+            EngineStart::Running => return Ok(()),
+            EngineStart::SkipElevated => return Err(CommandError::new(CommandErrorCode::PermissionDenied, ELEVATED_SKIP_NOTICE)),
+            EngineStart::Start => {}
         }
         let exe = service_exe()?;
         let op = HSTRING::from("open");
@@ -598,9 +657,9 @@ mod imp {
     }
 }
 
-pub use imp::{install, state, uninstall};
 #[cfg(windows)]
-pub use imp::{run_elevated, start_user_engine};
+pub use imp::{app_is_elevated, run_elevated, start_user_engine};
+pub use imp::{install, state, uninstall};
 
 #[cfg(target_os = "macos")]
 pub use imp::{note_registered, open_login_items, repair_registration, request_repair};
@@ -699,5 +758,44 @@ mod stale_tests {
         assert_eq!(super::repair_delay(0).as_secs(), 3);
         assert_eq!(super::repair_delay(1).as_secs(), 60);
         const { assert!(super::REPAIR_ATTEMPTS >= 5) };
+    }
+}
+
+#[cfg(test)]
+mod engine_start_tests {
+    use super::*;
+
+    #[test]
+    fn an_elevated_app_never_starts_the_users_engine() {
+        assert_eq!(engine_start_decision(true, false), EngineStart::Running);
+        assert_eq!(
+            engine_start_decision(true, true),
+            EngineStart::Running,
+            "an engine that already runs is left alone"
+        );
+        assert_eq!(engine_start_decision(false, false), EngineStart::Start);
+        assert_eq!(engine_start_decision(false, true), EngineStart::SkipElevated);
+        assert!(ELEVATED_SKIP_NOTICE.contains("administrator") && ELEVATED_SKIP_NOTICE.contains("normally"));
+    }
+
+    /// On the Windows test VM, run elevated: the app does not start the engine, says why, and no engine answers afterwards.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "VM: run elevated (PITCREW_TEST_EXPECT=elevated) on the Windows test VM"]
+    fn an_elevated_app_leaves_the_user_engine_not_running_and_says_why() {
+        use crate::service_client::{ServiceClient, UserEngineClient};
+        assert_eq!(
+            std::env::var("PITCREW_TEST_EXPECT").as_deref(),
+            Ok("elevated"),
+            "this row runs elevated"
+        );
+        assert!(app_is_elevated(), "the VM run is not elevated: the row proves nothing");
+        let err = start_user_engine().unwrap_err();
+        assert_eq!(err.code, CommandErrorCode::PermissionDenied);
+        assert!(err.message.contains("administrator"), "{}", err.message);
+        assert!(
+            UserEngineClient.request(pitcrew_core::protocol::Request::Status).is_err(),
+            "an engine is running after an elevated app looked"
+        );
     }
 }

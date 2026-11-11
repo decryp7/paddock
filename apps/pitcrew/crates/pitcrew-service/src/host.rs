@@ -29,13 +29,19 @@ impl Host {
         Host::start_with(data_dir, socket_dir, ipc::ServeMode::System, on_fatal)
     }
 
-    /// [`Host::start_at`] for a given [`ipc::ServeMode`]: the SYSTEM service, or the per-user engine.
+    /// [`Host::start_at`] for a given [`ipc::ServeMode`]: the SYSTEM service, or the per-user engine (never from an elevated token).
     pub fn start_with(
         data_dir: PathBuf,
         socket_dir: PathBuf,
         mode: ipc::ServeMode,
         on_fatal: impl FnOnce(String) + Send + 'static,
     ) -> Result<Host, Error> {
+        if mode == ipc::ServeMode::User {
+            user_engine_token_allowed(token_is_elevated()).map_err(|reason| Error::Os {
+                what: "Starting the engine for your own runners",
+                reason,
+            })?;
+        }
         let protected = protect_installed_folder(&data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
             path: data_dir.display().to_string(),
@@ -109,11 +115,17 @@ fn protect_installed_folder(data_dir: &std::path::Path) -> Result<Option<String>
         return Ok(None);
     }
     let mut machine = paddock_service::privileged::trust_real::RealTrust;
+    let list = |d: &str| -> std::io::Result<Vec<String>> {
+        std::fs::read_dir(d)?
+            .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+            .collect()
+    };
     let outcome = ensure_protected_root(
         &mut machine,
+        &list,
         data_dir,
-        &[crate::paths::CONFIG_FILE, crate::paths::CONFIG_BACKUP, "state.json"],
-        &["logs"],
+        crate::protected::TRUSTED_FILES,
+        crate::protected::TRUSTED_DIRS,
     )
     .map_err(|reason| Error::Os {
         what: "Protecting the data folder",
@@ -135,6 +147,32 @@ fn protect_installed_folder(data_dir: &std::path::Path) -> Result<Option<String>
 #[expect(clippy::unnecessary_wraps, reason = "the Windows version can fail")]
 fn protect_installed_folder(_: &std::path::Path) -> Result<Option<String>, Error> {
     Ok(None)
+}
+
+/// Whether the per-user engine may run with this token. Pure.
+///
+/// # Errors
+/// An elevated token: the engine for a user's own runners is the user's, not an administrator's.
+pub fn user_engine_token_allowed(elevated: bool) -> Result<(), String> {
+    if elevated {
+        Err("the engine for your own runners must not run elevated (as administrator): it takes requests from programs of your own account, and \
+             an elevated engine would run what they name with administrator rights. Start it again from a normal (not \"Run as administrator\") \
+             window or app"
+            .into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether this process has an elevated token (Windows; elsewhere no).
+#[cfg(windows)]
+fn token_is_elevated() -> bool {
+    crate::platform::win_session::is_elevated()
+}
+
+#[cfg(not(windows))]
+fn token_is_elevated() -> bool {
+    false
 }
 
 /// Where `run` keeps its data and whose engine it is (see [`run_foreground`]).
@@ -205,5 +243,17 @@ pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
             reason,
         }),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod elevation_tests {
+    use super::*;
+
+    #[test]
+    fn the_engine_for_a_users_own_runners_refuses_an_elevated_token_and_says_why() {
+        assert!(user_engine_token_allowed(false).is_ok());
+        let e = user_engine_token_allowed(true).unwrap_err();
+        assert!(e.contains("must not run elevated") && e.contains("normal"), "{e}");
     }
 }

@@ -157,7 +157,7 @@ fn a_new_data_folder_is_protected_from_the_moment_it_exists() {
     let root = scratch("created");
     let dir = root.join("Pitcrew");
     let mut machine = RealTrust;
-    let outcome = ensure_protected_root(&mut machine, &dir, &["pitcrew.toml"], &["logs"]).unwrap();
+    let outcome = ensure_protected_root(&mut machine, &list_real, &dir, &["pitcrew.toml"], &["logs"]).unwrap();
     assert_eq!(outcome, RootOutcome::Created);
     let node = machine.node(&dir.display().to_string()).unwrap().unwrap();
     let Security::Windows(d) = node.security else {
@@ -192,7 +192,7 @@ fn a_data_folder_a_user_made_first_is_not_trusted() {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("pitcrew.toml"), "schema_version = 1\n").unwrap();
     }
-    let result = ensure_protected_root(&mut RealTrust, &dir, &["pitcrew.toml"], &["logs"]);
+    let result = ensure_protected_root(&mut RealTrust, &list_real, &dir, &["pitcrew.toml"], &["logs"]);
     match (who.as_str(), &result) {
         ("elevated", Ok(RootOutcome::MovedAside(aside, why))) => {
             assert!(Path::new(aside).exists(), "{aside}");
@@ -251,7 +251,7 @@ fn settled_service_runner_folders_pass_the_guard_and_a_user_folder_never_does() 
             before.is_err(),
             "the old layout should not pass the guard: that is the upgrade problem"
         );
-        let out = ensure_protected_root(&mut RealTrust, &root, &["pitcrew.toml"], &["logs"]).unwrap();
+        let out = ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs"]).unwrap();
         println!("MEASURED data folder: {out:?}");
         let line = settle_runner_dir(&mut RealTrust, &list_real, &root, &runner(&svc, "service"));
         println!("MEASURED settle service runner: {line:?}");
@@ -285,7 +285,8 @@ fn settled_service_runner_folders_pass_the_guard_and_a_user_folder_never_does() 
     }
 }
 
-/// P1-1, written first and ignored until the shared adopt-a-tree mechanism lands (ADR `adopt-tree`). The elevated run lays a service
+/// P1-1, written first and ignored until the shared adopt-a-tree mechanism lands (ADR `adopt-tree`); until then the service blocks
+/// such a runner whatever its structure (it did not make the folder: `check_adopted_runner_folder`). The elevated run lays a service
 /// runner out as an older Pitcrew did, with a folder two levels down (`svc\work\job`) that inherited the right `C:\ProgramData`
 /// gives users to add to it; after the service has settled the runner's folder and adopted its tree, the standard user must not be
 /// able to create anything in it.
@@ -298,7 +299,7 @@ fn a_grandchild_of_a_settled_service_runner_folder_is_not_writable_by_a_user() {
     if who == "elevated" {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(svc.join("work").join("job")).unwrap();
-        ensure_protected_root(&mut RealTrust, &root, &["pitcrew.toml"], &["logs"]).unwrap();
+        ensure_protected_root(&mut RealTrust, &list_real, &root, &["pitcrew.toml"], &["logs"]).unwrap();
         settle_runner_dir(&mut RealTrust, &list_real, &root, &runner(&svc, "service"));
         // The shared mechanism's call goes here when it lands: it adopts the runner's whole tree, then the guard may accept it.
     } else {
@@ -322,7 +323,7 @@ fn a_per_user_engine_is_owned_by_its_user_and_serves_them_every_request() {
     assert_eq!(who, "standard", "this row is the standard user's engine");
     let data = scratch("user-engine");
     let host = Host::start_with(data.clone(), data.clone(), ServeMode::User, |e| panic!("the engine stopped: {e}")).unwrap();
-    let name = pitcrew_service::ipc::pipe_name(&data);
+    let name = pitcrew_service::ipc::read_user_pipe_name(&data).expect("the engine recorded its pipe name");
     let mut s = connect(&name);
     assert!(matches!(
         ask(
@@ -353,5 +354,89 @@ fn a_per_user_engine_is_owned_by_its_user_and_serves_them_every_request() {
     );
     drop(file);
     host.stop();
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+fn engine_file() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("PITCREW_TEST_ENGINE_FILE").expect("PITCREW_TEST_ENGINE_FILE names the file the engine's pipe name goes in"),
+    )
+}
+
+/// The standard user's engine, held open for the other account's row: it writes its pipe name, signals ready, and waits (at most
+/// three minutes) for the other row to finish.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=standard, run beside another_account_cannot_reach_a_per_user_engine"]
+fn a_per_user_engine_is_held_open_for_another_account() {
+    use pitcrew_service::ipc::ServeMode;
+    assert_eq!(expectation(), "standard", "this row is the standard user's engine");
+    let file = engine_file();
+    let data = scratch("held-engine");
+    let host = Host::start_with(data.clone(), data.clone(), ServeMode::User, |e| panic!("the engine stopped: {e}")).unwrap();
+    let name = pitcrew_service::ipc::read_user_pipe_name(&data).expect("the engine recorded its pipe name");
+    std::fs::write(&file, &name).unwrap();
+    std::fs::write(file.with_extension("ready"), b"1").unwrap();
+    let done = file.with_extension("done");
+    let deadline = std::time::Instant::now() + Duration::from_secs(180);
+    while !done.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(500)); // conformance: hang-guard — polls for the other account's done marker, bounded by the 180 s deadline above
+    }
+    assert!(done.exists(), "the other account's row did not finish in time");
+    host.stop();
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+/// Another account (here the elevated administrator: the VM has two accounts) can neither connect to the standard user's engine pipe
+/// nor create an instance of it: its ACL admits only its owner and SYSTEM.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=elevated, while a_per_user_engine_is_held_open_for_another_account runs as the standard user"]
+fn another_account_cannot_reach_a_per_user_engine() {
+    assert_eq!(expectation(), "elevated", "this row is the other account");
+    let file = engine_file();
+    let name = std::fs::read_to_string(&file).expect("the standard user's engine wrote its pipe name");
+    let name = name.trim();
+    assert!(pitcrew_core::service_paths::is_user_pipe_name(name), "{name}");
+    let outcome = std::panic::catch_unwind(|| {
+        let connect = pitcrew_core::service_paths::open_pipe_options().open(name);
+        match connect {
+            Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "connecting: {e}"),
+            Ok(_) => panic!("another account connected to a user's engine pipe"),
+        }
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let instance = runtime.block_on(async {
+            tokio::net::windows::named_pipe::ServerOptions::new()
+                .first_pipe_instance(false)
+                .create(name)
+        });
+        match instance {
+            Err(e) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "creating an instance: {e}"),
+            Ok(_) => panic!("another account created an instance of a user's engine pipe"),
+        }
+    });
+    // Whatever happened, the standard user's row is told to stop.
+    std::fs::write(file.with_extension("done"), b"1").unwrap();
+    if let Err(e) = outcome {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// An elevated token never starts the per-user engine: it takes requests from the user's own programs.
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=elevated"]
+fn a_user_engine_refuses_to_start_from_an_elevated_token() {
+    use pitcrew_service::ipc::ServeMode;
+    assert_eq!(expectation(), "elevated", "this row is the elevated administrator");
+    assert!(
+        pitcrew_service::platform::win_session::is_elevated(),
+        "the VM run is not elevated: the row proves nothing"
+    );
+    let data = scratch("elevated-engine");
+    let started = Host::start_with(data.clone(), data.clone(), ServeMode::User, |e| panic!("the engine stopped: {e}"));
+    let e = started.err().expect("an elevated engine was started");
+    assert!(e.to_string().contains("must not run elevated"), "{e}");
+    assert!(
+        pitcrew_service::ipc::read_user_pipe_name(&data).is_none(),
+        "an engine pipe name was recorded"
+    );
     let _ = std::fs::remove_dir_all(&data);
 }

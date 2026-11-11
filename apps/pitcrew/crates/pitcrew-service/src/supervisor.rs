@@ -238,8 +238,8 @@ pub fn os_env(data_dir: PathBuf) -> Env {
     Env {
         program_gate: crate::launcher::os_program_gate(),
         settle_runner_dir: crate::protected::os_settle(data_for_settle),
-        runner_folder_guard: crate::protected::os_folder_guard(),
-        prepare_runner_dir: crate::protected::os_prepare(),
+        runner_folder_guard: crate::protected::os_folder_guard(data_dir.clone()),
+        prepare_runner_dir: crate::protected::os_prepare(data_dir.clone()),
         base_path,
         exe_stamp,
         data_dir,

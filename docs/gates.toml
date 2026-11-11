@@ -693,7 +693,7 @@ approved = "coordinator"
 
 [[ignored]]
 path = "apps/pitcrew/crates/pitcrew-service/tests/windows_caller.rs"
-tests = ["the_pipe_refuses_changes_from_a_caller_that_is_not_an_elevated_administrator", "an_interactive_user_can_use_the_installed_pipe_but_not_host_one", "a_new_data_folder_is_protected_from_the_moment_it_exists", "a_data_folder_a_user_made_first_is_not_trusted", "settled_service_runner_folders_pass_the_guard_and_a_user_folder_never_does", "a_grandchild_of_a_settled_service_runner_folder_is_not_writable_by_a_user", "a_per_user_engine_is_owned_by_its_user_and_serves_them_every_request"]
+tests = ["the_pipe_refuses_changes_from_a_caller_that_is_not_an_elevated_administrator", "an_interactive_user_can_use_the_installed_pipe_but_not_host_one", "a_new_data_folder_is_protected_from_the_moment_it_exists", "a_data_folder_a_user_made_first_is_not_trusted", "settled_service_runner_folders_pass_the_guard_and_a_user_folder_never_does", "a_grandchild_of_a_settled_service_runner_folder_is_not_writable_by_a_user", "a_per_user_engine_is_owned_by_its_user_and_serves_them_every_request", "a_per_user_engine_is_held_open_for_another_account", "another_account_cannot_reach_a_per_user_engine", "a_user_engine_refuses_to_start_from_an_elevated_token"]
 gate = "not-gated"
 reason = "VM-only rows: they need a standard user's desktop session and an elevated administrator on a Windows machine (PITCREW_TEST_EXPECT), run with --include-ignored through scripts/vm-lock-run.sh; no harness line runs them yet"
 owner = "Pitcrew 1.1"
@@ -702,10 +702,10 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
-path = "apps/pitcrew/crates/pitcrew-service/src/protected.rs"
-tests = ["a_service_runner_with_a_user_writable_grandchild_is_not_accepted_until_its_tree_is_adopted"]
+path = "apps/pitcrew/app/src-tauri/src/service_install.rs"
+tests = ["an_elevated_app_leaves_the_user_engine_not_running_and_says_why"]
 gate = "not-gated"
-reason = "written first and waiting for the shared adopt-a-tree mechanism in paddock-service (docs/adr-adopt-tree); the runner stays blocked until it lands"
+reason = "VM-only row: it must run elevated on a Windows machine (PITCREW_TEST_EXPECT=elevated), run with --include-ignored through scripts/vm-lock-run.sh; no harness line runs it yet"
 owner = "Pitcrew 1.1"
 since = 2026-11-11
 review_by = 2026-12-20

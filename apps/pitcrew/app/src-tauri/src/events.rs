@@ -188,9 +188,8 @@ fn start_user_engine_events<R: Runtime>(app: AppHandle<R>) {
         .spawn(move || {
             let mut backoff = Duration::from_secs(2);
             loop {
-                if let Err(e) = crate::service_install::start_user_engine() {
-                    eprintln!("pitcrew: the per-user engine could not be started: {e:?}");
-                }
+                // What is wrong with the engine, if anything, goes to the window with the service's other problems.
+                let mut problem = crate::service_install::start_user_engine().err().map(|e| e.message);
                 let a = app.clone();
                 let result = subscribe_engine(
                     Engine::User,
@@ -213,7 +212,17 @@ fn start_user_engine_events<R: Runtime>(app: AppHandle<R>) {
                         true
                     },
                 );
-                if let Some(merged) = app.state::<Statuses>().set_user(None) {
+                if let Err(ClientError::Unavailable(m)) = &result {
+                    if m != crate::service_client::USER_ENGINE_NOT_RUNNING {
+                        problem.get_or_insert_with(|| m.clone());
+                    }
+                }
+                let merged = {
+                    let statuses = app.state::<Statuses>();
+                    statuses.set_user(None);
+                    statuses.set_user_problem(problem)
+                };
+                if let Some(merged) = merged {
                     publish_status(&app, merged);
                 }
                 if result.is_ok() {

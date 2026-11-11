@@ -19,8 +19,8 @@ use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAGS, HANDLE_FLAG_INHERIT, WAIT_OBJECT_0};
 use windows::Win32::Security::{
-    DuplicateTokenEx, GetTokenInformation, IsWellKnownSid, SecurityIdentification, TokenPrimary, TokenUser, WinLocalSystemSid,
-    SECURITY_ATTRIBUTES, TOKEN_ALL_ACCESS, TOKEN_QUERY, TOKEN_USER,
+    DuplicateTokenEx, GetTokenInformation, IsWellKnownSid, SecurityIdentification, TokenElevation, TokenPrimary, TokenUser,
+    WinLocalSystemSid, SECURITY_ATTRIBUTES, TOKEN_ALL_ACCESS, TOKEN_ELEVATION, TOKEN_QUERY, TOKEN_USER,
 };
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -73,6 +73,32 @@ pub fn is_local_system() -> bool {
     }
     // SAFETY: the buffer holds a TOKEN_USER written by the call above and is alive for the check.
     unsafe { IsWellKnownSid((*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid, WinLocalSystemSid) }.as_bool()
+}
+
+/// Whether this process runs with an **elevated** token (an administrator's full token, UAC "Run as administrator"). The per-user
+/// engine must never run so: its pipe admits its owner, and an elevated engine would be a place where any program of that user
+/// could make an elevated process run what it names.
+pub fn is_elevated() -> bool {
+    let mut token = HANDLE::default();
+    // SAFETY: the pseudo handle of this process and a valid out pointer; the token is owned below.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
+        // Not knowing is not "not elevated": the engine refuses to start.
+        return true;
+    }
+    let token = Owned(token);
+    let mut info = TOKEN_ELEVATION::default();
+    let mut returned = 0u32;
+    // SAFETY: `info` is a TOKEN_ELEVATION of the size passed; `token` is a valid token handle.
+    let read = unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenElevation,
+            Some((&mut info as *mut TOKEN_ELEVATION).cast()),
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut returned,
+        )
+    };
+    read.is_err() || info.TokenIsElevated != 0
 }
 
 /// A SID as the string `S-1-5-...`, from a pointer valid for the call.

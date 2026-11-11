@@ -248,6 +248,36 @@ pub enum ServeMode {
 /// The per-user engine's pipe: its owner and SYSTEM, nobody else (no interactive-user entry, no Administrators).
 pub const PIPE_SDDL_USER: &str = "D:P(A;;GA;;;OW)(A;;GA;;;SY)";
 
+/// Makes this start's pipe name for the per-user engine (128 random bits) and records it in the engine's folder, where only that
+/// user's programs (and the app) read it. A hint on top of the pipe's ACL and the client's owner check, not a secret to rely on.
+///
+/// # Errors
+/// The folder or the file could not be written.
+pub fn make_user_pipe_name(data_dir: &std::path::Path) -> std::io::Result<String> {
+    use std::hash::{BuildHasher, Hasher};
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    // `RandomState` is seeded by the OS's random source once per process: a fresh state per half keeps the halves apart.
+    let half = |salt: u64| {
+        let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+        h.write_u64(nanos);
+        h.write_u64(salt);
+        h.finish()
+    };
+    let name = pitcrew_core::service_paths::user_pipe_name((half(1), half(2)));
+    std::fs::create_dir_all(data_dir)?;
+    std::fs::write(data_dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE), &name)?;
+    Ok(name)
+}
+
+/// The per-user engine's pipe name recorded in `dir`, if the file holds a name this module could have made.
+pub fn read_user_pipe_name(dir: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE)).ok()?;
+    let text = text.trim();
+    pitcrew_core::service_paths::is_user_pipe_name(text).then(|| text.to_string())
+}
+
 /// Accepts connections until the runtime shuts down.
 pub async fn serve(tx: Sender<Msg>, socket_dir: std::path::PathBuf, mode: ServeMode) -> Result<(), String> {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
@@ -299,7 +329,12 @@ mod platform {
     }
 
     pub async fn serve(tx: Sender<Msg>, data_dir: std::path::PathBuf, permits: Arc<Semaphore>, mode: ServeMode) -> Result<(), String> {
-        let name = super::pipe_name(&data_dir);
+        let name = match mode {
+            ServeMode::System => super::pipe_name(&data_dir),
+            ServeMode::User => {
+                super::make_user_pipe_name(&data_dir).map_err(|e| format!("the engine's pipe name could not be recorded ({e})"))?
+            }
+        };
         let mut server = create(&name, true, mode)
             .map_err(|e| format!("the pipe {name} could not be created ({e}); is another Pitcrew service running?"))?;
         loop {
@@ -471,6 +506,37 @@ mod tests {
         ));
         task.await.unwrap();
         assert_eq!(timeout_for(&Request::Status), Duration::from_secs(120));
+    }
+}
+
+#[cfg(test)]
+mod user_pipe_name_tests {
+    use super::*;
+
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("pitcrew-it-pipename-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        p
+    }
+
+    #[test]
+    fn the_engine_records_a_random_pipe_name_and_reads_back_only_a_valid_one() {
+        let dir = scratch("roundtrip");
+        let first = make_user_pipe_name(&dir).unwrap();
+        assert!(pitcrew_core::service_paths::is_user_pipe_name(&first), "{first}");
+        assert_eq!(read_user_pipe_name(&dir).as_deref(), Some(first.as_str()));
+        let second = make_user_pipe_name(&dir).unwrap();
+        assert_ne!(first, second, "a new name at each start");
+        assert_eq!(read_user_pipe_name(&dir).as_deref(), Some(second.as_str()));
+        // Whatever else is in the file is not a name that is ever opened.
+        std::fs::write(dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE), r"\\.\pipe\pitcrew").unwrap();
+        assert_eq!(read_user_pipe_name(&dir), None);
+        assert_eq!(read_user_pipe_name(&scratch("missing")), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

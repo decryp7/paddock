@@ -67,6 +67,26 @@ pub fn user_engine_dir(env: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf>
     env("LOCALAPPDATA").map(|d| join(Os::Windows, &d, &["Pitcrew", "engine"]))
 }
 
+/// The file in the per-user engine's folder that holds its pipe's name (written at each start; a hint, never trusted: the client
+/// still checks who owns the pipe).
+pub const USER_ENGINE_PIPE_FILE: &str = "pipe.name";
+
+/// What a per-user engine's pipe name starts with.
+const USER_PIPE_PREFIX: &str = r"\\.\pipe\pitcrew-user-";
+
+/// A per-user engine's pipe name from 128 random bits: another account that does not know it cannot guess it, so it cannot connect
+/// early, and a program of the same user that does not read the file cannot find it. (The pipe's ACL and the client's owner check
+/// are what protect it; the name is only a hint on top.) Pure.
+pub fn user_pipe_name(random: (u64, u64)) -> String {
+    format!("{USER_PIPE_PREFIX}{:016x}{:016x}", random.0, random.1)
+}
+
+/// Whether text read from the pipe-name file is a name [`user_pipe_name`] could have made (nothing else is ever opened).
+pub fn is_user_pipe_name(text: &str) -> bool {
+    text.strip_prefix(USER_PIPE_PREFIX)
+        .is_some_and(|h| h.len() == 32 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+}
+
 /// The Unix socket's file name.
 pub const SOCKET_FILE: &str = "pitcrew.sock";
 
@@ -175,6 +195,26 @@ mod tests {
             pipe,
             pipe_name_for(Path::new("c:\\users\\me\\appdata\\local\\pitcrew\\engine\\"), installed.as_deref())
         );
+    }
+
+    #[test]
+    fn a_per_user_pipe_name_is_random_hex_and_only_that_is_accepted_back() {
+        let n = user_pipe_name((0x0123_4567_89ab_cdef, 0xfedc_ba98_7654_3210));
+        assert_eq!(n, r"\\.\pipe\pitcrew-user-0123456789abcdeffedcba9876543210");
+        assert!(is_user_pipe_name(&n));
+        for bad in [
+            "",
+            r"\\.\pipe\pitcrew",
+            r"\\.\pipe\pitcrew-user-",
+            r"\\.\pipe\pitcrew-user-0123",
+            r"\\.\pipe\pitcrew-user-0123456789ABCDEFfedcba9876543210",
+            r"\\.\pipe\other-0123456789abcdeffedcba9876543210",
+            r"\\server\pipe\pitcrew-user-0123456789abcdeffedcba9876543210",
+            "\\\\.\\pipe\\pitcrew-user-0123456789abcdeffedcba9876543210\n",
+        ] {
+            assert!(!is_user_pipe_name(bad), "{bad:?}");
+        }
+        assert_ne!(n, user_pipe_name((1, 2)));
     }
 
     #[test]

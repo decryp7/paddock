@@ -124,6 +124,16 @@ the SYSTEM service keeps the `session = service` runners in administrator-only f
   raises a permission prompt. Events: two subscriptions, one merged list for the window and the tray; the user engine not running is
   not an error. The app starts the user engine (hidden, as the user, no prompt) whenever it finds it not running, and the app
   itself starts at log-on.
+- **Never elevated.** The engine refuses to start with an elevated token (`user_engine_token_allowed`, checked in `Host::start_with`
+  and so in `run`), and the app never starts it from an elevated app: it skips it and the window says so (`ELEVATED_SKIP_NOTICE`
+  among the service's problems). Starting it de-elevated through the shell is not built.
+- **Its pipe's name** is 128 random bits, new at each start, recorded in `pipe.name` in the engine's folder (a hint, checked for
+  shape; the pipe's owner is still checked by the client). Another account can neither connect nor create an instance (VM rows).
+- **Routing never guesses.** A new runner is refused when the other engine already has its name; a request about one runner goes to
+  the engine whose status listed it; a runner nobody lists gets an `UnknownRunner` answer, and if an engine did not answer the
+  request is not sent anywhere else. `SaveSettings` compares only the service runners, the defaults and whether an older install
+  left a user's kind of runner in the service's configuration, so a user's own save never prompts; a save that reached the service
+  but not the user's engine says so.
 - **The pipe owner check** (every connection, before anything is written) accepts SYSTEM or Administrators for the service's pipe,
   and, for the user engine's pipe only, the current user's own SID (`pipe_owner_ok(owner, own_user)`).
 - **Not built here:** a log-on entry that starts the engine without the app (today the app starts it; a runner of the user's does
@@ -135,14 +145,15 @@ with the reason, until the user's engine has it (or the folder is moved under an
 `session = service`).
 
 **New limits.** (1) A service runner in a folder users can change (such as `C:\actions-runner`) is blocked; move it under
-`C:\Program Files` or `C:\ProgramData\Pitcrew\runners`, which the service locks at start. (2) A user's own runner is supervised by the per-user engine, not the service (above). (3) **Known gap, not closed here:** only the folder, its ancestors and its direct children are checked. On an upgrade from
-pitcrew-v1.0.1 the folders deeper than the direct children (`work\<repo>\.git\hooks`) keep the right `C:\ProgramData` gave users to
-add to them, so the guard can accept a service runner whose tree a user can still write in. The fix is one shared mechanism that
-adopts a folder tree once (walk without following links, move the disposable trees aside, verify and lock the rest) in
-`paddock-service`, used by Pitcrew and Dyno (`docs/adr-adopt-tree`, in review). Its tests are written first and ignored until it
-lands (`a_service_runner_with_a_user_writable_grandchild_is_not_accepted_until_its_tree_is_adopted`, and the VM row
-`a_grandchild_of_a_settled_service_runner_folder_is_not_writable_by_a_user`); until then **a fresh service runner folder is
-safe and an upgraded one is not**, and the release stays blocked on it. (4) `EnginePrune` and
+`C:\Program Files` or `C:\ProgramData\Pitcrew\runners`, which the service locks at start. (2) A user's own runner is supervised by the per-user engine, not the service (above). (3) **Fail closed.** The check looks at the folder, its ancestors and its direct children, not at every file below, so on an upgrade
+from pitcrew-v1.0.1 it could pass a service runner whose deeper folders (`work\<repo>\.git\hooks`) keep the right `C:\ProgramData`
+gave users to add to them. So **a service runner's folder is accepted only if the service made it itself** (`prepare_runner_dir`: made
+empty, protected at creation) **or adopted it** (the shared adopt-a-tree step in `paddock-service`, `docs/adr-adopt-tree`, in review);
+the folders made or adopted are listed in `adopted-folders.json` in the data folder (administrator-only, checked at start, never in
+a runner's folder; text that cannot be read is the empty list). An upgraded tree, and a folder an administrator made by hand
+(including under `C:\Program Files`), stays blocked until it is adopted. The guard asks for this before it looks at the folder
+(`check_adopted_runner_folder`); the fake-port test for the upgraded grandchild now runs and asserts the runner is blocked, and the VM
+row that shows a user cannot write in an adopted tree stays ignored until the shared step exists. (4) `EnginePrune` and
 `CacheClean` by a standard user are an availability point, not an elevation: they delete what the policy allows, in the
 administrator-only cache folder. (5) UAC on the same desktop is not a boundary against a program of the same user; the service's
 check on who asks is. (6) The container engine (`docker`, `podman`) is found on the service's `PATH` by SYSTEM for the engine

@@ -102,6 +102,71 @@ pub fn check_runner_folder(
     Ok(())
 }
 
+/// The name of the file in the data folder that lists the runner folders the service made itself (or adopted).
+pub const ADOPTED_FILE: &str = "adopted-folders.json";
+
+/// The runner folders the service **made** (empty, protected at creation: [`prepare_runner_dir`]) or adopted (the shared
+/// adopt-a-tree step, not built yet). **Only these are accepted**: a folder that merely looks admin-only (one an older Pitcrew made,
+/// or an administrator made by hand) may still hold, deeper than the service looks, folders a user can write in, so it stays
+/// blocked until it is adopted. The list lives in the data folder (administrator-only, and checked at start like the
+/// configuration), never in a runner's folder; text that cannot be read is the empty list (fail closed).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Adopted(std::collections::BTreeSet<String>);
+
+fn adopted_key(p: &Path) -> String {
+    text(p).replace('/', "\\").trim_end_matches('\\').to_lowercase()
+}
+
+impl Adopted {
+    /// Reads the file's text; anything that is not the expected JSON is no folders at all.
+    pub fn parse(text: &str) -> Self {
+        #[derive(serde::Deserialize)]
+        struct File {
+            folders: Vec<String>,
+        }
+        serde_json::from_str::<File>(text).map_or_else(
+            |_| Adopted::default(),
+            |f| Adopted(f.folders.iter().map(|d| adopted_key(Path::new(d))).collect()),
+        )
+    }
+
+    /// The file's text.
+    pub fn to_json(&self) -> String {
+        serde_json::json!({ "folders": self.0.iter().collect::<Vec<_>>() }).to_string()
+    }
+
+    /// Adds a folder (paths compare without case or trailing separators, as on Windows).
+    pub fn insert(&mut self, dir: &Path) {
+        self.0.insert(adopted_key(dir));
+    }
+
+    /// Whether the service made (or adopted) the folder.
+    pub fn contains(&self, dir: &Path) -> bool {
+        self.0.contains(&adopted_key(dir))
+    }
+}
+
+/// [`check_runner_folder`] for a folder that is also in `adopted`: the service works only in a folder it made itself or adopted.
+///
+/// # Errors
+/// The folder is not one the service made, or it is not admin-only; the message says what to do.
+pub fn check_adopted_runner_folder(
+    port: &mut dyn TrustPort,
+    list: &dyn Fn(&str) -> std::io::Result<Vec<String>>,
+    adopted: &Adopted,
+    dir: &Path,
+) -> Result<(), String> {
+    if !adopted.contains(dir) {
+        return Err(format!(
+            "{} is not a folder this service made: the service accepts only a runner folder it made itself (through Add runner, under \
+             C:\\ProgramData\\Pitcrew\\runners) or adopted; an older or hand-made folder stays blocked until it is adopted, \
+             because it may hold, deeper than the service looks, folders a user can still write in",
+            text(dir)
+        ));
+    }
+    check_runner_folder(port, list, dir)
+}
+
 /// Makes the folder `dir` and any folders above it that do not exist yet, each with the protected rules **at creation**
 /// (`TrustPort::create_dir`: no moment in which a user could add to it), but only when the nearest folder that does exist is itself
 /// admin-only: a runner under a folder a user can change is refused, not made. A folder that exists is left to the guard.
@@ -110,7 +175,11 @@ pub fn check_runner_folder(
 ///
 /// # Errors
 /// The nearest existing folder is one a user can change, or a folder could not be made.
-pub fn prepare_runner_dir(port: &mut dyn TrustPort, dir: &Path) -> Result<Option<String>, String> {
+pub fn prepare_runner_dir(
+    port: &mut dyn TrustPort,
+    dir: &Path,
+    record: &mut dyn FnMut(&Path) -> Result<(), String>,
+) -> Result<Option<String>, String> {
     let d = text(dir);
     if port.node(&d).map_err(|e| format!("{d} could not be examined ({e})"))?.is_some() {
         return Ok(None);
@@ -135,6 +204,9 @@ pub fn prepare_runner_dir(port: &mut dyn TrustPort, dir: &Path) -> Result<Option
     for p in missing.iter().rev() {
         port.create_dir(p).map_err(|e| format!("{p} could not be made ({e})"))?;
     }
+    // Made by the service, empty, protected at creation: from now on the guard accepts it. Recorded in the service's own
+    // (administrator-only) folder, never in the runner's.
+    record(dir).map_err(|e| format!("{d} was made but could not be recorded as the service's own ({e}); it stays blocked"))?;
     Ok(Some(format!("made the runner folder {d} (administrators and SYSTEM only)")))
 }
 
@@ -143,18 +215,25 @@ pub type PrepareHook = Arc<dyn Fn(&Path) -> Result<Option<String>, String> + Sen
 
 /// The prepare hook of this OS: on Windows as LocalSystem, [`prepare_runner_dir`] over the real machine; nothing elsewhere (the
 /// service is the user's own there, and `register` makes the folder).
-pub fn os_prepare() -> PrepareHook {
+pub fn os_prepare(data_dir: std::path::PathBuf) -> PrepareHook {
     #[cfg(windows)]
     {
-        Arc::new(|dir| {
+        Arc::new(move |dir| {
             if !crate::platform::win_session::is_local_system() {
                 return Ok(None);
             }
-            prepare_runner_dir(&mut paddock_service::privileged::trust_real::RealTrust, dir)
+            let mut record = |made: &Path| -> Result<(), String> {
+                let file = data_dir.join(ADOPTED_FILE);
+                let mut list = Adopted::parse(&std::fs::read_to_string(&file).unwrap_or_default());
+                list.insert(made);
+                crate::store::write_atomic(&file, &list.to_json()).map_err(|e| e.to_string())
+            };
+            prepare_runner_dir(&mut paddock_service::privileged::trust_real::RealTrust, dir, &mut record)
         })
     }
     #[cfg(not(windows))]
     {
+        drop(data_dir);
         Arc::new(|_| Ok(None))
     }
 }
@@ -164,10 +243,10 @@ pub type FolderGuard = Arc<dyn Fn(&Path) -> Result<(), String> + Send + Sync>;
 
 /// The guard of this OS: on Windows as LocalSystem, [`check_runner_folder`] over the real machine; everywhere else (the service
 /// is the user's own, or a developer's console) nothing.
-pub fn os_folder_guard() -> FolderGuard {
+pub fn os_folder_guard(data_dir: std::path::PathBuf) -> FolderGuard {
     #[cfg(windows)]
     {
-        Arc::new(|dir| {
+        Arc::new(move |dir| {
             if !crate::platform::win_session::is_local_system() {
                 return Ok(());
             }
@@ -176,11 +255,13 @@ pub fn os_folder_guard() -> FolderGuard {
                     .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
                     .collect()
             };
-            check_runner_folder(&mut paddock_service::privileged::trust_real::RealTrust, &list, dir)
+            let adopted = Adopted::parse(&std::fs::read_to_string(data_dir.join(ADOPTED_FILE)).unwrap_or_default());
+            check_adopted_runner_folder(&mut paddock_service::privileged::trust_real::RealTrust, &list, &adopted, dir)
         })
     }
     #[cfg(not(windows))]
     {
+        drop(data_dir);
         Arc::new(|_| Ok(()))
     }
 }
@@ -304,15 +385,24 @@ pub enum RootOutcome {
     MovedAside(String, String),
 }
 
+/// The files of the data folder that the service reads as instructions (checked like the folder at every start).
+pub const TRUSTED_FILES: &[&str] = &[crate::paths::CONFIG_FILE, crate::paths::CONFIG_BACKUP, "state.json", ADOPTED_FILE];
+/// The folders of the data folder the service writes to: owner-checked and locked at every start, their links and strangers' entries
+/// moved aside (`runners` is here as well as `logs`: an older Pitcrew's `runners` inherited what `C:\ProgramData` gives users).
+pub const TRUSTED_DIRS: &[&str] = &["logs", "runners"];
+
 /// Makes `dir` a protected folder, and checks what the service trusts in it: `trusted_files` (read as instructions) must be
 /// files protected like the folder, `trusted_dirs` (written to) must be real folders, never a link, owned by SYSTEM or
-/// Administrators. (Not the whole tree: a folder the service made before this check inherited rights from `C:\ProgramData`
-/// that cost nothing while only administrators could create files here.)
+/// Administrators; each is locked by handle (never propagated) and **every child of it that is a link, or not owned by SYSTEM or
+/// Administrators, is moved aside** (a user could have made one while the folder still inherited what `C:\ProgramData` gives users).
+/// (Not the whole tree: a folder the service made before this check inherited rights from `C:\ProgramData` that cost nothing while
+/// only administrators could create files here.)
 ///
 /// # Errors
 /// What could not be done (the folder could not be created, locked or moved aside): the service must not start.
 pub fn ensure_protected_root(
     port: &mut dyn TrustPort,
+    list: &dyn Fn(&str) -> std::io::Result<Vec<String>>,
     dir: &Path,
     trusted_files: &[&str],
     trusted_dirs: &[&str],
@@ -356,11 +446,18 @@ pub fn ensure_protected_root(
                 // A folder an older Pitcrew made inside the data folder (`logs`) inherited what `C:\ProgramData` gives users, who
                 // could then make links inside it: it is locked like the data folder, by handle, never propagated.
                 port.lock_dir(&child).map_err(|e| io("Locking", e))?;
-                // The second round briefly put a `blocked` folder per runner in `logs`; a user may have made one before the lock.
-                // It is moved aside, never used (blocked runners now keep no folder at all).
-                let legacy = format!("{child}\\blocked");
-                if port.node(&legacy).map_err(|e| io("Examining", e))?.is_some() {
-                    port.rename_aside(&legacy).map_err(|e| io("Moving aside", e))?;
+                for name in list(&child).unwrap_or_default() {
+                    let entry = format!("{}\\{name}", child.trim_end_matches('\\'));
+                    let Some(n) = port.node(&entry).map_err(|e| io("Examining", e))? else {
+                        continue;
+                    };
+                    let ours = match &n.security {
+                        Security::Windows(d) => is_trusted_sid(&d.owner),
+                        Security::Unix { .. } => true,
+                    };
+                    if n.kind == FileKind::Symlink || !ours {
+                        port.rename_aside(&entry).map_err(|e| io("Moving aside", e))?;
+                    }
                 }
             }
         }
@@ -455,7 +552,7 @@ mod tests {
     #[test]
     fn a_missing_data_folder_is_created_protected() {
         let mut p = machine();
-        let out = ensure_protected_root(&mut p, Path::new("C:\\ProgramData\\Pitcrew"), &["pitcrew.toml"], &["logs"]).unwrap();
+        let out = ensure(&mut p, &["pitcrew.toml"], &["logs"]).unwrap();
         assert_eq!(out, RootOutcome::Created);
         assert_eq!(p.calls, ["create_dir C:\\ProgramData\\Pitcrew"]);
     }
@@ -465,7 +562,7 @@ mod tests {
         let mut p = machine();
         p.put("C:\\ProgramData\\Pitcrew", inherited_from_program_data())
             .put("C:\\ProgramData\\Pitcrew\\pitcrew.toml", file(locked()));
-        let out = ensure_protected_root(&mut p, Path::new("C:\\ProgramData\\Pitcrew"), &["pitcrew.toml"], &["logs"]).unwrap();
+        let out = ensure(&mut p, &["pitcrew.toml"], &["logs"]).unwrap();
         assert_eq!(out, RootOutcome::Locked);
         assert!(p.calls.iter().any(|c| c.starts_with("lock_dir")), "{:?}", p.calls);
     }
@@ -501,6 +598,11 @@ mod tests {
                 .map(String::from)
                 .collect())
         }
+    }
+
+    fn ensure(p: &mut FakePort, files: &[&str], dirs: &[&str]) -> Result<RootOutcome, String> {
+        let list = list_of(p);
+        ensure_protected_root(p, &list, Path::new("C:\\ProgramData\\Pitcrew"), files, dirs)
     }
 
     fn settle(p: &mut FakePort, cfg: &RunnerConfig) -> Option<String> {
@@ -595,7 +697,7 @@ mod tests {
         p.put("C:\\ProgramData\\Pitcrew", locked())
             .put("C:\\ProgramData\\Pitcrew\\logs", inherited_from_program_data())
             .put("C:\\ProgramData\\Pitcrew\\logs\\blocked", user_owned());
-        let out = ensure_protected_root(&mut p, Path::new("C:\\ProgramData\\Pitcrew"), &["pitcrew.toml"], &["logs"]).unwrap();
+        let out = ensure(&mut p, &["pitcrew.toml"], &["logs"]).unwrap();
         assert_eq!(out, RootOutcome::Locked);
         assert!(
             p.calls.contains(&"lock_dir C:\\ProgramData\\Pitcrew\\logs".to_string()),
@@ -615,6 +717,63 @@ mod tests {
         );
     }
 
+    /// P2: `runners` is owner-checked and locked with the data folder like `logs` (an older Pitcrew's `runners` inherited what
+    /// `C:\ProgramData` gives users), and in both every child that is a link or not SYSTEM's or Administrators' is moved aside.
+    #[test]
+    fn the_start_checks_the_files_and_folders_the_service_reads_and_writes() {
+        assert!(TRUSTED_DIRS.contains(&"runners") && TRUSTED_DIRS.contains(&"logs"));
+        for f in [crate::paths::CONFIG_FILE, crate::paths::CONFIG_BACKUP, ADOPTED_FILE] {
+            assert!(TRUSTED_FILES.contains(&f), "{f}");
+        }
+    }
+
+    #[test]
+    fn runners_is_locked_like_logs_and_user_made_children_of_either_are_moved_aside() {
+        let mut p = machine();
+        let mut link = locked();
+        link.kind = FileKind::Symlink;
+        p.put("C:\\ProgramData\\Pitcrew", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners", inherited_from_program_data())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\good", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\evil", user_owned())
+            .put("C:\\ProgramData\\Pitcrew\\logs", inherited_from_program_data())
+            .put("C:\\ProgramData\\Pitcrew\\logs\\service.log", file(locked()))
+            .put("C:\\ProgramData\\Pitcrew\\logs\\junction", link);
+        let out = ensure(&mut p, &["pitcrew.toml"], &["logs", "runners"]).unwrap();
+        assert_eq!(out, RootOutcome::Locked);
+        for locked_dir in ["runners", "logs"] {
+            assert!(
+                p.calls.contains(&format!("lock_dir C:\\ProgramData\\Pitcrew\\{locked_dir}")),
+                "{locked_dir}: {:?}",
+                p.calls
+            );
+        }
+        let aside: Vec<&String> = p.calls.iter().filter(|c| c.starts_with("rename_aside")).collect();
+        assert_eq!(aside.len(), 2, "{aside:?}");
+        assert!(
+            aside.iter().any(|c| c.ends_with("runners\\evil")) && aside.iter().any(|c| c.ends_with("logs\\junction")),
+            "{aside:?}"
+        );
+        assert!(
+            p.nodes.contains_key(&p.key("C:\\ProgramData\\Pitcrew\\runners\\good")),
+            "SYSTEM's own folder stays"
+        );
+        assert!(
+            p.nodes.contains_key(&p.key("C:\\ProgramData\\Pitcrew\\logs\\service.log")),
+            "SYSTEM's own file stays"
+        );
+
+        // A `runners` that a user made first (user-owned) is not trusted: the whole data folder is moved aside.
+        let mut p = machine();
+        p.put("C:\\ProgramData\\Pitcrew", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners", user_owned());
+        let out = ensure(&mut p, &["pitcrew.toml"], &["logs", "runners"]).unwrap();
+        assert!(
+            matches!(&out, RootOutcome::MovedAside(_, why) if why.contains("runners")),
+            "{out:?}"
+        );
+    }
+
     /// P1-3: a new runner's folder does not exist yet. It is made protected at creation when the nearest existing folder is
     /// admin-only, and then the guard accepts it; under a folder a user can change it is refused and nothing is made.
     #[test]
@@ -622,21 +781,36 @@ mod tests {
         let mut p = machine();
         p.put(DATA, locked()).put("C:\\ProgramData\\Pitcrew\\runners", locked());
         let dir = Path::new("C:\\ProgramData\\Pitcrew\\runners\\new");
+        let mut adopted = Adopted::default();
         let list = list_of(&p);
         assert!(
             check_runner_folder(&mut p, &list, dir).is_err(),
             "before: missing, so blocked for good"
         );
-        let line = prepare_runner_dir(&mut p, dir).unwrap().unwrap();
+        let line = prepare_runner_dir(&mut p, dir, &mut |d| {
+            adopted.insert(d);
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
         assert!(line.contains("made the runner folder"), "{line}");
         assert_eq!(p.calls, ["create_dir C:\\ProgramData\\Pitcrew\\runners\\new"]);
         let list = list_of(&p);
-        check_runner_folder(&mut p, &list, dir).expect("after: the guard accepts the folder the service made");
-        assert_eq!(prepare_runner_dir(&mut p, dir), Ok(None), "an existing folder is left alone");
+        check_adopted_runner_folder(&mut p, &list, &adopted, dir).expect("after: the guard accepts the folder the service made");
+        assert_eq!(
+            prepare_runner_dir(&mut p, dir, &mut |_| panic!("nothing was made")),
+            Ok(None),
+            "an existing folder is left alone"
+        );
 
-        // Folders above are made too, each protected at creation.
+        // Folders above are made too, each protected at creation; only the runner's own folder is recorded.
         let deeper = Path::new("C:\\ProgramData\\Pitcrew\\runners\\a\\b");
-        prepare_runner_dir(&mut p, deeper).unwrap();
+        let mut recorded = vec![];
+        prepare_runner_dir(&mut p, deeper, &mut |d| {
+            recorded.push(d.display().to_string());
+            Ok(())
+        })
+        .unwrap();
         assert!(
             p.calls.ends_with(&[
                 "create_dir C:\\ProgramData\\Pitcrew\\runners\\a".to_string(),
@@ -645,34 +819,81 @@ mod tests {
             "{:?}",
             p.calls
         );
+        assert_eq!(recorded, ["C:\\ProgramData\\Pitcrew\\runners\\a\\b"]);
 
-        // Under a folder a user can change: refused, nothing made.
+        // Under a folder a user can change: refused, nothing made, nothing recorded.
         let mut p = machine();
         p.put("C:\\Users\\someone", user_owned());
-        let e = prepare_runner_dir(&mut p, Path::new("C:\\Users\\someone\\runner")).unwrap_err();
+        let e = prepare_runner_dir(&mut p, Path::new("C:\\Users\\someone\\runner"), &mut |_| panic!("recorded")).unwrap_err();
         assert!(
             e.contains("does not exist yet") && e.contains("only administrators can change"),
             "{e}"
         );
         assert!(p.calls.is_empty(), "{:?}", p.calls);
+
+        // A folder that was made but could not be recorded stays blocked (the error says so).
+        let mut p = machine();
+        p.put(DATA, locked()).put("C:\\ProgramData\\Pitcrew\\runners", locked());
+        let e = prepare_runner_dir(&mut p, Path::new("C:\\ProgramData\\Pitcrew\\runners\\x"), &mut |_| {
+            Err("disk full".into())
+        })
+        .unwrap_err();
+        assert!(e.contains("could not be recorded") && e.contains("stays blocked"), "{e}");
     }
 
-    /// P1-1, written first and ignored until the shared adopt-a-tree mechanism lands (ADR `adopt-tree`): after an upgrade the
-    /// folders deeper than the direct children (`work\job`) keep the right `C:\ProgramData` gave users to add to them, and
-    /// content a user plants there (`work\repo\.git\hooks`) would run as SYSTEM. The runner must stay blocked until its tree is
-    /// adopted.
+    /// P1-A, fail closed: a folder that only looks admin-only is not accepted unless the service made or adopted it.
     #[test]
-    #[ignore = "waits for the shared adopt-a-tree mechanism in paddock-service (docs/adr-adopt-tree); the runner stays blocked until then"]
-    fn a_service_runner_with_a_user_writable_grandchild_is_not_accepted_until_its_tree_is_adopted() {
+    fn a_runner_folder_is_accepted_only_if_the_service_made_it() {
+        let mut p = machine();
+        p.put(DATA, locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners", locked())
+            .put("C:\\ProgramData\\Pitcrew\\runners\\r", locked());
+        let dir = Path::new("C:\\ProgramData\\Pitcrew\\runners\\r");
+        let list = list_of(&p);
+        check_runner_folder(&mut p, &list, dir).expect("it looks admin-only");
+        let e = check_adopted_runner_folder(&mut p, &list, &Adopted::default(), dir).unwrap_err();
+        assert!(
+            e.contains("is not a folder this service made") && e.contains("blocked until it is adopted"),
+            "{e}"
+        );
+        let mut adopted = Adopted::default();
+        adopted.insert(Path::new("c:/programdata/pitcrew/runners/R/"));
+        check_adopted_runner_folder(&mut p, &list, &adopted, dir).expect("recorded, whatever the case and separators");
+        // A recorded folder that no longer looks admin-only is still refused.
+        p.put("C:\\ProgramData\\Pitcrew\\runners\\r", inherited_from_program_data());
+        assert!(check_adopted_runner_folder(&mut p, &list, &adopted, dir).is_err());
+    }
+
+    #[test]
+    fn the_list_of_adopted_folders_round_trips_and_garbage_is_no_folders() {
+        let mut a = Adopted::default();
+        a.insert(Path::new("C:\\ProgramData\\Pitcrew\\runners\\one"));
+        a.insert(Path::new("C:\\ProgramData\\Pitcrew\\runners\\two"));
+        let again = Adopted::parse(&a.to_json());
+        assert_eq!(again, a);
+        assert!(again.contains(Path::new("c:\\programdata\\pitcrew\\runners\\ONE\\")));
+        assert!(!again.contains(Path::new("C:\\ProgramData\\Pitcrew\\runners\\three")));
+        for bad in ["", "not json", "{}", "{\"folders\": 5}", "[1,2]"] {
+            assert_eq!(Adopted::parse(bad), Adopted::default(), "{bad:?}");
+        }
+    }
+
+    /// P1-1 / P1-A: after an upgrade the folders deeper than the direct children (`work\job`) keep the right `C:\ProgramData` gave
+    /// users to add to them, and content a user plants there (`work\repo\.git\hooks`) would run as SYSTEM. The structural check
+    /// cannot see that deep, so the runner is **blocked** because the service did not make it: it stays blocked until the shared
+    /// adopt-a-tree step adopts its tree.
+    #[test]
+    fn an_upgraded_service_runner_with_a_user_writable_grandchild_stays_blocked() {
         let mut p = old_runner_folder();
         p.put("C:\\ProgramData\\Pitcrew\\runners\\r\\work\\job", inherited_from_program_data());
         let dir = "C:\\ProgramData\\Pitcrew\\runners\\r";
         let _ = settle(&mut p, &runner(dir, "service"));
         let list = list_of(&p);
-        assert!(
-            check_runner_folder(&mut p, &list, Path::new(dir)).is_err(),
-            "the guard accepted a runner whose work\\job a user can still add to"
-        );
+        // The structure alone is fooled (this is why the list exists)...
+        check_runner_folder(&mut p, &list, Path::new(dir)).expect("direct children locked: the structural check passes");
+        // ...so the guard that is used refuses it: the service never made this folder.
+        let e = check_adopted_runner_folder(&mut p, &list, &Adopted::default(), Path::new(dir)).unwrap_err();
+        assert!(e.contains("is not a folder this service made"), "{e}");
     }
 
     #[test]
@@ -682,7 +903,7 @@ mod tests {
         link.kind = FileKind::Symlink;
         p.put("C:\\ProgramData\\Pitcrew", locked())
             .put("C:\\ProgramData\\Pitcrew\\logs", link);
-        let out = ensure_protected_root(&mut p, Path::new("C:\\ProgramData\\Pitcrew"), &["pitcrew.toml"], &["logs"]).unwrap();
+        let out = ensure(&mut p, &["pitcrew.toml"], &["logs"]).unwrap();
         assert!(matches!(&out, RootOutcome::MovedAside(_, r) if r.contains("logs")), "{out:?}");
     }
 
@@ -691,7 +912,7 @@ mod tests {
         let mut p = machine();
         p.put("C:\\ProgramData\\Pitcrew", locked())
             .put("C:\\ProgramData\\Pitcrew\\pitcrew.toml", file(user_owned()));
-        let out = ensure_protected_root(&mut p, Path::new("C:\\ProgramData\\Pitcrew"), &["pitcrew.toml"], &["logs"]).unwrap();
+        let out = ensure(&mut p, &["pitcrew.toml"], &["logs"]).unwrap();
         let RootOutcome::MovedAside(aside, reason) = out else {
             panic!("{out:?}");
         };

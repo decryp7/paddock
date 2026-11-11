@@ -16,7 +16,13 @@ fn connect(_socket_dir: &Path) -> Result<Box<dyn Stream>, Error> {
     };
     #[cfg(windows)]
     {
-        let name = crate::ipc::pipe_name(_socket_dir);
+        // The installed service's pipe, or the per-user engine's (its name is recorded in its folder), or the name derived from the
+        // folder (an engine started by hand in a test or development folder).
+        let name = if crate::ipc::pipe_name(_socket_dir) == crate::ipc::PIPE_NAME {
+            crate::ipc::PIPE_NAME.to_string()
+        } else {
+            crate::ipc::read_user_pipe_name(_socket_dir).unwrap_or_else(|| crate::ipc::pipe_name(_socket_dir))
+        };
         let f = pitcrew_core::service_paths::open_pipe_options().open(&name).map_err(unavailable)?;
         // Nothing is written before the pipe is shown to belong to the service (SYSTEM or Administrators), or, for the per-user
         // engine's own pipe, to this user.

@@ -59,7 +59,11 @@ pub enum Engine {
     User,
 }
 
-/// The pipe an engine listens on (Windows).
+/// What the client says when the per-user engine is not there (not an error to show: nobody may have runners there).
+pub const USER_ENGINE_NOT_RUNNING: &str = "your own runners' engine is not running";
+
+/// The pipe an engine listens on (Windows). The per-user engine's name is recorded by the engine in its own folder at each start
+/// (a hint, checked for shape; the pipe's owner is checked on connect regardless).
 #[cfg(windows)]
 fn pipe_of(engine: Engine) -> Result<String, ClientError> {
     let env = |k: &str| std::env::var_os(k).map(std::path::PathBuf::from);
@@ -68,8 +72,14 @@ fn pipe_of(engine: Engine) -> Result<String, ClientError> {
         Engine::User => {
             let dir = pitcrew_core::service_paths::user_engine_dir(&env)
                 .ok_or_else(|| ClientError::Unavailable("LOCALAPPDATA is not set".into()))?;
-            let installed = pitcrew_core::service_paths::data_dir(pitcrew_core::platform::Os::Windows, &env);
-            Ok(pitcrew_core::service_paths::pipe_name_for(&dir, installed.as_deref()))
+            let recorded = std::fs::read_to_string(dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE))
+                .map_err(|_| ClientError::Unavailable(USER_ENGINE_NOT_RUNNING.into()))?;
+            let recorded = recorded.trim();
+            if pitcrew_core::service_paths::is_user_pipe_name(recorded) {
+                Ok(recorded.to_string())
+            } else {
+                Err(ClientError::Unavailable(USER_ENGINE_NOT_RUNNING.into()))
+            }
         }
     }
 }
@@ -96,7 +106,7 @@ fn connect(engine: Engine) -> Result<Box<dyn Stream>, ClientError> {
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     return Err(ClientError::Unavailable(if engine == Engine::User {
-                        "your own runners' engine is not running".into()
+                        USER_ENGINE_NOT_RUNNING.into()
                     } else {
                         "it is not installed or not started. Install it from Settings ▸ Service (Windows asks for permission)".into()
                     }))
