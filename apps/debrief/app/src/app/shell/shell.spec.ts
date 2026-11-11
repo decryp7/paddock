@@ -5,12 +5,15 @@ import { all, buttonByText, el, FakeDock, provideFakeDock, provideTinyBackend, s
 import { PaletteService } from '../palette/palette.service';
 import { Platform } from '../core/platform';
 import { WorkspaceStore } from '../core/workspace.store';
+import { WorkspaceStatusStore } from '../core/workspace/status.store';
 import { TimelineZoom } from '../timeline/zoom';
 import { provideToolsBackend } from '../core/tools-backend';
 import { LifecycleService } from '../lifecycle/lifecycle.service';
 import { LiveTail } from '../workspace/live-tail';
 import { Sidebar } from './sidebar';
 import { StatusBar } from './status-bar';
+import { provideDebriefStatusItems } from './status/status-items.contributions';
+import { StatusCounts } from './status/workspace-counts';
 import { openedFolderName, TitleBar } from './title-bar';
 import { memoryHost, MockWindowingBackend } from '../windowing/mock-windowing-backend';
 import { WindowCommands } from '../windowing/window-commands';
@@ -34,7 +37,9 @@ const fakePlatform = {
 
 function setup<T>(cmp: Type<T>, backend = tinyBackend()) {
   const dock = new FakeDock();
-  TestBed.configureTestingModule({ providers: [provideTinyBackend(backend), provideFakeDock(dock), provideToolsBackend(), { provide: Platform, useValue: fakePlatform }] });
+  TestBed.configureTestingModule({
+    providers: [provideTinyBackend(backend), provideFakeDock(dock), provideToolsBackend(), ...provideDebriefStatusItems(), { provide: Platform, useValue: fakePlatform }],
+  });
   const fixture = TestBed.createComponent(cmp);
   return { fixture, store: TestBed.inject(WorkspaceStore), backend, dock };
 }
@@ -245,18 +250,32 @@ describe('openedFolderName', () => {
 });
 
 describe('StatusBar', () => {
+  /** The bar's items load after the first paint (they are contributions): waits until the last one is there. */
+  const itemsShown = (fixture: ComponentFixture<unknown>) => settleUntil(fixture, () => el(fixture, '[data-testid=status-details]'));
+
   it('shows busy work other than imports with a spinner (E1)', async () => {
     const { fixture } = setup(StatusBar);
+    await itemsShown(fixture);
+    const status = TestBed.inject(WorkspaceStatusStore);
+    status.setBusy({ kind: 'op', label: 'Clearing workspace…' });
     fixture.detectChanges();
-    expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Loading workspace');
+    expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Clearing workspace');
+    // An import has its own item: no second spinner.
+    status.setBusy({ kind: 'import', label: 'Importing', jobId: null });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-testid=status-busy]')).toBeNull();
+    status.setBusy(null);
     await settle(fixture);
     expect(fixture.nativeElement.querySelector('[data-testid=status-busy]')).toBeNull();
   });
 
   it('summarises the workspace', async () => {
     const { fixture, store } = setup(StatusBar);
-    fixture.detectChanges();
-    expect(text(fixture)).toContain('No workspace');
+    // Before the workspace loads, the counts item says so.
+    const counts = TestBed.createComponent(StatusCounts);
+    counts.detectChanges();
+    expect(text(counts)).toContain('No workspace');
+    await itemsShown(fixture);
     await settle(fixture);
     store.setMatchTotal(3);
     await settle(fixture);
@@ -293,6 +312,7 @@ describe('StatusBar', () => {
 
   it('shows how many events the pipeline dropped', async () => {
     const { fixture, store, backend } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     el<HTMLButtonElement>(fixture, '[data-testid=status-details]').click();
     fixture.detectChanges();
@@ -305,6 +325,7 @@ describe('StatusBar', () => {
 
   it('has a Live tail toggle that reflects and switches the live state', async () => {
     const { fixture, store } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     const live = TestBed.inject(LiveTail);
     const button = el<HTMLButtonElement>(fixture, 'button[aria-label="Live tail"]');
@@ -332,6 +353,7 @@ describe('StatusBar', () => {
 
   it('shows why live tail failed', async () => {
     const { fixture, backend } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     vi.spyOn(backend, 'setLive').mockRejectedValueOnce('watch limit reached');
     el<HTMLButtonElement>(fixture, 'button[aria-label="Live tail"]').click();
@@ -345,6 +367,7 @@ describe('StatusBar', () => {
 
   it('counts the sources in the Details popover', async () => {
     const { fixture, store } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     await store.removeSource(1);
     await settle(fixture);

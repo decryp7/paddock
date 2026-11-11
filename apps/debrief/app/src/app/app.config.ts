@@ -51,6 +51,7 @@ import { WorkspaceSource } from './shell/workspace-source';
 import { provideStartupContract } from './core/startup/startup-contract';
 import { provideStartupTimings } from './core/startup/startup-timings';
 import { provideRecovery } from './lifecycle/recovery';
+import { provideDebriefStatusItems } from './shell/status/status-items.contributions';
 import { provideDebriefThemes } from './theme/themes.contributions';
 import { provideDebriefSharedState } from './popout/shared-state';
 
@@ -108,6 +109,8 @@ export const appConfig: ApplicationConfig = {
     provideServiceHealth(),
     provideNotificationHost(),
     provideNotificationSource(WorkspaceSource),
+    // The status bar's items: data and loaders; their components load after the first paint.
+    ...provideDebriefStatusItems(),
     // Reports ready after the first paint; Rust's watchdog recovers a window that never does (ADR 0058).
     provideStartupContract(),
     // The main window's start-up marks for Rust's "Startup timings" line (rule 16).
