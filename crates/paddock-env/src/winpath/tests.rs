@@ -342,7 +342,7 @@ fn real_for_tools_and_real_verbatim_agree_with_real_off_windows() {
         assert_eq!(std::path::Path::new(&t), real(d.path()).unwrap());
     }
     let e = real_for_tools(&d.path().join("missing")).unwrap_err();
-    assert!(matches!(e, RealError::Io(_)));
+    assert!(matches!(e, RealError::Io { .. }));
     assert!(e.to_string().contains("missing"));
 }
 
