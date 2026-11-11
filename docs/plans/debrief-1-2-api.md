@@ -2216,10 +2216,10 @@ export interface DebriefContext {                   // CommandContext becomes Sh
 | `defineDialog` | Debrief's dialogs as declared contracts (ADR 0026, [debrief-1-2-api-dialogs.md](debrief-1-2-api-dialogs.md)) | M2b |
 | UI state checkpoint (not a `define*`: `provideUiCheckpoint` from `@decryp7/paddock-ui/shell/startup` over the `paddock-startup` port, `crates/paddock-startup/src/checkpoint.rs`, ADR 0058) | the window's restorable UI state, replacing Debrief's own `StartupBackend.checkpointUi` | M2a |
 | `defineStatusItem` | jobs, health chip, resource meter (`pd-resource-meter`, §14.4), time display | M1, 4.4 |
-| `defineSettingsPage` | Performance (with the Limits group, §14.4), Plugins, Time, Storage, AI, Parsers | M1, M2c |
-| `defineNotificationKind` | `limit` (`LimitNotice`), `import`, `plugin`, `folder-scan`, `time-zone` | M1, 2.3 |
-| `defineTheme` | Debrief's theme packs | M1 |
-| `defineSharedState` | selection, time range, lane selection, display zone | M1, M3a |
+| `defineSettingsPage` | Performance (with the Limits group, §14.4), Plugins, Time, Storage, AI, Parsers | M2c (M1's share moved there on 2026-11-12: Debrief's page ids and nav groups do not fit the shell's, and the pages live in the Settings window's bootstrap, which M2c replaces) |
+| `defineNotificationKind` | `limit` (`LimitNotice`), `import`, `plugin`, `folder-scan`, `time-zone` | M2a with `shell/notify`, or 2.3 for the kinds it adds (moved from M1 on 2026-11-12: nothing in Debrief reads them before M2a) |
+| `defineTheme` | Debrief's theme packs | M1, as Debrief's own `debriefThemes` kind: a Debrief pack sets sizes per density, traits and its own token names, which `defineTheme` (`--pd-*` colours per scheme) cannot hold (workbench.md §13) |
+| `defineSharedState` | selection, time range, lane selection, display zone | M1 as Debrief's own `debriefSharedState` kind (the shell has no `defineSharedState`), M3a |
 | `defineView` | events grid, timeline, Explorer views, analyses, profiling views, dumps, Problems, Processes tool window | M3a, 4.4 |
 | `definePerspective` | default, Full, profiling | M3a |
 | `defineActivityItem`, `defineExplorerProvider` | Sources tree on the shared tree (virtualized, keyed); the totals row "N files not imported" (ADR 0067 §7) | M3b, F8 |
@@ -2228,7 +2228,7 @@ export interface DebriefContext {                   // CommandContext becomes Sh
 
 - **Lazy by construction** (M1): a registration file imports no store or command class; the contributions lint fails
   otherwise. That lint is not built (no such rule under `eslint/` or `conformance/src` on the train); it is the move
-  plan's §7 item 6, built with Y12's checks, so M1 needs it first or carries the import check as its own spec. Acceptance: **first-paint JS at most 500 kB** (today 1,233 kB), measured by `app/scripts/window-weight.mjs`
+  plan's §7 item 6, built with Y12's checks, so M1 needs it first or carries the import check as its own spec. Acceptance: **first-paint JS at most 500 kB** (today 1,233 kB; moved to M3 on 2026-11-12: M1 measured 1136.7 kB and what remains is the dock, the chrome and the stores `app.ts` imports, which M3 moves), measured by `app/scripts/window-weight.mjs`
   (conformance C29) [J: the target; M1 records the measured value as a rule 48 block].
 - **M1 moves `coverage-guard.spec.ts`.** It reads `extensions/command-registry` and `DEBRIEF_COMMANDS`, which M1
   replaces with the shell's registry and `defineCommand`. M1 moves its command half to the shell's registry (every
