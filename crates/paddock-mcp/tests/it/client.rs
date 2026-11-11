@@ -352,33 +352,6 @@ fn an_owner_whose_socket_closes_as_it_dies_reads_as_not_open_not_as_a_closed_con
 }
 
 #[test]
-fn a_live_owner_that_answers_slowly_is_still_waited_for() {
-    use std::io::{BufRead, Write};
-    listen();
-    let dir = tempfile::tempdir().unwrap();
-    let mut owner = owner_process();
-    let listener = owned_listener(dir.path(), &owner);
-    let peer = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        let mut line = String::new();
-        std::io::BufReader::new(stream.try_clone().unwrap())
-            .read_line(&mut line)
-            .unwrap();
-        // Simulates the latency of a busy app: the answer comes after several of the client's looks at its owner (100 ms apart).
-        std::thread::sleep(Duration::from_millis(700));
-        writeln!(stream, "{}", json!({"ok": true, "client": "Demo"})).unwrap();
-        // Keep the connection until the client ended it.
-        let _ = std::io::BufReader::new(stream).read_line(&mut line);
-    });
-    let link = connect_loopback(&discovery_path(dir.path()), "pmk_x").unwrap();
-    assert_eq!(link.app(), "Demo");
-    drop(link);
-    peer.join().unwrap();
-    owner.kill().unwrap();
-    owner.wait().unwrap();
-}
-
-#[test]
 fn a_stale_file_of_a_killed_owner_answers_without_touching_its_port() {
     listen();
     let dir = tempfile::tempdir().unwrap();

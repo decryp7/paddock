@@ -201,7 +201,7 @@ impl From<std::io::Error> for Waited {
 /// Connects to the app's port in short tries, looking at its process between them, for at most `limit` (a live but slow app is
 /// still waited for). Windows retries a refused loopback connection for about 2 s, so a dead listener can cost that long per try
 /// there; the look between tries is what ends the wait when the owner is gone.
-fn connect_watching(hint: &Discovery, limit: Duration) -> Result<TcpStream, Waited> {
+fn connect_watching(hint: &Discovery, limit: Duration, alive: &Alive) -> Result<TcpStream, Waited> {
     let addr = ([127, 0, 0, 1], hint.port).into();
     let end = Instant::now() + limit;
     loop {
@@ -213,7 +213,7 @@ fn connect_watching(hint: &Discovery, limit: Duration) -> Result<TcpStream, Wait
                 if e.kind() == std::io::ErrorKind::TimedOut
                     || e.kind() == std::io::ErrorKind::WouldBlock =>
             {
-                if !hint.writer_alive() {
+                if !alive(hint) {
                     return Err(Waited::OwnerGone);
                 }
                 if left.is_zero() {
@@ -235,18 +235,20 @@ fn read_answer(
     into: &mut Vec<u8>,
     hint: &Discovery,
     limit: Duration,
+    alive: &Arc<Alive>,
 ) -> Result<(), Waited> {
     stream.0.set_read_timeout(Some(limit))?;
     let gone = Arc::new(AtomicBool::new(false));
     let (stop, tick) = std::sync::mpsc::channel::<()>();
     let watcher = {
-        let (stream, hint, gone) = (stream.clone(), hint.clone(), gone.clone());
+        let (stream, hint, gone, alive) =
+            (stream.clone(), hint.clone(), gone.clone(), alive.clone());
         std::thread::spawn(move || {
             // The sender is dropped when the read is over: that wakes the tick and ends the watcher.
             while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) =
                 tick.recv_timeout(OWNER_LOOK)
             {
-                if !hint.writer_alive() {
+                if !alive(&hint) {
                     gone.store(true, Ordering::SeqCst);
                     stream.shutdown(Shutdown::Both);
                     break;
@@ -258,7 +260,7 @@ fn read_answer(
     drop(stop);
     let _ = watcher.join();
     let ended = !matches!(read, Ok(n) if n > 0);
-    if gone.load(Ordering::SeqCst) || (ended && !hint.writer_alive()) {
+    if gone.load(Ordering::SeqCst) || (ended && !alive(hint)) {
         return Err(Waited::OwnerGone);
     }
     read.map(|_| ()).map_err(Waited::Failed)
@@ -282,9 +284,28 @@ pub fn connect_loopback_with(
     key: &str,
     limits: ConnectLimits,
 ) -> Result<LoopbackLink, ConnectError> {
+    connect_checked(
+        discovery,
+        key,
+        limits,
+        Arc::new(|d: &Discovery| d.writer_alive()),
+    )
+}
+
+/// How the handshake asks whether the app's process still runs (rule 53: pid with start time). The real one is
+/// [`Discovery::writer_alive`]; a test counts the looks.
+type Alive = dyn Fn(&Discovery) -> bool + Send + Sync;
+
+/// [`connect_loopback_with`] with the owner check given.
+fn connect_checked(
+    discovery: &Path,
+    key: &str,
+    limits: ConnectLimits,
+    alive: Arc<Alive>,
+) -> Result<LoopbackLink, ConnectError> {
     let started = Instant::now();
     let hint = Discovery::read(discovery)
-        .filter(Discovery::writer_alive)
+        .filter(|d| alive(d))
         .ok_or_else(|| {
             log::info!(
                 "paddock_mcp client: no live discovery file at {}",
@@ -302,7 +323,7 @@ pub fn connect_loopback_with(
         );
         ConnectError::NotOpen { app: app.clone() }
     };
-    let tcp = connect_watching(&hint, limits.connect).map_err(|e| match e {
+    let tcp = connect_watching(&hint, limits.connect, &*alive).map_err(|e| match e {
         Waited::OwnerGone => not_open("its process ended while connecting"),
         Waited::Failed(e) => {
             log::warn!(
@@ -319,16 +340,21 @@ pub fn connect_loopback_with(
     let mut first = Vec::new();
     let read = (|| {
         writeln!(stream.clone(), "{}", serde_json::json!({"key": key}))?;
-        read_answer(&stream, &mut reader, &mut first, &hint, limits.answer)?;
+        read_answer(
+            &stream,
+            &mut reader,
+            &mut first,
+            &hint,
+            limits.answer,
+            &alive,
+        )?;
         stream.0.set_read_timeout(None)?;
         Ok::<usize, Waited>(first.len())
     })()
     .map_err(|e| match e {
         Waited::OwnerGone => not_open("its process ended before it answered the key"),
         // A write to a socket the dying owner closed fails like any other: look at the owner before blaming the app's answer.
-        Waited::Failed(_) if !hint.writer_alive() => {
-            not_open("its process ended while the key was sent")
-        }
+        Waited::Failed(_) if !alive(&hint) => not_open("its process ended while the key was sent"),
         Waited::Failed(e) => {
             log::warn!("paddock_mcp client: {app} gave no answer to the key: {e}");
             ConnectError::NoAnswer {
@@ -369,4 +395,66 @@ pub fn connect_loopback_with(
         app,
         version: hint.version,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::AtomicUsize;
+
+    /// A live owner that is busy: its answer comes only after the client has looked at its process several times, so the
+    /// handshake keeps waiting while the owner is alive (no sleep: the peer waits for the third look, counted by the check).
+    #[test]
+    fn a_live_owner_that_answers_after_several_looks_is_still_waited_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let me = paddock_proc::ProcessId::of(std::process::id()).unwrap();
+        let hint = Discovery {
+            pid: me.pid(),
+            started_us: me.started().as_micros(),
+            port: listener.local_addr().unwrap().port(),
+            app: "Demo".into(),
+            version: "1".into(),
+        };
+        let file = crate::listener::discovery_path(dir.path());
+        std::fs::write(&file, serde_json::to_string(&hint).unwrap()).unwrap();
+        let looks = Arc::new(AtomicUsize::new(0));
+        let (third, third_look) = std::sync::mpsc::channel::<()>();
+        let third = Mutex::new(third);
+        let alive: Arc<Alive> = {
+            let looks = looks.clone();
+            Arc::new(move |_| {
+                if looks.fetch_add(1, Ordering::SeqCst) + 1 == 3 {
+                    let _ = third.lock().unwrap().send(());
+                }
+                true
+            })
+        };
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            // The first look is the one before connecting, the next two are the watcher's while this read waits.
+            third_look.recv_timeout(Duration::from_secs(30)).unwrap();
+            writeln!(
+                stream,
+                "{}",
+                serde_json::json!({"ok": true, "client": "Demo"})
+            )
+            .unwrap();
+            let _ = BufReader::new(stream).read_line(&mut line);
+        });
+        let limits = ConnectLimits {
+            connect: Duration::from_secs(30),
+            answer: Duration::from_secs(30),
+        };
+        let link = connect_checked(&file, "pmk_x", limits, alive).unwrap();
+        assert_eq!(link.app(), "Demo");
+        assert!(looks.load(Ordering::SeqCst) >= 3);
+        drop(link);
+        peer.join().unwrap();
+    }
 }
