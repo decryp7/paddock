@@ -17,22 +17,68 @@ pub const MAX_DESCRIPTION_CHARS: usize = 1024;
 /// How often a waiting call looks at Stop.
 const STOP_SLICE: Duration = Duration::from_millis(50);
 
-/// Which server and MCP tool each assistant tool name stands for (the policy keys its book on them).
+/// What the policy needs to know about one registered tool: where it comes from and what the server said, as it said it.
+#[derive(Clone)]
+struct Identity {
+    server: String,
+    tool: String,
+    /// The MCP `title`, uncleaned.
+    title: Option<String>,
+    /// The MCP `description`, whole (the model's copy is cleaned and cut, so a change past the cut would go unseen).
+    description: String,
+}
+
+/// Which server and MCP tool each assistant tool name stands for (the policy keys its book on them), and the raw text of the
+/// tool's title and description for its approval fingerprint.
 #[derive(Clone, Default)]
-pub struct ToolNames(Arc<Mutex<HashMap<String, (String, String)>>>);
+pub struct ToolNames(Arc<Mutex<HashMap<String, Identity>>>);
 
 impl ToolNames {
     /// The server and MCP tool of an assistant tool name.
     pub fn of(&self, assistant_name: &str) -> Option<(String, String)> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).get(assistant_name).cloned()
-    }
-
-    fn put(&self, assistant_name: &str, server: &str, tool: &str) {
         self.0
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .insert(assistant_name.into(), (server.into(), tool.into()));
+            .get(assistant_name)
+            .map(|i| (i.server.clone(), i.tool.clone()))
     }
+
+    /// The server's own title and whole description of a registered tool: what its approval fingerprint covers.
+    pub fn raw_text_of(&self, assistant_name: &str) -> Option<(Option<String>, String)> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(assistant_name)
+            .map(|i| (i.title.clone(), i.description.clone()))
+    }
+
+    fn put(&self, assistant_name: &str, server: &str, def: &Tool) {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).insert(
+            assistant_name.into(),
+            Identity {
+                server: server.into(),
+                tool: def.name.clone(),
+                title: def.title.clone(),
+                description: def.description.clone(),
+            },
+        );
+    }
+}
+
+/// The argument names a log line may carry: those the schema declares under `properties`, and how many others the call had
+/// (a name the server did not declare is the model's or an injection's text, ER-27).
+pub fn logged_args(schema: &Value, input: &Value) -> (Vec<String>, usize) {
+    let declared = schema.get("properties").and_then(Value::as_object);
+    let mut known = Vec::new();
+    let mut other = 0;
+    for key in input.as_object().into_iter().flat_map(|o| o.keys()) {
+        if declared.is_some_and(|d| d.contains_key(key)) {
+            known.push(key.clone());
+        } else {
+            other += 1;
+        }
+    }
+    (known, other)
 }
 
 /// `<server>_<tool>` in the assistant's `lower_snake_case`, at most 64 characters; `None` when nothing usable is left.
@@ -114,7 +160,7 @@ pub fn tools_of(
             continue;
         }
         let read_only = family && def.annotations.as_ref().and_then(|a| a.read_only_hint) == Some(true);
-        names.put(&name, server, &def.name);
+        names.put(&name, server, def);
         out.push(Arc::new(McpTool {
             server: server.into(),
             title: title.into(),
@@ -170,12 +216,17 @@ impl AssistantTool for McpTool {
         phrase(&self.title, &title_of(&self.def), self.access.writes())
     }
 
+    fn argument_problem(&self, input: &Value) -> Option<String> {
+        paddock_assistant::tool::argument_problem(&self.spec(), input)
+            .or_else(|| paddock_mcp::schema::validate(&self.def.input_schema, input).err())
+    }
+
     fn call(&self, input: &Value, cancel: &Cancel) -> ToolOutput {
         let started = Instant::now();
-        let arg_keys: Vec<String> = input.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+        let (arg_keys, other_args) = logged_args(&self.def.input_schema, input);
         let facts = |bytes: usize| {
             json!({"pitwall": {"server": self.server, "tool": self.def.name, "bytes": bytes,
-                "durationMs": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), "argKeys": arg_keys}})
+                "durationMs": u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), "argKeys": arg_keys, "otherArgs": other_args}})
         };
         let pending = match self.conn.start_call_tool(&self.def.name, input.clone()) {
             Ok(p) => p,

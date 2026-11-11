@@ -510,7 +510,7 @@ impl ConnectedApps {
     pub fn revoke(&self, id: &str, tool: &str) -> Result<ConnectedApp, AppsError> {
         title_of(id)?;
         self.policy.revoke(id, tool);
-        log::info!(target: "pitwall_chat", "connected apps: {id} {tool} asks again");
+        log::info!(target: "pitwall_chat", "{}", super::log_line::revoke_line(id, tool));
         self.publish();
         Ok(self.view(id))
     }

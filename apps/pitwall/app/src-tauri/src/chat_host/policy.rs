@@ -5,8 +5,10 @@
 
 use super::tool::ToolNames;
 use paddock_assistant::{ApprovalChoice, ApprovalPolicy, CallInfo, Verdict};
-use pitwall_core::approvals::{self, ApprovalBook, BookError, ToolKind};
-use std::path::{Path, PathBuf};
+use paddock_env::{Problem as FileProblem, VersionedFile};
+use pitwall_core::approvals::{self, ApprovalBook, Remembered, ToolKind};
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::sync::{Mutex, PoisonError};
 
 /// The file of the book, in the app's data folder.
@@ -15,48 +17,51 @@ pub const FILE: &str = "tool-approvals.json";
 /// The policy of the Playground chat.
 pub struct PitwallPolicy {
     book: Mutex<ApprovalBook>,
-    path: Option<PathBuf>,
+    file: Option<BookFile>,
     names: ToolNames,
     clock: Box<dyn Fn() -> u64 + Send + Sync>,
 }
 
-fn backup(path: &Path) -> PathBuf {
-    path.with_extension("json.bak")
+/// The book as `paddock-env`'s `VersionedFile` keeps it: the entries, with the file's `version` added around them.
+#[derive(Default, Serialize, Deserialize)]
+struct BookDoc {
+    #[serde(default)]
+    entries: Vec<Remembered>,
 }
 
-/// Reads the book: the file, else its backup, else an empty book. A newer file is kept as it is and the book is empty.
-pub fn load(path: &Path) -> (ApprovalBook, Option<BookError>) {
-    let read = |p: &Path| std::fs::read_to_string(p).ok().map(|t| ApprovalBook::from_json(&t));
-    match read(path) {
-        None => (ApprovalBook::new(), None),
-        Some(Ok(book)) => (book, None),
-        Some(Err(e)) => match read(&backup(path)) {
-            Some(Ok(book)) if !matches!(e, BookError::Newer(_)) => (book, Some(e)),
-            _ => (ApprovalBook::new(), Some(e)),
-        },
-    }
-}
+/// The file of the book: owner-only, written atomically with the last good copy kept as `<file>.bak`, a damaged file moved aside
+/// (and the backup used), a newer file left as it is and never overwritten, all by `VersionedFile` (rule 55, as `saved.rs`).
+pub struct BookFile(VersionedFile<BookDoc>);
 
-/// Writes the book atomically and keeps the previous good copy as the backup.
-pub fn save(path: &Path, book: &ApprovalBook) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
+impl BookFile {
+    /// The book file at `path`.
+    pub fn new(path: &Path) -> BookFile {
+        BookFile(
+            VersionedFile::new(path, approvals::FORMAT_VERSION)
+                .max_bytes(approvals::MAX_FILE_BYTES as u64)
+                .private(),
+        )
     }
-    if path.exists() {
-        std::fs::copy(path, backup(path))?;
+
+    /// Reads the book: the file, else its backup, else an empty book. A newer file is kept as it is and the book is empty.
+    pub fn load(&self) -> (ApprovalBook, Option<FileProblem>) {
+        let loaded = self.0.load();
+        (ApprovalBook::from_entries(loaded.value.entries), loaded.problem)
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, book.to_json())?;
-    std::fs::rename(&tmp, path)
+
+    /// Writes the book atomically and keeps the previous good copy as the backup.
+    pub fn save(&self, book: &ApprovalBook) -> paddock_env::Result<()> {
+        self.0.save(&BookDoc { entries: book.entries() })
+    }
 }
 
 impl PitwallPolicy {
     /// The policy over the book at `dir/`[`FILE`] (`None`: kept for this session only), naming tools through `names`.
     pub fn new(dir: Option<&Path>, names: ToolNames, clock: impl Fn() -> u64 + Send + Sync + 'static) -> PitwallPolicy {
-        let path = dir.map(|d| d.join(FILE));
-        let book = match &path {
-            Some(p) => {
-                let (book, problem) = load(p);
+        let file = dir.map(|d| BookFile::new(&d.join(FILE)));
+        let book = match &file {
+            Some(f) => {
+                let (book, problem) = f.load();
                 if let Some(e) = problem {
                     log::warn!(target: "pitwall_chat", "tool approvals: {e}; next step: approvals are asked again");
                 }
@@ -66,7 +71,7 @@ impl PitwallPolicy {
         };
         PitwallPolicy {
             book: Mutex::new(book),
-            path,
+            file,
             names,
             clock: Box::new(clock),
         }
@@ -76,8 +81,8 @@ impl PitwallPolicy {
     pub fn revoke(&self, server: &str, tool: &str) {
         let mut book = self.book.lock().unwrap_or_else(PoisonError::into_inner);
         if book.revoke(server, tool) {
-            if let Some(path) = &self.path {
-                if let Err(e) = save(path, &book) {
+            if let Some(file) = &self.file {
+                if let Err(e) = file.save(&book) {
                     log::warn!(target: "pitwall_chat", "tool approvals could not be saved: {e}; next step: check the data folder's permissions");
                 }
             }
@@ -88,8 +93,8 @@ impl PitwallPolicy {
     pub fn revoke_server(&self, server: &str) {
         let mut book = self.book.lock().unwrap_or_else(PoisonError::into_inner);
         if book.revoke_server(server) > 0 {
-            if let Some(path) = &self.path {
-                if let Err(e) = save(path, &book) {
+            if let Some(file) = &self.file {
+                if let Err(e) = file.save(&book) {
                     log::warn!(target: "pitwall_chat", "tool approvals could not be saved: {e}; next step: check the data folder's permissions");
                 }
             }
@@ -106,7 +111,13 @@ impl PitwallPolicy {
             .names
             .of(&call.tool.name)
             .unwrap_or_else(|| (String::new(), call.tool.name.clone()));
-        let fp = approvals::fingerprint(&call.tool.name, &call.tool.description, &call.tool.input_schema);
+        // What the server said, whole and as it said it (title included): the model's copy of the description is cleaned and
+        // cut, so a change past the cut, or to the title alone, would not ask again.
+        let (title, description) = self
+            .names
+            .raw_text_of(&call.tool.name)
+            .unwrap_or_else(|| (None, call.tool.description.clone()));
+        let fp = approvals::fingerprint(&call.tool.name, title.as_deref(), &description, &call.tool.input_schema);
         let kind = if call.access.writes() {
             ToolKind::Action
         } else {
@@ -145,8 +156,8 @@ impl ApprovalPolicy for PitwallPolicy {
             log::warn!(target: "pitwall_chat", "tool approval not remembered: {e}");
             return;
         }
-        if let Some(path) = &self.path {
-            if let Err(e) = save(path, &book) {
+        if let Some(file) = &self.file {
+            if let Err(e) = file.save(&book) {
                 log::warn!(target: "pitwall_chat", "tool approvals could not be saved: {e}; next step: check the data folder's permissions");
             }
         }
