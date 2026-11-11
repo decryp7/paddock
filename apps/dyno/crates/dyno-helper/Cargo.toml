@@ -35,6 +35,8 @@ toml.workspace = true
 libc = "0.2"
 
 [dev-dependencies]
+# The fake machine of the trust rule (`trust_fake`), for tests only.
+paddock-service = { path = "../../../../crates/paddock-service", features = ["test-support"] }
 # The ending harness of ADR 0072 (the ending test in src/server.rs).
 paddock-ipc = { workspace = true, features = ["testing"] }
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }

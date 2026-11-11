@@ -12,6 +12,8 @@ publish = ["decryp7"]
 # `service_repair`, `service_install` and `open_login_items`, the `paddock://service` event and the health wiring. The
 # core never depends on Tauri.
 tauri = ["dep:tauri", "paddock-commands/tauri"]
+# `trust_fake::FakePort`, the fake machine of the trust rule: for the tests of the crates that use `TrustPort`; never in a shipped build.
+test-support = []
 
 [dependencies]
 paddock-cli = { workspace = true }

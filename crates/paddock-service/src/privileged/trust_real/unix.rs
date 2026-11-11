@@ -429,19 +429,29 @@ pub(super) fn open_append_no_follow(
     path: &std::path::Path,
     require_trusted_owner: bool,
 ) -> io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    let meta = file.metadata()?; // fstat of the open file
     let bad = |why: &str| {
         Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("{} {why}", path.display()),
         ))
     };
+    // O_NONBLOCK so that a FIFO planted at the path cannot make the open wait for a reader (it fails with ENXIO, or opens and is
+    // refused below); the flag is cleared again once the file is known to be a regular file.
+    let file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(f) => f,
+        Err(e) if e.raw_os_error() == Some(libc::ENXIO) => {
+            return bad("is not a regular file (a pipe nobody reads)");
+        }
+        Err(e) => return Err(e),
+    };
+    let meta = file.metadata()?; // fstat of the open file
     if !meta.is_file() {
         return bad("is not a regular file");
     }
@@ -452,6 +462,13 @@ pub(super) fn open_append_no_follow(
     let me = unsafe { libc::geteuid() };
     if require_trusted_owner && meta.uid() != 0 && meta.uid() != me {
         return bad("is owned by another account");
+    }
+    // SAFETY: the descriptor is open and owned by `file` for both calls.
+    unsafe {
+        let flags = libc::fcntl(file.as_raw_fd(), libc::F_GETFL);
+        if flags >= 0 {
+            libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK);
+        }
     }
     Ok(file)
 }

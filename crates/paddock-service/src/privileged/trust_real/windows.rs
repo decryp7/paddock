@@ -441,14 +441,16 @@ pub(super) fn open_append_no_follow(
         BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
     };
     const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    const BACKUP_SEMANTICS: u32 = 0x0200_0000;
     const REPARSE: u32 = 0x400;
     const DIRECTORY: u32 = 0x10;
-    // Opens the entry itself, never what a reparse point names; shared for read and write only (no delete), as the engine lock is.
+    // Opens the entry itself, never what a reparse point names (a folder or junction opens too, to be refused below, not to fail
+    // with an access error); shared for read and write only (no delete), as the engine lock is.
     let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .share_mode(3)
-        .custom_flags(OPEN_REPARSE_POINT)
+        .custom_flags(OPEN_REPARSE_POINT | BACKUP_SEMANTICS)
         .open(path)?;
     let bad = |why: &str| {
         Err(io::Error::new(
@@ -734,5 +736,128 @@ mod windows_tests {
         assert_eq!(std::fs::read(&file).unwrap(), b"MZ");
         drop(held);
         std::fs::remove_file(&file).unwrap();
+    }
+
+    // --- open_append_no_follow, identity: run as an ordinary user on the Windows runner (round 7) ---
+
+    fn own_owner_is_trusted(file: &std::path::Path) -> bool {
+        let f = std::fs::File::open(file).unwrap();
+        crate::privileged::trust::is_trusted_sid(&win::descriptor(&f).unwrap().owner)
+    }
+
+    #[test]
+    fn the_append_open_refuses_a_second_name_and_does_not_touch_the_other_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("service.log");
+        std::fs::write(&a, "mine").unwrap();
+        let b = dir.path().join("held.log");
+        std::fs::hard_link(&a, &b).unwrap();
+        for name in [&a, &b] {
+            let e = open_append_no_follow(name, false).unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
+            assert!(e.to_string().contains("more than one name"), "{e}");
+        }
+        assert_eq!(std::fs::read_to_string(&b).unwrap(), "mine");
+        std::fs::remove_file(&b).unwrap();
+        drop(open_append_no_follow(&a, false).expect("with one name it opens"));
+    }
+
+    #[test]
+    fn the_append_open_asks_for_a_trusted_owner_when_told_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("own.log");
+        std::fs::write(&f, "x").unwrap();
+        if own_owner_is_trusted(&f) {
+            // An elevated runner creates files owned by Administrators: the rule accepts them.
+            drop(open_append_no_follow(&f, true).expect("an Administrators-owned file passes"));
+        } else {
+            let e = open_append_no_follow(&f, true).unwrap_err();
+            assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
+            assert!(
+                e.to_string()
+                    .contains("not owned by SYSTEM or Administrators"),
+                "{e}"
+            );
+        }
+        // Without the rule the same file opens.
+        drop(open_append_no_follow(&f, false).unwrap());
+    }
+
+    #[test]
+    fn the_append_open_opens_a_link_as_itself_and_refuses_it_with_its_target_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        // A symbolic link needs a privilege an ordinary user may not have: skipped then, the junction below still runs.
+        let target = dir.path().join("target.txt");
+        std::fs::write(&target, "secret").unwrap();
+        let link = dir.path().join("link.log");
+        match std::os::windows::fs::symlink_file(&target, &link) {
+            Ok(()) => {
+                let e = open_append_no_follow(&link, false).unwrap_err();
+                assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
+                assert!(e.to_string().contains("link or reparse point"), "{e}");
+                assert_eq!(std::fs::read_to_string(&target).unwrap(), "secret");
+            }
+            Err(e) => println!(
+                "SKIPPED symlink_file: {e} (symbolic links are not allowed for this account)"
+            ),
+        }
+        // A junction needs no privilege.
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let junction = dir.path().join("junction.log");
+        let made = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&real)
+            .output()
+            .unwrap();
+        assert!(
+            made.status.success(),
+            "mklink /J: {}",
+            String::from_utf8_lossy(&made.stderr)
+        );
+        let e = open_append_no_follow(&junction, false).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
+        assert_eq!(
+            std::fs::read_dir(&real).unwrap().count(),
+            0,
+            "nothing was made in the junction's target"
+        );
+    }
+
+    #[test]
+    fn identity_is_known_with_a_128_bit_id_and_two_names_of_one_file_are_equal() {
+        use crate::privileged::trust::Identity;
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        let c = dir.path().join("c");
+        std::fs::write(&a, "x").unwrap();
+        std::fs::write(&c, "y").unwrap();
+        std::fs::hard_link(&a, &b).unwrap();
+        let mut port = RealTrust;
+        let known =
+            |port: &mut RealTrust, p: &std::path::Path| match port.identity(&text(p)).unwrap() {
+                Identity::Known(id) => id,
+                other => panic!("{other:?}"),
+            };
+        let (ia, ib, ic) = (
+            known(&mut port, &a),
+            known(&mut port, &b),
+            known(&mut port, &c),
+        );
+        println!(
+            "MEASURED identity: volume {:#x}, index {:#x}, links {}",
+            ia.volume, ia.index, ia.links
+        );
+        assert_ne!(ia.index, 0);
+        assert_ne!(ia.volume, 0);
+        assert_eq!((ia.volume, ia.index), (ib.volume, ib.index));
+        assert_eq!(ia.links, 2);
+        assert_ne!(ia.index, ic.index);
+        assert_eq!(
+            port.identity(&text(&dir.path().join("missing"))).unwrap(),
+            Identity::Missing
+        );
     }
 }

@@ -183,6 +183,11 @@ pub trait TrustPort: Send {
     fn identity(&mut self, _path: &str) -> io::Result<Identity> {
         Ok(Identity::Unknown)
     }
+    /// How many numbers a name made by [`rename_aside`](Self::rename_aside) ends in: `<name>.untrusted-<secs>-<n>` has two. Only a
+    /// fake that counts with one number says otherwise; a caller that recognises its own moved-aside names asks the port.
+    fn aside_name_parts(&self) -> usize {
+        2
+    }
     /// Whether this port can tell files apart. `false` only for a fake that models no identities (its callers then rely on the path
     /// alone, in tests); every other port is expected to, and a security decision refuses on [`Identity::Unknown`] from it.
     fn models_identity(&self) -> bool {

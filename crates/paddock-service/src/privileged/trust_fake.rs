@@ -46,6 +46,9 @@ impl TrustPort for FakePort {
     fn models_identity(&self) -> bool {
         false
     }
+    fn aside_name_parts(&self) -> usize {
+        1
+    }
     fn canonical(&mut self, path: &str) -> io::Result<String> {
         Ok(self
             .links

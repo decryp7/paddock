@@ -300,6 +300,13 @@ pub(super) mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         assert!(open_append_no_follow(&link, false).is_err());
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "secret");
+        // A pipe nobody reads: refused at once, the open does not wait.
+        let fifo = dir.path().join("fifo.log");
+        let c = std::ffi::CString::new(fifo.to_str().unwrap()).unwrap();
+        // SAFETY: a valid NUL-terminated path.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o600) }, 0);
+        let e = open_append_no_follow(&fifo, false).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::InvalidData, "{e}");
         // A good file opens again.
         drop(open_append_no_follow(&log, false).unwrap());
     }

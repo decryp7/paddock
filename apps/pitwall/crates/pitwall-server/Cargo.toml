@@ -76,6 +76,8 @@ windows = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+# The fake machine of the trust rule (`trust_fake`), for tests only.
+paddock-service = { path = "../../../../crates/paddock-service", features = ["test-support"] }
 # The self dev-dependency that turns `test-support` on for this package's tests and builds the fake engine for them.
 pitwall-server = { path = ".", features = ["test-support"] }
 tempfile.workspace = true

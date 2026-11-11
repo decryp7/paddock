@@ -22,4 +22,6 @@ log = { version = "0.4", features = ["kv"] }
 workspace = true
 
 [dev-dependencies]
+# The fake machine of the trust rule (`trust_fake`), for tests only.
+paddock-service = { path = "../../../../crates/paddock-service", features = ["test-support"] }
 tempfile.workspace = true
