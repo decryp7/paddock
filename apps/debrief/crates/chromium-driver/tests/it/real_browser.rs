@@ -99,7 +99,10 @@ fn renders_a_scripted_page_and_leaves_nothing_behind() {
     #[cfg(unix)]
     {
         std::thread::sleep(Duration::from_millis(300));
-        assert!(!paddock_proc::is_alive(pid), "browser process leaked");
+        assert!(
+            paddock_proc::presence(pid) == paddock_proc::Presence::Gone,
+            "browser process leaked"
+        );
     }
     let _ = pid; // only checked on Unix
     drop(b);
@@ -120,7 +123,10 @@ fn dropping_the_browser_ends_the_process() {
     #[cfg(unix)]
     {
         std::thread::sleep(Duration::from_millis(300));
-        assert!(!paddock_proc::is_alive(pid), "browser process leaked");
+        assert!(
+            paddock_proc::presence(pid) == paddock_proc::Presence::Gone,
+            "browser process leaked"
+        );
     }
     let _ = pid;
 }

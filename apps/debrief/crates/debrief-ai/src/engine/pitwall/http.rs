@@ -454,6 +454,18 @@ mod tests {
         assert!(matches!(r.read_all(100), Err(HttpError::Protocol(_))));
     }
 
+    /// End to end: a port that is bound but not listening is refused (Linux only: see `paddock_testkit::net`); the error
+    /// mapping above covers the other OS.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_port_nothing_listens_on_is_refused() {
+        let held = paddock_testkit::net::HeldPort::refusing();
+        assert!(matches!(
+            send(held.port(), &Request::get("/"), Timeouts::QUICK, None),
+            Err(HttpError::Refused(_))
+        ));
+    }
+
     #[test]
     fn refused_garbage_and_header_injection() {
         // A refusal cannot be provoked portably (a freed port may belong to another test's server): the mapping is tested.

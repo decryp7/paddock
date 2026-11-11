@@ -135,10 +135,17 @@ mod tests {
             .unwrap();
         let elapsed = start.elapsed();
         let text = String::from_utf8_lossy(&out.stdout);
+        // The pid is read from what the command printed, so it is a recorded one: its holder must have started before this read.
+        let read_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
         let pid: i32 = text.trim().parse().unwrap_or(0);
         if pid > 0 {
             // Ends the test's own `sleep` grandchild, by identity.
-            if let Some(id) = u32::try_from(pid).ok().and_then(paddock_proc::ProcessId::of) {
+            if let Some(id) = u32::try_from(pid)
+                .ok()
+                .and_then(|p| paddock_proc::ProcessId::of_recorded(p, read_ms))
+            {
                 let _ = paddock_proc::end(id);
             }
         }

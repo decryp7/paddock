@@ -85,3 +85,16 @@ fn a_reset_that_reaches_the_write_first_is_still_a_reset() {
     let e = talk(s).expect_err("a reset, not an answer");
     assert!(is_reset(&e), "{e:?}");
 }
+
+/// A refusing port keeps its port taken (nothing else can bind it) and, on Linux, answers a connect with a refusal. Other OS
+/// differ (see the module notes of `net`), so the refusal itself is asserted on Linux only.
+#[test]
+fn a_refusing_port_stays_taken_and_refuses_where_the_os_does() {
+    let held = HeldPort::refusing();
+    assert!(TcpListener::bind(held.addr()).is_err(), "the port is held");
+    #[cfg(target_os = "linux")]
+    {
+        let e = TcpStream::connect_timeout(&held.addr(), Duration::from_secs(5)).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::ConnectionRefused, "{e}");
+    }
+}

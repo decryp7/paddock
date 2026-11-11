@@ -135,9 +135,7 @@ impl ExitNote {
 /// The OS process behind a [`ChildProcess`]: started by the standard library, or (a contained child on Windows) in
 /// an AppContainer by [`crate::contain`].
 enum OsChild {
-    /// The child and, read right after the spawn (while no one could have reaped it), its identity. Only the Unix group kill
-    /// reads the identity; on Windows the job object ends the tree by handle.
-    #[cfg_attr(windows, expect(dead_code, reason = "the job object, not the identity, ends the tree on Windows"))]
+    /// The child and, read right after the spawn (while no one could have reaped it), its identity.
     Std(Child, Option<paddock_proc::ProcessId>),
     #[cfg(windows)]
     Contained(crate::contain::Contained),
@@ -163,15 +161,19 @@ impl OsChild {
     /// Ends the child's whole process group and tree (Unix: every child is the leader of its own group, see
     /// [`ChildProcess::spawn`]), so what it started (a grandchild of the worker) ends with it even when its
     /// own clean-up never runs. It goes by the child's identity ([`paddock_proc::kill_tree`]): a leader that was
-    /// reaped and whose pid was handed on is left alone. Windows children are in a job object that does the same.
-    fn kill_group(&self) {
-        #[cfg(unix)]
-        {
-            // Unix children are all plain ones (`Contained` is Windows only).
-            let OsChild::Std(_, id) = self;
-            if let Some(id) = id {
+    /// reaped and whose pid was handed on is left alone. Without an identity (its start time could not be read) a child
+    /// that is not reaped yet is still ours: its group is ended through its pid (`unreaped`). On Windows the job object
+    /// ends the tree too; the identity is the fallback when Windows gave the child no job.
+    fn kill_group(&self, unreaped: bool) {
+        match self {
+            OsChild::Std(_, Some(id)) => {
                 paddock_proc::kill_tree(*id);
             }
+            OsChild::Std(c, None) if unreaped => paddock_proc::end_unreaped_group(c.id()),
+            OsChild::Std(_, None) => {}
+            // A contained child (Windows only) is in a job object that ends its tree.
+            #[cfg(windows)]
+            OsChild::Contained(_) => {}
         }
     }
 
@@ -586,7 +588,7 @@ impl ChildProcess {
                 std::thread::sleep(Duration::from_millis(5));
             }
             // Whatever it started and left behind ends now too.
-            c.kill_group();
+            c.kill_group(!ended);
             if !ended {
                 let _ = c.kill();
                 let _ = c.wait();
@@ -691,26 +693,16 @@ mod tests {
     /// is not one: a killed child's orphan is never collected in a container whose PID 1 reaps nothing).
     #[cfg(unix)]
     fn running(pid: u32) -> bool {
-        paddock_proc::is_alive(pid)
+        // Unknown (the process table could not be read) counts as running, so a blind probe fails the leak check.
+        paddock_proc::presence(pid) != paddock_proc::Presence::Gone
     }
 
-    /// A child killed after its grace period takes what it started with it (a worker's own child, which on
-    /// macOS has no parent-death signal and whose exit hook never runs under SIGKILL).
+    /// Starts the fake worker `body` (a shell script) and waits for the pid of the grandchild it wrote.
     #[cfg(unix)]
-    #[test]
-    fn a_child_killed_after_its_grace_takes_its_own_children_with_it() {
-        let d = tempfile::tempdir().unwrap();
-        let pid_file = d.path().join("grandchild.pid");
-        let script = d.path().join("worker.sh");
-        // A fake worker: starts a grandchild (the fake grandchild), ignores its lifeline and SIGTERM, and stays.
-        std::fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\ntrap '' TERM\nsleep 60 &\necho $! > '{}'\nwhile :; do sleep 1; done\n",
-                pid_file.display()
-            ),
-        )
-        .unwrap();
+    fn start_fake_worker(d: &std::path::Path, body: &str) -> (super::ChildProcess, u32) {
+        let pid_file = d.join("grandchild.pid");
+        let script = d.join("worker.sh");
+        std::fs::write(&script, body.replace("PIDFILE", &pid_file.display().to_string())).unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let child = super::ChildProcess::spawn(&super::SpawnSpec::new(&script, "fake worker")).unwrap();
         let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -721,7 +713,12 @@ mod tests {
             assert!(std::time::Instant::now() < end, "the fake worker started its child");
             std::thread::yield_now();
         };
-        child.kill();
+        (child, grandchild)
+    }
+
+    /// Fails unless `grandchild` is gone within a few seconds (a blind probe fails too), ending it by identity first.
+    #[cfg(unix)]
+    fn assert_grandchild_ends(grandchild: u32) {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while running(grandchild) {
             if std::time::Instant::now() >= end {
@@ -732,5 +729,44 @@ mod tests {
             }
             std::thread::yield_now();
         }
+    }
+
+    /// A fake worker that starts a grandchild, ignores its lifeline and SIGTERM, and stays.
+    #[cfg(unix)]
+    const STAYING_WORKER: &str = "#!/bin/sh\ntrap '' TERM\nsleep 60 &\necho $! > 'PIDFILE'\nwhile :; do sleep 1; done\n";
+
+    /// A child killed after its grace period takes what it started with it (a worker's own child, which on
+    /// macOS has no parent-death signal and whose exit hook never runs under SIGKILL).
+    #[cfg(unix)]
+    #[test]
+    fn a_child_killed_after_its_grace_takes_its_own_children_with_it() {
+        let d = tempfile::tempdir().unwrap();
+        let (child, grandchild) = start_fake_worker(d.path(), STAYING_WORKER);
+        child.kill();
+        assert_grandchild_ends(grandchild);
+    }
+
+    /// A child whose start time could not be read has no identity, but while it is not reaped it is still ours: its group
+    /// is ended through its pid (the same arm as `paddock_proc::Supervised::kill`).
+    #[cfg(unix)]
+    #[test]
+    fn a_child_without_an_identity_still_has_its_group_ended() {
+        let d = tempfile::tempdir().unwrap();
+        let (child, grandchild) = start_fake_worker(d.path(), STAYING_WORKER);
+        if let Some(super::OsChild::Std(_, id)) = super::lock(&child.child).as_mut() {
+            *id = None;
+        }
+        child.kill();
+        assert_grandchild_ends(grandchild);
+    }
+
+    /// A leader that exits by itself and leaves a grandchild behind: the kill still ends the grandchild.
+    #[cfg(unix)]
+    #[test]
+    fn a_leader_that_exited_by_itself_leaves_no_grandchild_after_the_kill() {
+        let d = tempfile::tempdir().unwrap();
+        let (child, grandchild) = start_fake_worker(d.path(), "#!/bin/sh\nsleep 60 &\necho $! > 'PIDFILE'\nexit 0\n");
+        child.kill();
+        assert_grandchild_ends(grandchild);
     }
 }

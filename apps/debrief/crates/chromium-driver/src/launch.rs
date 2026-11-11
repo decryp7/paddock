@@ -284,7 +284,7 @@ impl Chromium {
         let alive = Arc::new(AtomicBool::new(true));
         let timed_out = Arc::new(AtomicBool::new(false));
         // The browser's identity, taken right after the spawn: the watchdog and the CPU readings go by it (ADR 0033).
-        let id = process.id().and_then(ProcessId::of);
+        let id = process.process();
         watchdog(alive.clone(), timed_out.clone(), id, opts.max_lifetime);
         match connect(&dir, &mut process, id, opts, &timed_out) {
             Ok(conn) => Ok(Chromium {
@@ -901,7 +901,7 @@ mod tests {
 
     #[cfg(unix)]
     fn probe<'a>(dir: &'a Path, process: &'a mut Supervised) -> BrowserProbe<'a> {
-        let id = process.id().and_then(ProcessId::of);
+        let id = process.process();
         BrowserProbe {
             dir,
             process,
@@ -930,7 +930,7 @@ mod tests {
             assert!(p.failed.is_none(), "a refusal is tried again, not a failure");
             assert_eq!(p.refusals, 1);
         }
-        let id = process.id().and_then(ProcessId::of);
+        let id = process.process();
         let opts = LaunchOptions {
             patience: Patience {
                 idle: Duration::from_millis(300),
@@ -1038,7 +1038,10 @@ mod tests {
         // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
         assert!(b.close_gracefully(Duration::from_secs(40)), "it exited by itself");
         assert!(!dir.exists(), "the throwaway profile is gone");
-        assert!(!paddock_proc::is_alive(pid) || !b.is_running());
+        assert!(
+            paddock_proc::presence(pid) == paddock_proc::Presence::Gone,
+            "the browser process ended"
+        );
     }
 
     #[cfg(unix)]

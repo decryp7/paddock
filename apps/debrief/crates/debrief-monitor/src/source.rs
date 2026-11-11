@@ -38,18 +38,20 @@ pub trait ProcessSource {
 /// A process's parent pid and when the process started (seconds since the epoch).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Link {
-    pub parent: u32,
+    /// The parent pid, `None` for a process the OS reports no parent for.
+    pub parent: Option<u32>,
     pub started: u64,
 }
 
-/// Adds descendants of matched processes (`links` maps pid to its parent link) until stable. A pid can be handed on, so a
+/// Adds descendants of matched processes (`links` maps every pid to its link) until stable. A pid can be handed on, so a
 /// process that started before the present holder of its parent pid is not that holder's child and is not followed
-/// (ADR 0033: parent links are read with start times).
+/// (ADR 0033: parent links are read with start times). A parent whose start time is not known is not followed either.
 pub fn expand_children(matched: &mut HashSet<u32>, links: &HashMap<u32, Link>) {
     loop {
         let before = matched.len();
         for (pid, link) in links {
-            if matched.contains(&link.parent) && links.get(&link.parent).is_none_or(|p| link.started >= p.started) {
+            let Some(parent) = link.parent else { continue };
+            if matched.contains(&parent) && links.get(&parent).is_some_and(|p| link.started >= p.started) {
                 matched.insert(*pid);
             }
         }
@@ -113,15 +115,13 @@ impl SysinfoSource {
             if targets.matches(pid.as_u32(), &p.name().to_string_lossy(), exe.as_deref()) {
                 matched.insert(pid.as_u32());
             }
-            if let Some(parent) = p.parent() {
-                links.insert(
-                    pid.as_u32(),
-                    Link {
-                        parent: parent.as_u32(),
-                        started: p.start_time(),
-                    },
-                );
-            }
+            links.insert(
+                pid.as_u32(),
+                Link {
+                    parent: p.parent().map(Pid::as_u32),
+                    started: p.start_time(),
+                },
+            );
         }
         if include_children {
             expand_children(&mut matched, &links);
@@ -199,7 +199,19 @@ mod tests {
     }
 
     fn link(parent: u32, started: u64) -> Link {
-        Link { parent, started }
+        Link {
+            parent: Some(parent),
+            started,
+        }
+    }
+
+    /// A matched pid with no link (its start time is not known) cannot be checked against its children: they are not followed.
+    #[test]
+    fn children_of_a_parent_without_a_link_are_not_followed() {
+        let links = HashMap::from([(2, link(9, 20))]);
+        let mut m = HashSet::from([9]);
+        expand_children(&mut m, &links);
+        assert_eq!(m, HashSet::from([9]));
     }
 
     /// A process that started before the pid it names as parent was handed to its present holder is not that holder's child.

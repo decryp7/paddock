@@ -373,7 +373,8 @@ mod tests {
         fn gone(pid: u32) -> bool {
             (0..40).any(|_| {
                 std::thread::sleep(Duration::from_millis(50));
-                !paddock_proc::is_alive(pid)
+                // A look that could not be made (Unknown) is not "gone": a blind probe must fail the check, not pass it.
+                paddock_proc::presence(pid) == paddock_proc::Presence::Gone
             })
         }
 
@@ -1058,7 +1059,10 @@ mod tests {
         #[cfg(unix)]
         {
             std::thread::sleep(Duration::from_millis(300));
-            assert!(!paddock_proc::is_alive(pid), "browser process leaked");
+            assert!(
+                paddock_proc::presence(pid) == paddock_proc::Presence::Gone,
+                "browser process leaked"
+            );
         }
         let _ = pid;
         assert!(renderers.current("main").is_none());
