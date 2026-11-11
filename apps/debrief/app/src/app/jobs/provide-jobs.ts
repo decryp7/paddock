@@ -1,11 +1,12 @@
 import { effect, EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, provideAppInitializer, signal, untracked } from '@angular/core';
 import { Logger } from '../core/logger';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { JOBS_VIEW } from './job-viewer';
 import { JobsBackend } from './jobs-backend';
 import { JobsStore } from './jobs.store';
 import { JobsRecord } from './jobs.types';
+import { contributeFrom } from '../extensions/contributions';
 
 export function jobsViews(): DebriefView[] {
   return [
@@ -94,8 +95,8 @@ export class JobsPersistence {
 /** One line in `app.config.ts`: the Jobs view (View ▸ Jobs), its commands, saved history; running jobs show in the status bar. */
 export function provideJobs(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: jobsViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => jobsCommands(inject(JobsStore)) },
+    ...contributeFrom('views', jobsViews),
+    ...contributeFrom('commands', () => jobsCommands(inject(JobsStore))),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(JobsPersistence).contribution] },
     provideAppInitializer(() => {
       inject(JobsStore);

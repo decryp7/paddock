@@ -2,7 +2,7 @@ import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MemoryLogger, provideFakeDock, provideTinyBackendBare, FakeDock } from '../../../testing/helpers';
 import { COMMAND_CONTEXT, CommandRegistry } from '../../extensions/command-registry';
-import { CommandContext, DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
+import { CommandContext, DebriefCommand } from '../../extensions/tokens';
 import { PANEL_WINDOWS, PanelWindows } from '../../dock/panel-windows';
 import { Logger, withFailureLogging } from '../logger';
 import { WorkspaceStore } from '../workspace.store';
@@ -13,6 +13,8 @@ import { activity } from './runtime';
 import { EMPTY_QUERY } from '../workspace.store';
 import { RecordView } from '../api.types';
 import { at } from '../../../testing/must';
+import { debriefContributionProviders } from '../../extensions/contributions';
+import { FakeCommandContext } from '../../../testing/contributions';
 
 function entries(): { message: string; props: Record<string, string> }[] {
   return (TestBed.inject(Logger) as MemoryLogger).entries
@@ -20,16 +22,7 @@ function entries(): { message: string; props: Record<string, string> }[] {
     .map((e) => ({ message: e.message, props: e.props as Record<string, string> }));
 }
 
-const ctx: CommandContext = {
-  summary: null,
-  openPaths: async () => undefined,
-  setQuery: () => undefined,
-  addFilter: () => undefined,
-  selectRecord: () => undefined,
-  jumpTo: async () => undefined,
-  showView: () => undefined,
-  notifyError: () => undefined,
-};
+const ctx: CommandContext = new FakeCommandContext();
 
 describe('activity: trigger attribution of command entry paths', () => {
   let ran: string[];
@@ -42,7 +35,7 @@ describe('activity: trigger attribution of command entry paths', () => {
 
   function setup(commands: DebriefCommand[]) {
     TestBed.configureTestingModule({
-      providers: [provideTinyBackendBare(), provideFakeDock(), { provide: COMMAND_CONTEXT, useValue: ctx }, { provide: DEBRIEF_COMMANDS, multi: true, useValue: commands }],
+      providers: [provideTinyBackendBare(), provideFakeDock(), { provide: COMMAND_CONTEXT, useValue: ctx }, ...debriefContributionProviders({ commands: commands })],
     });
     TestBed.inject(ActivityLog);
     const stop = activity.triggers.install(document);

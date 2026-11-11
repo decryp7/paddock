@@ -807,6 +807,38 @@ paint), and the dialog registry (17 kB). Getting a pop-out or the main window mu
 manifest of command and view stubs per feature, the feature's code loaded on first use) and per-view provider sets for
 pop-outs; that is a design change, proposed as an ADR rather than done here.
 
+## 2026-11-12, contributions in the shell's registry (Debrief 1.2 M1, branch feat/debrief-m1-contributions)
+
+M1 moves every Debrief contribution (commands and their keys, views, activity items, inspector sections, field
+formatters) from Debrief's own `DEBRIEF_*` multi-provider tokens into the shell's one registry (`SHELL_CONTRIBUTIONS`
+of `@decryp7/paddock-ui/shell`), and starts lazy registration: a `*.contributions.ts` file lists command stubs and the
+commands' class loads when the window is idle or a command runs (`extensions/lazy-registration.ts`). Converted: the six
+share command classes, search everything, the analysis commands and the Store pane's commands. Measured with
+`npx ng build --stats-json`, then `node scripts/window-weight.mjs <window>` (production build, Mac mini, same tree before
+and after; base 38f735ce3).
+
+| Window (static closure before first paint) | Before | After | Budget |
+|---|---|---|---|
+| Main | 1235.2 kB, 146 chunks | 1242.5 kB, 136 chunks | 1355 kB (unchanged) |
+| Pop-out | 1173.5 kB, 147 chunks | 1154.4 kB, 128 chunks | reported |
+| About dialog | 442.8 kB, 31 chunks | 442.8 kB, 31 chunks | 480 kB |
+
+Where the main window's change comes from (bytes in output by package, after minus before): `@decryp7/paddock-ui`
++19.8 kB (the shell's module 18.8) and Angular Material +41.9 kB (its menu and ripple code: the shell's module imports
+`@decryp7/paddock-ui`'s root, which imports `@angular/material/menu`, and esbuild now puts that module, already used by
+lazy views, in a chunk the first paint loads); Debrief's own `extensions` +5.2 kB. Against that, the lazy registrations:
+share −24.3 kB, analysis −11.8 kB, timeline −7.4 kB, Store pane −3.6 kB, search everything −1.1 kB, and the CDK −7.2 kB
+(`@angular/cdk/dialog` is no longer reachable from the first paint: only the search everything launcher imported it).
+Net +7.3 kB on the main window, −19.1 kB on a pop-out.
+
+What M1's target needs that this branch does not do: the target in debrief-1-2-api.md §14.3 is at most 500 kB. With every
+`provide*()` of `app.config.ts` lazy, the closure would lose about 376 kB of input bytes (measured on this build by
+dropping each import of `app.config.ts` from the static graph); the rest is the window's own chrome in `app.ts` (dock
+130 kB, title bar and menus, status bar, theme packs 27 kB, Angular core 222 kB). So 500 kB needs the dock and chrome
+to load after the first paint as well (M3), and the shell's registry in a module that does not import
+`@decryp7/paddock-ui`'s root (a shared change, about +60 kB today for every app that registers contributions without the
+shell's frame).
+
 ## 2026-10-24, start-up timings (branch perf/startup)
 
 Every start logs one structured `Startup timings` line (`app/src-tauri/src/startup_timings.rs`): milliseconds since

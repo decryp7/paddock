@@ -3,8 +3,9 @@ import { AiLauncher } from '../ai/ai-launcher';
 import { DEBRIEF_RECORD_MENU_ITEMS, RecordMenuContribution } from '../context/record-actions';
 import { RecordView } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
-import { DEBRIEF_COMMANDS, DEBRIEF_INSPECTOR_SECTIONS, DebriefCommand, DebriefInspectorSection } from '../extensions/tokens';
+import { DebriefCommand, DebriefInspectorSection } from '../extensions/tokens';
 import { DialogService } from '../ui/dialog.service';
+import { contributeFrom, debriefContributionProviders } from '../extensions/contributions';
 
 /** "Search the web for this error" from anywhere (menus, inspector, chat, palette). */
 @Injectable({ providedIn: 'root' })
@@ -104,8 +105,8 @@ export function browserRecordMenu(launcher: BrowserLauncher, ai?: AiLauncher): R
 /** One line in `app.config.ts`: the browser's commands, menu entries and inspector section. */
 export function provideBrowser(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => browserCommands(inject(BrowserLauncher), inject(WorkspaceStore)) },
+    ...contributeFrom('commands', () => browserCommands(inject(BrowserLauncher), inject(WorkspaceStore))),
     { provide: DEBRIEF_RECORD_MENU_ITEMS, multi: true, useFactory: () => browserRecordMenu(inject(BrowserLauncher), inject(AiLauncher)) },
-    { provide: DEBRIEF_INSPECTOR_SECTIONS, multi: true, useValue: [WEB_INSPECTOR_SECTION] },
+    ...debriefContributionProviders({ inspectorSections: [WEB_INSPECTOR_SECTION] }),
   ]);
 }

@@ -3,7 +3,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { settle } from '../../testing/helpers';
 import { DumpDocSummary } from '../core/api.types';
 import { DROPPED_FILES_HANDLERS } from '../core/dropped-files';
-import { flattenContributions, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { DumpsExplainer, formatBytes, formatDelta } from './dumps-shared';
 import { DumpsBackend } from './dumps-backend';
@@ -13,6 +12,8 @@ import { DUMPS_STATE_KEY } from './dumps-persistence';
 import { DumpsCommands, dumpsViews, provideDumps, showOpened } from './provide-dumps';
 import { setupDumps } from './testing/dumps-test-support';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
+import { contributed } from '../../testing/contributions';
+import { flattenContributions } from '../extensions/tokens';
 
 const shown = (ctx: { calls: { fn: string; args: unknown[] }[] }) => ctx.calls.filter((c) => c.fn === 'showView').map((c) => c.args[0]);
 
@@ -54,9 +55,9 @@ describe('dumps views and commands', () => {
   it('provides the backend, views, commands, drop handler, persistence and the start-up refresh', async () => {
     const t = setupDumps();
     TestBed.configureTestingModule({ providers: [provideDumps(), { provide: DumpsBackend, useValue: t.backend }, { provide: COMMAND_CONTEXT, useValue: t.context }] });
-    const views = flattenContributions<DebriefView>(TestBed.inject(DEBRIEF_VIEWS));
+    const views = contributed('views');
     expect(views.map((v) => v.id)).toContain('umdh');
-    const commands = flattenContributions<DebriefCommand>(TestBed.inject(DEBRIEF_COMMANDS));
+    const commands = contributed('commands');
     expect(commands.map((c) => c.id)).toContain('dumps.open');
     const contributions = flattenContributions<UiStateContribution>(TestBed.inject(UI_STATE_CONTRIBUTIONS));
     expect(contributions.map((c) => c.key)).toContain(DUMPS_STATE_KEY);

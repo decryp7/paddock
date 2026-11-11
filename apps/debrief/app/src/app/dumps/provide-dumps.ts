@@ -3,12 +3,13 @@ import { DumpDocSummary } from '../core/api.types';
 import { DROPPED_FILES_HANDLERS, DroppedFilesHandler } from '../core/dropped-files';
 import { TOOL_IDS } from '../core/tools.types';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { CommandContext, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { CommandContext, DebriefCommand, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { ToolCatalog } from '../tools/tool-catalog.store';
 import { provideDumpsBackend } from './dumps-backend';
 import { DumpsPersistence } from './dumps-persistence';
 import { DumpFileKind, DumpsStore } from './dumps.store';
+import { contributeFrom } from '../extensions/contributions';
 
 /** The views' ids. */
 export const DUMP_VIEW_IDS = { dump: 'dump', umdh: 'umdh', capture: 'dump-capture' } as const;
@@ -72,8 +73,8 @@ export function dumpsDropHandler(): DroppedFilesHandler {
 export function provideDumps(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...provideDumpsBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: () => dumpsViews(inject(ToolCatalog)) },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(DumpsCommands).commands },
+    ...contributeFrom('views', () => dumpsViews(inject(ToolCatalog))),
+    ...contributeFrom('commands', () => inject(DumpsCommands).commands),
     { provide: DROPPED_FILES_HANDLERS, multi: true, useFactory: dumpsDropHandler },
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(DumpsPersistence).contribution] },
     provideAppInitializer(() => startDumps()),

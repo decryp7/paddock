@@ -1,6 +1,6 @@
 import { effect, EnvironmentInjector, EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, provideAppInitializer, untracked } from '@angular/core';
 import { DockService } from '../dock/dock.service';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { DialogService } from '../ui/dialog.service';
 import { LiveTail } from '../workspace/live-tail';
@@ -13,6 +13,7 @@ import { liveActivityItems } from './live-activity';
 import { LiveFeed } from './live-feed';
 import { LiveFollow } from './live-follow.store';
 import { LiveUiState } from './live-ui-state';
+import { contributeFrom, debriefContributionProviders } from '../extensions/contributions';
 
 export const ALERTS_VIEW = 'live-alerts';
 export const TAIL_STATUS_VIEW = 'tail-status';
@@ -99,9 +100,9 @@ export function startLive(): void {
  */
 export function provideLive(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useValue: LIVE_VIEWS },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(LiveCommands).commands },
-    { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: () => liveActivityItems(inject(LiveTail), inject(LiveFollow)) },
+    ...debriefContributionProviders({ views: LIVE_VIEWS }),
+    ...contributeFrom('commands', () => inject(LiveCommands).commands),
+    ...contributeFrom('activityItems', () => liveActivityItems(inject(LiveTail), inject(LiveFollow))),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => inject(LiveUiState).contributions },
     provideNotificationSource(AlertsSource),
     provideAppInitializer(() => startLive()),

@@ -9,7 +9,7 @@ import { MockAiBackend, MockAiOptions } from '../core/mock/mock-ai-backend';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DEBRIEF_RECORD_MENU_ITEMS, RecordMenuContribution } from '../context/record-actions';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { CommandContext, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { CommandContext } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { DialogService } from '../ui/dialog.service';
 import { MemoryLogger, settle, tinyBackend } from '../../testing/helpers';
@@ -24,6 +24,7 @@ import { SettingsDialogService } from '../settings/settings-dialog';
 import { NotificationsStore } from '../notifications/notifications.store';
 import { aiCommands, aiRecordMenu, aiViews, provideAi, rangeToSummarize } from './provide-ai';
 import { at } from '../../testing/must';
+import { contributed } from '../../testing/contributions';
 
 function setup(options: MockAiOptions = {}, extra: unknown[] = []) {
   const backend = new MockAiBackend({ stepMs: 0, ...options });
@@ -265,11 +266,11 @@ describe('provide-ai', () => {
     TestBed.configureTestingModule({
       providers: [provideAi(), { provide: Logger, useClass: MemoryLogger }, { provide: DebriefBackend, useValue: tinyBackend() }],
     });
-    const views = (TestBed.inject(DEBRIEF_VIEWS) as unknown as DebriefView[][]).flat();
+    const views = contributed('views');
     const chat = views.find((v) => v.id === 'ai-chat')!;
     expect(chat.defaultPosition).toBe('right');
     expect((await chat.component()).name).toContain('AiChatPanel');
-    const cmds = (TestBed.inject(DEBRIEF_COMMANDS) as unknown as DebriefCommand[][]).flat();
+    const cmds = contributed('commands');
     expect(cmds.some((c) => c.id === 'ai.setup')).toBe(true);
     const menus = TestBed.inject(DEBRIEF_RECORD_MENU_ITEMS) as readonly RecordMenuContribution[];
     expect(menus.length).toBeGreaterThan(0);

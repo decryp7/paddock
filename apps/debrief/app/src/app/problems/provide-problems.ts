@@ -1,8 +1,9 @@
 import { effect, EnvironmentInjector, EnvironmentProviders, inject, makeEnvironmentProviders, provideAppInitializer, untracked } from '@angular/core';
 import { DockService } from '../dock/dock.service';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
 import { PROBLEMS_VIEW, problemsTitle } from './problems-model';
 import { ProblemsStore } from './problems.store';
+import { contributeFrom } from '../extensions/contributions';
 
 export function problemsViews(): DebriefView[] {
   return [
@@ -47,8 +48,8 @@ export function startProblemsTitle(): void {
  */
 export function provideProblems(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: problemsViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => problemsCommands(inject(ProblemsStore)) },
+    ...contributeFrom('views', problemsViews),
+    ...contributeFrom('commands', () => problemsCommands(inject(ProblemsStore))),
     provideAppInitializer(() => startProblemsTitle()),
   ]);
 }

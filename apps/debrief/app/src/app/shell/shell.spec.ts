@@ -12,7 +12,6 @@ import { LiveTail } from '../workspace/live-tail';
 import { Sidebar } from './sidebar';
 import { StatusBar } from './status-bar';
 import { openedFolderName, TitleBar } from './title-bar';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { memoryHost, MockWindowingBackend } from '../windowing/mock-windowing-backend';
 import { WindowCommands } from '../windowing/window-commands';
 import { WindowingBackend } from '../windowing/windowing-backend';
@@ -21,6 +20,7 @@ import { MENU_MODE } from './menu/app-menu.service';
 import { NATIVE_MENU_GATE, NATIVE_MENU_PORT, NATIVE_MENU_TIMING, NativeMenuPort } from './menu/native-menu';
 import { NativeMenuModel } from './menu/native-menu.types';
 import { at } from '../../testing/must';
+import { contributeFrom } from '../extensions/contributions';
 
 const DROP_DEBUG_PROFILE = `name = "p"\n[[pipeline]]\nstep = "drop"\nwhen = [{ field = "@level", op = "eq", value = "Debug" }]\n`;
 
@@ -140,7 +140,7 @@ describe('TitleBar', () => {
   it('has a Window menu with one checkable item per window; New and Close window are in File', async () => {
     const windowing = new MockWindowingBackend(memoryHost());
     TestBed.configureTestingModule({
-      providers: [{ provide: WindowingBackend, useValue: windowing }, { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => TestBed.inject(WindowCommands).commands }],
+      providers: [{ provide: WindowingBackend, useValue: windowing }, ...contributeFrom('commands', () => TestBed.inject(WindowCommands).commands)],
     });
     const { fixture } = setup(TitleBar);
     await TestBed.inject(WindowingService).init();

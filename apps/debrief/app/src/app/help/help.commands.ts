@@ -1,5 +1,6 @@
 import { EnvironmentProviders, inject, Injectable, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
+import { contributeFrom } from '../extensions/contributions';
 import { SettingsDialogService } from '../settings/settings-dialog';
 import { MANAGE_PARSERS_COMMAND } from '../settings/parsers/parsers.types';
 import { EDIT_SHORTCUTS_COMMAND, KEYBOARD_ID } from '../settings/keyboard/keyboard.types';
@@ -45,5 +46,5 @@ export class HelpCommands {
 
 /** One line in `app.config.ts`. */
 export function provideHelp(): EnvironmentProviders {
-  return makeEnvironmentProviders([{ provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(HelpCommands).commands }]);
+  return makeEnvironmentProviders(contributeFrom('commands', () => inject(HelpCommands).commands));
 }

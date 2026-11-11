@@ -1,8 +1,9 @@
 import { EnvironmentProviders, inject, Injectable, makeEnvironmentProviders } from '@angular/core';
 import { RecordActions } from '../context/record-actions';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
 import { provideDebriefPlugin } from '../extensions/provide';
 import { WorkspaceStore } from '../core/workspace.store';
+import { contributeFrom } from '../extensions/contributions';
 
 /** Palette commands of the markers feature. */
 @Injectable({ providedIn: 'root' })
@@ -40,6 +41,6 @@ export function provideMarkers(): EnvironmentProviders {
     provideDebriefPlugin({
       views: [{ id: 'markers', category: 'Analysis', title: $localize`:View title|@@markers.view.title:Markers`, icon: 'alert', defaultPosition: 'center', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./markers-manager').then((m) => m.MarkersManager) }],
     }),
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(MarkersCommands).commands },
+    ...contributeFrom('commands', () => inject(MarkersCommands).commands),
   ]);
 }

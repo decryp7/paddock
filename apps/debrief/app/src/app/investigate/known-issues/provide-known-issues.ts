@@ -1,5 +1,6 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
+import { DebriefCommand } from '../../extensions/tokens';
+import { contributeFrom } from '../../extensions/contributions';
 import { PROBLEMS_VIEW } from '../../problems/problems-model';
 import { KnownIssuesStore } from './known-issues.store';
 
@@ -21,5 +22,5 @@ export function knownIssuesCommands(store: InstanceType<typeof KnownIssuesStore>
 
 /** One line in `app.config.ts`: the known-issues feature (ADR 0039): its palette command. The section lives in the Problems pane. */
 export function provideKnownIssues(): EnvironmentProviders {
-  return makeEnvironmentProviders([{ provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => knownIssuesCommands(inject(KnownIssuesStore)) }]);
+  return makeEnvironmentProviders(contributeFrom('commands', () => knownIssuesCommands(inject(KnownIssuesStore))));
 }

@@ -3,7 +3,7 @@ import { TimeCursor } from '../analysis/time-cursor';
 import { RecordView } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DEBRIEF_RECORD_MENU_ITEMS, RecordMenuContribution } from '../context/record-actions';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { aiActivityItems } from './ai-activity';
 import { AiBackend, provideAiBackend } from './ai-backend';
@@ -11,6 +11,7 @@ import { AiChatPersistence } from './ai-chat-persistence';
 import { KnowledgePersistence } from './knowledge/knowledge-persistence';
 import { AI_IMAGE_VIEW, AiLauncher } from './ai-launcher';
 import { AiStatusStore } from './ai-status.store';
+import { contributeFrom } from '../extensions/contributions';
 
 export const AI_CHAT_VIEW = 'ai-chat';
 
@@ -133,9 +134,9 @@ export function aiRecordMenu(launcher: AiLauncher, status: InstanceType<typeof A
 export function provideAi(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...provideAiBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: () => aiViews(inject(AiStatusStore)) },
-    { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: () => aiActivityItems(inject(AiStatusStore), AI_CHAT_VIEW) },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => aiCommands(inject(AiLauncher), inject(AiStatusStore), inject(WorkspaceStore), inject(TimeCursor)) },
+    ...contributeFrom('views', () => aiViews(inject(AiStatusStore))),
+    ...contributeFrom('activityItems', () => aiActivityItems(inject(AiStatusStore), AI_CHAT_VIEW)),
+    ...contributeFrom('commands', () => aiCommands(inject(AiLauncher), inject(AiStatusStore), inject(WorkspaceStore), inject(TimeCursor))),
     { provide: DEBRIEF_RECORD_MENU_ITEMS, multi: true, useFactory: () => aiRecordMenu(inject(AiLauncher), inject(AiStatusStore)) },
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(AiChatPersistence).contribution, inject(KnowledgePersistence).contribution] },
   ]);

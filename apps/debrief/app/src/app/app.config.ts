@@ -2,7 +2,7 @@ import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/
 import { provideDebriefBuiltins } from './builtin/provide-builtins';
 import { provideBackend } from './core/backend';
 import { provideErrorLogging, provideLogger } from './core/logger';
-import { provideDebriefPlugin } from './extensions';
+import { provideDebriefPlugin, provideDebriefShellCore } from './extensions';
 import { provideDiagnostics } from './diagnostics/provide-diagnostics';
 import { provideAnalysis } from './analysis/analysis.plugin';
 import { provideLive } from './live/provide-live';
@@ -109,5 +109,7 @@ export const appConfig: ApplicationConfig = {
     // The main window's start-up marks for Rust's "Startup timings" line (rule 16).
     provideStartupTimings(),
     provideRecovery(),
+    // The shell's command runner and ports are Debrief's own until M2 and M3 move them (workbench.md §4.3).
+    provideDebriefShellCore(),
   ],
 };

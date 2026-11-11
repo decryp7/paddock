@@ -1,5 +1,6 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
-import { DebriefCommand, DEBRIEF_COMMANDS } from '../../extensions/tokens';
+import { DebriefCommand } from '../../extensions/tokens';
+import { contributeFrom } from '../../extensions/contributions';
 import { DialogService } from '../../ui/dialog.service';
 
 /** The incident summary command: opens the dialog; the report view is shown once a report was built. */
@@ -19,5 +20,5 @@ export function incidentCommands(dialogs: DialogService): DebriefCommand[] {
 
 /** One line in `app.config.ts`: the incident summary report (ADR 0039). */
 export function provideIncident(): EnvironmentProviders {
-  return makeEnvironmentProviders([{ provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => incidentCommands(inject(DialogService)) }]);
+  return makeEnvironmentProviders(contributeFrom('commands', () => incidentCommands(inject(DialogService))));
 }

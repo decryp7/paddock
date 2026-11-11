@@ -16,7 +16,7 @@ export const FLYOUT_POSITIONS: ConnectedPosition[] = [
 
 /**
  * The left activity bar: one button per `DebriefActivityItem` (built-in features and plugins contribute them through
- * `DEBRIEF_ACTIVITY_ITEMS`), in order, with Settings and other bottom items pinned below. Items with a menu open a CDK
+ * the shell registry's Debrief activity items), in order, with Settings and other bottom items pinned below. Items with a menu open a CDK
  * fly-out to the right. When the window is too short, the last top items collapse into a More fly-out.
  */
 @Component({

@@ -1,9 +1,10 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../../lifecycle/ui-state';
 import { PLAYBOOKS_VIEW } from './playbook-model';
 import { PlaybookPersistence } from './playbook-persistence';
 import { PlaybookStore } from './playbook.store';
+import { contributeFrom } from '../../extensions/contributions';
 
 export function playbooksViews(): DebriefView[] {
   return [
@@ -37,8 +38,8 @@ export function playbooksCommands(store: InstanceType<typeof PlaybookStore>): De
 /** One line in `app.config.ts`: the Playbooks pane, its commands and the runs saved in the project (ADR 0039). */
 export function providePlaybooks(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: playbooksViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => playbooksCommands(inject(PlaybookStore)) },
+    ...contributeFrom('views', playbooksViews),
+    ...contributeFrom('commands', () => playbooksCommands(inject(PlaybookStore))),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(PlaybookPersistence).contribution] },
   ]);
 }

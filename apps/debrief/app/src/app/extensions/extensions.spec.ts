@@ -7,19 +7,13 @@ import { RecordView } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
 import {
   COMMAND_CONTEXT,
-  CommandContext,
   CommandRegistry,
   EVENT_ID_FORMATTER,
   FieldFormatters,
   findFormatter,
-  flattenContributions,
   formatKeybinding,
   fuzzyFilter,
   fuzzyScore,
-  DEBRIEF_COMMANDS,
-  DEBRIEF_FIELD_FORMATTERS,
-  DEBRIEF_INSPECTOR_SECTIONS,
-  DEBRIEF_VIEWS,
   DebriefCommand,
   DebriefEvents,
   DebriefView,
@@ -31,7 +25,10 @@ import {
   UI_PLUGIN_API_VERSION,
   ViewRegistry,
   WorkspaceCommandContext,
+  flattenContributions,
 } from './index';
+import { debriefContributionProviders } from './contributions';
+import { contributed, FakeCommandContext } from '../../testing/contributions';
 
 const key = (init: KeyboardEventInit & { key: string }) => new KeyboardEvent('keydown', { cancelable: true, ...init });
 
@@ -101,11 +98,10 @@ describe('contributions', () => {
         provideDebriefPlugin({}),
       ],
     });
-    expect(flattenContributions(TestBed.inject(DEBRIEF_VIEWS))).toEqual([view]);
-    expect(flattenContributions(TestBed.inject(DEBRIEF_COMMANDS))).toEqual([command]);
-    expect(flattenContributions(TestBed.inject(DEBRIEF_FIELD_FORMATTERS))).toEqual([formatter]);
-    expect(flattenContributions(TestBed.inject(DEBRIEF_INSPECTOR_SECTIONS))).toHaveLength(1);
-    expect(TestBed.inject(DEBRIEF_VIEWS, null)).toBeTruthy();
+    expect(contributed('views')).toEqual([view]);
+    expect(contributed('commands').map((c) => [c.id, c.title, c.keybinding])).toEqual([[command.id, command.title, command.keybinding]]);
+    expect(contributed('fieldFormatters')).toEqual([formatter]);
+    expect(contributed('inspectorSections')).toHaveLength(1);
   });
 });
 
@@ -125,7 +121,7 @@ describe('UI plugin API version and view layout (ADR 0056)', () => {
         }),
       ],
     });
-    const [good, bad, none] = flattenContributions<DebriefView>(TestBed.inject(DEBRIEF_VIEWS));
+    const [good, bad, none] = contributed('views');
     expect(good?.layout).toMatchObject({ area: 'side', priority: 100, pref: { width: 400 } });
     expect(bad?.layout).toBeUndefined();
     expect(none?.layout).toBeUndefined();
@@ -142,7 +138,7 @@ describe('ViewRegistry', () => {
 
   function registry(views: DebriefView[]) {
     TestBed.configureTestingModule({
-      providers: [provideTinyBackendBare(), provideFakeDock(), { provide: DEBRIEF_VIEWS, multi: true, useValue: views }, { provide: DEBRIEF_VIEWS, multi: true, useValue: [mk('dup')] }],
+      providers: [provideTinyBackendBare(), provideFakeDock(), ...debriefContributionProviders({ views: views }), ...debriefContributionProviders({ views: [mk('dup')] })],
     });
     return TestBed.inject(ViewRegistry);
   }
@@ -186,13 +182,13 @@ describe('ViewRegistry', () => {
 
 describe('CommandRegistry', () => {
   let ran: string[];
-  let ctx: CommandContext & { summary: unknown };
+  let ctx: FakeCommandContext;
 
   function setup(commands: DebriefCommand[]) {
     ran = [];
-    ctx = { summary: null, openPaths: async () => undefined, setQuery: () => undefined, addFilter: () => undefined, selectRecord: () => undefined, jumpTo: async () => undefined, showView: () => undefined, notifyError: () => undefined };
+    ctx = new FakeCommandContext();
     TestBed.configureTestingModule({
-      providers: [provideTinyBackendBare(), provideFakeDock(), { provide: COMMAND_CONTEXT, useValue: ctx }, { provide: DEBRIEF_COMMANDS, multi: true, useValue: commands }],
+      providers: [provideTinyBackendBare(), provideFakeDock(), { provide: COMMAND_CONTEXT, useValue: ctx }, ...debriefContributionProviders({ commands: commands })],
     });
     return { registry: TestBed.inject(CommandRegistry), store: TestBed.inject(WorkspaceStore) };
   }
@@ -244,8 +240,8 @@ describe('FieldFormatters', () => {
   it('formats EventId objects and falls back to plain strings', () => {
     TestBed.configureTestingModule({
       providers: [
-        { provide: DEBRIEF_FIELD_FORMATTERS, multi: true, useValue: [EVENT_ID_FORMATTER] },
-        { provide: DEBRIEF_FIELD_FORMATTERS, multi: true, useValue: [{ field: 'Bad', format: () => { throw new Error('x'); } }, { field: 'Upper', format: (v: unknown) => String(v).toUpperCase() }] },
+        ...debriefContributionProviders({ fieldFormatters: [EVENT_ID_FORMATTER] }),
+        ...debriefContributionProviders({ fieldFormatters: [{ field: 'Bad', format: () => { throw new Error('x'); } }, { field: 'Upper', format: (v: unknown) => String(v).toUpperCase() }] }),
       ],
     });
     const f = TestBed.inject(FieldFormatters);
@@ -272,16 +268,12 @@ describe('InspectorSections', () => {
   it('orders sections and filters them per record', () => {
     TestBed.configureTestingModule({
       providers: [
-        {
-          provide: DEBRIEF_INSPECTOR_SECTIONS,
-          multi: true,
-          useValue: [
+        ...debriefContributionProviders({ inspectorSections: [
             { id: 'late', title: 'Late', order: 200, component: A },
             { id: 'early', title: 'Early', order: 100, component: A },
             { id: 'warn', title: 'Warn only', order: 150, component: A, when: (r: RecordView) => r.level === 'Warning' },
             { id: 'boom', title: 'Boom', order: 160, component: A, when: () => { throw new Error('x'); } },
-          ],
-        },
+          ] }),
       ],
     });
     const s = TestBed.inject(InspectorSections);

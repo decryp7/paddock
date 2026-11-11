@@ -7,7 +7,7 @@ import { ANALYSIS_MENU_ORDER } from '../analysis/analysis-menu-order';
 import { ANALYSIS_VIEWS } from '../analysis/analysis.plugin';
 import { TOOL_IDS } from '../core/tools.types';
 import { WorkspaceStore } from '../core/workspace.store';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefActivityItem } from '../extensions/tokens';
+import { DebriefActivityItem } from '../extensions/tokens';
 import { liveActivityItems } from '../live/live-activity';
 import { SCHEDULES_VIEWS } from '../schedules/provide-schedules';
 import { toolsActivityItems } from '../tools/tools-activity';
@@ -16,6 +16,7 @@ import { DialogService } from '../ui/dialog.service';
 import { LiveTail } from '../workspace/live-tail';
 import { ActivityBar } from './activity-bar';
 import { fittingTopItems } from './activity-overflow';
+import { contributeFrom, debriefContributionProviders } from '../extensions/contributions';
 
 const KEY_CODES: Record<string, number> = { ArrowDown: 40, ArrowUp: 38, ArrowRight: 39, Escape: 27, Enter: 13 };
 
@@ -37,23 +38,19 @@ function setup(options: Setup = {}) {
     providers: [
       provideTinyBackend(),
       provideFakeDock(dock),
-      { provide: DEBRIEF_VIEWS, multi: true, useValue: ANALYSIS_VIEWS },
-      { provide: DEBRIEF_VIEWS, multi: true, useValue: toolsViews({ listed: (id) => id !== TOOL_IDS.eventLog }) },
-      { provide: DEBRIEF_VIEWS, multi: true, useValue: SCHEDULES_VIEWS },
-      { provide: DEBRIEF_VIEWS, multi: true, useValue: [{ id: 'ai-chat', category: 'AI', title: 'AI assistant', icon: 'ai', component: async () => ActivityBar }] },
-      {
-        provide: DEBRIEF_COMMANDS,
-        multi: true,
-        useValue: [
+      ...debriefContributionProviders({ views: ANALYSIS_VIEWS }),
+      ...debriefContributionProviders({ views: toolsViews({ listed: (id) => id !== TOOL_IDS.eventLog }) }),
+      ...debriefContributionProviders({ views: SCHEDULES_VIEWS }),
+      ...debriefContributionProviders({ views: [{ id: 'ai-chat', category: 'AI', title: 'AI assistant', icon: 'ai', component: async () => ActivityBar }] }),
+      ...debriefContributionProviders({ commands: [
           { id: 'live.toggle', title: 'Toggle live tail', when: () => live.available(), run: () => live.enabled.set(!live.enabled()) },
           { id: 'tools.collect', title: 'Collect diagnostics bundle…', run: () => void ran.push('tools.collect') },
-        ],
-      },
-      { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: analysisActivityItems },
-      { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: toolsActivityItems },
-      { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: () => liveActivityItems(live as unknown as LiveTail, follow as never) },
-      { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: () => aiActivityItems(ai as never, 'ai-chat') },
-      { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useValue: options.plugin ?? [] },
+        ] }),
+      ...contributeFrom('activityItems', analysisActivityItems),
+      ...contributeFrom('activityItems', toolsActivityItems),
+      ...contributeFrom('activityItems', () => liveActivityItems(live as unknown as LiveTail, follow as never)),
+      ...contributeFrom('activityItems', () => aiActivityItems(ai as never, 'ai-chat')),
+      ...debriefContributionProviders({ activityItems: options.plugin ?? [] }),
     ],
   });
   const fixture = TestBed.createComponent(ActivityBar);

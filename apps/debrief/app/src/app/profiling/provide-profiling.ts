@@ -2,7 +2,7 @@ import { EnvironmentProviders, inject, Injectable, Injector, makeEnvironmentProv
 import { CaptureSummary } from '../core/api.types';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
 import { DROPPED_FILES_HANDLERS, DroppedFilesHandler } from '../core/dropped-files';
-import { CommandContext, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { CommandContext, DebriefCommand, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { CapturesStore } from './captures.store';
 import { ProfilingPersistence } from './profiling-persistence';
@@ -13,6 +13,7 @@ import { provideDotnetBackend } from './dotnet/dotnet-backend';
 import { DotnetCommands } from './dotnet/dotnet-commands';
 import { provideNativeBackend } from './native/native-backend';
 import { NativeCommands } from './native/native-commands';
+import { contributeFrom, debriefContributionProviders } from '../extensions/contributions';
 
 const CATEGORY = $localize`:@@profiling.category:Profiling`;
 
@@ -96,10 +97,10 @@ export function provideProfiling(): EnvironmentProviders {
     ...provideProfilingBackend(),
     ...provideDotnetBackend(),
     ...provideNativeBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useValue: PROFILING_VIEWS },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(ProfilingCommands).commands },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(DotnetCommands).commands },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(NativeCommands).commands },
+    ...debriefContributionProviders({ views: PROFILING_VIEWS }),
+    ...contributeFrom('commands', () => inject(ProfilingCommands).commands),
+    ...contributeFrom('commands', () => inject(DotnetCommands).commands),
+    ...contributeFrom('commands', () => inject(NativeCommands).commands),
     { provide: DROPPED_FILES_HANDLERS, multi: true, useFactory: profilingDropHandler },
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(ProfilingPersistence).contribution] },
     provideAppInitializer(() => startProfiling()),

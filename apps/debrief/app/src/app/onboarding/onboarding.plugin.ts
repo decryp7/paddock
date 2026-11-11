@@ -1,5 +1,6 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
+import { contributeFrom } from '../extensions/contributions';
 import { DemoService } from './demo.service';
 import { TourService } from './tour.service';
 
@@ -15,5 +16,5 @@ export function onboardingCommands(): DebriefCommand[] {
 
 /** One line in `app.config.ts`: the demo and the guided tour. */
 export function provideOnboarding(): EnvironmentProviders {
-  return makeEnvironmentProviders([{ provide: DEBRIEF_COMMANDS, multi: true, useFactory: onboardingCommands }]);
+  return makeEnvironmentProviders(contributeFrom('commands', onboardingCommands));
 }

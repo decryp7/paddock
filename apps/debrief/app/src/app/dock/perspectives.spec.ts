@@ -3,7 +3,7 @@ import { at, must } from '../../testing/must';
 import { FakeDock, provideTinyBackendBare } from '../../testing/helpers';
 import { provideWorkspace } from '../core/workspace/provide-workspace';
 import { WorkspaceStore } from '../core/workspace.store';
-import { DEBRIEF_VIEWS, DebriefView } from '../extensions/tokens';
+import { DebriefView } from '../extensions/tokens';
 import { DockService } from './dock.service';
 import { EMPTY_EXTRAS, SavedLayout, toEnvelope } from './layout-store';
 import { NAMED_LAYOUT_STORE, NamedLayout, NamedLayoutStore } from './named-layouts';
@@ -19,6 +19,7 @@ import {
   PERSPECTIVES_KEY,
   serializePerspectiveState,
 } from './perspectives';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 const grid = (id: string) => ({ grid: { root: { type: 'leaf', data: { views: [], id } }, height: 1, width: 1, orientation: 'HORIZONTAL' }, panels: {} }) as never;
 const layout = (id: string): SavedLayout => ({ layout: grid(id), extras: { ...EMPTY_EXTRAS } });
@@ -59,7 +60,7 @@ function setup(opts: { views?: string[]; state?: PerspectiveState; named?: Named
       provideWorkspace(),
       ...provideTinyBackendBare(),
       { provide: DockService, useValue: dock },
-      { provide: DEBRIEF_VIEWS, multi: true, useValue: ids.map(view) },
+      ...debriefContributionProviders({ views: ids.map(view) }),
       { provide: PERSPECTIVE_STORE, useValue: store },
       { provide: NAMED_LAYOUT_STORE, useValue: new MemoryNamed(opts.named) },
     ],

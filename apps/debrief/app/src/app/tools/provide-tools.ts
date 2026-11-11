@@ -2,7 +2,6 @@ import { WhatsNewService } from '../whats-new/whats-new.service';
 import { EnvironmentProviders, inject, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
 import { DROPPED_FILES_HANDLERS } from '../core/dropped-files';
 import { provideToolsBackend } from '../core/tools-backend';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DEBRIEF_VIEWS } from '../extensions/tokens';
 import { CoreUiState } from '../lifecycle/core-ui-state';
 import { LifecycleCommands } from '../lifecycle/lifecycle-commands';
 import { LifecycleService } from '../lifecycle/lifecycle.service';
@@ -16,6 +15,7 @@ import { pluginPackageDropHandler } from '../plugins-panel/package-drop';
 import { ToolCatalog } from './tool-catalog.store';
 import { toolsActivityItems } from './tools-activity';
 import { ToolsCommands, toolsViews } from './tools-commands';
+import { contributeFrom } from '../extensions/contributions';
 
 /**
  * Registers the tools (Performance Monitor, process monitor, diagnostics collector, plugin
@@ -25,12 +25,12 @@ import { ToolsCommands, toolsViews } from './tools-commands';
 export function provideTools(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...provideToolsBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: () => toolsViews(inject(ToolCatalog)) },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(ToolsCommands).commands },
-    { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: toolsActivityItems },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(LifecycleCommands).commands },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(ProjectCommands).commands },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(SavedQueryCommands).commands },
+    ...contributeFrom('views', () => toolsViews(inject(ToolCatalog))),
+    ...contributeFrom('commands', () => inject(ToolsCommands).commands),
+    ...contributeFrom('activityItems', toolsActivityItems),
+    ...contributeFrom('commands', () => inject(LifecycleCommands).commands),
+    ...contributeFrom('commands', () => inject(ProjectCommands).commands),
+    ...contributeFrom('commands', () => inject(SavedQueryCommands).commands),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => inject(CoreUiState).contributions },
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => inject(ProjectUiState).contributions },
     // `.debriefplugin` files dropped on the window are reviewed for installing, never opened as logs.

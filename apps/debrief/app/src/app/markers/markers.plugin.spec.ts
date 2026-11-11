@@ -1,5 +1,4 @@
 import { TestBed } from '@angular/core/testing';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, flattenContributions } from '../extensions/tokens';
 import { provideTinyBackend, settle, tinyBackend } from '../../testing/helpers';
 import { RecordActions } from '../context/record-actions';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -7,18 +6,19 @@ import { GridSelection } from '../grid/grid-selection';
 import { CommandContext } from '../extensions/tokens';
 import { provideMarkers, MarkersCommands } from './markers.plugin';
 import { MarkersManager } from './markers-manager';
+import { contributed } from '../../testing/contributions';
 
 describe('markers plugin', () => {
   const setup = () => {
     TestBed.configureTestingModule({ providers: [provideTinyBackend(tinyBackend()), provideMarkers()] });
-    const commands = flattenContributions(TestBed.inject(DEBRIEF_COMMANDS) as never) as { id: string; run(ctx: CommandContext): void }[];
+    const commands = contributed('commands') as { id: string; run(ctx: CommandContext): void }[];
     const ctx = { showView: vi.fn(), notifyError: vi.fn() } as unknown as CommandContext;
     return { commands, ctx, store: TestBed.inject(WorkspaceStore) };
   };
 
   it('registers a dockable Markers view that loads the manager', async () => {
     TestBed.configureTestingModule({ providers: [provideTinyBackend(), provideMarkers()] });
-    const views = flattenContributions(TestBed.inject(DEBRIEF_VIEWS) as never) as { id: string; title: string; component(): Promise<unknown> }[];
+    const views = contributed('views') as { id: string; title: string; component(): Promise<unknown> }[];
     const v = views.find((x) => x.id === 'markers')!;
     expect(v.title).toBe('Markers');
     expect(await v.component()).toBe(MarkersManager);

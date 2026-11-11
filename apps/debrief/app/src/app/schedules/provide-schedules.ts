@@ -1,5 +1,6 @@
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 /** The scheduled-collection views. Same extension point as plugin views. */
 export const SCHEDULES_VIEWS: DebriefView[] = [
@@ -18,7 +19,7 @@ export const SCHEDULES_COMMANDS: DebriefCommand[] = [
  */
 export function provideSchedules(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useValue: SCHEDULES_VIEWS },
-    { provide: DEBRIEF_COMMANDS, multi: true, useValue: SCHEDULES_COMMANDS },
+    ...debriefContributionProviders({ views: SCHEDULES_VIEWS }),
+    ...debriefContributionProviders({ commands: SCHEDULES_COMMANDS }),
   ]);
 }

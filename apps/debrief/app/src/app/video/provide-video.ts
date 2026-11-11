@@ -2,9 +2,10 @@ import { EnvironmentProviders, inject, Injectable, Injector, makeEnvironmentProv
 import { VideoView as VideoViewDto } from '../core/generated/video';
 import { DROPPED_FILES_HANDLERS, DroppedFilesHandler } from '../core/dropped-files';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { CommandContext, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { CommandContext, DebriefCommand, DebriefView } from '../extensions/tokens';
 import { provideVideoBackend } from './video-backend';
 import { VideoStore } from './video.store';
+import { contributeFrom } from '../extensions/contributions';
 
 /** The Video view's id. */
 export const VIDEO_VIEW_ID = 'video';
@@ -64,8 +65,8 @@ export function videoDropHandler(): DroppedFilesHandler {
 export function provideVideo(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...provideVideoBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: videoViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(VideoCommands).commands },
+    ...contributeFrom('views', videoViews),
+    ...contributeFrom('commands', () => inject(VideoCommands).commands),
     { provide: DROPPED_FILES_HANDLERS, multi: true, useFactory: videoDropHandler },
     provideAppInitializer(() => startVideo()),
   ]);

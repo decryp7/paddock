@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { Logger } from '../core/logger';
 import { DockService } from '../dock/dock.service';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { NOTIFICATIONS_VIEW } from './notice-actions';
 import { NotificationsSource } from './notifications-source';
@@ -19,6 +19,7 @@ import { provideNotificationSource } from '../health/provide-notification-host';
 import { NotificationsBackend } from './notifications-backend';
 import { NotificationsStore } from './notifications.store';
 import { NoticesRecord } from './notifications.types';
+import { contributeFrom } from '../extensions/contributions';
 
 export function notificationsViews(): DebriefView[] {
   return [
@@ -109,8 +110,8 @@ export function startNotifications(): void {
 /** One line in `app.config.ts`: Notifications (view, button, commands, toasts, saved project messages). */
 export function provideNotifications(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: notificationsViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => notificationsCommands(inject(NotificationsStore)) },
+    ...contributeFrom('views', notificationsViews),
+    ...contributeFrom('commands', () => notificationsCommands(inject(NotificationsStore))),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(NotificationsPersistence).contribution] },
     provideNotificationSource(NotificationsSource),
     provideAppInitializer(() => startNotifications()),
