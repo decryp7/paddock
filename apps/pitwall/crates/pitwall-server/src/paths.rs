@@ -134,21 +134,11 @@ pub fn read_with_backup(path: &Path, max: usize) -> (Option<String>, Option<Stri
 }
 
 /// Write `data` to `path` atomically and owner-only, through the shared writer of `paddock-secrets` (ADR 0092 WP-0): a
-/// temporary file with a name no one can predict, created new (`O_EXCL`, no link followed) with mode 0600 on Unix and an
+/// new temporary file, created exclusively (`O_EXCL`, no link followed) with mode 0600 on Unix and an
 /// owner-only DACL without sharing on Windows, flushed and renamed over the target. The folder is made private or refused
 /// (on Windows when others may write in it). No backup copy is kept: use it for files that must not outlive a revocation.
 pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
     paddock_secrets::write_owner_only(path, data).map_err(std::io::Error::other)
-}
-
-/// Read `path`, bounded to `max` bytes: `Ok(None)` when it does not exist, an error when it is too large or unreadable.
-pub fn read_bounded(path: &Path, max: usize) -> std::io::Result<Option<String>> {
-    match std::fs::metadata(path) {
-        Ok(m) if m.len() as usize > max => Err(std::io::Error::other(format!("it is larger than {max} bytes"))),
-        Ok(_) => std::fs::read_to_string(path).map(Some),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
-    }
 }
 
 /// Make a file owner-only on Unix (a no-op on Windows, where the per-user folder is already private).
@@ -227,13 +217,11 @@ mod tests {
             "{e}"
         );
         // A source that half-filled the buffer before failing gives nothing either.
-        assert!(
-            random32_with(|b| {
-                b[0] = 1;
-                Err("partial".into())
-            })
-            .is_err()
-        );
+        assert!(random32_with(|b| {
+            b[0] = 1;
+            Err("partial".into())
+        })
+        .is_err());
     }
 
     #[test]

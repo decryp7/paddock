@@ -45,9 +45,16 @@ impl Health {
 #[serde(rename_all = "camelCase")]
 pub struct PairStart {
     pub pairing_id: String,
+    /// Sent with every poll (`X-Pitwall-Pair-Token`): only this caller got it; without it Pitwall never hands the key over.
+    pub poll_token: String,
     pub code: String,
     #[serde(default = "five_minutes")]
     pub expires_in_secs: u64,
+}
+
+/// An id or token that can go in a path or header: 1 to 128 letters, digits, `-` or `_`.
+fn token_ok(t: &str) -> bool {
+    !t.is_empty() && t.len() <= 128 && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 fn five_minutes() -> u64 {
@@ -266,19 +273,22 @@ impl Client {
     pub fn pair(&self) -> Result<PairStart, PitwallError> {
         let body = serde_json::json!({ "name": APP_NAME }).to_string().into_bytes();
         let p: PairStart = self.typed(Request::post("/x/v1/pair", body), "pairing")?;
-        if p.code.is_empty() || p.code.len() > 16 || p.pairing_id.is_empty() || p.pairing_id.len() > 128 {
+        if p.code.is_empty() || p.code.len() > 16 || p.pairing_id.is_empty() || p.pairing_id.len() > 128 || !token_ok(&p.poll_token) {
             return Err(PitwallError::Protocol("a pairing answer without a usable code".into()));
         }
         Ok(p)
     }
 
-    /// `GET /x/v1/pair/{id}`.
-    pub fn poll(&self, pairing_id: &str) -> Result<PairPoll, PitwallError> {
-        if !pairing_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+    /// `GET /x/v1/pair/{id}` with the poll token of [`Client::pair`] in the `X-Pitwall-Pair-Token` header.
+    pub fn poll(&self, pairing_id: &str, poll_token: &str) -> Result<PairPoll, PitwallError> {
+        if !token_ok(pairing_id) {
             return Err(PitwallError::Protocol("a pairing id with unexpected characters".into()));
         }
+        if !token_ok(poll_token) {
+            return Err(PitwallError::Protocol("a pairing poll token with unexpected characters".into()));
+        }
         let path = format!("/x/v1/pair/{pairing_id}");
-        let v = self.json(Request::get(&path))?;
+        let v = self.json(Request::get(&path).header("X-Pitwall-Pair-Token", poll_token))?;
         Ok(match v.get("status").and_then(Value::as_str) {
             Some("pending") => PairPoll::Pending,
             Some("approved") => PairPoll::Approved(v.get("key").and_then(Value::as_str).and_then(super::keys::parse_key)),

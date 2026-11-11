@@ -9,6 +9,17 @@ Conventional Commits; one semver tag for the whole repo.
   value (Pitwall's `apps.json`, the access list). The folder is made private or refused, then a unique temporary file is
   created new and owner-only (0600 and no link followed on Unix; a protected DACL with no sharing on Windows), flushed and
   renamed over the target. No backup copy. `SecretFile::write` now calls it, so there is one implementation.
+- New `paddock_secrets::read_owner_only(path, max)`, its read twin: opens without following a link or reparse point and checks
+  the open handle (regular file, owner, no group or other bits or a DACL entry for anyone else, one name; on Windows also the
+  folder's access list), reads at most `max` bytes. `None` when there is no file; a refusal names the file and the next step.
+- New `paddock_secrets::random_token(bytes)` (lowercase hex of 1 to 64 OS random bytes; fails closed, no stand-in) and
+  `random_token_with` (an injected source for tests). `paddock-secrets` gains the `getrandom` dependency.
+
+### `paddock-pitwall`: the pairing poll carries its token (ADR 0092)
+- Breaking (before v1): `Pairing` gains `poll_token` (the `pollToken` of Pitwall's answer to `POST /x/v1/pair`; an answer
+  without a usable one is a `Protocol` error) and `Client::poll_pairing(pairing_id, poll_token)` sends it in the
+  `X-Pitwall-Pair-Token` header. Pitwall answers `denied` to a poll without its request's token, so the guessable id alone no
+  longer takes the key. The fake server (`testing`) behaves the same. Debrief's own client does the same in this change.
 
 ### `paddock-env`: `dev_override`, the development-only environment override (ADR 0073 WP-S)
 - New `paddock_env::dev_override`: `decide(debug, value)` (pure; empty is unset), `resolve(debug, name, value)` (a set variable is ignored in a release build and logged once per name, never its value; a poisoned lock still answers), `from_environment(debug, name)`, `warn_ignored(name)` and the `dev_override!(NAME)` macro. The build mode is `cfg!(debug_assertions)` of the calling crate (the macro expands it there), not of `paddock-env`, so a per-package profile override or a prebuilt copy cannot make a release app honour the variable.
