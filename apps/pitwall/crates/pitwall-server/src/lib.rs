@@ -23,6 +23,7 @@ pub mod os_signals;
 pub mod paths;
 pub mod process;
 pub mod service;
+pub mod speech;
 pub mod serving;
 pub mod system;
 pub mod updates;
