@@ -434,9 +434,6 @@ impl JobSpec {
             source: JobSource::default(),
             cancellable: true,
             request: None,
-        }
-    }
-
             quiet: false,
             key: None,
             joins_running: true,

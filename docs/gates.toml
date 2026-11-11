@@ -373,9 +373,9 @@ approved = "coordinator"
 
 [[ignored]]
 path = "apps/debrief/crates/debrief-core/tests/it/names_perf.rs"
-tests = ["timings_at_fifty_thousand_entities", "merge_scaling"]
+tests = ["timings_at_fifty_thousand_entities"]
 gate = "not-gated"
-reason = "a measurement (rule 48) whose results block is not written yet: timings_at_fifty_thousand_entities, merge_scaling"
+reason = "a measurement (rule 48) whose results block is not written yet: timings_at_fifty_thousand_entities"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -499,6 +499,66 @@ reason = "a measurement (rule 48) whose results block is not written yet: a_256_
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/app/src-tauri/src/jobs/tests.rs"
+tests = ["two_identical_requests_give_one_job"]
+gate = "not-gated"
+reason = "a marked failing test of a later plan package (J1, an idempotency key on every producer's job): fails today by design, enabled when J1 lands"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-core/tests/it/regress_1_2.rs"
+tests = ["a_3_gib_csv_imports_under_the_worker_cap"]
+gate = "not-gated"
+reason = "a marked failing test of a later plan package (3.5, streaming legacy text): needs a 3 GiB generated file and minutes of CPU, enabled when it lands"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/it/regress_1_2.rs"
+tests = ["a_gz_of_1_5_gb_uncompressed_imports_under_the_import_budget", "an_exceptions_view_with_50_000_groups_returns_at_most_its_limit_and_says_truncated", "an_idle_store_statements_and_cpu"]
+gate = "not-gated"
+reason = "marked failing tests of later plan packages (3.5 streaming archives, 4.2 bounded engine queries) and a long idle-CPU measurement: run by hand with --ignored"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugins/tests/it/capture_open.rs"
+tests = ["app_holds_the_file", "file_is_lent_by_ranges", "many_captures_without_a_budget", "many_captures_within_a_budget"]
+gate = "not-gated"
+reason = "a measurement (rule 48) of memory while opening large captures, run by hand with --ignored; its results are in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugins/tests/it/evtx_idle.rs"
+tests = ["idle_after_an_event_log_import"]
+gate = "not-gated"
+reason = "a measurement (rule 48) of CPU after an event log import (20 CPU-s per GB budget), run by hand with --ignored; its results are in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/bench_name_reads.rs"
+tests = ["name_reads_by_how_often_the_name_occurs"]
+gate = "not-gated"
+reason = "a benchmark of the name rebuild's reads (rule 48), run by hand with --ignored; its results are in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
 approved = "coordinator"
 
 [[ignored]]

@@ -1021,13 +1021,11 @@ mod tests {
     }
 
     /// A folder with capture files of `Lines`' format, removed on drop.
-    struct Dir(std::path::PathBuf);
+    struct Dir(std::path::PathBuf, #[allow(dead_code)] tempfile::TempDir);
     impl Dir {
         fn new(tag: &str) -> Dir {
-            let d = std::env::temp_dir().join(format!("debrief-profile-budget-{tag}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&d);
-            std::fs::create_dir_all(&d).unwrap();
-            Dir(d)
+            let t = tempfile::Builder::new().prefix(&format!("debrief-profile-budget-{tag}-")).tempdir().unwrap();
+            Dir(t.path().to_path_buf(), t)
         }
         fn file(&self, name: &str, stacks: usize) -> String {
             let text: String = std::iter::once("#t\n".to_string())
@@ -1036,11 +1034,6 @@ mod tests {
             let path = self.0.join(name);
             std::fs::write(&path, text).unwrap();
             path.to_string_lossy().into_owned()
-        }
-    }
-    impl Drop for Dir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
         }
     }
 

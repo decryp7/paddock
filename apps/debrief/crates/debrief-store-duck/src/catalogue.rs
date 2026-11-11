@@ -343,8 +343,8 @@ impl Drop for CatalogueService {
     }
 }
 
-/// One turn: tidy, then build the next source. `_running` proves the exit handler counts its statements.
-fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
+/// One turn: tidy, then build the next source. `running` proves the exit handler counts its statements.
+fn step(running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     // Nothing changed since the last look: nothing to tidy and nothing new to build (and no statement to run).
     if !s.gate.take() {
         return Ok(Turn::Idle);
@@ -392,7 +392,7 @@ fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write
     s.rows_high.fetch_max(unsaved, Ordering::SeqCst);
     s.rows_committed.fetch_add(written.unwrap_or(0), Ordering::SeqCst);
     s.rows_largest.fetch_max(written.unwrap_or(0), Ordering::SeqCst);
-    if unsaved >= CHECKPOINT_AFTER_ROWS && settle(conn, write_lock) {
+    if unsaved >= CHECKPOINT_AFTER_ROWS && settle(running, s, conn, write_lock) {
         s.unsaved_rows.store(0, Ordering::SeqCst);
         s.unsaved.store(false, Ordering::SeqCst);
         s.changes.bump();
@@ -744,9 +744,7 @@ mod tests {
     /// P3: a status call that asks for news returns when the catalogue commits, not when its wait is over.
     #[test]
     fn a_status_call_wakes_when_the_catalogue_commits() {
-        let dir = std::env::temp_dir().join(format!("debrief-catalogue-status-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = debrief_ipc::testing::scratch_dir("catalogue-status");
         let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples");
         let store = DuckStore::create(&dir, Profile::default_profile(), PluginRegistry::new()).unwrap();
         store

@@ -954,8 +954,7 @@ mod tests {
     /// H6: an index loop with nothing to index and no news ran a query every turn. An idle turn runs no statement.
     #[test]
     fn a_hundred_idle_turns_run_no_statement() {
-        let dir = std::env::temp_dir().join(format!("debrief-fts-idle-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = debrief_ipc::testing::scratch_dir("fts-idle");
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
             .unwrap();
@@ -1023,6 +1022,7 @@ mod tests {
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
             fail_writes: AtomicBool::new(false),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
         };
         run(&s, dir.path(), &conn, &Mutex::new(()), 1);
         assert!(
@@ -1051,6 +1051,7 @@ mod tests {
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
             fail_writes: AtomicBool::new(false),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
         }
     }
 

@@ -22,10 +22,7 @@ const IMPORT_BUDGET_MB: u64 = 768;
 struct TempDir(PathBuf);
 impl TempDir {
     fn new(tag: &str) -> TempDir {
-        let d = std::env::temp_dir().join(format!("debrief-regress-1-2-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        TempDir(d)
+        TempDir(crate::scratch::scratch_dir(&format!("regress-1-2-{tag}")))
     }
 }
 impl Drop for TempDir {
