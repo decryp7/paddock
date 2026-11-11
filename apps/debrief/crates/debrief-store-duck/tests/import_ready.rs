@@ -2,7 +2,7 @@
 //!
 //! `DEBRIEF_READY_CORPUS=<folder> DEBRIEF_READY_STORE=<new folder> cargo test --release --test import_ready -- --nocapture`
 //!
-//! Imports the folder into a new store and prints, from the start: the import (events, events/s, peak RSS), the full-text
+//! Imports the folder into a new store and prints, from the start: the import (events, events/s, peak footprint), the full-text
 //! index covering every segment and the catalogue built, and the store's size. Without `DEBRIEF_READY_CORPUS` it does
 //! nothing. The store folder is removed afterwards unless `DEBRIEF_READY_KEEP` is set. With `DEBRIEF_READY_REINDEX=1` it
 //! times only the index phase on a kept store (`DEBRIEF_READY_STORE`), built again from its segments.
@@ -70,7 +70,7 @@ fn import_until_search_is_ready() {
         reindex || recatalogue || !store_dir.join("data.duckdb").exists(),
         "DEBRIEF_READY_STORE must be a new folder"
     );
-    let sampler = Sampler::start();
+    let sampler = Sampler::start_footprint();
     let started = Instant::now();
     if std::env::var_os("DEBRIEF_READY_LOG").is_some() {
         let _ = log::set_boxed_logger(Box::new(Log(started))).map(|()| log::set_max_level(log::LevelFilter::Debug));
@@ -88,9 +88,9 @@ fn import_until_search_is_ready() {
             heap: mb.parse::<usize>().expect("DEBRIEF_READY_INDEX heap MB") << 20,
         };
     }
-    // `DEBRIEF_READY_CATALOGUE_WORKERS` (sources the catalogue builds at the same time; 0 = automatic).
-    if let Some(n) = std::env::var("DEBRIEF_READY_CATALOGUE_WORKERS").ok().and_then(|v| v.parse().ok()) {
-        options.catalogue_workers = n;
+    // `DEBRIEF_READY_READ_THREADS` (threads reading row groups for the index feed; 0 = automatic).
+    if let Some(n) = std::env::var("DEBRIEF_READY_READ_THREADS").ok().and_then(|v| v.parse().ok()) {
+        let _: usize = n;
     }
     // `DEBRIEF_READY_DUCK` (DuckDB threads).
     if let Some(n) = std::env::var("DEBRIEF_READY_DUCK").ok().and_then(|v| v.parse().ok()) {
@@ -116,7 +116,7 @@ fn import_until_search_is_ready() {
         let built = store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
         let s = started.elapsed().as_secs_f64();
         eprintln!(
-            "ready: recatalogue built={built} in {s:.1} s, peak RSS {} MB",
+            "ready: recatalogue built={built} in {s:.1} s, peak footprint {} MB",
             sampler.take_peak_mb()
         );
         return;
@@ -129,7 +129,7 @@ fn import_until_search_is_ready() {
         let s = started.elapsed().as_secs_f64();
         let meta = std::fs::read_to_string(store_dir.join("index").join("meta.json")).unwrap_or_default();
         eprintln!(
-            "ready: reindex {} of {} docs in {s:.1} s = {:.0} docs/s, peak RSS {} MB, index {:.0} MB, index segments {}",
+            "ready: reindex {} of {} docs in {s:.1} s = {:.0} docs/s, peak footprint {} MB, index {:.0} MB, index segments {}",
             st.indexed,
             st.total,
             st.indexed as f64 / s,
@@ -144,7 +144,7 @@ fn import_until_search_is_ready() {
     let r = store.open(std::slice::from_ref(&corpus)).unwrap().wait().unwrap();
     let import_s = secs();
     eprintln!(
-        "ready: import {} events in {import_s:.1} s = {:.0} events/s, peak RSS {} MB; segments {:.0} MB",
+        "ready: import {} events in {import_s:.1} s = {:.0} events/s, peak footprint {} MB; segments {:.0} MB",
         r.events,
         r.events as f64 / import_s,
         sampler.take_peak_mb(),
@@ -153,7 +153,7 @@ fn import_until_search_is_ready() {
     if wait == "index" {
         let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
         eprintln!(
-            "ready: index {} of {} docs at {:.1} s ({:.0} docs/s after the import), peak RSS {} MB, index {:.0} MB",
+            "ready: index {} of {} docs at {:.1} s ({:.0} docs/s after the import), peak footprint {} MB, index {:.0} MB",
             st.indexed,
             st.total,
             secs(),
@@ -189,7 +189,7 @@ fn import_until_search_is_ready() {
     let ready_s = index.1.max(catalogue.1);
     eprintln!(
         "ready: index {} of {} docs at {:.1} s; catalogue built={} at {:.1} s; search ready at {ready_s:.1} s = {:.0} events/s \
-         end to end; peak RSS after import {} MB; store {:.0} MB (segments {:.0} MB, index {:.0} MB, data.duckdb {:.0} MB)",
+         end to end; peak footprint after import {} MB; store {:.0} MB (segments {:.0} MB, index {:.0} MB, data.duckdb {:.0} MB)",
         index.0.indexed,
         index.0.total,
         index.1,

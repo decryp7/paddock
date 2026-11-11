@@ -2251,6 +2251,7 @@ dependencies = [
  "libc",
  "log",
  "memory-stats",
+ "paddock-proc",
  "parquet",
  "rayon",
  "serde",

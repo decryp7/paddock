@@ -35,6 +35,7 @@ tantivy = { workspace = true, features = ["mmap", "lz4-compression"] }
 debrief-store-client = { path = "../debrief-store-client" }
 # Current resident set size on Windows, macOS and Linux (MIT OR Apache-2.0), for the memory budget test.
 memory-stats.workspace = true
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 getrandom.workspace = true
 chrono.workspace = true
 zip.workspace = true
