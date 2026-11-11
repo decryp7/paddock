@@ -1,6 +1,6 @@
 # 56. Service repair as one declared state machine
 
-- Status: Proposed (2026-11-05; user decision to redesign before the Dyno 1.1.0 tag; revision 4 answers the second review (N1 to N3, R1 to R7) on top of revision 3 (Linux included) and revision 2 (the first review))
+- Status: Accepted (built; was Proposed) (2026-11-05; user decision to redesign before the Dyno 1.1.0 tag; revision 4 answers the second review (N1 to N3, R1 to R7) on top of revision 3 (Linux included) and revision 2 (the first review))
 - Date: 2026-11-05
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-17 to ER-19 (long operations: off the UI thread,
   labelled progress, no timeouts of running jobs), ER-27 (logs explain every failure), rule 53 (reusable OS names; held

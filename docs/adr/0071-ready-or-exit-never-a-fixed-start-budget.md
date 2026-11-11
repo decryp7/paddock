@@ -2,6 +2,7 @@
 
 - Status: Accepted 2026-11-09 by the user: D1–D6 as recommended. Revision 2 after the independent review of revision 1
   (CHANGES) and its re-review (ACCEPTABLE, 2026-11-09), with the re-review's P2s applied.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-0b, WP-1, WP-2, WP-4a, WP-5 (about 5.5 days); dropped WP-3; deferred WP-4b to WP-4e (migrate a site when its test flakes).
 - Date: 2026-11-09
 - Related: ER-11 / rule 5 (failing test first), ER-12 (no raised timeouts or sleeps; flaky is red), ER-20 / rule 51
   (parallelism and cost), ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42-43 (share first,

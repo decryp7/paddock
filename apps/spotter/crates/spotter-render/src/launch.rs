@@ -42,6 +42,10 @@ pub struct LaunchOptions {
     /// How the browser's answers to the commands that open a page are judged ([`crate::answer`]): while it is alive and
     /// working, never for a fixed time; `max_lifetime` is the overall bound.
     pub patience: Patience,
+    /// The longest a browser may take to become ready (its DevTools endpoint). The wait ends earlier when the browser is
+    /// ready or its process has exited; this is only the guard for a start that hangs. A product render keeps
+    /// [`START_LIMIT`]; a test on a shared, starved host passes a long guard (ADR 0071).
+    pub start_limit: Duration,
 }
 
 impl LaunchOptions {
@@ -54,6 +58,7 @@ impl LaunchOptions {
             memory_cap: Some(2 << 30),
             extra_args: Vec::new(),
             patience: Patience::default(),
+            start_limit: START_LIMIT,
         }
     }
 }
@@ -187,7 +192,12 @@ pub const START_LIMIT: Duration = Duration::from_secs(20);
 
 /// The wall-clock cap for a render whose page gets `page_budget`: the start allowance, the page and a margin.
 pub fn lifetime_for(page_budget: Duration) -> Duration {
-    START_LIMIT + page_budget + Duration::from_secs(10)
+    lifetime_with(START_LIMIT, page_budget)
+}
+
+/// [`lifetime_for`] with a start allowance other than [`START_LIMIT`] (a test's start guard).
+pub fn lifetime_with(start_limit: Duration, page_budget: Duration) -> Duration {
+    start_limit + page_budget + Duration::from_secs(10)
 }
 
 /// How long a browser gets to quit by itself after `Browser.close` before it is killed.
@@ -277,7 +287,7 @@ impl Chromium {
         let ended_by = Arc::new(AtomicU8::new(NONE));
         // The caps run from the process start, also while it is still starting.
         watchdog(process.process(), alive.clone(), ended_by.clone(), opts.max_lifetime);
-        match connect(&dir, &mut process) {
+        match connect(&dir, &mut process, opts.start_limit) {
             Ok(conn) => Ok(Chromium {
                 conn: Arc::new(conn),
                 process: Mutex::new(process),
@@ -427,9 +437,12 @@ fn cleanup(dir: &Path) {
     }
 }
 
-/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint.
-fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
-    let end = Instant::now() + START_LIMIT;
+/// Waits for the `DevToolsActivePort` file Chrome writes into the profile and connects to the browser endpoint. The wait
+/// ends when the browser is ready or its process has exited (with its exit status and the end of its error output); a
+/// browser that is alive but silent is waited for up to `limit`, the guard for a hung start (ADR 0071).
+fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Connection> {
+    let began = Instant::now();
+    let end = began + limit;
     loop {
         if let Ok(s) = std::fs::read_to_string(dir.join("DevToolsActivePort")) {
             let mut l = s.lines();
@@ -438,10 +451,21 @@ fn connect(dir: &Path, process: &mut Supervised) -> Result<Connection> {
             }
         }
         if !process.is_running() {
-            return Err(Error::Launch(with_stderr("the browser exited right after it started", dir)));
+            let status = process.wait().map_or_else(|| "exit status unknown".to_string(), |s| s.to_string());
+            return Err(Error::Launch(with_stderr(
+                &format!("the browser exited right after it started ({status})"),
+                dir,
+            )));
         }
         if Instant::now() > end {
-            return Err(Error::Timeout("the browser start"));
+            let pid = process.id().map_or_else(|| "unknown".to_string(), |p| p.to_string());
+            return Err(Error::Launch(with_stderr(
+                &format!(
+                    "the browser (pid {pid}) was still running but not ready after {:.0} s (the start guard); it is ended now",
+                    began.elapsed().as_secs_f64()
+                ),
+                dir,
+            )));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -621,5 +645,71 @@ mod tests {
     fn profile_dirs_are_unique() {
         let b = Path::new("/b");
         assert_ne!(unique_dir(b), unique_dir(b));
+    }
+
+    /// A stand-in browser that is alive but never writes `DevToolsActivePort`: the start ends at the guard, says the
+    /// browser was still running with its pid and output, and leaves no process and no profile behind.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_never_becomes_ready_fails_at_the_guard_and_is_ended() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let exe_path = base.path().join("silent-chrome.sh");
+        std::fs::write(&exe_path, "#!/bin/sh\necho 'still warming up' >&2\nexec sleep 300\n").unwrap();
+        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let mut o = headless(base.path());
+        o.start_limit = Duration::from_millis(600);
+        let marker = base.path().to_string_lossy().to_string();
+        let e = Chromium::launch(&exe, &o).err().unwrap().to_string();
+        assert!(
+            e.contains("still running but not ready") && e.contains("pid ") && e.contains("still warming up"),
+            "{e}"
+        );
+        assert!(
+            crate::process::processes_mentioning(&marker).is_empty(),
+            "the silent browser was left running"
+        );
+        assert_eq!(
+            std::fs::read_dir(base.path())
+                .unwrap()
+                .filter(|d| d.as_ref().unwrap().path().is_dir())
+                .count(),
+            0
+        );
+    }
+
+    /// A stand-in that exits at once ends the wait at once, however long the guard, with its exit status and output.
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_that_exits_ends_the_wait_with_its_status_not_at_the_guard() {
+        use std::os::unix::fs::PermissionsExt;
+        let base = tempfile::tempdir().unwrap();
+        let exe_path = base.path().join("dying-chrome.sh");
+        std::fs::write(&exe_path, "#!/bin/sh\necho 'out of memory' >&2\nexit 3\n").unwrap();
+        std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let exe = Browser {
+            flavor: crate::discover::Flavor::Chromium,
+            path: exe_path,
+        };
+        let mut o = headless(base.path());
+        o.start_limit = Duration::from_secs(120);
+        let t = Instant::now();
+        let e = Chromium::launch(&exe, &o).err().unwrap().to_string();
+        assert!(t.elapsed() < Duration::from_secs(30), "waited {:?}", t.elapsed());
+        assert!(e.contains("exited right after it started (exit status: 3)"), "{e}");
+        assert!(e.contains("out of memory"), "{e}");
+    }
+
+    #[test]
+    fn the_lifetime_follows_the_start_guard() {
+        assert_eq!(
+            lifetime_with(START_LIMIT, Duration::from_secs(40)),
+            lifetime_for(Duration::from_secs(40))
+        );
+        assert_eq!(lifetime_with(Duration::from_secs(120), Duration::ZERO), Duration::from_secs(130));
     }
 }

@@ -2,6 +2,7 @@
 
 - Status: Accepted (2026-10-30), after two independent reviews. Revision 2 answered the first review's P1 and P2
   findings; revision 3 the second review's P2 findings and the coordinator's decision to drop source generations.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-1 (parallel Parquet readers) and WP-2 and WP-3 (sink stress test, lock order) and the measurement; deferred WP-4 to WP-8 (tee, LAYOUT, catalogue tee, settings, prototypes B and C); the tee comes back only if WP-1 misses the target on large10.
 - Date: 2026-10-30
 - Related: ADR 0010 (persistent store), ADR 0014 (database-first engine; §2 step 4 already planned "index: Tantivy on
   its own thread, from the same batches"), ADR 0037 (live tail), ADR 0042 (port table), ADR 0051 (stable source ids),

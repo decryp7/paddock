@@ -1802,3 +1802,24 @@ Two flakes seen, not fixed here: `debrief-ipc` `launch::a_locked_child_cannot_wr
 runs on the base tree, 5 of 6 in one container run; the "before the lockdown" note, probably the handshake thread still being
 listed), and the store worker's client-RSS budget tests (`imports_and_queries_within_the_budgets`, `low_memory_mode_...`), which
 measure the test process's own growth while other tests of the same binary run in it.
+
+## An uncapped test container ran OrbStack out of memory, and restarting it took Docker down (2026-11-11)
+
+A test container without CPU or memory limits ran OrbStack's VM out of memory; the agent then restarted OrbStack, which also
+restarts every container of the user's, and Docker was down for about 15 minutes. Rule 7 now says: test containers run with
+`--rm` and CPU and memory limits, and agents never restart, stop or reconfigure shared infrastructure; they stop and report.
+
+## A 23-31-day design lost to a half-day warning that common practice already used (2026-11-11)
+
+Debrief's elevated-helper amendment to ADR 0073 went through four review rounds and 22.75 to 31.25 days of estimate before
+the user compared it with Visual Studio and VS Code and chose a half-day risk warning instead; several accepted process
+ADRs were then cut as more than a personal tool needs (`docs/adr/trims-2026-11-11.md`). Rule 76 (ER-37): a design states
+how comparable software and the platform vendor handle the problem, with sources and the cost in agent-days, and always
+offers the cheaper common-practice option.
+
+## A LocalSystem service trusted its pipe ACL and started any program a user process named (2026-11-11)
+
+A survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) starts any program a same-user process names
+over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone; Dyno's helper already checked the caller
+per connection. Rule 77 (ER-38): privileged services authorise changing requests by the caller's OS identity, and a
+request that changes what runs elevated needs an administrator caller; user-chosen elevation needs only a risk warning.

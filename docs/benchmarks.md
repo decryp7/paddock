@@ -998,3 +998,30 @@ brush-parser probe's start cost is not the problem (its parse-only run costs the
 (proc-macro crates, a second `syn` major, licence and supply-chain review, every change to the lockfile changing the tool's input
 hash) and an AST walk for what the rules read as a flat command list are. Reverse it if a later rule needs a real grammar.
 Not measured: Linux and Windows hosts, and a run at the load of 53 that ADR 0083 quotes.
+
+## Approval signature verification (ADR 0097, 2026-11-10)
+
+Question: what does checking a user's signature cost per approval, so a gate can verify every record on every tag?
+Throw-away software `ssh-ed25519` keys made in the agent's scratch folder (no real key, no keychain, no ssh-agent:
+`HOME` in scratch, `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, `SSH_AUTH_SOCK` unset), a five-commit repository
+in the same folder, 200 calls per round, three rounds. macOS 27.2, Mac mini (Mac16,11, 14 cores), git 2.56.0, the system
+OpenSSH 10.5p1. Load 8.8 before and 13.5 after: an indication, not a budget.
+
+| Operation | Round 1 | Round 2 | Round 3 |
+|---|---|---|---|
+| `git verify-commit HEAD` with `gpg.format=ssh` and `gpg.ssh.allowedSignersFile` (one process for git, one for `ssh-keygen`) | 21.9 ms | 51.5 ms | 23.3 ms |
+| `ssh-keygen -Y verify` of a detached signature over a 2-line record, own namespace | 11.6 ms | 7.9 ms | 8.9 ms |
+
+History cost on the repository itself, `docs/gates.toml` at `origin/train/2026-11-09-3` (`c151422a4`; 1 023 lines, 14
+commits touch it), same isolation, 5 calls per round, three rounds, load 15.9 to 20.4 (an indication):
+
+| Operation | Round 1 | Round 2 | Round 3 |
+|---|---|---|---|
+| `git -c blame.ignoreRevsFile= blame --porcelain` of the whole file | 15 ms | 24 ms | 31 ms |
+| `git log -L1016,1024:docs/gates.toml` (one record's history) | 44 ms | 52 ms | 52 ms |
+| `git log --first-parent` of the file | 53 ms | 43 ms | 48 ms |
+
+All are dominated by process start. Not measured: a security-key (`sk-ssh-ed25519`) or Secure Enclave signature (no
+device was used, by design), an in-process Rust verifier, and the runners. At these rates 200 approval commits checked
+with one `git verify-commit` each cost 4.4 to 10.3 s (200 x 21.9 to 51.5 ms); a verifier that checks each distinct commit
+once is bounded by the number of approval commits, and the history walk adds about 50 ms per record.
