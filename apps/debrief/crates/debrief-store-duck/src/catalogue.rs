@@ -25,8 +25,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-/// Layout and extraction version; sources built with another are built again.
-pub const VERSION: u32 = 1;
+/// Layout and extraction version; sources built with another are built again (2: the tail mark, the left-out fields and
+/// the GUID bound; stores made before are catalogued again, as no data is migrated before v1).
+pub const VERSION: u32 = 2;
 
 /// Rows of the catalogue tables of `source` are removed with this (the mark of live tail's appends is a separate
 /// statement: a build replaces the rows but must keep a mark it has not read past, see [`settle_mark`]).
@@ -125,6 +126,8 @@ fn build_from(conn: &Connection, source: u32, from: u64, upto: Option<u64>, orde
         }
     }
     out.truncated = out.rows >= limit;
+    // The field values are read over the rows the scan above reached, not beyond: the rest is the next read's.
+    let upto = if out.truncated { out.last_id.unwrap_or(upto) } else { upto };
     let sql = format!(
         "WITH kv AS (SELECT unnest(map_keys(extra)) AS k, unnest(map_values(extra)) AS v FROM events WHERE source = ? AND id >= ? AND id <= ?),
 g AS (SELECT k, v, count(*) AS n FROM kv WHERE v IS NOT NULL AND length(v) BETWEEN 1 AND {} AND TRY_CAST(v AS DOUBLE) IS NULL GROUP BY k, v),
@@ -240,6 +243,7 @@ fn scan_limit() -> u64 {
 }
 
 /// The newest event id of `source`, read before a build so the rows appended while it runs stay marked.
+// Relies on new rows becoming visible as a prefix by id: a row with an id above this one is not read, and is marked.
 fn newest_id(conn: &Connection, source: u32) -> Result<Option<u64>> {
     let newest = conn.query_row("SELECT max(id) FROM events WHERE source = ?", params![source], |r| r.get(0))?;
     #[cfg(test)]
@@ -270,12 +274,22 @@ fn settle_mark(conn: &Connection, source: u32, seen_to: Option<u64>) -> Result<(
 /// left out stays out. Set-based: the names go into the staging table once, then one UPDATE and one INSERT per table.
 /// The mark moves past what was read (`read_to`) and goes if nothing newer exists; `None` when the source is not ready.
 fn commit_tail(conn: &Connection, source: u32, read_to: Option<u64>, read: &Read) -> Result<Option<u64>> {
-    let ready: bool = conn.query_row("SELECT count(*) > 0 FROM sources WHERE id = ? AND ready", params![source], |r| {
-        r.get(0)
-    })?;
-    if !ready {
+    // The source is ready and catalogued with the current version: a give-up or a rebuild since the read leaves nothing
+    // to add to.
+    let current: bool = conn.query_row(
+        "SELECT count(*) > 0 FROM sources s WHERE s.id = ? AND s.ready
+           AND EXISTS (SELECT 1 FROM catalogue_sources c WHERE c.source = s.id AND c.version = ?)",
+        params![source, VERSION],
+        |r| r.get(0),
+    )?;
+    if !current {
         return Ok(None);
     }
+    conn.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS catalogue_stage (
+           source UINTEGER NOT NULL, scope VARCHAR NOT NULL, name VARCHAR NOT NULL, n UBIGINT NOT NULL, first_ts BIGINT,
+           last_ts BIGINT, first_id UBIGINT NOT NULL, last_id UBIGINT NOT NULL)",
+    )?;
     conn.execute_batch("BEGIN TRANSACTION")?;
     let written = (|| -> Result<u64> {
         let mut dropped = read.dropped;
@@ -297,6 +311,8 @@ fn commit_tail(conn: &Connection, source: u32, read_to: Option<u64>, read: &Read
             let mut app = conn.appender("catalogue_stage")?;
             for e in &read.entries {
                 if matches!(&e.scope, Scope::Field(k) if left_out.contains(k)) {
+                    // `dropped` counts these values on tail reads only (a full build never reads a left-out field's
+                    // values into the tally); it is a diagnostic of what the catalogue refused, not a bound.
                     dropped += 1;
                     continue;
                 }
@@ -918,8 +934,16 @@ impl crate::DuckStore {
     pub fn catalogue_give_up_on(&self, source: u32) -> StoreResult<()> {
         let service = self.inner.catalogue.as_ref().ok_or_else(|| engine("the store has no catalogue"))?;
         let conn = self.inner.conn()?;
-        for sql in DELETE_SQL {
-            conn.execute(sql, params![source]).map_err(engine)?;
+        // Under the write lock and in one transaction, so it cannot interleave with a catalogue commit.
+        let _writing = lock(&self.inner.write_lock);
+        conn.execute_batch("BEGIN TRANSACTION").map_err(engine)?;
+        let deleted = DELETE_SQL.iter().try_for_each(|sql| conn.execute(sql, params![source]).map(|_| ()));
+        match deleted {
+            Ok(()) => conn.execute_batch("COMMIT").map_err(engine)?,
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(engine(e));
+            }
         }
         lock(&service.shared.failed).insert(source);
         Ok(())
@@ -1322,7 +1346,7 @@ mod tests {
         let (conn, s, write_lock) = rig();
         catalogued(&conn, &s, &write_lock, 1, &["ran first.exe"]);
         for (i, name) in ["a1", "b2", "c3", "d4", "e5"].iter().enumerate() {
-            append(&conn, 1, i as u64 + 2, &format!("ran {name}.exe"), &[]);
+            append(&conn, 1, i as u64 + 2, &format!("ran {name}.exe"), &[("Env", "prod")]);
         }
         SCAN_LIMIT.with(|c| c.set(Some(2)));
         let worked = drain(&s, &conn, &write_lock);
@@ -1332,6 +1356,71 @@ mod tests {
             assert_eq!(count_of(&conn, 1, &format!("{name}.exe")), Some(1), "{name}");
         }
         assert!(marks(&conn, 1).is_empty());
+        // The field values of the rows a read did not reach are not counted by it as well: once each.
+        assert_eq!(count_of(&conn, 1, "prod"), Some(5), "a field value is counted once per row");
+    }
+
+    /// A tail commit for a source whose rows were given up on or rebuilt (no current catalogue_sources row) writes nothing.
+    #[test]
+    fn a_tail_commit_for_a_source_without_a_current_row_writes_nothing() {
+        let (conn, _s, _w) = rig();
+        add_source(&conn, 1);
+        let entries = vec![Entry {
+            scope: Scope::Entity(debrief_core::entities::EntityKind::Executable),
+            name: "late.exe".into(),
+            count: 1,
+            first_ts: None,
+            last_ts: None,
+            first_id: 1,
+            last_id: 1,
+        }];
+        let read = Read {
+            entries,
+            ..Read::default()
+        };
+        assert_eq!(commit_tail(&conn, 1, None, &read).unwrap(), None);
+        assert_eq!(rows_in(&conn, "catalogue", 1), 0);
+        // An older layout version counts as no row.
+        conn.execute("INSERT INTO catalogue_sources VALUES (1, 0, 0, 0, ?)", params![VERSION - 1])
+            .unwrap();
+        assert_eq!(commit_tail(&conn, 1, None, &read).unwrap(), None);
+        assert_eq!(rows_in(&conn, "catalogue", 1), 0);
+    }
+
+    /// Giving up on a source waits for the write lock, so it cannot interleave with a commit that holds it.
+    #[test]
+    fn giving_up_on_a_source_waits_for_the_write_lock() {
+        let dir = debrief_ipc::testing::scratch_dir("catalogue-give-up-lock");
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples");
+        let store = DuckStore::create(&dir, Profile::default_profile(), PluginRegistry::new()).unwrap();
+        store.open(&[samples.join("serilog-text")]).unwrap().wait().unwrap();
+        assert!(store.wait_for_catalogue(Duration::from_secs(60)).unwrap());
+        let id: u32 = store
+            .inner
+            .conn()
+            .unwrap()
+            .query_row("SELECT min(id) FROM sources", [], |r| r.get(0))
+            .unwrap();
+        let started = Arc::new(AtomicBool::new(false));
+        let finished = Arc::new(AtomicBool::new(false));
+        let held = lock(&store.inner.write_lock);
+        let worker = {
+            let (store, started, finished) = (store.clone(), started.clone(), finished.clone());
+            std::thread::spawn(move || {
+                started.store(true, Ordering::SeqCst);
+                store.catalogue_give_up_on(id).unwrap();
+                finished.store(true, Ordering::SeqCst);
+            })
+        };
+        assert!(paddock_testkit::poll_until_within(Duration::from_secs(30), || started.load(Ordering::SeqCst)));
+        // Bounded look: with the lock held the call must not finish (it finishes within milliseconds without one).
+        assert!(
+            !paddock_testkit::poll_until_within(Duration::from_millis(500), || finished.load(Ordering::SeqCst)),
+            "the give-up ran while the write lock was held"
+        );
+        drop(held);
+        assert!(paddock_testkit::poll_until_within(Duration::from_secs(30), || finished.load(Ordering::SeqCst)));
+        worker.join().unwrap();
     }
 
     /// P2-5: the mark and the left-out fields go with their source (clear, refresh, removal, the orphan sweep).
