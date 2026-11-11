@@ -4,6 +4,8 @@
 //!   failed and then passed on a rerun of the same commit ([`flakes`], ADR 0082 D6; the log readers are [`logfind`]). A run whose
 //!   logs cannot be read is "not measured", never "no flakes" (ER-33).
 //! - `ci timings`: the port of `scripts/ci-timings.mjs` ([`timings`]).
+//! - `ci schedule-skip`: whether a scheduled run ends early because a train is in CI ([`schedule_skip`]; the job token in
+//!   `PLAN_TOKEN` or `GITEA_TOKEN`, and it never fails the run).
 //!
 //! The API client ([`client`]) reuses the planner's [`Http`](crate::wait::Http) and [`GiteaRuns`](crate::plan_since::GiteaRuns).
 //! The token is read from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
@@ -12,6 +14,7 @@ pub mod client;
 pub mod flakes;
 pub mod logfind;
 pub mod preconditions;
+pub mod schedule_skip;
 #[cfg(test)]
 mod testutil;
 pub mod time;
@@ -81,6 +84,71 @@ pub struct TimingsArgs {
     /// The API root of the owner's repositories.
     #[arg(long, default_value = "https://dev.decryptology.net/api/v1/repos/decryp7")]
     base: String,
+}
+
+/// Arguments of `ci schedule-skip`. The event, server and repository default to the job's (`GITHUB_EVENT_NAME`,
+/// `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`).
+#[derive(Args)]
+pub struct ScheduleSkipArgs {
+    /// The event of the run (default: GITHUB_EVENT_NAME); only `schedule` is ever skipped.
+    #[arg(long)]
+    event: Option<String>,
+    /// The repository (default: GITHUB_REPOSITORY, then decryp7/paddock).
+    #[arg(long)]
+    repo: Option<String>,
+    /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
+    #[arg(long)]
+    server: Option<String>,
+}
+
+/// `ci schedule-skip`: `skip=true|false` to `GITHUB_OUTPUT` (standard output without it), the annotation on standard output,
+/// the reason in the job summary. Exit 0 whatever the API says (a scheduled test run fails open).
+pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let event = a.event.clone().or_else(|| env("GITHUB_EVENT_NAME")).unwrap_or_default();
+    let server = a
+        .server
+        .clone()
+        .or_else(|| env("GITHUB_SERVER_URL"))
+        .unwrap_or_else(|| SERVER.into());
+    let repo = a
+        .repo
+        .clone()
+        .or_else(|| env("GITHUB_REPOSITORY"))
+        .unwrap_or_else(|| "decryp7/paddock".into());
+    let token = env("PLAN_TOKEN").or_else(|| env("GITEA_TOKEN")).unwrap_or_default();
+    let now_ms = time::now_secs() as f64 * 1000.0;
+    let runs = if event == "schedule" {
+        let mut http = CurlHttp;
+        let mut client = Client::new(&mut http, &server, &repo, &token);
+        schedule_skip::read(&mut client, now_ms)
+    } else {
+        Ok(Vec::new())
+    };
+    let d = schedule_skip::decide(&event, runs, now_ms);
+    let answer = format!("skip={}", d.skip());
+    let mut text: Vec<String> = d.annotation().into_iter().collect();
+    match env("GITHUB_OUTPUT") {
+        Some(path) => append(&path, &format!("{answer}\n"))?,
+        None => text.push(answer),
+    }
+    if let Some(path) = env("GITHUB_STEP_SUMMARY") {
+        append(&path, &d.summary())?;
+    }
+    Ok(Report::new(
+        serde_json::json!({ "skip": d.skip(), "summary": d.summary() }),
+        text.join("\n"),
+    ))
+}
+
+fn append(path: &str, text: &str) -> Result<(), CliError> {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(text.as_bytes()))
+        .map_err(|e| CliError::failure(format!("{path} cannot be written: {e}.")))
 }
 
 fn token() -> Result<String, CliError> {

@@ -20,8 +20,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A scheduled run ends early while a train's dispatch run is in CI (./dev ci schedule-skip; ADR 0093 amendment 2026-11-12).
+  # Every other event passes at once (no checkout, nothing read).
+  gate:
+    name: gate (no train in CI?)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: .
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'schedule'
+      - id: train
+        if: github.event_name == 'schedule'
+        uses: ./.gitea/actions/schedule-skip
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      - id: decide
+        env:
+          SKIP: ${{ steps.train.outputs.skip }}
+        run: if [ "$SKIP" = true ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+
   macos-vm:
     name: update smoke in a macOS VM
+    needs: [gate]
+    if: needs.gate.outputs.run == 'true'
     runs-on: macos-latest
     timeout-minutes: 120
     env:

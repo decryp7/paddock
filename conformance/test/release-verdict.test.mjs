@@ -107,7 +107,7 @@ test('the nightly builds every app\'s installers with the app\'s own release inp
   assert.match(verdictJob, /if: \$\{\{ always\(\) \}\}/);
   for (const app of APPS) assert.match(verdictJob, new RegExp(`app: ${app}\\n\\s+plan-run: \\$\\{\\{ needs\\.installers-gate\\.outputs\\.run \\}\\}`), `${app}: the verdict knows the gate's answer`);
   assert.match(nightly, /\n  installers-gate:\n(?:.*\n)*?.*nightly-installers-\$\{\{ github\.sha \}\}-\$\{\{ hashFiles\('ci-image\/\*\*', 'rust-toolchain\*', '\.nvmrc'\) \}\}/, 'the gate keys on the commit, the toolchain image and the pinned Rust and Node');
-  assert.match(nightly, /\n  installers-mark:\n(?:.*\n)*?    needs: \[installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall\]/, 'the marker is saved only after every build');
+  assert.match(nightly, /\n  installers-mark:\n(?:.*\n)*?    needs: \[installers-gate, installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall\]\n    if: \$\{\{ github\.event_name == 'schedule' && success\(\) && needs\.installers-gate\.outputs\.run == 'true' \}\}/, 'the marker is saved only after every build, never for a skipped night');
 });
 
 test('the release-verdict action is documented and runs the script', () => {

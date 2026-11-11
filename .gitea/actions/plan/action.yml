@@ -1,5 +1,5 @@
 name: plan
-description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one, a push to main whose commit is tagged is covered by the tag run, and for an app's own workflow (`app`) the change must reach that app (`./dev plan --ci --app`; needs fetch-depth 0)."
+description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one or while a train is in CI (./dev ci schedule-skip), a push to main whose commit is tagged is covered by the tag run, and for an app's own workflow (`app`) the change must reach that app (`./dev plan --ci --app`; needs fetch-depth 0)."
 inputs:
   main-ref:
     description: The default branch ref.
@@ -60,6 +60,16 @@ runs:
         out=$(mktemp)
         GITHUB_OUTPUT="$out" node "${{ github.action_path }}/../../../conformance/ci/plan.mjs"
         run=$(sed -n 's/^run=//p' "$out")
+        # A scheduled run ends early while a train is in CI (./dev ci schedule-skip, the schedule-skip action's command;
+        # ADR 0093 amendment 2026-11-12); it fails open.
+        if [ "$run" = true ] && [ "$EVENT" = schedule ]; then
+          skip_out=$(mktemp)
+          if GITHUB_OUTPUT="$skip_out" bash "${{ github.action_path }}/../../../dev" ci schedule-skip; then
+            [ "$(sed -n 's/^skip=//p' "$skip_out")" = true ] && run=false
+          else
+            echo "::warning::schedule skip: ./dev ci schedule-skip did not run; this scheduled run proceeds (fail open)."
+          fi
+        fi
         if [ "$run" = true ] && [ -n "$APP" ]; then
           run=$(bash "${{ github.action_path }}/../../../dev" plan --ci --app "$APP")
         fi

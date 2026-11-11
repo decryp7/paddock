@@ -9,8 +9,14 @@
 //!   whole job reruns with the reason (ER-27). The filterset names each failed test exactly (`binary_id(=b) & test(=t)`), or its
 //!   whole test binary when the name has characters a filterset would have to escape: never fewer tests than failed.
 //! - a job that failed in any other step (a build, clippy, a doc test, a check, the end-to-end tests) reruns whole.
-//! - vitest: the failed spec files are read and reported (`vitest`), but no ci.yml step takes a file list yet, so such a job
-//!   reruns whole.
+//! - vitest: the failed spec files are read and reported (`vitest`). A job whose only failed step is a vitest step that takes a
+//!   file list ([`VITEST_STEPS`]: Debrief's `frontend`) reruns only those spec files, when the log's `Test Files` summary counts
+//!   exactly as many failed files as it names; no ci.yml step takes a file list yet, so such a ci.yml job reruns whole.
+//!
+//! An app's own workflow (`apps/<app>/paddock.ci.json` `workflow`, today only `debrief.yml`) is planned the same way through
+//! [`SincePlan::app_outputs`]: its jobs are the workflow file's own (an unknown one plans everything), a job that was skipped
+//! because a job it `needs` failed reruns too, matrix legs are read from the job's `name:` template (`end-to-end (shard 2/4)`),
+//! and [`APP_WORKFLOWS`] says which jobs only a full run has.
 //!
 //! The pure core is here ([`nextest_failures`], [`classify`], [`SincePlan`]); [`GiteaRuns`] reads a run through the Gitea API.
 
@@ -28,15 +34,64 @@ fn re(pattern: &str) -> Regex {
     Regex::new(pattern).expect("a valid pattern")
 }
 
-/// The steps of a ci.yml job that run nextest and take a filterset (`matrix.filter`, ci.yml). A job whose failed steps are all
-/// listed here, and whose failures are all read from its log, reruns only its failed tests. `composite`: the step is a composite
-/// action that runs several commands and names each failed one in an `::error::failed (exit N): <command>` line (app-gates), so
-/// every such line must be a nextest run.
-pub const TEST_STEPS: &[(&str, &[&str], bool)] = &[
-    ("crate", &["Tests (workspace, every feature)"], false),
-    ("paddock-dev", &["Tests"], false),
-    ("app", &["Run ./.gitea/actions/app-gates"], true),
+/// The steps of a workflow's job that run nextest and take a filterset (ci.yml: `matrix.filter`; debrief.yml: the plan job's
+/// `<job>_filter` output), as `(workflow, job, steps, composite)`. A job whose failed steps are all listed here, and whose
+/// failures are all read from its log, reruns only its failed tests. `composite`: the step is a composite action that runs
+/// several commands and names each failed one in an `::error::failed (exit N): <command>` line (app-gates), so every such line
+/// must be a nextest run. Debrief's `Memory budget` is `continue-on-error` (it never fails the job, but the API may list it as
+/// failed); the narrowed rerun skips it. Its `No temp folders left behind` check fails when a failed test left its folder
+/// behind (run 7961); the narrowed rerun runs it again, so a leak that is not the failed tests' still fails there.
+pub const TEST_STEPS: &[(&str, &str, &[&str], bool)] = &[
+    ("ci.yml", "crate", &["Tests (workspace, every feature)"], false),
+    ("ci.yml", "paddock-dev", &["Tests"], false),
+    ("ci.yml", "app", &["Run ./.gitea/actions/app-gates"], true),
+    (
+        "debrief.yml",
+        "rust-test",
+        &["Tests (workspace)", "No temp folders left behind", "Memory budget"],
+        false,
+    ),
+    (
+        "debrief.yml",
+        "rust-test-macos",
+        &["Tests (workspace)", "No temp folders left behind"],
+        false,
+    ),
 ];
+
+/// The steps of a workflow's job that run vitest and take a list of spec files (the plan job's `<job>_include` output), as
+/// `(workflow, job, steps)`. A job whose only failed steps are these reruns only the failed spec files.
+pub const VITEST_STEPS: &[(&str, &str, &[&str])] = &[("debrief.yml", "frontend", &["Frontend unit tests"])];
+
+/// An app's own workflow as a rerun of its failures needs it: the jobs only a full run has, and the jobs whose content a full
+/// run changes (Debrief's end-to-end tests add WebKit). A rerun of such a job from a full run must itself be full.
+pub struct AppWorkflow {
+    /// The workflow file (`debrief.yml`).
+    pub file: &'static str,
+    /// The input that makes a manual run full (`bundles`).
+    pub full_input: &'static str,
+    /// Jobs that run only in a full run.
+    pub full_only: &'static [&'static str],
+    /// Jobs that run in every run but test more in a full one.
+    pub full_changes: &'static [&'static str],
+    /// Jobs a manual run never has (a tag's release, a schedule's mark): never added as skipped dependents.
+    pub never_manual: &'static [&'static str],
+}
+
+/// The app workflows a rerun of failures is planned for (`dev plan --ci --app <app>` with `PLAN_SINCE_RUN`).
+pub const APP_WORKFLOWS: &[AppWorkflow] = &[AppWorkflow {
+    file: "debrief.yml",
+    full_input: "bundles",
+    full_only: &["tauri-smoke", "bundle"],
+    full_changes: &["e2e"],
+    never_manual: &["release", "nightly-mark"],
+}];
+
+/// The workflow file of a run's `path` (`ci.yml@refs/heads/main` is `ci.yml`; `ci.yaml` reads as `ci.yml`).
+pub fn workflow_file(path: &str) -> String {
+    let file = path.split('@').next().unwrap_or("");
+    if file == "ci.yaml" { "ci.yml".into() } else { file.to_string() }
+}
 
 /// One failed test as nextest names it: the binary id and the test name.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -115,6 +170,37 @@ pub fn vitest_failed_files(log: &str) -> Vec<String> {
     out
 }
 
+static VITEST_SUMMARY: LazyLock<Regex> = LazyLock::new(|| re(r"^\s*Test Files\s+(?:(\d+) failed)?"));
+static PLAIN_SPEC: LazyLock<Regex> = LazyLock::new(|| re(r"^[A-Za-z0-9_./-]+$"));
+
+/// The failed spec files of the vitest run in a job log, or why the log cannot prove that they are all of them: exactly one
+/// `Test Files` summary, whose failed count equals the files named under `Failed Tests`, every name a plain path.
+pub fn vitest_failures(log: &str) -> Result<Vec<String>, String> {
+    let summaries: Vec<Option<usize>> = log
+        .lines()
+        .filter_map(|l| {
+            VITEST_SUMMARY
+                .captures(&plain(l))
+                .map(|m| m.get(1).and_then(|n| n.as_str().parse().ok()))
+        })
+        .collect();
+    let [failed] = summaries.as_slice() else {
+        return Err(format!("{} vitest summaries in the log, not one", summaries.len()));
+    };
+    let files = vitest_failed_files(log);
+    let failed = failed.unwrap_or(0);
+    if failed == 0 || files.is_empty() {
+        return Err("the step failed but vitest names no failed spec file".into());
+    }
+    if failed != files.len() {
+        return Err(format!("vitest counts {failed} failed files but the log names {}", files.len()));
+    }
+    if let Some(f) = files.iter().find(|f| !PLAIN_SPEC.is_match(f)) {
+        return Err(format!("the spec file {f:?} cannot be passed plainly"));
+    }
+    Ok(files)
+}
+
 /// The workflow job key the runner printed at the top of a job log (`Job: crate`).
 pub fn job_key(log: &str) -> Option<String> {
     static KEY: LazyLock<Regex> = LazyLock::new(|| re(r"^Job: ([A-Za-z0-9_-]+)\s*$"));
@@ -161,8 +247,69 @@ fn key_by_name(name: &str, templates: &[(String, String)]) -> Option<String> {
     (hits.len() == 1).then(|| hits[0].clone())
 }
 
-/// A matrix leg of a failed job, read from its display name (`crate (macos-latest)`, `app dyno (ubuntu-latest, e2e-1)`).
-/// `None` fields are unknown: every leg of that kind reruns.
+/// The `needs:` of each job of a workflow (`needs: [plan, rust-lint]` or `needs: plan`), in file order.
+pub fn job_needs(workflow: &str) -> Vec<(String, Vec<String>)> {
+    static NEEDS: LazyLock<Regex> = LazyLock::new(|| re(r"(?m)^ {4}needs: *(?:\[([^\]]*)\]|([A-Za-z0-9_-]+))\s*$"));
+    workflow_jobs(workflow)
+        .map(|w| {
+            w.jobs
+                .into_iter()
+                .map(|(k, text)| {
+                    let needs = NEEDS
+                        .captures(&text)
+                        .map(|m| {
+                            m.get(1)
+                                .or(m.get(2))
+                                .map_or("", |x| x.as_str())
+                                .split(',')
+                                .map(|n| n.trim().to_string())
+                                .filter(|n| !n.is_empty())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    (k, needs)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The matrix values a display name shows through its `name:` template: `end-to-end (shard ${{ matrix.shard }}/4)` and
+/// `end-to-end (shard 2/4)` give `shard = 2`. Other expressions match anything; empty when the name does not fit.
+pub fn matrix_of(name: &str, template: &str) -> BTreeMap<String, String> {
+    static EXPR: LazyLock<Regex> = LazyLock::new(|| re(r"\$\{\{.*?\}\}"));
+    static MATRIX: LazyLock<Regex> = LazyLock::new(|| re(r"^\$\{\{\s*matrix\.([A-Za-z0-9_]+)\s*\}\}$"));
+    let mut pattern = String::from("^");
+    let mut names: Vec<String> = Vec::new();
+    let mut at = 0;
+    for m in EXPR.find_iter(template) {
+        pattern.push_str(&regex::escape(&template[at..m.start()]));
+        match MATRIX.captures(m.as_str()) {
+            Some(c) if !names.contains(&c[1].to_string()) => {
+                pattern.push_str(&format!("(?P<{}>.*?)", &c[1]));
+                names.push(c[1].to_string());
+            }
+            _ => pattern.push_str(".*?"),
+        }
+        at = m.end();
+    }
+    pattern.push_str(&regex::escape(&template[at..]));
+    pattern.push('$');
+    let Ok(r) = Regex::new(&pattern) else {
+        return BTreeMap::new();
+    };
+    r.captures(name)
+        .map(|c| {
+            names
+                .iter()
+                .filter_map(|n| c.name(n).map(|v| (n.clone(), v.as_str().to_string())))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A matrix leg of a failed job, read from its display name (`crate (macos-latest)`, `app dyno (ubuntu-latest, e2e-1)`,
+/// `end-to-end (shard 2/4)`). `None` fields are unknown: every leg of that kind reruns.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Leg {
     /// The runner label.
@@ -171,6 +318,22 @@ pub struct Leg {
     pub app: Option<String>,
     /// The end-to-end leg of an `app` leg (`e2e-1`), `Some("")` for the main leg.
     pub e2e_leg: Option<String>,
+    /// The shard of a sharded job of an app's workflow (`matrix.shard`).
+    pub shard: Option<String>,
+}
+
+/// The leg of a job of an app's own workflow, from its `name:` template.
+fn app_leg_of(key: &str, name: &str, templates: &[(String, String)]) -> Leg {
+    let matrix = templates
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, t)| matrix_of(name, t))
+        .unwrap_or_default();
+    Leg {
+        os: matrix.get("os").cloned(),
+        shard: matrix.get("shard").cloned(),
+        ..Leg::default()
+    }
 }
 
 fn leg_of(key: &str, name: &str) -> Leg {
@@ -185,6 +348,7 @@ fn leg_of(key: &str, name: &str) -> Leg {
             os: Some(m[2].to_string()),
             app: Some(m[1].to_string()),
             e2e_leg: Some(m.get(3).map_or("", |x| x.as_str()).to_string()),
+            shard: None,
         }),
         _ => Leg::default(),
     }
@@ -202,6 +366,8 @@ pub enum Scope {
         /// The failed tests it selects.
         tests: Vec<FailedTest>,
     },
+    /// Only these vitest spec files (the step's file list).
+    Specs(Vec<String>),
 }
 
 /// A job of a run as the Gitea API lists it.
@@ -266,13 +432,18 @@ pub struct Rerun {
     pub vitest: Vec<String>,
 }
 
-/// Decides what of a failed job reruns. `log` is the job's log or why it could not be read; `ci` says whether the run is of
-/// ci.yml (only its steps are known to take a filter); `templates` are the workflow's `name:` lines.
-pub fn classify(job: &RunJob, log: Result<&str, &str>, ci: bool, templates: &[(String, String)]) -> Rerun {
+/// Decides what of a failed job reruns. `log` is the job's log or why it could not be read; `workflow` is the run's workflow
+/// file (only the steps of [`TEST_STEPS`] and [`VITEST_STEPS`] are known to take a filter); `templates` are the workflow's
+/// `name:` lines.
+pub fn classify(job: &RunJob, log: Result<&str, &str>, workflow: &str, templates: &[(String, String)]) -> Rerun {
     let key = log.ok().and_then(job_key).or_else(|| key_by_name(&job.name, templates));
-    let leg = key.as_deref().map(|k| leg_of(k, &job.name)).unwrap_or_default();
+    let leg = match key.as_deref() {
+        Some(k) if workflow == "ci.yml" => leg_of(k, &job.name),
+        Some(k) => app_leg_of(k, &job.name, templates),
+        None => Leg::default(),
+    };
     let vitest = log.map(vitest_failed_files).unwrap_or_default();
-    let scope = narrow(job, log, ci, key.as_deref()).unwrap_or_else(Scope::Job);
+    let scope = narrow(job, log, workflow, key.as_deref()).unwrap_or_else(Scope::Job);
     Rerun {
         id: job.id,
         name: job.name.clone(),
@@ -283,7 +454,7 @@ pub fn classify(job: &RunJob, log: Result<&str, &str>, ci: bool, templates: &[(S
     }
 }
 
-fn narrow(job: &RunJob, log: Result<&str, &str>, ci: bool, key: Option<&str>) -> Result<Scope, String> {
+fn narrow(job: &RunJob, log: Result<&str, &str>, workflow: &str, key: Option<&str>) -> Result<Scope, String> {
     let log = log.map_err(|e| format!("its log could not be read ({e})"))?;
     if job.conclusion != "failure" {
         return Err(format!(
@@ -292,13 +463,21 @@ fn narrow(job: &RunJob, log: Result<&str, &str>, ci: bool, key: Option<&str>) ->
         ));
     }
     let key = key.ok_or("its workflow job is unknown")?;
-    let entry = TEST_STEPS.iter().find(|(k, _, _)| ci && *k == key);
-    let Some((_, steps, composite)) = entry else {
-        return Err(format!("job {key} has no step that takes a test filter"));
-    };
-    if job.failed_steps.is_empty() {
+    if job.failed_steps.is_empty()
+        && (TEST_STEPS.iter().any(|t| t.0 == workflow && t.1 == key) || VITEST_STEPS.iter().any(|t| t.0 == workflow && t.1 == key))
+    {
         return Err("the run lists no failed step".into());
     }
+    if let Some((_, _, steps)) = VITEST_STEPS.iter().find(|(w, k, _)| *w == workflow && *k == key) {
+        if let Some(s) = job.failed_steps.iter().find(|s| !steps.contains(&s.as_str())) {
+            return Err(format!("step \"{s}\" failed and takes no spec file list"));
+        }
+        return vitest_failures(log).map(Scope::Specs);
+    }
+    let entry = TEST_STEPS.iter().find(|(w, k, _, _)| *w == workflow && *k == key);
+    let Some((_, _, steps, composite)) = entry else {
+        return Err(format!("job {key} has no step that takes a test filter"));
+    };
     if let Some(s) = job.failed_steps.iter().find(|s| !steps.contains(&s.as_str())) {
         return Err(format!("step \"{s}\" failed and takes no test filter"));
     }
@@ -344,6 +523,9 @@ pub struct SincePlan {
     pub not_rerun: usize,
     /// Why everything reruns instead, when the failures cannot be told job by job.
     pub everything: Option<String>,
+    /// Whether the run was a full run of an app's workflow ([`AppWorkflow`]): its event is a schedule or a push, or a job only
+    /// a full run has ran. A rerun of its full-run jobs must be full too.
+    pub full_ran: bool,
 }
 
 impl SincePlan {
@@ -355,24 +537,34 @@ impl SincePlan {
         log: &mut dyn FnMut(u64) -> Result<String, String>,
     ) -> SincePlan {
         let path = run["path"].as_str().unwrap_or("");
-        let workflow = path.split('@').next().unwrap_or("").to_string();
-        let ci = crate::plan_ci::is_ci_yml(path);
+        let workflow = workflow_file(path);
+        let ci = workflow == "ci.yml";
         let mut reruns = Vec::new();
         for j in jobs.iter().filter(|j| j.failed()) {
             let text = log(j.id);
-            reruns.push(classify(j, text.as_deref().map_err(String::as_str), ci, templates));
+            reruns.push(classify(j, text.as_deref().map_err(String::as_str), &workflow, templates));
         }
-        let everything = if !ci {
-            None
-        } else if let Some(r) = reruns.iter().find(|r| r.key.as_deref() == Some("plan")) {
+        let everything = if let Some(r) = reruns.iter().find(|r| r.key.as_deref() == Some("plan")) {
             Some(format!("the plan job failed ({}): nothing after it ran", r.name))
-        } else {
+        } else if ci {
             // A job the plan's outputs cannot gate (unknown, or added after this planner) cannot be rerun on its own.
             reruns
                 .iter()
                 .find(|r| !r.key.as_deref().is_some_and(|k| CI_JOBS.iter().any(|(j, _)| *j == k)))
                 .map(|r| format!("job \"{}\" is not a job of this ci.yml", r.name))
+        } else {
+            // An app's workflow: its jobs are the file's own; one this checkout does not have cannot be gated.
+            reruns
+                .iter()
+                .find(|r| !r.key.as_deref().is_some_and(|k| templates.iter().any(|(j, _)| j == k)))
+                .map(|r| format!("job \"{}\" is not a job of this {workflow}", r.name))
         };
+        let full_ran = APP_WORKFLOWS.iter().find(|a| a.file == workflow).is_some_and(|a| {
+            matches!(run["event"].as_str(), Some("schedule" | "push"))
+                || jobs.iter().any(|j| {
+                    j.conclusion != "skipped" && key_by_name(&j.name, templates).is_some_and(|k| a.full_only.contains(&k.as_str()))
+                })
+        });
         SincePlan {
             run: run["id"].as_u64().unwrap_or(0),
             workflow,
@@ -380,7 +572,99 @@ impl SincePlan {
             not_rerun: jobs.len() - reruns.len(),
             reruns,
             everything,
+            full_ran,
         }
+    }
+
+    /// Adds the jobs that were skipped because a job they `need` failed (Debrief's installers and real-app smoke after a failed
+    /// `rust-lint`): they never ran, so they rerun whole after it. Repeated until nothing is added; the plan job is not a
+    /// reason (its failure plans everything).
+    pub fn add_skipped_dependents(&mut self, jobs: &[RunJob], templates: &[(String, String)], needs: &[(String, Vec<String>)]) {
+        let never: &[&str] = APP_WORKFLOWS
+            .iter()
+            .find(|a| a.file == self.workflow)
+            .map_or(&[], |a| a.never_manual);
+        loop {
+            let failed: BTreeSet<String> = self.reruns.iter().filter_map(|r| r.key.clone()).collect();
+            let mut added = false;
+            for j in jobs.iter().filter(|j| j.conclusion == "skipped") {
+                if self.reruns.iter().any(|r| r.id == j.id) {
+                    continue;
+                }
+                let Some(key) = key_by_name(&j.name, templates).filter(|k| !never.contains(&k.as_str())) else {
+                    continue;
+                };
+                let Some(need) = needs
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .and_then(|(_, n)| n.iter().find(|n| *n != "plan" && failed.contains(*n)))
+                else {
+                    continue;
+                };
+                self.reruns.push(Rerun {
+                    id: j.id,
+                    name: j.name.clone(),
+                    leg: app_leg_of(&key, &j.name, templates),
+                    key: Some(key),
+                    scope: Scope::Job(format!("it did not run: {need}, which it needs, failed")),
+                    vitest: Vec::new(),
+                });
+                added = true;
+            }
+            if !added {
+                break;
+            }
+        }
+        self.not_rerun = jobs.len().saturating_sub(self.reruns.len());
+    }
+
+    /// Whether this rerun must be a full run: the earlier run was full and a job that only a full run has, or that a full run
+    /// changes, reruns.
+    pub fn needs_full(&self) -> bool {
+        APP_WORKFLOWS.iter().find(|a| a.file == self.workflow).is_some_and(|a| {
+            self.full_ran
+                && self.reruns.iter().any(|r| {
+                    r.key
+                        .as_deref()
+                        .is_some_and(|k| a.full_only.contains(&k) || a.full_changes.contains(&k))
+                })
+        })
+    }
+
+    /// An app workflow's plan job outputs for this rerun (only without [`SincePlan::everything`]):
+    ///
+    /// - `rerun_jobs`: the job keys that rerun (each job's `if` reads an empty list as its own name);
+    /// - `<job>_filter`: the nextest filterset of a job narrowed to its failed tests (`rust-test` is `rust_test_filter`);
+    /// - `<job>_include`: the spec files, space separated, of a job narrowed to its failed vitest files;
+    /// - `<job>_shards`: the failed shards of a sharded job as a JSON list, written only when every failed leg's shard is known
+    ///   (otherwise the plan step writes every shard).
+    pub fn app_outputs(&self) -> Vec<(String, String)> {
+        let keys: BTreeSet<&str> = self.reruns.iter().filter_map(|r| r.key.as_deref()).collect();
+        let mut out = vec![("rerun_jobs".to_string(), serde_json::to_string(&keys).unwrap_or_default())];
+        for key in &keys {
+            let runs: Vec<&Rerun> = self.reruns.iter().filter(|r| r.key.as_deref() == Some(key)).collect();
+            let name = key.replace('-', "_");
+            // One filter per job: a job with legs reruns them all with it, so it is narrowed only when it has one leg.
+            if let [one] = runs.as_slice() {
+                match &one.scope {
+                    Scope::Tests { filter, .. } => out.push((format!("{name}_filter"), filter.clone())),
+                    Scope::Specs(files) => out.push((format!("{name}_include"), files.join(" "))),
+                    Scope::Job(_) => {}
+                }
+            }
+            if runs.iter().all(|r| r.leg.shard.is_some()) && runs.iter().any(|r| r.leg.shard.is_some()) {
+                let mut shards: Vec<Value> = Vec::new();
+                for r in &runs {
+                    let s = r.leg.shard.as_deref().unwrap_or("");
+                    let v = s.parse::<u64>().map_or_else(|_| json!(s), |n| json!(n));
+                    if !shards.contains(&v) {
+                        shards.push(v);
+                    }
+                }
+                out.push((format!("{name}_shards"), serde_json::to_string(&shards).unwrap_or_default()));
+            }
+        }
+        out
     }
 
     /// Whether the rerun needs the WebKit legs in the matrix: the WebKit job failed, an app's WebKit leg failed, or an app leg
@@ -422,6 +706,13 @@ impl SincePlan {
                         o.insert("filter".into(), json!(filter));
                         o.insert("tests".into(), json!(tests.iter().map(ToString::to_string).collect::<Vec<_>>()));
                     }
+                    Scope::Specs(files) => {
+                        o.insert("scope".into(), json!("specs"));
+                        o.insert("specs".into(), json!(files));
+                    }
+                }
+                if let Some(shard) = &r.leg.shard {
+                    o.insert("shard".into(), json!(shard));
                 }
                 if !r.vitest.is_empty() {
                     o.insert("vitest".into(), json!(r.vitest));
@@ -434,6 +725,7 @@ impl SincePlan {
             "workflow": self.workflow,
             "head": self.head,
             "everything": self.everything,
+            "fullRan": self.full_ran,
             "jobs": jobs,
             "notRerun": self.not_rerun,
         })
@@ -509,7 +801,7 @@ impl SincePlan {
                 .map(|r| {
                     let filter = match &r.scope {
                         Scope::Tests { filter, .. } => filter.clone(),
-                        Scope::Job(_) => String::new(),
+                        Scope::Job(_) | Scope::Specs(_) => String::new(),
                     };
                     json!({ "os": r.leg.os, "filter": filter })
                 })
@@ -551,6 +843,7 @@ impl SincePlan {
             let what = match &r.scope {
                 Scope::Job(why) => format!("the whole job: {why}"),
                 Scope::Tests { tests, .. } => format!("{} failed test(s) only", tests.len()),
+                Scope::Specs(files) => format!("{} failed spec file(s) only", files.len()),
             };
             lines.push(format!("| {} | {what} |", r.name.replace('|', "/")));
         }
@@ -622,7 +915,8 @@ pub fn since_run(
     let jobs = runs.jobs(id).map_err(|e| format!("the jobs of run {id} could not be read: {e}"))?;
     let path = run["path"].as_str().unwrap_or("");
     let file = path.split('@').next().unwrap_or("");
-    let templates = workflow_text(file).map(|t| name_templates(&t)).unwrap_or_default();
+    let text = workflow_text(file);
+    let templates = text.as_deref().map(name_templates).unwrap_or_default();
     let failed = jobs.iter().filter(|j| j.failed()).count();
     log(&format!("run {id} ({path}): {} jobs, {failed} failed", jobs.len()));
     let started = std::time::Instant::now();
@@ -640,10 +934,27 @@ pub fn since_run(
         "{failed} job logs read and decided in {:.1} s",
         started.elapsed().as_secs_f64()
     ));
+    let mut plan = plan;
+    if plan.everything.is_none() {
+        let before = plan.reruns.len();
+        plan.add_skipped_dependents(&jobs, &templates, &text.as_deref().map(job_needs).unwrap_or_default());
+        if plan.reruns.len() > before {
+            log(&format!(
+                "{} skipped job(s) rerun after the jobs they need",
+                plan.reruns.len() - before
+            ));
+        }
+    }
     for r in &plan.reruns {
         match &r.scope {
             Scope::Job(why) => log(&format!("{}: the whole job reruns: {why}", r.name)),
             Scope::Tests { tests, filter } => log(&format!("{}: {} failed test(s) rerun: {filter}", r.name, tests.len())),
+            Scope::Specs(files) => log(&format!(
+                "{}: {} failed spec file(s) rerun: {}",
+                r.name,
+                files.len(),
+                files.join(" ")
+            )),
         }
     }
     Ok(plan)
@@ -781,7 +1092,7 @@ mod tests {
 
     #[test]
     fn a_job_failed_only_in_its_test_step_reruns_its_failed_tests_and_any_other_failure_the_whole_job() {
-        let mac = classify(&job(33271), Ok(CRATE_MACOS), true, &templates());
+        let mac = classify(&job(33271), Ok(CRATE_MACOS), "ci.yml", &templates());
         assert_eq!(mac.key.as_deref(), Some("crate"));
         assert_eq!(mac.leg.os.as_deref(), Some("macos-latest"));
         assert_eq!(
@@ -792,34 +1103,37 @@ mod tests {
             }
         );
         // Windows also failed in the features-off step, whose first failed command stopped the ones after it: whole job.
-        let win = classify(&job(33273), Ok(CRATE_WINDOWS), true, &templates());
+        let win = classify(&job(33273), Ok(CRATE_WINDOWS), "ci.yml", &templates());
         assert_eq!(
             win.scope,
             Scope::Job("step \"Tests with the optional features off\" failed and takes no test filter".into())
         );
         // app-gates: only nextest failed, so the leg's failed tests.
-        let dyno = classify(&job(33275), Ok(APP_DYNO), true, &templates());
+        let dyno = classify(&job(33275), Ok(APP_DYNO), "ci.yml", &templates());
         assert_eq!(
             dyno.leg,
             Leg {
                 os: Some("macos-latest".into()),
                 app: Some("dyno".into()),
-                e2e_leg: Some(String::new())
+                e2e_leg: Some(String::new()),
+                shard: None,
             }
         );
         assert!(matches!(dyno.scope, Scope::Tests { ref tests, .. } if tests.len() == 1));
         // Another command of app-gates failed too: whole leg.
         let doc = format!("{APP_DYNO}2026-11-09T07:41:30.0000000Z ::error::failed (exit 101): cargo test --workspace --doc\n");
-        assert!(matches!(classify(&job(33275), Ok(&doc), true, &templates()).scope, Scope::Job(ref w) if w.contains("other than nextest")));
+        assert!(
+            matches!(classify(&job(33275), Ok(&doc), "ci.yml", &templates()).scope, Scope::Job(ref w) if w.contains("other than nextest"))
+        );
         // A job without a test step (the ui job's node --test scripts), an unreadable log, a run of another workflow.
-        let ui = classify(&job(33261), Ok(UI_SCRIPTS), true, &templates());
+        let ui = classify(&job(33261), Ok(UI_SCRIPTS), "ci.yml", &templates());
         assert_eq!(ui.key.as_deref(), Some("ui"));
         assert_eq!(ui.scope, Scope::Job("job ui has no step that takes a test filter".into()));
-        let lost = classify(&job(33271), Err("HTTP 404"), true, &templates());
+        let lost = classify(&job(33271), Err("HTTP 404"), "ci.yml", &templates());
         assert_eq!(lost.key.as_deref(), Some("crate"), "the name tells the job when the log is missing");
         assert_eq!(lost.scope, Scope::Job("its log could not be read (HTTP 404)".into()));
         assert!(matches!(
-            classify(&job(33271), Ok(CRATE_MACOS), false, &templates()).scope,
+            classify(&job(33271), Ok(CRATE_MACOS), "debrief.yml", &templates()).scope,
             Scope::Job(_)
         ));
     }
@@ -966,6 +1280,7 @@ mod tests {
             reruns,
             not_rerun: 0,
             everything: None,
+            full_ran: false,
         }
     }
 
@@ -975,6 +1290,7 @@ mod tests {
             os: Some("ubuntu-latest".into()),
             app: Some("x".into()),
             e2e_leg: e2e.map(str::to_string),
+            shard: None,
         };
         assert!(plan_of(vec![rerun("e2e-webkit", Leg::default())]).needs_webkit());
         assert!(plan_of(vec![rerun("app", app(Some("e2e-webkit")))]).needs_webkit());
@@ -989,15 +1305,17 @@ mod tests {
     fn app_gates_is_narrowed_only_when_the_rust_step_and_the_composite_are_its_only_failures() {
         // A third failure (notices.sh or the cargo-about install, which print no ::error::) keeps the whole leg.
         let third = format!("{APP_DYNO}2026-11-09T07:46:00.0000000Z ##[error]Process completed with exit code 1.\n");
-        assert!(matches!(classify(&job(33275), Ok(&third), true, &templates()).scope, Scope::Job(ref w) if w.contains("3 failed steps")));
+        assert!(
+            matches!(classify(&job(33275), Ok(&third), "ci.yml", &templates()).scope, Scope::Job(ref w) if w.contains("3 failed steps"))
+        );
         let one: String = APP_DYNO
             .lines()
             .filter(|l| !l.contains("07:45:57"))
             .map(|l| format!("{l}\n"))
             .collect();
-        assert!(matches!(classify(&job(33275), Ok(&one), true, &templates()).scope, Scope::Job(ref w) if w.contains("1 failed steps")));
+        assert!(matches!(classify(&job(33275), Ok(&one), "ci.yml", &templates()).scope, Scope::Job(ref w) if w.contains("1 failed steps")));
         assert!(matches!(
-            classify(&job(33275), Ok(APP_DYNO), true, &templates()).scope,
+            classify(&job(33275), Ok(APP_DYNO), "ci.yml", &templates()).scope,
             Scope::Tests { .. }
         ));
     }
@@ -1037,12 +1355,14 @@ mod tests {
                     os: Some("freebsd-latest".into()),
                     app: Some("dyno".into()),
                     e2e_leg: Some(String::new()),
+                    shard: None,
                 },
                 scope: Scope::Job("x".into()),
                 vitest: vec![],
             }],
             not_rerun: 0,
             everything: None,
+            full_ran: false,
         };
         let mut warned = Vec::new();
         let out: BTreeMap<String, String> = plan
@@ -1067,12 +1387,18 @@ mod tests {
         }];
         let plan = SincePlan::new(&run_7821(), &failed_plan, &templates(), &mut |_| Err("gone".into()));
         assert!(plan.everything.unwrap().contains("the plan job failed"));
+        // A run of another workflow: its jobs are that file's own, so ci.yml's job names are unknown there (everything), and
+        // only the steps the tables list for that workflow take a filter.
         let other = json!({"id": 5, "status": "completed", "path": "debrief.yml@refs/heads/main", "head_sha": "h"});
         let plan = SincePlan::new(&other, &jobs(), &[], &mut logs);
-        assert_eq!(plan.everything, None);
+        assert!(
+            plan.everything
+                .as_deref()
+                .is_some_and(|e| e.contains("is not a job of this debrief.yml"))
+        );
         assert!(
             plan.reruns.iter().all(|r| matches!(r.scope, Scope::Job(_))),
-            "only ci.yml's steps are known to take a filter"
+            "only the listed steps of a workflow take a filter"
         );
         let v = SincePlan::new(&run_7821(), &jobs(), &templates(), &mut logs).to_json();
         assert_eq!(v["run"], 7821);
@@ -1086,6 +1412,163 @@ mod tests {
         );
         let ui = v["jobs"].as_array().unwrap().iter().find(|j| j["id"] == 33261).unwrap();
         assert_eq!(ui["scope"], "job");
+    }
+
+    const DEBRIEF_JOBS: &str = include_str!("../tests/since-run/debrief-run-jobs.json");
+    const DEBRIEF_MACOS: &str = include_str!("../tests/since-run/debrief-rust-test-macos.log");
+
+    /// Debrief's jobs as debrief.yml names them and what they need (tests/it/tree.rs checks the real file has these).
+    const DEBRIEF_YML: &str = "name: debrief\non:\n  push:\njobs:\n  plan:\n    name: plan\n  rust-lint:\n    name: rust format + clippy\n    needs: [plan]\n  rust-test:\n    name: rust tests\n    needs: [plan]\n  rust-test-macos:\n    name: rust tests (macOS)\n    needs: [plan]\n  plugin-sdk:\n    name: plugin SDK templates\n    needs: [plan]\n  licences:\n    name: licences, notices + commits\n    needs: [plan]\n  frontend:\n    name: frontend build, lint + unit tests\n    needs: [plan]\n  e2e:\n    name: end-to-end (shard ${{ matrix.shard }}/4)\n    needs: [plan]\n  tauri-smoke:\n    name: real-app smoke (${{ matrix.os }})\n    needs: [plan, rust-lint]\n  bundle:\n    name: bundle (${{ matrix.os }})\n    needs: [plan, rust-lint]\n  keychain:\n    name: C99 (no Keychain in a macOS build)\n    needs: [plan]\n  release:\n    name: release\n    needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, keychain]\n  nightly-mark:\n    name: nightly-mark\n    needs: [rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, tauri-smoke, bundle]\n";
+
+    fn debrief_jobs() -> Vec<RunJob> {
+        RunJob::list(&serde_json::from_str(DEBRIEF_JOBS).unwrap())
+    }
+
+    fn debrief_run(event: &str) -> Value {
+        json!({"id": 7961, "status": "completed", "event": event, "path": "debrief.yml@refs/heads/train/2026-11-11-5", "head_sha": "d5"})
+    }
+
+    /// The fixture with some jobs changed: `(id, conclusion, failed steps)`.
+    fn debrief_with(changes: &[(u64, &str, &[&str])]) -> Vec<RunJob> {
+        let mut jobs = debrief_jobs();
+        for (id, conclusion, steps) in changes {
+            let j = jobs.iter_mut().find(|j| j.id == *id).unwrap();
+            j.conclusion = conclusion.to_string();
+            j.failed_steps = steps.iter().map(|s| s.to_string()).collect();
+        }
+        jobs
+    }
+
+    fn debrief_logs(id: u64) -> Result<String, String> {
+        Ok(match id {
+            41004 => DEBRIEF_MACOS,
+            41007 => VITEST,
+            _ => return Err("not in the fixture".into()),
+        }
+        .to_string())
+    }
+
+    fn plan_debrief(event: &str, jobs: &[RunJob]) -> SincePlan {
+        let templates = name_templates(DEBRIEF_YML);
+        let mut plan = SincePlan::new(&debrief_run(event), jobs, &templates, &mut debrief_logs);
+        plan.add_skipped_dependents(jobs, &templates, &job_needs(DEBRIEF_YML));
+        plan
+    }
+
+    #[test]
+    fn a_debrief_run_that_failed_only_in_rust_tests_on_macos_reruns_that_job_and_its_failed_tests_only() {
+        // Run 7961's shape: 20 jobs, only `rust tests (macOS)` failed, in its nextest step.
+        let jobs = debrief_jobs();
+        assert_eq!(jobs.len(), 20);
+        let plan = plan_debrief("workflow_dispatch", &jobs);
+        assert_eq!(plan.everything, None);
+        assert_eq!(plan.reruns.len(), 1);
+        assert_eq!(plan.not_rerun, 19);
+        assert!(!plan.full_ran && !plan.needs_full());
+        let out: BTreeMap<String, String> = plan.app_outputs().into_iter().collect();
+        assert_eq!(out["rerun_jobs"], r#"["rust-test-macos"]"#);
+        assert_eq!(
+            out["rust_test_macos_filter"],
+            "(binary_id(=debrief-app) & test(=browser::launch::tests::the_first_start_is_paid_before_the_guard)) | (binary_id(=debrief-store-duck::it) & test(=worker::imports_and_queries_within_the_budgets))"
+        );
+        assert_eq!(out.len(), 2, "no other job, shard or file list: {out:?}");
+        assert!(plan.summary().contains("| rust tests (macOS) | 2 failed test(s) only |"));
+    }
+
+    #[test]
+    fn a_failed_shard_reruns_alone_and_failed_unit_tests_rerun_only_their_spec_files() {
+        let jobs = debrief_with(&[
+            (41004, "success", &[]),
+            (41010, "failure", &["Frontend end-to-end tests"]),
+            (41007, "failure", &["Frontend unit tests"]),
+        ]);
+        let plan = plan_debrief("workflow_dispatch", &jobs);
+        let out: BTreeMap<String, String> = plan.app_outputs().into_iter().collect();
+        assert_eq!(out["rerun_jobs"], r#"["e2e","frontend"]"#);
+        assert_eq!(out["e2e_shards"], "[3]", "only shard 3 of 4");
+        assert!(!out.contains_key("e2e_filter"), "Playwright reruns the whole shard");
+        assert_eq!(
+            out["frontend_include"],
+            "src/app/analysis/outliers-view.spec.ts src/app/watched/watched-folders.spec.ts"
+        );
+        // Another step of the frontend job failed too: the whole job.
+        let jobs = debrief_with(&[(41004, "success", &[]), (41007, "failure", &["Lint", "Frontend unit tests"])]);
+        let out: BTreeMap<String, String> = plan_debrief("workflow_dispatch", &jobs).app_outputs().into_iter().collect();
+        assert_eq!(out["rerun_jobs"], r#"["frontend"]"#);
+        assert!(!out.contains_key("frontend_include"));
+    }
+
+    #[test]
+    fn a_full_runs_failed_lint_reruns_the_jobs_it_skipped_and_asks_for_a_full_rerun() {
+        let mut jobs = debrief_with(&[(41004, "success", &[]), (41002, "failure", &["Clippy (workspace)"])]);
+        let plan = plan_debrief("schedule", &jobs);
+        assert!(plan.full_ran);
+        let out: BTreeMap<String, String> = plan.app_outputs().into_iter().collect();
+        assert_eq!(out["rerun_jobs"], r#"["bundle","rust-lint","tauri-smoke"]"#);
+        assert!(!out.contains_key("tauri_smoke_shards"));
+        assert!(plan.needs_full(), "the installers and the real-app smoke run only in a full run");
+        let smoke = plan.reruns.iter().find(|r| r.key.as_deref() == Some("tauri-smoke")).unwrap();
+        assert_eq!(smoke.scope, Scope::Job("it did not run: rust-lint, which it needs, failed".into()));
+        assert_eq!(smoke.leg.os.as_deref(), Some("ubuntu-latest"));
+        assert_eq!(plan.not_rerun, 13);
+        // A manual run is full when a full-run job ran.
+        jobs.iter_mut().find(|j| j.id == 41014).unwrap().conclusion = "success".into();
+        assert!(plan_debrief("workflow_dispatch", &jobs).full_ran);
+        // The release (a tag's) and the nightly mark (a schedule's) need the failed job too, but a manual run never has them.
+        assert!(
+            !plan
+                .reruns
+                .iter()
+                .any(|r| matches!(r.key.as_deref(), Some("plan" | "release" | "nightly-mark")))
+        );
+    }
+
+    #[test]
+    fn a_failed_plan_job_or_an_unknown_job_of_an_app_workflow_plans_everything() {
+        let jobs = debrief_with(&[(41001, "failure", &["Decide"])]);
+        assert!(
+            plan_debrief("workflow_dispatch", &jobs)
+                .everything
+                .unwrap()
+                .contains("the plan job failed")
+        );
+        let mut jobs = debrief_jobs();
+        jobs.push(RunJob {
+            id: 9,
+            name: "a job added later".into(),
+            conclusion: "failure".into(),
+            failed_steps: vec!["x".into()],
+        });
+        assert!(
+            plan_debrief("workflow_dispatch", &jobs)
+                .everything
+                .unwrap()
+                .contains("is not a job of this debrief.yml")
+        );
+    }
+
+    #[test]
+    fn vitest_failures_are_counted_against_the_summary_and_the_matrix_is_read_from_the_name() {
+        assert_eq!(vitest_failures(VITEST).unwrap().len(), 2);
+        let short = VITEST.replace("src/app/watched/watched-folders.spec.ts\u{1b}[2m >", "x");
+        assert!(
+            vitest_failures(&short)
+                .unwrap_err()
+                .contains("counts 2 failed files but the log names 1")
+        );
+        assert!(vitest_failures("nothing").unwrap_err().contains("0 vitest summaries"));
+        let shard = matrix_of("end-to-end (shard 2/4)", "end-to-end (shard ${{ matrix.shard }}/4)");
+        assert_eq!(shard.get("shard").map(String::as_str), Some("2"));
+        let both = matrix_of(
+            "app dyno (ubuntu-latest, e2e-1)",
+            "app ${{ matrix.app }} (${{ matrix.os }}${{ matrix.e2e_leg != '' && format(', {0}', matrix.e2e_leg) || '' }})",
+        );
+        assert_eq!(both.get("app").map(String::as_str), Some("dyno"));
+        assert!(matrix_of("other", "end-to-end (shard ${{ matrix.shard }}/4)").is_empty());
+        assert_eq!(
+            job_needs(DEBRIEF_YML).into_iter().find(|(k, _)| k == "bundle").unwrap().1,
+            ["plan", "rust-lint"]
+        );
     }
 
     struct Fake {

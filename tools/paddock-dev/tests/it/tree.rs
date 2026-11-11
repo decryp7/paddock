@@ -815,6 +815,7 @@ fn since_outputs() -> Vec<String> {
         reruns,
         not_rerun: 0,
         everything: None,
+        full_ran: false,
     };
     plan.ci_outputs(&[], &mut |_| {}).into_iter().map(|(k, _)| k).collect()
 }
@@ -893,4 +894,116 @@ fn ci_yml_passes_every_field_of_a_matrix_leg_to_app_gates() {
             "ci.yml passes matrix.tests_only"
         );
     }
+}
+
+/// A rerun of a debrief.yml run's failures (its `since_run` input): the planner can split the file into jobs and read their
+/// names and needs, every job but the plan and the tag-only and schedule-only ones asks `rerun_jobs` for itself, the plan job
+/// declares every output the planner writes, and the steps the planner narrows are the file's.
+#[test]
+fn debrief_yml_takes_a_rerun_of_its_failures() {
+    use paddock_dev::plan_since::{APP_WORKFLOWS, TEST_STEPS, VITEST_STEPS, job_needs, name_templates};
+    let text = std::fs::read_to_string(root().join(".gitea/workflows/debrief.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
+    let wf = paddock_dev::plan_gitea::workflow_jobs(&text).expect("debrief.yml splits into jobs (no YAML-anchor look-alikes)");
+    let templates = name_templates(&text);
+    let needs = job_needs(&text);
+    let app = APP_WORKFLOWS.iter().find(|a| a.file == "debrief.yml").unwrap();
+    for (key, body) in &wf.jobs {
+        assert!(templates.iter().any(|(k, _)| k == key), "{key} has a name");
+        if key == "plan" || app.never_manual.contains(&key.as_str()) {
+            continue;
+        }
+        let gate = format!("contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"{key}\"]'), '{key}')");
+        let cond = body
+            .lines()
+            .find(|l| l.starts_with("    if: "))
+            .unwrap_or_else(|| panic!("job {key} has no if"));
+        assert!(cond.contains(&gate), "job {key}: its if asks rerun_jobs ({gate})");
+        assert!(
+            needs.iter().any(|(k, n)| k == key && n.iter().any(|x| x == "plan")),
+            "job {key} needs the plan"
+        );
+    }
+    for k in app.full_only.iter().chain(app.full_changes).chain(app.never_manual) {
+        assert!(
+            wf.jobs.iter().any(|(j, _)| j == k),
+            "APP_WORKFLOWS names {k}, which debrief.yml does not have"
+        );
+    }
+    let plan = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
+    for out in [
+        "rerun_jobs",
+        "rust_test_filter",
+        "rust_test_macos_filter",
+        "frontend_include",
+        "e2e_shards",
+    ] {
+        assert!(
+            plan.contains(&format!("      {out}: ${{{{ steps.plan.outputs.{out} }}}}")),
+            "plan output {out}"
+        );
+    }
+    assert!(plan.contains("PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}"));
+    assert!(
+        plan.contains("e2e_shards=[1,2,3,4]"),
+        "the plan step writes every shard when no rerun names some"
+    );
+    assert!(text.contains("shard: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}"));
+    for (w, job, steps, _) in TEST_STEPS.iter().filter(|t| t.0 == "debrief.yml") {
+        let body = &wf.jobs.iter().find(|(k, _)| k == job).unwrap_or_else(|| panic!("{w} {job}")).1;
+        for s in *steps {
+            assert!(body.contains(&format!("- name: {s}\n")), "{job} has the step {s}");
+        }
+        let output = format!("needs.plan.outputs.{}_filter", job.replace('-', "_"));
+        assert!(
+            body.contains(&format!("RERUN_FILTER: ${{{{ {output} }}}}")),
+            "{job} passes its filter"
+        );
+    }
+    for (_, job, steps) in VITEST_STEPS.iter().filter(|t| t.0 == "debrief.yml") {
+        let body = &wf.jobs.iter().find(|(k, _)| k == job).unwrap().1;
+        for s in *steps {
+            assert!(body.contains(&format!("- name: {s}\n")), "{job} has the step {s}");
+        }
+        assert!(body.contains(&format!(
+            "RERUN_INCLUDE: ${{{{ needs.plan.outputs.{}_include }}}}",
+            job.replace('-', "_")
+        )));
+    }
+}
+
+/// Every scheduled workflow asks whether a train is in CI before it runs anything (the schedule-skip action, or the plan
+/// action, which runs the same command), and no green mark is written for a run that was skipped.
+#[test]
+fn every_scheduled_workflow_skips_while_a_train_is_in_ci_and_never_marks_a_skipped_run() {
+    let dir = root().join(".gitea/workflows");
+    let mut scheduled = 0;
+    for e in std::fs::read_dir(&dir).unwrap() {
+        let path = e.unwrap().path();
+        let text = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
+        if !text.contains("\n  schedule:\n") {
+            continue;
+        }
+        scheduled += 1;
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        assert!(
+            text.contains("uses: ./.gitea/actions/schedule-skip") || text.contains("uses: ./.gitea/actions/plan\n"),
+            "{name} does not ask whether a train is in CI"
+        );
+        for line in text
+            .lines()
+            .filter(|l| l.starts_with("    if: ") && l.contains("success()") && l.contains("schedule"))
+        {
+            assert!(
+                line.contains(".outputs.run == 'true'"),
+                "{name}: a mark job ({line}) must also ask that the run was not skipped"
+            );
+        }
+    }
+    assert!(scheduled >= 9, "the scheduled workflows were found ({scheduled})");
+    let plan = std::fs::read_to_string(root().join(".gitea/actions/plan/action.yml")).unwrap();
+    assert!(plan.contains("ci schedule-skip"));
+    let action = std::fs::read_to_string(root().join(".gitea/actions/schedule-skip/action.yml")).unwrap();
+    assert!(action.contains("ci schedule-skip") && action.contains("fail open"));
 }
