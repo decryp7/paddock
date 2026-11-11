@@ -123,21 +123,22 @@ panel('c4-3-server-edges', {
 const SUBU = 'C4 · Level 3 — Components of the Angular UI';
 const FP = 'features/';
 panel('c4-3-ui-features', {
-  title: 'Angular UI — screens', kind: SUBU, group: 'Features [standalone components, OnPush, one page each]', cols: 4, rows: 3,
-  desc: 'Each screen binds to its own SignalStore and shows what the server computes; none re-implements a domain rule. The stores are in the next diagram.',
+  title: 'Angular UI — screens', kind: SUBU, group: 'Features [standalone components, OnPush, one page each, on the Paddock app shell]', cols: 4, rows: 3,
+  desc: 'The shell (shell/contributions.ts) lists the pages, menus, Settings pages and dialogs; each screen binds to its own SignalStore and shows what the server computes. None re-implements a domain rule. The stores are in the next diagram.',
   legend: [{ kind: 'ui', label: 'Screen' }],
   nodes: [
-    ['dash', 0, 0, 'dashboard', `${FP}dashboard`, 'Stat tiles, loaded models with idle countdown, queue, pairing card, events feed, usage card.', { role: 'ui' }],
+    ['dash', 0, 0, 'dashboard', `${FP}dashboard · usage`, 'Stat tiles, loaded models with idle countdown, queue, pairing card, events feed, usage card.', { role: 'ui' }],
     ['models', 1, 0, 'models', `${FP}models`, 'Library, Hugging Face discover with the fit check, presets tab, slots panel with the fit table, build menu per model.', { role: 'ui' }],
     ['engines', 2, 0, 'engines', `${FP}engines`, 'Builds, install with progress, self-test, version pin, roll back, features per build (supported, needs bNNNN)', { role: 'ui' }],
     ['apps', 3, 0, 'apps', `${FP}apps`, 'Apps and keys, pairing approval, permissions and limits, per-app usage over time, key shown once.', { role: 'ui' }],
     ['req', 0, 1, 'requests', `${FP}requests`, 'Recent requests with timing, the chosen model and alias; prompts only on demand.', { role: 'ui' }],
-    ['play', 1, 1, 'playground', `${FP}playground`, 'Chat with a local model, streamed through the management API.', { role: 'ui' }],
+    ['play', 1, 1, 'playground', `${FP}playground`, 'Compare tab, and the Chat tab (behind the chat build switch): attachments, pictures, saved chats, tools from connected apps.', { role: 'ui' }],
     ['bench', 2, 1, 'benchmarks', `${FP}benchmarks`, 'Tokens per second and time to first token per model.', { role: 'ui' }],
-    ['set', 3, 1, 'settings', `${FP}settings`, 'General, server, memory presets and idle release, network, privacy.', { role: 'ui' }],
-    ['tray', 0, 2, 'tray', `${FP}tray`, 'Compact view for the tray and menu bar.', { role: 'ui' }],
-    ['usage', 1, 2, 'usage', `${FP}usage`, 'Usage card (24 h, 7 d, 30 d) and the per-app view: tokens, requests, attributed peak memory, limit statuses.', { role: 'ui' }],
-    ['upd', 2, 2, 'updates', `${FP}updates`, 'Update banner: Get it (confirm host and size), Dismiss, Remind me in a week; check status.', { role: 'ui' }],
+    ['set', 3, 1, 'settings', `${FP}settings · connected-apps`, 'The shell’s Settings window with Pitwall’s pages: Pitwall, Connected apps, Chats, Tray popup, Logging.', { role: 'ui' }],
+    ['tray', 0, 2, 'tray', `${FP}tray`, 'The popover (#/tray, its own small bootstrap) opened by the native tray: memory, throughput, loaded models, Pause, Free memory.', { role: 'ui' }],
+    ['svc', 1, 2, 'service · jobs', `${FP}service · ${FP}jobs`, 'Background service panel (install, Repair, Remove) and the jobs behind long work, with phases, Cancel and Stop waiting.', { role: 'ui' }],
+    ['quit', 2, 2, 'quit', `${FP}quit`, 'The “When you quit Pitwall” question, also reached from the menu bar and the tray.', { role: 'ui' }],
+    ['upd', 3, 2, 'updates', `${FP}updates`, 'Update banner; About, Updates and What’s new come from the shared updater.', { role: 'ui' }],
   ],
   links: [],
 });
@@ -149,7 +150,7 @@ panel('c4-3-ui-state', {
   nodes: [
     ['stores', 0, 0, 'Feature stores', 'one SignalStore per page', 'Load through the backend; keep loading, error and Retry state; expose signals.', { role: 'ui' }],
     ['live', 0, 1, 'LiveStore', 'core/live.store · live-reducer', 'Applies pushed updates (memory, models, queue, throughput, pairing) so tiles move without polling.', { role: 'ui' }],
-    ['shared', 3, 1, 'Shared UI', 'tokens · charts · icons', 'Design tokens (dark, light), ECharts wrapper, own SVG icons, native-feel rules, toasts.', { role: 'ui' }],
+    ['shared', 3, 1, 'Shell and shared UI', 'paddock-ui · tokens · charts', 'The Paddock shell (pages frame, menus, dialogs), design tokens (dark, light), ECharts wrapper, own SVG icons, toasts.', { role: 'ui' }],
     ['be', 1, 0, 'PitwallBackend', 'interface + BACKEND token', 'One method per management call and a live feed; api.types.ts is the wire contract that pitwall_core::mgmt mirrors.', { role: 'ui', span: 2 }],
     ['tauri', 2, 0, 'TauriBackend', 'core/tauri-backend', 'Invokes the shell’s commands and subscribes to its live event. The only code that calls Tauri.', { role: 'ui' }],
     ['mock', 2, 1, 'MockBackend', 'browser development and tests only', 'Plausible data; never the reference for behaviour.', { role: 'ui' }],
