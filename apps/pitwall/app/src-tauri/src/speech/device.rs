@@ -38,48 +38,57 @@ impl Capture for Unsupported {
     }
 }
 
-/// Integer samples as `f32` in ±1: signed by their full scale, unsigned around their midpoint.
+/// Integer samples as `f32` in ±1: signed by their full scale, unsigned around their midpoint. Used by the adapters, which
+/// exist on macOS until slice 3 builds Windows and Linux.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) trait ToF32: Copy {
     /// The sample as a float in ±1.
     fn to_f32(self) -> f32;
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ToF32 for f32 {
     fn to_f32(self) -> f32 {
         self
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ToF32 for f64 {
     fn to_f32(self) -> f32 {
         self as f32
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ToF32 for i8 {
     fn to_f32(self) -> f32 {
         f32::from(self) / 128.0
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ToF32 for i16 {
     fn to_f32(self) -> f32 {
         f32::from(self) / 32_768.0
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ToF32 for i32 {
     fn to_f32(self) -> f32 {
         (f64::from(self) / 2_147_483_648.0) as f32
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ToF32 for u8 {
     fn to_f32(self) -> f32 {
         (f32::from(self) - 128.0) / 128.0
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl ToF32 for u16 {
     fn to_f32(self) -> f32 {
         (f32::from(self) - 32_768.0) / 32_768.0
@@ -87,6 +96,7 @@ impl ToF32 for u16 {
 }
 
 /// Converts one callback's samples into `scratch` (reused, so the audio thread does not allocate for it) and hands them over.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn hand_over<T: ToF32>(frames: &Frames, data: &[T], scratch: &mut Vec<f32>) {
     scratch.clear();
     scratch.extend(data.iter().map(|s| s.to_f32()));
