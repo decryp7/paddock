@@ -9,6 +9,27 @@
   `paddock-proc`'s start judge in §4.4; applies ADR 0070 (no built-in AI engine) and ADR 0062's trim (no tee); adds
   §14.13 (the restored scope, a stub), §5.10 (`debrief.sniff.v1`) and §17.1 (common practice and cost); four questions
   for the user are open in §17.2 (Q-U1 to Q-U4). Sections not named in §17.3's list are unchanged.
+- **Revision 7 (2026-11-12, `docs/debrief-1-2-restored-scope` from `origin/docs/debrief-1-2-api-landing` `765346486`):**
+  applies the user's answers of 2026-11-12 to Q-U1 (c), Q-U2 (b2), Q-U3 (b) and Q-U4 (a), and replaces §14.13's stub with
+  the design of the restored scope (investigation-folder features, ADR 0068's checks beyond WP-1: 25 packages, 116.5 raw).
+  Q-U5 (the cheaper options, ER-37) is open. What changed: §17.4. Heads read for revision 7, re-read right before its
+  commit (ADR 0091's block):
+
+```evidence-heads
+read: 2026-11-12 (revision 7)
+origin/docs/debrief-1-2-api-landing 765346486
+origin/main e2a318345
+origin/train/2026-11-11-5 607bb7928
+origin/debrief/p0-idle a0fd29185
+origin/debrief/1.2-int 852b35ac0
+```
+
+  Source read for revision 7 (on `765346486`, this branch's base): `apps/debrief/crates/debrief-core/src/report/`,
+  `debrief-ai/src/assistant/{citations,incident}.rs`, `debrief-notes/src/anchor.rs`, `debrief-core/src/{threads,spans/mod}.rs`,
+  `app/src-tauri/src/{lib,investigate/incident}.rs`, `app/src/app/{dumps,share,investigate}/*-backend.ts`,
+  `crates/paddock-pitwall/src/{lib,client,model,request}.rs`; on `origin/main` `e2a318345`: `crates/paddock-proc/src/lib.rs`,
+  `crates/paddock-packs/src/lib.rs` and the shell's `define*` exports under `ui/projects/paddock-ui`; ADRs 0067 and 0068
+  as landed on this branch.
 - Scope, by the user's decision of 2026-11-07 (plan §10, "full foundation in 1.2, then one function per release"):
   every package of the plan that §10.3 does not move out has its API here. Revision 2 (same day) extends revision 1,
   which had wrongly limited itself to a narrower foundation, to that scope; §3 to §6 are unchanged.
@@ -91,10 +112,11 @@ tray popup, Y9's small items, Y13 (format gaps, PML, batch queries), Y14's R5 UI
 redesign). §14.12 names the foundation type each of them will build on, so that nothing in 1.2 has to change when they
 come.
 
-**Back in 1.2 by the user's decision of 2026-11-11, not designed yet** (§14.13, a stub): the investigation-folder
-features plan §10.3 had moved out (citations, report blocks, the thread/sequence view, Pitwall report drafting) and ADR
-0068's checks other than WP-1 (crash, hang, memory, .NET managed state). Each is designed before its first package
-starts, on the foundation types §14.13 names; §17.2 Q-U4 asks how.
+**Back in 1.2 by the user's decision of 2026-11-11, designed in §14.13 (revision 7; the user chose Q-U4 (a) on
+2026-11-12):** the investigation-folder features plan §10.3 had moved out (the time shapes `+h:mm` and spaced dates,
+citations, report blocks, the thread/sequence view, Pitwall report drafting, and the assessment's two small items) and
+ADR 0068's checks other than WP-1 (crash, hang, memory, .NET managed state). They are 116.5 raw days in 25 packages
+(§14.13.8), built on the foundation types with no change to §2 to §13 beyond the user's answers of 2026-11-12 (§17.2).
 
 **Where each part of 1.2 is designed:**
 
@@ -117,7 +139,7 @@ starts, on the foundation types §14.13 names; §17.2 Q-U4 asks how.
 | Family obligations (X1 to X11, Y6, Y7, Y8, Y16, A1's checks) | §14.10 |
 | Rule 47 in Debrief's views (Y10) | §14.11 |
 | What remains of Y9 and Y14 (the job service on the executor, R0 and R3) | §9.5, §14.10 |
-| Restored to 1.2 on 2026-11-11: investigation-folder features, ADR 0068's checks other than WP-1 (stub only) | §14.13 |
+| Restored to 1.2 on 2026-11-11: investigation-folder features (IF-1 to IF-6, C2), ADR 0068's checks other than WP-1 (WP-0, WP-2 to WP-18, WP-RR) | §14.13 |
 
 **Priority order used** (the user's): streaming import and folder open first: §3 to §6 were written to completion
 first and are unchanged by the scope correction. §18 says what is complete.
@@ -271,13 +293,15 @@ pub enum OrdinalKind {
   `line` widened); the wire carries the field from v1 either way (§1.4).
 - **Unique, not increasing.** Increasing does not imply unique across a split file, and unique does not imply increasing:
   an EVTX log is a circular buffer, so its record numbers rise across the wrap while file order does not [S: `evtx`
-  walks the oldest chunk first]. The order inside a source is the ordinal, not the file position. The sink checks:
+  walks the oldest chunk first]. The order inside a source is the ordinal, not the file position.
   - `Line` and `Position`: made by the reader, strictly increasing by construction; equal to the previous is a bug,
     caught by a debug assertion and the contract test;
-  - `RecordNumber`: a per-source set of seen numbers (a compressed bitmap, freed at `finish_source`), bounded by
-    `import.ordinal_set_bytes` (64 MiB, `hard`). **A duplicate `(source, ordinal)` is refused:** the event is skipped
-    with `ProblemKind::DuplicateOrdinal` (counted, sampled). Past the bound the check stops for that source with one
-    `ProblemKind::OrdinalUnchecked`, and the source's provenance says so.
+  - `RecordNumber`: **declared unique by the importer, not checked** (the user's decision of 2026-11-12, Q-U2 (b2)).
+    A real log can repeat a record number (a log cleared and refilled, a file stitched from two exports); every such
+    event is kept, and the event id, the last part of the order key, breaks the tie. There is no per-source seen-set, no
+    `import.ordinal_set_bytes` row and no problem kind for a repeat (revision 6's `DuplicateOrdinal` and
+    `OrdinalUnchecked` are gone). Test (FD-B, `debrief-store-duck/tests/ordinal.rs`): two events of one source with the
+    same `RecordNumber` are both stored, in id order, and keep that order across a reload.
 - **One order key.** FD-B amends ADR 0062's `(ts, source, line, id)` to `(ts, source, ordinal, id)`, where the ordinal
   of a text source is its line, so nothing changes for text; `PageAnchor::Key` (§14.5) and `ViewCursor` (§5.8) use the
   same key.
@@ -923,7 +947,14 @@ Call keys used by the foundation (C measured per key in LV1, recorded under rule
 `plugin.describe`, `plugin.sniff`, `debrief.import`, `debrief.tail`, `debrief.document`, `debrief.profile`,
 `debrief.annotate`, `worker.start`, `worker.call`, `import.busy_wait`, `tail.wait`, `window.ready`. (`ai.connect` is gone
 with the built-in AI engine, ADR 0070: Debrief's AI is a `paddock-pitwall` HTTP client, whose waits are external bounds,
-ADR 0031 §6.) Settings: §16 and §17.2 Q-U3 (open).
+ADR 0031 §6.)
+
+**Settings (decided by the user 2026-11-12, Q-U3 (b)).** The per-key thresholds are **constants**: LV1 measures them and
+records them under rule 48, in one table `paddock_jobs::patience::product()` reads. One Setting scales them all,
+`performance.stall.patience` (§16): `Normal` (×1) or `Patient` (×4), applied by multiplying each key's `blocked_ticks`
+and `spin_cpu` when `CallPatience::stall` answers; the hang guard of a start (`paddock_proc::Patience`) takes the same
+multiplier. There are no per-key Settings. Tests (2.6c, `paddock-jobs/src/patience/tests.rs`): `Patient` gives four times
+the ticks of `Normal` for every key; a value other than the two is refused at the Settings edge.
 
 ### 4.5 `paddock-proc` and `paddock-metrics` (2.2, P1, BP1)
 
@@ -1274,21 +1305,31 @@ Configuration parsers stay whole-reading under their 64 MiB cap (ADR 0064 D1, "l
 pub enum AnnotateRequest { Annotate { annotator: Box<str>, ticket: u64, since: Option<ListedSince> } }   // Bulk
 pub struct AnnotateReply { pub annotations: Vec<Annotation>, pub dropped: u64, pub listed_through: u64 }   // MAX_ANNOTATIONS
 /// "New since the previous run": events in segments listed after this listing sequence (ADR 0062's listing transaction).
+/// Always `None` in 1.2 (full runs, Q-U1 (c)); kept so that incremental runs are a minor change later.
 pub struct ListedSince { pub listing: u64 }
 
 pub enum TransformRequest { Transform { transform: Box<str>, source_name: Box<str>, rows: Vec<WireEvent> } } // Bulk
 pub struct TransformOut { pub rows: Vec<WireEvent>, pub keep: Vec<bool>, pub marks: Vec<(u32, Box<str>)>, pub notes: Vec<Box<str>> }
 ```
 
-Protocol 1's `RecordCursor { id: u32, ts }` (`debrief-plugin-api/src/annotate.rs:21`) [S] is replaced. Neither an
-event id nor a time-order `ViewCursor` says "new since": ids are allocated in blocks per segment, so an id does not tell
-when its event became visible, and events imported later can sort earlier in time. The store already lists segments in
-one transaction each when they are ready (ADR 0062) [A]; giving each listing a sequence number [J] makes "new since"
-exact: the host answers `listed_through` with each run, the next run sends it back as `since`, and `ViewRequest::Select`
-takes `listed_after: Option<u64>` (§5.8) to read only those segments. The number is the store's and lives as long as the
-store; a re-import starts a new store, and an annotation run never spans one.
+Protocol 1's `RecordCursor { id: u32, ts }` (`debrief-plugin-api/src/annotate.rs:21`) [S] is replaced.
 
-**Under rewrites and merges** (IX-B1, one test per case in `debrief-store-duck/tests/listing_seq.rs`):
+**Full runs in 1.2 (decided by the user 2026-11-12, Q-U1 (c)).** Every annotation run reads all its events. The wire
+keeps the fields so that incremental runs can come later as a minor change (§1.4): the host always sends `since: None`
+and answers `listed_through: 0`; `ViewRequest::Select` always gets `listed_after: None` (§5.8), and the host refuses a
+`Some` from a plugin with `RemoteError { code: codes::INVALID }`. No listing sequence is built in the store, so IX-B1
+carries none of it (Q28). The round-trip test of `debrief.annotate.v1` covers both fields; a host test asserts the two
+constant values.
+
+**When incremental runs come (a later release, not 1.2).** The design below stays the target. Neither an event id nor a
+time-order `ViewCursor` says "new since": ids are allocated in blocks per segment, so an id does not tell when its event
+became visible, and events imported later can sort earlier in time. The store already lists segments in one transaction
+each when they are ready (ADR 0062) [A]; giving each listing a sequence number [J] makes "new since" exact: the host
+answers `listed_through` with each run, the next run sends it back as `since`, and `ViewRequest::Select` takes
+`listed_after` (§5.8) to read only those segments. The number is the store's and lives as long as the store; a re-import
+starts a new store, and an annotation run never spans one.
+
+**Under rewrites and merges** (for that later release; one test per case in `debrief-store-duck/tests/listing_seq.rs`):
 
 | Case | Sequence of the result | Effect on the next annotation run |
 |---|---|---|
@@ -1660,7 +1701,7 @@ impl SegmentSink {
 pub struct SourceSummary { pub end: ImportEnd, pub time: TimeProvenance, pub ordinal: OrdinalKind, pub problems: Problems }
 ```
 
-- Ids: the block allocator checks `EventId::new` (§2.1); ordinals checked per source (§2.2); the source is listed with
+- Ids: the block allocator checks `EventId::new` (§2.1); ordinals declared per source, a repeated `RecordNumber` kept and ordered by id (§2.2, Q-U2 (b2)); the source is listed with
   its `source_time` row in the same catalog transaction (ADR 0066 §11) [A].
 - `MAX_RESERVED` rises to `MAX_ENTRIES` (ADR 0064 §3) [A].
 - `RLIMIT_NOFILE`: the store worker raises its soft limit at start to min(hard, system maximum), logs it; `EMFILE` is
@@ -2447,27 +2488,613 @@ themes; new screenshots with an independent review (ER-23).
 | Y13 formats, PML, batch queries | the `Importer` trait (§3), `Seekable` for PML |
 | Plugin analysis contributions | `debrief.analysis.v1` (§5.9) returning `AnyFinding` |
 
-### 14.13 Restored to 1.2 on 2026-11-11: investigation-folder features and ADR 0068's checks (STUB)
+### 14.13 Restored to 1.2: investigation-folder features and ADR 0068's checks (revision 7)
 
-**Status: a stub, not a design.** On 2026-11-11 the user put back into 1.2 what plan §10.3 had moved out of it
-[mem: decision relayed by the coordinator in this revision's brief]:
+**Status: designed (revision 7, 2026-11-12), replacing revision 6's stub.** On 2026-11-11 the user put back into 1.2
+what plan §10.3 had moved out [mem: decisions 2026-11-11, "Scope answers"]; on 2026-11-12 the user chose Q-U4 (a):
+design all of it in this file now (§17.2). The scope, from the user's decisions of 2026-11-07 [mem: investigation-folder
+decisions; ADR 0068 decisions] and 2026-11-11:
 
-- the investigation-folder features: citations, report blocks, the thread/sequence view, Pitwall report drafting;
-- ADR 0068's checks other than WP-1: "Check crash", "Check hang", "Check memory", with .NET managed state (ADR 0068's
-  work packages other than WP-1, that is WP-0 and WP-2 to WP-18 with WP-RR; §17 Q3 is updated for WP-8).
+- **Investigation-folder features:** the time shapes `+h:mm` and dates with spaces (C2, §14.7, widened here); citations
+  as `path!/member:line` with the written and the zoned time, in reports, exports and AI; report blocks (hypotheses, open
+  points, glossary, SVG figures, two audience versions, analysis results); the per-thread sequence view with stall gaps
+  and a sequence-diagram export; Pitwall drafting of a report section by section within about 8k tokens from engine facts
+  with checked citations (rule 46). The same decision of 2026-11-07 named two small items from the assessment that no plan
+  row carries: a duplicate rule for a zip next to its own extraction and the `ctime;` event-log text exports (ADR 0066's
+  gap 4); they are packages IF-5 and IF-6 here.
+- **ADR 0068's checks other than WP-1:** WP-0, WP-2 to WP-18 and WP-RR, with .NET managed state (the approved ".NET dump
+  stacks" are WP-0 and WP-12). ADR 0068 decides the behaviour [A]; this section gives each work package its signatures,
+  homes, Settings, limits and test homes, on the foundation types, and the corrections the foundation forces.
 
-They are **not designed here**. Each gets its API section (a §14.13.n of this file, reviewed like the rest) before its
-first package starts, and adds no second mechanism for anything §2 to §13 define. They build on these foundation types,
-which do not change for them:
+**Rules for this section.** No second mechanism for anything §2 to §13 defines: evidence is `EvidenceRef` (§2.4), findings
+are `Finding<V>` and `AnyFinding` (§11), "the same process" is `ProcessInstance` and `same_process` (§2.5), times outside
+the event table are `StampedTime` (§10.3), every collection reply is `paddock_limits::Bounded<T>` with its rows in a
+registry (§4.6), every long operation is a job ending in ADR 0052's `Outcome` (§9.6), child processes go through
+`paddock_proc` (rule 53, §1.5), knowledge lists are `paddock_packs` packs (rule 21), the UI registers through the shell's
+`define*` (§14.3), and Debrief's AI goes through `paddock_pitwall` (ADR 0070).
 
-| Restored function | Builds on, unchanged |
-|---|---|
-| Citations, report blocks, Pitwall drafting | `EvidenceRef` (§2.4), `AnyFinding` (§11), `Bounded` (§4.6); Pitwall through `paddock-pitwall` (ADR 0070) |
-| Thread/sequence view | `(source, ordinal)` order (§2.2), `ProcessInstance` (§2.5), lanes (§14.2) |
-| ADR 0068's checks (crash, hang, memory, .NET) | `CheckReport` on `Finding` (§11), `debrief.dumpquery.v1` and `HostFiles::lend_ranges` (§5.9, §4.2), `StampedTime` (§10.3), `OpenDocuments` (§14.8, which needs MEM-2, §8) |
+**Prerequisites that are not built** (ADR 0096; each checked on `origin/main` `e2a318345` and every remote branch,
+2026-11-12, with `git ls-tree` and `git grep`):
 
-What is not settled, and is not decided here: the packages, their sizes and their place in the waves (the plan's next
-refresh, see its landing note), and whether each is designed in this file or in its own note (§17.2 Q-U4).
+| Prerequisite | State on 2026-11-12 | Needed by | Owner |
+|---|---|---|---|
+| ADR 0052 WP-B1: `NextStep`, `Why`, `Outcome` in `paddock-jobs` | no `enum NextStep` in `crates/paddock-jobs` on any branch | every job here; WP-18 adds variants to it | ADR 0052's package (§15, shared dependency) |
+| ADR 0051's crate `paddock-tools` (pins, install on demand, Authenticode check) | no `crates/paddock-tools` on any branch | WP-12 (the helper's pin, the DAC signature check) | ADR 0051's packages; WP-12 waits for them |
+| ADR 0028's `paddock-deps` (notices for downloaded tools) | no `crates/paddock-deps` on any branch | WP-12's notices | Y16 (§14.10) |
+| MEM-2's open-documents budget | on `origin/debrief/p0-idle` `a0fd29185` only (`ed8e6005a`), not on `origin/main` or `origin/debrief/1.2-int` | WP-RR, WP-12 (documents held open), §14.8 | L-0 (§8) |
+| FD-E2, FD-I, FD-B, FD-P, Z3, Z6 | 1.2 packages, not built | IF-1 to IF-4, WP-6, WP-9 | their rows (plan §10.1, ADR 0066) |
+| `framehop` | an external crate (MIT or Apache-2.0), not a dependency yet | WP-3 | WP-3 adds it (licence allow-list as for every dependency) |
+
+Built on `origin/main` and used as they are: `paddock-limits`, `paddock-proc` (`Supervised`, `MemoryCap`, `run_bounded`,
+`ProcessId`), `paddock-pitwall` (`Link`, `ChatRequest`, `Client::count_tokens`, `CallOptions` with `CancelToken`,
+`AiState`), `paddock-packs` (`PackKind`, `PackLoader`), and the shell's `defineView`, `defineCommand`, `defineMenuItem`,
+`defineSettingsPage`, `defineNotificationKind` and `defineAssistantContext` (`ui/projects/paddock-ui`).
+
+**Order inside 1.2.** None of this is on the streaming and folder-open chain (§9.3 of the plan), and nothing in §2 to §13
+changes for it. It starts by capacity once its dependencies are in: the engine halves of ADR 0068 (WP-0, WP-1's
+follow-ups, WP-2, WP-11) can start in wave 2; the UI halves wait for M3a (`defineView`) and the shell's job end
+(ADR 0052 WP-B1); IF-1 to IF-4 wait for FD-E2 and FD-I. §14.13.8 lists every package.
+
+#### 14.13.1 Time shapes and the assessment's two small items (C2 widened, IF-5, IF-6)
+
+- **C2, widened (no new days; it stays 1.5).** `+h:mm` (a one-digit offset hour) is accepted in all three places where an
+  offset is read today [mem: investigation-folder decisions]: the line regex of the shipped `generic.toml` pack, the
+  numeric-date pattern (`numeric_date_re`) and `TimestampParser::parse_offset`; a date with spaces (`yyyy MM dd,`) gets a
+  template entry. All three go through ADR 0066's `TimeReader` (§10.2) once Z1 lands, so C2 adds the shapes to Z1's corpus
+  shapes (`debrief-plugins/tests/it/time_corpus.rs`) rather than to the old parser only. Test homes as §14.7.
+- **IF-5, a zip next to its own extraction (ADR 0067's duplicate rules, F5).** A folder holding `x.zip` beside a folder
+  `x/` whose files match the zip's members by relative name and declared size (from the central directory,
+  `paddock_archive::Members::entries()`, SI-4, no inflation) is a duplicate set: the extracted folder stays checked and
+  the zip is flagged. ADR 0067 keeps duplicates as rules in its pack (`[[duplicates.*]]`, "Duplicates are only flags"
+  [A]), so this is one new rule kind, `[[duplicates.extracted-copy]]` (`scope = "sibling"`, `prefer = "folder"`,
+  `min_match = 0.95` of members), and one variant appended to §6.3's `ReasonKey`, `ExtractedCopy { of: NodeId }`,
+  computed in the scan's `duplicates` phase (§9.2) by a pure function `debrief_core::folder_scan::recommend::
+  extracted_copy(zip: &[MemberEntry], dir: &ScanTable, at: NodeId) -> Option<f32>`, comparing at most
+  `folder.scan_entries` names (no new limit). Test: ADR 0067's `folder_scan/recommend` tests gain an invented zip and its
+  extraction, and the negative cases (a member missing past the threshold, a size differing, a renamed member).
+- **IF-6, `ctime;` event-log text exports.** Lines of the shape `Mon Jun  1 10:00:00 2026;0x12;Info;Svc;msg` (ADR 0066
+  corpus row `evt_ctime`) are read by a template entry in the shipped delimited-text pack (`importers/*.toml`, rule 21)
+  with the `ctime` stamp format added to `TimestampParser` (`%a %b %e %H:%M:%S %Y`, a wall time, `WALL` set) and the
+  `;` fields named by position. No new importer and no new trait: the core text importer (§3.2) with a pack entry. Tests:
+  ADR 0066's corpus row turns from "gap 4" to read, in `debrief-plugins/tests/it/time_corpus.rs`; a sniff test that the
+  shape wins over the generic CSV.
+
+#### 14.13.2 Citations (IF-1)
+
+A citation is how a person sees an `EvidenceRef` (§2.4): where it is, and when it happened, both as the file wrote it and
+in the report's display zone. FD-E2 gives notes, report blocks and AI citations one `EvidenceRef` and its resolver; IF-1
+gives them one rendering, used by reports, exports, the AI chat and drafting. One formatter, no per-surface copies
+(rule 55).
+
+```rust
+// debrief-core::evidence::cite   (pure; ts-rs → core/generated/evidence.ts)
+/// Where a citation points, in the form people quote: `logs/app.zip!/svc/app.log:1234`.
+pub enum CiteLocation {
+    /// A text source: its root-relative path (`RelPath`, archive members as `a.zip!/m`, §6.6) and 1-based line.
+    Line { file: RelPath, line: u32 },
+    /// A non-text source: path and the importer's declared ordinal (§2.2), shown as `#<n>` (an EVTX record number).
+    Ordinal { file: RelPath, kind: OrdinalKind, n: u64 },
+    /// A part of a document (§2.4's `DocItem`): `dumps/app.dmp#thread 1234 frame 3`.
+    Document { file: RelPath, item: DocItem },
+}
+/// The time as the file wrote it: the wall clock read in the source's own zone, and how Debrief knows that zone.
+pub struct WrittenTime { pub wall: CivilTime, pub offset: Option<OffsetMinutes>, pub how: WrittenHow }
+pub enum WrittenHow {
+    /// The line carried an offset (ADR 0066 `Written::Offset` or `OffsetZero`); shown with it.
+    Offset,
+    /// A wall time under the zone applied to its folder (ADR 0066 `source_time`); shown with the zone's name.
+    ZoneApplied { zone: ZoneName },
+    /// A wall time whose zone is not known (`AsWritten`): shown as written, marked "zone unknown".
+    AsWritten,
+}
+/// The same instant in the report's display zone (§10.4: UTC, local or the logs' zone), with its confidence.
+pub struct ZonedTime { pub ms: i64, pub display: TimeDisplay, pub confidence: Confidence }
+pub struct Citation {
+    pub reference: EvidenceRef,
+    pub resolved: Resolved,                       // §2.4: Found, Moved or Gone (Gone keeps the excerpt)
+    pub at: CiteLocation,
+    pub written: Option<WrittenTime>,             // None for timeless evidence
+    pub zoned: Option<ZonedTime>,
+}
+pub enum CiteStyle { Short, Full, Plain }         // Short: in text; Full: a footnote; Plain: an export column, no markup
+pub fn cite(r: &EvidenceRef, resolved: &Resolved, zones: &dyn SourceZones, display: TimeDisplay) -> Citation;
+pub fn format_citation(c: &Citation, style: CiteStyle, words: &dyn CiteWords) -> String;
+// "logs/app.zip!/svc/app.log:1234 · 10:00:00.120 +9:00 as written · 01:00:00.120 UTC"
+```
+
+- **Written time, reconstructed honestly.** The store keeps `ts` (UTC ms) and the `ts_state` byte, not the offset each
+  line carried (§5.3). `debrief-core::zone::resolve` gains `fn written_time(ts: i64, ts_state: u8, prov: &TimeProvenance,
+  table: &OffsetTable) -> WrittenTime`: an event with `WALL` clear and a source whose provenance records one written
+  offset is `Offset`; a `WALL` event under an applied zone is `ZoneApplied` with that zone's offset at the instant (the
+  offset table ADR 0066 §10 already returns for the logs' display); `AsWritten` otherwise. Sources whose lines carry
+  differing offsets give `Offset` with the provenance's offset at that instant and the citation says "offset from the
+  source's provenance". `SourceZones` is the port the store's `Skew::source_time` (§7.1) already serves. [J]
+- **Where citations appear.** Report export (HTML, Markdown, PDF): every events block row and every inline citation in
+  text renders `Short` in place and `Full` as a numbered note at the end of its section. Event exports
+  (`debrief-core/src/export.rs`, CSV and JSON): one column `citation` (`Plain`), on by default, off by an export option.
+  AI chat and drafting (§14.13.5): links carry the `EvidenceRef`; the hover shows `Full`; a `Gone` citation shows the
+  kept excerpt and the word "gone". Copy: a command "Copy citation" on a row (`defineCommand`, `debrief.evidence.copyCitation`)
+  puts `Full` on the clipboard.
+- **Redaction.** The location is a path, so the redacted copy and a redacted export run it through the redactor's path
+  rules (`debrief-core/src/redact`), as `raw` is; the excerpt is already redacted (§2.4).
+- **Commands.** `evidence_cite(refs: Vec<EvidenceRef>, display: TimeDisplay) -> Bounded<Vec<Citation>>`, at most
+  `evidence.resolve_batch` (1,000, §2.4) per call: one row in `command_table!` and in `store_port_table!` only through
+  `Inspect::resolve` (no new port). TypeScript: `core/generated/evidence.ts` gains `Citation`, `CiteLocation`,
+  `WrittenTime`, `ZonedTime`; `core/format.ts` gains `formatCitation(c, style)` which only lays out the engine's fields
+  (the engine computed them; §13.3).
+- **Tests.** `debrief-core/src/evidence/cite/tests.rs` (pure: every `CiteLocation` and `WrittenHow`, a zip member path, a
+  `Gone` citation, a DST fold under `ZoneApplied`, redaction of the path); `debrief-core/tests/it/cite_export.rs` (a CSV
+  export has the column and a re-time moves the zoned time, not the written one); a spec
+  `app/src/app/core/format.citation.spec.ts`; a Playwright spec that a report's note links back to the cited row
+  (plan 0.2's citation regression).
+
+#### 14.13.3 Report blocks and audiences (IF-2)
+
+The report stays one versioned JSON document (`debrief-core/src/report/mod.rs` [S]: `Report`, `Section`, `StoredBlock`
+keeping unknown blocks verbatim, `Block` tagged by `type`). IF-2 appends block kinds and an audience per block; the
+engine renders every kind (HTML, Markdown, PDF); the UI only edits and lays out.
+
+```rust
+// debrief-core::report  (REPORT_VERSION 2; a newer block kind in an older Debrief stays `StoredBlock::Unknown`)
+pub enum Block {
+    Text { markdown: String },                               // today; inline citations as `[[cite:<n>]]` tokens, n into `cites`
+    Events { caption: String, refs: Vec<EvidenceRef> },     // FD-E2 replaces `ids: Vec<u32>`
+    Chart { .. }, Timeline { .. }, Annotations { .. },       // today
+    Table { caption: String, query: String, dialect: QueryDialect, columns: Vec<String>, rows: Vec<Vec<Value>> },
+    Finding { finding: AnyFinding },                         // FD-I (§11) replaces the three strings
+    // appended by IF-2:
+    Hypothesis { statement: String, status: HypothesisStatus, evidence: Vec<BlockEvidence> },
+    OpenPoints { items: Vec<OpenPoint> },
+    Glossary { entries: Vec<GlossaryEntry> },
+    Figure { caption: String, svg: SafeSvg, from: FigureSource },
+    AnalysisResult { caption: String, run: AnalysisRunId, kind: Box<str>, snapshot: Bounded<Value>, findings: Vec<AnyFinding> },
+}
+pub enum QueryDialect { Ql, Sql }                            // the SQL result block (roadmap §2.3) is a Table with `Sql`
+pub enum HypothesisStatus { Open, Supported, Refuted, CannotTell }
+/// §11's `Evidence` with a person's note instead of an engine label key (same `EvidenceRef`, same `EvidenceRole`).
+pub struct BlockEvidence { pub what: EvidenceRef, pub role: EvidenceRole, pub note: Option<String> }
+pub struct OpenPoint { pub text: String, pub done: bool, pub evidence: Vec<BlockEvidence> }
+pub struct GlossaryEntry { pub term: String, pub meaning: String }
+pub enum FigureSource { Timeline { from: i64, to: i64 }, Chart { spec: ChartDef }, Sequence { request: SequenceRequest }, Imported }
+/// SVG checked by the existing sanitiser (`debrief-core/src/svg.rs`) at the parse edge; never rendered unchecked.
+pub struct SafeSvg(String);
+pub struct BlockItem { pub id: String, pub audience: AudienceSet, pub block: Block }   // `audience` defaults to both
+pub enum Audience { Technical, Summary }
+pub struct AudienceSet { pub technical: bool, pub summary: bool }
+
+impl ResolvedReport {
+    /// One audience's version: blocks not for it are left out; in `Summary`, evidence lists collapse to their
+    /// citations, analysis snapshots to their findings, and terms used in the kept text that the glossary defines
+    /// are listed at the end. Pure; the export calls it.
+    pub fn for_audience(&self, a: Audience) -> ResolvedReport;
+}
+```
+
+- **Limits.** Today's constants (`MAX_SECTIONS` 100, `MAX_BLOCKS` 200, `MAX_EVENT_IDS` 1,000, `MAX_TABLE_ROWS` 1,000,
+  `MAX_TEXT` 256 KiB [S]) become registry rows (ADR 0065 part 3; §4.6) in `debrief-core/src/limits.rs`, `hard`:
+  `report.sections`, `report.blocks`, `report.evidence` (per block, 1,000), `report.table_rows`, `report.text_bytes`, and
+  new `report.glossary_entries` (500), `report.open_points` (500), `report.figure_bytes` (2 MiB of SVG, the sanitiser's
+  input cap). `AnalysisResult.snapshot` is cut by the analysis's own `CutRow` (its `Bounded` as returned, §14.6).
+- **Engine operations.** `report_add_analysis(run: AnalysisRunId, section: SectionId) -> BlockItem` (snapshot of a stored
+  run, Q-2's cache, §14.5); `report_add_figure(source: FigureSource) -> BlockItem` (the engine renders the SVG: the
+  timeline and chart through today's serialisers moved engine-side where they are UI-side today [S: `Block::Chart` and
+  `Timeline` hold "the SVG the UI rendered"]; sequence through §14.13.4's renderer); `report_glossary_suggest(report) ->
+  Bounded<Vec<GlossaryEntry>>` (terms from the report's findings' label keys and the names pack, N3, no AI); export takes
+  `audience: Audience` (`share::export_report`'s request gains it, one field).
+- **UI.** `app/src/app/share/report/blocks/` gains one editor component per kind (`hypothesis-block.ts`,
+  `open-points-block.ts`, `glossary-block.ts`, `figure-block.ts`, `analysis-block.ts`), Material first (rule 47); the
+  report menu gains "Add hypothesis", "Add open points", "Add glossary", "Add figure"; an "Audience" toggle per block;
+  the export dialog (`report-export-dialog.ts`) a "Version: Technical / Summary" choice. `ShareBackend.exportReport`'s
+  request gains `audience`; `ReportBackend` (new, split from `ShareBackend` by interface segregation) has
+  `addAnalysis`, `addFigure`, `suggestGlossary`.
+- **Tests.** `debrief-core/src/report/tests.rs`: each kind round-trips; a newer kind stays verbatim in an older reader
+  (today's `StoredBlock::Unknown` test extended); `for_audience` property tests (Summary never contains a
+  Technical-only block; every citation of a kept block survives); the sanitiser refuses script and external references in
+  a `Figure`; each limit's `limit_case!`. Export goldens in `debrief-core/tests/it/report_export.rs` (HTML and Markdown
+  per audience). UI: one spec per editor on CDK harnesses (rule 38), the export dialog's Playwright spec.
+
+#### 14.13.4 Thread/sequence view (IF-3)
+
+What happened on each thread of a process, in order, where it stalled, and a sequence diagram of it. Built on the order
+key `(ts, source, ordinal, id)` (§2.2), `ProcessInstance` (§2.5), the lane canvas and Lanes picker (§14.2) and keyset
+paging (§14.5). A thread id means something only inside one process instance, so the lane key is both.
+
+```rust
+// debrief-core::sequence   (pure core + one store query; ts-rs → core/generated/sequence.ts)
+/// Which fields name a process and a thread, per source format. Data, not code (rule 21): `[sequence]` in the shipped
+/// profile (`default_profile.toml`) and user profiles: `process_fields = ["pid", "ProcessId", "ProcessID"]`,
+/// `thread_fields = ["tid", "thread", "ThreadId", "ThreadID", "thread_id"]`, first match wins, at most 16 names each.
+pub struct ThreadRoles { pub process: Vec<FieldName>, pub thread: Vec<FieldName> }
+/// A lane: one thread of one recorded process. `instance` is the source plus the process field's value when there is no
+/// recorded start time (a log line rarely has one); a reused pid is then two instances only if a restart marker (spans,
+/// `crate::spans`) separates them, which the reply says (`InstanceBasis`).
+pub struct ThreadKey { pub instance: ProcessRef, pub thread: Box<str> }
+pub enum ProcessRef { Recorded(ProcessInstance), InSource { source: SourceId, pid: Box<str>, run: u32 } }
+pub enum InstanceBasis { Recorded, ByRestartMarker, AssumedOneRun }
+pub struct ThreadSummary { pub key: ThreadKey, pub events: u64, pub first: i64, pub last: i64, pub stalls: u32, pub basis: InstanceBasis }
+
+pub struct SequenceRequest {
+    pub query: QueryKey,                        // the view's filter (§14.5)
+    pub threads: ThreadPick,                    // TopByEvents(n) | Keys(Vec<ThreadKey>) | ForEvent(EventId)
+    pub range: Option<TimeRange>,
+    pub anchor: PageAnchor,                     // §14.5's keyset paging, `before + after ≤ 512`
+}
+pub struct SequenceReply {
+    pub lanes: Bounded<Vec<ThreadSummary>>,     // cut by `timeline.lanes_max` (§14.2), TopBy events
+    pub rows: Bounded<Vec<SeqRow>>,             // events of the picked lanes in order, one page
+    pub gaps: Bounded<Vec<StallGap>>,           // in the page's span; TopBy duration
+    pub generation: u64,
+}
+pub struct SeqRow { pub id: EventId, pub lane: u16, pub ts: Option<i64>, pub level: Level, pub text: Excerpt, pub link: Option<Handoff> }
+/// A silence on one thread longer than both the stall floor and `GAP_FACTOR` × that thread's median interval.
+pub struct StallGap { pub lane: u16, pub from: EventId, pub to: EventId, pub ms: u64, pub median_ms: u64 }
+/// An edge to another lane: the same correlation value (a trace, request or activity id, from the profile's existing
+/// correlation fields of `analysis/trace.rs`) appearing next on another thread. Never inferred from time alone.
+pub struct Handoff { pub to_lane: u16, pub to: EventId, pub by: FieldName }
+pub const GAP_FACTOR: u32 = 20;                  // a heuristic constant with a test on each side of it (§1.7)
+
+pub fn thread_key(record: &RecordView, roles: &ThreadRoles, source: SourceId) -> Option<ThreadKey>;   // pure
+pub fn stall_gaps(lane_times: &[(EventId, i64)], floor_ms: u64) -> Vec<StallGap>;                      // pure
+
+/// The export: Mermaid and PlantUML text (lifelines = lanes, an event = a note on its lifeline, a handoff = an arrow,
+/// a gap = a delay), and SVG drawn by the engine (`debrief-core/src/svg.rs`) for report figures.
+pub enum SequenceFormat { Mermaid, PlantUml, Svg }
+pub struct SequenceExport { pub format: SequenceFormat, pub text: String, pub cut: Option<Cut> }
+pub fn render_sequence(rows: &[SeqRow], lanes: &[ThreadSummary], gaps: &[StallGap], f: SequenceFormat, cap: RowLimit) -> SequenceExport;
+```
+
+- **Store side.** One port row: `Query::sequence(req: &SequenceRequest) -> SequenceReply` in `store_port_table!`, a
+  `WIRE_VERSION` bump in IF-3's commit (§7.1). The store reads the role fields through the catalogue's field index and
+  pages in the order key; it never loads a thread whole. Stall gaps need each lane's median interval: computed over the
+  page window plus a bounded look-back (`sequence.median_window`, 10,000 events per lane, `hard`), stated in the reply's
+  `gaps` cut when the window was short.
+- **Commands.** `sequence_threads(query) -> Bounded<Vec<ThreadSummary>>`, `sequence_page(req) -> SequenceReply` (both
+  Query, `Analysis` queue when over the exact-position threshold), `sequence_export(req, format) -> SequenceExport`
+  (at most `sequence.export_events`, 2,000 events, `hard`, a `Cut` beyond; Mermaid's own renderer slows on large
+  diagrams, so the cap is about readability, not memory [J]).
+- **Settings.** `sequence.stall_floor_ms` (§16): the floor below which no silence is a stall, default 1,000 ms.
+- **UI.** `app/src/app/sequence/`: `SequenceBackend` (abstract; Tauri and mock), `sequence.store.ts` (SignalStore),
+  `sequence-view.ts` on the shared lane canvas (2.4) with one lane per thread, rows as ticks, gaps shaded and labelled
+  with their length and "×N the usual interval", handoffs as arrows; registered with `defineView({ id: 'debrief.sequence'
+  })`; commands `debrief.sequence.openForEvent` (grid row menu, `defineMenuItem`) and `debrief.sequence.export`
+  (Mermaid, PlantUML, SVG through the shell's save dialog); "Add to report" makes a `Figure { from: Sequence }` (IF-2).
+- **Tests.** `debrief-core/src/sequence/tests.rs` (roles from the pack, a pid reused across a restart marker gives two
+  instances, `stall_gaps` on each side of `GAP_FACTOR` and the floor, renderer goldens for Mermaid and PlantUML, the
+  export cut); `debrief-store-duck/tests/sequence.rs` (paging over 1M invented events of 50 threads keeps order and reads
+  at most k × rows shown, Q-4's counter); `app/src/app/sequence/*.spec.ts` against the mock; one Playwright spec.
+
+#### 14.13.5 Pitwall drafting (IF-4)
+
+Pitwall drafts a report section from engine facts; the engine checks every citation the draft makes; the person accepts
+or discards each section. One request per section within the section budget (rule 46: no LLM over the large job; the
+model words facts the engine computed and never decides a verdict, as ADR 0068 §15 says of dumps). It replaces
+`incident_narrative` (`app/src-tauri/src/investigate/incident.rs`, `debrief-ai`'s `assistant/incident.rs` [S]): the
+narrative becomes "draft the Summary section", one mechanism (rule 55).
+
+```rust
+// debrief-core::report::draft   (pure: no I/O, no clock, no model)
+/// The facts a section may use, each with a short handle the model cites as `[F12]`.
+pub struct FactBundle { pub facts: Bounded<Vec<Fact>>, pub glossary: Vec<GlossaryEntry>, pub audience: Audience }
+pub struct Fact { pub handle: FactHandle, pub kind: FactKind, pub text: String, pub cites: Vec<EvidenceRef> }
+pub struct FactHandle(u16);                                   // "F1".."F<n>", unique within one bundle
+pub enum FactKind { Finding(Producer), Count, Event, Hypothesis, OpenPoint, TimeNote }
+/// Builds the bundle from the section's blocks and the report's findings, ranked (findings by confidence, then evidence
+/// count), redacted when the report is, and cut to `budget` tokens by the caller's counter (Pitwall's tokenizer).
+pub fn build_bundle(section: &ResolvedSection, report: &ResolvedReport, budget: u32, count: &dyn TokenCount) -> FactBundle;
+pub fn draft_prompt(bundle: &FactBundle, instructions: Option<&str>) -> Vec<paddock_pitwall::Message>;
+/// Every sentence of the reply: kept with its verified handles, or marked. Unknown handles never become links.
+pub fn check_draft(reply: &str, bundle: &FactBundle) -> CheckedDraft;
+pub struct CheckedDraft { pub markdown: String, pub sentences: u32, pub cited: u32, pub uncited: u32, pub unknown: Vec<Box<str>> }
+pub trait TokenCount { fn tokens(&self, text: &str) -> Result<u32, DraftError>; }   // adapter over `Client::count_tokens`
+```
+
+- **The call (adapter, `app/src-tauri/src/investigate/draft.rs`).** A job of kind `Ai` (§9.1), role Live, phases
+  `facts` (blocks read), `drafting` (sections), `checking`; one `paddock_pitwall::ChatRequest` per section through the
+  window's `Link::chat_with` with `CallOptions { priority: Interactive, cancel }`; Cancel stops between sections and
+  aborts the stream. Pitwall missing or stopped: the job does not start; the UI shows the shared `<pd-needs-ai>` from
+  `AiState` (ADR 0070). The draft is stored as a **proposal** beside the report (`DraftProposal { section, blocks:
+  Vec<BlockItem>, check: CheckedDraft, provenance: paddock_pitwall::Provenance, made_at }`), never written into the report
+  until the person accepts it; an accepted text block keeps `generated: Some(Provenance)` and a "drafted" mark in the
+  editor and the export.
+- **Citations in the draft** become IF-1 citations (`[[cite:n]]` tokens into the block's evidence); an uncited sentence is
+  kept with a "not backed by a fact" mark in the editor; a sentence citing only unknown handles is shown struck through
+  with "cites a fact that was not given" and is left out on accept unless the person keeps it.
+- **Budget.** `ai.draft.section_tokens` (§16), default 8,000, the prompt plus the expected answer; `build_bundle` cuts
+  facts by rank to fit and reports the cut (`ai.draft.facts`, 200 facts, `hard`, a `CutRow<TopBy>`).
+- **Job end (§9.6).** Read back through the stored proposal: `Confirmed` when every requested section has a proposal;
+  `Unconfirmed { why: SectionsFailed { n } }` when Pitwall failed some (`NextStep::Retry`); `Failed` when none.
+- **Commands.** `report_draft(req: DraftRequest { report: ReportId, sections: Vec<SectionId>, audience, instructions:
+  Option<String> }) -> JobId` (instructions at most 2,000 characters), `report_draft_proposals(report) ->
+  Bounded<Vec<DraftProposal>>`, `report_draft_accept(report, section, keep_marked: bool) -> Report`,
+  `report_draft_discard(report, section)`. UI: `investigate/incident/` becomes `share/report/draft/` with
+  `DraftBackend` (abstract; Tauri and mock: the mock returns fixed drafts and computes no facts); "Draft with Pitwall" on a
+  section and on the report; the assistant context (`defineAssistantContext`) offers the same facts to Pitwall's chat.
+- **Tests.** `debrief-core/src/report/draft/tests.rs` (bundle ranking and cut against a fake counter; `check_draft` on
+  every sentence class; handles never collide; a redacted report's bundle holds no unredacted text);
+  `app/src-tauri/src/investigate/draft/tests.rs` against `paddock_pitwall::testing`'s fake Pitwall (no real Pitwall, its
+  port or the credential store, as that crate requires): a section drafted, Cancel between sections, Pitwall gone mid-job
+  gives `Unconfirmed`; a spec that accept writes the block and discard leaves the report unchanged.
+
+#### 14.13.6 ADR 0068's checks: where each work package's API lives
+
+ADR 0068 §10 shows `CheckReport` with its own `verdict`, `confidence`, `evidence`, `not_checked` and `left_out`. §11 builds
+`CheckReport` on the shared `Finding<Verdict>` (WP-1, in 1.2 already), so every work package below fills
+`finding: Finding<Verdict>` rather than five parallel fields, `left_out` is `Vec<Cut>` (§17 Q4), `pairing` is §2.5's
+`Pairing`, `CheckedDoc.process` is `ProcessInstance`, times are `StampedTime`, and evidence is `EvidenceRef` with
+`EvidenceTarget::Document { doc: DocumentKey, item: DocItem }` (§2.4: `Thread`, `Module`, `Region`, `Handle`,
+`ManagedType` already listed). The table names the home of each API; the blocks below give the signatures ADR 0068 left
+as prose.
+
+| WP | API home | New public surface |
+|---|---|---|
+| WP-2 reader | `debrief-plugin-dumps/src/dump_reader.rs`, `synth.rs`; model in `debrief-dump/src/model.rs` | `DumpCapabilities` (ADR 0068 §10), `MemoryIndex`, `ThreadTimes`, `HandleObject`, `RegionInfo`, `UnloadedRange`, `ProcessTimes` in the model |
+| WP-RR, WP-8 | `debrief-plugin-ext/src/wire/dumpquery.rs` (§5.9's reserved namespace); `app/src-tauri/src/dumps.rs` (held handle), `paths.rs` (re-grant) | `debrief.dumpquery.v1` below; `HeldDocument`; WP-8 removes `WholeReason::DumpWithoutMemoryList` (§3.3, §17 Q3) |
+| WP-3 unwinder | `debrief-plugin-dumps/src/unwind.rs` (new), `pdb_symbols.rs`, `debrief-symbols` | `UnwindProvider: minidump_unwind::SymbolProvider` (its `walk_frame`), `FrameTrust` |
+| WP-4 to WP-7 | `debrief-dump/src/checks/{crash,hang,series,memory}.rs` | `fn check_*(docs: &[&DumpDoc], ctx: &CheckCtx) -> CheckReport`, pure over the model plus planned range reads |
+| WP-9 | `debrief-dump/src/checks/around.rs` (plan), `debrief-core` (query) | `EventsAround` below |
+| WP-10 | `app/src-tauri/src/dumps.rs`, `command_table!` | the check job, its cache, four commands |
+| WP-11 | `debrief-plugin-dumps/src/capture.rs`, `plugin.rs` | `CaptureSeries`, the privacy option |
+| WP-0, WP-12 | `apps/debrief/tools/debrief-clr-inspect/` (C#); plugin crate `debrief-plugin-dumps-dotnet` (new); `debrief-dump/src/managed.rs` | `debrief.managed.v1` below; schema 1 as Rust types |
+| WP-13 | `app/src/app/dumps/checks/` | `DumpsBackend` additions below |
+| WP-16 | `debrief-dump/src/packs/injectors.rs`; pack files under `packs/` | `InjectorPack: paddock_packs::PackKind` |
+| WP-17 | `debrief-plugin-windows/src/minidump_import.rs` | none: the importer calls `debrief-dump`'s reader; its parser is deleted |
+| WP-18 | `crates/paddock-jobs` (integrator) | `NextStep::{TakeDump, AddSymbolFolder, TurnOnSymbolServers, AddDacFolder, OpenAgain, RecordUmdh}` appended to ADR 0052's enum |
+
+**Range reads after open (WP-RR), the namespace §5.9 reserved.**
+
+```rust
+// debrief-plugin-ext::wire::dumpquery   (postcard; round trip and fuzz target as every namespace, §5)
+pub struct DumpQuery;
+impl Contract for DumpQuery { const NS: &'static str = "debrief.dumpquery.v1"; const MINOR: u16 = 0;
+    type Request = DumpQueryRequest; type Reply = DumpQueryReply; }          // unary; role Live (a person waits on a check)
+pub enum DumpQueryRequest {
+    /// Decode the named ranges of the lent dump. `index` is the slice of the document's memory index the ranges need, so
+    /// a restarted plugin answers the same (ADR 0068 §7: stateless for correctness).
+    Read { file: HostFileRef, doc: DocKeyWire, index: Vec<IndexEntry>, ranges: Vec<VaRange>, kind: DecodeKind },
+}
+pub struct IndexEntry { pub va: u64, pub len: u64, pub file_offset: u64 }   // 24 bytes, ADR 0068 §7
+pub struct VaRange { pub va: u64, pub len: u32 }
+pub enum DecodeKind { CriticalSection, Peb, Teb, UnwindTables { module: u32 }, Exports { module: u32 }, Raw }
+pub enum DumpQueryReply { Pieces { pieces: Vec<Piece>, missing: Vec<(VaRange, MissingWire)> } }
+pub enum Piece { CriticalSection { va: u64, owner_tid: Option<u32>, recursion: i32, lock_count: i32 },
+                 Teb { va: u64, tid: u32, stack_base: u64, stack_limit: u64 }, Peb { va: u64, being_debugged: bool },
+                 Unwind { module: u32, pdata: Vec<u8>, xdata: Vec<(u32, Vec<u8>)> }, Exports { module: u32, names: Vec<(u32, Box<str>)> },
+                 Raw { va: u64, bytes: Vec<u8> } }
+pub enum MissingWire { MemoryNotInDump, OverBudget, Unreadable }
+```
+
+- **The file.** The host keeps the handle it opened for `dumps_open` for the document's lifetime (rule 53): `HeldDocument {
+  file: File, identity: FileIdentity, header_hash: u64, lease: DocLease }` in `app/src-tauri/src/dumps.rs`, opened with
+  share-read and share-delete (ADR 0068 Consequences (4)); the `DocLease` is MEM-2's `OpenDocuments` lease (§14.8), so
+  held handles count against the documents budget. For each query the host lends the handle by ranges through
+  `HostFiles::lend_ranges` (§4.2) for the call only. A restored session re-opens by path only under a re-confirmed grant
+  (`paths.rs`) and re-verifies `FileIdentity` and the header hash; a mismatch is `MissingReason::FileChanged`.
+- **Limits** (registry rows in `debrief-dump/src/limits.rs`, `hard`, each with `limit_case!`): `dumps.query_ranges`
+  4,096 and `dumps.query_bytes` 16 MiB per query; `dumps.check_queries` 64 and `dumps.check_bytes` 256 MiB per check;
+  `dumps.unwind_table_bytes` 16 MiB per module; `dumps.memory_index_entries` 4 Mi; `dumps.prefix_cache_docs` 2. `Raw` is
+  capped at 4 KiB per piece and refused outside `cfg(test)` builds' callers by the host.
+- **WP-8.** `source.rs`'s prefix-plus-ranges path covers the 32-bit `MemoryListStream`; the 1 GiB refusal and
+  `WholeReason::DumpWithoutMemoryList` go in WP-8's change with ADR 0064's amendment (§17 Q3).
+
+**The unwinder (WP-3).**
+
+```rust
+// debrief-plugin-dumps::unwind
+/// The CFI seam of `minidump-unwind` (`SymbolProvider::walk_frame`), fed from bytes: image pages read by range,
+/// binaries from the symbol folders by code identity (`<name>/<TIMESTAMP><SIZE>/<name>`), the host's fetch when symbol
+/// servers are on, dynamic function tables (stream 13). Never opens a path recorded in the dump.
+pub struct UnwindProvider { modules: UnwindCache /* parsed once per module identity, bounded by `symbols.cache_bytes` */ }
+impl minidump_unwind::SymbolProvider for UnwindProvider { /* walk_frame over framehop; fill_symbol from PDBs as today */ }
+pub enum FrameTrust { Context, Cfi, FramePointer, Scan }      // every frame says how it was found; Scan is "candidate"
+pub fn rewalk(doc: &mut DumpDoc, improvable: &[u32], provider: &UnwindProvider, threads: usize, cancel: &CancelCheck) -> RewalkReport;
+```
+
+- `framehop` is pinned and wrapped (ADR 0068 Consequences (2)): only `unwind.rs` names it. A re-walk runs threads in
+  parallel (`performance.dumps.walk_threads`, Auto = cores − 1, §16), results in thread order (deterministic). Test:
+  synthetic x64 frames with `.pdata`/`.xdata` in `synth.rs`; a dump whose module path points at a planted file must not
+  read it.
+
+**The checks (WP-4 to WP-7) and the events around (WP-9).**
+
+```rust
+// debrief-dump::checks
+pub struct CheckCtx<'a> { pub limits: &'a Limits, pub reads: &'a dyn RangeReads, pub managed: Option<&'a ManagedState>,
+                          pub symbols_generation: u64, pub cancel: &'a CancelCheck, pub phase: &'a dyn PhaseSink }
+/// Port the shell implements over `debrief.dumpquery.v1`; the checks plan reads and interpret the typed pieces.
+pub trait RangeReads { fn read(&self, doc: DocId, ranges: &[VaRange], kind: DecodeKind) -> Result<ReadOutcome, ReadFault>; }
+pub fn check_crash(docs: &[&DumpDoc], ctx: &CheckCtx) -> CheckReport;   // WP-4
+pub fn check_hang(docs: &[&DumpDoc], ctx: &CheckCtx) -> CheckReport;    // WP-5, WP-6 (series)
+pub fn check_memory(docs: &[&DumpDoc], ctx: &CheckCtx) -> CheckReport;  // WP-7
+pub fn pair_candidates(doc: &DumpDoc, others: &[&DumpDoc]) -> PairCandidates;   // WP-6: same process / same program / other
+pub struct PairCandidates { pub same_process: Vec<(DocId, Pairing)>, pub same_program: Vec<DocId>, pub other: Vec<DocId> }
+/// The cache key of ADR 0068 §1: document identities, kind, ordered set, symbol generation, the helper's pin.
+pub struct CheckKey(u128);
+pub fn check_key(kind: CheckKind, docs: &[&DumpDoc], symbols_generation: u64, helper_pin: Option<&str>) -> CheckKey;
+
+// debrief-core::dumps_around  (WP-9: a store query, bounded like every reply)
+pub struct EventsAround { pub at: StampedTime, pub window: TimeRange, pub same_machine: bool,
+                          pub counts_by_level: Vec<(Level, u64)>, pub first: Bounded<Vec<AroundRow>>, pub query: QueryKey }
+pub struct AroundRow { pub reference: EvidenceRef, pub level: Level, pub excerpt: Excerpt }
+pub fn events_around(store: &dyn Query, at: &StampedTime, window: AroundWindow, machine: Option<&MachineKey>) -> Result<EventsAround, QueryError>;
+```
+
+- Verdict enums (`CrashVerdict`, `HangVerdict`, `MemoryVerdict`, ADR 0068 §2 to §4) each implement §11's `VerdictKind`
+  (`CannotTell` present, a compile-time test per producer). `ThreadClass` replaces `api::ThreadState` in WP-5 (ADR 0068
+  §1), no shim. `GrewOnce` and `NeedsMore { of, have, need }` are the shared words of ADR 0068 D13 (`NeedsMoreOf` is
+  §11's).
+- The window is two Settings, `dumps.around_before_s` and `dumps.around_after_s` (§16), with ADR 0068 §6's defaults;
+  the first rows are a `CutRow<TopBy>` (`dumps.around_rows`, 50, `hard`).
+
+**The shell (WP-10) and capture (WP-11).**
+
+```rust
+// app/src-tauri/src/dumps.rs (commands; one line each in `command_table!`)
+#[tauri::command] async fn dumps_check(req: CheckRequest) -> CmdResult<CheckStarted>;          // { job: JobId } or { cached: CheckKey }
+#[tauri::command] async fn dumps_check_result(key: CheckKey) -> CmdResult<Option<CheckReport>>;
+#[tauri::command] async fn dumps_pair_candidates(doc: DocId) -> CmdResult<PairCandidates>;
+#[tauri::command] async fn dumps_events_around(doc: DocId) -> CmdResult<EventsAround>;
+pub struct CheckRequest { pub kind: CheckKind, pub docs: Vec<DocId> }   // 1..=`dumps.check_docs` (16, hard); the engine orders them
+
+// debrief-plugin-dumps::capture (WP-11); the existing `create` grows, no new tool
+pub struct CaptureSeries { pub pid: u32, pub kind: DumpKind, pub folder: FolderGrant, pub count: u8 /* 1..=5 */, pub interval_s: u16 /* 1..=600 */,
+                           pub include_process_details: bool /* Heap and Full only; refused for Minidump (D9) */ }
+```
+
+- A check is an `Analysis` job (§9.1) with ADR 0068 §11's phases; phase ids (§9.2) `thread-details`, `reading-memory`,
+  `walking`, `lock-owners`, `managed`, `comparing`, `events-around`. Its end (§9.6): read back through
+  `dumps_check_result(key)`; `Confirmed` when the cached report is there; `Unconfirmed` is never used for a weak dump
+  (that is the report's `CannotTell` with its Not checked list, ADR 0068 §1); `Failed` when the reader failed.
+- A series capture is a `Capture` job (§9.1) holding the process handle across the series through `paddock_proc`
+  (rule 53), phases `capturing` (dumps, count of `count`) and `opening`; read back: the files exist with the expected
+  names and open as one group.
+
+**.NET managed state (WP-0, WP-12).**
+
+```rust
+// debrief-plugin-ext::wire::managed   (unary; role Live; the reply crosses as JSON: schema 1 grows, §1.4)
+pub struct Managed;
+impl Contract for Managed { const NS: &'static str = "debrief.managed.v1"; const MINOR: u16 = 0;
+    type Request = ManagedRequest; type Reply = Json; }   // Json of debrief_dump::managed::ManagedState (schema 1)
+pub enum ManagedRequest {
+    /// The host grants the dump's canonical path for this call only, after checking the held handle's identity
+    /// (ADR 0068 §9); `dac` is a path the host chose and signature-checked; `sections` and `budget` bound the run.
+    Inspect { dump: ChosenPath, dac: ChosenPath, sections: Vec<ManagedSection>, budget: ManagedBudget },
+}
+pub enum ManagedSection { Threads, Exceptions, Stacks, HeapStats, SyncBlocks, ThreadPool, Finalizer }
+pub struct ManagedBudget { pub heap_objects: u64, pub types: u32, pub frames: u16, pub text: u32, pub wall_ms: u64 }
+
+// debrief-dump::managed: schema 1 as Rust types, the JSON Schema generated from them (WP-12's check against the helper)
+pub struct ManagedState { pub schema: u32, pub runtime: RuntimeId, pub sections: Vec<SectionResult> }
+pub enum SectionStatus { Ok, Failed { reason: Box<str> }, Cut { limit: LimitId } }
+
+// app/src-tauri/src/dumps/dac.rs
+pub enum DacSource { UserFolder, LocalRuntime, SymbolServer }
+pub fn find_dac(runtime: &RuntimeId, folders: &[PathBuf], servers_on: bool) -> Result<(PathBuf, DacSource), DacUnavailable>;
+```
+
+- **The helper run.** The plugin `net.decryptology.dumps.dotnet` (`RunPrograms`, `ReadFolders`, no network, ADR 0068 D2)
+  starts the pinned helper through `paddock_proc::Supervised` with a memory cap (the job object on Windows) of
+  `performance.dumps.dotnet_memory_mb`, reads stdout bounded by `dumps.dotnet_output_bytes` (64 MiB, `hard`), and ends it
+  by held handle on Cancel (rule 53). At most `performance.dumps.dotnet_helpers` runs at once (§16). The memory type is
+  §4.5's `MemoryPolicy` once 2.2 lands (§17 Q16), not a second cap type.
+- **The pin and the signature check** are `paddock-tools`' (ADR 0051 and its `ci-artifact` amendment in WP-12); the
+  signer policy's roots are a `paddock_packs` pack (`packs/microsoft-code-signing-roots.toml`, rule 21). Neither is
+  built (prerequisites table above); WP-12 does not start its plugin half before `paddock-tools` exists.
+- **Bounds inside the helper** are ADR 0068 §9's; the outer ones are registry rows (`dumps.dotnet_types` 10,000,
+  `dumps.dotnet_frames` 256, `hard`; `dumps.dotnet_heap_objects`, a Setting, default 200 million).
+- **WP-0 exit criteria** are ADR 0068 §9's, unchanged; WP-0 records its numbers under rule 48 before WP-12 starts.
+
+**The UI (WP-13).**
+
+```ts
+// app/src/app/dumps/dumps-backend.ts (additions)
+abstract check(request: CheckRequest): Promise<CheckStarted>;
+abstract checkResult(key: CheckKey): Promise<CheckReport | null>;
+abstract pairCandidates(doc: number): Promise<PairCandidates>;
+abstract eventsAround(doc: number): Promise<EventsAround>;
+// app/src/app/dumps/checks/: checks-strip.ts (three mat-buttons, the primary from `suggested_check`), check-report-view.ts
+// (verdict, confidence reasons, evidence links into Threads/Modules/regions, Not checked with each NextStep, Around,
+// cuts through <pd-limit-note>), pair-picker.ts, capability-line.ts. The capture dialog gains series and the privacy option.
+```
+
+- The report view's "Add to report" makes a `Finding { finding: AnyFinding }` block (IF-2), so a check reaches a report
+  through the same block as every other finding; "Explain with AI" is IF-4's drafting over that one finding's facts,
+  not a second AI path (ADR 0068 §15, rule 55).
+
+#### 14.13.7 Settings, limits, logs and jobs added
+
+- **Settings** (all in §16): `sequence.stall_floor_ms`, `ai.draft.section_tokens`, `dumps.around_before_s`,
+  `dumps.around_after_s`, `dumps.dac_folders`, `dumps.dotnet_heap_objects`, `performance.dumps.walk_threads`,
+  `performance.dumps.dotnet_helpers`, `performance.dumps.dotnet_memory_mb`. The symbol-server switch that gates binaries
+  and DACs (ADR 0068 D4, D6) is today's symbols switch, not a new one.
+- **Registry rows without a Setting (`hard`)**, each with `limit_case!`: `report.*` (§14.13.3), `sequence.export_events`,
+  `sequence.median_window`, `ai.draft.facts`, `dumps.check_docs`, `dumps.query_ranges`, `dumps.query_bytes`,
+  `dumps.check_queries`, `dumps.check_bytes`, `dumps.unwind_table_bytes`, `dumps.memory_index_entries`,
+  `dumps.prefix_cache_docs`, `dumps.memory_regions` (65,536), `dumps.handle_objects` (65,536), `dumps.around_rows`,
+  `dumps.dotnet_types`, `dumps.dotnet_frames`, `dumps.dotnet_output_bytes`. Dump limits live in `debrief_dump::Limits`
+  today (`limits.rs`, carried as JSON in `debrief.document.v1`'s options, §5.7); WP-1 ("model, wire, limits") gives them a
+  registry in `debrief-dump/src/limits.rs`, and the rows here are added to it, with the `Limits` fields read from the rows
+  (one source).
+- **Log lines** (§12.2's rules: fields only, a test per line in its emitting module): `Dump check` (ADR 0068 §14's
+  fields, as there [A]); `Range read` (queries, ranges, bytes, missing, `FileChanged` field); `DAC lookup` (step,
+  outcome, `SignatureFault`, HRESULT); `Managed helper` (pin, exit code, duration, peak job memory, section statuses, the
+  dump path as a hash of its file name, last 20 stderr lines); `Draft section` (report id hash, section index, facts,
+  tokens, cut, sentences cited/uncited/unknown, Pitwall provenance, duration; never text); `Sequence export` (format,
+  lanes, events, cut).
+- **Jobs** (§9.1, §9.2): checks are `Analysis`; drafting is `Ai` with phases `facts`, `drafting`, `checking`; series
+  capture is `Capture` with `capturing`, `opening`. No new job kind.
+
+#### 14.13.8 Work packages
+
+Raw agent-days, judgement-sized [J] unless marked [P] (a size from ADR 0068's table or the roadmap note §2.3). ADR 0068's
+packages keep their names and its sizes; "Accept" is the failing-test-first condition, from ADR 0068's test plan where
+it has one. Every package that ends a job depends on ADR 0052 WP-B1 (§15's shared dependency).
+
+| # | Package | Role | Depends | Days | Accept (failing test first) |
+|---|---|---|---|---|---|
+| C2 | Time shapes, widened to the three places (§14.13.1) | implementer | Z1 | (1.5, in §10.2) | `+9:00` in the line regex, the numeric date and `parse_offset`, and a spaced date, parse to the right instant |
+| IF-1 | Citations: `cite`, `format_citation`, `written_time`, report, export and AI surfaces, Copy citation | implementer | FD-E2, Z3, Z6 | 3 [P] | a cited line in a zip member shows `a.zip!/m:12` with written and zoned times; a re-time moves the zoned time only; a removed source shows "gone" with the excerpt |
+| IF-2 | Report blocks and audiences: the five kinds, `Table` dialect, `for_audience`, limits as rows, engine-rendered figures, editors | designer | FD-I, FD-E2, IF-1, Q-2 | 5.5 [P: 5 + the SQL block 0.5] | a Summary export of a report with a Technical-only block omits it and keeps its citations elsewhere; an SVG figure with a script is refused |
+| IF-3 | Thread/sequence view: roles pack, `ThreadKey`, the store query, gaps, handoffs, the view, the three exports | designer | FD-B, FD-P, 2.4, 3.3, Q-1, M3a | 7 [P] | two threads with the same tid in two runs of one pid stay two lanes; a 30 s silence on a thread whose median is 50 ms is a gap and a 30 ms one is not; the Mermaid golden matches |
+| IF-4 | Pitwall drafting: bundle, prompt, check, proposals, accept, replacing `incident_narrative` | designer | IF-2, FD-I, IF-1 | 4 [P] | against the fake Pitwall, a draft citing an unknown handle shows that sentence struck through and leaves it out on accept; a bundle over budget is cut with its `Cut` |
+| IF-5 | Zip next to its extraction: the `extracted-copy` rule kind and `ExtractedCopy` reason | implementer | F5, SI-4 | 1 [mem] | an invented zip and its extracted folder form one group with the folder preselected |
+| IF-6 | `ctime;` event-log exports: pack entry and stamp format | implementer | Z1, SI-3 | 1.5 [mem] | ADR 0066's `evt_ctime` row reads 07:00:00 UTC under its zone instead of "gap 4" |
+| WP-0 | .NET helper spike against ADR 0068 §9's exit criteria; numbers under rule 48 | researcher | — | 3 [P] | as ADR 0068 §9 (1) to (6) |
+| WP-2 | Reader: new streams, memory index, `DumpCapabilities` | implementer | WP-1 | 4 [P] | a synthetic dump without stream 17 reports `thread_info: false` and every check that needs it adds its Not checked item |
+| WP-RR | `debrief.dumpquery.v1`, held handle, `lend_ranges`, re-grant, `FileChanged`, prefix LRU | designer | WP-1, WP-2, PH2a, 2.6b, MEM-2 (L-0) | 8 [P] | a range outside the index is `missing` with `MemoryNotInDump`; a changed file gives `FileChanged`; a restarted plugin answers the same query |
+| WP-8 | Heap dumps by ranges; ADR 0064 amendment; `WholeReason::DumpWithoutMemoryList` removed | implementer | WP-RR | 3 [P] | an invented 1.2 GiB heap dump without a Memory64 list opens within the reader cap |
+| WP-3 | Unwinder over framehop; re-walk | designer | WP-RR, WP-8 | 12 [P] | a synthetic x64 stack walks by CFI past a frame that scanning misses; a planted module path is never opened |
+| WP-4 | Check crash, break-in | implementer | WP-1, WP-2 | 3 [P] | a breakpoint on a `DbgUiRemoteBreakin` stack gives `DebuggerBreakIn` |
+| WP-5 | Check hang, one dump; `ThreadState` removed | designer | WP-3, WP-RR, WP-8 | 8 [P] | a two-critical-section deadlock gives `Deadlock` with High; without its handle stream the same dump gives `CannotTell` (the ER-33 probe) |
+| WP-6 | Series: pairing on §2.5, picker groups, progress, spin ranges, growth rule | implementer | WP-4, WP-5, FD-P | 4 [P] | proptest: no series of two yields `Growing`; a pid reused with another create time is `Different` |
+| WP-7 | Check memory | implementer | WP-1, WP-6 | 4 [P] | three dumps growing every step give `Growing` with a rate; one step gives `GrewOnce` |
+| WP-9 | Events around (on `StampedTime`, `EvidenceRef`, `Bounded`) | implementer | WP-1, FD-E2, Z6 | 3 [P] | events of another machine are not mixed in when a host field matches; the window follows the Settings |
+| WP-10 | Shell: job, cache, commands, logs | implementer | WP-1, WP-RR, WP-18 | 3 [P] | pressing a check twice starts one job (cache by `CheckKey`); Cancel caches nothing |
+| WP-11 | Capture series, presets, D9 flags with sizes measured | implementer | — | 3 [P] | a Minidump capture never sets 0x100 or 0x40000; series names follow ADR 0068 §5 |
+| WP-12 | .NET: helper, CI build, pin, plugin, DAC lookup and signer policy, per-query grant, notices, decoder and fuzz target | designer (integrator for `.gitea/`) | WP-0, WP-1, WP-RR, `paddock-tools`, `paddock-deps` | 15 [P] | an unsigned DAC gives `DacUnavailable` "unsigned or wrong signer"; the helper's JSON validates against the generated schema; offline with no runtime the managed part is Not checked with its next step |
+| WP-13 | UI: checks strip, report view, pair picker, capability line, capture options | designer | WP-10, WP-18, M3a, IF-2 | 6 [P] | one Playwright spec per check against the mock; axe in both themes |
+| WP-14 | Tests outside a package: command-driven Windows fixtures, named-build mutant tests, properties, first measurements | implementer | all of ADR 0068 | 8 [P] | as ADR 0068's test plan |
+| WP-15 | Docs and ADR amendments (0023, Languages rule D3, ADR 0068 scope line), report screens reviewed (ER-23) | implementer, then reviewer | WP-13 | 2 [P] | the user guide's "which dump for which question" page; the review's P1s fixed |
+| WP-16 | Unexpected-modules pack on `paddock-packs` | implementer | WP-2 | 2 [P] | a user pack adds an injector and the finding names it; a broken pack keeps the last good one |
+| WP-17 | One minidump reader (D10); copy entry removed | implementer | WP-2, SI-12 | 2.5 [P: 3, less 0.5 shared with SI-12's minidump importer] | the Windows plugin's minidump import goes through `debrief-dump`'s reader; its parser file is gone |
+| WP-18 | `NextStep` variants (shared change, all users updated) | integrator | ADR 0052 WP-B1 | 1 [P] | each variant round-trips and has its words |
+| | **Investigation-folder total** (IF-1 to IF-6) | | | **22** | C2 stays in §10.2 |
+| | **ADR 0068 remainder** (99 [P] less WP-1's 4, less 0.5 netted in WP-17) | | | **94.5** | 76.5 without WP-0 and WP-12 |
+| | **Restored scope, total** | | | **116.5** | [calc] |
+
+#### 14.13.9 Parallelism and cost (ER-20)
+
+| Operation | Bound | Setting | Cheaper alternative checked |
+|---|---|---|---|
+| Citations | one resolve per 1,000 refs (§2.4) | none | written time reconstructed from provenance instead of storing each line's offset (a column per event) |
+| Report export per audience | one pass over the resolved report | none | `for_audience` filters the resolved report; no second resolve |
+| Sequence page | the store's readers (§14.5) | none | keyset pages; never a whole thread; median over a bounded look-back |
+| Drafting | one section at a time per window (a person reads each) | `ai.draft.section_tokens` | facts ranked and cut before the call; no model over raw events (rule 46) |
+| Re-walk | cores − 1 across threads | `performance.dumps.walk_threads` (Auto) | only improvable threads; unwind tables parsed once per module |
+| Range reads | sequential per query | none | only addresses a waiting frame or module names; prefix LRU of 2 |
+| .NET helper | one at a time (memory-heavy) | `performance.dumps.dotnet_helpers` | one run per dump with all sections, cached by `CheckKey` |
+
+Priority (rule 52): checks, sequence pages and drafting are Live (a person waits); capture series is Bulk at the
+gentle level; nothing here uses a starvable level.
+
+#### 14.13.10 Common practice and cost (ER-37)
+
+Debrief is a personal tool, so ER-37's default is common practice; each row names the cheaper common-practice option,
+which §17.2 Q-U5 offers as a decision. Sources were read on 2026-11-12.
+
+| Function | Common practice, with sources | Cost here (raw) | Cheaper common-practice option: its cost, what it saves |
+|---|---|---|---|
+| Citations | Tools quote a place as `file:line`: "Error messages from compilers should look like this: sourcefile:lineno: message" ([GNU Coding Standards](https://www.gnu.org/prep/standards/html_node/Errors.html)); an entry inside an archive as `jar:<url>!/{entry}` ([Java `JarURLConnection`](https://docs.oracle.com/javase/8/docs/api/java/net/JarURLConnection.html)); a time with its numeric offset ([RFC 3339](https://www.rfc-editor.org/rfc/rfc3339)) | IF-1 3 | `path!/member:line` plus one UTC time, no written time: about 1, saves about 2 |
+| Report blocks, audiences | Postmortems have fixed sections, "Summary", "Impact", "Root Causes", "Trigger", "Resolution", "Detection", "Action Items", "Lessons Learned", "Timeline" ([Google SRE example postmortem](https://sre.google/sre-book/example-postmortem/)); a second, external version "is a summarized and sanitized version of the information used for the internal postmortem" ([PagerDuty postmortem guide](https://docs.pagerduty.com/ops-guides/postmortem-best-practices/step-by-step)); notebooks mix text with computed outputs ([Jupyter Notebook](https://jupyter-notebook.readthedocs.io/en/stable/notebook.html)) | IF-2 5.5 | hypotheses, open points and glossary as headings in today's text blocks, one audience; only `AnalysisResult` and `Figure` added: about 3, saves about 2.5 |
+| Thread/sequence view | One lane per thread: Visual Studio's Threads view has "A channel for each thread in the process" with executing and blocked segments ([Concurrency Visualizer](https://learn.microsoft.com/en-us/visualstudio/profiling/threads-view-parallel-performance)); Perfetto filters tracks by process or thread ([Perfetto UI](https://perfetto.dev/docs/visualization/perfetto-ui)); sequence diagrams "are defined entirely in text" ([PlantUML](https://plantuml.com/sequence-diagram); also [Mermaid](https://mermaid.js.org/syntax/sequenceDiagram.html)) | IF-3 7 | a grid filter "thread = X" plus timeline lanes by the thread field, and a Mermaid text export only, no gaps or handoffs: about 4, saves about 3 |
+| Pitwall drafting | [J] No current vendor page found that standardises checked citations in generated incident text; Azure OpenAI "On Your Data" returned citations to source documents but is retired (its page says so, read 2026-11-12, [Microsoft Learn](https://learn.microsoft.com/en-us/azure/ai-services/openai/concepts/use-your-data)) | IF-4 4 | keep today's one-request incident narrative, marked as generated, with no per-section facts or citation check: about 1 (moving it onto Pitwall), saves about 3 |
+| Time shapes, small items | — (bug fixes and pack entries) | C2 1.5, IF-5 1, IF-6 1.5 | none cheaper |
+| Dump checks, native | Microsoft's own tools answer the same three questions: DebugDiag "is designed to assist in troubleshooting issues such as hangs, slow performance, memory leaks … and crashes" ([download page](https://www.microsoft.com/en-us/download/details.aspx?id=103453)); WinDbg's `!analyze` "displays information about the current exception" and `-hang` "Generates !analyze hung-application output" ([`!analyze`](https://learn.microsoft.com/en-us/windows-hardware/drivers/debuggercmds/-analyze)); Visual Studio shows a "Minidump File Summary" ([dump files](https://learn.microsoft.com/en-us/visualstudio/debugger/using-dump-files)) | 76.5 (WP-2 to WP-11, WP-13 to WP-18) | (a) "Open in WinDbg or Visual Studio" from the dump view, today's view kept: about 1.5, saves about 75; (b) the checks without Debrief's own unwinder, scanned frames labelled (saves WP-3's 12, with weaker hang verdicts) |
+| .NET managed state | `dotnet-dump analyze` runs SOS commands such as `clrstack`, `dumpheap`, `syncblk` ([dotnet-dump](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-dump)); Visual Studio's .NET Diagnostic Analyzers report thread-pool starvation on a managed dump ([Microsoft Learn](https://learn.microsoft.com/en-us/visualstudio/debugger/how-to-debug-managed-memory-dump)) | WP-0 3 + WP-12 15 = 18 | "Open in Visual Studio" or a copied `dotnet-dump analyze` command line, with the managed part shown as Not checked: about 0.5, saves about 17.5. ADR 0068 D1 rejected parsing `dotnet-dump`'s text as a stop-gap; linking out is not parsing |
+
+**Why this design goes further.** The user decided each of these with its size: ADR 0068 D1 to D13 on 2026-11-07 (99
+raw, "all of it in 1.2"), the four investigation-folder features on 2026-11-07, and their return to 1.2 on 2026-11-11.
+The design adds nothing beyond those decisions; the cheaper options are offered once more because ER-37 asks for it.
 
 ## 15. Package index: which section each package cites
 
@@ -2514,7 +3141,12 @@ end jobs (F4, F7, F8, 3.4, Z5, Y9, J1, FD-F's builds) land after it or with it.
 | Y9 (job service) | §9.5 | | X1 to X11, Y6, Y7, Y8, Y14 R0 and R3, Y16, A1 | §14.10 |
 | Y10 | §14.11 | | 5.4, M5, R, F (fix buffer), L-0 | no API (review, safety net, release, landing) |
 | W0 (ADR 0063's binary-wire gate) | §13.4, §17 Q1 and Q15 | | MEM-1, MEM-2 (built on `debrief/p0-idle`, not landed; L-0 lands them, §8) | §8, §14.8 |
-| WG0 (the shell screenshot baseline, called W0 in the plan's M rows) | §14.3 | | Restored 2026-11-11: citations, report blocks, thread/sequence view, Pitwall drafting; ADR 0068 WP-0, WP-2 to WP-18, WP-RR | §14.13 (stub; designed before each first package) |
+| WG0 (the shell screenshot baseline, called W0 in the plan's M rows) | §14.3 | | IF-1 citations | §14.13.2, §2.4, §10.3 |
+| IF-2 report blocks and audiences | §14.13.3, §11 | | IF-3 thread/sequence view | §14.13.4, §14.2, §14.5 |
+| IF-4 Pitwall drafting | §14.13.5 | | IF-5, IF-6, C2 (widened) | §14.13.1, §6.3 |
+| WP-2, WP-RR, WP-8 (ADR 0068) | §14.13.6, §5.9, §4.2, §14.8 | | WP-3 (ADR 0068) | §14.13.6 |
+| WP-4 to WP-7, WP-9 (ADR 0068) | §14.13.6, §11, §2.5 | | WP-10, WP-11, WP-13 (ADR 0068) | §14.13.6, §9 |
+| WP-0, WP-12 (ADR 0068) | §14.13.6 (.NET), prerequisites table | | WP-14 to WP-18 (ADR 0068) | §14.13.6, §14.13.8 |
 
 ## 16. Settings introduced or touched
 
@@ -2536,7 +3168,7 @@ use the names here (§17, Q24).
 | `performance.plugins.start` | On first use | On first use, At startup | 2.6a, 4.4 |
 | `performance.plugins.idle_stop_min` | 10 [J] | 1 to 120, Never | 2.6a, 4.4 |
 | `performance.plugins.stream_credit` | Auto (4) | 1 to 64 | 2.6b |
-| `performance.stall.<key>.blocked_ticks`, `.spin_cpu_s` (revision 5; **open: §17.2 Q-U3**, recommended one Setting `performance.stall.patience` instead) | Auto (per key, LV1) | per key | 2.6c, LV1 |
+| `performance.stall.patience` (decided 2026-11-12, Q-U3 (b); the per-key values are LV1's constants, §4.4) | Normal (×1) | Normal, Patient (×4) | 2.6c, LV1 |
 | `performance.index.read_threads`, `.write_threads`, `performance.catalogue.workers` | Auto (within cores − 1 beside parse threads; capped at 4 until measured) | 1 to cores | SR1, SR3 |
 | `performance.symbols.cache_mb` | from MEM-5's measurement | 64 to 4,096 | MEM-5 |
 | `performance.documents.budget_mb` | from the MEM-6 ADR | as there | MEM-6, FD-G |
@@ -2548,10 +3180,19 @@ use the names here (§17, Q24).
 | `timeline.cache_mb` | 16 | 4 to 256 | 4.1 |
 | `time.display` | UTC | UTC, Local, Logs' time zone | Z-packages |
 | `time.zone_probe_budget_ms` | ADR 0066 D3 | as there | Z8 |
+| `sequence.stall_floor_ms` | 1,000 | 10 to 600,000 | IF-3 |
+| `ai.draft.section_tokens` | 8,000 | 2,000 to 32,000 | IF-4 |
+| `dumps.around_before_s`, `dumps.around_after_s` | 120, 10 (ADR 0068 §6) | 1 to 3,600; 0 to 600 | WP-9 |
+| `dumps.dac_folders` | none | up to 16 folders | WP-12 |
+| `dumps.dotnet_heap_objects` | 200,000,000 (ADR 0068 §9) | 1,000,000 to 2,000,000,000 | WP-12 |
+| `performance.dumps.walk_threads` | Auto (cores − 1) | 1 to cores | WP-3 |
+| `performance.dumps.dotnet_helpers` | 1 | 1 to 4 | WP-12 |
+| `performance.dumps.dotnet_memory_mb` | Auto (half of physical memory, at most 8,192; 4,096 when unknown) | 512 to 16,384 | WP-12 |
 
 Limits that are registry rows without a Setting (`hard`) are listed with their sections: `store.event_ids` (§2.1),
 `evidence.resolve_batch` (§2.4), `query.source_folders` (§6.10), `timeline.lanes_max` (§14.2),
-`store.exact_positions_max` (§14.5), `search.budget_ms` (§14.5), `symbols.cache_bytes` (§14.8).
+`store.exact_positions_max` (§14.5), `search.budget_ms` (§14.5), `symbols.cache_bytes` (§14.8), and the restored
+scope's rows (§14.13.7).
 
 ## 17. Open questions, corrections, recommendations
 
@@ -2584,7 +3225,7 @@ Limits that are registry rows without a Setting (`hard`) are listed with their s
 | Q25 | `TsState` lives in `debrief-batch`, which pulls Arrow; plugins must not | `debrief-batch`'s Arrow dependencies behind a default feature `arrow`; `debrief-plugin-ext` depends on it with `default-features = false` (one definition, rule 55); a `cargo tree` check in CI (beside PH2a's) fails when a plugin binary (`debrief-plugins`, `debrief-plugin-*`) links an `arrow-*` crate. Alternative: move ids and `TsState` to a dependency-free crate; not chosen, one more crate for two types |
 | Q26 | Plugin items in flight across an import add up to the store worker's whole budget (§8) | **A shared `CreditPool` by bytes** (§4.2), initial grants included, at most `limit / EVENT_FRAME_MAX` plugin streams, FIFO fairness; `performance.import.items_in_flight_mb` 128 MiB, raised only with 2.6b's and 4.3's recorded results |
 | Q27 | **Decided by the user, 2026-11-07, as recommended.** D7's 768 MB is the worker's total peak footprint (§8). With ADR 0067's idle allowances, 138 MB remain on macOS and 448 MB on Linux for import parts whose bounded share alone is 285 MB (read buffers 151, credit pool 134; revision 6: no tee, ADR 0062's trim; revision 5 said 525 with a 240 MB tee), before batches, the writer and DuckDB: short by 147 MB on macOS, 163 MB left on Linux | 4.3 measures the idle footprint and every part first (the allowances are not measurements). Then choose: a per-OS budget (macOS's footprint counts more than Linux's PSS), smaller parts (chunk size, credit pool, at a measured throughput cost), or both. Bring back with 4.3's numbers, beside plan §9.6 D1 |
-| Q28 | Annotation "new since" needs a listing sequence the store does not have (§5.6) | **Owner: IX-B1** (it owns `writer.rs`, `compact.rs`, `skew.rs`): the sequence in the listing transaction, with the rewrite rules and tests of §5.6 |
+| Q28 | Annotation "new since" needs a listing sequence the store does not have (§5.6) | **Closed by Q-U1 (c), 2026-11-12:** full runs in 1.2, no listing sequence; IX-B1 builds none of it. The rewrite rules of §5.6 wait for the release that adds incremental runs |
 
 **Where the ADR notes land.** Q21's amendment of ADR 0064 and Q23's note land in SI-1's first commit; Q22's note in
 ADR 0067 lands in F1's first commit; Q8 and Q24's notes in ADR 0067 with F7 and FM; §4.4's rename (`CallPatience`, `paddock_proc::RunState`, the `ProcessId` probe) in ADR 0031 §5 with 2.6c; Q4 in
@@ -2602,25 +3243,37 @@ says why, and its cheaper option is a decision the user can still take.
 | Plugins out of process, sandboxed, supervised (§4, PH1 to PH4, IP1, 2.6a to 2.6d) | Browsers run untrusted parsing and rendering in sandboxed target processes under a privileged broker that outlives them (Chromium, [sandbox design](https://chromium.googlesource.com/chromium/src/+/main/docs/design/sandbox.md)); VS Code runs extensions in an extension host apart from the UI ([extension host](https://code.visualstudio.com/api/advanced-topics/extension-host)) | IP1 4 (built), 2.6a 4.5, 2.6b 3.5, 2.6c 4.5, 2.6d 4, PH1 2.5 (3.5 − 1, ADR 0070), PH2a 2, PH2b 3.5, PH3 0.5, PH4 3.5: about 32.5 [calc] | none cheaper that keeps the 1.1 behaviour: Debrief 1.1 already hosts plugins out of process; the cost is moving onto the shared host (ADR 0003, accepted), not isolation itself | the family decision (ADR 0001, 0003): one host for every app |
 | Credit-based back-pressure on streamed items (§4.2 `CreditPool`) | HTTP/2's receiver-controlled, credit-based flow control with `WINDOW_UPDATE` ([RFC 9113 §5.2](https://www.rfc-editor.org/rfc/rfc9113#section-5.2)) | inside 2.6b (3.5) | a fixed per-stream credit without a shared pool | 16 files × credit 4 × 12 MiB items is the whole 768 MB budget (§8, Q26) |
 | Bounded replies that say what they left out (§4.6, ADR 0065) | Elasticsearch counts hits exactly up to `track_total_hits` (default 10,000) and reports `hits.total.relation: "gte"` beyond it, a lower bound ([search API](https://www.elastic.co/docs/solutions/search/the-search-api)) | 1.4 + B1 5 (built); B2 to B8 per ADR 0065 | a plain cap with a "results truncated" flag | ADR 0065 (accepted 2026-11-06, full scope): Debrief's lists are evidence, and an unmarked cut misleads an investigation |
-| Stall judgement instead of timeouts (§4.4, 2.6c, 2.6d, LV1, LV2) | Windows calls a window not responding after an internal 5 s without pumping messages, not configurable and "subject to change" ([`IsHungAppWindow`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-ishungappwindow)); the OS shows the state and the user decides | 2.6c 4.5, 2.6d 4, LV1 2.25 (3 − 0.75), LV2 1: about 11.75 [calc], on the start judge that is already built | fixed timeouts per call with a "still working" note, no per-key Settings (Q-U3 (c)) | ADR 0031 (accepted): a paused or starved Mac (App Tamer, CI 7096) failed fixed timeouts |
+| Stall judgement instead of timeouts (§4.4, 2.6c, 2.6d, LV1, LV2) | Windows calls a window not responding after an internal 5 s without pumping messages, not configurable and "subject to change" ([`IsHungAppWindow`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-ishungappwindow)); the OS shows the state and the user decides | 2.6c 4.5, 2.6d 4, LV1 2.25 (3 − 0.75), LV2 1: about 11.75 [calc], on the start judge that is already built | fixed timeouts per call with a "still working" note, no per-key Settings (Q-U3 (c)) | ADR 0031 (accepted): a paused or starved Mac (App Tamer, CI 7096) failed fixed timeouts. **Decided 2026-11-12, Q-U3 (b):** constants plus one Setting |
 | Virtual lists and the keyed window (§14.1) | Angular CDK virtual scrolling renders only the visible items ([CDK scrolling](https://material.angular.dev/cdk/scrolling/overview)), which rule 47 already prefers | 2.1 4 (+1 to 2 for columns), 2.7 2.5, 4.5 4, 3.7 3: about 13.5 to 15.5 [calc] | CDK `cdk-virtual-scroll-viewport` with fixed row heights and an index window only, no keyed mode | 1 billion events: an index window cannot place rows whose positions are unknown above 100M (§14.5, Q17) |
 | `define*` contributions, lazy by construction (§14.3, M1 to M5) | VS Code declares contribution points in the extension manifest and activates an extension when one of its activation events fires ([contribution points](https://code.visualstudio.com/api/references/contribution-points), [activation events](https://code.visualstudio.com/api/references/activation-events)); JupyterLab plugins provide and require tokens ([extension guide](https://jupyterlab.readthedocs.io/en/stable/extension/extension_dev.html)) | the M packages of the shell move (plan, not repriced here) | keep Debrief's own registries (no move) | the family workbench (ADR 0013 and workbench.md, accepted): one shell for every app |
-| Incremental annotation (§5.6, the listing sequence) | analysers that rerun over the whole data set on demand are the usual pattern [J: no vendor document found that standardises "new since"] | about 1 to 1.5 in IX-B1 [J] | full runs only (Q-U1 (b) or (c)) | only if the user wants "new since" in 1.2 |
+| Restored scope: citations, report blocks, sequence view, drafting, ADR 0068's checks and .NET (§14.13) | per function in §14.13.10, with sources | 116.5 [calc] (§14.13.8) | per function in §14.13.10 (Q-U5) | the user's decisions of 2026-11-07 (ADR 0068 D1 to D13; the four features) and 2026-11-11 (back in 1.2) |
+| Incremental annotation (§5.6, the listing sequence) | analysers that rerun over the whole data set on demand are the usual pattern [J: no vendor document found that standardises "new since"] | about 1 to 1.5 in IX-B1 [J] | full runs only (Q-U1 (b) or (c)) | **Decided 2026-11-12, Q-U1 (c):** full runs in 1.2, the wire fields kept and always empty; nothing built |
 
 **Summary.** The plugin, back-pressure, bounded-reply and list mechanisms are accepted ADRs with common practice behind
-them; this revision does not reopen them. The two places where this design is above common practice and not yet
-decided are the stall Settings (Q-U3) and incremental annotation (Q-U1); both have a cheaper option below.
+them; this revision does not reopen them. The stall Settings and incremental annotation were decided on 2026-11-12 with
+the cheaper option (Q-U3 (b), Q-U1 (c)). The restored scope goes beyond common practice by the user's earlier decisions;
+its cheaper options are §14.13.10's, offered as Q-U5.
 
-### 17.2 Open questions for the user (revision 6)
+### 17.2 Questions for the user (revision 6, decided 2026-11-12; revision 7 adds Q-U5)
 
-These are not decided here. Each has a recommendation; the user decides.
+**Decided by the user on 2026-11-12** (answers relayed in revision 7's brief); each is applied in the section named.
+
+| # | Question | Decision (2026-11-12) | Applied in |
+|---|---|---|---|
+| Q-U1 | **Incremental annotation.** A store listing sequence so an annotator reads only what is "new since" its last run | **(c)**: full runs in 1.2; `since` and `listed_through` stay on the wire, always `None` and 0, so incremental runs can come later as a minor change. No listing sequence is built (Q28 closed) | §5.6, §17 Q28, §17.1 |
+| Q-U2 | **Duplicate EVTX record ids.** A real log can repeat a record number | **(b2)**: keep every event, the event id as the tie-break, no check. The `RecordNumber` seen-set, the `import.ordinal_set_bytes` row and the problem kinds `DuplicateOrdinal` and `OrdinalUnchecked` are removed | §2.2, §7.2, plan FD-B row |
+| Q-U3 | **Stall Settings.** Two Settings per call key, about 26 fields | **(b)**: the per-key values are constants measured by LV1 (rule 48); one Setting `performance.stall.patience` (Normal, Patient = ×4) | §4.4, §16, §17.1 |
+| Q-U4 | **The restored scope** | **(a)**: design all of it now, in this file: the investigation-folder features and ADR 0068's checks beyond WP-1, with APIs, packages, days and ER-37's comparison | §0, §14.13, §15, §16, plan §10.6 |
+
+Options that were offered, for the record: Q-U1 (a) build the listing sequence, (b) drop the fields, (d) per-source
+generation; Q-U2 (a) skip duplicates, (b1) keep and count, (c) declare EVTX `Position`; Q-U3 (a) per-key Settings, (c) no
+Setting; Q-U4 (b) design before each first package, (c) move it back out.
+
+**Open (revision 7).** Not decided here; the user decides.
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|
-| Q-U1 | **Incremental annotation.** §5.6 gives each store listing a sequence so an annotator can read only what is "new since" its last run; that is a new store field and rewrite rules (Q28, IX-B1) | (a) build it as §5.6 says, in 1.2 (about 1 to 1.5 [J]); (b) no incremental runs at all: drop `since` and `listed_through` from the wire; (c) full runs in 1.2, but keep `since: Option<ListedSince>` and `listed_through` on the wire, always `None`/0, so the store field can come later as a minor change; (d) cheap incremental runs keyed by each source's import generation: a run skips sources whose generation is unchanged since its last run and reads the others whole, with no listing sequence and no rewrite rules (about 0.5 [J]) | **(c)**: no store work in 1.2 and no wire change later |
-| Q-U2 | **Duplicate EVTX record ids.** §2.2 refuses an event whose `(source, ordinal)` was seen (skipped, `DuplicateOrdinal`). A real log can repeat a record number (a log cleared and refilled, a file stitched from two exports) | (a) as designed: skip the duplicate and count it; (b1) keep every event and count repeats: the event id breaks the tie, and the source's provenance counts them as `DuplicateOrdinal`, a note, not a loss; this keeps the per-source seen-set, the `import.ordinal_set_bytes` row (64 MiB, `hard`) and `OrdinalUnchecked` past it; (b2) keep every event, the event id as the tie-break (the order key's last part), and no check at all; (c) declare EVTX `Position` (file order) instead of `RecordNumber` | **(b2)**: no event is dropped, the order stays total, and the check costs memory to report something nobody acts on. It removes from §2.2 the `RecordNumber` seen-set (the compressed bitmap freed at `finish_source`), the `import.ordinal_set_bytes` row, and both problem kinds `DuplicateOrdinal` and `OrdinalUnchecked` with the provenance note; §2.2's ordinal stays "unique per source" as the importer's declaration, not a checked guarantee |
-| Q-U3 | **Stall Settings.** §16 lists two Settings per call key (`blocked_ticks`, `spin_cpu_s`), about 26 fields for 13 keys | (a) per-key Settings as listed; (b) one Setting `performance.stall.patience` (Normal, Patient = 4×), applied over LV1's measured per-key values, which stay constants recorded under rule 48; (c) no Setting (common practice, §17.1) | **(b)**: one escape hatch for a slow machine, no wall of fields |
-| Q-U4 | **The restored scope** (§14.13: investigation-folder features, ADR 0068's checks other than WP-1) | (a) design all of it in this file now, before wave 1; (b) a stub now, each part designed (and reviewed) before its first package starts, on §14.13's foundation types; (c) move it back out of 1.2 | **(b)**: the foundation does not wait for it, and nothing in §2 to §13 changes for it |
+| Q-U5 | **Cheaper options for the restored scope** (ER-37, §14.13.10). Each function has a common-practice option that costs less | (a) build as designed, 116.5 raw; (b) take one or more of §14.13.10's cheaper options: citations with one UTC time (saves about 2), report blocks as headings in text (about 2.5), sequence view as a thread filter plus Mermaid text (about 3), keep today's one-request narrative (about 3), dump checks without Debrief's own unwinder (12), "Open in WinDbg or Visual Studio" instead of native checks (about 75), link out to Visual Studio or `dotnet-dump` for .NET (about 17.5) | **(a)**: the user decided each function with its size on 2026-11-07 and brought all of it back on 2026-11-11; if the end date must move, the first candidate is the unwinder (WP-3, 12 days), whose loss weakens hang verdicts on unsymbolised dumps but leaves every check working |
 
 ### 17.3 What revision 6 changed
 
@@ -2635,6 +3288,13 @@ contributions lint not built, `coverage-guard.spec.ts` moves, WG0, assistant row
 Settings owners); §17 (Q3, Q6, Q27, ADR notes; §17.1 to §17.3 new). After round 2: §4.5's dependency edges, Q-U1's
 option (d), Q-U2's (b1)/(b2) split, §17.1's `define*` row. The plan `debrief-1-2.md` landed with this file
 carries a landing note on its totals.
+
+### 17.4 What revision 7 changed
+
+Header (revision line, evidence heads); §0 (restored scope designed, index row); §2.2 (Q-U2 (b2)); §4.4 (Q-U3 (b)); §5.6
+and its `ListedSince` comment (Q-U1 (c)); §7.2 (ordinals); §14.13 (the stub replaced by §14.13.1 to §14.13.10); §15
+(rows); §16 (stall row, nine new Settings, the restored rows' pointer); §17 (Q28 closed; §17.1 rows and summary; §17.2
+decided and Q-U5; this list); §18. The plan `debrief-1-2.md` gains §10.6 and new totals.
 
 ## 18. Completeness
 
@@ -2651,8 +3311,10 @@ the shell move (workbench.md and the move plan own the API), §14.5 store perfor
 
 **Scope not found in the sources read, so not designed:** ST-6, Y11's sticky field promotion, Y14's R3 split (Q18).
 
-**Restored to 1.2, deliberately not designed yet (revision 6):** §14.13, a stub (Q-U4).
+**Restored to 1.2, designed in revision 7:** §14.13 (signatures, homes, Settings, limits, logs, jobs, test homes, work
+packages with days and acceptance, ER-37's comparison). Its prerequisites that are not built are listed in its table:
+ADR 0052 WP-B1, ADR 0051's `paddock-tools`, ADR 0028's `paddock-deps`, MEM-2's landing (L-0).
 
 **Not verified:** nothing was compiled; signatures were checked against the source files named in the header, not
-built. The listing sequence of §5.6 is a new store field [J]; IX-B1 adds it with the tests of §5.6. The drawing research's numbers are from
+built. The listing sequence of §5.6 is not built in 1.2 (Q-U1 (c)). The drawing research's numbers are from
 Playwright's browsers, not the real webviews; CV1 settles that.

@@ -3,14 +3,15 @@
 - Status: Plan, 2026-10-27; user decisions D1-D3 applied the same day (section 6). **Refreshed 2026-11-06 (section 9):
   the current total, critical path and schedule are there; the estimate in section 5 and the tracks in section 8 are
   history.** **Release split adopted 2026-11-07 (section 10): 1.2 is the full foundation plus correctness fixes, then
-  one function per release; 510.5 raw, 612.6 with 20 %, about 2027-04-21.**
+  one function per release; 510.5 raw, 612.6 with 20 %, about 2027-04-21.** (Superseded on 2026-11-12 by section 10.6: the restored scope is back in; about 643 raw, 767 with the buffer, about 2027-05-31.)
   2026-11-11 (user): both axes virtualized for tables and timeline (2.1 columns, 2.4 time range).
   **Landing note (2026-11-12):** the totals of sections 9 and 10 predate two later additions, which they do not include:
   DBR-LINT (23.5 raw, user decisions of 2026-11-08 and 2026-11-09, below) and the column virtualization (about +1 to 2 in
   2.1, 2026-11-11), which add about 25 raw; ADR 0062's trim (2026-11-11: the tee, WP-4 to WP-8, deferred) takes IX days
   out, and the user's decision of 2026-11-11 to bring the investigation-folder features and ADR 0068's checks other than
-  WP-1 back into 1.2 puts days in (API design §14.13). The totals and the calendar are recomputed in the plan's next
-  refresh, not here. The API design is [debrief-1-2-api.md](debrief-1-2-api.md).
+  WP-1 back into 1.2 puts days in (API design §14.13). The API design is [debrief-1-2-api.md](debrief-1-2-api.md).
+  **Restored scope designed (2026-11-12, section 10.6):** 25 packages, 116.5 raw. **Current total, recomputed in
+  section 10.6: about 643 raw, about 767 with the buffer, about 2027-05-31** at 5.5 agent-days a day.
 - App: Debrief (`apps/debrief`). Rule 1 holds: Debrief is the one app; the shared work below is done for Debrief's
   release and is adopted by the demos in the same change (monorepo rules 39 and 42), not as a separate Paddock project.
 - Scope:
@@ -811,14 +812,14 @@ The user decided on 2026-11-07: **the full foundation in 1.2, then one function 
 | FD-P | `ProcessInstance` in `debrief-core` (pid, start time with ADR 0066 provenance, main image identity, confirmed or not with the reason); UMDH on it; ADR 0068 WP-6 builds the dumps' check on it | implementer | ADR 0068 §1 | 0.5 | Same pid, different start time: two instances; no start time: unconfirmed with its reason |
 | FD-E1 | Evidence reference ADR: one `EvidenceRef` (stable source id, locator, content hash, time, id hint) for notes, reports, AI citations and findings; found, moved or gone | designer, then reviewer | ADR 0051, 0066 | 2 | (design) its test list below |
 | FD-E2 | `EvidenceRef` and its resolver; notes, report blocks and AI citations moved onto it | implementer | FD-E1, FD-U, FD-B | 3 | A cited event survives a reload and a re-time (found or moved); a removed source gives gone with the kept excerpt; `EventsRequest` reports the ids it could not resolve instead of dropping them |
-| FD-B | Ordinal per source: `line` for text sources, a declared ordinal for the rest (EVTX record id, CSV row, OTLP record, video frame), uniqueness checked at the sink (ADR 0062 amendment) | designer, then implementer | IX-B1 | 1.5 | Two events with the same time keep one order across reloads; a non-text importer without a declared ordinal fails its contract test; a duplicate `(source, ordinal)` is refused |
+| FD-B | Ordinal per source: `line` for text sources, a declared ordinal for the rest (EVTX record id, CSV row, OTLP record, video frame), declared by the importer and not checked (Q-U2 (b2), 2026-11-12: a repeated record number is kept, the event id breaks the tie) (ADR 0062 amendment) | designer, then implementer | IX-B1 | 1.25 (1.5 less the seen-set) | Two events with the same time keep one order across reloads; a non-text importer without a declared ordinal fails its contract test; two events with the same `(source, ordinal)` are both kept, in id order |
 | WP-1 | ADR 0068's model, wire, limits and the `CheckReport` contract (ADR 0068 work package WP-1; the rest of ADR 0068 moves out, 10.3) | implementer | - | 4 | As ADR 0068's test plan lists for WP-1 |
 | FD-I | ADR 0068's `CheckReport` as the shared finding: health, profiling and heap findings mapped; the report's Finding block typed | implementer | WP-1 | 1 | Each producer's findings map without loss; a report Finding block round-trips its typed verdict, confidence and evidence |
 | FD-F | Analyses at scale ADR: which analyses are import-time accumulated, store-side over all rows or sampled with a stated coverage; the query language's refusal over 2M matches (`qlang.rs:66-77`) with known issues and playbooks on store-side counts; Parallelism and cost per class | researcher, then reviewer | Q-1, 4.3 | 3 | (design) measurements on the 4.3 corpus, recorded per rule 48 |
 | FD-G | MEM-6 ADR's scope widened to dump and UMDH documents (a byte budget instead of `MAX_DOCS = 32`) | designer | MEM-6 ADR | 1 | (design) |
 | FD-K | Analysis run log lines: kind, query hash, coverage, Settings hash, duration; no user content (ER-27) | implementer | FD-F | 0.5 | A run's log line has the five fields and no message text |
 | FD-M | Planted-incident generator over the 4.3 corpus (spike, leak, restart, skewed clock, deadlock dump, UMDH series) with an expected-findings file and a recall check per analysis, nightly; invented data only (ER-14) | implementer | 4.3 | 3 | The recall check fails on a planted incident that no analysis reports |
-| | **Total** | | | **22.5** | |
+| | **Total** | | | **22.25** (22.5 less FD-B's seen-set, Q-U2 (b2)) | |
 
 ### 10.2 Correctness packages (in 1.2)
 
@@ -832,6 +833,10 @@ The user decided on 2026-11-07: **the full foundation in 1.2, then one function 
 | | **Total** | | | **6** | |
 
 ### 10.3 Moved to a later release
+
+**2026-11-11 (user): the approved functions and ADR 0068's checks named at the end of this section are back in 1.2**
+(section 10.6); the rest of the list stays moved.
+
 
 Kept in their rows above, marked; one function per release after 1.2, in the order of the roadmap note §4.2: Y1 AI
 memory (10.5), Y2 semantic search with X55 (9.5), N4, N5, N0, N7 (5.5), Y5 tray popup (5), Y9's small items (4), Y13
@@ -858,3 +863,56 @@ The waiting packages of the chain (1.4 + B1, IP1, 2.6c, PH1, 2.2, 1.3) may be wr
 - merged, not rebased, after the tag;
 - on spare agents only (wave 0 uses all seven, §9.4), so the gain is bounded by the working days between 0.5's review
   and T.
+
+### 10.6 Restored to 1.2 (user, 2026-11-11), designed 2026-11-12
+
+The user brought the investigation-folder features and ADR 0068's checks beyond WP-1 back into 1.2 on 2026-11-11 and,
+on 2026-11-12, asked for their full design now (API design Q-U4 (a)). The API, homes, Settings, limits and test homes of
+each package are in [the API design §14.13](debrief-1-2-api.md#1413-restored-to-12-investigation-folder-features-and-adr-0068s-checks-revision-7);
+its §14.13.8 holds the acceptance tests. Sizes are raw agent-days; [P] from ADR 0068's table or the roadmap note §2.3,
+[J] judgement, [mem] the 2026-11-07 decision.
+
+| # | Package | Role | Depends | Days |
+|---|---|---|---|---|
+| IF-1 | Citations: `path!/member:line`, written and zoned time, in reports, exports and AI | implementer | FD-E2, Z3, Z6 | 3 [P] |
+| IF-2 | Report blocks (hypotheses, open points, glossary, figures, analysis results, SQL tables) and two audience versions | designer | FD-I, FD-E2, IF-1, Q-2 | 5.5 [P] |
+| IF-3 | Thread/sequence view, stall gaps, Mermaid, PlantUML and SVG export | designer | FD-B, FD-P, 2.4, 3.3, Q-1, M3a | 7 [P] |
+| IF-4 | Pitwall drafting per section with checked citations, replacing the incident narrative | designer | IF-2, FD-I, IF-1 | 4 [P] |
+| IF-5 | A zip next to its own extraction: one duplicate rule kind | implementer | F5, SI-4 | 1 [mem] |
+| IF-6 | `ctime;` event-log text exports read | implementer | Z1, SI-3 | 1.5 [mem] |
+| WP-0, WP-12 (ADR 0068) | .NET: helper spike; helper, plugin, DAC lookup, pin, notices | researcher; designer | WP-12: WP-0, WP-1, WP-RR, `paddock-tools`, `paddock-deps` | 3 + 15 [P] |
+| WP-2, WP-RR, WP-8 (ADR 0068) | Reader streams; range reads after open; heap dumps by ranges | implementer; designer; implementer | WP-1; WP-2, PH2a, 2.6b, MEM-2 (L-0); WP-RR | 4 + 8 + 3 [P] |
+| WP-3 (ADR 0068) | Debrief's unwinder | designer | WP-RR, WP-8 | 12 [P] |
+| WP-4 to WP-7 (ADR 0068) | Check crash; check hang; series; check memory | implementer, designer | as ADR 0068; WP-6 also FD-P | 3 + 8 + 4 + 4 [P] |
+| WP-9, WP-10, WP-11 (ADR 0068) | Events around; shell job, cache, commands; capture series | implementer | WP-9: FD-E2, Z6; WP-10: WP-18 | 3 + 3 + 3 [P] |
+| WP-13 to WP-16 (ADR 0068) | UI; tests and first measurements; docs and review; injectors pack | designer; implementer | WP-13: WP-10, M3a, IF-2 | 6 + 8 + 2 + 2 [P] |
+| WP-17 (ADR 0068) | One minidump reader (0.5 netted against SI-12's minidump importer) | implementer | WP-2, SI-12 | 2.5 [P less 0.5] |
+| WP-18 (ADR 0068) | `NextStep` variants in `paddock-jobs` | integrator | ADR 0052 WP-B1 | 1 [P] |
+| | **Total** | | | **116.5** (investigation folder 22; ADR 0068 94.5, 76.5 without .NET) |
+
+C2 (the time shapes) stays in 10.2, widened to the three places an offset is read; its 1.5 days do not change.
+
+**Prerequisites not built** (checked 2026-11-12 on `origin/main` `e2a318345` and every remote branch): ADR 0052 WP-B1
+(`NextStep` in `paddock-jobs`, every job here and WP-18), ADR 0051's `paddock-tools` and ADR 0028's `paddock-deps`
+(WP-12), MEM-2's landing by L-0 (WP-RR). None is on the streaming and folder-open chain, so the critical path of 9.3 does
+not change; these packages run by capacity once their dependencies land.
+
+**Total and calendar, recomputed** [calc; marks as in section 9]:
+
+| | Raw agent-days | Basis |
+|---|---|---|
+| Total after the release split (9.5) | 510.5 | [calc] |
+| DBR-LINT | +23.5 | [P], user decisions 2026-11-08 and 2026-11-09 |
+| Column virtualization in 2.1 | +1.5 | [J], midpoint of 1 to 2 (2026-11-11) |
+| ADR 0062's trim: IX-B2 5.25, IX-C 0.5, IX-M 1.5, IX-S 1.5 deferred | −8.75 | [P] rows in 9.2; P4's tee tally share is not separable and stays [U] |
+| FD-B without the seen-set (Q-U2 (b2)) | −0.25 | [J] |
+| Incremental annotation not built (Q-U1 (c)) | 0 | it was never priced in a plan row |
+| Restored scope (this section) | +116.5 | [calc] |
+| **Total** | **about 643 raw** | [calc] |
+| **With 20 %** (on everything but DBR-LINT, which carries its own allowance, section 5) | **about 767** | [calc]: 619.5 × 1.2 + 23.5 |
+
+At 5.5 agent-days a working day: 767 / 5.5 = 139.5, plus Spotter 2.5 and quiet-window slips 4, **about 146 working days
+from 2026-11-09: about 2027-05-31** (no holidays or CI queues counted), against 2027-04-21 before. ADR 0070's own deltas
+(the built-in engine removed, PH1 −1 and LV1 −0.75, against its removal work) are not netted here [U]; its plan table
+owns them. Without .NET (Q-U5's cheapest large option short of dropping the checks) the end moves about 4 working days
+earlier.
