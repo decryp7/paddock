@@ -212,6 +212,7 @@ fn ducklake_trial() {
         Ok("store") => store_mode(),
         Ok("lake") => lake_mode(),
         Ok("raw") => raw_mode(),
+        Ok("layout") => layout_mode(),
         _ => eprintln!("skipped: set TRIAL_MODE=store|lake"),
     }
 }
@@ -238,7 +239,11 @@ fn store_mode() {
     let dir = PathBuf::from(env("TRIAL_STORE"));
     let kept = std::env::var_os("TRIAL_KEEP").map(PathBuf::from);
     assert!(!dir.join(debrief_store_duck::DB_FILE).exists(), "TRIAL_STORE must be a new folder");
-    println!("trial: variant={}", std::env::var("DEBRIEF_TRIAL_STORE").unwrap_or_else(|_| "base".into()));
+    println!(
+        "trial: variant={} row_group={}",
+        std::env::var("DEBRIEF_TRIAL_STORE").unwrap_or_else(|_| "base".into()),
+        std::env::var("DEBRIEF_TRIAL_ROW_GROUP").unwrap_or_else(|_| "default".into())
+    );
     let q = q();
     let peak = Peak::start();
     let started = Instant::now();
@@ -322,14 +327,31 @@ fn store_mode() {
     );
 
     let t = Instant::now();
-    let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
-    let built = store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
+    // The index and the catalogue build at the same time; each one's finish is timed from the end of the imports.
+    let (index_s, catalogue_s, st, built) = std::thread::scope(|sc| {
+        let i = sc.spawn(|| {
+            let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
+            (st, t.elapsed().as_secs_f64())
+        });
+        let c = sc.spawn(|| {
+            let b = store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
+            (b, t.elapsed().as_secs_f64())
+        });
+        let (st, is) = i.join().unwrap();
+        let (b, cs) = c.join().unwrap();
+        (is, cs, st, b)
+    });
+    println!("trial: background_split index_s={index_s:.2} catalogue_s={catalogue_s:.2}");
     println!(
         "trial: background_index_and_catalogue s={:.2} indexed={} catalogue={built} peak_fp_mb={}",
         t.elapsed().as_secs_f64(),
         st.indexed,
         peak.take()
     );
+    if std::env::var_os("TRIAL_STOP_AFTER_READY").is_some() {
+        println!("trial: ready_end_to_end s={:.2}", started.elapsed().as_secs_f64());
+        return;
+    }
     println!("trial: ready_end_to_end s={:.2}", started.elapsed().as_secs_f64());
     store_disk(&dir, "after_import");
     quiet("quiet_query_after_import", || page(&store));
@@ -656,4 +678,317 @@ fn raw_mode() {
         let mut st = conn.prepare(&sql).ok()?;
         Some(st.query_map([], |_| Ok(())).ok()?.count())
     });
+}
+
+/// Trial 2, C1/C3/C4 and the SQL-level comparison: the store's kept segments (`TRIAL_KEEP/main`, then `TRIAL_KEEP/extra`
+/// as a later import) laid out several ways in `TRIAL_LAYOUT_DIR`, each queried with the page's SQL shape (count, the first
+/// 500 ids in time order, their rows) over `TRIAL_WINDOWS` random 45 s windows plus the standard one, with the store's
+/// DuckDB settings (`TRIAL_THREADS`, default 4; `TRIAL_MEMORY_LIMIT`, default 192MB; 768MB while a layout is written, as
+/// the store's import budget). Layouts (`TRIAL_LAYOUTS`, comma-separated):
+/// - `seg`: the segments, every file read; `seg_pruned`: the segments, files chosen by their ts min/max (catalog pruning);
+/// - `lake`: DuckLake adopting the segments; `sorted`: one full time-sorted rewrite (131,072 rows per file);
+/// - `b<minutes>` / `bs<minutes>`: files per time bucket (and per source), import 1 then import 2 as late rows, then
+///   merged per bucket ("compaction").
+fn layout_mode() {
+    use duckdb::{Config, Connection};
+    let kept = PathBuf::from(env("TRIAL_KEEP"));
+    let out = PathBuf::from(env("TRIAL_LAYOUT_DIR"));
+    assert!(!out.exists(), "TRIAL_LAYOUT_DIR must be a new folder");
+    std::fs::create_dir_all(&out).unwrap();
+    let threads: i64 = std::env::var("TRIAL_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(4);
+    let mem = std::env::var("TRIAL_MEMORY_LIMIT").unwrap_or_else(|_| "192MB".into());
+    let nwin: usize = std::env::var("TRIAL_WINDOWS").ok().and_then(|v| v.parse().ok()).unwrap_or(20);
+    let layouts = std::env::var("TRIAL_LAYOUTS").unwrap_or_else(|_| "seg,seg_pruned,lake,sorted,b10,b60,bs60".into());
+    let q = q();
+    let peak = Peak::start();
+    let conn = Connection::open_in_memory_with_flags(
+        Config::default()
+            .threads(threads)
+            .unwrap()
+            .with("autoinstall_known_extensions", "false")
+            .unwrap()
+            .with("autoload_known_extensions", "false")
+            .unwrap(),
+    )
+    .unwrap();
+    conn.execute_batch(&format!("SET memory_limit = '{mem}';")).unwrap();
+    let main = parquet_files(&kept.join("main"));
+    let extra = parquet_files(&kept.join("extra"));
+    let mut all = main.clone();
+    all.extend(extra.iter().cloned());
+    let src = |files: &[PathBuf]| format!("read_parquet({}, union_by_name = true)", list(files));
+    println!("trial: layout threads={threads} memory={mem} windows={nwin} main_files={} extra_files={}", main.len(), extra.len());
+    let (tmin, tmax): (i64, i64) = conn
+        .query_row(&format!("SELECT min(ts), max(ts) FROM {}", src(&all)), [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    // The windows: the standard one and `nwin` seeded random 45 s windows inside the data.
+    let mut windows = vec![(q.from, q.to)];
+    let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+    for _ in 0..nwin {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        let start = tmin + (x % ((tmax - tmin - 45_000) as u64)) as i64;
+        windows.push((start, start + 45_000));
+    }
+    let pred = |f: i64, t: i64| {
+        format!("ts >= {f} AND ts <= {t} AND map_extract_value(extra, '{}') = '{}'", q.field, q.value)
+    };
+    // Per-file ts ranges and row groups of a file set (what a catalog would hold).
+    let meta = |files: &[PathBuf]| -> Vec<(PathBuf, i64, i64)> {
+        let mut st = conn
+            .prepare(&format!(
+                "SELECT file_name, min(TRY_CAST(stats_min AS BIGINT)), max(TRY_CAST(stats_max AS BIGINT)) FROM parquet_metadata({}) WHERE path_in_schema = 'ts' GROUP BY 1",
+                list(files)
+            ))
+            .unwrap();
+        st.query_map([], |r| Ok((PathBuf::from(r.get::<_, String>(0)?), r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .flatten()
+            .collect()
+    };
+    let disk = |files: &[PathBuf]| files.iter().map(|f| std::fs::metadata(f).map_or(0, |m| m.len())).sum::<u64>() as f64 / 1e6;
+    // C1: how well a file set is ordered by time: for each window, files and row groups whose ts range contains part of it,
+    // against those that hold a matching row (any row in the window, and rows of the query).
+    let ordering = |label: &str, files: &[PathBuf]| {
+        let l = list(files);
+        conn.execute_batch(&format!(
+            "CREATE OR REPLACE TEMP TABLE rg AS SELECT file_name AS f, row_group_id AS g, row_group_num_rows AS n,
+               TRY_CAST(stats_min AS BIGINT) AS lo, TRY_CAST(stats_max AS BIGINT) AS hi FROM parquet_metadata({l}) WHERE path_in_schema = 'ts';
+             CREATE OR REPLACE TEMP TABLE rgs AS SELECT f, g, n, lo, hi, sum(n) OVER (PARTITION BY f ORDER BY g) - n AS first_row FROM rg;"
+        ))
+        .unwrap();
+        let (files_n, groups, rows_avg, span_avg): (i64, i64, f64, f64) = conn
+            .query_row("SELECT count(DISTINCT f), count(*), avg(n), avg(hi - lo) / 1000.0 FROM rgs", [], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })
+            .unwrap();
+        let mut s = (0f64, 0f64, 0f64, 0f64, 0f64, 0f64);
+        for (f, t) in &windows[1..] {
+            let (cf, cg): (i64, i64) = conn
+                .query_row(&format!("SELECT count(DISTINCT f), count(*) FROM rgs WHERE lo <= {t} AND hi >= {f}"), [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .unwrap();
+            let (hf, hg, qg): (i64, i64, i64) = conn
+                .query_row(
+                    &format!(
+                        "WITH m AS (SELECT filename AS f, file_row_number AS r, map_extract_value(extra, '{}') = '{}' AS hit
+                           FROM read_parquet({l}, union_by_name = true, filename = true, file_row_number = true) WHERE ts >= {f} AND ts <= {t})
+                         SELECT count(DISTINCT m.f), count(DISTINCT (m.f, g.g)), count(DISTINCT (m.f, g.g)) FILTER (WHERE hit)
+                         FROM m JOIN rgs g ON g.f = m.f AND m.r >= g.first_row AND m.r < g.first_row + g.n",
+                        q.field, q.value
+                    ),
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .unwrap();
+            s.0 += cf as f64;
+            s.1 += cg as f64;
+            s.2 += hf as f64;
+            s.3 += hg as f64;
+            s.4 += qg as f64;
+            s.5 += 1.0;
+        }
+        let n = s.5;
+        println!(
+            "trial: c1 layout={label} files={files_n} row_groups={groups} rows_per_group={rows_avg:.0} group_span_s={span_avg:.0} per_45s_window: files_by_range={:.1} groups_by_range={:.1} files_with_rows={:.1} groups_with_rows={:.1} groups_with_query_rows={:.1}",
+            s.0 / n, s.1 / n, s.2 / n, s.3 / n, s.4 / n
+        );
+    };
+    // The page's SQL shape over `from` (a table expression), files chosen per window by `choose`.
+    let bench = |label: &str, choose: &dyn Fn(i64, i64) -> Option<String>| {
+        let mut ms = Vec::new();
+        let mut rows_std = 0usize;
+        for (k, (f, t)) in windows.iter().enumerate() {
+            let Some(from) = choose(*f, *t) else {
+                ms.push(0.0);
+                continue;
+            };
+            let w = pred(*f, *t);
+            let started = Instant::now();
+            let total: i64 = conn.query_row(&format!("SELECT count(*) FROM {from} WHERE {w}"), [], |r| r.get(0)).unwrap();
+            let mut st = conn.prepare(&format!("SELECT id FROM {from} WHERE {w} ORDER BY ts, source, line, id LIMIT 500")).unwrap();
+            let ids: Vec<u64> = st.query_map([], |r| r.get(0)).unwrap().flatten().collect();
+            if !ids.is_empty() {
+                let idl = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+                let mut st = conn.prepare(&format!("SELECT id, ts, level, source, message, extra FROM {from} WHERE {w} AND id IN ({idl})")).unwrap();
+                let n = st.query_map([], |_| Ok(())).unwrap().count();
+                assert_eq!(n, ids.len());
+            }
+            ms.push(started.elapsed().as_secs_f64() * 1000.0);
+            if k == 0 {
+                rows_std = total as usize;
+            }
+        }
+        // The standard window 11 times (first run dropped as warm-up), then the random windows once each.
+        let mut std_ms = Vec::new();
+        for i in 0..11 {
+            let from = choose(windows[0].0, windows[0].1).unwrap();
+            let w = pred(windows[0].0, windows[0].1);
+            let t = Instant::now();
+            let _: i64 = conn.query_row(&format!("SELECT count(*) FROM {from} WHERE {w}"), [], |r| r.get(0)).unwrap();
+            let mut st = conn.prepare(&format!("SELECT id FROM {from} WHERE {w} ORDER BY ts, source, line, id LIMIT 500")).unwrap();
+            let _ = st.query_map([], |r| r.get::<_, u64>(0)).unwrap().count();
+            if i > 0 {
+                std_ms.push(t.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+        std_ms.sort_by(f64::total_cmp);
+        let mut rnd: Vec<f64> = ms[1..].to_vec();
+        rnd.sort_by(f64::total_cmp);
+        println!(
+            "trial: query layout={label} std_rows={rows_std} std_p50_ms={:.1} std_max_ms={:.1} random_p50_ms={:.1} random_max_ms={:.1} peak_fp_mb={}",
+            std_ms[std_ms.len() / 2],
+            std_ms[std_ms.len() - 1],
+            rnd[rnd.len() / 2],
+            rnd[rnd.len() - 1],
+            peak.take()
+        );
+    };
+    let pruned_choice = |m: Vec<(PathBuf, i64, i64)>| {
+        move |f: i64, t: i64| -> Option<String> {
+            let files: Vec<PathBuf> = m.iter().filter(|(_, lo, hi)| *lo <= t && *hi >= f).map(|x| x.0.clone()).collect();
+            (!files.is_empty()).then(|| format!("read_parquet({}, union_by_name = true)", list(&files)))
+        }
+    };
+    let set_import_mem = |on: bool| {
+        conn.execute_batch(&format!("SET memory_limit = '{}';", if on { "768MB" } else { mem.as_str() })).unwrap();
+    };
+    for layout in layouts.split(',') {
+        match layout {
+            "seg" => {
+                println!("trial: layout=seg files={} disk_mb={:.1}", all.len(), disk(&all));
+                ordering("seg", &all);
+                let from = src(&all);
+                bench("seg", &|_, _| Some(from.clone()));
+            }
+            "seg_pruned" => {
+                let t = Instant::now();
+                let m = meta(&all);
+                println!("trial: layout=seg_pruned catalog_s={:.3} files={}", t.elapsed().as_secs_f64(), m.len());
+                bench("seg_pruned", &pruned_choice(m));
+            }
+            "lake" => {
+                let ext = PathBuf::from(env("TRIAL_EXT_DIR"));
+                conn.execute_batch(&format!("LOAD '{}';", ext.join("ducklake.duckdb_extension").display())).unwrap();
+                let d = out.join("lake");
+                std::fs::create_dir_all(d.join("data")).unwrap();
+                conn.execute_batch(&format!(
+                    "ATTACH 'ducklake:{}' AS lake (DATA_PATH '{}/'); CREATE TABLE lake.events AS SELECT {COLS} FROM read_parquet('{}') LIMIT 0;",
+                    d.join("cat.ducklake").display(),
+                    d.join("data").display(),
+                    all[0].display()
+                ))
+                .unwrap();
+                let t = Instant::now();
+                conn.execute_batch(&format!("CALL ducklake_add_data_files('lake', 'events', {}, ignore_extra_columns => true);", list(&all)))
+                    .unwrap();
+                println!("trial: layout=lake register_s={:.3}", t.elapsed().as_secs_f64());
+                bench("lake", &|_, _| Some("lake.events".to_string()));
+            }
+            "sorted" => {
+                let d = out.join("sorted");
+                set_import_mem(true);
+                let t = Instant::now();
+                conn.execute_batch(&format!(
+                    "COPY (SELECT * FROM {} ORDER BY ts, source, line, id) TO '{}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 65536, ROW_GROUPS_PER_FILE 2, PER_THREAD_OUTPUT false);",
+                    src(&all),
+                    d.display()
+                ))
+                .unwrap();
+                let s = t.elapsed().as_secs_f64();
+                set_import_mem(false);
+                let files = parquet_files(&d);
+                println!("trial: layout=sorted write_s={s:.2} files={} disk_mb={:.1} peak_fp_mb={}", files.len(), disk(&files), peak.take());
+                ordering("sorted", &files);
+                bench("sorted", &pruned_choice(meta(&files)));
+            }
+            b if b.starts_with('b') => {
+                let by_source = b.starts_with("bs");
+                let minutes: i64 = b.trim_start_matches("bs").trim_start_matches('b').parse().unwrap();
+                let bucket = minutes * 60_000;
+                let d = out.join(b);
+                let part = if by_source { "source, bucket" } else { "bucket" };
+                set_import_mem(true);
+                // A partitioned write needs no insertion order (DuckDB's advice for its out-of-memory error; with it on, the
+                // 1 h buckets ran out of 768 MB at 56M events).
+                conn.execute_batch("SET preserve_insertion_order = false;").unwrap();
+                // Import 1, then import 2 written afterwards into the same buckets (its rows arrive late).
+                let mut write_s = Vec::new();
+                for (i, files) in [&main, &extra].into_iter().enumerate() {
+                    let t = Instant::now();
+                    conn.execute_batch(&format!(
+                        "COPY (SELECT *, ts // {bucket} AS bucket FROM {} WHERE ts IS NOT NULL) TO '{}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 65536, PARTITION_BY ({part}), FILENAME_PATTERN 'imp{i}_{{i}}', OVERWRITE_OR_IGNORE true);",
+                        src(files),
+                        d.display()
+                    ))
+                    .unwrap();
+                    write_s.push(t.elapsed().as_secs_f64());
+                }
+                set_import_mem(false);
+                conn.execute_batch("SET preserve_insertion_order = true;").unwrap();
+                let walk = |d: &Path| -> Vec<PathBuf> {
+                    let mut v = Vec::new();
+                    let mut stack = vec![d.to_path_buf()];
+                    while let Some(p) = stack.pop() {
+                        for e in std::fs::read_dir(&p).unwrap().flatten() {
+                            if e.path().is_dir() {
+                                stack.push(e.path());
+                            } else if e.path().extension().is_some_and(|x| x == "parquet") {
+                                v.push(e.path());
+                            }
+                        }
+                    }
+                    v.sort();
+                    v
+                };
+                let files = walk(&d);
+                let late = files.iter().filter(|f| f.file_name().unwrap().to_string_lossy().starts_with("imp1")).count();
+                println!(
+                    "trial: layout={b} write_import1_s={:.2} write_import2_s={:.2} files={} late_files={late} disk_mb={:.1} peak_fp_mb={}",
+                    write_s[0],
+                    write_s[1],
+                    files.len(),
+                    disk(&files),
+                    peak.take()
+                );
+                ordering(b, &files);
+                bench(b, &pruned_choice(meta(&files)));
+                // Compaction: each bucket directory with more than one file is merged into one file.
+                set_import_mem(true);
+                let t = Instant::now();
+                let mut dirs: std::collections::BTreeMap<PathBuf, Vec<PathBuf>> = Default::default();
+                for f in &files {
+                    dirs.entry(f.parent().unwrap().to_path_buf()).or_default().push(f.clone());
+                }
+                let mut merged = 0;
+                for (dir, fs) in dirs.iter().filter(|(_, fs)| fs.len() > 1) {
+                    let tmp = dir.join("merged.parquet.tmp");
+                    conn.execute_batch(&format!(
+                        "COPY (SELECT * FROM read_parquet({}, union_by_name = true) ORDER BY ts, source, line, id) TO '{}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 65536);",
+                        list(fs),
+                        tmp.display()
+                    ))
+                    .unwrap();
+                    for f in fs {
+                        std::fs::remove_file(f).unwrap();
+                    }
+                    std::fs::rename(&tmp, dir.join("merged.parquet")).unwrap();
+                    merged += 1;
+                }
+                set_import_mem(false);
+                let files = walk(&d);
+                println!(
+                    "trial: layout={b} compact_s={:.2} merged_buckets={merged} files={} disk_mb={:.1} peak_fp_mb={}",
+                    t.elapsed().as_secs_f64(),
+                    files.len(),
+                    disk(&files),
+                    peak.take()
+                );
+                bench(&format!("{b}_compacted"), &pruned_choice(meta(&files)));
+            }
+            other => println!("trial: unknown layout {other}"),
+        }
+    }
 }

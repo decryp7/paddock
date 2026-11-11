@@ -41,8 +41,20 @@ const TMP: &str = "tmp";
 fn props() -> WriterProperties {
     WriterProperties::builder()
         .set_compression(Compression::ZSTD(ZstdLevel::default()))
-        .set_max_row_group_row_count(Some(ROW_GROUP_ROWS))
+        .set_max_row_group_row_count(Some(trial_row_group_rows()))
         .build()
+}
+
+/// Trial 2 (C2): `DEBRIEF_TRIAL_ROW_GROUP` overrides the rows per row group (test-only).
+fn trial_row_group_rows() -> usize {
+    static N: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *N.get_or_init(|| {
+        std::env::var("DEBRIEF_TRIAL_ROW_GROUP")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .filter(|n: &usize| *n > 0)
+            .unwrap_or(ROW_GROUP_ROWS)
+    })
 }
 
 /// The file name of the segment starting at `first_id` (`generation` tells rewritten segments apart).

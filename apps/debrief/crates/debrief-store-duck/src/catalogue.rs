@@ -60,7 +60,8 @@ fn pending(conn: &Connection) -> Result<Vec<u32>> {
 fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry>, u64, u64)> {
     let mut tally = Tally::default();
     {
-        let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
+        let from = crate::trial_lake::source_events(conn, source);
+        let mut stmt = conn.prepare(&format!("SELECT id, ts, message, exception FROM {from} WHERE source = ? LIMIT ?"))?;
         let mut rows = stmt.query(params![source, MAX_EVENTS_SCANNED as u64])?;
         while let Some(r) = rows.next()? {
             // The process is exiting: stop reading (the source is catalogued again next time).
@@ -79,11 +80,12 @@ fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry
         }
     }
     let sql = format!(
-        "WITH kv AS (SELECT unnest(map_keys(extra)) AS k, unnest(map_values(extra)) AS v FROM events WHERE source = ?),
+        "WITH kv AS (SELECT unnest(map_keys(extra)) AS k, unnest(map_values(extra)) AS v FROM {} WHERE source = ?),
 g AS (SELECT k, v, count(*) AS n FROM kv WHERE v IS NOT NULL AND length(v) BETWEEN 1 AND {} AND TRY_CAST(v AS DOUBLE) IS NULL GROUP BY k, v),
 d AS (SELECT k FROM g GROUP BY k HAVING count(*) <= {MAX_FIELD_DISTINCT}),
 r AS (SELECT g.k, g.v, g.n, row_number() OVER (PARTITION BY g.k ORDER BY g.n DESC, g.v) AS rk FROM g JOIN d USING (k))
 SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
+        crate::trial_lake::source_events(conn, source),
         debrief_core::entities::MAX_NAME_CHARS
     );
     // The aggregate holds a hash table of the source's fields: never beside an import's ordering (the store's `heavy`
