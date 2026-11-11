@@ -189,7 +189,7 @@ changes here, every app's copy is updated in the same change.
     in parallel and bounded by the machine's load: `cargo fmt --check`, clippy on the host and `cargo xwin` for Windows, lint and
     type-check of the touched files, conformance, commit-lint (rule 50g), lockfiles with `--locked`. Then dispatch with `./dev`
     and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
-    `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
+    `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. The Linux Clippy of the touched shared crates is `bash tools/linux-clippy-touched.sh` (container with `--cpus 4 --memory 12g`; without Docker it prints a `::warning::` and skips), because Linux-only lints such as `useless_conversion` on `mode_t` show only there. Cap local builds
     (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
     API (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{id}/cancel`), fix every failure and push once; this cancel needs no
     further approval. (a) and (b) still hold.

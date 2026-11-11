@@ -10,7 +10,7 @@
 #
 # With no command: `cargo test -p <packages> && cargo clippy -p <packages> --all-targets -- -D warnings`.
 # Environment: DOCKER (default docker), PADDOCK_LINUX_BASE_IMAGE (rust:1-bookworm), PADDOCK_LINUX_CPUS (4), PADDOCK_LINUX_JOBS (2),
-# PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
+# PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
 set -euo pipefail
 
 id=""; root="$PWD"; packages=""; clean=0
@@ -35,6 +35,7 @@ base_image="${PADDOCK_LINUX_BASE_IMAGE:-rust:1-bookworm}"
 image="$id-linux-dev:1"
 cpus="${PADDOCK_LINUX_CPUS:-4}"
 jobs="${PADDOCK_LINUX_JOBS:-2}"
+memory="${PADDOCK_LINUX_MEMORY:-12g}"
 registry_volume="$id-cargo-registry"
 target_volume="$id-linux-target"
 
@@ -68,7 +69,7 @@ if [ -n "${PADDOCK_LINUX_USER:-}" ]; then
   user_args=(--user "$PADDOCK_LINUX_USER" -e HOME=/tmp/home -e CARGO_HOME=/tmp/cargo-home -e CARGO_TARGET_DIR=/tmp/target)
 fi
 
-exec "$docker" run --rm --label "$label" --cpus "$cpus" \
+exec "$docker" run --rm --label "$label" --cpus "$cpus" --memory "$memory" \
   --mount "type=bind,source=$root,target=/work,readonly" \
   --mount "type=volume,source=$registry_volume,target=/usr/local/cargo/registry" \
   --mount "type=volume,source=$target_volume,target=/target" \

@@ -22,7 +22,7 @@ test('first use builds the labelled image, creates the labelled volumes and runs
   assert.match(log[2], /docker volume create --label paddock\.tools=dyno dyno-cargo-registry/);
   assert.match(log[3], /docker volume create --label paddock\.tools=dyno dyno-linux-target/);
   const runLine = log[4];
-  assert.match(runLine, /^docker run --rm --label paddock\.tools=dyno --cpus 4 /);
+  assert.match(runLine, /^docker run --rm --label paddock\.tools=dyno --cpus 4 --memory 12g /);
   assert.ok(runLine.includes(`type=bind,source=${repo},target=/work,readonly`));
   assert.match(runLine, /type=volume,source=dyno-cargo-registry,target=\/usr\/local\/cargo\/registry/);
   assert.match(runLine, /CARGO_BUILD_JOBS=2/);
