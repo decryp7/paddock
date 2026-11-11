@@ -14,6 +14,46 @@ pub struct Host {
     tx: Sender<Msg>,
     supervisor: Option<JoinHandle<()>>,
     runtime: Option<tokio::runtime::Runtime>,
+    /// The per-user engine's exclusive lock on `engine.lock` (ER-38 follow-up, round 5 P1-1): held for the process, released by the OS.
+    _instance_lock: Option<std::fs::File>,
+}
+
+/// The file whose exclusive lock makes a per-user engine the only one on its folder.
+pub const ENGINE_LOCK_FILE: &str = "engine.lock";
+
+/// Takes the per-user engine's exclusive lock in `data_dir` (made if missing).
+///
+/// # Errors
+/// The folder or file cannot be used, or another engine holds the lock (the message says so and what to do).
+fn take_instance_lock(data_dir: &std::path::Path) -> Result<std::fs::File, Error> {
+    std::fs::create_dir_all(data_dir).map_err(|source| Error::Io {
+        path: data_dir.display().to_string(),
+        source,
+    })?;
+    let path = data_dir.join(ENGINE_LOCK_FILE);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|source| Error::Io {
+            path: path.display().to_string(),
+            source,
+        })?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(Error::Os {
+            what: "Starting the engine for your own runners",
+            reason: format!(
+                "another engine for your runners is already running on {} (it holds {ENGINE_LOCK_FILE}); a second one would supervise the same runners twice. Quit the other one first",
+                data_dir.display()
+            ),
+        }),
+        Err(std::fs::TryLockError::Error(source)) => Err(Error::Io {
+            path: path.display().to_string(),
+            source,
+        }),
+    }
 }
 
 impl Host {
@@ -42,6 +82,12 @@ impl Host {
                 reason,
             })?;
         }
+        // Before the supervisor, the pipe or `pipe.name`: a second engine must not touch anything of the first.
+        let instance_lock = if mode == ipc::ServeMode::User {
+            Some(take_instance_lock(&data_dir)?)
+        } else {
+            None
+        };
         let protected = protect_installed_folder(&data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
             path: data_dir.display().to_string(),
@@ -80,6 +126,7 @@ impl Host {
             tx,
             supervisor: Some(handle),
             runtime: Some(runtime),
+            _instance_lock: instance_lock,
         })
     }
 
@@ -255,5 +302,49 @@ mod elevation_tests {
         assert!(user_engine_token_allowed(false).is_ok());
         let e = user_engine_token_allowed(true).unwrap_err();
         assert!(e.contains("must not run elevated") && e.contains("normal"), "{e}");
+    }
+}
+
+#[cfg(test)]
+mod single_instance_tests {
+    use super::*;
+
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    fn scratch(name: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("pitcrew-it-single-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        p
+    }
+
+    fn start_user(dir: &std::path::Path) -> Result<Host, Error> {
+        Host::start_with(dir.to_path_buf(), dir.to_path_buf(), ipc::ServeMode::User, |_| {})
+    }
+
+    #[test]
+    fn a_second_user_engine_on_one_folder_does_not_start_and_says_who_holds_it() {
+        let dir = scratch("two");
+        let first = start_user(&dir).expect("the first engine starts");
+        let second = start_user(&dir).err().expect("a second engine on the same folder must be refused");
+        let text = second.to_string();
+        assert!(text.contains("already running"), "{text}");
+        first.stop();
+        // The lock goes with the first engine: a new one starts.
+        start_user(&dir).expect("the folder is free again once the first engine stopped").stop();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_refused_second_engine_leaves_the_first_ones_pipe_name_alone() {
+        let dir = scratch("name");
+        let first = start_user(&dir).expect("the first engine starts");
+        let before = std::fs::read_to_string(dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE)).ok();
+        assert!(start_user(&dir).is_err());
+        let after = std::fs::read_to_string(dir.join(pitcrew_core::service_paths::USER_ENGINE_PIPE_FILE)).ok();
+        assert_eq!(before, after, "the refused engine must not overwrite pipe.name");
+        first.stop();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
