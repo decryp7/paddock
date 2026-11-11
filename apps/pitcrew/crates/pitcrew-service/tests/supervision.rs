@@ -114,6 +114,8 @@ impl Harness {
         let exe = Arc::new(AtomicU64::new(1));
         let exe2 = exe.clone();
         let env = Env {
+            program_gate: pitcrew_service::launcher::open_gate(),
+            settle_runner_dir: Arc::new(|_, _| None),
             data_dir: data,
             launcher,
             sources: Sources::public(),

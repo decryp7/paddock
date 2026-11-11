@@ -6,8 +6,9 @@
 //!   owner, read/write for interactive users (the logged-on user's app), nothing for anyone else (services, network
 //!   logons, other sessions' non-interactive tokens).
 //! - Unix: `<socket folder>/pitcrew.sock` (the data folder, or `$XDG_RUNTIME_DIR/pitcrew` on Linux) in a 0700 folder, the socket itself 0600: only the user who runs the agent.
-//! - A request that changes something is accepted only from an elevated administrator on Windows ([`crate::caller`]); the
-//!   others get `PermissionDenied` and the supervisor never sees it (it only logs the refusal).
+//! - A request that changes what runs is accepted only from an elevated administrator on Windows, any request that changes
+//!   something only from an identified caller ([`crate::caller`]); the others get `PermissionDenied` and the supervisor never
+//!   sees the request (it logs every such request with the caller's account).
 //! - Every connection starts with a hello; frames are bounded by `MAX_FRAME`; at most [`MAX_CONNECTIONS`] at once.
 //!   A subscribed connection receives pushed events until either side closes it.
 
@@ -50,9 +51,11 @@ pub fn pipe_name_for(data_dir: &std::path::Path, installed: Option<&std::path::P
 pub const SOCKET_FILE: &str = pitcrew_core::service_paths::SOCKET_FILE;
 /// Most connections at once.
 pub const MAX_CONNECTIONS: usize = 32;
-/// The pipe's security descriptor (SDDL): SYSTEM, Administrators and the owner full access; interactive users
-/// read and write.
-pub const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;GRGW;;;IU)";
+/// The pipe's security descriptor (SDDL): SYSTEM, Administrators and the owner full access; interactive users read and write
+/// data with exactly [`pitcrew_core::service_paths::PIPE_CLIENT_ACCESS`] (`0x12019b`): **not** `GRGW`, which includes
+/// `FILE_CREATE_PIPE_INSTANCE` and would let any interactive user host `\\.\pipe\pitcrew` and receive an elevated caller's
+/// connection. A test keeps the literal and the constant the app opens the pipe with in step.
+pub const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;OW)(A;;0x12019b;;;IU)";
 
 /// How long a client has to say hello.
 const HELLO_TIMEOUT: Duration = Duration::from_secs(30);
@@ -128,13 +131,20 @@ pub async fn connection<S: AsyncRead + AsyncWrite + Unpin + Send>(
             subscribed(stream, tx).await;
             return;
         }
-        if req.requires_admin() {
-            let who = caller.get_or_insert_with(|| identify.take().map_or(Caller::Standard, |f| f()));
-            if let Err(refusal) = authorize(&req, who) {
-                let _ = tx.send(Msg::Denied {
-                    request: kind_of(&req),
-                    caller: who.describe(),
-                });
+        if req.mutates() {
+            // Every request that changes anything is attributed (and logged with the account), so who is asking is read here.
+            let who = caller.get_or_insert_with(|| {
+                identify
+                    .take()
+                    .map_or_else(|| Caller::Unreadable("the caller was not asked".into()), |f| f())
+            });
+            let verdict = authorize(&req, who);
+            let _ = tx.send(Msg::Audit {
+                request: kind_of(&req),
+                caller: who.describe(),
+                allowed: verdict.is_ok(),
+            });
+            if let Err(refusal) = verdict {
                 if write_frame(&mut stream, &Response::Error(refusal)).await.is_err() {
                     return;
                 }
@@ -405,6 +415,51 @@ mod tests {
 }
 
 #[cfg(test)]
+mod pipe_acl_tests {
+    use super::PIPE_SDDL;
+    use pitcrew_core::service_paths::PIPE_CLIENT_ACCESS;
+
+    /// `FILE_CREATE_PIPE_INSTANCE` (the same bit as `FILE_APPEND_DATA`).
+    const CREATE_PIPE_INSTANCE: u32 = 0x4;
+    const FILE_READ_DATA: u32 = 0x1;
+    const FILE_WRITE_DATA: u32 = 0x2;
+
+    /// The access mask an ACE of `PIPE_SDDL` gives to the account `who` (`IU`), as written.
+    fn mask_for(who: &str) -> u32 {
+        let ace = PIPE_SDDL
+            .split('(')
+            .skip(1)
+            .map(|a| a.trim_end_matches(')'))
+            .find(|a| a.ends_with(&format!(";;;{who}")))
+            .unwrap_or_else(|| panic!("no ACE for {who} in {PIPE_SDDL}"));
+        let rights = ace.split(';').nth(2).unwrap();
+        u32::from_str_radix(rights.trim_start_matches("0x"), 16)
+            .unwrap_or_else(|_| panic!("a symbolic right ({rights}) hides what it includes"))
+    }
+
+    #[test]
+    fn interactive_users_may_read_and_write_but_not_create_a_pipe_instance() {
+        let iu = mask_for("IU");
+        assert_eq!(
+            iu & CREATE_PIPE_INSTANCE,
+            0,
+            "{iu:#x} lets an interactive user host the pipe: it would receive an elevated caller"
+        );
+        assert!(iu & FILE_READ_DATA != 0 && iu & FILE_WRITE_DATA != 0, "{iu:#x}");
+        assert_eq!(iu, PIPE_CLIENT_ACCESS, "the app opens the pipe with the mask the service grants");
+    }
+
+    #[test]
+    fn nobody_else_is_in_the_list_and_the_list_is_protected() {
+        assert!(PIPE_SDDL.starts_with("D:P("), "protected: nothing inherited");
+        assert_eq!(PIPE_SDDL.matches("(A;").count(), 4, "{PIPE_SDDL}");
+        for who in ["SY", "BA", "OW"] {
+            assert!(PIPE_SDDL.contains(&format!("(A;;GA;;;{who})")), "{who}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod pipe_name_tests {
     use super::{pipe_name_for, PIPE_NAME};
     use std::path::Path;
@@ -445,6 +500,8 @@ mod caller_tests {
     use std::sync::Mutex;
 
     type Seen = Arc<Mutex<Vec<String>>>;
+    /// The audit lines the supervisor was given: `allowed|refused <request> <caller>`.
+    type Audits = Arc<Mutex<Vec<String>>>;
 
     async fn send(c: &mut tokio::io::DuplexStream, r: &Request) {
         c.write_all(&encode_frame(r).unwrap()).await.unwrap();
@@ -459,10 +516,12 @@ mod caller_tests {
     }
 
     /// A stand-in supervisor that records what reached it and answers Ok.
-    fn supervisor() -> (Sender<Msg>, Seen) {
+    fn supervisor() -> (Sender<Msg>, Seen, Audits) {
         let (tx, rx) = std::sync::mpsc::channel::<Msg>();
         let seen: Seen = Arc::default();
         let log = seen.clone();
+        let audits: Audits = Arc::default();
+        let audit_log = audits.clone();
         std::thread::spawn(move || {
             for m in rx {
                 match m {
@@ -470,16 +529,29 @@ mod caller_tests {
                         log.lock().unwrap().push(crate::caller::kind_of(&req));
                         let _ = reply.send(Response::Ok);
                     }
-                    Msg::Denied { request, .. } => log.lock().unwrap().push(format!("denied:{request}")),
+                    Msg::Audit { request, caller, allowed } => {
+                        audit_log
+                            .lock()
+                            .unwrap()
+                            .push(format!("{} {request} {caller}", if allowed { "allowed" } else { "refused" }));
+                        if !allowed {
+                            log.lock().unwrap().push(format!("denied:{request}"));
+                        }
+                    }
                     _ => {}
                 }
             }
         });
-        (tx, seen)
+        (tx, seen, audits)
     }
 
     async fn connect(caller: Caller) -> (tokio::io::DuplexStream, Seen) {
-        let (tx, seen) = supervisor();
+        let (c, seen, _) = connect_audited(caller).await;
+        (c, seen)
+    }
+
+    async fn connect_audited(caller: Caller) -> (tokio::io::DuplexStream, Seen, Audits) {
+        let (tx, seen, audits) = supervisor();
         let (mut client, server) = tokio::io::duplex(64 * 1024);
         tokio::spawn(connection(server, tx, move || caller));
         send(
@@ -490,8 +562,10 @@ mod caller_tests {
         )
         .await;
         assert!(matches!(recv(&mut client).await, Response::Hello { .. }));
-        (client, seen)
+        (client, seen, audits)
     }
+
+    const SID: &str = "S-1-5-21-1-2-3-1001";
 
     fn service_runner() -> Request {
         let mut runner: RunnerConfig = toml::from_str(
@@ -515,7 +589,7 @@ mod caller_tests {
 
     #[tokio::test]
     async fn a_service_runner_from_a_caller_without_administrator_rights_is_refused_and_never_reaches_the_supervisor() {
-        for caller in [Caller::Standard, Caller::Unreadable("OpenThreadToken: denied".into())] {
+        for caller in [Caller::Standard(SID.into()), Caller::Unreadable("OpenThreadToken: denied".into())] {
             let (mut c, seen) = connect(caller).await;
             send(&mut c, &service_runner()).await;
             let answer = recv(&mut c).await;
@@ -535,7 +609,7 @@ mod caller_tests {
     #[tokio::test]
     async fn every_request_that_changes_what_runs_is_refused_for_a_standard_caller() {
         let name = RunnerName::parse("a").unwrap();
-        let (mut c, seen) = connect(Caller::Standard).await;
+        let (mut c, seen) = connect(Caller::Standard(SID.into())).await;
         for r in [
             Request::SaveSettings {
                 config: pitcrew_core::config::Config::default(),
@@ -567,7 +641,7 @@ mod caller_tests {
     #[tokio::test]
     async fn operating_an_existing_runner_is_open_to_a_standard_caller() {
         let name = RunnerName::parse("a").unwrap();
-        let (mut c, seen) = connect(Caller::Standard).await;
+        let (mut c, seen) = connect(Caller::Standard(SID.into())).await;
         for r in [
             Request::Start { runner: name.clone() },
             Request::Stop { runner: name.clone() },
@@ -584,7 +658,7 @@ mod caller_tests {
 
     #[tokio::test]
     async fn an_elevated_administrator_and_a_local_caller_are_served() {
-        for caller in [Caller::Elevated, Caller::Local] {
+        for caller in [Caller::Elevated(SID.into()), Caller::Local] {
             let (mut c, seen) = connect(caller).await;
             send(&mut c, &service_runner()).await;
             assert_eq!(recv(&mut c).await, Response::Ok);
@@ -593,8 +667,48 @@ mod caller_tests {
     }
 
     #[tokio::test]
+    async fn a_caller_that_cannot_be_identified_cannot_even_stop_a_runner() {
+        let (mut c, seen, audits) = connect_audited(Caller::Unreadable("OpenThreadToken: denied".into())).await;
+        send(
+            &mut c,
+            &Request::Stop {
+                runner: RunnerName::parse("a").unwrap(),
+            },
+        )
+        .await;
+        assert!(denied(&recv(&mut c).await));
+        send(&mut c, &Request::Status).await;
+        assert_eq!(recv(&mut c).await, Response::Ok, "reading needs no identity");
+        assert_eq!(*seen.lock().unwrap(), ["denied:Stop", "Status"]);
+        assert!(
+            audits.lock().unwrap()[0].starts_with("refused Stop"),
+            "{:?}",
+            audits.lock().unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn every_change_is_logged_with_the_callers_account() {
+        let (mut c, _seen, audits) = connect_audited(Caller::Elevated(SID.into())).await;
+        send(&mut c, &service_runner()).await;
+        assert_eq!(recv(&mut c).await, Response::Ok);
+        send(
+            &mut c,
+            &Request::Stop {
+                runner: RunnerName::parse("a").unwrap(),
+            },
+        )
+        .await;
+        assert_eq!(recv(&mut c).await, Response::Ok);
+        let audits = audits.lock().unwrap();
+        assert_eq!(audits.len(), 2, "{audits:?}");
+        assert!(audits[0].starts_with("allowed AddRunner") && audits[0].contains(SID), "{audits:?}");
+        assert!(audits[1].starts_with("allowed Stop") && audits[1].contains(SID), "{audits:?}");
+    }
+
+    #[tokio::test]
     async fn read_only_requests_never_ask_who_the_caller_is() {
-        let (tx, _seen) = supervisor();
+        let (tx, _seen, _audits) = supervisor();
         let (mut client, server) = tokio::io::duplex(64 * 1024);
         tokio::spawn(connection(server, tx, || -> Caller {
             panic!("the caller was identified for a read-only request")

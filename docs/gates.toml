@@ -692,6 +692,26 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
+path = "apps/pitcrew/crates/pitcrew-service/tests/windows_caller.rs"
+tests = ["the_pipe_refuses_changes_from_a_caller_that_is_not_an_elevated_administrator", "an_interactive_user_can_use_the_installed_pipe_but_not_host_one", "a_new_data_folder_is_protected_from_the_moment_it_exists", "a_data_folder_a_user_made_first_is_not_trusted", "settled_runner_folders_protect_service_runners_and_leave_interactive_ones_writable"]
+gate = "not-gated"
+reason = "VM-only rows: they need a standard user's desktop session and an elevated administrator on a Windows machine (PITCREW_TEST_EXPECT), run with --include-ignored through scripts/vm-lock-run.sh; no harness line runs them yet"
+owner = "Pitcrew 1.1"
+since = 2026-11-11
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/pitcrew/app/src-tauri/src/pipe_server.rs"
+tests = ["a_pipe_hosted_by_a_user_is_refused_and_the_installed_service_is_accepted"]
+gate = "not-gated"
+reason = "VM-only row: it needs a Windows machine, and the installed service for the accepting half (PITCREW_TEST_INSTALLED=1); run with --include-ignored through scripts/vm-lock-run.sh; no harness line runs it yet"
+owner = "Pitcrew 1.1"
+since = 2026-11-11
+review_by = 2026-12-20
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/dyno/crates/dyno-agent/tests/helper_vm.rs"
 tests = ["the_helper_state_and_one_action_on_this_machine", "the_helper_readers_on_this_machine"]
 gate = "not-gated"

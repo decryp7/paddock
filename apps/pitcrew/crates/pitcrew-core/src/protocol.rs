@@ -336,7 +336,8 @@ impl Request {
     /// Whether the service accepts the request only from an elevated administrator (Windows, where the service runs as
     /// LocalSystem and its pipe is open to every interactive user; rule 77): a request that changes **what runs or where**,
     /// that is, the configuration the service later acts on (runners, their programs, folders, sessions and environment, the
-    /// runner's own `config.yaml`, a registration).
+    /// runner's own `config.yaml`, a registration, and the version a runner is pinned to or skips: a setting the elevated side
+    /// acts on).
     ///
     /// Operational requests on an existing runner (start, stop, restart, drain, resume, updates of the managed binary from
     /// its checked release source, disk and process housekeeping) and every read stay open to the pipe's users, like `sc stop`
@@ -347,7 +348,9 @@ impl Request {
             | Request::AddRunner { .. }
             | Request::RemoveRunner { .. }
             | Request::Register { .. }
-            | Request::SaveRunnerConfig { .. } => true,
+            | Request::SaveRunnerConfig { .. }
+            | Request::SkipVersion { .. }
+            | Request::PinVersion { .. } => true,
             Request::Hello { .. }
             | Request::Status
             | Request::Subscribe
@@ -361,8 +364,6 @@ impl Request {
             | Request::CheckUpdate { .. }
             | Request::ApplyUpdate { .. }
             | Request::CancelUpdate { .. }
-            | Request::SkipVersion { .. }
-            | Request::PinVersion { .. }
             | Request::History { .. }
             | Request::Disk { .. }
             | Request::CleanDisk { .. }
@@ -1058,6 +1059,14 @@ mod tests {
                 edit: ConfigEdit::Raw { text: String::new() },
                 base: String::new(),
             },
+            Request::PinVersion {
+                runner: name("a"),
+                version: None,
+            },
+            Request::SkipVersion {
+                runner: name("a"),
+                version: RunnerVersion::parse("5.3.0").unwrap(),
+            },
         ] {
             assert!(r.requires_admin(), "{r:?}");
         }
@@ -1068,6 +1077,8 @@ mod tests {
             Request::Drain { runner: name("a") },
             Request::Resume { runner: name("a") },
             Request::CleanDisk { runner: name("a") },
+            Request::CheckUpdate { runner: name("a") },
+            Request::CancelUpdate { runner: name("a") },
             Request::Status,
             Request::GetSettings,
             Request::Diagnostics,

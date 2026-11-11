@@ -58,14 +58,34 @@ program of any logged-on user run code as SYSTEM (release blocker, 2026-11-11).
   request (`--forward-request <file> <sha-256> <file>`; the digest on the command line stops a swap of the request file).
   One Windows prompt per change.
 - **Which requests (rule 77).** `requires_admin` is true for what changes **what runs or where**: `SaveSettings`, `AddRunner`,
-  `RemoveRunner`, `Register` and `SaveRunnerConfig` (the runner's own `config.yaml`). Operating an existing runner (start, stop,
-  restart, drain, resume, update of the managed binary from its checked release source, disk and process housekeeping) and
-  every read stay open to the pipe's users, like `sc stop`. The match names every request, so a new one must decide.
+  `RemoveRunner`, `Register`, `SaveRunnerConfig` (the runner's own `config.yaml`), `PinVersion` and `SkipVersion` (a setting the
+  elevated side acts on). Operating an existing runner (start, stop,
+  restart, drain, resume, check, apply or cancel an update of the managed binary from its checked release source, disk and
+  process housekeeping) and every read stay open to the pipe's users, like `sc stop`. The match names every request, so a new one must decide.
 - **Folders.** The data folder is protected (shared trust rule); a runner that starts with the service's token needs a
   protected program and folder, else it is refused rather than copied (a copy of a runner is large, carries its
   registration and would need repair on every update; moving it is one visible step for the administrator).
-- **Known limits (no code yet).** (1) A service-mode runner in a user-writable folder such as `C:\actions-runner` is refused at
-  start, with the reason and next step shown; runners under `%ProgramData%\Pitcrew\runners` (the app's default) pass.
-  (2) An interactive runner kept in the now-protected data tree has read and execute only for users; it already lacked write
-  there under the inherited ACL, and no test covers it. (3) Only the runner's program and folder are checked, not its
-  `config.yaml`: it sits in the checked folder, but an older file with a weak ACL would not be detected.
+- **Pipe.** The pipe's ACL gives interactive users exactly `0x12019b` (read and write data, no `FILE_CREATE_PIPE_INSTANCE`;
+  `GRGW` includes it), so a standard user cannot host `\\.\pipe\pitcrew` and receive an elevated caller's connection. Clients
+  open with that mask and at identification level (`pitcrew_core::service_paths::open_pipe_options`); the elevated forwarder also
+  checks that the server is the SYSTEM service (a held handle to it, its token's user, its pid read twice) before it sends.
+- **Callers.** Every request that changes anything is attributed (an unidentifiable caller changes nothing, not even a Stop) and
+  logged with the account's SID. "Elevated" means the Administrators group is enabled and not deny-only.
+- **Programs the service starts.** A runner that starts with the service's token needs a protected program and folder; so does
+  every program the service runs for a runner (the version probe, `generate-config`, `register`, an update's check). For an
+  interactive runner in a folder users can change those are refused with the reason (register it with the runner's own command
+  as the user; Pitcrew adopts it). Deleting in a runner's folder (cleanup, cache trim) never follows a link, and where users can
+  change the folder it runs as the logged-on user.
+- **Data folder and runner folders.** `C:\ProgramData` lets users create folders, so a folder made by an older Pitcrew keeps what it
+  inherited. At start the data folder is locked, and each runner folder inside it is settled: a `service` runner's folder (and the
+  folders above it) is locked (one folder at a time, by handle, never propagated), a **new** `interactive` runner's folder gets
+  SYSTEM and Administrators full control and interactive users modify (an empty folder only: `icacls` rewrites what is already
+  in a folder, and a hard link a user planted could make that rewrite a file they cannot write). An existing interactive folder is
+  left as it is. The VM test `settled_runner_folders_protect_service_runners_and_leave_interactive_ones_writable` measures both the upgrade and the fresh layout (its first VM run is still to be recorded).
+- **Known limits.** (1) A service-mode runner in a user-writable folder such as `C:\actions-runner` is refused at start, with the
+  reason and next step shown; runners under `%ProgramData%\Pitcrew\runners` pass after the settle. (2) An interactive runner in a
+  folder users can change cannot be version-probed, configured or registered by the service (see above). (3) Only the runner's
+  program and folder are checked, not its `config.yaml` or `logs` folder inside it: an older file with a weak ACL would not be
+  detected, and the service writes its runner log under the folder. (4) `EnginePrune` and `CacheClean` by a standard user are an
+  availability point (they delete what the policy allows, never more), not an elevation. (5) The prompt itself: UAC on the same
+  desktop is not a boundary against a program of the same user.

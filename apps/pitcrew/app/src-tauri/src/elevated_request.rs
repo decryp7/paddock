@@ -11,6 +11,12 @@
 //! open cannot make an administrator's approval carry its own request. The response comes back in the response file; a
 //! forged response can only mislead what the window shows, never change the service. This module is the pure part
 //! (files, digest, arguments, the elevated side over a [`ServiceClient`]); the prompt itself is in `service_install`.
+//!
+//! **What this does not do.** A Windows permission prompt on the same desktop as the program that asked for it is *not a security
+//! boundary*: a program running as the same user can click it, send it keystrokes or ask for a prompt of its own, and the user
+//! may approve what they did not start. The protection is the *check on the service's side* (only an elevated administrator
+//! changes what runs) and what the user sees in the prompt; this module only makes sure that a prompt the user did approve
+//! carries exactly the request the app showed, to the SYSTEM service and to nobody else (`pipe_server`).
 
 use crate::service_client::{ClientError, ServiceClient};
 use pitcrew_core::checksum::Sha256Digest;
@@ -161,6 +167,28 @@ pub fn collect(h: Handoff) -> Result<Response, ClientError> {
     result
 }
 
+/// Removes the folders of earlier hand-offs below `parent` that are older than `max_age` (a crashed app, a prompt nobody answered).
+/// Only `forward-*` folders are touched; each holds one request, which may carry a registration token, and its answer. Returns how
+/// many were removed.
+pub fn sweep_stale(parent: &Path, now: std::time::SystemTime, max_age: std::time::Duration) -> usize {
+    let Ok(list) = std::fs::read_dir(parent) else { return 0 };
+    let mut removed = 0;
+    for entry in list.flatten() {
+        let is_handoff = entry.file_name().to_string_lossy().starts_with("forward-");
+        let Ok(meta) = entry.metadata() else { continue };
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age > max_age);
+        // A link is never followed: only a real folder is removed, by its own name.
+        if is_handoff && meta.is_dir() && !meta.file_type().is_symlink() && old && std::fs::remove_dir_all(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 /// Runs the forwarding mode when the app was started for it; returns the exit code, or `None` for a normal start.
 pub fn run_if_asked(args: &[String], client: &dyn ServiceClient) -> Option<i32> {
     let forward = parse_args(args)?;
@@ -291,6 +319,24 @@ mod tests {
             .is_err());
         assert_eq!(run_if_asked(&["--hidden".to_string()], &fake(Ok(Response::Ok))), None);
         assert_eq!(run_if_asked(&[FLAG.to_string()], &fake(Ok(Response::Ok))), Some(1));
+    }
+
+    #[test]
+    fn stale_handoff_folders_are_swept_and_nothing_else() {
+        let root = scratch("sweep");
+        let old = prepare(&root, &drain()).unwrap();
+        std::fs::create_dir(root.join("keep-me")).unwrap();
+        let now = std::time::SystemTime::now();
+        let hour = std::time::Duration::from_secs(3600);
+        assert_eq!(
+            sweep_stale(&root, now, hour),
+            0,
+            "a fresh hand-off may still be waiting for its prompt"
+        );
+        assert!(old.dir.exists());
+        assert_eq!(sweep_stale(&root, now + 2 * hour, hour), 1);
+        assert!(!old.dir.exists() && root.join("keep-me").exists(), "only forward-* folders go");
+        assert_eq!(sweep_stale(&root.join("missing"), now, hour), 0);
     }
 
     #[test]

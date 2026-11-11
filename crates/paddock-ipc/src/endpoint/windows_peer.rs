@@ -33,9 +33,6 @@ use windows_sys::Win32::Security::{
 use windows_sys::Win32::System::Pipes::{GetNamedPipeClientProcessId, ImpersonateNamedPipeClient};
 use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
 
-/// `SE_GROUP_USE_FOR_DENY_ONLY` (winnt.h): the group is in the token only to deny, as in a UAC-filtered administrator's token.
-const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
-
 /// The Administrators group, which also marks a UAC-filtered token (the group is present with "deny only").
 const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
 
@@ -140,8 +137,8 @@ pub(super) fn raw_peer(pipe: HANDLE) -> Result<RawPeer, PeerError> {
             .iter()
             .find(|g| sid_string(g.Sid).is_some_and(|sid| sid == ADMINISTRATORS_SID))
             .map_or(TokenAdmin::NotAdmin, |g| TokenAdmin::Admin {
-                // A UAC-filtered administrator's token carries the group as "deny only".
-                elevated: g.Attributes & SE_GROUP_USE_FOR_DENY_ONLY == 0,
+                // A UAC-filtered administrator's token carries the group as "deny only"; elevated needs it enabled too.
+                elevated: crate::identity::group_is_elevated(g.Attributes),
             })
     };
     Ok(RawPeer {

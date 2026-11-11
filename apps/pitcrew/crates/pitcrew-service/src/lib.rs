@@ -24,6 +24,7 @@ pub mod process;
 pub mod process_watch;
 pub mod protected;
 pub mod runner_files;
+pub mod safe_delete;
 pub mod status;
 pub mod store;
 pub mod supervisor;

@@ -15,6 +15,7 @@ pub mod gitea;
 pub mod handoff;
 pub mod native_feel;
 pub mod ops;
+pub mod pipe_server;
 pub mod service_client;
 pub mod service_install;
 pub mod service_repair;
@@ -30,6 +31,15 @@ pub fn run() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = elevated_request::run_if_asked(&args, &service_client::DirectClient) {
         std::process::exit(code);
+    }
+    #[cfg(windows)]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        // Hand-offs left by an app that crashed or a prompt nobody answered hold a request, maybe with a registration token.
+        elevated_request::sweep_stale(
+            &std::path::Path::new(&local).join("Pitcrew").join("elevated"),
+            std::time::SystemTime::now(),
+            std::time::Duration::from_secs(3600),
+        );
     }
     let client: SharedClient = Arc::new(service_client::LocalServiceClient);
     let result = tauri::Builder::default()

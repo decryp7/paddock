@@ -78,6 +78,18 @@ pub enum TokenAdmin {
     },
 }
 
+/// `SE_GROUP_ENABLED` (winnt.h): the group is enabled in the token.
+const SE_GROUP_ENABLED: u32 = 0x0000_0004;
+/// `SE_GROUP_USE_FOR_DENY_ONLY` (winnt.h): the group is in the token only to deny.
+const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
+
+/// Whether the Administrators group with these token attributes makes the token **elevated**: enabled, and not "deny only". A
+/// UAC-filtered administrator's token carries the group deny-only (and not enabled); a group that is merely present proves
+/// nothing. Pure, so the rule is tested on every platform; the Windows reader passes the attributes it found.
+pub fn group_is_elevated(attributes: u32) -> bool {
+    attributes & SE_GROUP_ENABLED != 0 && attributes & SE_GROUP_USE_FOR_DENY_ONLY == 0
+}
+
 /// The facts a platform read from one connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawPeer {
@@ -209,6 +221,27 @@ mod tests {
             admin,
             audit: AuditHint::new(pid, Some("/usr/bin/example".into())),
         }
+    }
+
+    #[test]
+    fn a_group_is_elevated_only_when_enabled_and_not_deny_only() {
+        assert!(
+            group_is_elevated(0x7),
+            "mandatory, enabled by default, enabled"
+        );
+        assert!(
+            !group_is_elevated(0x10),
+            "deny only, as in a filtered token"
+        );
+        assert!(
+            !group_is_elevated(0x14),
+            "enabled and deny only is still a filtered token"
+        );
+        assert!(!group_is_elevated(0x0), "present but not enabled");
+        assert!(
+            !group_is_elevated(0x3),
+            "mandatory and default but not enabled"
+        );
     }
 
     #[test]

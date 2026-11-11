@@ -37,14 +37,23 @@ pub trait ServiceClient: Send + Sync {
 trait Stream: Read + Write + Send {}
 impl<T: Read + Write + Send> Stream for T {}
 
-fn connect() -> Result<Box<dyn Stream>, ClientError> {
+/// Connects to the service. `require_system`: before anything is sent, check that the program serving the pipe is the SYSTEM
+/// service (Windows; the elevated forwarder, which carries a registration token, asks for it). Elsewhere the socket's folder is
+/// the user's own and nothing is asked.
+fn connect(require_system: bool) -> Result<Box<dyn Stream>, ClientError> {
+    let _ = require_system;
     #[cfg(windows)]
     {
         const ERROR_PIPE_BUSY: i32 = 231;
         let started = std::time::Instant::now();
         loop {
-            match std::fs::OpenOptions::new().read(true).write(true).open(r"\\.\pipe\pitcrew") {
-                Ok(f) => return Ok(Box::new(f)),
+            match pitcrew_core::service_paths::open_pipe_options().open(r"\\.\pipe\pitcrew") {
+                Ok(f) => {
+                    if require_system {
+                        crate::pipe_server::require_system_server(&f).map_err(ClientError::Unavailable)?;
+                    }
+                    return Ok(Box::new(f));
+                }
                 Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) && started.elapsed() < Duration::from_secs(3) => {
                     std::thread::sleep(Duration::from_millis(50));
                 }
@@ -136,9 +145,14 @@ pub struct LocalServiceClient;
 impl LocalServiceClient {
     /// One request as this process, with whatever rights it has.
     fn request_direct(&self, request: Request) -> Result<Response, ClientError> {
+        self.request_checked(request, false)
+    }
+
+    /// [`Self::request_direct`], optionally refusing a server that is not the SYSTEM service.
+    fn request_checked(&self, request: Request, require_system: bool) -> Result<Response, ClientError> {
         let timeout = timeout_for(&request);
         with_timeout(timeout, move || {
-            let mut s = connect()?;
+            let mut s = connect(require_system)?;
             hello(&mut s)?;
             write_frame(&mut s, &request).map_err(|e| ClientError::Unavailable(e.to_string()))?;
             read_frame::<Response>(&mut s).map_err(|e| ClientError::Unavailable(e.to_string()))
@@ -159,13 +173,14 @@ impl ServiceClient for LocalServiceClient {
     }
 }
 
-/// The client of the elevated forwarding mode: it never elevates again (a refusal there is the answer).
+/// The client of the elevated forwarding mode: it never elevates again (a refusal there is the answer), and it sends nothing
+/// to a pipe whose server is not the SYSTEM service.
 #[derive(Debug, Default)]
 pub struct DirectClient;
 
 impl ServiceClient for DirectClient {
     fn request(&self, request: Request) -> Result<Response, ClientError> {
-        LocalServiceClient.request_direct(request)
+        LocalServiceClient.request_checked(request, true)
     }
 }
 
@@ -224,7 +239,7 @@ mod elevated {
 /// `on_connected` gets the service's version once the subscription stands.
 pub fn subscribe(on_connected: impl FnOnce(String), mut on_event: impl FnMut(Response) -> bool) -> Result<(), ClientError> {
     let mut s = with_timeout(Duration::from_secs(10), || {
-        let mut s = connect()?;
+        let mut s = connect(false)?;
         let v = hello(&mut s)?;
         write_frame(&mut s, &Request::Subscribe).map_err(|e| ClientError::Unavailable(e.to_string()))?;
         match read_frame::<Response>(&mut s).map_err(|e| ClientError::Unavailable(e.to_string()))? {

@@ -91,18 +91,45 @@ impl<L: Launcher> Launcher for ServiceTokenGuard<L> {
     }
 }
 
-/// The check of the real Windows service: when it runs as LocalSystem, the shared trust rule over the real machine; when it runs
-/// as a user (development), nothing, because the token is the user's own.
+/// What decides whether the service may run a program (with its folder) with its own token: a runner's program at start, but also
+/// its version probe, `generate-config` and `register` (everything the service starts for a runner).
+pub type ProgramGate = std::sync::Arc<dyn Fn(&std::path::Path, &std::path::Path) -> Result<(), String> + Send + Sync>;
+
+/// A gate that accepts everything: every platform where the service runs as the user, and tests.
+pub fn open_gate() -> ProgramGate {
+    std::sync::Arc::new(|_, _| Ok(()))
+}
+
+/// The gate of the real Windows service: when it runs as LocalSystem (its own token's user is `S-1-5-18`), the shared trust rule
+/// over the real machine; when it runs as a user (development), nothing, because the token is the user's own.
 #[cfg(windows)]
-pub fn windows_token_check() -> TokenCheck {
-    use crate::platform::win_session::{console_user, ConsoleUser};
-    Box::new(|spec| {
-        if matches!(console_user(), ConsoleUser::NotSystem) {
+pub fn windows_program_gate() -> ProgramGate {
+    std::sync::Arc::new(|program, dir| {
+        if !crate::platform::win_session::is_local_system() {
             return Ok(());
         }
         let mut machine = paddock_service::privileged::trust_real::RealTrust;
-        crate::protected::check_service_launch(&mut machine, &spec.program, &spec.dir)
+        crate::protected::check_service_launch(&mut machine, program, dir)
     })
+}
+
+/// The program gate of this OS.
+pub fn os_program_gate() -> ProgramGate {
+    #[cfg(windows)]
+    {
+        windows_program_gate()
+    }
+    #[cfg(not(windows))]
+    {
+        open_gate()
+    }
+}
+
+/// The check of the real Windows service for a runner's own start ([`windows_program_gate`] on the spec's program and folder).
+#[cfg(windows)]
+pub fn windows_token_check() -> TokenCheck {
+    let gate = windows_program_gate();
+    Box::new(move |spec| gate(&spec.program, &spec.dir))
 }
 
 #[cfg(test)]

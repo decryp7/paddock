@@ -386,22 +386,26 @@ pub fn cache_plan(dir: &Path, limits: &CacheLimits, home: Option<&Path>, now: Ti
 /// Deletes the planned entries (names are re-checked: a single path component inside `dir`, never a link target).
 pub fn cache_clean(dir: &Path, plan: &CachePlan) -> Vec<(String, String)> {
     let mut failures = vec![];
-    for (e, _) in &plan.entries {
-        let name = Path::new(&e.name);
-        if name.components().count() != 1 || e.name == ".." || e.name == "." {
-            failures.push((e.name.clone(), "the name is not a plain entry of the cache folder".into()));
-            continue;
+    // No link is followed (safe_delete), and where a user can change the folder the work runs as the logged-on user.
+    let ran = crate::safe_delete::with_rights(dir, || {
+        for (e, _) in &plan.entries {
+            let name = Path::new(&e.name);
+            if name.components().count() != 1 || e.name == ".." || e.name == "." {
+                failures.push((e.name.clone(), "the name is not a plain entry of the cache folder".into()));
+                continue;
+            }
+            if let Err(err) = crate::safe_delete::remove_below(dir, name) {
+                let reason = if err.kind() == std::io::ErrorKind::InvalidInput {
+                    err.to_string()
+                } else {
+                    failure_reason(err.raw_os_error(), cfg!(windows), &err.to_string())
+                };
+                failures.push((e.name.clone(), reason));
+            }
         }
-        let path = dir.join(name);
-        let result = match std::fs::symlink_metadata(&path) {
-            Ok(m) if m.is_dir() && !m.file_type().is_symlink() => std::fs::remove_dir_all(&path),
-            Ok(_) => std::fs::remove_file(&path),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        };
-        if let Err(err) = result {
-            failures.push((e.name.clone(), failure_reason(err.raw_os_error(), cfg!(windows), &err.to_string())));
-        }
+    });
+    if let Err(reason) = ran {
+        failures.push((dir.display().to_string(), reason));
     }
     failures
 }

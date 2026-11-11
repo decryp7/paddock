@@ -18,7 +18,10 @@ use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{CloseHandle, SetHandleInformation, HANDLE, HANDLE_FLAGS, HANDLE_FLAG_INHERIT, WAIT_OBJECT_0};
-use windows::Win32::Security::{DuplicateTokenEx, SecurityIdentification, TokenPrimary, SECURITY_ATTRIBUTES, TOKEN_ALL_ACCESS};
+use windows::Win32::Security::{
+    DuplicateTokenEx, GetTokenInformation, ImpersonateLoggedOnUser, IsWellKnownSid, RevertToSelf, SecurityIdentification, TokenPrimary,
+    TokenUser, WinLocalSystemSid, SECURITY_ATTRIBUTES, TOKEN_ALL_ACCESS, TOKEN_QUERY, TOKEN_USER,
+};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_GENERIC_READ, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
@@ -35,6 +38,7 @@ use windows::Win32::System::Threading::{
     EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
     STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
 const NO_SESSION: u32 = 0xFFFF_FFFF;
@@ -48,6 +52,59 @@ pub enum ConsoleUser {
     Session(u32),
     /// The service is not LocalSystem (development): it runs as the user, so plain children are in their session.
     NotSystem,
+}
+
+/// Whether this service process runs as LocalSystem: its own token's user is `S-1-5-18`. (Not guessed from whether another call
+/// fails: `WTSQueryUserToken` also fails for other reasons, and a service running as an administrator account is not SYSTEM.)
+pub fn is_local_system() -> bool {
+    let mut token = HANDLE::default();
+    // SAFETY: the pseudo handle of this process and a valid out pointer; the token is owned below.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) }.is_err() {
+        return false;
+    }
+    let token = Owned(token);
+    let mut needed = 0u32;
+    // SAFETY: a size query with no buffer (it fails by design with the size needed).
+    let _ = unsafe { GetTokenInformation(token.0, TokenUser, None, 0, &mut needed) };
+    let mut buf = vec![0u64; (needed as usize).div_ceil(8).max(1)];
+    // SAFETY: `buf` holds at least `needed` bytes and is 8-byte aligned.
+    if unsafe { GetTokenInformation(token.0, TokenUser, Some(buf.as_mut_ptr().cast()), needed, &mut needed) }.is_err() {
+        return false;
+    }
+    // SAFETY: the buffer holds a TOKEN_USER written by the call above and is alive for the check.
+    unsafe { IsWellKnownSid((*buf.as_ptr().cast::<TOKEN_USER>()).User.Sid, WinLocalSystemSid) }.as_bool()
+}
+
+/// The calling thread acts as the logged-on user until this is dropped (file operations then use that user's rights, so a link
+/// the user planted can only lead where the user could already go).
+pub struct Impersonation(());
+
+impl Drop for Impersonation {
+    fn drop(&mut self) {
+        // SAFETY: always valid; failing means there was nothing to revert.
+        unsafe {
+            let _ = RevertToSelf();
+        }
+    }
+}
+
+/// Makes the calling thread the user at the console (or the Remote Desktop user, [`console_user`]) until the result is dropped.
+///
+/// # Errors
+/// Nobody is logged on, or the token could not be used: nothing was changed.
+pub fn impersonate_console_user() -> Result<Impersonation, String> {
+    let session = match console_user() {
+        ConsoleUser::Session(s) => s,
+        ConsoleUser::Nobody => return Err("nobody is logged on".into()),
+        ConsoleUser::NotSystem => return Err("the service does not run as LocalSystem".into()),
+    };
+    let mut user = HANDLE::default();
+    // SAFETY: valid out pointer; owned below.
+    unsafe { WTSQueryUserToken(session, &mut user) }.map_err(|e| os_err("Getting the logged-on user's token", e))?;
+    let user = Owned(user);
+    // SAFETY: `user.0` is a valid token (a primary one is duplicated into an impersonation token by the call).
+    unsafe { ImpersonateLoggedOnUser(user.0) }.map_err(|e| os_err("Acting as the logged-on user", e))?;
+    Ok(Impersonation(()))
 }
 
 /// An owned Win32 handle, closed on drop.

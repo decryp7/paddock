@@ -2,6 +2,7 @@
 //! the binary swap and its roll-back, asking a binary for its version, and registration. Each returns a result
 //! for the supervisor to feed into the core's state machines; none of them touches supervision state.
 
+use crate::launcher::ProgramGate;
 use crate::net::{file_digest, Http, MAX_BINARY};
 use crate::process::{quiet_command, run_with_timeout};
 use pitcrew_core::checksum::{agreed, checksum_for, verify, MAX_CHECKSUM_FILE};
@@ -84,6 +85,7 @@ pub fn verify_download(
     version: &RunnerVersion,
     platform: Platform,
     binary: &Path,
+    gate: &ProgramGate,
 ) -> Result<String, String> {
     let files = kind.release_files(version, platform).map_err(|e| e.to_string())?;
     let dest = layout::download_path(binary);
@@ -114,19 +116,31 @@ pub fn verify_download(
             kind.display_name()
         ));
     }
-    match binary_version(&dest) {
-        Some(v) if &v == version => Ok(note),
-        Some(v) => Err(format!("the download reports version {v}, not {version}")),
-        None => Err("the download does not run or does not report its version".into()),
+    match binary_version(&dest, gate) {
+        Ok(v) if &v == version => Ok(note),
+        Ok(v) => Err(format!("the download reports version {v}, not {version}")),
+        Err(e) => Err(format!("the download was not run: {e}")),
     }
 }
 
-/// The version a binary reports with `--version`.
-pub fn binary_version(binary: &Path) -> Option<RunnerVersion> {
+/// The folder a program is checked with: the one that holds it.
+fn folder_of(program: &Path) -> &Path {
+    program.parent().unwrap_or(program)
+}
+
+/// The version a binary reports with `--version`. The service may run a runner's program only where `gate` accepts it (on Windows,
+/// as LocalSystem, a program a standard user can replace would run as SYSTEM): otherwise nothing is started and the reason says
+/// why.
+///
+/// # Errors
+/// The gate's reason, or that the program does not run or does not report a version.
+pub fn binary_version(binary: &Path, gate: &ProgramGate) -> Result<RunnerVersion, String> {
+    gate(binary, folder_of(binary))?;
     let mut cmd = quiet_command(binary);
     cmd.arg("--version");
-    let out = run_with_timeout(cmd, VERSION_TIMEOUT).ok()?;
-    RunnerVersion::from_version_output(&format!("{} {}", out.stdout, out.stderr)).ok()
+    let out = run_with_timeout(cmd, VERSION_TIMEOUT).map_err(|e| e.to_string())?;
+    RunnerVersion::from_version_output(&format!("{} {}", out.stdout, out.stderr))
+        .map_err(|_| "the program does not report its version".to_string())
 }
 
 /// Puts the verified download in place, keeping the installed binary as `<binary>.previous`.
@@ -190,13 +204,16 @@ pub struct Registration<'a> {
     pub name: &'a str,
     /// Labels.
     pub labels: &'a [String],
+    /// Whether the service may run the runner's program ([`ProgramGate`]).
+    pub gate: &'a ProgramGate,
 }
 
 /// Writes the runner configuration if it has none (`generate-config`, with jobs and cache inside the folder).
-pub fn ensure_runner_config(binary: &Path, config: &Path, dir: &Path) -> Result<(), String> {
+pub fn ensure_runner_config(binary: &Path, config: &Path, dir: &Path, gate: &ProgramGate) -> Result<(), String> {
     if config.exists() {
         return Ok(());
     }
+    gate(binary, dir)?;
     let mut cmd = quiet_command(binary);
     cmd.arg("generate-config").current_dir(dir);
     let out = run_with_timeout(cmd, VERSION_TIMEOUT).map_err(|e| e.to_string())?;
@@ -224,7 +241,8 @@ pub fn register(r: &Registration<'_>) -> Result<Registered, String> {
     if r.dir.join(layout::REGISTRATION_FILE).exists() {
         return Ok(Registered::Adopted);
     }
-    ensure_runner_config(r.binary, &r.config, r.dir)?;
+    (r.gate)(r.binary, r.dir)?;
+    ensure_runner_config(r.binary, &r.config, r.dir, r.gate)?;
     let mut cmd = quiet_command(r.binary);
     cmd.args(layout::register_args(&r.config, r.server, r.token, r.name, r.labels))
         .current_dir(r.dir);
@@ -312,7 +330,15 @@ mod tests {
         let binary = dir.join("bin/gitea-runner");
         download(&src, RunnerKind::GiteaRunner, &v, platform(), &binary).unwrap();
         assert!(layout::download_path(&binary).exists());
-        let err = verify_download(&src, RunnerKind::GiteaRunner, &v, platform(), &binary).unwrap_err();
+        let err = verify_download(
+            &src,
+            RunnerKind::GiteaRunner,
+            &v,
+            platform(),
+            &binary,
+            &crate::launcher::open_gate(),
+        )
+        .unwrap_err();
         assert!(err.contains("disagree"), "{err}");
         discard_download(&binary);
         assert!(!layout::download_path(&binary).exists());
@@ -324,6 +350,54 @@ mod tests {
             &binary
         )
         .is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P1-2: the version probe, `generate-config` and `register` run the runner's program as the service, so each asks the gate
+    /// first; a refused program is never started.
+    #[cfg(unix)]
+    #[test]
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    fn every_program_the_service_starts_for_a_runner_goes_through_the_gate() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("pitcrew-it-gate-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary = dir.join("gitea-runner");
+        let ran = dir.join("ran");
+        std::fs::write(
+            &binary,
+            format!("#!/bin/sh\necho started >> '{}'\necho gitea-runner version v5.2.0\n", ran.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let refuse: ProgramGate = std::sync::Arc::new(|_, _| Err("not in a protected folder".into()));
+        let config = dir.join("config.yaml");
+
+        assert_eq!(binary_version(&binary, &refuse).unwrap_err(), "not in a protected folder");
+        assert_eq!(
+            ensure_runner_config(&binary, &config, &dir, &refuse).unwrap_err(),
+            "not in a protected folder"
+        );
+        let registration = Registration {
+            dir: &dir,
+            binary: &binary,
+            config: config.clone(),
+            server: "https://git.example.com",
+            token: "t",
+            name: "r",
+            labels: &[],
+            gate: &refuse,
+        };
+        assert_eq!(register(&registration).unwrap_err(), "not in a protected folder");
+        assert!(!ran.exists(), "the refused program was started");
+
+        // The control: with the gate open the same program does run, so the probe above could have seen it.
+        assert_eq!(binary_version(&binary, &crate::launcher::open_gate()).unwrap().to_string(), "5.2.0");
+        assert!(ran.exists(), "the control did not run the program");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -348,7 +422,7 @@ mod tests {
         restore_previous(&binary).unwrap();
         assert_eq!(std::fs::read(&binary).unwrap(), b"old");
         assert!(restore_previous(&binary).is_err(), "nothing to go back to");
-        assert_eq!(binary_version(&binary), None, "not a program");
+        assert!(binary_version(&binary, &crate::launcher::open_gate()).is_err(), "not a program");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

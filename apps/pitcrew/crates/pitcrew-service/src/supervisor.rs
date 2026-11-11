@@ -82,12 +82,15 @@ pub type Reply = tokio::sync::oneshot::Sender<Response>;
 pub enum Msg {
     /// A request from the app.
     Request(Box<Request>, Reply),
-    /// A request the transport refused because its caller may not send it (it never reached the supervisor); only for the log.
-    Denied {
+    /// A request that changes something reached the transport: whether it was let through, for the log (the request's kind
+    /// and the caller's account, never the request's fields). A refused request never reaches the supervisor otherwise.
+    Audit {
         /// The request's kind, never its fields.
         request: String,
-        /// Who asked.
+        /// Who asked, with the account's SID.
         caller: String,
+        /// Whether the transport let it through.
+        allowed: bool,
     },
     /// A subscriber for pushed events.
     Subscribe(tokio::sync::mpsc::Sender<Response>),
@@ -117,8 +120,8 @@ pub enum Msg {
 pub enum Done {
     /// A release check.
     Checked(Result<RunnerVersion, String>),
-    /// The installed binary's version.
-    Version(Option<RunnerVersion>),
+    /// The installed binary's version, or why it is not known (an empty reason: the binary is not there yet).
+    Version(Result<RunnerVersion, String>),
     /// The download.
     Downloaded(Result<(), String>),
     /// The verification (a note on success).
@@ -139,6 +142,12 @@ pub enum Done {
 pub struct Env {
     /// The data folder.
     pub data_dir: PathBuf,
+    /// Whether the service may run a runner's program with its own token: its start, its version probe, `generate-config` and
+    /// `register` all ask (Windows, as LocalSystem, where a program a standard user can replace would run as SYSTEM).
+    pub program_gate: crate::launcher::ProgramGate,
+    /// Gives a runner's folder inside the data folder its access rules (`protected::settle_runner_dir`; Windows, as LocalSystem):
+    /// the second argument says the folder was created just now. Returns a line for the runner's log.
+    pub settle_runner_dir: crate::protected::SettleHook,
     /// Starts runner processes.
     pub launcher: Box<dyn Launcher>,
     /// Release information and downloads.
@@ -217,7 +226,10 @@ pub fn os_env(data_dir: PathBuf) -> Env {
         let login = crate::login_env::LoginPath::new();
         Arc::new(move || Some(login.get()))
     };
+    let data_for_settle = data_dir.clone();
     Env {
+        program_gate: crate::launcher::os_program_gate(),
+        settle_runner_dir: crate::protected::os_settle(data_for_settle),
         base_path,
         exe_stamp,
         data_dir,
@@ -415,11 +427,15 @@ impl Supervisor {
     }
 
     fn add(&mut self, cfg: RunnerConfig, now: Timestamp) {
+        let settled = (self.env.settle_runner_dir)(&cfg, false);
         let st = self.state.runners.entry(cfg.name.to_string()).or_default().clone();
         let settings = self.settings_for(&cfg);
         let wanted = cfg.enabled && st.wanted;
         let mut log = LogWriter::open(&layout::log_dir(&cfg), LOG_FILE, self.config.defaults.logs);
         log.supervisor(now, "Pitcrew is supervising this runner");
+        if let Some(line) = settled {
+            log.supervisor(now, &line);
+        }
         let registered = layout::registration(&cfg).exists();
         let name = cfg.name.clone();
         let mut runner = Runner {
@@ -550,8 +566,13 @@ impl Supervisor {
                     let _ = reply.send(resp);
                 }
             }
-            Msg::Denied { request, caller } => {
-                self.log_service(now, &format!("refused {request} from {caller}: it needs an elevated administrator"));
+            Msg::Audit { request, caller, allowed } => {
+                let line = if allowed {
+                    format!("accepted {request} from {caller}")
+                } else {
+                    format!("refused {request} from {caller}")
+                };
+                self.log_service(now, &line);
             }
             Msg::Subscribe(sub) => {
                 let status = self.status_event(now);
@@ -1064,8 +1085,13 @@ impl Supervisor {
     fn spawn_version_probe(&mut self, name: &RunnerName) {
         let Some(r) = self.runners.get(name) else { return };
         let bin = self.binary(&r.cfg).path;
+        let gate = self.env.program_gate.clone();
         self.worker(name, move || {
-            Done::Version(if bin.exists() { work::binary_version(&bin) } else { None })
+            Done::Version(if bin.exists() {
+                work::binary_version(&bin, &gate)
+            } else {
+                Err(String::new())
+            })
         });
     }
 
@@ -1132,8 +1158,9 @@ impl Supervisor {
                     return;
                 };
                 r.update_worker = true;
+                let gate = self.env.program_gate.clone();
                 self.worker(name, move || {
-                    Done::Verified(work::verify_download(&src, kind, &version, platform, &bin))
+                    Done::Verified(work::verify_download(&src, kind, &version, platform, &bin, &gate))
                 });
             }
             UpdateCommand::WatchForIdle => r.watch_idle = true,
@@ -1225,9 +1252,10 @@ impl Supervisor {
                     }
                 }
             }
-            Done::Version(v) => {
-                if v.is_some() {
-                    r.current_version = v;
+            Done::Version(Ok(v)) => r.current_version = Some(v),
+            Done::Version(Err(why)) => {
+                if !why.is_empty() {
+                    r.log.supervisor(now, &format!("the runner's version is not known: {why}"));
                 }
             }
             Done::Downloaded(res) => {
@@ -1626,16 +1654,20 @@ impl Supervisor {
                 if let Response::Error(e) = self.save_settings(config, now) {
                     return Some((reply, Response::Error(e)));
                 }
+                let gate = self.env.program_gate.clone();
+                let settle = self.env.settle_runner_dir.clone();
                 self.worker(&runner, move || {
                     let result = (|| {
+                        let existed = cfg.dir.exists();
                         std::fs::create_dir_all(&cfg.dir).map_err(|e| format!("{}: {e}", cfg.dir.display()))?;
+                        let _ = settle(&cfg, !existed);
                         if !bin.path.exists() {
                             if !bin.managed {
                                 return Err(format!("the runner binary {} is missing", bin.path.display()));
                             }
                             let v = work::latest(&src, cfg.kind, pitcrew_core::update::Channel::Stable)?;
                             work::download(&src, cfg.kind, &v, platform, &bin.path)?;
-                            work::verify_download(&src, cfg.kind, &v, platform, &bin.path)?;
+                            work::verify_download(&src, cfg.kind, &v, platform, &bin.path, &gate)?;
                             work::swap(&bin.path)?;
                         }
                         work::register(&Registration {
@@ -1646,6 +1678,7 @@ impl Supervisor {
                             token: token.expose(),
                             name: &display,
                             labels: &cfg.labels,
+                            gate: &gate,
                         })
                     })();
                     Done::Registered(result, reply)

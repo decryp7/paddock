@@ -9,6 +9,26 @@
 use crate::platform::Os;
 use std::path::{Path, PathBuf};
 
+/// The access an interactive user's connection to the service's named pipe has and asks for (Windows): read and write data and
+/// the attributes and `SYNCHRONIZE`/`READ_CONTROL` they need, **without `FILE_CREATE_PIPE_INSTANCE` (0x4)**, so a standard user
+/// cannot host a pipe of this name and receive an elevated caller's connection. `GENERIC_READ | GENERIC_WRITE` includes that bit
+/// (as `FILE_APPEND_DATA`), so both ends use this exact mask: the service's pipe ACL gives it to interactive users and the
+/// app opens the pipe with it.
+pub const PIPE_CLIENT_ACCESS: u32 = 0x0012_019b;
+
+/// How a client opens the service's pipe (Windows): with exactly [`PIPE_CLIENT_ACCESS`], and at **identification** impersonation
+/// level (`SECURITY_IDENTIFICATION`), so whatever answers on the pipe can learn who the caller is but can never act as them: an
+/// elevated caller's token is not handed to a program that merely hosts a pipe of this name.
+#[cfg(windows)]
+pub fn open_pipe_options() -> std::fs::OpenOptions {
+    use std::os::windows::fs::OpenOptionsExt;
+    /// `SECURITY_IDENTIFICATION` (winbase.h); the standard library adds `SECURITY_SQOS_PRESENT`.
+    const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
+    let mut options = std::fs::OpenOptions::new();
+    options.access_mode(PIPE_CLIENT_ACCESS).security_qos_flags(SECURITY_IDENTIFICATION);
+    options
+}
+
 /// The Unix socket's file name.
 pub const SOCKET_FILE: &str = "pitcrew.sock";
 

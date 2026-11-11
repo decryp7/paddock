@@ -13,7 +13,7 @@ use pitcrew_core::housekeeping::{
 };
 use pitcrew_core::layout::{self, LOG_FILE};
 use pitcrew_core::time::Timestamp;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Most files one scan measures (beyond, sizes are lower bounds).
@@ -149,20 +149,13 @@ pub fn scan(runner: &RunnerConfig, binary: &Path, free_bytes: Option<u64>) -> Di
     }
 }
 
-/// The path to hand to the OS: verbatim on Windows, so long paths work.
-fn os_path(p: &Path) -> PathBuf {
-    #[cfg(windows)]
-    {
-        if let Ok(c) = std::fs::canonicalize(p) {
-            return c; // canonicalize returns a `\\?\` path on Windows
-        }
-    }
-    p.to_path_buf()
-}
-
 fn clear_read_only(p: &Path) {
     let walk = |path: &Path| {
         if let Ok(meta) = std::fs::symlink_metadata(path) {
+            if meta.file_type().is_symlink() {
+                // Never follow a link: its target is not this folder's to change.
+                return;
+            }
             let mut perms = meta.permissions();
             if perms.readonly() {
                 #[allow(clippy::permissions_set_readonly_false)]
@@ -172,7 +165,8 @@ fn clear_read_only(p: &Path) {
         }
     };
     walk(p);
-    let mut stack = vec![p.to_path_buf()];
+    let is_link = std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink());
+    let mut stack = if is_link { vec![] } else { vec![p.to_path_buf()] };
     while let Some(dir) = stack.pop() {
         let Ok(list) = std::fs::read_dir(&dir) else { continue };
         for e in list.flatten() {
@@ -185,26 +179,17 @@ fn clear_read_only(p: &Path) {
     }
 }
 
-fn remove(p: &Path) -> std::io::Result<()> {
-    let meta = std::fs::symlink_metadata(p)?;
-    if meta.is_dir() && !meta.file_type().is_symlink() {
-        std::fs::remove_dir_all(p)
-    } else {
-        std::fs::remove_file(p)
-    }
-}
-
-/// Deletes one entry: once, then again after clearing read-only attributes.
-pub fn delete(p: &Path) -> Result<(), String> {
-    let path = os_path(p);
-    match remove(&path) {
+/// Deletes one entry below `root`: once, then again after clearing read-only attributes. No link is followed (see
+/// [`crate::safe_delete`]); a link in the way is refused with the reason.
+pub fn delete_below(root: &Path, rel: &Path) -> Result<(), String> {
+    use crate::safe_delete::remove_below;
+    let target = root.join(rel);
+    match remove_below(root, rel) {
         Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => Err(e.to_string()),
         Err(_) => {
-            clear_read_only(&path);
-            remove(&path)
-                .or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
-                .map_err(|e| failure_reason(e.raw_os_error(), cfg!(windows), &e.to_string()))
+            clear_read_only(&target);
+            remove_below(root, rel).map_err(|e| failure_reason(e.raw_os_error(), cfg!(windows), &e.to_string()))
         }
     }
 }
@@ -218,25 +203,31 @@ pub fn execute(runner: &RunnerConfig, plan: &CleanupPlan, now: Timestamp) -> Cle
         deleted: 0,
         failures: vec![],
     };
-    for d in &plan.deletions {
-        let rel_path = &d.entry.path;
-        if rel_path.split('/').any(|part| part == ".." || part.is_empty()) || Path::new(rel_path).is_absolute() {
-            report.failures.push(CleanupFailure {
-                path: rel_path.clone(),
-                reason: "the path is outside the runner's folder".into(),
-            });
-            continue;
-        }
-        match delete(&runner.dir.join(rel_path)) {
-            Ok(()) => {
-                report.freed_bytes += d.entry.bytes;
-                report.deleted += 1;
+    // As the service where the folder is protected, as the logged-on user where a user can change it (safe_delete).
+    let ran = crate::safe_delete::with_rights(&runner.dir, || {
+        for d in &plan.deletions {
+            let rel_path = &d.entry.path;
+            if rel_path.split('/').any(|part| part == ".." || part.is_empty()) || Path::new(rel_path).is_absolute() {
+                report.failures.push(CleanupFailure {
+                    path: rel_path.clone(),
+                    reason: "the path is outside the runner's folder".into(),
+                });
+                continue;
             }
-            Err(reason) => report.failures.push(CleanupFailure {
-                path: rel_path.clone(),
-                reason,
-            }),
+            match delete_below(&runner.dir, Path::new(rel_path)) {
+                Ok(()) => {
+                    report.freed_bytes += d.entry.bytes;
+                    report.deleted += 1;
+                }
+                Err(reason) => report.failures.push(CleanupFailure {
+                    path: rel_path.clone(),
+                    reason,
+                }),
+            }
         }
+    });
+    if let Err(reason) = ran {
+        report.failures.push(CleanupFailure { path: ".".into(), reason });
     }
     report
 }
@@ -382,10 +373,10 @@ mod tests {
         // Windows refuses to delete a file opened without FILE_SHARE_DELETE.
         use std::os::windows::fs::OpenOptionsExt;
         let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&f).unwrap();
-        let err = delete(&d.join("work/job")).unwrap_err();
+        let err = delete_below(&d, Path::new("work/job")).unwrap_err();
         assert!(err.contains("tries again"), "{err}");
         drop(held);
-        assert!(delete(&d.join("work/job")).is_ok());
+        assert!(delete_below(&d, Path::new("work/job")).is_ok());
         let _ = std::fs::remove_dir_all(&d);
     }
 }

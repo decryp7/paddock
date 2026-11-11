@@ -16,9 +16,7 @@ fn connect(_socket_dir: &Path) -> Result<Box<dyn Stream>, Error> {
     };
     #[cfg(windows)]
     {
-        let f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
+        let f = pitcrew_core::service_paths::open_pipe_options()
             .open(crate::ipc::pipe_name(_socket_dir))
             .map_err(unavailable)?;
         Ok(Box::new(f))
