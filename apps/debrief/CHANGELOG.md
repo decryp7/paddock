@@ -11,6 +11,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Fixed
 
+- **Sandbox:** On Linux a child's log sometimes said that a thread had started before the lockdown and kept its file access. The thread was the start-up handshake thread, finished but not yet removed by the kernel; the child now waits for it to go before it locks itself down (and logs it if it does not go within two seconds).
 - **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end
 
 ### Security
