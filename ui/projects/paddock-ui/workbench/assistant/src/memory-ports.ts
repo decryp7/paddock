@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import type { Attachment } from '../generated/assistant';
 import type { Unlisten } from './backend';
-import { AssistantAttachments, AssistantSpeech, type AttachmentChip, type AttachRules, type AttachSource, type SpeechState } from './composer-ports';
+import { AssistantAttachments, AssistantSpeech, type AttachmentChip, type ImageAction, type AttachRules, type AttachSource, type SpeechState } from './composer-ports';
 
 /** A plausible SHA-256 for the demo (not a real digest: the memory port keeps nothing). */
 function fakeSha(text: string): string {
@@ -28,6 +28,8 @@ export class MemoryAssistantAttachments extends AssistantAttachments {
   readonly removed: string[] = [];
   private readonly block = signal<string | null>(null);
   override readonly imageBlock = this.block.asReadonly();
+  private readonly action = signal<ImageAction | null>(null);
+  override readonly imageAction = this.action.asReadonly();
   /** The thumbnails of the pictures taken, by digest. */
   private readonly thumbs = new Map<string, string>();
   /** The size of each file taken, by its digest (the memory engine's size source; files are at most 256 KiB, 16 a question). */
@@ -37,9 +39,10 @@ export class MemoryAssistantAttachments extends AssistantAttachments {
     super();
   }
 
-  /** Plays a model that cannot read pictures (`null`: one that can). */
-  blockImages(words: string | null): void {
+  /** Plays a model that cannot read images (`null`: one that can), with the button the host offers beside its words (or none). */
+  blockImages(words: string | null, action: ImageAction | null = null): void {
     this.block.set(words);
+    this.action.set(action);
   }
 
   hold(): void {

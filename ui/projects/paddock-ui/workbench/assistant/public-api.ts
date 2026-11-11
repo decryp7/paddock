@@ -23,6 +23,8 @@ export {
   AssistantAttachments,
   AssistantSpeech,
   attachmentChip,
+  RASTER_IMAGE_TYPES,
+  type ImageAction,
   type AttachSource,
   type AttachRules,
   type AttachmentChip,

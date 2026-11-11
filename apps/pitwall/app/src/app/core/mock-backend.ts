@@ -170,7 +170,7 @@ export interface MockOptions {
 
 const clone = <T>(v: T): T => structuredClone(v);
 
-/** The type of a picture by its first bytes, as Rust's `chat_host::image::sniff` (`'unsupported'`: a picture type the chat can't read; null: not a picture). */
+/** The type of a picture by its first bytes, as Rust's `chat_host::image::sniff` (`'unsupported'`: an image type the chat can't read; null: not a picture). */
 function sniffImage(b: Uint8Array): string | 'unsupported' | null {
   const at = (...v: number[]) => v.every((x, i) => b[i] === x);
   if (at(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
@@ -1562,7 +1562,7 @@ export class MockBackend implements PitwallBackend {
     if (this.attachGate) await this.attachGate;
     return this.reply('chatAttach', () => {
       const picture = sniffImage(bytes);
-      if (picture === 'unsupported') this.fail('badRequest', `"${name}" is a picture type the chat can't read. It reads PNG, JPEG, WebP and GIF; convert it, then attach it again.`);
+      if (picture === 'unsupported') this.fail('badRequest', `"${name}" is an image type the chat can't read. It reads PNG, JPEG, WebP and GIF; convert it, then attach it again.`);
       if (picture !== null) return this.attachPicture(name, bytes, picture);
       let text: string;
       try {
@@ -1585,7 +1585,7 @@ export class MockBackend implements PitwallBackend {
   private attachPicture(name: string, bytes: Uint8Array, mime: string): ChatAttached {
     const images = this.picker(this.chatModel_).images;
     if (!images.allowed) this.fail('badRequest', images.reason ?? 'Choose a model that can read images first.');
-    if (bytes.length > 25 * 1024 * 1024) this.fail('badRequest', `"${name}" is larger than 25 MiB. Attach a smaller picture, or export a smaller copy.`);
+    if (bytes.length > 25 * 1024 * 1024) this.fail('badRequest', `"${name}" is larger than 25 MiB. Attach a smaller image, or export a smaller copy.`);
     const { width, height } = pictureSize(bytes);
     let h = 7;
     for (let i = 0; i < bytes.length; i++) h = (Math.imul(h, 31) + (bytes[i] ?? 0)) >>> 0;
@@ -1713,7 +1713,7 @@ export class MockBackend implements PitwallBackend {
       .sort((a, b) => Number(!a.loaded) - Number(!b.loaded) || a.name.toLowerCase().localeCompare(b.name.toLowerCase()))[0];
     const suggest = seeing ? { id: seeing.id, name: seeing.name } : null;
     const reason = suggest
-      ? `${chosen.name} can't read images. Choose ${suggest.name} to ask about a picture.`
+      ? `${chosen.name} can't read images. Choose ${suggest.name} to ask about an image.`
       : `${chosen.name} can't read images. Download a model that can (one with a vision file, for example Gemma 3 or Qwen2.5-VL) in Models, then choose it here.`;
     return { allowed: false, reason, suggest };
   }

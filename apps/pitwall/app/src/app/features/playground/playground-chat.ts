@@ -1,7 +1,7 @@
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
-import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
+import { MatOptgroup, MatOption, MatSelect, MatSelectTrigger } from '@angular/material/select';
 import { MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, MatSlideToggle } from '@angular/material/slide-toggle';
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -22,7 +22,7 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
  */
 @Component({
   selector: 'pw-playground-chat',
-  imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatOption, MatOptgroup, MatButton, MatSlideToggle],
+  imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatSelectTrigger, MatOption, MatOptgroup, MatButton, MatSlideToggle],
   providers: [
     ChatSaving,
     ChatImagesState,
@@ -40,6 +40,8 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
       <mat-form-field class="model" subscriptSizing="dynamic">
         <mat-label>Model</mat-label>
         <mat-select data-testid="chat-model" panelClass="pw-chat-model-panel" [value]="picker()?.selected ?? null" [disabled]="!picker()" (selectionChange)="choose($event.value)">
+          <!-- The closed field shows the name alone; "reads images" belongs to the open list. -->
+          <mat-select-trigger>{{ selectedName() }}</mat-select-trigger>
           @for (m of usable(); track m.id) {
             <mat-option [value]="m.id">{{ m.name }}@if (m.vision) {<span class="why"> · reads images</span>}</mat-option>
           }
@@ -54,21 +56,6 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
         </mat-select>
       </mat-form-field>
       <p class="tools" data-testid="chat-apps" role="status">{{ appsLine() }}</p>
-      <!-- WP-5: whether the chosen model reads pictures, in Rust's words; with a downloaded vision model to switch to. -->
-      @if (picker()?.images; as images) {
-        <p class="vision" data-testid="chat-vision" role="status">
-          @if (images.allowed) {
-            Reads images.
-          } @else if (picker()?.selected) {
-            No image input.
-            @if (images.suggest; as s) {
-              <button type="button" matButton data-testid="chat-use-vision" (click)="choose(s.id)">Use {{ s.name }}</button>
-            } @else {
-              <span data-testid="chat-vision-why">{{ images.reason }}</span>
-            }
-          }
-        </p>
-      }
       <!-- ADR 0023 Decision 3: per chat; a new chat starts with Settings > Chats' default. -->
       <mat-slide-toggle data-testid="chat-dont-save" [checked]="!saved()" [disabled]="moving()" (toggleChange)="dontSave()">Don't save this chat</mat-slide-toggle>
       <button type="button" matButton data-testid="chat-open-apps" (click)="openApps()">Connected apps…</button>
@@ -111,7 +98,6 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
     ::ng-deep .pw-chat-model-panel .mat-mdc-option.mdc-list-item--disabled .mdc-list-item__primary-text { opacity: 1; color: var(--pd-text-muted); }
     ::ng-deep .pw-chat-model-panel .why { color: var(--pd-text-muted); opacity: 1; }
     ::ng-deep .pw-chat-model-panel .mat-mdc-optgroup-label { opacity: 1; color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: normal; line-height: 1.4; padding-block: var(--pd-space-2); }
-    .vision { margin: 0; display: inline-flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .tools { margin: 0; flex: 1; min-width: 12ch; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .problem { margin: 0; color: var(--pd-text); }
     .assistant { flex: 1; min-height: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-1); overflow: hidden; }
@@ -176,7 +162,11 @@ export class PlaygroundChat {
     return 'Tools from ' + on.map((a) => `${a.title} (${a.tools.length})`).join(', ') + '.';
   });
 
+  /** The chosen model's name for the closed field. */
+  protected readonly selectedName = computed(() => this.picker()?.models.find((m) => m.id === this.picker()?.selected)?.name ?? '');
+
   constructor() {
+    this.imagesState.use = (id) => void this.choose(id);
     void this.load();
     // Settings is another window: a connect made there reaches this tab through Rust's event.
     const stop = this.backend.onConnectedApps((apps) => this.apps.set(apps));
@@ -213,7 +203,7 @@ export class PlaygroundChat {
     }
   }
 
-  /** Rust's picker, and what it says of pictures for the attachments' gate. */
+  /** Rust's picker, and what it says of images for the attachments' gate. */
   private setPicker(picker: ChatModels): void {
     this.picker.set(picker);
     this.imagesState.images.set(picker.images);

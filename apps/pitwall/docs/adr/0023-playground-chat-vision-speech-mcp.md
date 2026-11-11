@@ -143,9 +143,12 @@ the text above:
 - The file's bytes reach `chat_attach` as base64, not Tauri's JSON list of numbers (a 25 MiB picture would be about 90 MB of
   digits); the command's limit is 36 MiB.
 - The size is read from the header before any pixel is decoded, so a pixel bomb is refused from its header: at most 40
-  megapixels and a side of 16,384 pixels, and the decoder runs with a 320 MiB allocation limit. EXIF orientation is applied
-  before the metadata is dropped. A JPEG is written as a JPEG (quality 90), everything else as a PNG, so flat colour and text stay
-  exact.
+  megapixels and a side of 16,384 pixels. The header is read under a 16 MiB allocation limit, never none (a PNG's iCCP profile and
+  text chunks are inflated while the header is read: security review P1, a 2 MB file asked for 2 GB), and the pixels under 320 MiB.
+  The image is shrunk to the budget before it is turned (the budget is a pixel count), so only the decoded pixels, at most 320 MB at
+  16 bits with alpha, are held at full size, and one image is prepared at a time. EXIF orientation is applied before the metadata
+  is dropped. A JPEG is written as a JPEG (quality 90), everything else as a PNG, so flat colour and text stay exact. Only the first
+  frame of an animated GIF or WebP is sent, and the hint says so.
 - The budget is the projector's: the server reads each projector's header once, when it scans the models, and reports
   `imageMaxPixels` on every local model (its `ProjectorInfo::max_image_pixels`, until now used only by its tests); the app
   shrinks to the chosen model's budget, and to 1024 tokens at 28 px a side when a model has none.

@@ -5,7 +5,7 @@ import { gradientPng } from './png';
 
 // The Chat tab's composer (ADR 0023 WP-4b, WP-5): text files and pictures attached through the picker, paste or drop, refusals in
 // words, the files on the sent question, the context meter, the layout from 900 to 1440 px wide and axe over the pane with all of
-// it on screen. Browser build with the mock backend; Rust's `chat_host::attach` and `chat_host::pictures` are the reference for
+// it on screen. Browser build with the mock backend; Rust's `chat_host::attach` and `chat_host::images` are the reference for
 // what is taken.
 
 const notes = { name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# Notes\nThe disk filled up at 03:10.\n') };
@@ -36,22 +36,23 @@ test.describe('chat composer', () => {
     await expect(chat.getByTestId('assistant-context')).toContainText(/^\d+ of 7\.2k tokens$/);
   });
 
-  test('refuses a picture for a model without vision in words, keeps the question usable, and a removed file is not sent', async ({ page }) => {
+  test('refuses an image for a model without vision in words, keeps the question usable, and a removed file is not sent', async ({ page }) => {
     const chat = await chatWithFile(page);
     await chat.getByTestId('assistant-file-input').setInputFiles(photo);
-    await expect(chat.getByTestId('assistant-failure')).toContainText("Qwen3.5 4B can't read images. Choose Gemma 4 E4B to ask about a picture.");
+    await expect(chat.getByTestId('assistant-failure')).toContainText("Qwen3.5 4B can't read images. Choose Gemma 4 E4B to ask about an image.");
     await chat.getByTestId('assistant-file-remove').click();
     await expect(chat.getByTestId('assistant-file')).toHaveCount(0);
     await expect(chat.getByTestId('assistant-input')).toBeFocused();
   });
 
-  test('pictures: the bar offers the vision model, a picture shows as a thumbnail, goes with the question and shows on the sent turn', async ({ page }) => {
+  test('images: the bar offers the vision model, an image shows as a thumbnail, goes with the question and shows on the sent turn', async ({ page }) => {
     await openApp(page, '/playground');
     const chat = page.locator('pw-playground-chat');
-    await expect(chat.getByTestId('chat-vision')).toContainText('No image input.');
-    await chat.getByTestId('chat-use-vision').click();
-    await expect(chat.getByTestId('chat-vision')).toHaveText('Reads images.');
-    await expect(chat.getByTestId('chat-model')).toContainText('Gemma 4 E4B');
+    // The refusal carries the way out; the bar says nothing about images (it stays one row at 900 px).
+    await chat.getByTestId('assistant-file-input').setInputFiles(cat);
+    await expect(chat.getByTestId('assistant-failure')).toContainText("Qwen3.5 4B can't read images");
+    await chat.getByTestId('assistant-failure-image-action').click();
+    await expect(chat.getByTestId('chat-model')).toHaveText('Gemma 4 E4B');
     await chat.getByTestId('assistant-file-input').setInputFiles(cat);
     const thumb = chat.getByTestId('assistant-file-thumb');
     await expect(thumb).toBeVisible();
@@ -59,17 +60,19 @@ test.describe('chat composer', () => {
     await expect.poll(() => thumb.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)).toBe(96);
     const box = (await thumb.boundingBox())!;
     expect(box.width).toBeGreaterThanOrEqual(20);
-    await chat.getByTestId('assistant-input').fill('What is in this picture?');
+    await chat.getByTestId('assistant-input').fill('What is in this image?');
     await chat.getByTestId('assistant-input').press('Enter');
     await expect(chat.getByTestId('assistant-turn-thumb')).toBeVisible();
     await expect(chat.getByTestId('assistant-file')).toHaveCount(0);
     await expect(chat.getByTestId('assistant-answer').last()).not.toBeEmpty({ timeout: 10_000 });
   });
 
-  test('a picture waiting for a model that cannot read it keeps Send off, with the words and the way out', async ({ page }) => {
+  test('an image waiting for a model that cannot read it keeps Send off, with the words and the way out', async ({ page }) => {
     await openApp(page, '/playground');
     const chat = page.locator('pw-playground-chat');
-    await chat.getByTestId('chat-use-vision').click();
+    await chat.getByTestId('chat-model').click();
+    await page.getByRole('option', { name: /Gemma 4 E4B/ }).click();
+    await expect(page.locator('.pw-chat-model-panel')).toHaveCount(0);
     await chat.getByTestId('assistant-file-input').setInputFiles(cat);
     await expect(chat.getByTestId('assistant-file-thumb')).toBeVisible();
     await chat.getByTestId('assistant-input').fill('What is this?');
@@ -77,11 +80,42 @@ test.describe('chat composer', () => {
     // Choose a model without vision: the picture stays, Send waits, and the words say what to do.
     await chat.getByTestId('chat-model').click();
     await page.getByRole('option', { name: /Qwen3\.5 9B/ }).click();
-    await expect(chat.getByTestId('assistant-image-block')).toContainText("Qwen3.5 9B can't read images. Choose Gemma 4 E4B to ask about a picture.");
+    await expect(page.locator('.pw-chat-model-panel')).toHaveCount(0);
+    await expect(chat.getByTestId('assistant-image-block')).toContainText("Qwen3.5 9B can't read images. Choose Gemma 4 E4B to ask about an image.");
     await expect(chat.getByTestId('assistant-send')).toBeDisabled();
-    await chat.getByTestId('chat-use-vision').click();
+    await expect(chat.getByTestId('assistant-image-action')).toHaveText('Use Gemma 4 E4B for images');
+    await chat.getByTestId('assistant-image-action').click();
     await expect(chat.getByTestId('assistant-image-block')).toHaveCount(0);
     await expect(chat.getByTestId('assistant-send')).toBeEnabled();
+  });
+
+  test('a tray of thumbnails shows whole rows (no clipped row), says "16 images" when folded, and the bar stays on one row at 900 px', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await openApp(page, '/playground');
+    const chat = page.locator('pw-playground-chat');
+    await chat.getByTestId('chat-model').click();
+    await page.getByRole('option', { name: /Gemma 4 E4B/ }).click();
+    await expect(page.locator('.pw-chat-model-panel')).toHaveCount(0);
+    const many = Array.from({ length: 16 }, (_, i) => ({ name: `shot-${i + 1}.png`, mimeType: 'image/png', buffer: gradientPng(40 + i, 30) }));
+    await chat.getByTestId('assistant-file-input').setInputFiles(many);
+    await expect(chat.getByTestId('assistant-file')).toHaveCount(16);
+    await expect(chat.getByTestId('assistant-files-summary')).toHaveText('16 images');
+    const tabs = (await page.getByRole('tablist').boundingBox())!;
+    const bar = (await chat.getByTestId('chat-model').boundingBox())!;
+    expect(bar.y - (tabs.y + tabs.height), 'the bar is one row: the pane starts right below it').toBeLessThan(60);
+    // Whole rows: folded in a short pane, two rows of 24 px chips with their gap (54 px) and no third row showing.
+    const rows = async () => chat.getByTestId('assistant-file').evaluateAll((els) => new Set(els.map((e) => Math.round(e.getBoundingClientRect().top))).size);
+    expect(Math.round((await chat.getByTestId('assistant-files').boundingBox())!.height)).toBe(54);
+    // Tall enough, it opens to two whole rows of 32 px thumbnails (72 px with its padding), the rest scrolls with the fade.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(chat.getByTestId('assistant-files')).toHaveClass(/scrolls/);
+    const tray = (await chat.getByTestId('assistant-files').boundingBox())!;
+    expect(Math.round(tray.height)).toBe(72);
+    const edge = tray.y + tray.height;
+    const spans = await chat.getByTestId('assistant-file').evaluateAll((els) => els.map((e) => ({ top: e.getBoundingClientRect().top, bottom: e.getBoundingClientRect().bottom })));
+    // Every chip is wholly inside the tray's visible height or wholly below it: no row is cut.
+    expect(spans.filter((c) => c.bottom > edge + 0.5 && c.top < edge - 0.5)).toEqual([]);
+    expect(await rows()).toBeGreaterThan(2);
   });
 
   for (const size of [

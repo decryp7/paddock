@@ -389,7 +389,7 @@ pub async fn chat_attach<R: Runtime>(app: AppHandle<R>, name: String, data: Stri
                 let small = thumbnail(&image.bytes);
                 log::info!(
                     target: "pitwall_chat",
-                    "attach: took a picture, {} bytes in, {} bytes kept, {} x {}, shrunk {}, {} ms",
+                    "attach: took an image, {} bytes in, {} bytes kept, {} x {}, shrunk {}, {} ms",
                     bytes.len(),
                     image.bytes.len(),
                     image.width,
@@ -419,8 +419,8 @@ pub async fn chat_attach<R: Runtime>(app: AppHandle<R>, name: String, data: Stri
 fn refusal_kind(words: &str) -> &'static str {
     if words.contains("can't read images") || words.contains("Choose a model") {
         "no model that reads images"
-    } else if words.contains("picture") || words.contains("pixels") {
-        "picture"
+    } else if words.contains("image") || words.contains("pixels") {
+        "image"
     } else {
         "text"
     }
@@ -436,7 +436,7 @@ pub async fn chat_thumbnail<R: Runtime>(app: AppHandle<R>, sha256: String) -> Re
         _ => None,
     })
     .await
-    .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the picture stopped unexpectedly: {e}")))
+    .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the image stopped unexpectedly: {e}")))
 }
 
 /// Takes a file off the question before it is sent: Pitwall forgets it (review P2-1).

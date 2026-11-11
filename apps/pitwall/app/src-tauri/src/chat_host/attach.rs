@@ -2,7 +2,7 @@
 //! only, up to [`MAX_TEXT_BYTES`] each. The bytes come from the webview and are judged here, never there: the UI may look at
 //! [`AttachRules`] to refuse an obvious misfit before reading it, and this module checks everything again.
 //!
-//! Pictures (WP-5) are told apart by their magic bytes and prepared by [`super::pictures`]; [`take`] routes a file to the one or the
+//! Pictures (WP-5) are told apart by their magic bytes and prepared by [`super::images`]; [`take`] routes a file to the one or the
 //! other, and refuses a picture in words when the chosen model cannot read pictures ([`super::models::ChatImages`]).
 
 use super::models::ChatImages;
@@ -41,7 +41,7 @@ pub fn rules() -> AttachRules {
 .jsx,.rs,.py,.go,.java,.kt,.c,.h,.cpp,.hpp,.cs,.swift,.rb,.php,.sh,.ps1,.sql,text/*"
             .into(),
         hint: format!(
-            "Attach images (PNG, JPEG, WebP, GIF, up to {} MiB) or text and code files (UTF-8, up to {} KiB each)",
+            "Attach images (PNG, JPEG, WebP, GIF, up to {} MiB; an animated GIF or WebP sends its first frame) or text and code files (UTF-8, up to {} KiB each)",
             MAX_SOURCE_BYTES / (1024 * 1024),
             MAX_TEXT_BYTES / 1024
         ),
@@ -110,7 +110,7 @@ pub fn prepare(raw_name: &str, bytes: &[u8]) -> Result<Prepared, Refused> {
         )));
     }
     if !matches!(pictures::sniff(bytes), Sniffed::NotAnImage) {
-        return Err(Refused(format!("\"{name}\" is a picture, not text. Attach it as an image.")));
+        return Err(Refused(format!("\"{name}\" is an image, not text. Attach it as an image.")));
     }
     let body = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
     let not_text = || {
@@ -187,7 +187,7 @@ pub fn with_files(text: &str, attachments: &[Attachment], read: &dyn Fn(&str) ->
         out.push_str("\n\n");
         let name = quoted(name);
         match read(sha256) {
-            // The reader's bound is the largest picture's: a text file over its own bound is not sent.
+            // The reader's bound is the largest image's: a text file over its own bound is not sent.
             KeptFile::Bytes(b) if b.len() > MAX_TEXT_BYTES => out.push_str(&format!(
                 "Attached file {name} is too large to send (over {} KiB); its content is not included.",
                 MAX_TEXT_BYTES / 1024
@@ -262,7 +262,7 @@ mod tests {
         ] {
             let words = prepare("photo", &image).unwrap_err().0;
             assert!(
-                words.contains("is a picture, not text") && words.contains("Attach it as an image"),
+                words.contains("is an image, not text") && words.contains("Attach it as an image"),
                 "{words}"
             );
         }
@@ -336,7 +336,7 @@ mod tests {
     fn blind() -> ChatImages {
         ChatImages {
             allowed: false,
-            reason: Some("Tiny can't read images. Choose Eyes to ask about a picture.".into()),
+            reason: Some("Tiny can't read images. Choose Eyes to ask about an image.".into()),
             suggest: None,
             max_pixels: 10_000,
         }
@@ -373,7 +373,7 @@ mod tests {
             "text needs no vision"
         );
         let words = take("shot.png", &png, &blind()).unwrap_err().0;
-        assert_eq!(words, "Tiny can't read images. Choose Eyes to ask about a picture.");
+        assert_eq!(words, "Tiny can't read images. Choose Eyes to ask about an image.");
         let words = take("scan.tiff", b"II*\0....", &seeing()).unwrap_err().0;
         assert!(words.contains("scan.tiff") && words.contains("can't read"), "{words}");
         // A picture's refusal for its own size or damage still reaches the user.
@@ -389,11 +389,11 @@ mod tests {
         assert!(r.accept.contains(".rs") && r.accept.contains("text/*"));
         assert!(
             r.accept.contains("image/png") && r.accept.contains(".webp"),
-            "the picker offers pictures: {}",
+            "the picker offers images: {}",
             r.accept
         );
         assert!(
-            r.hint.contains("256 KiB") && r.hint.contains("25 MiB") && r.hint.contains("images"),
+            r.hint.contains("256 KiB") && r.hint.contains("25 MiB") && r.hint.contains("images") && r.hint.contains("first frame"),
             "{}",
             r.hint
         );

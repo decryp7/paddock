@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { AssistantAttachments, type Attachment, type AttachmentChip, type AttachRules, type AttachSource } from '@decryp7/paddock-ui/workbench/assistant';
+import { AssistantAttachments, attachmentChip, type Attachment, type AttachmentChip, type AttachRules, type AttachSource, type ImageAction } from '@decryp7/paddock-ui/workbench/assistant';
 import type { ChatImages } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
@@ -15,6 +15,8 @@ export function sizeText(bytes: number): string {
 @Injectable()
 export class ChatImagesState {
   readonly images = signal<ChatImages | null>(null);
+  /** Chooses a model by its id (the Chat tab sets it): what "Use X for images" does. */
+  use: (modelId: string) => void = () => undefined;
 }
 
 /**
@@ -33,6 +35,22 @@ export class PitwallAttachments extends AssistantAttachments {
     return images && !images.allowed ? images.reason : null;
   });
 
+  /** "Use Gemma 4 E4B for images", when a downloaded model that reads images can be chosen. */
+  override readonly imageAction = computed((): ImageAction | null => {
+    const suggest = this.state.images()?.suggest;
+    return suggest ? { label: `Use ${suggest.name} for images`, run: () => this.state.use(suggest.id) } : null;
+  });
+
+  /** The names of the images taken, by digest: an image keeps its name on its chip once sent (the engine keeps none). */
+  private readonly names = new Map<string, string>();
+
+  override chipOf(attachment: Attachment): AttachmentChip {
+    if (attachment.kind !== 'image') return super.chipOf(attachment);
+    const plain = attachmentChip(attachment);
+    const name = this.names.get(attachment.sha256);
+    return { ...plain, label: name ?? `Image ${attachment.width} × ${attachment.height}` };
+  }
+
   override thumbnail(attachment: Attachment): Promise<string | null> {
     return this.backend.chatThumbnail(attachment.sha256).catch(() => null);
   }
@@ -50,6 +68,7 @@ export class PitwallAttachments extends AssistantAttachments {
       const taken = await this.backend.chatAttach(file.name, await file.bytes());
       if (taken.attachment.kind === 'image') {
         const { width, height } = taken.attachment;
+        this.names.set(taken.attachment.sha256, file.name);
         return { attachment: taken.attachment, label: file.name, detail: `${width} × ${height} · ${sizeText(taken.bytes)}`, thumbnail: taken.thumbnail };
       }
       const lines = `${taken.lines} ${taken.lines === 1 ? 'line' : 'lines'}`;

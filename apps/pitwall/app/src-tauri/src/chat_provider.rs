@@ -144,7 +144,7 @@ pub fn playground_request(
 /// What became of one picture of a question.
 enum Picture {
     Sent(Image),
-    /// Not sent, with the kind of reason (its words are [`Pictures::notes`]).
+    /// Not sent, with the kind of reason (its words are [`Images::notes`]).
     Left(Why),
 }
 
@@ -717,7 +717,7 @@ mod tests {
             ..Default::default()
         };
         let w = playground_request("m", &req, &picture_bytes, true).unwrap();
-        assert_eq!(w.messages[2].images.len(), 10, "the newest question keeps all of its pictures");
+        assert_eq!(w.messages[2].images.len(), 10, "the newest question keeps all of its images");
         assert_eq!(w.messages[0].images.len(), 6, "the older one keeps the last six");
         assert_eq!(
             w.messages[0].images[0].data,

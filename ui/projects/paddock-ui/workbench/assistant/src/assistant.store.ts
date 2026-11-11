@@ -5,7 +5,7 @@ import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from
 import { WorkbenchRegistry } from '@decryp7/paddock-ui/workbench';
 import { ASSISTANT_LIMITS, type ApprovalChoice, type AssistantInfo, type Attachment, type ContextItem, type ContextUse, type ConversationSummary, type Envelope } from '../generated/assistant';
 import { AssistantBackend, type Unlisten } from './backend';
-import { AssistantAttachments, AssistantSpeech, attachmentChip, type AttachmentChip, type AttachRules, type AttachSource, type SpeechState } from './composer-ports';
+import { RASTER_IMAGE_TYPES, AssistantAttachments, AssistantSpeech, attachmentChip, type AttachmentChip, type AttachRules, type AttachSource, type SpeechState } from './composer-ports';
 import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 import { assistantMessage } from './wire';
 
@@ -492,17 +492,24 @@ export const AssistantStore = signalStore(
             refused.push($localize`:@@pd.wb.assistant.attach.too-many:A question can carry at most ${max}:max: attachments.`);
             break;
           }
-          const isImage = file.type.startsWith('image/');
+          const isImage = RASTER_IMAGE_TYPES.includes(file.type);
           const block = isImage ? port.imageBlock() : null;
           if (block) {
-            // A picture for a model that cannot read pictures: the host's words, at once (the engine would refuse it too).
+            // An image for a model that cannot read images: the host's words, at once (the engine would refuse it too).
             refused.push(block);
             continue;
           }
           const largest = isImage ? (rules.maxImageBytes ?? rules.maxFileBytes) : rules.maxFileBytes;
           if (isImage && file.size > largest) {
             const mib = Math.floor(largest / (1024 * 1024));
-            refused.push($localize`:@@pd.wb.assistant.attach.image-too-big:"${file.name}:name:" is larger than ${mib}:mib: MiB. Attach a smaller picture, or export a smaller copy.`);
+            const kib = Math.floor(largest / 1024);
+            refused.push(
+              mib > 0
+                ? $localize`:@@pd.wb.assistant.attach.image-too-big:"${file.name}:name:" is larger than ${mib}:mib: MiB. Attach a smaller image, or export a smaller copy.`
+                : kib > 0
+                  ? $localize`:@@pd.wb.assistant.attach.image-too-big-kib:"${file.name}:name:" is larger than ${kib}:kib: KiB. Attach a smaller image, or export a smaller copy.`
+                  : $localize`:@@pd.wb.assistant.attach.image-too-big-bytes:"${file.name}:name:" is larger than ${largest}:bytes: bytes. Attach a smaller image, or export a smaller copy.`,
+            );
             continue;
           }
           if (!isImage && file.size > rules.maxFileBytes) {

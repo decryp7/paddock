@@ -221,7 +221,7 @@ pub fn chat_images(locals: &[Facts<'_>], selected: Option<&str>) -> ChatImages {
         name: m.name.to_string(),
     });
     let words = match &suggest {
-        Some(s) => format!("{} can't read images. Choose {} to ask about a picture.", chosen.name, s.name),
+        Some(s) => format!("{} can't read images. Choose {} to ask about an image.", chosen.name, s.name),
         None => format!(
             "{} can't read images. Download a model that can (one with a vision file, for example Gemma 3 or Qwen2.5-VL) in Models, then choose it here.",
             chosen.name

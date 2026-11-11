@@ -3,7 +3,7 @@ import { afterNextRender, ChangeDetectionStrategy, Component, DestroyRef, Elemen
 import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore, type ActionsGate } from './assistant.store';
-import { AssistantAttachments, attachmentChip, type AttachmentChip, type AttachSource } from './composer-ports';
+import { AssistantAttachments, attachmentChip, type AttachmentChip, type AttachSource, type ImageAction } from './composer-ports';
 import type { Attachment, ContextUse } from '../generated/assistant';
 import { chipText, conversationTitle, waitingPhase, type TurnPart, type TurnView } from './chat-model';
 import type { ProviderPhase } from '../generated/assistant';
@@ -110,7 +110,7 @@ const SCROLL_STICK_PX = 24;
                   @let chip = chipOf(a);
                   <li class="chip static file" data-testid="assistant-turn-file" [attr.title]="chipTitle(chip)">
                     @if (thumbOf(a.sha256, chip); as src) {
-                      <img class="thumb turn-thumb" [src]="src" alt="" data-testid="assistant-turn-thumb" />
+                      <img class="thumb turn-thumb" [src]="src" [alt]="chip.label" data-testid="assistant-turn-thumb" />
                     } @else {
                       <pd-glyph [name]="glyphOf(a)" [size]="14" />
                     }
@@ -216,6 +216,11 @@ const SCROLL_STICK_PX = 24;
       <div class="banner error" role="alert" data-testid="assistant-failure">
         <pd-status-glyph class="banner-glyph" status="error" [size]="16" />
         <span class="banner-text" data-testid="assistant-failure-text">{{ failure }}</span>
+        @if (imageAction(); as act) {
+          @if (failureIsImageBlock(failure)) {
+            <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-failure-image-action" (click)="act.run(); store.dismissFailure()">{{ act.label }}</button>
+          }
+        }
         <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-failure-dismiss" (click)="store.dismissFailure()">{{ t.dismiss }}</button>
       </div>
     }
@@ -248,6 +253,7 @@ const SCROLL_STICK_PX = 24;
           id="pd-assistant-files"
           class="chips files-tray"
           [class.folded]="short() && !filesOpen()"
+          [class.thumbs]="hasThumbs()"
           [class.open]="short() && filesOpen()"
           [class.scrolls]="trayOverflows() && !(short() && !filesOpen())"
           [attr.aria-label]="t.files"
@@ -273,7 +279,7 @@ const SCROLL_STICK_PX = 24;
           @for (chip of store.attached(); track chip.attachment.sha256) {
             <li class="chip file" [class.has-thumb]="!!thumbOf(chip.attachment.sha256, chip)" data-testid="assistant-file" [attr.title]="chipTitle(chip)">
               @if (thumbOf(chip.attachment.sha256, chip); as src) {
-                <img class="thumb" [src]="src" alt="" data-testid="assistant-file-thumb" />
+                <img class="thumb" [src]="src" [alt]="chip.label" data-testid="assistant-file-thumb" />
               } @else {
                 <pd-glyph [name]="glyphOf(chip.attachment)" [size]="14" />
               }
@@ -295,6 +301,9 @@ const SCROLL_STICK_PX = 24;
         <p class="image-block" role="status" data-testid="assistant-image-block">
           <pd-status-glyph status="warning" [size]="14" />
           <span>{{ why }}</span>
+          @if (imageAction(); as act) {
+            <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-image-action" (click)="act.run()">{{ act.label }}</button>
+          }
         </p>
       }
       @if (store.chips().length) {
@@ -506,10 +515,17 @@ const SCROLL_STICK_PX = 24;
     /* A picture's thumbnail replaces the file glyph: 28 px in the tray (the chip grows to 32), 20 px in a short pane's folded tray
        (the chip stays 24), 40 px in the sent question. object-fit keeps the picture's shape inside the square. */
     .thumb { width: 28px; height: 28px; flex: none; object-fit: cover; border-radius: var(--pd-radius-tag); background: var(--pd-surface-1); }
-    .chip.has-thumb { padding: 3px var(--pd-space-1) 3px 3px; min-height: 32px; border-radius: var(--pd-radius-control); }
+    .chip.has-thumb { padding: 3px var(--pd-space-1) 3px 3px; height: 32px; min-height: 32px; box-sizing: border-box; border-radius: var(--pd-radius-control); }
     .turn-thumb { width: 40px; height: 40px; }
     .chip.static.file:has(.turn-thumb) { padding: 3px var(--pd-space-2) 3px 3px; border-radius: var(--pd-radius-control); gap: var(--pd-space-2); }
-    :host(.short) .chip.has-thumb { min-height: 24px; padding-block: 1px; border-radius: var(--pd-radius-pill); }
+    :host(.short) .chip.has-thumb { height: 24px; min-height: 24px; padding-block: 1px; border-radius: var(--pd-radius-pill); }
+    /* A tray of thumbnails shows whole rows only: two rows of 32 px chips and the gap (68 px, 2 px padding), the rest scrolls with the fade. */
+    .files-tray.thumbs { max-height: 72px; }
+    .files-tray.thumbs.open { max-height: 72px; }
+    :host(.short) .files-tray.thumbs.folded { max-height: 54px; }
+    /* In a short pane the empty state keeps its title and gives up its hint, so no half line shows above a banner. */
+    :host(.short) .empty-state .hint { display: none; }
+    .image-block .pd-btn { margin-left: var(--pd-space-1); }
     :host(.short) .chip.has-thumb .thumb { width: 20px; height: 20px; }
     .image-block { display: flex; align-items: flex-start; gap: var(--pd-space-2); margin: 0; font-size: var(--pd-text-label); color: var(--pd-text); overflow-wrap: anywhere; }
     .composer { position: relative; }
@@ -692,7 +708,7 @@ export class PdAssistant {
       watch.observe(el);
       onCleanup(() => watch.disconnect());
     });
-    // effect-state: the host's small copies of pictures are a cache filled by asking it (an I/O answer, not derivable); a question's
+    // effect-state: the host's small copies of images are a cache filled by asking it (an I/O answer, not derivable); a question's
     // pictures are asked for once each, and what the chips just attached carry is remembered for the sent question.
     effect(() => {
       const chips = this.store.attached();
@@ -1023,8 +1039,28 @@ export class PdAssistant {
 
   /** The folded tray's summary: how many files the next question carries. */
   protected filesCount(): string {
-    const n = this.store.attached().length;
+    const chips = this.store.attached();
+    const n = chips.length;
+    // One word for what they are: "3 images" when every one is an image, else "3 files".
+    if (chips.every((c) => c.attachment.kind === 'image')) {
+      return n === 1 ? $localize`:@@pd.wb.assistant.images.one:1 image` : $localize`:@@pd.wb.assistant.images.many:${n}:count: images`;
+    }
     return n === 1 ? $localize`:@@pd.wb.assistant.files.one:1 file` : $localize`:@@pd.wb.assistant.files.many:${n}:count: files`;
+  }
+
+  /** Some chip in the tray has a thumbnail (its rows are taller: the tray then snaps to whole rows). */
+  protected hasThumbs(): boolean {
+    return this.store.attached().some((c) => !!this.thumbOf(c.attachment.sha256, c));
+  }
+
+  protected imageAction(): ImageAction | null {
+    return this.attachments?.imageAction() ?? null;
+  }
+
+  /** The refusal is the host's words for an image its model cannot read (so the host's button belongs beside it). */
+  protected failureIsImageBlock(failure: string): boolean {
+    const why = this.attachments?.imageBlock();
+    return !!why && failure.includes(why);
   }
 
   /** Why nothing more can be sent: the chat is too long, or the files waiting in the composer are (review 2 P2-C). */

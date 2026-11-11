@@ -34,7 +34,7 @@ describe('PitwallAttachments (ADR 0023 WP-4b)', () => {
     await expect(port().add(source('data.bin', new Uint8Array([0xc3, 0x28])))).rejects.toThrow("isn't a text file");
   });
 
-  describe('pictures (WP-5)', () => {
+  describe('images (WP-5)', () => {
     const withModel = async (model: string | null) => {
       const mock = new MockBackend({ latencyMs: 0 });
       TestBed.resetTestingModule();
@@ -44,7 +44,7 @@ describe('PitwallAttachments (ADR 0023 WP-4b)', () => {
       return { mock, p: TestBed.inject(PitwallAttachments), picker };
     };
 
-    it("takes a picture for a model that reads pictures: a chip with its size in pixels, its name and Rust's thumbnail", async () => {
+    it("takes an image for a model that reads images: a chip with its size in pixels, its name and Rust's thumbnail", async () => {
       const { p } = await withModel('gemma-4-e4b-it-q4_k_m');
       expect((await p.rules()).maxImageBytes).toBe(25 * 1024 * 1024);
       const chip = await p.add(source('cat.png', pngHeader(640, 480)));
@@ -55,22 +55,22 @@ describe('PitwallAttachments (ADR 0023 WP-4b)', () => {
       expect(p.imageBlock()).toBeNull();
     });
 
-    it("refuses a picture for a model without vision with Rust's words, which also say what to choose", async () => {
+    it("refuses an image for a model without vision with Rust's words, which also say what to choose", async () => {
       const { p, picker } = await withModel('qwen3.5-4b-q4_k_m');
       expect(picker.images).toMatchObject({ allowed: false, suggest: { id: 'gemma-4-e4b-it-q4_k_m', name: 'Gemma 4 E4B' } });
-      const words = "Qwen3.5 4B can't read images. Choose Gemma 4 E4B to ask about a picture.";
+      const words = "Qwen3.5 4B can't read images. Choose Gemma 4 E4B to ask about an image.";
       expect(p.imageBlock()).toBe(words);
       await expect(p.add(source('cat.png', pngHeader(2, 2)))).rejects.toThrow(words);
       // Text still goes.
       expect((await p.add(source('a.txt', new TextEncoder().encode('hi')))).attachment.kind).toBe('file');
     });
 
-    it('has no block before the models are known, and names a picture type the chat cannot read', async () => {
+    it('has no block before the models are known, and names an image type the chat cannot read', async () => {
       TestBed.resetTestingModule();
       TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: new MockBackend({ latencyMs: 0 }) }, ChatImagesState, PitwallAttachments] });
       expect(TestBed.inject(PitwallAttachments).imageBlock()).toBeNull();
       const { p } = await withModel('gemma-4-e4b-it-q4_k_m');
-      await expect(p.add(source('scan.tif', new Uint8Array([0x49, 0x49, 0x2a, 0x00, 1, 2])))).rejects.toThrow("is a picture type the chat can't read");
+      await expect(p.add(source('scan.tif', new Uint8Array([0x49, 0x49, 0x2a, 0x00, 1, 2])))).rejects.toThrow("is an image type the chat can't read");
     });
   });
 
