@@ -1,3 +1,4 @@
+import { provideDebriefThemes } from '../theme/themes.contributions';
 import { ApplicationConfig, EnvironmentProviders, inject, Injector, provideAppInitializer, provideBrowserGlobalErrorListeners, Provider } from '@angular/core';
 import { provideActivity } from '../core/activity/provide-activity';
 import { provideBackend } from '../core/backend';
@@ -71,6 +72,7 @@ export function dialogBaseProviders(): Providers {
     provideBackend(),
     provideActivity(),
     provideDebriefIcons(),
+    ...provideDebriefThemes(),
     provideAppInitializer(() => inject(ThemeService).start()),
     // Reports ready after the first paint (ADR 0058).
     provideStartupContract(),

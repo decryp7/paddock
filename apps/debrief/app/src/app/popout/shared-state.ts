@@ -1,4 +1,6 @@
-import { Injector } from '@angular/core';
+import { Injector, Provider, runInInjectionContext } from '@angular/core';
+import { contributionProviders } from '@decryp7/paddock-ui/shell/contributions';
+import { contributedItems, DEBRIEF_KIND, provideDebriefKinds } from '../extensions/contributions';
 import { Query, RecordView } from '../core/api.types';
 import { DateFormat, TimeZoneMode } from '../core/format';
 import { WorkspaceStore } from '../core/workspace.store';
@@ -139,13 +141,56 @@ function workspaceState(injector: Injector): SyncedValue[] {
 }
 
 /**
+ * A group of shared state as a contribution (workbench.md §4.3 M1, Debrief's `debriefSharedState` kind until the
+ * shell has `defineSharedState`): the narrowest scope that carries it, and the values it binds in a window's injector
+ * (each a key, a read and an apply). A plugin adds a group the same way; a key already bound by an earlier group is
+ * left out.
+ */
+export interface SharedStateDef {
+  /** Namespaced id: `db.shared.display`. */
+  readonly id: string;
+  /** `display`: every window; `summary`: windows that read the workspace summary and pop-outs; `full`: pop-outs and the host. */
+  readonly scope: SharedScope;
+  values(injector: Injector): SyncedValue[];
+}
+
+/** The scopes each window scope includes. */
+const SCOPE_INCLUDES: Readonly<Record<SharedScope, readonly SharedScope[]>> = {
+  display: ['display'],
+  summary: ['display', 'summary'],
+  full: ['display', 'summary', 'full'],
+};
+
+/** Debrief's own groups, in sync order. */
+export const DEBRIEF_SHARED_STATE: readonly SharedStateDef[] = Object.freeze([
+  { id: 'db.shared.workspace', scope: 'full', values: workspaceState },
+  { id: 'db.shared.display', scope: 'display', values: displayState },
+  { id: 'db.shared.data', scope: 'summary', values: dataState },
+]);
+
+/** Registers shared state groups (a plugin's, or a test's). */
+export function provideSharedState(defs: readonly SharedStateDef[]): Provider[] {
+  return [provideDebriefKinds(), ...contributionProviders('debriefSharedState', defs)];
+}
+
+/**
+ * Debrief's groups, in the main window's and pop-outs' providers. A dialog window registers none and gets the built-in
+ * groups from `sharedUiState`'s fallback: its bootstrap must not import the stores they bind (`check-dialog-commands`).
+ */
+export function provideDebriefSharedState(): Provider[] {
+  return provideSharedState(DEBRIEF_SHARED_STATE);
+}
+
+/**
  * The interaction state a host and its guests share: the query, selection and jumps, time cursor and brushed
- * range, live follow, theme and display settings, plus what only the host decides (data versions, live tail on/off).
+ * range, live follow, theme and display settings, plus what only the host decides (data versions, live tail on/off),
+ * as the registered groups bind them (`DEBRIEF_SHARED_STATE`; the built-in groups in a window that registers none).
  * A guest that shows less asks for a narrower `scope`, so it never creates the stores of what it does not show.
  * A window ignores the keys it was not given.
  */
 export function sharedUiState(injector: Injector, scope: SharedScope = 'full'): SyncedValue[] {
-  if (scope === 'display') return displayState(injector);
-  if (scope === 'summary') return [...displayState(injector), ...dataState(injector)];
-  return [...workspaceState(injector), ...displayState(injector), ...dataState(injector)];
+  const registered = runInInjectionContext(injector, () => contributedItems<SharedStateDef>(DEBRIEF_KIND.sharedState));
+  const groups = (registered.length ? registered : DEBRIEF_SHARED_STATE).filter((g) => SCOPE_INCLUDES[scope].includes(g.scope));
+  const seen = new Set<string>();
+  return groups.flatMap((g) => g.values(injector)).filter((v) => !seen.has(v.key) && !!seen.add(v.key));
 }

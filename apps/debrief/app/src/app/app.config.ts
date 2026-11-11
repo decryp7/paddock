@@ -51,11 +51,15 @@ import { WorkspaceSource } from './shell/workspace-source';
 import { provideStartupContract } from './core/startup/startup-contract';
 import { provideStartupTimings } from './core/startup/startup-timings';
 import { provideRecovery } from './lifecycle/recovery';
+import { provideDebriefThemes } from './theme/themes.contributions';
+import { provideDebriefSharedState } from './popout/shared-state';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideNativeFeel(),
+    ...provideDebriefThemes(),
+    ...provideDebriefSharedState(),
     provideLogger(),
     provideErrorLogging(),
     provideDiagnostics(),

@@ -1,5 +1,6 @@
 import { EnvironmentProviders, inject, InjectionToken, Injector, makeEnvironmentProviders, Provider, runInInjectionContext } from '@angular/core';
 import {
+  CONTRIBUTION_ID,
   defineContributionKind,
   defineKeybinding,
   SHELL_CONTRIBUTION_KINDS,
@@ -9,8 +10,11 @@ import {
   type ContributionKind,
   type KeybindingDef,
   type Message,
-} from '@decryp7/paddock-ui/shell';
+} from '@decryp7/paddock-ui/shell/contributions';
 import type { DebriefContext } from './context';
+import { missingTokens } from '../theme/theme-tokens';
+import type { ThemeDef } from '../theme/theme.types';
+import type { SharedStateDef } from '../popout/shared-state';
 import type { DebriefActivityItem, DebriefCommand, DebriefFieldFormatter, DebriefInspectorSection, DebriefView } from './tokens';
 
 /*
@@ -35,6 +39,8 @@ export const DEBRIEF_KIND = Object.freeze({
   inspectorSections: 'debriefInspectorSections',
   fieldFormatters: 'debriefFieldFormatters',
   activityItems: 'debriefActivityItems',
+  themes: 'debriefThemes',
+  sharedState: 'debriefSharedState',
 } as const);
 
 /** What each Debrief batch key holds (the authoring types). */
@@ -44,6 +50,8 @@ export interface DebriefBatchItems {
   readonly inspectorSections: DebriefInspectorSection;
   readonly fieldFormatters: DebriefFieldFormatter;
   readonly activityItems: DebriefActivityItem;
+  readonly themes: ThemeDef;
+  readonly sharedState: SharedStateDef;
 }
 export type DebriefBatchKey = keyof DebriefBatchItems;
 
@@ -77,6 +85,26 @@ export const DEBRIEF_KINDS: readonly ContributionKind[] = Object.freeze([
     identity: (a) => a.id,
     check: (a) => issues(textProblem('id', a.id), textProblem('label', a.label), (typeof a.order !== 'number' || !Number.isFinite(a.order)) && 'order is not a number'),
   }),
+  // Debrief's theme packs (ADR 0018): full token sets per scheme and density plus traits, which the shell's `defineTheme`
+  // (`--pd-*` overrides only) cannot hold; see `theme/themes.contributions.ts`.
+  defineContributionKind<ThemeDef>({
+    name: DEBRIEF_KIND.themes,
+    label: 'theme',
+    identity: (t) => t.id,
+    check: (t) => issues(textProblem('id', t.id), textProblem('name', t.name), ...missingTokens(t).map((m) => `is missing ${m}`)),
+  }),
+  // The state a window group keeps in step (`popout/shared-state.ts`); the shell has no `defineSharedState` yet.
+  defineContributionKind<SharedStateDef>({
+    name: DEBRIEF_KIND.sharedState,
+    label: 'shared state',
+    identity: (g) => g.id,
+    check: (g) =>
+      issues(
+        !CONTRIBUTION_ID.test(g.id) && `id ${JSON.stringify(g.id)} is not a namespaced id (db.shared.display)`,
+        !['display', 'summary', 'full'].includes(g.scope) && 'scope must be display, summary or full',
+        fnProblem('values', g.values),
+      ),
+  }),
 ] as readonly ContributionKind<never>[] as readonly ContributionKind[]);
 
 /** Debrief's kinds in the shell's registry (once per window; repeating it is harmless). */
@@ -85,11 +113,11 @@ export function provideDebriefKinds(): Provider {
 }
 
 /**
- * A message of a Debrief command, read live from the authoring object (titles of toggles change), with the command's id
- * as its message id. Debrief's titles are `$localize`d where they are written, so the text is already in the window's
- * language; the id is for the shell's lint and later renderers.
+ * A message read live (titles of toggles change), with a contribution id as its message id. Debrief's texts are
+ * `$localize`d where they are written, so the text is already in the window's language; the id is for the shell's lint
+ * and later renderers (the shell's `msg` looks translations up by its own id, which Debrief's locales do not have).
  */
-function liveMessage(id: string, read: () => string): Message {
+export function localMessage(id: string, read: () => string): Message {
   return Object.freeze({
     id,
     get text(): string {
@@ -113,8 +141,8 @@ export function messageId(commandId: string, suffix?: string): string {
 export function toShellCommand(c: DebriefCommand): DebriefCommandDef {
   const def: DebriefCommandDef & { category?: Message } = {
     id: c.id,
-    title: liveMessage(messageId(c.id), () => c.title),
-    ...(c.category !== undefined ? { category: liveMessage(messageId(c.id, 'category'), () => c.category ?? '') } : {}),
+    title: localMessage(messageId(c.id), () => c.title),
+    ...(c.category !== undefined ? { category: localMessage(messageId(c.id, 'category'), () => c.category ?? '') } : {}),
     ...(c.when ? { when: (ctx) => c.when?.(ctx) ?? true } : {}),
     ...(c.keybinding ? { keybinding: c.keybinding } : {}),
     ...(c.view ? { view: c.view } : {}),
