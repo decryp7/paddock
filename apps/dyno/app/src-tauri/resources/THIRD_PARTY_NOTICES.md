@@ -396,7 +396,7 @@ Licence expressions (packages):
 - rsqlite-vfs 0.1.1 — MIT [MIT-4]
 - rusqlite 0.41.1 — MIT [MIT-95]
 - rustc-hash 2.1.3 — Apache-2.0 OR MIT [MIT-47]
-- rustix 1.1.5 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-47]
+- rustix 1.1.6 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT [MIT-47]
 - rustls 0.23.46 — Apache-2.0 OR ISC OR MIT [MIT-160]
 - rustls-native-certs 0.8.5 — Apache-2.0 OR ISC OR MIT [MIT-160]
 - rustls-pki-types 1.15.1 — MIT OR Apache-2.0 [MIT-184]
@@ -5251,7 +5251,7 @@ Used by (80):
   ordered-stream 0.2.0, parking 2.2.1, paste 1.0.15, pin-project-lite 0.2.17, piper 0.2.5,
   polling 3.11.0, portable-atomic 1.15.0, portable-atomic-util 0.2.8, proc-macro-crate 1.3.1,
   proc-macro-crate 2.0.2, proc-macro-crate 3.5.0, proc-macro2 1.0.107, quote 1.0.47,
-  rustc-hash 2.1.3, rustix 1.1.5, rustversion 1.0.23, semver 1.0.28, serde 1.0.229,
+  rustc-hash 2.1.3, rustix 1.1.6, rustversion 1.0.23, semver 1.0.28, serde 1.0.229,
   serde-untagged 0.1.9, serde_core 1.0.229, serde_derive 1.0.229, serde_derive_internals 0.29.1,
   serde_ignored 0.1.14, serde_json 1.0.154, serde_repr 0.1.21, servo_arc 0.4.3, simd_cesu8 1.2.0,
   syn 1.0.109, syn 2.0.119, syn 3.0.9, thiserror 1.0.69, thiserror 2.0.21, thiserror-impl 1.0.69,
