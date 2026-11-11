@@ -1,12 +1,12 @@
 # Sourced by vm-win.sh and prepare.sh: the one Windows test VM these scripts may ever act on (ADR 0040 §1; review P1-1,
 # 2026-11-08). The user's own VMs (Fusion keeps them in the same app) must be impossible to target, whatever the environment.
 #
-# Allowed: the folder /Volumes/d7sst7/vms/paddock-win11-test (after resolving links), or, for the scripts' own tests only,
+# Allowed: the folder /Volumes/d8sst7/vm-data/paddock-win11-test (after resolving links), or, for the scripts' own tests only,
 # "fake mode", which nothing in the environment can switch on by itself: the folder resolves under the per-user temp root
 # (`getconf DARWIN_USER_TEMP_DIR`, /tmp where there is none; never $TMPDIR), carries the marker file `.paddock-fake-vm`
 # the test created, is not under $HOME, its .vmx has one hard link, and FUSION_APP's vmrun resolves outside the installed Fusion, is a script and never names the app.
 # Anything else is refused before vmrun, ssh, scp or any file is touched. FAKE_VM=1 is set only in fake mode.
-WIN_VM_DIR=/Volumes/d7sst7/vms/paddock-win11-test
+WIN_VM_DIR=/Volumes/d8sst7/vm-data/paddock-win11-test
 WIN_VM_NAME=paddock-win11-test
 
 # A path with links resolved; a missing last part is resolved through its parent (prepare.sh creates the folder).

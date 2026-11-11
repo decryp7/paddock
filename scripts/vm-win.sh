@@ -14,7 +14,7 @@
 #   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
 #
-# Only ever acts on /Volumes/d7sst7/vms/paddock-win11-test: any other folder in PADDOCK_WIN_VM_DIR is refused before vmrun,
+# Only ever acts on /Volumes/d8sst7/vm-data/paddock-win11-test: any other folder in PADDOCK_WIN_VM_DIR is refused before vmrun,
 # ssh or scp run (vm-win/target.sh), except a fake VM under $TMPDIR with a fake FUSION_APP, for this script's own tests.
 # Any other VM on this Mac is never started, stopped or changed. Only if the VM is encrypted (option A, virtual TPM) is its password read
 # from the login keychain (service paddock-win11-test-vm, account vmrun) and passed to vmrun as -vp.

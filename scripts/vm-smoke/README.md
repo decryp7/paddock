@@ -24,7 +24,7 @@ scripts/vm-smoke/vm-smoke.sh --app debrief  --run <debrief.yml run id>
 Options: `--out <dir>` (result files; default `$PADDOCK_VM_SMOKE_OUT`, else `./vm-smoke-results/`, which is git-ignored), `--base
 <tart vm>` (clone this local VM instead of the pinned `macos-tahoe-base` image; it must have the guest agent, `admin`/`admin`),
 `--artifact <name>` (default `<app>-macOS`), `--keep-vm` (do not delete the clone; for debugging only). Environment: `TART_HOME`
-(default `$HOME/.tart`, as in `tools/macos-vm-smoke.sh`; the images here live on d7, so `export TART_HOME=/Volumes/d7sst7/dev-targets/tart-home`), `PADDOCK_VM_MAX_LOAD` (16), `PADDOCK_VM_MIN_FREE_GB` (60), `PADDOCK_VM_MAX` (VMs at once, 1 or 2), `PADDOCK_VM_SLOT_WAIT`, `PADDOCK_VM_LOAD_WAIT`. Exit code 0: no step failed;
+(default `$HOME/.tart`, as in `tools/macos-vm-smoke.sh`; the images here live on d8, so `export TART_HOME=/Volumes/d8sst7/vm-data/tart-from-home`), `PADDOCK_VM_MAX_LOAD` (16), `PADDOCK_VM_MIN_FREE_GB` (60), `PADDOCK_VM_MAX` (VMs at once, 1 or 2), `PADDOCK_VM_SLOT_WAIT`, `PADDOCK_VM_LOAD_WAIT`. Exit code 0: no step failed;
 1: a step failed; 2: the check could not run (no Tart, load too high, download failed).
 
 To find the run: the last `<app>-release` run of the commit you will tag that **built bundles** (its job list has three

@@ -3,7 +3,7 @@
 #
 #   scripts/vm-win/prepare.sh [--no-tpm] [--lang <tag>] [--input-locale <id>] [--vm-only]
 #
-# Creates, under PADDOCK_WIN_VM_DIR (default /Volumes/d7sst7/vms/paddock-win11-test, never under $HOME):
+# Creates, under PADDOCK_WIN_VM_DIR (default /Volumes/d8sst7/vm-data/paddock-win11-test, never under $HOME):
 #   keys/            SSH key pairs for paddock-test and paddock-admin, the setup passwords (all mode 600)
 #   payload/         the installers pinned in payload.lock, hash-checked
 #   iso/paddock-setup.iso   the setup disc: autounattend.xml, firstlogon.ps1, payload, public keys, Arm drivers

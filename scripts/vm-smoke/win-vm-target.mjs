@@ -8,7 +8,7 @@ import { isMain } from '../../conformance/src/util/is-main.mjs';
 
 export const WIN_VM_NAME = 'paddock-win11-test';
 /** The test VM's folder; the .vmx, the SSH keys and the snapshots all live below it. */
-export const WIN_VM_DIR = '/Volumes/d7sst7/vms/paddock-win11-test';
+export const WIN_VM_DIR = '/Volumes/d8sst7/vm-data/paddock-win11-test';
 /** The test VM's .vmx, derived from the folder. */
 export const WIN_VMX = join(WIN_VM_DIR, 'vm', `${WIN_VM_NAME}.vmwarevm`, `${WIN_VM_NAME}.vmx`);
 
