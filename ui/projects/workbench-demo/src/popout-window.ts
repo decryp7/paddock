@@ -2,7 +2,7 @@ import { demoAccent } from './app/params';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { inTauri } from '@decryp7/paddock-ui/ipc';
 import { provideAppearance, provideShellContext } from '@decryp7/paddock-ui/shell';
-import { provideShellCore } from '@decryp7/paddock-ui/shell';
+import { provideShellCore } from '@decryp7/paddock-ui/shell/contributions';
 import { MockStartupBackend, provideStartupBackend, provideStartupContract, reportBootstrapFailure, TauriStartupBackend } from '@decryp7/paddock-ui/shell/startup';
 import { provideWorkbenchContributions } from '@decryp7/paddock-ui/workbench';
 import { browserWindowChrome, mountPopoutWindowHost, parsePopoutRoute, PdPopoutShell, providePopoutWindow, tauriPanelsIo, tauriWindowChrome } from '@decryp7/paddock-ui/workbench/panels';

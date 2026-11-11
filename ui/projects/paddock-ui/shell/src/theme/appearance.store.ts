@@ -1,7 +1,7 @@
 import { computed, DestroyRef, effect, inject, InjectionToken, signal, type Signal } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { applyPaddockAppearance, type SuAccent } from '@decryp7/paddock-ui';
-import { ContributionRegistry } from '../registry';
+import { ContributionRegistry } from '@decryp7/paddock-ui/shell/contributions';
 import { resolveAppearance, sameAppearance, type Appearance, type ResolvedAppearance, type SystemAppearance } from './appearance';
 import { AppearanceBackend } from './appearance-backend';
 import { themeTokensFor, type ThemeDef, type ThemeTokens } from './theme';

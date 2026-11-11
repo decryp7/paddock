@@ -1,4 +1,4 @@
-import type { DialogDef } from '@decryp7/paddock-ui/shell';
+import type { DialogDef } from '@decryp7/paddock-ui/shell/contributions';
 import { assertDialogBoots } from '@decryp7/paddock-ui/shell/testing';
 import { BACKEND } from '../core/backend';
 import { jobsProviders, mockWithJobs } from '../../testing/job-test-support';

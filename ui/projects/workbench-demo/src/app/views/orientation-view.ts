@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { ShellContextHost } from '@decryp7/paddock-ui/shell/contributions';
 import { formatKey, Keymap } from '@decryp7/paddock-ui/shell/menu';
 import { WORKBENCH_PORTS } from '@decryp7/paddock-ui/workbench';
 import type { WorkbenchDemoContext } from '../context';

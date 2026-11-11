@@ -15,8 +15,8 @@ import {
 } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
 import { SuErrorState, SuSkeleton } from '@decryp7/paddock-ui';
-import { describe } from '../context';
-import { loadPart, type LazyPart } from '../lazy';
+import { describeError } from '@decryp7/paddock-ui/shell/contributions';
+import { loadPart, type LazyPart } from '@decryp7/paddock-ui/shell/contributions';
 
 /** Where a part is loading, shown, or failed to load (with the reason). */
 export type PartStatus = { readonly kind: 'loading' } | { readonly kind: 'loaded' } | { readonly kind: 'error'; readonly reason: string };
@@ -121,7 +121,7 @@ export class PdPartOutlet {
       if (generation !== this.generation) return;
       this.clear();
       console.error(`[paddock-shell] ${label} failed to load`, e);
-      this.state.set({ kind: 'error', reason: describe(e) });
+      this.state.set({ kind: 'error', reason: describeError(e) });
     }
   }
 

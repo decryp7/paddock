@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
+import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell/contributions';
 import { Notifier, NOTICE_ACTION } from './notifier';
 
 function setup() {

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
-import { ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { ShellContextHost } from '@decryp7/paddock-ui/shell/contributions';
 import type { DemoContext } from '../demo-context';
 
 /**
