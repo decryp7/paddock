@@ -135,6 +135,21 @@ impl Adopted {
         serde_json::json!({ "folders": self.0.iter().collect::<Vec<_>>() }).to_string()
     }
 
+    /// The file's text as a list: an error (to be logged) when it is not the expected JSON, never silently no folders. The caller
+    /// decides what a missing file means (see [`read_adopted`]).
+    ///
+    /// # Errors
+    /// The text is not the list's JSON.
+    pub fn try_parse(text: &str) -> Result<Self, String> {
+        #[derive(serde::Deserialize)]
+        struct File {
+            folders: Vec<String>,
+        }
+        serde_json::from_str::<File>(text)
+            .map(|f| Adopted(f.folders.iter().map(|d| adopted_key(Path::new(d))).collect()))
+            .map_err(|e| format!("{ADOPTED_FILE} is not the list of folders the service made ({e})"))
+    }
+
     /// Adds a folder (paths compare without case or trailing separators, as on Windows).
     pub fn insert(&mut self, dir: &Path) {
         self.0.insert(adopted_key(dir));
@@ -201,13 +216,27 @@ pub fn prepare_runner_dir(
             e.describe()
         )
     })?;
+    // Recorded first, in the service's own (administrator-only) folder, never in the runner's: a folder that could not be recorded is
+    // not made, so no protected folder is left that nobody accepts. A recorded folder that was never made is only a name the guard
+    // finds missing.
+    record(dir).map_err(|e| format!("{d} could not be recorded as the service's own ({e}); nothing was made"))?;
     for p in missing.iter().rev() {
         port.create_dir(p).map_err(|e| format!("{p} could not be made ({e})"))?;
     }
-    // Made by the service, empty, protected at creation: from now on the guard accepts it. Recorded in the service's own
-    // (administrator-only) folder, never in the runner's.
-    record(dir).map_err(|e| format!("{d} was made but could not be recorded as the service's own ({e}); it stays blocked"))?;
     Ok(Some(format!("made the runner folder {d} (administrators and SYSTEM only)")))
+}
+
+/// Reads the list of folders the service made. A missing file is the empty list (nothing was made yet); a file that cannot be read or
+/// is not the list is an error naming the cause (ER-27), never silently no folders.
+///
+/// # Errors
+/// The file exists and cannot be read, or is not the list.
+pub fn read_adopted(file: &Path) -> Result<Adopted, String> {
+    match std::fs::read_to_string(file) {
+        Ok(text) => Adopted::try_parse(&text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Adopted::default()),
+        Err(e) => Err(format!("{} could not be read ({e})", file.display())),
+    }
 }
 
 /// What makes a runner's missing folder.
@@ -224,7 +253,7 @@ pub fn os_prepare(data_dir: std::path::PathBuf) -> PrepareHook {
             }
             let mut record = |made: &Path| -> Result<(), String> {
                 let file = data_dir.join(ADOPTED_FILE);
-                let mut list = Adopted::parse(&std::fs::read_to_string(&file).unwrap_or_default());
+                let mut list = read_adopted(&file)?;
                 list.insert(made);
                 crate::store::write_atomic(&file, &list.to_json()).map_err(|e| e.to_string())
             };
@@ -255,7 +284,7 @@ pub fn os_folder_guard(data_dir: std::path::PathBuf) -> FolderGuard {
                     .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
                     .collect()
             };
-            let adopted = Adopted::parse(&std::fs::read_to_string(data_dir.join(ADOPTED_FILE)).unwrap_or_default());
+            let adopted = read_adopted(&data_dir.join(ADOPTED_FILE))?;
             check_adopted_runner_folder(&mut paddock_service::privileged::trust_real::RealTrust, &list, &adopted, dir)
         })
     }
@@ -901,6 +930,33 @@ mod tests {
         );
     }
 
+    /// Round 5 P2-3: the folder was made and then recorded, so a failed record left a protected folder nobody accepts. Recorded first,
+    /// nothing is made when the record fails.
+    #[test]
+    fn a_runner_folder_is_recorded_before_it_is_made() {
+        let mut p = machine();
+        p.put(DATA, locked()).put("C:\\ProgramData\\Pitcrew\\runners", locked());
+        let dir = Path::new("C:\\ProgramData\\Pitcrew\\runners\\new");
+        let e = prepare_runner_dir(&mut p, dir, &mut |_| Err("disk full".into())).unwrap_err();
+        assert!(e.contains("disk full") && e.contains("could not be recorded"), "{e}");
+        assert!(
+            !p.calls.iter().any(|c| c.starts_with("create_dir")),
+            "nothing is made when the record fails: {:?}",
+            p.calls
+        );
+    }
+
+    /// Round 5 P2-3: text that is not the list was silently no folders; now it is an error the caller logs.
+    #[test]
+    fn a_list_of_adopted_folders_that_does_not_parse_is_an_error_and_an_empty_text_is_not() {
+        assert!(Adopted::try_parse("{\"folders\":[\"C:\\\\a\"]}")
+            .unwrap()
+            .contains(Path::new("C:\\a")));
+        let e = Adopted::try_parse("not json").unwrap_err();
+        assert!(e.contains("adopted-folders.json"), "{e}");
+        assert!(Adopted::try_parse("").is_err(), "an empty file is not a list either");
+    }
+
     /// Round 5 P1-2: a listing error was treated as an empty folder.
     #[test]
     fn a_listing_error_of_a_trusted_folder_is_an_error() {
@@ -974,14 +1030,15 @@ mod tests {
         );
         assert!(p.calls.is_empty(), "{:?}", p.calls);
 
-        // A folder that was made but could not be recorded stays blocked (the error says so).
+        // A folder that could not be recorded is not made (round 5 P2-3: recorded first).
         let mut p = machine();
         p.put(DATA, locked()).put("C:\\ProgramData\\Pitcrew\\runners", locked());
         let e = prepare_runner_dir(&mut p, Path::new("C:\\ProgramData\\Pitcrew\\runners\\x"), &mut |_| {
             Err("disk full".into())
         })
         .unwrap_err();
-        assert!(e.contains("could not be recorded") && e.contains("stays blocked"), "{e}");
+        assert!(e.contains("could not be recorded") && e.contains("nothing was made"), "{e}");
+        assert!(p.calls.is_empty(), "{:?}", p.calls);
     }
 
     /// P1-A, fail closed: a folder that only looks admin-only is not accepted unless the service made or adopted it.
@@ -1062,5 +1119,32 @@ mod tests {
         assert!(aside.contains("untrusted") && reason.contains("pitcrew.toml"), "{aside} {reason}");
         assert!(p.calls.iter().any(|c| c.starts_with("create_dir")), "{:?}", p.calls);
         let _ = (SID_ADMINISTRATORS, SID_USERS);
+    }
+}
+
+#[cfg(test)]
+mod read_adopted_tests {
+    use super::*;
+
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a test builds its scratch path from the OS temp folder and removes it"
+    )]
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("pitcrew-it-adopted-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// Round 5 P2-3: only NotFound means no list.
+    #[test]
+    fn only_a_missing_file_is_the_empty_list_and_garbage_or_a_folder_is_an_error() {
+        let dir = scratch("read");
+        assert_eq!(read_adopted(&dir.join("none.json")).unwrap(), Adopted::default());
+        std::fs::write(dir.join("bad.json"), "garbage").unwrap();
+        assert!(read_adopted(&dir.join("bad.json")).unwrap_err().contains("not the list"));
+        assert!(read_adopted(&dir).is_err(), "a folder where the file should be cannot be read");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
