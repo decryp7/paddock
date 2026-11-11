@@ -25,3 +25,14 @@ Get-Content 'C:\ProgramData\Pitcrew\logs\service.log' -ErrorAction SilentlyConti
 $theirs = (Get-Content 'C:\paddock-test\theirs-service.log' -Raw).Trim()
 if ($theirs -ne 'planted') { "::error::the service wrote through a hard link to its log: $theirs"; exit 3 }
 'unchanged'
+'--- the standard user's planted service.log.1 must be moved aside, and the live log must belong to SYSTEM or Administrators'
+$asides = @(Get-ChildItem 'C:\ProgramData\Pitcrew\logs' -Filter 'service.log.1.untrusted-*' -ErrorAction SilentlyContinue)
+if ($asides.Count -lt 1) { '::error::the standard user planted service.log.1 and it was not moved aside by the service'; exit 4 }
+if (Test-Path 'C:\ProgramData\Pitcrew\logs\service.log.1') {
+  $o = (Get-Acl 'C:\ProgramData\Pitcrew\logs\service.log.1').Owner
+  if ($o -notmatch 'SYSTEM|Administrators') { "::error::service.log.1 is still owned by $o"; exit 4 }
+}
+$owner = (Get-Acl 'C:\ProgramData\Pitcrew\logs\service.log').Owner
+"service.log owner: $owner"
+if ($owner -notmatch 'SYSTEM|Administrators') { "::error::the service's log is owned by $owner"; exit 5 }
+'planted files refused'

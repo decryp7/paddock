@@ -11,8 +11,8 @@ trap cleanup EXIT
 echo "VM running before the run:"; "$VMRUN" -T fusion list | head -2
 timeout 300 $W revert gui-baseline || exit 1
 timeout 400 $W start || exit 1
-for f in windows_caller.exe app_lib.exe pitcrew-service.exe env.ps1 std4.ps1; do timeout 120 $W put paddock-test $V/$f C:/paddock-test/$f || exit 1; done
-for f in admin1.ps1 admin2.ps1 install.ps1; do timeout 120 $W put paddock-admin $V/$f C:/paddock-test/$f || exit 1; done
+for f in windows_caller.exe app_lib.exe pitcrew-service.exe env.ps1 std4.ps1 std-plant.ps1; do timeout 120 $W put paddock-test $V/$f C:/paddock-test/$f || exit 1; done
+for f in admin1.ps1 admin2.ps1 install-pre.ps1 install.ps1 system-priv.ps1; do timeout 120 $W put paddock-admin $V/$f C:/paddock-test/$f || exit 1; done
 echo "=== 1 STANDARD"; timeout 420 $W job $V/std1.ps1 300; echo "std1 exit $?"
 echo "=== 2 ELEVATED ADMIN"; timeout 420 $W ssh --admin 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\paddock-test\admin1.ps1'; echo "admin1 exit $?"
 echo "=== 2b HELD ENGINE (standard) and the other account (elevated admin)"
@@ -21,6 +21,9 @@ HELD=$!
 timeout 420 $W ssh --admin 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\paddock-test\admin2.ps1'; echo "admin2 exit $?"
 wait $HELD; echo "std4 exit $?"; cat $V/std4.out
 echo "=== 3 STANDARD again"; timeout 420 $W job $V/std2.ps1 300; echo "std2 exit $?"
+echo "=== 3b PLANT as the standard user, before the service is installed"
+timeout 300 $W ssh --admin 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\paddock-test\install-pre.ps1'; echo "install-pre exit $?"
+timeout 300 $W job $V/std-plant.ps1 120; echo "std-plant exit $?"
 echo "=== 4 INSTALL the service"; timeout 300 $W ssh --admin 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\paddock-test\install.ps1'; echo "install exit $?"
 echo "=== 5 STANDARD against the installed service"; timeout 420 $W job $V/std3.ps1 300; echo "std3 exit $?"
 echo VMDONE

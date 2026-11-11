@@ -490,6 +490,24 @@ fn the_rename_over_a_held_open_pipe_name_fails_with_a_code_the_retry_handles() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Round 8: the trusted-owner rule of the log open refuses a standard user's own file (the CI runner may be elevated, so the shared
+/// crate's test can only show the accept branch there; this row shows the refusal).
+#[test]
+#[ignore = "VM: PITCREW_TEST_EXPECT=standard"]
+fn the_append_open_refuses_a_standard_users_file_when_the_trusted_owner_rule_is_asked() {
+    assert_eq!(expectation(), "standard", "this row needs an account that is not an administrator");
+    let dir = scratch("owner-refusal");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("own.log");
+    std::fs::write(&file, "x").unwrap();
+    let e = paddock_service::privileged::trust_real::open_append_no_follow(&file, true).unwrap_err();
+    println!("MEASURED standard user's file with the trusted-owner rule: {e}");
+    assert_eq!(e.kind(), std::io::ErrorKind::InvalidData, "{e}");
+    assert!(e.to_string().contains("not owned by SYSTEM or Administrators"), "{e}");
+    drop(paddock_service::privileged::trust_real::open_append_no_follow(&file, false).expect("without the rule it opens"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The per-user engine (ADR 0004, second amendment) as the standard user runs it: its pipe is owned by that user and the app's
 /// owner check accepts it only when told it is the user's own engine; it serves its own user every request (no administrator
 /// needed for their own runners), and the SYSTEM service's rule for the same request is the opposite.

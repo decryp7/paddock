@@ -768,6 +768,9 @@ mod windows_tests {
         let f = dir.path().join("own.log");
         std::fs::write(&f, "x").unwrap();
         if own_owner_is_trusted(&f) {
+            println!(
+                "MEASURED branch: ACCEPT (this account's files are owned by SYSTEM or Administrators: an elevated runner); the refusal is the VM row for a standard user"
+            );
             // An elevated runner creates files owned by Administrators: the rule accepts them.
             drop(open_append_no_follow(&f, true).expect("an Administrators-owned file passes"));
         } else {

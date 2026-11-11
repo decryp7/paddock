@@ -9,4 +9,5 @@ $bad = 0
 & C:\paddock-test\windows_caller.exe --include-ignored --test-threads=1 --nocapture a_second_per_user_engine 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { $bad = 1 }
 & C:\paddock-test\windows_caller.exe --include-ignored --test-threads=1 --nocapture the_engine_lock_file 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { $bad = 1 }
 & C:\paddock-test\windows_caller.exe --include-ignored --test-threads=1 --nocapture the_rename_over_a_held_open 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { $bad = 1 }
+& C:\paddock-test\windows_caller.exe --include-ignored --test-threads=1 --nocapture the_append_open_refuses_a_standard 2>&1 | Out-String; if ($LASTEXITCODE -ne 0) { $bad = 1 }
 if ($bad -ne 0) { exit 1 } else { exit 0 }

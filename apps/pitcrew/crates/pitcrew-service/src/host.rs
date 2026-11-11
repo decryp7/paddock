@@ -105,9 +105,11 @@ impl Host {
         };
         // From here the engine owns its folder: a failure is written to its own log. Before the lock (an elevated refusal, a second
         // engine) it touches nothing, not even the log of the engine that holds the folder.
-        let result = Host::start_locked(data_dir.clone(), socket_dir, mode, on_fatal, instance_lock);
+        // The lock stays in `instance_lock` until the host takes it, so a failure is logged while it is still held.
+        let mut instance_lock = instance_lock;
+        let result = Host::start_locked(data_dir.clone(), socket_dir, mode, on_fatal, &mut instance_lock);
         if let Err(e) = &result {
-            log_engine_failure(&data_dir, mode, &e.to_string());
+            log_engine_failure(&data_dir, mode, instance_lock.is_some(), &e.to_string());
         }
         result
     }
@@ -117,7 +119,7 @@ impl Host {
         socket_dir: PathBuf,
         mode: ipc::ServeMode,
         on_fatal: impl FnOnce(String) + Send + 'static,
-        instance_lock: Option<std::fs::File>,
+        instance_lock: &mut Option<std::fs::File>,
     ) -> Result<Host, Error> {
         let protected = protect_installed_folder(&data_dir)?;
         std::fs::create_dir_all(&data_dir).map_err(|source| Error::Io {
@@ -157,7 +159,7 @@ impl Host {
             tx,
             supervisor: Some(handle),
             runtime: Some(runtime),
-            _instance_lock: instance_lock,
+            _instance_lock: instance_lock.take(),
         })
     }
 
@@ -324,7 +326,7 @@ pub fn run_foreground(data_dir: PathBuf) -> Result<(), Error> {
     let fatal = fatal_rx.try_recv().ok();
     if let Some(reason) = &fatal {
         // While the host still holds the engine's lock (stopping it releases the lock).
-        log_engine_failure(&own_dir, mode, reason);
+        log_engine_failure(&own_dir, mode, true, reason);
     }
     host.stop();
     match fatal {
@@ -348,9 +350,10 @@ pub fn socket_dir_for(mode: ipc::ServeMode, data_dir: &std::path::Path, os_socke
 
 /// Writes why the engine could not start or stopped to its own `logs/service.log` (ER-27): a user's engine has no console, so this is
 /// where the cause can be found from a diagnostic bundle. A log that cannot be written is the only thing left unsaid.
-pub fn log_engine_failure(data_dir: &std::path::Path, mode: ipc::ServeMode, cause: &str) {
-    // The SYSTEM service's supervisor writes its own log; only the per-user engine, which owns its folder, writes here.
-    if mode != ipc::ServeMode::User {
+pub fn log_engine_failure(data_dir: &std::path::Path, mode: ipc::ServeMode, lock_held: bool, cause: &str) {
+    // The SYSTEM service's supervisor writes its own log; only the per-user engine, which owns its folder, writes here, and only while
+    // it holds the folder's lock (without it the log belongs to the engine that does).
+    if mode != ipc::ServeMode::User || !lock_held {
         return;
     }
     let who = if mode == ipc::ServeMode::User {
@@ -472,7 +475,7 @@ mod location_tests {
             .expect("refused");
         assert!(e.to_string().contains("must not run elevated"), "{e}");
         assert!(!data.exists(), "an elevated refusal touched {}", data.display());
-        log_engine_failure(&data, ipc::ServeMode::System, "a cause");
+        log_engine_failure(&data, ipc::ServeMode::System, true, "a cause");
         assert!(!data.exists(), "the service mode writes no engine log");
     }
 
@@ -493,7 +496,9 @@ mod location_tests {
     #[test]
     fn the_cause_of_an_engine_stopping_is_written_to_its_own_service_log() {
         let data = scratch("fail");
-        log_engine_failure(&data, ipc::ServeMode::User, "the pipe could not be created (access denied)");
+        log_engine_failure(&data, ipc::ServeMode::User, false, "written without the lock");
+        assert!(!data.exists(), "an engine that does not hold the lock writes nothing");
+        log_engine_failure(&data, ipc::ServeMode::User, true, "the pipe could not be created (access denied)");
         let text = std::fs::read_to_string(data.join("logs").join("service.log")).unwrap();
         assert!(
             text.contains("engine for your own runners stopped") && text.contains("access denied"),

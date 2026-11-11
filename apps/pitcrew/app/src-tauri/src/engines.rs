@@ -109,16 +109,9 @@ impl RoutingClient {
         let user = self.user.request(Request::Status);
         Ok(match (system, user) {
             (Ok(Response::Status { mut runners, service }), Ok(Response::Status { runners: mine, .. })) => {
-                if let Some(r) = mine.iter().find(|m| runners.iter().any(|s| s.name == m.name)) {
-                    return Ok(Response::Error(ServiceError::new(
-                        ErrorCode::BadRequest,
-                        format!(
-                            "both engines list a runner named {}; runner names are unique across both. Remove one of them",
-                            r.name
-                        ),
-                    )));
-                }
                 runners.extend(mine);
+                let mut service = service;
+                service.config_problems.extend(mark_conflicts(&mut runners));
                 Response::Status { runners, service }
             }
             (Ok(answer), _) => answer,
@@ -153,7 +146,7 @@ impl RoutingClient {
                 if let Some(name) = Self::duplicate_name(config.runners.iter().chain(mine.iter())) {
                     return Ok(Response::Error(ServiceError::new(
                         ErrorCode::BadRequest,
-                        format!("both engines list a runner named {name}; runner names are unique across both. Remove one of them in its own configuration"),
+                        format!("both engines list a runner named {name}; runner names are unique across both. Remove one of them: your own with Remove runner, the service's from its pitcrew.toml"),
                     )));
                 }
                 config.runners.extend(mine);
@@ -221,7 +214,7 @@ impl RoutingClient {
         let (system, user) = Self::split(config);
         if let Some(name) = Self::duplicate_name(system.runners.iter().chain(user.runners.iter())) {
             return refuse(format!(
-                "the configuration names {name} for both engines; runner names are unique across both. Nothing was saved"
+                "the configuration names {name} for both engines; runner names are unique across both. Nothing was saved; give one of them another name (the files are the two engines' pitcrew.toml)"
             ));
         }
         let read = *self.read.lock().unwrap_or_else(|p| p.into_inner());
@@ -299,9 +292,14 @@ impl ServiceClient for RoutingClient {
             other => match other.target_runner() {
                 Some(runner) => match self.owner_of(runner) {
                     Owner::Engine(engine) => engine.request(request),
+                    // A conflict can always be resolved by the user removing their own: that request goes to their engine (the service's
+                    // runner needs an administrator and its own pitcrew.toml). Anything else about the name goes nowhere.
+                    Owner::Both if matches!(request, Request::RemoveRunner { .. }) => self.user.request(request),
                     Owner::Both => Ok(Response::Error(ServiceError::new(
                         ErrorCode::BadRequest,
-                        format!("both engines list a runner named {runner}; the request was not sent to either. Remove one of them"),
+                        format!(
+                            "both engines list a runner named {runner}; the request was not sent to either. Remove your own with Remove runner, or the service's from its pitcrew.toml"
+                        ),
                     ))),
                     Owner::Nobody => Ok(Response::Error(ServiceError::new(
                         ErrorCode::UnknownRunner,
@@ -375,6 +373,8 @@ impl Statuses {
         let merged = match (system, user) {
             (Some(mut s), Some(u)) => {
                 s.runners.extend(u.runners);
+                let notes = mark_conflicts(&mut s.runners);
+                s.service.config_problems.extend(notes);
                 Some(s)
             }
             (Some(s), None) => Some(s),
@@ -388,6 +388,26 @@ impl Statuses {
             m
         })
     }
+}
+
+/// A name that both engines list is shown twice, each entry with a problem that says so, and once among the service's problems: the
+/// window shows the conflict instead of refusing to show anything. Returns the line(s) for the problems list.
+fn mark_conflicts(runners: &mut [pitcrew_core::protocol::RunnerSnapshot]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let dups: std::collections::BTreeSet<String> = runners
+        .iter()
+        .map(|r| r.name.to_string())
+        .filter(|n| !seen.insert(n.clone()))
+        .collect();
+    for r in runners.iter_mut().filter(|r| dups.contains(&r.name.to_string())) {
+        r.problem = Some(format!(
+            "both engines list a runner named {}; runner names are unique across both. Remove one of them: your own with Remove runner, the service's from its pitcrew.toml",
+            r.name
+        ));
+    }
+    dups.into_iter()
+        .map(|n| format!("A runner named {n} is in both engines' pitcrew.toml; remove one of them (your own with Remove runner)"))
+        .collect()
 }
 
 fn empty_service_info() -> pitcrew_core::protocol::ServiceInfo {
@@ -854,19 +874,53 @@ mod tests {
         assert_eq!(config.runners[0].name.to_string(), "mine");
     }
 
-    /// Round 7: a name both engines list is refused for status and for a request about it; nothing is sent to a guess.
+    /// Round 7 and 8: a name both engines list is not a dead end. Status shows both entries marked as a conflict; a request about the
+    /// name is not sent to a guess, except Remove runner, which goes to the user's own engine and clears the conflict.
     #[test]
-    fn a_name_both_engines_list_is_refused_for_status_and_for_a_request() {
+    fn a_name_both_engines_list_is_shown_as_a_conflict_and_can_be_removed_from_the_users_engine() {
         let (system, user) = (Fake::new(&["same"], false), Fake::new(&["same"], false));
         let c = router(&system, &user);
-        let answer = c.request(Request::Status).unwrap();
-        assert!(matches!(&answer, Response::Error(e) if e.message.contains("same")), "{answer:?}");
+        let Ok(Response::Status { runners, service }) = c.request(Request::Status) else {
+            panic!()
+        };
+        assert_eq!(runners.len(), 2, "both entries are shown");
+        assert!(runners.iter().all(|r| r
+            .problem
+            .as_deref()
+            .is_some_and(|p| p.contains("both engines") && p.contains("pitcrew.toml"))));
+        assert!(
+            service
+                .config_problems
+                .iter()
+                .any(|p| p.contains("same") && p.contains("pitcrew.toml")),
+            "{:?}",
+            service.config_problems
+        );
         let answer = c.request(Request::Stop { runner: name("same") }).unwrap();
         assert!(
-            matches!(&answer, Response::Error(e) if e.message.contains("not sent to either")),
+            matches!(&answer, Response::Error(e) if e.message.contains("not sent to either") && e.message.contains("pitcrew.toml")),
             "{answer:?}"
         );
         assert!(!system.asked().contains(&"Stop".to_string()) && !user.asked().contains(&"Stop".to_string()));
+        // Remove runner goes to the user's own engine, never the service.
+        assert_eq!(c.request(Request::RemoveRunner { runner: name("same") }).unwrap(), Response::Ok);
+        assert!(user.asked().contains(&"RemoveRunner".to_string()), "{:?}", user.asked());
+        assert!(!system.asked().contains(&"RemoveRunner".to_string()), "{:?}", system.asked());
+    }
+
+    /// The merged status of the events path marks a conflict the same way.
+    #[test]
+    fn the_events_path_marks_a_conflict_too() {
+        let statuses = Statuses::default();
+        let mk = |n: &str| StatusReply {
+            runners: vec![snapshot(n)],
+            service: empty_service_info(),
+        };
+        statuses.set_system(mk("same"));
+        let merged = statuses.set_user(Some(mk("same"))).unwrap();
+        assert_eq!(merged.runners.len(), 2);
+        assert!(merged.runners.iter().all(|r| r.problem.is_some()));
+        assert_eq!(merged.service.config_problems.len(), 1);
     }
 
     /// An engine that refuses every change.
