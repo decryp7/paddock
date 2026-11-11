@@ -144,10 +144,11 @@ fn input(cmd: &str) -> String {
     json!({"tool_name": "Bash", "tool_input": {"command": cmd}}).to_string()
 }
 
-/// The new rules' decision for a command: the id of the rule that refuses, if any.
+/// The new rules' decision for a command: the id of the rule that refuses, if any. `no-unbounded-wait` is not a port (it has no shell
+/// hook as oracle, its tests are in its own file), and the corpora hold sleeping loops it refuses: it is not counted here.
 fn new_rule(cmd: &str) -> Option<&'static str> {
     let call = ToolCall::parse(&input(cmd)).unwrap();
-    decide(&call).denial.map(|d| d.rule)
+    decide(&call).denial.map(|d| d.rule).filter(|rule| *rule != "no-unbounded-wait")
 }
 
 fn check_new(corpus: &str, rule: &str) -> usize {
@@ -183,7 +184,7 @@ fn no_force_push_decides_the_corpus_as_the_shell_hook_did() {
 #[test]
 fn the_rules_are_registered_in_this_order() {
     let ids: Vec<&str> = rules::all().iter().map(|r| r.id()).collect();
-    assert_eq!(ids, ["no-pgrep-wait", "no-force-push"]);
+    assert_eq!(ids, ["no-pgrep-wait", "no-force-push", "no-unbounded-wait"]);
 }
 
 #[test]
