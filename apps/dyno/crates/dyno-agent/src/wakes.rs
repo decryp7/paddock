@@ -422,7 +422,7 @@ impl HelperRoute for SharedHelper {
         };
         let status = shared.helper.status();
         match status.state {
-            HelperState::Ready => Ok(()),
+            HelperState::Ready | HelperState::UpdateAvailable => Ok(()),
             HelperState::NotIncluded => Err(HelperNeed::NotIncluded(status.message)),
             _ => Err(HelperNeed::TurnOn(status.message)),
         }

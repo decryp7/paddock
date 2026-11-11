@@ -154,7 +154,7 @@ impl<T: HelperTransport> HelperCentre<T> {
     }
 
     fn install(&self, ctx: &JobContext, action: HelperAction, before: &HelperStatus) -> Result<HelperStatus, JobError> {
-        if action == HelperAction::TurnOn && before.state == HelperState::Ready {
+        if action == HelperAction::TurnOn && before.state.usable() {
             return Ok(before.clone());
         }
         self.prompt(ctx, "Waiting for the system's permission prompt", |i| i.install(action))?;
@@ -191,7 +191,10 @@ impl<T: HelperTransport> HelperCentre<T> {
         // A running helper removes itself on an authenticated request (no prompt), except on Windows: a running program cannot be
         // deleted there, so the request leaves `dyno-helper.exe` behind (measured in the Windows 11 VM). Windows goes through the
         // prompt, where the bundled copy removes the installed one completely.
-        let can_ask = matches!(before.state, HelperState::Ready | HelperState::Outdated) && self.host != HelperHost::Windows;
+        let can_ask = matches!(
+            before.state,
+            HelperState::Ready | HelperState::UpdateAvailable | HelperState::Outdated
+        ) && self.host != HelperHost::Windows;
         let asked = can_ask && self.link.uninstall().is_ok();
         if !asked {
             self.prompt(ctx, "Waiting for the system's permission prompt", |i| i.uninstall())?;

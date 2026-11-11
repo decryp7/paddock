@@ -148,7 +148,7 @@ pub fn wait_or_stop(shared: &crate::agent::Shared, every: std::time::Duration) -
 }
 
 /// The slices of [`wait_or_stop`] with the clock, the sleep and the stop flag passed in. The end is a deadline on the clock, not a
-/// sum of the slices asked for: a sleep that overshoots (a loaded machine, a suspended laptop) cannot stretch the wait.
+/// sum of the slices asked for: a sleep that overshoots (a loaded machine) cannot stretch the wait.
 fn wait_with(
     every: std::time::Duration,
     now: impl Fn() -> std::time::Instant,
@@ -282,6 +282,8 @@ mod tests {
             |asked| {
                 sleeps += 1;
                 longest = longest.max(asked);
+                let remaining = every.saturating_sub(elapsed.get());
+                assert!(asked <= remaining, "a slice of {asked:?} is asked with only {remaining:?} left");
                 elapsed.set(elapsed.get() + asked * 3);
             },
             || false,

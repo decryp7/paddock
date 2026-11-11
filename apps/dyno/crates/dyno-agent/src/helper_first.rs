@@ -163,7 +163,7 @@ impl Availability {
     pub fn from_status(status: &HelperStatus) -> Availability {
         let m = || status.message.clone();
         match status.state {
-            HelperState::Ready => Availability::Ready,
+            HelperState::Ready | HelperState::UpdateAvailable => Availability::Ready,
             HelperState::Off => Availability::Off,
             HelperState::Outdated => Availability::Outdated(m()),
             HelperState::NotIncluded => Availability::Unsupported(m()),

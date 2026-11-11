@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- An administrator helper from an older Dyno is now offered the newer helper that ships with the app (macOS, Windows and Linux), also when the older helper is still accepted. A helper that is the same version or newer is left alone; a newer one is never replaced by an older one. The agent's checks of its own program file now end on time even on a busy computer.
+- An administrator helper from an older Dyno that Dyno still accepts is now offered the newer helper that ships with the app: Settings shows "Update available" and "Update the helper", and the helper's readings keep working until you choose to update. A helper of the same version and build, or a newer one, is left alone; a newer one is never replaced by an older one. The agent's checks of its own program file now end on time even on a busy computer.
 - When Dyno cannot find your home folder, it no longer falls back to a shared folder in the temporary folder, where another user on the same computer could have put a file for Dyno to trust. It now uses a private folder made for your account only and refuses a folder that belongs to someone else or is a link. If no safe folder exists, the command stops and says what to set. The file that tells the app where the agent is runs is also ignored when its folder is a link or belongs to another user.
 
 ### Changed

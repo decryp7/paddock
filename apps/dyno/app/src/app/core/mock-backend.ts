@@ -181,7 +181,7 @@ export interface MockOptions {
   keepsMeasuring?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
-  /** The helper's state at the start (`?helper=ready`, `off`, `silent`, `foreign`, `outdated`, `missing`, `notIncluded`; default `off`). */
+  /** The helper's state at the start (`?helper=ready`, `off`, `silent`, `foreign`, `outdated`, `updateAvailable`, `missing`, `notIncluded`; default `off`). */
   helper?: MockHelperVariant;
   /** Which keep-awake state the mock starts in (`?power=unavailable|ended|waiting`; default off). */
   power?: MockPowerVariant;
@@ -258,7 +258,7 @@ function savedFromUrl(days: string | null): Partial<MockOptions> {
     savedListsAgeMs: d * 86_400_000,
   };
 }
-const HELPER_VARIANTS: readonly string[] = ['notIncluded', 'off', 'notRunning', 'starting', 'missing', 'outdated', 'ready', 'silent', 'foreign'];
+const HELPER_VARIANTS: readonly string[] = ['notIncluded', 'off', 'notRunning', 'starting', 'missing', 'outdated', 'updateAvailable', 'ready', 'silent', 'foreign'];
 /** What the real engine says when these fail: the cause and the next step. */
 const FAIL_TEXT: Readonly<Record<string, string>> = {
   intelStatus: 'Dyno could not read your IP lists: the agent did not answer. Check that Dyno is running, then try again.',

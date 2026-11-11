@@ -302,6 +302,16 @@ pub enum HelperState {
     /// Installed and starting (a start in progress after Windows started, or one Dyno just began): not a fault; Dyno looks
     /// again by itself. Appended last: the enum travels as a postcard index (protocol.rs).
     Starting,
+    /// Installed, answering and accepted, but older than the helper this Dyno ships: the readings go on and the newer one is offered,
+    /// never forced (ADR 0027 section 4). Appended last: the enum travels as a postcard index (protocol.rs).
+    UpdateAvailable,
+}
+
+impl HelperState {
+    /// Whether the helper answers and its readings can be used ([`Ready`](Self::Ready), or [`UpdateAvailable`](Self::UpdateAvailable)).
+    pub fn usable(self) -> bool {
+        matches!(self, HelperState::Ready | HelperState::UpdateAvailable)
+    }
 }
 
 /// What the user asked of the helper in Settings; each runs as a job with phases (ADR 0027 section 8).
@@ -366,6 +376,9 @@ pub enum Probe {
     Starting(String),
     /// Something that is not Dyno's helper owns the endpoint (pipe squatting): the owner's account id (or uid).
     Foreign(String),
+    /// It answered `Info` with this API and an accepted version that is older than this Dyno's: it is used as it is and the bundled
+    /// one is offered ([`HelperState::UpdateAvailable`]).
+    AnsweredOlder(HelperInfo, Vec<AuditEntry>),
     /// It answered `Info` with an API and version this Dyno accepts, but it is another build than the one Dyno ships
     /// ([`BuildVerdict::Other`]): the id it reported (`None`: it cannot answer `Build`, so it is older than that request) and the id
     /// of the bundled program.
@@ -401,21 +414,9 @@ pub fn judge_build(installed: Option<&str>, bundled: Option<&str>) -> BuildVerdi
     }
 }
 
-/// Whether `have` ("1.2.3", a pre-release suffix is ignored) is at least `min`. An unreadable version is not.
+/// Whether `have` is at least `min` by [`compare_versions`] (a pre-release is below its release). An unreadable version is not.
 pub fn version_at_least(have: &str, min: &str) -> bool {
-    fn parts(v: &str) -> Option<[u64; 3]> {
-        let core = v.split(['-', '+']).next()?;
-        let mut it = core.split('.');
-        let mut out = [0u64; 3];
-        for slot in &mut out {
-            *slot = it.next()?.parse().ok()?;
-        }
-        it.next().is_none().then_some(out)
-    }
-    match (parts(have), parts(min)) {
-        (Some(h), Some(m)) => h >= m,
-        _ => false,
-    }
+    compare_versions(have, min).is_some_and(std::cmp::Ordering::is_ge)
 }
 
 /// Orders two versions ("1.2.3", optionally with a `-pre-release` and a `+build` suffix) by the SemVer rules: the numbers first,
@@ -553,7 +554,7 @@ pub const HELPER_MISSING: &str = "This reading needs Dyno's helper, which is not
 fn verb_for(state: HelperState) -> &'static str {
     match state {
         HelperState::Off => "install",
-        HelperState::Outdated => "update",
+        HelperState::Outdated | HelperState::UpdateAvailable => "update",
         HelperState::NotRunning | HelperState::Missing | HelperState::Foreign => "repair",
         _ => "change",
     }
@@ -632,6 +633,16 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
                 installed.as_deref().unwrap_or("unknown (it does not answer the build request)"),
                 info.api
             )),
+        ),
+        Probe::AnsweredOlder(info, recent) => status(
+            HelperState::UpdateAvailable,
+            format!(
+                "A newer helper ships with this Dyno (installed {}, bundled {our_version}). Administrator readings are on; update the helper when you like.",
+                info.version
+            ),
+            Some(info.version.clone()),
+            recent,
+            Some(format!("Helper version {}, Dyno {our_version}.", info.version)),
         ),
         Probe::Answered(info, recent) => status(
             HelperState::Ready,
@@ -986,7 +997,9 @@ mod tests {
     #[test]
     fn versions_compare_by_number() {
         assert!(version_at_least("1.10.0", "1.9.9"));
-        assert!(version_at_least("1.1.0-beta.1", "1.1.0"));
+        assert!(!version_at_least("1.1.0-beta.1", "1.1.0"), "a pre-release is below its release");
+        assert!(version_at_least("1.1.0-beta.1", "1.1.0-alpha"));
+        assert!(version_at_least("1.1.0+build.5", "1.1.0"));
         assert!(!version_at_least("1.0.99", "1.1.0"));
         for bad in ["", "1.1", "1.1.0.1", "a.b.c", "1.1.x"] {
             assert!(!version_at_least(bad, "1.1.0"), "{bad}");

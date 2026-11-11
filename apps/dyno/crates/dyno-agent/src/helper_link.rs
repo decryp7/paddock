@@ -268,9 +268,10 @@ impl<T: HelperTransport> HelperLink<T> {
         status
     }
 
-    /// `Answered`, or `AnsweredOtherBuild` when the helper is of this API and either older than this Dyno (the bundled one is
-    /// newer: offer it, whatever the build ids say) or of this Dyno's version but another build than the one it ships. An equal
-    /// version with the same build is left as it is, and so is a newer helper (a downgrade is never offered, it is only logged).
+    /// `Answered`; `AnsweredOlder` when the helper is of this API, still accepted and older than this Dyno, and a newer one ships
+    /// (offered, never forced: it is not asked for its build, the version says it); `AnsweredOtherBuild` when it is of this Dyno's
+    /// own version but another build than the one it ships. A newer helper is left as it is (a downgrade is never offered), and a
+    /// helper of another API is never asked anything more: `Build` is only known to this API.
     fn judge(
         &self,
         wait: Wait,
@@ -283,26 +284,36 @@ impl<T: HelperTransport> HelperLink<T> {
             .then(|| dyno_core::helper_wire::compare_versions(&info.version, our_version))
             .flatten();
         if order == Some(Ordering::Greater) {
-            log::info!(Installed = info.version.as_str(), Dyno = our_version; "Helper is newer than this Dyno: left as it is, a downgrade is never offered");
+            // Every status poll gets here, so the verdict is only logged at debug level; the state change is logged once.
+            log::debug!(Installed = info.version.as_str(), Dyno = our_version; "Helper is newer than this Dyno: left as it is, a downgrade is never offered");
         }
-        // One below the minimum is outdated by itself and is not asked for its build.
-        let older = order == Some(Ordering::Less)
-            && dyno_core::helper_wire::version_at_least(&info.version, dyno_core::helper_wire::MIN_HELPER_VERSION);
-        let Some(bundled_of) = self.bundled_build.as_ref().filter(|_| older || order == Some(Ordering::Equal)) else {
+        let Some(bundled_of) = self
+            .bundled_build
+            .as_ref()
+            .filter(|_| matches!(order, Some(Ordering::Less | Ordering::Equal)))
+        else {
             return Probe::Answered(info, recent);
         };
         let bundled = bundled_of();
-        let installed = self.installed_build(wait);
-        let mut verdict = dyno_core::helper_wire::judge_build(installed.as_deref(), bundled.as_deref());
-        if older && verdict == dyno_core::helper_wire::BuildVerdict::Same {
-            verdict = dyno_core::helper_wire::BuildVerdict::Other;
+        if order == Some(Ordering::Less) {
+            // One below the minimum is outdated by itself (assess says so); anything else older is only offered the update.
+            let offer = bundled.as_deref().is_some_and(|b| !b.is_empty())
+                && dyno_core::helper_wire::version_at_least(&info.version, dyno_core::helper_wire::MIN_HELPER_VERSION);
+            log::debug!(Installed = info.version.as_str(), Dyno = our_version, Offered = offer; "Helper is older than this Dyno");
+            return if offer {
+                Probe::AnsweredOlder(info, recent)
+            } else {
+                Probe::Answered(info, recent)
+            };
         }
+        let installed = self.installed_build(wait);
+        let verdict = dyno_core::helper_wire::judge_build(installed.as_deref(), bundled.as_deref());
         let (installed_text, bundled_text) = (installed.as_deref().unwrap_or("none"), bundled.as_deref().unwrap_or("unreadable"));
         if verdict == dyno_core::helper_wire::BuildVerdict::Same {
             log::debug!(Installed = installed_text, Bundled = bundled_text; "Helper build checked: same");
         } else {
             log::info!(
-                Installed = installed_text, Bundled = bundled_text, Version = info.version.as_str(), Dyno = our_version,
+                Installed = installed_text, Bundled = bundled_text, Version = info.version.as_str(),
                 Verdict = format!("{verdict:?}").as_str();
                 "Helper build checked"
             );
@@ -529,7 +540,7 @@ impl<T: HelperTransport> HelperLink<T> {
 
     /// Whether the helper answers right now (cheap: one `Info`).
     pub fn is_ready(&self, host: HelperHost, our_version: &str) -> bool {
-        self.status(host, Ok(()), our_version).state == HelperState::Ready
+        self.status(host, Ok(()), our_version).state.usable()
     }
 }
 
@@ -674,12 +685,14 @@ mod tests {
         let bundled = || Arc::new(|| Some("bbbb".to_string())) as BundledBuild;
         // (installed version, this Dyno's version, the build the helper reports, the state, whether it was asked for its build)
         let cases = [
-            // Older, still accepted, and the same build id: the version alone says there is something newer to offer.
-            ("1.1.0", "1.1.1", Some("bbbb"), HelperState::Outdated, true),
-            ("1.1.0", "1.1.1", Some("aaaa"), HelperState::Outdated, true),
-            // An older helper that cannot answer `Build` is offered the update as well.
-            ("1.1.0", "1.1.1", None, HelperState::Outdated, true),
-            ("1.1.1-beta.2", "1.1.1", Some("aaaa"), HelperState::Outdated, true),
+            // Older and still accepted: the version alone says there is something newer to offer, whatever the build ids say,
+            // and readings go on (UpdateAvailable, never Outdated). The helper is not asked for its build.
+            ("1.1.0", "1.1.1", Some("bbbb"), HelperState::UpdateAvailable, false),
+            ("1.1.0", "1.1.1", Some("aaaa"), HelperState::UpdateAvailable, false),
+            ("1.1.0", "1.1.1", None, HelperState::UpdateAvailable, false),
+            ("1.1.1-beta.2", "1.1.1", Some("aaaa"), HelperState::UpdateAvailable, false),
+            // Below the minimum is outdated by itself.
+            ("1.0.9", "1.1.1", Some("aaaa"), HelperState::Outdated, false),
             // Equal stays a no-op when the build is the same; a newer helper is never offered a downgrade and not asked.
             ("1.1.1", "1.1.1", Some("bbbb"), HelperState::Ready, true),
             ("1.1.1+build.7", "1.1.1", Some("bbbb"), HelperState::Ready, true),
@@ -699,6 +712,47 @@ mod tests {
             assert_eq!(s.state, want, "installed {installed}, Dyno {ours}, build {build:?}");
             assert_eq!(seen_build(&l), asked, "installed {installed}, Dyno {ours}");
         }
+    }
+
+    #[test]
+    fn a_helper_of_another_api_is_never_asked_for_its_build() {
+        // `Build` is only known to this API: another API's helper could decode it as something else, whatever its version says.
+        for (installed, ours) in [("1.1.0", "1.1.0"), ("1.1.0", "1.1.1"), ("1.0.0", "1.1.1"), ("1.2.0", "1.1.1")] {
+            for api in [HELPER_API + 1, HELPER_API.saturating_sub(1)] {
+                let l = link(vec![Ok(about(installed, api)), Ok(HelperReply::Entries(vec![]))])
+                    .with_bundled_build(Arc::new(|| Some("bbbb".to_string())));
+                let s = l.status(HelperHost::Linux, Ok(()), ours);
+                assert_eq!(s.state, HelperState::Outdated, "{installed} API {api} under Dyno {ours}");
+                assert!(
+                    !l.transport.seen.lock().unwrap().contains(&HelperRequest::Build),
+                    "{installed} API {api}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn readings_keep_working_while_a_newer_bundled_helper_is_offered() {
+        // ADR 0027 section 4: the newer bundled helper is offered, never forced. An older accepted helper still answers, so the
+        // readings go on through it and the status carries the offer.
+        let l = link(vec![
+            Ok(about("1.1.0", HELPER_API)),
+            Ok(HelperReply::Entries(vec![])),
+            Ok(HelperReply::Build("aaaa".into())),
+        ])
+        .with_bundled_build(Arc::new(|| Some("bbbb".to_string())));
+        let s = l.status(HelperHost::Linux, Ok(()), "1.1.1");
+        assert_eq!(
+            crate::helper_first::Availability::from_status(&s),
+            crate::helper_first::Availability::Ready,
+            "{s:?}"
+        );
+        assert!(
+            s.message.contains("newer helper ships with this Dyno") && s.message.contains("1.1.0") && s.message.contains("1.1.1"),
+            "{}",
+            s.message
+        );
+        assert!(s.error.is_none());
     }
 
     #[test]
