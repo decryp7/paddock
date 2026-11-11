@@ -204,7 +204,11 @@ Results of shared crates (rule 48: shared code records here), newest first.
 - **Load:** 1-minute load 10-18 during the builds (CI running on the same machine)
 - **Build:** production `ng build --stats-json` (Angular application builder, esbuild), `ui/dist` rebuilt from the tree under test with `npm run build`
 - **Corpus:** none (bundle sizes)
-- **Command:** `npx ng build --stats-json` in `apps/<app>/app`, then the static closure of `src/main.ts` (and for Debrief `src/bootstrap.ts`, `src/app/app.ts`, `src/app/app.config.ts`) through `measure()` of `conformance/src/window-weight/measure.mjs`; Material, CDK and paddock-ui kB are the `bytesInOutput` of their inputs in those chunks
+- **Command:** `npm run build -w ui`, then in `apps/<app>/app` `npx ng build --stats-json --output-path <scratch>/<name>`, then
+  `node ui/scripts/first-paint-weight.mjs <scratch>/<name>/browser-stats.json src/main.ts` (Debrief: add `src/bootstrap.ts src/app/app.ts src/app/app.config.ts`).
+  The script is the static closure of the entry chunks through `measure()` of `conformance/src/window-weight/measure.mjs`; Material, CDK and paddock-ui kB are the `bytesInOutput` of their inputs in those chunks
+- **Debrief files switched for the "change" build** (6, from `apps/debrief/app/src/app/`): `extensions/command-context.ts`, `extensions/command-registry.ts`,
+  `extensions/context.ts`, `extensions/contributions.ts`, `extensions/lazy-registration.ts` and `testing/contributions.ts`: `@decryp7/paddock-ui/shell` became `@decryp7/paddock-ui/shell/contributions`
 - **Runs:** single (a build is deterministic)
 - **Numbers:** (kB of JS loaded before first paint, minified, not compressed)
 
@@ -219,6 +223,8 @@ Results of shared crates (rule 48: shared code records here), newest first.
   | Pitwall main | JS total | 702.5 | 702.4 | no change |
   | Pitwall main | Material / CDK / paddock-ui | 158.4 / 168.0 / 201.2 | 158.4 / 168.0 / 201.1 | no change |
 
+- **Memory measure:** n/a (bundle sizes, no process measured)
+- **Budget:** none asserted for these windows (rule 35 budgets: Debrief main 1355 kB, see Budgets); Debrief M1's main window at 1189.4 kB is under its 1355 kB
 - **Notes:** Dyno and Pitwall main windows already import the paddock-ui root and Material elsewhere (the other files that import `shell` also use the
   frame, so they stay on `shell`), so switching their registry-only files gains nothing there; they gain only the cleaner import. A first Debrief
   "before" build ran against a `ui/dist` that already contained the new entry (its `shell` re-exports it) and showed no difference: compare only against a `ui/dist` built from the base tree.

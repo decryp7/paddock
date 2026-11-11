@@ -16,10 +16,7 @@ import {
   signal,
 } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
-import { evaluate } from '@decryp7/paddock-ui/shell/contributions';
-import { ShellContextHost } from '@decryp7/paddock-ui/shell/contributions';
-import type { StatusItemDef } from '@decryp7/paddock-ui/shell/contributions';
-import { ContributionRegistry } from '@decryp7/paddock-ui/shell/contributions';
+import { ContributionRegistry, evaluate, ShellContextHost, type StatusItemDef } from '@decryp7/paddock-ui/shell/contributions';
 import { PdIcon } from './icon';
 import { PdPartOutlet } from './part-outlet';
 import { planStatusBar, statusWidth } from './status-layout';

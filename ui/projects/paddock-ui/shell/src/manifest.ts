@@ -1,19 +1,21 @@
-import type {
-  CommandDef,
-  DialogDef,
-  DialogKind,
-  DialogModality,
-  HealthServiceDef,
-  KeybindingDef,
-  MenuItemDef,
-  NotificationKindDef,
-  PageDef,
-  SettingsPageDef,
-  StatusItemDef,
+import {
+  type CommandDef,
+  DIALOG_KINDS,
+  type DialogDef,
+  type DialogKind,
+  type DialogModality,
+  type HealthServiceDef,
+  isMessage,
+  type KeybindingDef,
+  type MenuItemDef,
+  type Message,
+  normalizeKey,
+  type NotificationKindDef,
+  type PageDef,
+  type SettingsPageDef,
+  type StatusItemDef,
+  toAccelerator,
 } from '@decryp7/paddock-ui/shell/contributions';
-import { DIALOG_KINDS } from '@decryp7/paddock-ui/shell/contributions';
-import { normalizeKey, toAccelerator } from '@decryp7/paddock-ui/shell/contributions';
-import { isMessage, type Message } from '@decryp7/paddock-ui/shell/contributions';
 
 /*
  * `paddock-manifest.json`: the static parts of a window's contributions that Rust needs, generated from the registry by
