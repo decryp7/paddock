@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { chartsDrawn } from './charts-drawn';
 
 /**
  * Every Dyno page, with the many-rows mock, at 1920x1080, 1440x900, 1280x800 and 1024x768, in light and dark (design guide section 2;
@@ -50,31 +51,6 @@ const PAGES: { name: string; hash: string; fill?: boolean; width: Width; open?: 
   { name: 'lifespan', hash: '/lifespan', width: 1440 },
   { name: 'diagnostics', hash: '/diagnostics', width: 1440 },
 ];
-
-/**
- * Every chart has drawn and finished its entry animation: each dy-chart has a canvas, and the painted pixels of all canvases are the same
- * in two checks a frame apart (the first draw loads ECharts on demand and animates, so a capture before that shows empty axes).
- */
-async function chartsDrawn(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const charts = [...document.querySelectorAll('dy-chart')];
-    if (charts.length === 0) return true;
-    if (charts.some((c) => !c.querySelector('canvas'))) return false;
-    const sig = [...document.querySelectorAll('dy-chart canvas')]
-      .map((c) => {
-        const cv = c as HTMLCanvasElement;
-        const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data;
-        let n = 0;
-        for (let i = 3; i < d.length; i += 4) if (d[i]! > 0) n++;
-        return n;
-      })
-      .join(',');
-    const w = window as unknown as { __sig?: string; __same?: number };
-    w.__same = w.__sig === sig ? (w.__same ?? 0) + 1 : 0;
-    w.__sig = sig;
-    return w.__same >= 8;
-  }, undefined, { timeout: 30_000, polling: 'raf' });
-}
 
 for (const p of PAGES) {
   for (const size of [...SIZES, ...(p.extraSizes ?? [])]) {
