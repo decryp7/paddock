@@ -7,10 +7,13 @@ use crate::config::HelperConfig;
 use crate::elevate::{helper_paths, this_host};
 use crate::paths::HelperPaths;
 use crate::serve::os_of;
+use dyno_core::helper::HelperHost;
 use dyno_core::helper_wire::HelperUser;
 use dyno_helper_service::source_check::FamilyKey;
 use dyno_helper_service::{install_in_place, install_roots, preflight_in_place, uninstall_in_place, uninstall_self_in_place};
 use paddock_env::Os;
+use paddock_service::privileged::files::FileKind;
+use paddock_service::privileged::trust::{parent_of, verify_chain, verify_container, TrustPort};
 use paddock_service::privileged::trust_real::RealTrust;
 use paddock_service::privileged::{OsKnownFolders, ProtectedFiles, RealFiles, Report};
 use paddock_service::{RealSystem, System};
@@ -384,7 +387,7 @@ const OWN_DIRS: [&str; 2] = ["tools", "staging"];
 /// # Errors
 /// What could not be removed.
 pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
-    remove_data_folder_with(paths, &crate::logfile::quiesce_installed)
+    remove_data_folder_with(paths, &crate::logfile::quiesce_installed, &mut RealTrust)
 }
 
 /// [`remove_data_folder`] with the step that stops the helper's own log writing, which runs before anything is removed: a log
@@ -393,7 +396,10 @@ pub fn remove_data_folder(paths: &HelperPaths) -> Result<String, String> {
 ///
 /// # Errors
 /// What could not be removed.
-pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> Result<String, String> {
+pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn(), trust: &mut dyn TrustPort) -> Result<String, String> {
+    if paths.host == HelperHost::Windows {
+        verify_data_folder(paths, trust)?;
+    }
     quiesce_log();
     // The lifecycle file lives beside the data folder (macOS) or in the logs folder (Linux): it goes with the helper, before the
     // folder above it is tried.
@@ -446,6 +452,23 @@ pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> R
         }
         Err(e) => Ok(left_in_place_note(dir, &e, std::fs::read_dir(dir).map(Iterator::count))),
     }
+}
+
+/// Windows: what the helper deletes must still be what it locked. `C:\ProgramData` lets a standard user create folders and a
+/// junction there redirects a SYSTEM delete, so before anything is removed the vendor folder must be one no other account can
+/// swap (`verify_container`) and the data folder a real folder, owned and locked as the helper left it (`verify_chain`, which
+/// refuses a link or reparse point in any component). A folder that fails is left as it is and the error says what to do.
+fn verify_data_folder(paths: &HelperPaths, trust: &mut dyn TrustPort) -> Result<(), String> {
+    let dir = paths.data_dir.to_string_lossy().into_owned();
+    let style = trust.style();
+    let refused = |what: &str, why: String| {
+        log::error!(Dir = dir.as_str(), Check = what, Why = why.as_str(); "Helper: the data folder was not removed, its place is not protected");
+        format!("The helper's data folder {dir} was not removed: {why}. Nothing was deleted; remove the folder as an administrator once it is the helper's own again.")
+    };
+    if let Some(vendor) = parent_of(&dir, style) {
+        verify_container(trust, &vendor).map_err(|e| refused("vendor folder", e.describe()))?;
+    }
+    verify_chain(trust, &dir, FileKind::Dir, Some(&dir), false).map_err(|e| refused("data folder", e.describe()))
 }
 
 /// What the log says when the data folder could not be removed: the real error, and whether the folder holds items (someone
@@ -531,6 +554,68 @@ mod tests {
         p
     }
 
+    fn windows_paths() -> HelperPaths {
+        HelperPaths::for_host(
+            HelperHost::Windows,
+            &WindowsRoots {
+                program_files: PathBuf::from("C:\\Program Files"),
+                program_data: PathBuf::from("C:\\ProgramData"),
+                system_root: PathBuf::from("C:\\Windows"),
+            },
+        )
+    }
+
+    /// Plan WP-6 (1): a junction (or any untrusted folder) where the data folder should be is refused before anything is removed.
+    #[test]
+    fn a_data_folder_that_is_a_junction_is_refused_before_anything_is_removed() {
+        use paddock_service::privileged::files::FileKind;
+        use paddock_service::privileged::trust_fake::{locked, windows_machine};
+        let paths = windows_paths();
+        assert_eq!(paths.data_dir, PathBuf::from("C:\\ProgramData\\Dyno\\Helper"));
+        let mut machine = windows_machine(|_| locked());
+        let mut junction = locked();
+        junction.kind = FileKind::Symlink;
+        machine.put("C:\\ProgramData\\Dyno\\Helper", junction);
+        let quiesced = std::cell::Cell::new(false);
+        let why = remove_data_folder_with(&paths, &|| quiesced.set(true), &mut machine).unwrap_err();
+        assert!(
+            why.contains("link") && why.contains("Helper") && why.contains("not removed"),
+            "{why}"
+        );
+        assert!(
+            machine.calls.iter().all(|c| !c.starts_with("remove_tree")),
+            "nothing was removed: {:?}",
+            machine.calls
+        );
+        assert!(!quiesced.get(), "the helper's log is left running when nothing is removed");
+    }
+
+    /// Plan WP-6 (1): a vendor folder a user could swap (Users may delete its children) is refused too.
+    #[test]
+    fn a_vendor_folder_that_users_can_swap_is_refused() {
+        use paddock_service::privileged::trust::Security;
+        use paddock_service::privileged::trust_fake::{inherited_from_program_data, locked, windows_machine};
+        let paths = windows_paths();
+        let mut machine = windows_machine(|_| locked());
+        // `C:\ProgramData\Dyno` as a standard user made it: it inherits the ProgramData rights (create and delete children).
+        let mut dyno = inherited_from_program_data();
+        if let Security::Windows(sd) = &mut dyno.security {
+            sd.owner = "S-1-5-21-111-222-333-1001".into();
+        }
+        machine.put("C:\\ProgramData\\Dyno", dyno);
+        let why = remove_data_folder_with(&paths, &|| {}, &mut machine).unwrap_err();
+        assert!(why.contains("not removed") && why.contains("Dyno"), "{why}");
+    }
+
+    /// The same folder, protected, passes the check and the removal goes on (here the real folder is not there).
+    #[test]
+    fn a_protected_data_folder_passes_the_check() {
+        use paddock_service::privileged::trust_fake::{locked, windows_machine};
+        let mut machine = windows_machine(|_| locked());
+        let note = remove_data_folder_with(&windows_paths(), &|| {}, &mut machine).unwrap();
+        assert_eq!(note, "was not there");
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_folder_above_the_private_one_is_readable_by_everyone_so_a_standard_user_can_read_the_lifecycle_file() {
@@ -566,7 +651,7 @@ mod tests {
         std::fs::create_dir_all(&paths.data_dir).unwrap();
         std::fs::write(paths.data_dir.join("config.json"), "{}").unwrap();
         std::fs::write(paths.data_dir.join("audit.jsonl"), "").unwrap();
-        remove_data_folder_with(&paths, &|| {}).expect("a best-effort file never aborts the removal");
+        remove_data_folder_with(&paths, &|| {}, &mut RealTrust).expect("a best-effort file never aborts the removal");
         assert!(!paths.data_dir.exists(), "the data folder and the audit log still went");
     }
 
@@ -578,12 +663,12 @@ mod tests {
         std::fs::create_dir_all(&logs).unwrap();
         paths.lifecycle = Some(logs.join("lifecycle.log"));
         std::fs::write(logs.join("lifecycle.log"), "t=1 stopped pid=1 version=1\n").unwrap();
-        remove_data_folder_with(&paths, &|| {}).unwrap();
+        remove_data_folder_with(&paths, &|| {}, &mut RealTrust).unwrap();
         assert!(!logs.exists(), "an empty dyno-helper logs folder is removed");
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::write(logs.join("lifecycle.log"), "x").unwrap();
         std::fs::write(logs.join("someone-elses.log"), "keep").unwrap();
-        remove_data_folder_with(&paths, &|| {}).unwrap();
+        remove_data_folder_with(&paths, &|| {}, &mut RealTrust).unwrap();
         assert!(
             logs.join("someone-elses.log").exists() && logs.exists(),
             "another file keeps the folder"
@@ -597,10 +682,10 @@ mod tests {
         let file = paths.lifecycle.clone().unwrap();
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
         std::fs::write(&file, "t=1 stopped pid=1 version=1\n").unwrap();
-        remove_data_folder_with(&paths, &|| {}).unwrap();
+        remove_data_folder_with(&paths, &|| {}, &mut RealTrust).unwrap();
         assert!(!file.exists());
         // A missing file is fine (a second uninstall).
-        remove_data_folder_with(&paths, &|| {}).unwrap();
+        remove_data_folder_with(&paths, &|| {}, &mut RealTrust).unwrap();
     }
 
     #[test]
@@ -693,7 +778,7 @@ mod tests {
                 assert!(waited.elapsed().as_secs() < 20, "the logging thread never wrote its file");
                 std::thread::yield_now();
             }
-            let note = remove_data_folder_with(&paths, &|| gate.quiesce()).unwrap();
+            let note = remove_data_folder_with(&paths, &|| gate.quiesce(), &mut RealTrust).unwrap();
             stop.store(true, Ordering::SeqCst);
             worker.join().unwrap();
             assert_eq!(note, "removed", "round {round}");
@@ -716,7 +801,7 @@ mod tests {
             std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
             return; // running as root: a read-only parent does not stop it
         }
-        let note = remove_data_folder_with(&paths, &|| {});
+        let note = remove_data_folder_with(&paths, &|| {}, &mut RealTrust);
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
         let note = note.unwrap();
         assert!(note.contains("left in place"), "{note}");
@@ -747,7 +832,7 @@ mod tests {
         let paths = paths_in(dir.path());
         std::fs::create_dir_all(&paths.data_dir).unwrap();
         std::fs::write(paths.data_dir.join("notes.txt"), b"someone else's").unwrap();
-        let note = remove_data_folder_with(&paths, &|| {}).unwrap();
+        let note = remove_data_folder_with(&paths, &|| {}, &mut RealTrust).unwrap();
         assert!(note.contains("left in place"), "{note}");
     }
 

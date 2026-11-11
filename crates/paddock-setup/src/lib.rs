@@ -26,6 +26,7 @@ pub mod checkdir;
 pub mod exit;
 pub mod guard;
 pub mod handoff;
+pub mod linkargs;
 pub mod localpath;
 pub mod log;
 pub mod runvalues;

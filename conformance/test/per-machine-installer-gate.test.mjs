@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion, checkReleasedHash, previousTag, previousProgramVersion } from '../release/check-per-machine-installer.mjs';
+import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, dependentLoadFlagsOf, checkSetupLoadFlag, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion, checkReleasedHash, previousTag, previousProgramVersion } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -117,6 +117,51 @@ test('paddock-setup.exe must be a GUI-subsystem program: a console one flashes a
   assert.match(checkSetupSubsystem({ bytes: pe(3), name: 'a-setup.exe' }).join(), /subsystem 3.*command prompt/s);
   assert.match(checkSetupSubsystem({ bytes: Buffer.from('MZ'), name: 'a-setup.exe' }).join(), /not a Windows program/);
   assert.match(checkSetupSubsystem({ bytes: null, name: 'a-setup.exe' }).join(), /could not be extracted/);
+});
+
+/**
+ * A PE32+ file with one section and, when `flags` is a number, a load configuration directory that holds it as DependentLoadFlags
+ * (offset 0x4E of IMAGE_LOAD_CONFIG_DIRECTORY64). The section maps RVA 0x2000 to file offset 0x400.
+ */
+const peWithLoadConfig = (flags, { size = 0x90 } = {}) => {
+  const b = Buffer.alloc(0x800);
+  b.writeUInt16LE(0x5a4d, 0);
+  b.writeUInt32LE(0x80, 0x3c);
+  b.writeUInt32LE(0x4550, 0x80);
+  b.writeUInt16LE(1, 0x80 + 6); // sections
+  b.writeUInt16LE(0xf0, 0x80 + 20); // size of the optional header
+  const opt = 0x80 + 24;
+  b.writeUInt16LE(0x20b, opt);
+  b.writeUInt16LE(2, opt + 68);
+  b.writeUInt32LE(16, opt + 108);
+  const section = opt + 0xf0;
+  b.write('.rdata', section);
+  b.writeUInt32LE(0x1000, section + 8); // virtual size
+  b.writeUInt32LE(0x2000, section + 12); // virtual address
+  b.writeUInt32LE(0x400, section + 16); // raw size
+  b.writeUInt32LE(0x400, section + 20); // raw pointer
+  if (typeof flags === 'number') {
+    b.writeUInt32LE(0x2100, opt + 112 + 10 * 8); // load config RVA
+    b.writeUInt32LE(size, opt + 112 + 10 * 8 + 4);
+    b.writeUInt32LE(size, 0x400 + 0x100); // the structure's own Size
+    b.writeUInt16LE(flags, 0x400 + 0x100 + 0x4e);
+  }
+  return b;
+};
+
+test('paddock-setup.exe must link with /DEPENDENTLOADFLAG:0x800: it runs from $PLUGINSDIR and imports version.dll', () => {
+  assert.equal(dependentLoadFlagsOf(peWithLoadConfig(0x800)), 0x800);
+  assert.equal(dependentLoadFlagsOf(peWithLoadConfig(undefined)), null);
+  assert.deepEqual(checkSetupLoadFlag({ bytes: peWithLoadConfig(0x800), name: 'a-setup.exe' }), []);
+  // Other bits may be set beside LOAD_LIBRARY_SEARCH_SYSTEM32 (0x800).
+  assert.deepEqual(checkSetupLoadFlag({ bytes: peWithLoadConfig(0x800 | 0x100), name: 'a-setup.exe' }), []);
+  assert.match(checkSetupLoadFlag({ bytes: peWithLoadConfig(0), name: 'a-setup.exe' }).join(), /DependentLoadFlags is 0x0.*0x800.*version\.dll/s);
+  assert.match(checkSetupLoadFlag({ bytes: peWithLoadConfig(0x100), name: 'a-setup.exe' }).join(), /0x100/);
+  assert.match(checkSetupLoadFlag({ bytes: peWithLoadConfig(undefined), name: 'a-setup.exe' }).join(), /no load configuration/);
+  // A structure too short to hold the field is the same as having none (an old linker).
+  assert.match(checkSetupLoadFlag({ bytes: peWithLoadConfig(0x800, { size: 0x40 }), name: 'a-setup.exe' }).join(), /DependentLoadFlags field/);
+  assert.match(checkSetupLoadFlag({ bytes: Buffer.from('MZ'), name: 'a-setup.exe' }).join(), /not a Windows program/);
+  assert.match(checkSetupLoadFlag({ bytes: null, name: 'a-setup.exe' }).join(), /could not be extracted/);
 });
 
 const brand = (v, wide = false) => Buffer.concat([Buffer.from('MZ....'), wide ? Buffer.from(`Nullsoft Install System v${v}`, 'utf16le') : Buffer.from(`Nullsoft Install System v${v}`)]);

@@ -3,7 +3,7 @@
 //! `root/wmi`, administrators). The sysfs readers take the `/sys` root so a test builds a tree in a temporary folder; the text
 //! parsers are pure. The helper reads only these fixed places; no request names a path.
 
-use crate::runner::ToolRunner;
+use crate::runner::{Tool, ToolRunner};
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_counters::{CounterReader, CounterValue, EnergyDomain, FanSpeed, ThermalZone, MAX_ENTRIES};
 use dyno_core::helper_requests::CounterId;
@@ -14,6 +14,8 @@ use std::time::Duration;
 const TIMEOUT: Duration = Duration::from_secs(15);
 const POWERMETRICS: &str = "/usr/bin/powermetrics";
 const POWERSHELL: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+/// `$PSHOME\Modules`: the only module folder the SYSTEM PowerShell may load from (`PSModulePath` is set to it for the call).
+const PSHOME_MODULES: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules";
 const MSACPI: &str = "Get-CimInstance -Namespace root/wmi -ClassName MSAcpi_ThermalZoneTemperature | Select-Object InstanceName,CurrentTemperature | ConvertTo-Json -Compress";
 /// The largest sensor file or tool output read.
 const MAX_TEXT: u64 = 1 << 20;
@@ -247,9 +249,21 @@ impl CounterReader for SystemCounters {
             (HelperHost::Windows, CounterId::Thermal) => {
                 let args = ["-NoProfile", "-NonInteractive", "-Command", MSACPI].map(String::from);
                 // "Not supported": the machine has no ACPI thermal zone class (a virtual machine), not a failure to explain.
-                let text = match self.runner.run(POWERSHELL, &args, TIMEOUT) {
+                let tool = Tool {
+                    program: POWERSHELL.to_string(),
+                    args: args.to_vec(),
+                    // Run as SYSTEM: never load modules from a path the service inherited (ADR 0053 audit P2, Dyno 1.1.1 WP-6).
+                    env: vec![("PSModulePath".to_string(), PSHOME_MODULES.to_string())],
+                };
+                let text = match self.runner.run_tool(&tool, TIMEOUT) {
+                    Ok(out) if out.ok => out.stdout,
+                    Ok(out) if out.error.contains("Not supported") => return Err(nothing("thermal zones")),
+                    Ok(out) => {
+                        let why = if out.error.is_empty() { "no message" } else { out.error.as_str() };
+                        return Err(PlatformError::Failed(format!("powershell.exe failed: {why}")));
+                    }
                     Err(e) if e.to_string().contains("Not supported") => return Err(nothing("thermal zones")),
-                    other => other?,
+                    Err(e) => return Err(e),
                 };
                 let zones = parse_msacpi(&text);
                 if zones.is_empty() {
@@ -287,7 +301,7 @@ impl dyno_core::helper_memory::MemoryReader for SystemMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runner::{Tool, ToolOutput};
+    use crate::runner::ToolOutput;
 
     fn put(root: &Path, rel: &str, text: &str) {
         let p = root.join(rel);
@@ -453,5 +467,37 @@ mod tests {
         assert!(matches!(vm.read(CounterId::Thermal), Err(PlatformError::Unsupported(m)) if m.contains("thermal zones")));
         let empty = SystemCounters::new(HelperHost::Windows, Box::new(Scripted("")));
         assert!(empty.read(CounterId::Thermal).is_err());
+    }
+
+    /// Plan WP-6 (3): the PowerShell run as SYSTEM reads its modules from `$PSHOME\Modules` only, never from a `PSModulePath` the
+    /// service inherited (a folder a standard user can write would run their `CimCmdlets` as SYSTEM).
+    #[test]
+    fn the_powershell_run_as_system_pins_its_module_path_to_pshome() {
+        use std::sync::{Arc, Mutex};
+        struct Records(Arc<Mutex<Vec<Tool>>>);
+        impl ToolRunner for Records {
+            fn run_tool(&self, t: &Tool, _: Duration) -> Result<ToolOutput, PlatformError> {
+                self.0.lock().unwrap().push(t.clone());
+                Ok(ToolOutput {
+                    ok: true,
+                    stdout: r#"{"InstanceName":"z","CurrentTemperature":3000}"#.into(),
+                    error: String::new(),
+                })
+            }
+        }
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let win = SystemCounters::new(HelperHost::Windows, Box::new(Records(seen.clone())));
+        win.read(CounterId::Thermal).unwrap();
+        let tools = seen.lock().unwrap();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].program, POWERSHELL);
+        assert_eq!(
+            tools[0].env,
+            [(
+                "PSModulePath".to_string(),
+                r"C:\Windows\System32\WindowsPowerShell\v1.0\Modules".to_string()
+            )],
+            "the module path is exactly $PSHOME\\Modules"
+        );
     }
 }

@@ -104,6 +104,66 @@ export function checkSetupSubsystem({ bytes, name }) {
   }
 }
 
+/**
+ * The DependentLoadFlags of a PE file's load configuration directory (what `/DEPENDENTLOADFLAG` writes), the file's raw bytes read through the
+ * section table; `null` when the file has no load configuration or its structure is too short to hold the field. Throws a message that
+ * says what is wrong with a file that is not a PE file.
+ */
+export function dependentLoadFlagsOf(bytes) {
+  const b = Buffer.from(bytes);
+  if (b.length < 0x40 || b.readUInt16LE(0) !== 0x5a4d) throw new Error('not a Windows program (no MZ header)');
+  const pe = b.readUInt32LE(0x3c);
+  if (pe + 24 > b.length || b.readUInt32LE(pe) !== 0x4550) throw new Error('not a Windows program (no PE header)');
+  const sections = b.readUInt16LE(pe + 6);
+  const optSize = b.readUInt16LE(pe + 20);
+  const opt = pe + 24;
+  const magic = b.readUInt16LE(opt);
+  if (magic !== 0x20b && magic !== 0x10b) throw new Error(`not a Windows program (optional header magic ${magic.toString(16)})`);
+  const wide = magic === 0x20b;
+  const dirs = opt + (wide ? 112 : 96);
+  const count = b.readUInt32LE(opt + (wide ? 108 : 92));
+  if (count <= 10 || dirs + 11 * 8 > b.length) return null;
+  const rva = b.readUInt32LE(dirs + 10 * 8);
+  const size = b.readUInt32LE(dirs + 10 * 8 + 4);
+  if (rva === 0 || size === 0) return null;
+  let raw = null;
+  for (let i = 0; i < sections; i++) {
+    const at = opt + optSize + i * 40;
+    if (at + 40 > b.length) break;
+    const virtualSize = b.readUInt32LE(at + 8);
+    const va = b.readUInt32LE(at + 12);
+    const rawSize = b.readUInt32LE(at + 16);
+    const rawPointer = b.readUInt32LE(at + 20);
+    if (rva >= va && rva < va + Math.max(virtualSize, rawSize)) {
+      raw = rawPointer + (rva - va);
+      break;
+    }
+  }
+  if (raw === null) throw new Error('not a Windows program (the load configuration is outside every section)');
+  const field = raw + (wide ? 0x4e : 0x36);
+  // The structure says its own size first: a short one (an old linker) has no such field.
+  if (raw + 4 > b.length || field + 2 > b.length || b.readUInt32LE(raw) < field + 2 - raw) return null;
+  return b.readUInt16LE(field);
+}
+
+/**
+ * paddock-setup.exe runs from `$PLUGINSDIR` (a folder beside other programs' files) and imports `version.dll`: without
+ * `/DEPENDENTLOADFLAG:0x800` (LOAD_LIBRARY_SEARCH_SYSTEM32) Windows looks in the program's own folder first and a planted DLL runs with the
+ * installer's rights (Dyno 1.1.1 WP-6 (2), the security audit). The flag is read from the shipped file, not from the build's arguments.
+ */
+export function checkSetupLoadFlag({ bytes, name }) {
+  if (!bytes) return [`${name}: paddock-setup.exe could not be extracted to check its load flags`];
+  try {
+    const flags = dependentLoadFlagsOf(bytes);
+    if (flags === null) return [`${name}: paddock-setup.exe has no load configuration with a DependentLoadFlags field: link with /DEPENDENTLOADFLAG:0x800 (crates/paddock-setup/build.rs) so it never loads version.dll from its own folder`];
+    return (flags & 0x800) === 0x800
+      ? []
+      : [`${name}: paddock-setup.exe's DependentLoadFlags is 0x${flags.toString(16)}, expected 0x800 set (LOAD_LIBRARY_SEARCH_SYSTEM32): it imports version.dll and runs from $PLUGINSDIR, so a planted version.dll beside it would load; link with /DEPENDENTLOADFLAG:0x800 (crates/paddock-setup/build.rs)`];
+  } catch (e) {
+    return [`${name}: paddock-setup.exe is ${e.message}`];
+  }
+}
+
 /** One string of a version resource (UTF-16: key, NULs, value), or null. */
 export function resourceStringOf(bytes, key) {
   const b = Buffer.from(bytes);
@@ -321,6 +381,7 @@ function main(argv) {
         const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
         const exe = join(tmp, 'paddock-setup.exe');
         problems.push(...checkSetupSubsystem({ bytes: ex.status === 0 ? readFileSync(exe) : null, name }));
+        problems.push(...checkSetupLoadFlag({ bytes: ex.status === 0 ? readFileSync(exe) : null, name }));
         problems.push(...checkSetupDescribed({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, expectVersion: setupVersion, product: conf.productName, roots }));
         const released = checkReleasedHash({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, identifier: conf.identifier, version: setupVersion, records, previousVersion });
         problems.push(...released.problems);

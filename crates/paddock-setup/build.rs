@@ -4,7 +4,12 @@
 //! a Defender verdict is per hash). Only the VM tests set `PADDOCK_SETUP_TEST_VERSION` (a build that must look like a newer
 //! installed app). Other builds (tests, other hosts) get no resource.
 //!
-//! The link is deterministic (`/Brepro`: lld-link then derives the header time stamp from the contents, not the clock; `/DEBUG:NONE`: no PDB path or GUID).
+//! The link is deterministic (`/Brepro`: lld-link then derives the header time stamp from the contents, not the clock; `/DEBUG:NONE`: no PDB path or GUID)
+//! and loads its DLLs from the system folder only (`/DEPENDENTLOADFLAG:0x800`, Dyno 1.1.1 WP-6); the arguments are in `src/linkargs.rs`.
+
+#[path = "src/linkargs.rs"]
+#[allow(dead_code)]
+mod linkargs;
 
 #[path = "src/versionres.rs"]
 #[allow(dead_code)]
@@ -30,10 +35,11 @@ fn main() {
         return;
     }
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-        println!("cargo:rustc-link-arg-bins=/Brepro");
-        // No PDB and no CodeView record: lld derives the `/Brepro` hash from the PDB too, and a PDB holds the build folder's absolute
-        // paths, so the same source would give another hash in another checkout or target folder.
-        println!("cargo:rustc-link-arg-bins=/DEBUG:NONE");
+        // `/Brepro`, `/DEBUG:NONE` (no PDB and no CodeView record: lld derives the `/Brepro` hash from the PDB too, and a PDB holds
+        // the build folder's absolute paths) and `/DEPENDENTLOADFLAG:0x800` (system folder only), see `src/linkargs.rs`.
+        for arg in linkargs::msvc_link_args() {
+            println!("cargo:rustc-link-arg-bins={arg}");
+        }
     }
     let Ok(product) = std::env::var("PADDOCK_SETUP_PRODUCT") else {
         return;
