@@ -19,7 +19,6 @@ pub mod cue;
 pub mod discover;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fake;
-mod ignored_env;
 pub mod install;
 pub mod launch;
 pub mod page;

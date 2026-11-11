@@ -16,6 +16,7 @@
 
 mod app;
 mod atomic;
+pub mod dev_override;
 mod dirs;
 mod error;
 mod folder;

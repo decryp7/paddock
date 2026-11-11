@@ -426,14 +426,8 @@ fn current_location_for(exe: &str) -> Result<(), String> {
 /// The agent program next to the app (or `DYNO_AGENT_BIN` in a development build).
 pub fn agent_program() -> Result<PathBuf, String> {
     let app = std::env::current_exe().map_err(|e| format!("the app's folder cannot be found: {e}"))?;
-    let env = std::env::var_os("DYNO_AGENT_BIN");
-    crate::link::agent_exe(&app, agent_override(cfg!(debug_assertions), env.as_deref()))
-}
-
-/// The program `DYNO_AGENT_BIN` names, only in a development build: in a release build the environment must not decide
-/// which program the app runs (any process of the user could set it).
-pub fn agent_override(debug_build: bool, value: Option<&std::ffi::OsStr>) -> Option<&std::ffi::OsStr> {
-    value.filter(|_| debug_build)
+    let env = paddock_env::dev_override!("DYNO_AGENT_BIN");
+    crate::link::agent_exe(&app, env.as_deref())
 }
 
 // ----------------------------------------------------------------------------------------------------------- Linux
@@ -1189,18 +1183,6 @@ mod tests {
             registration_words(&ServiceError::Busy, false),
             "Another change is still running; try again in a moment."
         );
-    }
-
-    #[test]
-    fn the_agent_override_from_the_environment_counts_only_in_a_development_build() {
-        let v = std::ffi::OsString::from("/tmp/other-agent");
-        assert_eq!(super::agent_override(true, Some(v.as_os_str())), Some(v.as_os_str()));
-        assert_eq!(
-            super::agent_override(false, Some(v.as_os_str())),
-            None,
-            "a release build ignores it"
-        );
-        assert_eq!(super::agent_override(true, None), None);
     }
 
     /// The wiring of the app's Linux service (`LinuxService`) over the shared simulator: what the transition decides is tested in

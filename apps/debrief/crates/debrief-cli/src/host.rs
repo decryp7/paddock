@@ -33,7 +33,7 @@ pub fn worker_binary() -> PathBuf {
 
 /// [`worker_binary`] for a given build mode and value of `DEBRIEF_STORE_WORKER`.
 fn worker_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
-    if let Some(p) = debrief_ipc::dev_env::resolve(debug, "DEBRIEF_STORE_WORKER", env) {
+    if let Some(p) = paddock_env::dev_override::resolve(debug, "DEBRIEF_STORE_WORKER", env) {
         return PathBuf::from(p);
     }
     let name = if cfg!(windows) {

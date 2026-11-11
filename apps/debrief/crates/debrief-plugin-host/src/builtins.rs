@@ -42,7 +42,7 @@ pub const PLUGINS_VAR: &str = "DEBRIEF_PLUGINS";
 
 /// [`default_binary`] for a given build mode and value of [`PLUGINS_VAR`].
 fn default_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
-    if let Some(p) = debrief_ipc::dev_env::resolve(debug, PLUGINS_VAR, env) {
+    if let Some(p) = paddock_env::dev_override::resolve(debug, PLUGINS_VAR, env) {
         return PathBuf::from(p);
     }
     let dir = std::env::current_exe()

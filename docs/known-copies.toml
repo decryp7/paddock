@@ -1062,25 +1062,6 @@ id = "dev-env-override"
 title = "A development-only environment variable that picks a program or switch, honoured under cfg!(debug_assertions) only and logged once by name when ignored (ADR 0073 DB1, DB9)"
 canonical = "paddock-env"
 paths = ["crates/paddock-env/src/dev_override.rs"]
-status = "planned"
+status = "built"
 adr = "0073"
 
-  [[mechanism.copy]]
-  paths = ["apps/debrief/crates/debrief-ipc/src/dev_env.rs"]
-  owner = "debrief"
-  delete_by = "debrief-v1.2.0"
-  note = "decide, resolve and dev_override: used by the store worker (app and CLI) and the plugins binary lookups."
-
-  [[mechanism.copy]]
-  paths = ["apps/debrief/crates/chromium-driver/src/ignored_env.rs", "apps/debrief/crates/chromium-driver/src/discover.rs", "apps/debrief/crates/chromium-driver/src/launch.rs"]
-  symbols = ["item:warn_once", "item:first_time", "item:find_with", "item:decide", "item:from_environment"]
-  owner = "debrief"
-  delete_by = "debrief-v1.2.0"
-  note = "chromium-driver is a neutral crate that moves to paddock-chromium (docs/plans/shared-next.md), so it cannot depend on debrief-ipc; it keeps its own log-once for CHROMIUM_PATH and DEBRIEF_BROWSER_NO_SANDBOX (launch.rs Sandbox::decide takes the same debug flag)."
-
-  [[mechanism.copy]]
-  paths = ["apps/dyno/app/src-tauri/src/login.rs"]
-  symbols = ["item:agent_override"]
-  owner = "dyno"
-  delete_by = "dyno-v1.2.0"
-  note = "agent_override(debug_build, value) for DYNO_AGENT_BIN; it does not log the ignored name."

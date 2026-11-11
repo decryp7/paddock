@@ -17,6 +17,8 @@ test = false
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 debrief-ipc = { path = "../debrief-ipc" }
+# `DEBRIEF_PLUGINS` is honoured in a debug build only (ADR 0073).
+paddock-env = { path = "../../../../crates/paddock-env" }
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 debrief-plugin-package = { path = "../debrief-plugin-package" }
 debrief-profile = { path = "../debrief-profile" }

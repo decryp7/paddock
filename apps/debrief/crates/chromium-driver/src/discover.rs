@@ -119,7 +119,7 @@ pub fn find_for_tests_with(env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn
 pub fn find_with(debug: bool, os: Os, env: &dyn Fn(&str) -> Option<String>, exists: &dyn Fn(&Path) -> bool) -> Option<Browser> {
     if let Some(p) = env(PATH_ENV).filter(|v| !v.is_empty()) {
         if !debug {
-            crate::ignored_env::warn_once(PATH_ENV);
+            paddock_env::dev_override::warn_ignored(PATH_ENV);
         } else if exists(Path::new(&p)) {
             return Some(Browser {
                 flavor: Flavor::Chromium,
