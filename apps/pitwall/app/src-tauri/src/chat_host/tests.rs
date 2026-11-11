@@ -972,6 +972,19 @@ fn logs_carry_only_declared_argument_names_and_never_forge_lines() {
     assert!(!l.contains('\n') && !l.contains('\r'), "one line: {l:?}");
     assert!(l.contains("other_args=4"), "{l}");
 
+    let forged = AssistantEvent::ToolFinished {
+        call_id: "c1\nINFO forged".into(),
+        name: "dyno_x".into(),
+        ok: true,
+        summary: String::new(),
+        output: None,
+        data: None,
+        outcome: None,
+        approval: None,
+    };
+    let l = log_line::line("conv\r\nWARN forged", &forged).unwrap();
+    assert!(!l.contains('\n') && !l.contains('\r'), "ids cannot forge a line: {l:?}");
+
     let r = log_line::revoke_line("dyno", "disks\nINFO pitwall_chat: forged");
     assert!(!r.contains('\n'), "{r:?}");
 }

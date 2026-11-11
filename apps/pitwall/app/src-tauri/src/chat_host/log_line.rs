@@ -53,7 +53,9 @@ pub fn line(conversation: &str, event: &AssistantEvent) -> Option<String> {
         (None, false) => "failed",
     };
     Some(format!(
-        "tool call conversation={conversation} call={call_id} server={server} tool={tool} approval={how} outcome={result} duration_ms={} result_bytes={} args=[{}] other_args={}",
+        "tool call conversation={} call={} server={server} tool={tool} approval={how} outcome={result} duration_ms={} result_bytes={} args=[{}] other_args={}",
+        plain(conversation),
+        plain(call_id),
         get("durationMs").and_then(Value::as_u64).unwrap_or(0),
         get("bytes").and_then(Value::as_u64).unwrap_or(0),
         keys.join(","),
