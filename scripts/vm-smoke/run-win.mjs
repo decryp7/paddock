@@ -5,7 +5,7 @@
 // vm-smoke format. The VM is reverted and stopped at the end, also after a failure.
 //
 //   node scripts/vm-smoke/run-win.mjs --app dyno (--installer <setup.exe> | --run <ci run id>) [--out <dir>] [--only <rows>]
-//   --only names whole release rows (win-rows.mjs: tray-menu, login-jobs, disk-space, exploit, scoping, hung-page, install-rows, upgrade-swap, second-user, restart-tray, or their
+//   --only names whole release rows (win-rows.mjs: tray-menu, login-jobs, disk-space, exploit, scoping, hung-page, install-rows, upgrade-swap, second-user, second-install, restart-tray, or their
 //   row numbers, e.g. 10,11,16,21): one install, only those rows, a partial result. Needs --vnc. Without rows, --only is a win-suite.ps1 part (`start`).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';

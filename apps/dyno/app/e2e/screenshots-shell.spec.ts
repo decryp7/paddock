@@ -66,3 +66,32 @@ test.describe('Dyno shell screenshots', () => {
     });
   }
 });
+
+// The pages WP-14 changed, at the widths a window really has, light and dark. Only on request:
+// `SCREENSHOTS=1 SHELL_SHOTS_DIR=<dir> SHELL_SHOTS_SIZES=1280x800,1920x1080 npx playwright test --project=screenshots e2e/screenshots-shell.spec.ts -g "sized"`.
+const SIZES = (process.env['SHELL_SHOTS_SIZES'] ?? '').split(',').filter(Boolean).map((s) => s.split('x').map(Number) as [number, number]);
+const SIZED_PAGES: [string, string][] = [
+  ['extras-apps', 'extras?tab=apps'], ['extras-boot', 'extras?tab=boot'], ['extras-changes', 'extras?tab=changes'], ['extras-files', 'extras?tab=files'],
+  ['connections', 'network'], ['listening', 'network?tab=listening'], ['firewall', 'firewall'], ['alarms', 'alarms'], ['processes', 'processes'], ['cpu', 'cpu'],
+];
+test.describe('Dyno shell screenshots, sized', () => {
+  test.skip(!OUT || SIZES.length === 0, 'set SHELL_SHOTS_DIR and SHELL_SHOTS_SIZES');
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const [w, h] of SIZES) {
+      test.describe(`${w}x${h} ${scheme}`, () => {
+        test.use({ colorScheme: scheme, viewport: { width: w, height: h } });
+        for (const [name, path] of SIZED_PAGES) {
+          test(`sized ${name}`, async ({ page }) => {
+            mkdirSync(OUT, { recursive: true });
+            await page.goto(`/?latency=0#/${path}`);
+            await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 30_000 });
+            if (name === 'listening') await page.getByRole('radio', { name: 'Listening' }).click();
+            await expect(page.locator('[aria-busy="true"]')).toHaveCount(0, { timeout: 30_000 });
+            await page.evaluate(() => document.fonts.ready);
+            await page.screenshot({ path: `${OUT}/${name}-${w}x${h}-${scheme}.png` });
+          });
+        }
+      });
+    }
+  }
+});

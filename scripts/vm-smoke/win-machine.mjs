@@ -223,7 +223,9 @@ export async function coldUninstallStep() {
   return coldUninstallAccepted(f) ? { ...res, status: 'pass', summary: 'the first uninstall after boot left nothing, or only the noted leftover and a reinstall works' } : res;
 }
 
-export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
+export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser), ...secondInstallRow()];
+/** The refusal of `crates/paddock-setup/src/apply.rs` `Refusal::Busy` (ADR 0022, amendment 2026-11-12): not driven yet, so not measured. */
+export const secondInstallRow = () => [notDriven(ROW_TITLES.secondInstall, NOT_DRIVEN.secondInstall)];
 
 const NT = `Add-Type -Namespace N -Name P -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);'; `;
 /**
@@ -319,7 +321,8 @@ export const afterRowFns = {
   'hung-page': () => winHung(),
   'install-rows': () => installRows(),
   'upgrade-swap': () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }),
-  'second-user': () => notDrivenWinRows(),
+  'second-user': () => notDrivenWinRows().slice(0, 1),
+  'second-install': () => secondInstallRow(),
 };
 export const afterRowSteps = (ids) => ids.map((k) => afterRowFns[k]);
 export const afterQuitSteps = [() => sameVersionRefused(), () => winMcpStep(), () => uninstall(), () => installRows(), () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }), () => notDrivenWinRows(), () => winHung(), () => winHiddenStart(), () => winQuitStop()];

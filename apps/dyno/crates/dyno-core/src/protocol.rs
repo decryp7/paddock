@@ -1469,7 +1469,7 @@ mod tests {
         let json = serde_json::to_value(&live).unwrap();
         assert_eq!(
             json["via"],
-            serde_json::json!({ "processes": "helper", "others": "local", "temperatures": "local" })
+            serde_json::json!({ "processes": "helper", "others": "local", "temperatures": "local", "processesHint": null })
         );
         assert_eq!(round(&Message::Live(Box::new(live.clone()))), Message::Live(Box::new(live)));
     }

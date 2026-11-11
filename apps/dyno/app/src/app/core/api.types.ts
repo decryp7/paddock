@@ -204,6 +204,8 @@ export interface LiveVia {
   processes: ReadVia;
   others: ReadVia;
   temperatures: ReadVia;
+  /** A note beside the process list while part of it is still to come; not a failure. */
+  processesHint?: string | null;
 }
 
 export interface Locker {

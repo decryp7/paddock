@@ -87,6 +87,16 @@ describe('ProcessesPage', () => {
     expect(r.el.querySelector('[data-testid="reading-source-turn-on"]')).not.toBeNull();
     r.f.destroy();
   });
+  it('shows the engine\'s note while the helper\'s first read is awaited, as a hint and not as a failure', async () => {
+    const { f, el } = await make((m) => {
+      const live = m.liveUpdate.bind(m);
+      m.liveUpdate = (d) => ({ ...live(d), via: { processes: 'local', others: 'local', temperatures: 'local', processesHint: 'Other accounts appear after the helper’s first read.' } }) as ReturnType<typeof live>;
+    });
+    expect(el.querySelector('[data-testid="processes-source"] [data-testid="reading-source-hint"]')?.textContent).toContain('appear after the helper’s first read');
+    expect(el.querySelector('[data-testid="reading-source-unavailable"]')).toBeNull();
+    expect(el.querySelector('[data-testid="reading-source-step"]')).toBeNull();
+    f.destroy();
+  });
   it('says the Other users total was counted by the helper', async () => {
     const { f, store, el } = await make((m) => {
       const live = m.liveUpdate.bind(m);

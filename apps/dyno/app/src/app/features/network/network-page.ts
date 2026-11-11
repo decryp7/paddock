@@ -205,7 +205,9 @@ function readCollapsed(): Set<string> {
     .summary { margin: 0; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
     .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
     .summary .this-pc { margin-left: auto; color: var(--text-3); }
-    .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
+    /* All of the controls (search, two checks, three segmented controls, expand and collapse) fit one row at 1280: the search gives way first. */
+    .bar { display: flex; gap: var(--sp-2) var(--sp-3); align-items: center; flex-wrap: wrap; }
+    .bar dy-search-field { flex: 1 1 140px; min-width: 140px; max-width: 220px; }
     .traffic { margin-left: auto; flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .reach dy-icon { --icon-size: 13px; }
