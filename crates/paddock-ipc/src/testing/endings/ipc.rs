@@ -247,7 +247,14 @@ pub fn logged<E: std::fmt::Display>(
     let from = capture.len();
     let (mut observed, expect) = run().map_err(|e| e.to_string())?;
     if expect.end_line {
-        capture.wait_settled(from, expect.ends, GUARD, SETTLE);
+        // A missing line is the judge's finding (`no-end-line`); an endpoint that never stops ending connections is the rig's.
+        if capture.wait_settled(from, expect.ends, GUARD, SETTLE) == super::log::Settled::NeverQuiet
+        {
+            return Err(format!(
+                "the endpoint kept logging end lines for {} s and never went quiet; the scenario's window cannot be closed",
+                GUARD.as_secs()
+            ));
+        }
     }
     observed.log = capture.since(from);
     Ok((observed, expect))
