@@ -17,6 +17,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 - **Names:** The name table is now rebuilt in a background job ("Updating names" in Jobs, with phases and Cancel) instead of inside a search or an AI chat turn, and only after the catalogue is built. A search always answers at once from the last table, and joining look-alike names no longer compares every pair of names (8,000 names: 7.5 ms instead of 43 s)
 - **Names:** Opening another project while the name table is being rebuilt no longer shows the old project's names in the new window, and a change that arrives while a rebuild runs is no longer lost: it queues the next rebuild. A catalogue with one source that cannot be read is now treated as finished (the Jobs pane says how many sources are missing) instead of being waited for until the rebuild gave up
 - **Memory:** A capture that Debrief released from memory to make room for others is read again only if its file is unchanged since you opened it (otherwise it says to open it again), and it is read again by the same reader process as when you opened it, without holding up the captures you have open
+- **AI:** Asking for a summary of the same time range again while it is queued or running (from the button, the menu or the palette) no longer starts a second job: it joins the first one in Jobs
 
 ### Removed
 

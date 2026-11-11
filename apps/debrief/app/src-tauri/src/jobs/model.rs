@@ -449,7 +449,6 @@ impl JobSpec {
     }
 
     /// Makes the spec idempotent (see [`JobSpec::key`]); the caller builds the key from the window and the request.
-    #[cfg(test)]
     pub fn keyed(mut self, key: impl Into<String>) -> JobSpec {
         self.key = Some(key.into());
         self

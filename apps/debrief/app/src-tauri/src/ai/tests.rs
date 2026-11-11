@@ -750,6 +750,35 @@ fn a_waiting_request_can_be_cancelled_and_a_queued_turn_frees_its_chat() {
 }
 
 #[test]
+fn clicking_summarize_twice_gives_one_job() {
+    let f = Fixture::new("summarize-twice");
+    let core = f.core();
+    let (model, steps, entered) = gated_counted(vec![text("A summary.")]);
+    core.set_fixed_provider(model);
+    let app = f.app(core);
+    let main = window(&app, "main");
+    open_samples(&main);
+    let range = json!({"op": "summarize", "from": 0, "to": 1000});
+    let first = start(&main, range.clone());
+    // The same ask from the menu or the palette while it runs (and the button again) joins the running job.
+    wait_until("the model to be asked", || entered.load(Ordering::SeqCst) == 1);
+    assert_eq!(start(&main, range.clone()), first, "a second click while it runs");
+    assert_eq!(active_ai(&app).len(), 1);
+    // A different range is a different job, queued behind it.
+    let other = start(&main, json!({"op": "summarize", "from": 0, "to": 2000}));
+    assert_ne!(other, first);
+    assert_eq!(active_ai(&app).len(), 2);
+    steps.send(Step::Answer).unwrap();
+    assert_eq!(ended(&app, first).map(|j| j.state), Some(crate::jobs::JobState::Done));
+    // A finished job frees the key: asking again summarises again.
+    wait_until("the other job to run", || entered.load(Ordering::SeqCst) == 2);
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 1);
+    steps.send(Step::Answer).unwrap();
+    wait_until("no AI jobs", || active_ai(&app).is_empty());
+    assert_ne!(start(&main, range), first);
+}
+
+#[test]
 fn research_with_workspace_data_in_the_search_asks_to_confirm_first() {
     let f = Fixture::new("research-confirm");
     let core = f.core();

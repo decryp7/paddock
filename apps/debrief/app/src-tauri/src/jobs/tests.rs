@@ -22,11 +22,16 @@ type Release = mpsc::Sender<Result<Option<JobResult>, String>>;
 
 /// An export job of `window` that runs until the test releases it with a result.
 fn gated_export(app: &tauri::App<MockRuntime>, window: &str, title: &str) -> (JobId, Release) {
-    let (tx, rx) = mpsc::channel::<Result<Option<JobResult>, String>>();
-    let rx = Mutex::new(rx);
     let spec = JobSpec::new(JobKind::Export, title)
         .window(window)
         .retry_with(json!({"op": "export"}));
+    gated_spec(app, spec)
+}
+
+/// A job of `spec` that runs until the test releases it with a result.
+fn gated_spec(app: &tauri::App<MockRuntime>, spec: JobSpec) -> (JobId, Release) {
+    let (tx, rx) = mpsc::channel::<Result<Option<JobResult>, String>>();
+    let rx = Mutex::new(rx);
     let id = spawn(
         app.handle(),
         spec,
@@ -62,17 +67,21 @@ fn listed(main: &tauri::WebviewWindow<MockRuntime>) -> Vec<Value> {
 /// H11 (docs/research/2026-10-28-cpu-memory.md): Summarize from the button, the menu and the palette each queued a job. A
 /// request that is already queued or running gives the same job, not a second one.
 #[test]
-#[ignore = "regress-1-2: FAILING TODAY (fixed by plan package J1, idempotency key on jobs): the same request twice queued 2 jobs (JobId(1) against JobId(2))"]
 fn two_identical_requests_give_one_job() {
     let app = test_app_with_commands(None);
-    let (first, _release_first) = gated_export(&app, "main", "Summarize r.log");
-    let (second, _release_second) = gated_export(&app, "main", "Summarize r.log");
+    // The spec Summarize's producers (the button, the menu, the palette) all build.
+    let summarize = |from, to| crate::ai::requests::AiRequest::Summarize { from, to }.spec("main");
+    let (first, _release_first) = gated_spec(&app, summarize(0, 10));
+    let (second, _release_second) = gated_spec(&app, summarize(0, 10));
     assert_eq!(
         first,
         second,
         "the same request twice queued {} jobs",
         jobs(&app).find_active(|_| true).len()
     );
+    // Another range is another request.
+    let (other, _release_other) = gated_spec(&app, summarize(0, 11));
+    assert_ne!(first, other);
 }
 
 #[test]

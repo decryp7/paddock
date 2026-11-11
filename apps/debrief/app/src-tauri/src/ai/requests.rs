@@ -312,9 +312,21 @@ impl AiRequest {
         if let Some(l) = self.link() {
             spec = spec.link(l);
         }
+        if let Some(key) = self.dedupe_key(window) {
+            spec = spec.keyed(key);
+        }
         match serde_json::to_value(self) {
             Ok(v) => spec.retry_with(v),
             Err(_) => spec,
+        }
+    }
+
+    /// What the request is about, so the same ask while it is queued or running joins that job (the button, the menu and the
+    /// palette each start Summarize). Only Summarize is keyed: its answer depends on nothing but the window and the range.
+    fn dedupe_key(&self, window: &str) -> Option<String> {
+        match self {
+            AiRequest::Summarize { from, to } => Some(format!("{window}|summarize|{from}|{to}")),
+            _ => None,
         }
     }
 
