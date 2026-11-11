@@ -180,6 +180,13 @@ impl Simple {
         false
     }
 
+    /// How many of the nested pieces that follow this command in [`Script::items`] are substitutions (`$(...)`, backticks, `<(...)`
+    /// in a word or a redirection target): they come first, and they run before the command does. The pieces after them are
+    /// the shell text the command itself runs (`bash -c`, `eval`, a heredoc to a shell).
+    pub fn substitution_count(&self) -> usize {
+        self.words.iter().map(|w| w.subs.len()).sum::<usize>() + self.subs.len()
+    }
+
     /// The command line starts with the `do` of a loop.
     pub fn is_do(&self) -> bool {
         self.words.first().is_some_and(|w| w.text == "do")

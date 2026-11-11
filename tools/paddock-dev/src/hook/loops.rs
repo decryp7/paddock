@@ -37,6 +37,10 @@ pub struct Loop {
     /// A `timeout` or `gtimeout` command wraps the nested shell this loop is written in (`timeout 60 bash -c '...'`, or a heredoc to
     /// a shell), so the whole loop ends when the time is up.
     pub timeout_wrapped: bool,
+    /// The commands (indices, a subset of the condition and body) that sit in a loop wrapped by a `timeout` and opened within this
+    /// loop: that inner wait ends by itself, so its `sleep` is not this loop's. A command of a wrapped shell that is in no inner
+    /// loop (`while true; do timeout 5 bash -c 'sleep 1'; done`) is not listed. Empty when this loop is itself wrapped.
+    pub wrapped_inside: Vec<usize>,
 }
 
 impl Loop {
@@ -53,6 +57,9 @@ struct Open {
     stack: Vec<(usize, bool)>,
     /// Inside a nested shell started by a `timeout` command.
     wrapped: bool,
+    /// The command last seen at this level: how many of the nested pieces after it are still substitutions, and whether it runs
+    /// `timeout`. A piece's own commands never overwrite it (they are at the level inside).
+    owner: (usize, bool),
 }
 
 /// The command names `timeout` runs, before the command: `timeout`, `gtimeout` (and their paths).
@@ -83,51 +90,58 @@ pub fn loops(script: &Script) -> Vec<Loop> {
     let mut out: Vec<Loop> = Vec::new();
     let mut now = Open::default();
     let mut saved: Vec<Open> = Vec::new();
-    let mut last_cmd: Option<&Simple> = None;
+    let new_loop = |kind: Kind, wrapped: bool| Loop {
+        kind,
+        condition: Vec::new(),
+        body: Vec::new(),
+        timeout_wrapped: wrapped,
+        wrapped_inside: Vec::new(),
+    };
     for (idx, item) in script.items.iter().enumerate() {
         match item {
             Item::Enter => {
-                saved.push(now.clone());
-                if last_cmd.is_some_and(wraps_with_timeout) {
+                let (substitutions_left, wraps) = now.owner;
+                // Back at this level the next piece is the owner's next one.
+                let mut outside = now.clone();
+                outside.owner = (substitutions_left.saturating_sub(1), wraps);
+                saved.push(outside);
+                // A substitution runs before the command does; only the shell text a `timeout` runs is wrapped by it.
+                if substitutions_left == 0 && wraps {
                     now.wrapped = true;
                 }
+                now.owner = (0, false);
             }
             Item::Leave => now = saved.pop().unwrap_or_default(),
             Item::Sep(_) => {}
             Item::Cmd(cmd) => {
-                last_cmd = Some(cmd);
+                now.owner = (cmd.substitution_count(), wraps_with_timeout(cmd));
                 if cmd.is_do()
                     && let Some(top) = now.stack.last_mut()
                 {
                     top.1 = false;
                 }
                 if cmd.opens_condition() {
-                    out.push(Loop {
-                        kind: keyword_kind(cmd),
-                        condition: Vec::new(),
-                        body: Vec::new(),
-                        timeout_wrapped: now.wrapped,
-                    });
+                    out.push(new_loop(keyword_kind(cmd), now.wrapped));
                     now.stack.push((out.len() - 1, true));
                 } else if cmd.opens_for() {
-                    out.push(Loop {
-                        kind: Kind::For,
-                        condition: Vec::new(),
-                        body: Vec::new(),
-                        timeout_wrapped: now.wrapped,
-                    });
+                    out.push(new_loop(Kind::For, now.wrapped));
                     now.stack.push((out.len() - 1, false));
                 }
-                let closes = cmd.words.first().is_some_and(|w| w.text == "done");
-                if closes {
+                if cmd.words.first().is_some_and(|w| w.text == "done") {
                     now.stack.pop();
                 } else {
-                    let innermost = now.stack.len().checked_sub(1);
+                    // Under every open loop: its condition while that is still open, its body after.
+                    let wrapped_loops: Vec<bool> = now.stack.iter().map(|(id, _)| out[*id].timeout_wrapped).collect();
                     for (depth, (id, in_condition)) in now.stack.iter().enumerate() {
-                        if Some(depth) == innermost && *in_condition {
-                            out[*id].condition.push(idx);
+                        let in_wrapped_inner_loop = wrapped_loops[depth + 1..].iter().any(|w| *w);
+                        let lp = &mut out[*id];
+                        if *in_condition {
+                            lp.condition.push(idx);
                         } else {
-                            out[*id].body.push(idx);
+                            lp.body.push(idx);
+                        }
+                        if in_wrapped_inner_loop && !lp.timeout_wrapped {
+                            lp.wrapped_inside.push(idx);
                         }
                     }
                 }
@@ -229,5 +243,43 @@ mod tests {
         assert_eq!(l.len(), 1);
         let (_, l) = parse("done; done; echo x");
         assert!(l.is_empty());
+    }
+
+    #[test]
+    fn a_substitution_does_not_take_the_wrapping_of_the_timeout_that_follows_it() {
+        for (src, want) in [
+            // the substitution runs first, then the timeout runs the script
+            (
+                "timeout 120 bash -c \"until curl -sf localhost:$(cat port); do sleep 1; done\"",
+                true,
+            ),
+            ("timeout $(echo 60) bash -c 'until a; do sleep 1; done'", true),
+            ("timeout 60 bash -c \"until a; do sleep 1; done; $(echo x)\"", true),
+            // a loop inside the substitution is not run by the timeout
+            ("timeout 5 curl \"$(until a; do sleep 1; done)\"", false),
+            ("timeout 5 curl `until a; do sleep 1; done`", false),
+            ("timeout 5 bash -c \"$(until a; do sleep 1; done)\"", false),
+        ] {
+            let (_, l) = parse(src);
+            assert_eq!(l.last().map(|x| x.timeout_wrapped), Some(want), "{src}");
+        }
+    }
+
+    #[test]
+    fn a_wrapped_inner_shell_in_an_unwrapped_loop_is_marked_inside_it() {
+        let (s, l) = parse("while read h; do timeout 30 bash -c 'until ping $h; do sleep 1; done'; echo; done");
+        assert!(!l[0].timeout_wrapped && l[1].timeout_wrapped);
+        assert_eq!(words(&s, &l[0].wrapped_inside), ["ping", "sleep"]);
+        assert!(l[1].wrapped_inside.is_empty());
+        assert!(words(&s, &l[0].body).contains(&"echo".to_string()));
+    }
+
+    #[test]
+    fn a_command_is_filed_under_every_loop_whose_condition_is_still_open() {
+        let (s, l) = parse("while a; while b; do c; done; do d; done");
+        assert_eq!(words(&s, &l[0].condition), ["a", "b", "c"]);
+        assert_eq!(words(&s, &l[0].body), ["d"]);
+        assert_eq!(words(&s, &l[1].condition), ["b"]);
+        assert_eq!(words(&s, &l[1].body), ["c"]);
     }
 }

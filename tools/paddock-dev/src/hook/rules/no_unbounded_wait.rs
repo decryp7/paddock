@@ -9,7 +9,8 @@
 //!
 //! The rule reads each loop through [`crate::hook::loops`]: a `sleep` in the condition or the body of a `while` or `until` loop
 //! (including its substitutions, backticks and nested shells, and after a `for` loop inside it), when the loop is not
-//! [`Loop::timeout_wrapped`]. A command the lexer cannot read gets the text check ([`Rule::legacy`]): a `while` or `until` before a
+//! [`Loop::timeout_wrapped`]. A loop that a `timeout` wraps inside this loop ends by itself, so its `sleep` is not this loop's
+//! ([`Loop::wrapped_inside`]). A command the lexer cannot read gets the text check ([`Rule::legacy`]): a `while` or `until` before a
 //! `sleep` and no `timeout`/`gtimeout` word, which may refuse a harmless line but never lets a loop through for a stray quote.
 //!
 //! Known gap (the lexer reads a heredoc as data unless the command is a shell): `cat <<EOF | bash` with a sleeping loop in the body
@@ -49,10 +50,13 @@ impl Rule for NoUnboundedWait {
         let sleeps_unbounded = |lp: &Loop| {
             lp.kind != Kind::For
                 && !lp.timeout_wrapped
-                && lp.commands().any(|at| match &script.items[at] {
-                    Item::Cmd(cmd) => cmd.command().first().is_some_and(|w| basename(&w.text) == "sleep"),
-                    _ => false,
-                })
+                && lp
+                    .commands()
+                    .filter(|at| !lp.wrapped_inside.contains(at))
+                    .any(|at| match &script.items[at] {
+                        Item::Cmd(cmd) => cmd.command().first().is_some_and(|w| basename(&w.text) == "sleep"),
+                        _ => false,
+                    })
         };
         loops(script).iter().any(sleeps_unbounded).then(|| self.denial())
     }
@@ -112,6 +116,9 @@ mod tests {
             "until test -f y; do x=`sleep 1`; done",
             "until test -f y; do bash -c 'sleep 1'; done",
             "until test -f y; do\n:\nsleep 1\ndone",
+            // the substitution runs before the timeout does: it is not wrapped by it
+            "timeout 5 curl \"$(until a; do sleep 1; done)\"",
+            "timeout 5 curl `until a; do sleep 1; done`",
         ] {
             assert!(denies(line), "{line}");
         }
@@ -127,6 +134,10 @@ mod tests {
             "sudo timeout 60 bash -c 'until test -f y; do sleep 1; done'",
             "timeout 60 bash <<EOF\nuntil test -f y; do sleep 1; done\nEOF",
             "timeout 60 bash -c 'while a; do for i in 1; do :; done; sleep 1; done'",
+            // a substitution in the command line is not the loop, and a wrapped inner wait is not the outer loop's sleep
+            "timeout 120 bash -c \"until curl -sf localhost:$(cat port); do sleep 1; done\"",
+            "timeout $(echo 60) bash -c 'until a; do sleep 1; done'",
+            "while read h; do timeout 30 bash -c \"until ping -c1 $h; do sleep 1; done\"; done < hosts",
         ] {
             assert!(!denies(line), "{line}");
         }
