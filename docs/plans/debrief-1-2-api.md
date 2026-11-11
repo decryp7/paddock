@@ -32,6 +32,7 @@ origin/docs/debrief-dump-analysis-adr ad386a9bb
 origin/docs/adr-wiring-outcomes-ui fed6b5855
 origin/debrief/p0-idle a0fd29185
 origin/debrief/1.2-limits-adopt 0d315d649
+origin/docs/debrief-analysis-usefulness 95be52908
 ```
 
 **Read for this design** (all on the named commits; nothing was built or run):
@@ -940,8 +941,8 @@ pub struct ProcessRow { pub role: ProcessRole, pub id: ProcessId, pub footprint:
 pub enum ProcessRole { App, StoreWorker, Plugin { id: Box<str> }, Helper { id: Box<str> } }   // no AiWorker: ADR 0070
 
 pub mod priority {
-    /// Defined here, once: paddock-proc has no paddock-* dependency, and paddock-jobs (which depends on it) and
-    /// paddock-plugin-api re-export both (`paddock_jobs::exec::Class`, `paddock_plugin_api::extension::WorkRole`).
+    /// Defined here, once, and re-exported by paddock-jobs and paddock-plugin-api (`paddock_jobs::exec::Class`,
+    /// `paddock_plugin_api::extension::WorkRole`).
     pub enum Class { Interactive, User, Background, Idle }      // ADR 0020's classes, moved here from paddock-jobs::exec
     pub enum WorkRole { Live, Bulk }                            // rule 52's roles (§4.1)
     /// THE table of OS levels per class (ADR 0020's table with its 2026-10-30 amendment): Interactive and User normal;
@@ -952,6 +953,14 @@ pub mod priority {
     pub fn threads(kind: WorkKind, class: Class) -> NonZeroUsize;   // ADR 0024 §1
 }
 ```
+
+**New dependency edges (revision 6 correction).** Neither re-exporting crate depends on `paddock-proc` today
+(`crates/paddock-jobs/Cargo.toml` and `crates/paddock-plugin-api/Cargo.toml` on the train; revision 5 wrongly said
+`paddock-jobs` does). So **2.6c adds `paddock-jobs → paddock-proc`** (with the `patience` module, §4.4, which also uses
+`paddock_proc::{RunState, StallCause, StallReport, ProcessId}`) and **2.6b adds `paddock-plugin-api → paddock-proc`**
+(for `WorkRole` and `for_role`; it reaches `paddock-proc` today only through `paddock-ipc`). No cycle is possible:
+`paddock-proc`'s `[dependencies]` hold no `paddock-*` crate but the workspace hack (`paddock-testkit` is a
+dev-dependency only), and it must stay that way; each edge is one line in the owning package's `Cargo.toml`.
 
 ### 4.6 `paddock-limits` (1.4 with B1; answers plan D5)
 
@@ -2595,6 +2604,7 @@ says why, and its cheaper option is a decision the user can still take.
 | Bounded replies that say what they left out (§4.6, ADR 0065) | Elasticsearch counts hits exactly up to `track_total_hits` (default 10,000) and reports `hits.total.relation: "gte"` beyond it, a lower bound ([search API](https://www.elastic.co/docs/solutions/search/the-search-api)) | 1.4 + B1 5 (built); B2 to B8 per ADR 0065 | a plain cap with a "results truncated" flag | ADR 0065 (accepted 2026-11-06, full scope): Debrief's lists are evidence, and an unmarked cut misleads an investigation |
 | Stall judgement instead of timeouts (§4.4, 2.6c, 2.6d, LV1, LV2) | Windows calls a window not responding after an internal 5 s without pumping messages, not configurable and "subject to change" ([`IsHungAppWindow`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-ishungappwindow)); the OS shows the state and the user decides | 2.6c 4.5, 2.6d 4, LV1 2.25 (3 − 0.75), LV2 1: about 11.75 [calc], on the start judge that is already built | fixed timeouts per call with a "still working" note, no per-key Settings (Q-U3 (c)) | ADR 0031 (accepted): a paused or starved Mac (App Tamer, CI 7096) failed fixed timeouts |
 | Virtual lists and the keyed window (§14.1) | Angular CDK virtual scrolling renders only the visible items ([CDK scrolling](https://material.angular.dev/cdk/scrolling/overview)), which rule 47 already prefers | 2.1 4 (+1 to 2 for columns), 2.7 2.5, 4.5 4, 3.7 3: about 13.5 to 15.5 [calc] | CDK `cdk-virtual-scroll-viewport` with fixed row heights and an index window only, no keyed mode | 1 billion events: an index window cannot place rows whose positions are unknown above 100M (§14.5, Q17) |
+| `define*` contributions, lazy by construction (§14.3, M1 to M5) | VS Code declares contribution points in the extension manifest and activates an extension when one of its activation events fires ([contribution points](https://code.visualstudio.com/api/references/contribution-points), [activation events](https://code.visualstudio.com/api/references/activation-events)); JupyterLab plugins provide and require tokens ([extension guide](https://jupyterlab.readthedocs.io/en/stable/extension/extension_dev.html)) | the M packages of the shell move (plan, not repriced here) | keep Debrief's own registries (no move) | the family workbench (ADR 0013 and workbench.md, accepted): one shell for every app |
 | Incremental annotation (§5.6, the listing sequence) | analysers that rerun over the whole data set on demand are the usual pattern [J: no vendor document found that standardises "new since"] | about 1 to 1.5 in IX-B1 [J] | full runs only (Q-U1 (b) or (c)) | only if the user wants "new since" in 1.2 |
 
 **Summary.** The plugin, back-pressure, bounded-reply and list mechanisms are accepted ADRs with common practice behind
@@ -2607,8 +2617,8 @@ These are not decided here. Each has a recommendation; the user decides.
 
 | # | Question | Options | Recommendation |
 |---|---|---|---|
-| Q-U1 | **Incremental annotation.** §5.6 gives each store listing a sequence so an annotator can read only what is "new since" its last run; that is a new store field and rewrite rules (Q28, IX-B1) | (a) build it as §5.6 says, in 1.2 (about 1 to 1.5 [J]); (b) no incremental runs at all: drop `since` and `listed_through` from the wire; (c) full runs in 1.2, but keep `since: Option<ListedSince>` and `listed_through` on the wire, always `None`/0, so the store field can come later as a minor change | **(c)**: no store work in 1.2 and no wire change later |
-| Q-U2 | **Duplicate EVTX record ids.** §2.2 refuses an event whose `(source, ordinal)` was seen (skipped, `DuplicateOrdinal`). A real log can repeat a record number (a log cleared and refilled, a file stitched from two exports) | (a) as designed: skip the duplicate and count it; (b) keep every event: a repeated ordinal is allowed, the order key's last part (the event id) breaks the tie, and the source's provenance counts the repeats with `DuplicateOrdinal` as a note, not a loss; (c) declare EVTX `Position` (file order) instead of `RecordNumber` | **(b)**: no event is dropped from evidence, and the order stays total |
+| Q-U1 | **Incremental annotation.** §5.6 gives each store listing a sequence so an annotator can read only what is "new since" its last run; that is a new store field and rewrite rules (Q28, IX-B1) | (a) build it as §5.6 says, in 1.2 (about 1 to 1.5 [J]); (b) no incremental runs at all: drop `since` and `listed_through` from the wire; (c) full runs in 1.2, but keep `since: Option<ListedSince>` and `listed_through` on the wire, always `None`/0, so the store field can come later as a minor change; (d) cheap incremental runs keyed by each source's import generation: a run skips sources whose generation is unchanged since its last run and reads the others whole, with no listing sequence and no rewrite rules (about 0.5 [J]) | **(c)**: no store work in 1.2 and no wire change later |
+| Q-U2 | **Duplicate EVTX record ids.** §2.2 refuses an event whose `(source, ordinal)` was seen (skipped, `DuplicateOrdinal`). A real log can repeat a record number (a log cleared and refilled, a file stitched from two exports) | (a) as designed: skip the duplicate and count it; (b1) keep every event and count repeats: the event id breaks the tie, and the source's provenance counts them as `DuplicateOrdinal`, a note, not a loss; this keeps the per-source seen-set, the `import.ordinal_set_bytes` row (64 MiB, `hard`) and `OrdinalUnchecked` past it; (b2) keep every event, the event id as the tie-break (the order key's last part), and no check at all; (c) declare EVTX `Position` (file order) instead of `RecordNumber` | **(b2)**: no event is dropped, the order stays total, and the check costs memory to report something nobody acts on. It removes from §2.2 the `RecordNumber` seen-set (the compressed bitmap freed at `finish_source`), the `import.ordinal_set_bytes` row, and both problem kinds `DuplicateOrdinal` and `OrdinalUnchecked` with the provenance note; §2.2's ordinal stays "unique per source" as the importer's declaration, not a checked guarantee |
 | Q-U3 | **Stall Settings.** §16 lists two Settings per call key (`blocked_ticks`, `spin_cpu_s`), about 26 fields for 13 keys | (a) per-key Settings as listed; (b) one Setting `performance.stall.patience` (Normal, Patient = 4×), applied over LV1's measured per-key values, which stay constants recorded under rule 48; (c) no Setting (common practice, §17.1) | **(b)**: one escape hatch for a slow machine, no wall of fields |
 | Q-U4 | **The restored scope** (§14.13: investigation-folder features, ADR 0068's checks other than WP-1) | (a) design all of it in this file now, before wave 1; (b) a stub now, each part designed (and reviewed) before its first package starts, on §14.13's foundation types; (c) move it back out of 1.2 | **(b)**: the foundation does not wait for it, and nothing in §2 to §13 changes for it |
 
@@ -2622,7 +2632,8 @@ port comment (sniffs moved); §5.10 (new, `debrief.sniff.v1`); §8 (no tee, reco
 §13.3 (the coverage guard, not a lint); §14.2 (CV1 to CV4); §14.3 (`define*` rows, M1 selection type, 500 kB target,
 contributions lint not built, `coverage-guard.spec.ts` moves, WG0, assistant row); §14.5 (no tee, IX packages);
 §14.8 (MEM-2); §14.12 (restored rows moved); §14.13 (new stub); §15 (rows); §16 (tee row gone, stall row, thread
-Settings owners); §17 (Q3, Q6, Q27, ADR notes; §17.1 to §17.3 new). The plan `debrief-1-2.md` landed with this file
+Settings owners); §17 (Q3, Q6, Q27, ADR notes; §17.1 to §17.3 new). After round 2: §4.5's dependency edges, Q-U1's
+option (d), Q-U2's (b1)/(b2) split, §17.1's `define*` row. The plan `debrief-1-2.md` landed with this file
 carries a landing note on its totals.
 
 ## 18. Completeness
