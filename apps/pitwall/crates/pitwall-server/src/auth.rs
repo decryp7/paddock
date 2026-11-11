@@ -440,7 +440,17 @@ impl Auth {
         }
         let app_id = AppId::from_name(name).map_err(|e| AuthError::Invalid(e.to_string()))?;
         let mut p = lock(&self.pending);
-        p.retain(|x| now.saturating_sub(x.req.requested_at) < PAIRING_TTL_MS);
+        let (live, expired): (Vec<Pending>, Vec<Pending>) = std::mem::take(&mut *p)
+            .into_iter()
+            .partition(|x| now.saturating_sub(x.req.requested_at) < PAIRING_TTL_MS);
+        *p = live;
+        for x in expired {
+            // An approved request nobody collected expires with its key (as when it is closed by wrong polls).
+            if let Some((app, key_id)) = x.approved_key {
+                let revoked = self.revoke_key(&app, &key_id);
+                log::warn!(target: "pitwall_server", "pairing request {} expired: the uncollected key was revoked ({revoked})", x.req.id);
+            }
+        }
         if p.len() >= MAX_PENDING {
             return Err(AuthError::Invalid(
                 "too many pairing requests are waiting; approve or deny them in Pitwall first".into(),
@@ -1039,6 +1049,24 @@ mod tests {
             matches!(a.authenticate(Some(&key), false, 2004), Ok(Principal::App { .. })),
             "a delivered key stays"
         );
+    }
+
+    /// An approved request nobody collected expires with the request: the next `request_pairing` drops it, and its key
+    /// goes with it (as when it is closed by wrong polls). A delivered key stays.
+    #[test]
+    fn an_expired_approved_request_revokes_its_uncollected_key() {
+        let (_d, a) = auth();
+        let key_count = |a: &Auth| lock(&a.apps).iter().map(|x| x.keys.len()).sum::<usize>();
+        let kept = approve(&a, "Pitcrew", false, 500);
+        let (r, _t) = a.request_pairing("Debrief", 1, false, 1000).unwrap();
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 1001).unwrap());
+        assert_eq!(key_count(&a), 2, "one delivered key and one uncollected");
+        // Not yet expired: nothing changes.
+        a.request_pairing("Other", 1, false, 1002).unwrap();
+        assert_eq!(key_count(&a), 2);
+        a.request_pairing("Next", 1, false, 1000 + PAIRING_TTL_MS).unwrap();
+        assert_eq!(key_count(&a), 1, "the uncollected key is revoked when its request expires");
+        assert!(a.authenticate(Some(&kept), false, 1).is_ok(), "a delivered key stays");
     }
 
     /// ADR 0092 W5 for the admin key: with a failing OS random source there is no admin key, nobody authenticates as the
