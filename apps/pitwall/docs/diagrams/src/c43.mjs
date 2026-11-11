@@ -1,17 +1,25 @@
+import { pathToFileURL } from 'node:url';
 import { P, save, link } from './common.mjs';
 const Y = 144, W = 264, GAP = 96, NH = 120, VG = 40;
 
 /**
  * A component diagram on a grid. nodes: [id, col, row, name, tech, desc, { planned, role, span }]; links: [a, sa, b, sb, label, opts].
+ * nw and gap: node width and column gap (a gap carries edge labels, so 96 unless the panel has no links); date: this panel's
+ * footer date when it was redrawn on its own. Every panel's nodes are recorded in PANELS (for c43.test.mjs); the files are
+ * written only when this script is run, not when it is imported.
  */
-function panel(file, { title, kind, desc, group, cols, rows, nodes, links, legend }) {
-  const w = 96 + cols * W + (cols - 1) * GAP + 48;
-  const d = P({ title, kind, desc, w: Math.max(w, 1000) });
-  const gx = 48, gw = 24 + cols * W + (cols - 1) * GAP + 24, gh = 40 + rows * NH + (rows - 1) * VG + 24;
+function panel(file, spec) {
+  PANELS[file] = spec.nodes.map(([id, , , name, tech, desc]) => ({ id, name, tech, desc }));
+  if (RUN) render(file, spec);
+}
+function render(file, { title, kind, desc, group, cols, rows, nodes, links, legend, nw = W, gap = GAP, date }) {
+  const w = 96 + cols * nw + (cols - 1) * gap + 48;
+  const d = P({ title, kind, desc, date, w: Math.max(w, 1000) });
+  const gx = 48, gw = 24 + cols * nw + (cols - 1) * gap + 24, gh = 40 + rows * NH + (rows - 1) * VG + 24;
   d.group('g', gx, Y, gw, gh, group);
   for (const [id, c, r, name, tech, dsc, o = {}] of nodes) {
-    const span = o.span ?? 1;
-    d.node(id, 72 + c * (W + GAP), Y + 40 + r * (NH + VG), W, NH * span + VG * (span - 1), o.role ?? 'core', { name, tech, desc: dsc, planned: o.planned });
+    const span = o.span ?? 1, h = NH * span + VG * (span - 1);
+    d.node(id, 72 + c * (nw + gap), Y + 40 + r * (NH + VG), nw, h, o.role ?? 'core', { name, tech, desc: dsc, planned: o.planned });
   }
   for (const [a, sa, b, sb, label, o = {}] of links) {
     const { rev, ...rest } = o;
@@ -20,6 +28,9 @@ function panel(file, { title, kind, desc, group, cols, rows, nodes, links, legen
   d.legend(legend ?? [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'line', label: 'Feeds' }]);
   save(file, d, Y + gh);
 }
+/** Each panel's nodes by file name: id, name, tech (the bracketed line, paths separated by " · ") and desc. */
+export const PANELS = {};
+const RUN = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 const LEGP = [{ kind: 'core', label: 'Component (pure Rust)' }, { kind: 'line', label: 'Feeds' }];
 const SUB = 'C4 · Level 3 — Components of pitwall-core';
 
@@ -120,40 +131,53 @@ panel('c4-3-server-edges', {
   legend: [{ kind: 'accent', label: 'Server module' }, { kind: 'line', label: 'Calls' }, { kind: 'dashline', label: 'Check only, opt-in' }],
 });
 
+
 const SUBU = 'C4 · Level 3 — Components of the Angular UI';
-const FP = 'features/';
+/** The UI panels were redrawn after the 1.1 review; the other panels keep the family date. */
+const UI_DATE = '2026-11-12';
 panel('c4-3-ui-features', {
-  title: 'Angular UI — screens', kind: SUBU, group: 'Features [standalone components, OnPush, one page each]', cols: 4, rows: 3,
-  desc: 'Each screen binds to its own SignalStore and shows what the server computes; none re-implements a domain rule. The stores are in the next diagram.',
+  title: 'Angular UI — screens', kind: SUBU, date: UI_DATE, cols: 3, rows: 4, nw: 288, gap: 40,
+  group: 'Features [standalone components, OnPush; pages, Settings pages, dialogs and the tray popover on the Paddock app shell]',
+  desc: 'The shell (shell/contributions.ts) lists the pages, menus, Settings pages and dialogs; most screens bind to their own SignalStore and show what the server computes; none implements a domain rule itself. The stores and backends are in the next diagram.',
   legend: [{ kind: 'ui', label: 'Screen' }],
   nodes: [
-    ['dash', 0, 0, 'dashboard', `${FP}dashboard`, 'Stat tiles, loaded models with idle countdown, queue, pairing card, events feed, usage card.', { role: 'ui' }],
-    ['models', 1, 0, 'models', `${FP}models`, 'Library, Hugging Face discover with the fit check, presets tab, slots panel with the fit table, build menu per model.', { role: 'ui' }],
-    ['engines', 2, 0, 'engines', `${FP}engines`, 'Builds, install with progress, self-test, version pin, roll back, features per build (supported, needs bNNNN)', { role: 'ui' }],
-    ['apps', 3, 0, 'apps', `${FP}apps`, 'Apps and keys, pairing approval, permissions and limits, per-app usage over time, key shown once.', { role: 'ui' }],
-    ['req', 0, 1, 'requests', `${FP}requests`, 'Recent requests with timing, the chosen model and alias; prompts only on demand.', { role: 'ui' }],
-    ['play', 1, 1, 'playground', `${FP}playground`, 'Chat with a local model, streamed through the management API.', { role: 'ui' }],
-    ['bench', 2, 1, 'benchmarks', `${FP}benchmarks`, 'Tokens per second and time to first token per model.', { role: 'ui' }],
-    ['set', 3, 1, 'settings', `${FP}settings`, 'General, server, memory presets and idle release, network, privacy.', { role: 'ui' }],
-    ['tray', 0, 2, 'tray', `${FP}tray`, 'Compact view for the tray and menu bar.', { role: 'ui' }],
-    ['usage', 1, 2, 'usage', `${FP}usage`, 'Usage card (24 h, 7 d, 30 d) and the per-app view: tokens, requests, attributed peak memory, limit statuses.', { role: 'ui' }],
-    ['upd', 2, 2, 'updates', `${FP}updates`, 'Update banner: Get it (confirm host and size), Dismiss, Remind me in a week; check status.', { role: 'ui' }],
+    ['dash', 0, 0, 'dashboard', 'features/dashboard · features/usage', 'Stat tiles, loaded models with idle countdown, queue, pairing card, events feed, usage card and cache tiles.', { role: 'ui' }],
+    ['models', 1, 0, 'models', 'features/models', 'Library, Hugging Face discover with the fit check, presets tab, slots panel with the fit table, build menu per model.', { role: 'ui' }],
+    ['engines', 2, 0, 'engines', 'features/engines', 'Builds, install with progress, self-test, version pin, roll back, features per build (supported, needs bNNNN).', { role: 'ui' }],
+    ['apps', 0, 1, 'apps', 'features/apps · features/usage', 'Apps and keys, pairing approval, permissions and limits, per-app usage over time (the usage views), key shown once.', { role: 'ui' }],
+    ['req', 1, 1, 'requests', 'features/requests', 'Recent requests with timing, the chosen model and alias; prompts only on demand.', { role: 'ui' }],
+    ['play', 2, 1, 'playground', 'features/playground', 'Compare tab, and the Chat tab (behind the chat build switch): attachments, pictures, saved chats, tools from connected apps.', { role: 'ui' }],
+    ['bench', 0, 2, 'benchmarks', 'features/benchmarks', 'Tokens per second and time to first token per model.', { role: 'ui' }],
+    ['set', 1, 2, 'settings', 'features/connected-apps · features/settings', 'Pitwall’s pages in the shell’s Settings window: Pitwall, Connected apps, Chats, Tray popup; the shell adds Logging.', { role: 'ui' }],
+    ['tray', 2, 2, 'tray', 'features/tray · core/generated/widgets.ts', 'The popover (#/tray, its own small bootstrap) from the native tray: the widgets the user chose, in their order; Pause serving and Release memory.', { role: 'ui' }],
+    ['svc', 0, 3, 'service · jobs', 'features/service · features/jobs', 'Background service panel (install, Repair, Remove) and the jobs behind long work, with phases, Cancel and Stop waiting.', { role: 'ui' }],
+    ['quit', 1, 3, 'quit', 'features/quit', 'The “Quit Pitwall” question (“Keep serving after you quit?”) from menus, Mod+Q and the tray; the “When you quit Pitwall” setting decides when it asks.', { role: 'ui' }],
+    ['upd', 2, 3, 'updates', 'features/updates', 'Update banner; About, Updates and What’s new come from the shared updater.', { role: 'ui' }],
   ],
   links: [],
 });
 
+const IMPL = { dash: true, arrow: 'open' };
 panel('c4-3-ui-state', {
-  title: 'Angular UI — state and backend', kind: SUBU, group: 'State and the backend boundary', cols: 4, rows: 2,
-  desc: 'Components never call Tauri; they use the backend injected by the BACKEND token. The real backend invokes the shell; the mock serves browser development and tests only.',
-  legend: [{ kind: 'ui', label: 'Angular UI' }, { kind: 'accent', label: 'Pitwall container' }, { kind: 'line', label: 'Calls' }],
+  title: 'Angular UI — state and backends', kind: SUBU, date: UI_DATE, group: 'State and the backend boundary', cols: 4, rows: 4,
+  desc: 'Components never call Tauri directly; they use injected backends: BACKEND for management calls, the shell’s backends for windows, dialogs, settings and chat. In the browser build, mock and in-memory backends stand in.',
+  legend: [{ kind: 'ui', label: 'Angular UI' }, { kind: 'accent', label: 'Pitwall container' }, { kind: 'line', label: 'Calls' }, { kind: 'dashline', arrow: 'open', label: 'Implements' }],
   nodes: [
-    ['stores', 0, 0, 'Feature stores', 'one SignalStore per page', 'Load through the backend; keep loading, error and Retry state; expose signals.', { role: 'ui' }],
+    ['stores', 0, 0, 'Feature stores', 'a SignalStore per screen', 'Load through the backend; keep loading, error and Retry state; expose signals.', { role: 'ui' }],
     ['live', 0, 1, 'LiveStore', 'core/live.store · live-reducer', 'Applies pushed updates (memory, models, queue, throughput, pairing) so tiles move without polling.', { role: 'ui' }],
-    ['shared', 3, 1, 'Shared UI', 'tokens · charts · icons', 'Design tokens (dark, light), ECharts wrapper, own SVG icons, native-feel rules, toasts.', { role: 'ui' }],
-    ['be', 1, 0, 'PitwallBackend', 'interface + BACKEND token', 'One method per management call and a live feed; api.types.ts is the wire contract that pitwall_core::mgmt mirrors.', { role: 'ui', span: 2 }],
-    ['tauri', 2, 0, 'TauriBackend', 'core/tauri-backend', 'Invokes the shell’s commands and subscribes to its live event. The only code that calls Tauri.', { role: 'ui' }],
-    ['mock', 2, 1, 'MockBackend', 'browser development and tests only', 'Plausible data; never the reference for behaviour.', { role: 'ui' }],
-    ['shell', 3, 0, 'Rust shell', 'app/src-tauri · Tauri IPC', 'Commands to the server’s management API.', { role: 'accent' }],
+    ['shared', 0, 2, 'Shell and shared UI', 'paddock-ui · tokens · charts', 'The Paddock shell (pages frame, menus, dialogs), design tokens (dark, light), ECharts wrapper, own SVG icons, toasts.', { role: 'ui' }],
+    ['be', 1, 0, 'PitwallBackend', 'core/backend · BACKEND token', 'One method per management call and a live feed; api.types.ts is the wire contract that pitwall_core::mgmt mirrors.', { role: 'ui', span: 2 }],
+    ['tmo', 1, 2, 'withTimeout', 'core/timeout-backend', 'Set up in backend-factory: a call that takes too long fails with Retry; jobs and streams pass through.', { role: 'ui' }],
+    ['mock', 1, 3, 'MockBackend', 'core/mock-backend · implements PitwallBackend', 'The browser build only, for development and tests; plausible data, never the reference for behaviour.', { role: 'ui' }],
+    ['shellb', 2, 0, 'Shell backends', 'shell/ipc · shell/engines', 'About, updates, settings, health, notifications, diagnostics and the dialog bridge over the paddock-shell plugin; in memory in the browser.', { role: 'ui' }],
+    ['chat', 2, 1, 'Chat backend', 'features/playground/chat-backend', 'paddock-ui’s TauriAssistantBackend over tauriIpc, served by the shell’s chat_host module (src-tauri/src/chat_host); in memory in the browser.', { role: 'ui' }],
+    ['tauri', 2, 2, 'TauriBackend', 'core/tauri-backend · implements PitwallBackend', 'The only code that calls Pitwall’s management commands; it also subscribes to the live event.', { role: 'ui' }],
+    ['wc', 2, 3, 'WindowControl', 'features/tray/tray-popover · core/window-control', 'Raises the main window on a route, fits and closes the tray popover, quits; used by the popover and the main window.', { role: 'ui' }],
+    ['shell', 3, 0, 'Rust shell', 'app/src-tauri · Tauri IPC', 'Pitwall’s commands (management API, chat host, jobs, quit) and the paddock-shell plugin. Management calls go on to the server’s management API.', { role: 'accent', span: 4 }],
   ],
-  links: [['stores', 'R', 'be', 'L', 'Call', { t: [0.5, 0.2143] }], ['live', 'R', 'be', 'L', 'Subscribes', { t: [0.5, 0.7857] }], ['tauri', 'L', 'be', 'R', 'Implements', { t: [0.5, 0.2143] }], ['mock', 'L', 'be', 'R', 'Implements', { t: [0.5, 0.7857] }], ['tauri', 'R', 'shell', 'L', 'Invokes']],
+  links: [
+    ['stores', 'R', 'be', 'L', 'Call'], ['live', 'R', 'be', 'L', 'Subscribes'], ['stores', 'B', 'live', 'T', 'Reads'],
+    ['tmo', 'T', 'be', 'B', 'Implements', IMPL], ['tmo', 'R', 'tauri', 'L', 'Wraps'], ['tmo', 'B', 'mock', 'T', 'Wraps'],
+    ['shellb', 'R', 'shell', 'L', 'Invokes'], ['chat', 'R', 'shell', 'L', 'Invokes'], ['tauri', 'R', 'shell', 'L', 'Invokes'], ['wc', 'R', 'shell', 'L', 'Invokes'],
+  ],
 });
