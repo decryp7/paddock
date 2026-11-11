@@ -61,7 +61,8 @@ describe('the graph of this tree', () => {
   test('a change in the shared ui and e2e packages marks Debrief (UI half, through its tsconfig paths)', () => {
     for (const f of ['ui/projects/paddock-ui/src/public-api.ts', 'ui/projects/paddock-e2e/src/index.ts']) {
       const r = run(f);
-      assert.ok(r.apps.includes('debrief') && r.kinds.debrief.includes('ui'), `${f}: ${JSON.stringify(r.kinds.debrief)}`);
+      assert.ok(r.apps.includes('debrief'), `${f}: debrief not marked: ${JSON.stringify(r.apps)}`);
+      assert.ok(r.kinds.debrief?.includes('ui'), `${f}: debrief UI half not marked: ${JSON.stringify(r.kinds.debrief)}`);
     }
   });
 
