@@ -127,7 +127,13 @@ fn the_e2e_port_and_build_guard_mark_the_ui_half_of_every_app() {
 fn a_ui_change_marks_the_tauri_shells_that_embed_a_ui_build_both_halves() {
     let r = run(&["ui/projects/paddock-ui/shell/src/public-api.ts"]);
     assert_eq!(r["ui"], true);
-    assert_eq!(names(&r["apps"]), ["dyno", "pitwall", "shell-demo", "spotter", "workbench-demo"]);
+    // Debrief maps @decryp7/paddock-ui and @decryp7/paddock-e2e to ui/dist in its tsconfig (package 0.4 of the 1.2 plan), as
+    // Spotter and Dyno do, so its UI half is marked too (scripts/affected.test.mjs says the same).
+    assert_eq!(
+        names(&r["apps"]),
+        ["debrief", "dyno", "pitwall", "shell-demo", "spotter", "workbench-demo"]
+    );
+    assert_eq!(r["kinds"]["debrief"], json!(["ui"]));
     assert_eq!(r["kinds"]["spotter"], json!(["ui"]));
     assert_eq!(r["kinds"]["dyno"], json!(["ui"]));
     assert_eq!(r["kinds"]["shell-demo"], json!(["rust", "ui"]));
