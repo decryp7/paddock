@@ -6,6 +6,7 @@
 use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::btm::{LoginItemsLink, LoginItemsReply};
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::metrics::Reading;
 use dyno_core::ports::PlatformError;
 use dyno_core::read_via::ReadVia;
@@ -15,6 +16,7 @@ pub struct LoginItems;
 
 impl HelperReading for LoginItems {
     type Value = LoginItemsReply;
+    const KINDS: &'static [RequestKind] = &[RequestKind::LoginItems];
 
     fn name(&self) -> &'static str {
         "login items"

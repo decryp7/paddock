@@ -1,297 +1,164 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! Every reading the helper advertises has a production sender (ADR 0052 section 1.1, C83 for Dyno until `./dev check` takes
-//! it over; Dyno plan 2026-11-04 section 7.2).
+//! Every reading the helper advertises is wired in the agent (ADR 0052 section 1.1, C83 for Dyno until `./dev check` takes it
+//! over; Dyno plan 2026-11-04 section 7.2).
 //!
-//! The scan is by name, not a call graph: it parses the non-test code of `dyno-agent/src` and `dyno-platform/src` with `syn`,
-//! finds the functions that construct `HelperRequest::<Kind>`, and asks whether any non-test code calls (or mentions) such a
-//! function from outside its own impl block, or, for a trait impl, whether the composition boxes the implementing type
-//! (`Box::new(X..)` or `Arc::new(X..)` outside X's impl). Closures, macros and trait objects are not followed; the helper's
-//! run-time `served:` counts (ADR 0052 section 1.5) are the backstop for those.
+//! The registry is the seam itself: [`HelperReading::KINDS`] is required of every reading (the compiler refuses one that does not
+//! say what it asks), and `HelperFirst::new` records it where the composition builds the reading. The composition test runs the
+//! real agent over the fakes for each host, with [`wired_kinds_while`] around the build, and compares what was wired with the
+//! readings the card advertises for that host, in both directions. A reading wired without being advertised needs a reason in
+//! [`unlisted`]; a reading advertised and not wired fails with the next step. There is no source scan: a call shape a scan does not
+//! know cannot hide a reading, and a reading cannot be wired without being registered. What this does not cover: a request kind sent
+//! outside a [`HelperReading`] (`Info`, `Audit`, tool install, wakes, `Build`); the helper's run-time `served:` counts (ADR 0052
+//! section 1.5) and `apps/dyno/wiring.toml` (C83) stay the check for those.
 //!
-//! The kinds that are neither advertised nor wired must be declared in `apps/dyno/wiring.toml` with a reason and an end.
-//! The tests over the checker itself (fixtures that must fail) and the two tests over the real tree all run, locally and in CI
-//! (the `checks` list of `apps/dyno/paddock.ci.json`).
+//! The user guide lists the advertised readings between `<!-- helper-readings:start -->` and `<!-- helper-readings:end -->`.
 
+use dyno_agent::helper_first::{wired_kinds_while, HelperReading};
+use dyno_agent::paths::Dirs;
+use dyno_agent::Running;
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_wire::{readings, Advertised};
-use std::collections::{BTreeMap, BTreeSet};
+use dyno_platform::fake::Fake;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
-use syn::visit::Visit;
 
-// ---------------------------------------------------------------- the scan
+#[path = "common/helper_rig.rs"]
+mod helper_rig;
+use helper_rig::{dispatcher, wiring, Caller, DispatcherTransport, Readers};
 
-/// One non-test function, by name.
-#[derive(Debug, Clone, Default)]
-struct FnInfo {
-    name: String,
-    /// The file it is in.
-    file: String,
-    /// The type of the enclosing impl block, when there is one.
-    owner: Option<String>,
-    /// The trait of the enclosing impl block, when it is a trait impl.
-    trait_impl: Option<String>,
-    /// `HelperRequest` kinds this function constructs.
-    builds: BTreeSet<String>,
-    /// Last path segments of everything called or mentioned as a path or method.
-    mentions: BTreeSet<String>,
-    /// Types named inside `Box::new(..)`, `Arc::new(..)` and `Rc::new(..)` arguments.
-    boxed: BTreeSet<String>,
+fn dyno_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
 }
 
-fn is_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|a| {
-        if a.path().is_ident("test") {
-            return true;
-        }
-        if !a.path().is_ident("cfg") {
-            return false;
-        }
-        let text = quote_tokens(a);
-        text.contains("test") && !text.contains("not (test)") && !text.contains("not(test)")
-    })
+// ---------------------------------------------------------------- the registry
+
+/// What `HelperFirst::new` recorded while the real agent was built for `host` over the fakes (no machine is touched: the data
+/// folder is a temp folder, the platform and the helper are the rig's).
+fn wired_on(host: HelperHost) -> HashSet<RequestKind> {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(tmp.path().join("data"));
+    let fake = Fake::new();
+    let transport = DispatcherTransport::new(dispatcher(host, Readers::default(), tmp.path()), Caller::Owner);
+    let (running, wired) = wired_kinds_while(|| {
+        Running::start_with_helper(
+            dirs,
+            fake.platform(),
+            Box::new(fake.clone()),
+            Box::new(|_| Ok(())),
+            wiring(transport, host),
+        )
+        .unwrap()
+    });
+    running.stop();
+    wired
 }
 
-fn quote_tokens(a: &syn::Attribute) -> String {
-    match &a.meta {
-        syn::Meta::List(l) => l.tokens.to_string(),
-        _ => String::new(),
-    }
+/// The reason shared by the readings the agent composes on every host but the helper reads only where `readings()` lists them:
+/// elsewhere the reading falls to the agent's own reader or says it is not on this system, and the card does not claim it.
+const EVERYWHERE: &str =
+    "composed on every host; the helper reads it only where readings() lists it, elsewhere the agent's own reader answers or says \
+                          it is not on this system";
+
+/// Kinds that are wired on some host without a line on the card for that host, and why. Anything else wired and not advertised
+/// fails the check, and an entry that is wired nowhere unadvertised is stale.
+const UNLISTED: &[(RequestKind, &str)] = &[
+    (RequestKind::Counters, EVERYWHERE),
+    (RequestKind::MemoryModules, EVERYWHERE),
+    (RequestKind::LoginItems, EVERYWHERE),
+    (RequestKind::Firewall, EVERYWHERE),
+    (RequestKind::Smart, EVERYWHERE),
+    (RequestKind::Extras, EVERYWHERE),
+    (
+        RequestKind::LogTail,
+        "the problem report's copy of the helper's own log, not a reading on the card (diagnostics::HelperLog)",
+    ),
+    (
+        RequestKind::WolState,
+        "Linux Wake-on-LAN readiness (plan 2026-11-04, D4), not a reading on the card",
+    ),
+];
+
+fn advertised_on(host: HelperHost) -> HashSet<RequestKind> {
+    readings(host).iter().flat_map(|a| a.kinds.iter().copied()).collect()
 }
 
-#[derive(Default)]
-struct Scan {
-    fns: Vec<FnInfo>,
-    file: String,
-    owner: Option<String>,
-    trait_impl: Option<String>,
-}
-
-fn type_name(ty: &syn::Type) -> Option<String> {
-    match ty {
-        syn::Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
-        syn::Type::Reference(r) => type_name(&r.elem),
-        _ => None,
-    }
-}
-
-/// Collects what one function body constructs, calls and boxes.
-struct Body<'a> {
-    info: &'a mut FnInfo,
-    /// The type names in what each local was bound to (`let reading = R { .. };`), so `HelperFirst::new(reading, ..)` hands over `R`.
-    locals: BTreeMap<String, BTreeSet<String>>,
-}
-
-fn path_idents(p: &syn::Path) -> Vec<String> {
-    p.segments.iter().map(|s| s.ident.to_string()).collect()
-}
-
-impl Body<'_> {
-    fn path(&mut self, p: &syn::Path) {
-        let ids = path_idents(p);
-        if ids.len() >= 2 && ids[ids.len() - 2] == "HelperRequest" {
-            self.info.builds.insert(ids[ids.len() - 1].clone());
-        }
-        if let Some(last) = ids.last() {
-            self.info.mentions.insert(last.clone());
+/// The problems between what was wired and what is advertised for one host; empty means they agree.
+fn problems(host: HelperHost, wired: &HashSet<RequestKind>, allowed: &[(RequestKind, &str)]) -> Vec<String> {
+    let advertised = advertised_on(host);
+    let mut out = Vec::new();
+    for kind in &advertised {
+        if !wired.contains(kind) {
+            out.push(format!(
+                "{host:?}: {kind:?} is advertised by readings() but no reading that declares it is built by the agent; wire a HelperReading with KINDS \
+                 containing {kind:?} through HelperFirst::new, or stop advertising it (and say so in the changelog)"
+            ));
         }
     }
-}
-
-struct TypeNames(BTreeSet<String>);
-impl<'ast> Visit<'ast> for TypeNames {
-    fn visit_path(&mut self, p: &'ast syn::Path) {
-        for s in &p.segments {
-            self.0.insert(s.ident.to_string());
-        }
-        syn::visit::visit_path(self, p);
-    }
-}
-
-impl<'ast> Visit<'ast> for Body<'_> {
-    fn visit_expr_path(&mut self, e: &'ast syn::ExprPath) {
-        self.path(&e.path);
-        syn::visit::visit_expr_path(self, e);
-    }
-    fn visit_local(&mut self, l: &'ast syn::Local) {
-        if let (syn::Pat::Ident(p), Some(init)) = (&l.pat, &l.init) {
-            let mut names = TypeNames(BTreeSet::new());
-            names.visit_expr(&init.expr);
-            self.locals.insert(p.ident.to_string(), names.0);
-        }
-        syn::visit::visit_local(self, l);
-    }
-    fn visit_expr_struct(&mut self, e: &'ast syn::ExprStruct) {
-        self.path(&e.path);
-        syn::visit::visit_expr_struct(self, e);
-    }
-    fn visit_expr_method_call(&mut self, e: &'ast syn::ExprMethodCall) {
-        self.info.mentions.insert(e.method.to_string());
-        syn::visit::visit_expr_method_call(self, e);
-    }
-    fn visit_expr_call(&mut self, e: &'ast syn::ExprCall) {
-        if let syn::Expr::Path(p) = &*e.func {
-            let ids = path_idents(&p.path);
-            // The last two segments: `crate::helper_first::HelperFirst::new(..)` hands a reading to the seam like `HelperFirst::new(..)`.
-            if ids.len() >= 2 && matches!(ids[ids.len() - 2].as_str(), "Box" | "Arc" | "Rc" | "HelperFirst") && ids[ids.len() - 1] == "new"
-            {
-                let mut names = TypeNames(BTreeSet::new());
-                for a in &e.args {
-                    names.visit_expr(a);
-                    if let syn::Expr::Path(p) = a {
-                        if let Some(bound) = p.path.get_ident().and_then(|i| self.locals.get(&i.to_string())) {
-                            names.0.extend(bound.iter().cloned());
-                        }
-                    }
-                }
-                self.info.boxed.extend(names.0);
-            }
-        }
-        syn::visit::visit_expr_call(self, e);
-    }
-}
-
-impl Scan {
-    fn function(&mut self, name: &syn::Ident, attrs: &[syn::Attribute], block: &syn::Block) {
-        if is_test_attr(attrs) {
-            return;
-        }
-        let mut info = FnInfo {
-            name: name.to_string(),
-            file: self.file.clone(),
-            owner: self.owner.clone(),
-            trait_impl: self.trait_impl.clone(),
-            ..FnInfo::default()
-        };
-        Body {
-            info: &mut info,
-            locals: BTreeMap::new(),
-        }
-        .visit_block(block);
-        self.fns.push(info);
-    }
-}
-
-impl<'ast> Visit<'ast> for Scan {
-    fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
-        if !is_test_attr(&m.attrs) {
-            syn::visit::visit_item_mod(self, m);
-        }
-    }
-    fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
-        self.function(&f.sig.ident, &f.attrs, &f.block);
-    }
-    fn visit_item_impl(&mut self, i: &'ast syn::ItemImpl) {
-        if is_test_attr(&i.attrs) {
-            return;
-        }
-        let (owner, tr) = (self.owner.take(), self.trait_impl.take());
-        self.owner = type_name(&i.self_ty);
-        self.trait_impl = i
-            .trait_
-            .as_ref()
-            .and_then(|(_, p, _)| p.segments.last().map(|s| s.ident.to_string()));
-        syn::visit::visit_item_impl(self, i);
-        self.owner = owner;
-        self.trait_impl = tr;
-    }
-    fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
-        self.function(&f.sig.ident, &f.attrs, &f.block);
-    }
-    fn visit_trait_item_fn(&mut self, f: &'ast syn::TraitItemFn) {
-        if let Some(b) = &f.default {
-            self.function(&f.sig.ident, &f.attrs, b);
-        }
-    }
-}
-
-/// Parses `(path, source)` pairs; an unparsable file is a problem, never skipped.
-fn scan(sources: &[(String, String)]) -> Result<Vec<FnInfo>, String> {
-    let mut all = Vec::new();
-    for (path, text) in sources {
-        let file = syn::parse_file(text).map_err(|e| format!("{path}: does not parse ({e}); the wiring scan cannot skip a file"))?;
-        let mut s = Scan {
-            file: path.clone(),
-            ..Scan::default()
-        };
-        s.visit_file(&file);
-        all.extend(s.fns);
-    }
-    Ok(all)
-}
-
-/// Files whose functions are the composition: the program starts here, so what they (transitively) name is reachable.
-const ROOT_FILES: [&str; 3] = ["agent.rs", "main.rs", "lib.rs"];
-
-/// Trait impls the composition reaches without a `Box::new` the scan can see. Each names the type and the trait (ADR 0052
-/// section 1.1: the exemption names the type, never the trait alone): `tool_download::install` hands the link to the downloader as a
-/// `&dyn ToolSink`, and `SharedHelper::new` holds a `LinkWakes` that the wake centre calls as a `WakeScheduler`.
-const COMPOSED_NOT_BOXED: [(&str, &str); 2] = [("HelperLink", "ToolSink"), ("LinkWakes", "WakeScheduler")];
-
-/// The typed `HelperCalls` methods are called by name from the readings only (`HelperReading::via_helper`): a method of the
-/// same name elsewhere (`shared.processes`, `x.traffic()`) is not a reading using the helper. Callee trait, then the trait of
-/// the only callers that count.
-const ONLY_CALLED_FROM: [(&str, &str); 1] = [("HelperCalls", "HelperReading")];
-
-/// For each `HelperRequest` kind name, whether a function that builds it is reachable from the composition by name: a root
-/// function mentions it (or a function that mentions it, and so on), or, for a trait impl, the composition boxes the type.
-fn wired_kinds(fns: &[FnInfo]) -> BTreeMap<String, bool> {
-    let mut reachable: Vec<bool> = fns.iter().map(|f| ROOT_FILES.iter().any(|r| f.file.ends_with(r))).collect();
-    loop {
-        let mentioned: BTreeSet<&str> = fns
-            .iter()
-            .zip(&reachable)
-            .filter(|(_, r)| **r)
-            .flat_map(|(f, _)| f.mentions.iter().map(String::as_str))
-            .collect();
-        let boxed: BTreeSet<&str> = fns
-            .iter()
-            .zip(&reachable)
-            .filter(|(_, r)| **r)
-            .flat_map(|(f, _)| f.boxed.iter().map(String::as_str))
-            .collect();
-        let from_readings: BTreeSet<&str> = fns
-            .iter()
-            .zip(&reachable)
-            .filter(|(f, r)| **r && f.trait_impl.as_deref() == Some("HelperReading"))
-            .flat_map(|(f, _)| f.mentions.iter().map(String::as_str))
-            .collect();
-        let mut changed = false;
-        for (i, f) in fns.iter().enumerate() {
-            if reachable[i] {
-                continue;
-            }
-            let ok = match (&f.trait_impl, &f.owner) {
-                // A trait impl is reached when the composition builds the type as a trait object AND something reachable calls
-                // the method by name: boxing `Bounded` does not make its `processes` a sender until a reading calls `processes`.
-                (Some(tr), Some(x)) => {
-                    let called = if ONLY_CALLED_FROM.iter().any(|(callee, _)| callee == tr) {
-                        &from_readings
-                    } else {
-                        &mentioned
-                    };
-                    (boxed.contains(x.as_str()) || COMPOSED_NOT_BOXED.iter().any(|(t, c)| *t == x && *c == tr))
-                        && called.contains(f.name.as_str())
-                }
-                _ => mentioned.contains(f.name.as_str()),
-            };
-            if ok {
-                reachable[i] = true;
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    let mut out: BTreeMap<String, bool> = BTreeMap::new();
-    for (f, r) in fns.iter().zip(&reachable) {
-        for k in &f.builds {
-            *out.entry(k.clone()).or_insert(false) |= *r;
+    for kind in wired {
+        if !advertised.contains(kind) && !allowed.iter().any(|(k, _)| k == kind) {
+            out.push(format!(
+                "{host:?}: {kind:?} is wired but not advertised; add it to readings() or give it a reason in UNLISTED (the card and the guide must tell the truth)"
+            ));
         }
     }
     out
+}
+
+#[test]
+fn what_the_agent_wires_is_what_readings_advertises_on_every_host() {
+    let mut all = Vec::new();
+    let mut used: HashSet<RequestKind> = HashSet::new();
+    for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
+        let wired = wired_on(host);
+        used.extend(wired.difference(&advertised_on(host)).copied());
+        all.extend(problems(host, &wired, UNLISTED));
+    }
+    for (kind, _) in UNLISTED {
+        if !used.contains(kind) {
+            all.push(format!(
+                "UNLISTED names {kind:?}, which no host wires without advertising it; delete the entry"
+            ));
+        }
+    }
+    assert!(all.is_empty(), "{} wiring problem(s):\n- {}", all.len(), all.join("\n- "));
+}
+
+#[test]
+fn the_check_names_each_way_the_two_sides_can_differ() {
+    let host = HelperHost::Linux;
+    let advertised = advertised_on(host);
+    assert!(
+        problems(host, &advertised, &[]).is_empty(),
+        "the advertised set is its own fixture of agreement"
+    );
+    let mut missing = advertised.clone();
+    missing.remove(&RequestKind::Firewall);
+    let p = problems(host, &missing, &[]);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert!(
+        p[0].contains("Firewall is advertised") && p[0].contains("HelperFirst::new"),
+        "{p:?}"
+    );
+    let mut extra = advertised;
+    extra.insert(RequestKind::Smart);
+    let p = problems(host, &extra, &[]);
+    assert_eq!(p.len(), 1, "{p:?}");
+    assert!(p[0].contains("Smart is wired but not advertised"), "{p:?}");
+    assert!(
+        problems(host, &extra, &[(RequestKind::Smart, "x")]).is_empty(),
+        "a reason lets it through"
+    );
+}
+
+#[test]
+fn a_reading_declares_its_kinds_at_compile_time() {
+    // The trait requires KINDS: this does not compile for a reading without it, which is the point of the registry.
+    fn kinds<R: HelperReading>() -> &'static [RequestKind] {
+        R::KINDS
+    }
+    assert_eq!(kinds::<dyno_agent::diagnostics::HelperLog>(), &[RequestKind::LogTail]);
 }
 
 // ---------------------------------------------------------------- wiring.toml
@@ -352,113 +219,11 @@ fn until_problem(until: &str, today: i64) -> Option<String> {
     }
 }
 
-// ---------------------------------------------------------------- the check
-
-const WIRE: &str = "agent-helper";
-
-/// All problems of the tree, each with the next step. Empty means the check passes.
-fn check(fns: &[FnInfo], advertised: &BTreeSet<String>, unwired: &[Unwired], today: i64) -> Vec<String> {
-    let wired = wired_kinds(fns);
-    let mut problems = Vec::new();
-    for kind in RequestKind::ALL {
-        let name = format!("{kind:?}");
-        let is_wired = wired.get(&name).copied().unwrap_or(false);
-        let declared = unwired.iter().find(|u| u.wire == WIRE && u.kind == name);
-        match (is_wired, advertised.contains(&name), declared) {
-            (true, _, None) | (false, false, Some(_)) => {}
-            (true, _, Some(_)) => problems.push(format!(
-                "{name}: wired, but apps/dyno/wiring.toml still declares it unwired; delete the [[unwired]] entry"
-            )),
-            (false, true, d) => problems.push(format!(
-                "{name}: advertised by readings() but no non-test code sends HelperRequest::{name} to a caller{}; wire it (WP in plan section 2) \
-                 and do not declare an advertised reading unwired",
-                if d.is_some() { " (and wiring.toml declares it unwired, which is not allowed for an advertised kind)" } else { "" }
-            )),
-            (false, false, None) => problems.push(format!(
-                "{name}: not advertised and not sent by non-test code; wire it or add an [[unwired]] entry (wire = \"{WIRE}\", kind, why, until) \
-                 to apps/dyno/wiring.toml"
-            )),
-        }
-    }
-    for u in unwired {
-        if u.wire != WIRE {
-            problems.push(format!(
-                "wiring.toml: unknown wire \"{}\" (only \"{WIRE}\" exists for Dyno)",
-                u.wire
-            ));
-        }
-        if !RequestKind::ALL.iter().any(|k| format!("{k:?}") == u.kind) {
-            problems.push(format!("wiring.toml: \"{}\" is not a HelperRequest kind", u.kind));
-        }
-        if let Some(p) = until_problem(&u.until, today) {
-            problems.push(format!(
-                "wiring.toml: {}: {p}; wire it or move the date with a Wiring-date trailer",
-                u.kind
-            ));
-        }
-    }
-    problems
-}
-
 fn advertised_kinds() -> BTreeSet<String> {
     [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux]
         .iter()
         .flat_map(|h| readings(*h).iter().flat_map(|a| a.kinds.iter().map(|k| format!("{k:?}"))))
         .collect()
-}
-
-// ---------------------------------------------------------------- the real tree
-
-fn dyno_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
-}
-
-fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let mut entries: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
-    entries.sort();
-    for p in entries {
-        let name = p.file_name().unwrap().to_string_lossy().to_string();
-        if p.is_dir() {
-            if name != "tests" {
-                rust_files(&p, out);
-            }
-        } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
-            out.push(p);
-        }
-    }
-}
-
-fn real_sources() -> Vec<(String, String)> {
-    let root = dyno_root();
-    let mut files = Vec::new();
-    for c in ["dyno-agent", "dyno-platform"] {
-        rust_files(&root.join("crates").join(c).join("src"), &mut files);
-    }
-    files
-        .iter()
-        .map(|p| (p.display().to_string(), std::fs::read_to_string(p).unwrap()))
-        .collect()
-}
-
-fn today() -> i64 {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    (secs / 86_400) as i64
-}
-
-#[test]
-fn every_advertised_reading_has_a_production_sender() {
-    let fns = scan(&real_sources()).unwrap();
-    let wiring = std::fs::read_to_string(dyno_root().join("wiring.toml")).expect("apps/dyno/wiring.toml");
-    let problems = check(&fns, &advertised_kinds(), &parse_wiring(&wiring).unwrap(), today());
-    assert!(
-        problems.is_empty(),
-        "{} helper request kind(s) are advertised or declared wrongly (name-level scan, not a call graph):\n- {}",
-        problems.len(),
-        problems.join("\n- ")
-    );
 }
 
 // ---------------------------------------------------------------- doc claims
@@ -509,209 +274,16 @@ fn all_advertised() -> Vec<Advertised> {
 }
 
 #[test]
-fn the_user_guide_and_the_changelog_claim_what_readings_advertises() {
-    let root = dyno_root();
-    let mut problems = Vec::new();
-    for file in ["docs/user-guide.md", "CHANGELOG.md"] {
-        let doc = std::fs::read_to_string(root.join(file)).unwrap();
-        problems.extend(claim_problems(file, &doc, &all_advertised()));
-    }
-    assert!(problems.is_empty(), "the docs differ from readings():\n- {}", problems.join("\n- "));
-}
-
-// ---------------------------------------------------------------- the checker proves it can fail
-
-fn src(text: &str) -> Vec<FnInfo> {
-    scan(&[("lib_like.rs".to_string(), text.to_string())]).unwrap()
-}
-
-/// `defs` in an ordinary file, `compose` in `agent.rs`, the composition root.
-fn composed(defs: &str, compose: &str) -> Vec<FnInfo> {
-    scan(&[
-        ("fixture.rs".to_string(), defs.to_string()),
-        ("agent.rs".to_string(), compose.to_string()),
-    ])
-    .unwrap()
-}
-
-fn set(names: &[&str]) -> BTreeSet<String> {
-    names.iter().map(|s| s.to_string()).collect()
-}
-
-const LINK: &str = "struct L; impl L { fn firewall(&self) { let _ = HelperRequest::Firewall; } fn other(&self) { self.firewall(); } }";
-
-#[test]
-fn a_sender_nothing_reaches_is_not_wired() {
-    let fns = composed(LINK, "fn compose() {}");
-    assert_eq!(
-        wired_kinds(&fns).get("Firewall"),
-        Some(&false),
-        "called only from its own impl, which nobody calls"
-    );
-}
-
-#[test]
-fn a_sender_the_composition_reaches_is_wired() {
-    let fns = composed(LINK, "fn compose(l: &L) { l.firewall(); }");
-    assert_eq!(wired_kinds(&fns).get("Firewall"), Some(&true));
-}
-
-#[test]
-fn reaching_goes_through_a_chain_of_calls() {
-    let fns = composed(
-        "struct L; impl L { fn a(&self) { let _ = HelperRequest::Traffic; } } struct M; impl M { fn b(l: &L) { l.a(); } } fn c(l: &L) { M::b(l); }",
-        "fn compose(l: &L) { c(l); }",
-    );
-    assert_eq!(wired_kinds(&fns).get("Traffic"), Some(&true));
-}
-
-#[test]
-fn a_wrapper_that_no_root_reaches_does_not_lend_reachability() {
-    // The shape of the seam: `Bounded::traffic` calls the link, but nothing composes a reading that calls `Bounded`.
-    let fns = composed(
-        "struct L; impl L { fn traffic_in(&self) { let _ = HelperRequest::Traffic; } } struct B; impl B { fn traffic(&self, l: &L) { l.traffic_in(); } }",
-        "fn compose() {}",
-    );
-    assert_eq!(wired_kinds(&fns).get("Traffic"), Some(&false));
-}
-
-#[test]
-fn a_sender_used_only_in_test_code_is_not_wired() {
-    let fns = composed(
-        "struct L; impl L { fn firewall(&self) { let _ = HelperRequest::Firewall; } }
-         #[cfg(test)] mod tests { fn t(l: &super::L) { l.firewall(); } }",
-        "fn compose() {}",
-    );
-    assert_eq!(wired_kinds(&fns).get("Firewall"), Some(&false));
-    let fns = src("#[cfg(test)] fn only_test() { let _ = HelperRequest::Smart; }");
+fn the_user_guide_claims_what_readings_advertises() {
+    let doc = std::fs::read_to_string(dyno_root().join("docs/user-guide.md")).unwrap();
+    let problems = claim_problems("docs/user-guide.md", &doc, &all_advertised());
     assert!(
-        !wired_kinds(&fns).contains_key("Smart"),
-        "a test-only construction is not even a sender"
+        problems.is_empty(),
+        "the guide differs from readings():\n- {}",
+        problems.join("\n- ")
     );
 }
 
-#[test]
-fn a_trait_impl_counts_only_when_the_composition_boxes_the_type() {
-    let impl_ = "struct L; trait R { fn read(&self); } impl R for L { fn read(&self) { let _ = HelperRequest::Firewall; } } struct W; impl R for W { fn read(&self) {} } fn user(b: &dyn R) { b.read(); }";
-    let not_built = composed(impl_, "fn compose() { let b: Box<dyn R> = Box::new(W); user(&*b); }");
-    assert_eq!(
-        wired_kinds(&not_built).get("Firewall"),
-        Some(&false),
-        "a second impl never lends the first its reachability"
-    );
-    let built = composed(impl_, "fn compose() { let b: Box<dyn R> = Box::new(L); user(&*b); }");
-    assert_eq!(wired_kinds(&built).get("Firewall"), Some(&true));
-    let in_first = composed(impl_, "fn compose() { let r = HelperFirst::new(L, port()); user(&r); }");
-    assert_eq!(
-        wired_kinds(&in_first).get("Firewall"),
-        Some(&true),
-        "a reading handed to the seam is composed"
-    );
-}
-
-#[test]
-fn a_reading_handed_to_the_seam_by_a_full_path_is_composed() {
-    let defs = "trait HelperReading { fn via_helper(&self); } struct R; impl HelperReading for R { fn via_helper(&self) { let _ = HelperRequest::LogTail(1); } }
-        struct Seam; impl Seam { fn read(&self, r: &dyn HelperReading) { r.via_helper(); } }";
-    for call in [
-        "HelperFirst::new(R, ())",
-        "crate::helper_first::HelperFirst::new(R, ())",
-        "std::sync::Arc::new(R)",
-    ] {
-        let fns = composed(defs, &format!("fn compose() {{ let s = {call}; Seam.read(&s); }}"));
-        assert_eq!(wired_kinds(&fns).get("LogTail"), Some(&true), "{call}");
-    }
-}
-
-#[test]
-fn a_reading_bound_to_a_local_before_it_is_handed_to_the_seam_is_composed() {
-    let defs = "trait HelperReading { fn via_helper(&self); } struct R { n: u8 } impl HelperReading for R { fn via_helper(&self) { let _ = HelperRequest::FileHolders; } }
-        struct Seam; impl Seam { fn read(&self, r: &dyn HelperReading) { r.via_helper(); } }";
-    let fns = composed(
-        defs,
-        "fn compose() { let reading = R { n: 0 }; let s = HelperFirst::new(reading, ()); Seam.read(&s); }",
-    );
-    assert_eq!(wired_kinds(&fns).get("FileHolders"), Some(&true));
-    let other = composed(defs, "fn compose() { let reading = R { n: 0 }; let s = Seam; s.read(&reading); }");
-    assert_eq!(
-        wired_kinds(&other).get("FileHolders"),
-        Some(&false),
-        "a local that is not handed to the seam is not composed"
-    );
-}
-
-#[test]
-fn a_boxed_type_does_not_make_every_trait_method_a_sender() {
-    let defs = "struct B; trait Calls { fn processes(&self); fn memory(&self); }
-        impl Calls for B { fn processes(&self) { let _ = HelperRequest::Processes; } fn memory(&self) { let _ = HelperRequest::MemoryModules; } }
-        fn read_memory(c: &dyn Calls) { c.memory(); }";
-    let fns = composed(defs, "fn compose() { let c: Box<dyn Calls> = Box::new(B); read_memory(&*c); }");
-    let wired = wired_kinds(&fns);
-    assert_eq!((wired.get("MemoryModules"), wired.get("Processes")), (Some(&true), Some(&false)));
-}
-
-#[test]
-fn the_typed_helper_calls_count_only_when_a_reading_calls_them() {
-    let defs = "struct B; trait HelperCalls { fn traffic(&self); } trait HelperReading { fn via_helper(&self, c: &dyn HelperCalls); }
-        impl HelperCalls for B { fn traffic(&self) { let _ = HelperRequest::Traffic; } }
-        struct R; impl HelperReading for R { fn via_helper(&self, c: &dyn HelperCalls) { c.traffic(); } }
-        fn unrelated(x: &B) { x.traffic(); }";
-    let by_other = composed(defs, "fn compose() { let c: Box<dyn HelperCalls> = Box::new(B); let _ = &c; }");
-    assert_eq!(
-        wired_kinds(&by_other).get("Traffic"),
-        Some(&false),
-        "a method of the same name elsewhere is not a reading"
-    );
-    let by_reading = composed(
-        defs,
-        "fn compose() { let c: Box<dyn HelperCalls> = Box::new(B); let r = HelperFirst::new(R, ()); r.via_helper(&*c); }",
-    );
-    assert_eq!(wired_kinds(&by_reading).get("Traffic"), Some(&true));
-}
-
-#[test]
-fn an_unparsable_file_is_an_error_not_a_skip() {
-    assert!(scan(&[("broken.rs".into(), "fn (".into())]).unwrap_err().contains("broken.rs"));
-}
-
-fn unwired(kind: &str, until: &str) -> Unwired {
-    Unwired {
-        wire: WIRE.into(),
-        kind: kind.into(),
-        why: "later".into(),
-        until: until.into(),
-    }
-}
-
-#[test]
-fn the_check_reports_each_way_a_kind_can_be_wrong() {
-    let none: Vec<FnInfo> = vec![];
-    let adv = set(&["Firewall"]);
-    let today = days_from_civil(2026, 11, 4);
-    let all_declared: Vec<Unwired> = RequestKind::ALL
-        .iter()
-        .filter(|k| **k != RequestKind::Firewall)
-        .map(|k| unwired(&format!("{k:?}"), "dyno-v1.2.0"))
-        .collect();
-    let p = check(&none, &adv, &all_declared, today);
-    assert_eq!(p.len(), 1, "{p:?}");
-    assert!(p[0].starts_with("Firewall: advertised"), "{p:?}");
-    // An advertised kind may not hide in wiring.toml.
-    let mut with_fw = all_declared.clone();
-    with_fw.push(unwired("Firewall", "dyno-v1.2.0"));
-    assert!(check(&none, &adv, &with_fw, today)[0].contains("not allowed"));
-    // An unadvertised, unsent kind needs an entry.
-    let p = check(&none, &set(&[]), &[], today);
-    assert_eq!(p.len(), RequestKind::ALL.len());
-    assert!(p[0].contains("[[unwired]]"));
-    // A stale entry (the kind is wired now) is a problem.
-    let fns = composed(
-        "struct L; impl L { fn f(&self) { let _ = HelperRequest::LogTail(1); } }",
-        "fn compose(l: &L) { l.f(); }",
-    );
-    let p = check(&fns, &set(&[]), &[unwired("LogTail", "dyno-v1.2.0")], today);
-    assert!(p.iter().any(|m| m.starts_with("LogTail: wired, but")), "{p:?}");
-}
 #[test]
 fn waivers_are_bounded() {
     let today = days_from_civil(2026, 11, 4);

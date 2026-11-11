@@ -12,6 +12,7 @@ use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, O
 use crate::helper_link::CallError;
 use dyno_core::firewall::{FirewallReader, FirewallSource, FirewallView, RuleSource};
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::metrics::Reading;
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::read_via::ReadVia;
@@ -37,6 +38,7 @@ impl HelperFirewall {
 
 impl HelperReading for HelperFirewall {
     type Value = FirewallSource;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Firewall];
 
     fn name(&self) -> &'static str {
         "firewall rules"

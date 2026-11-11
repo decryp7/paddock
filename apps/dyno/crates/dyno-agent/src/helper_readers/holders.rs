@@ -10,6 +10,7 @@
 use crate::helper_first::{HelperCalls, HelperFirst, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::helper_holders::{FileHolders, Holder, SocketOwners};
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_processes::OwnerKind;
 use dyno_core::metrics::Reading;
 use dyno_core::network::SocketRow;
@@ -33,6 +34,7 @@ pub struct SocketOwnerReading;
 
 impl HelperReading for SocketOwnerReading {
     type Value = SocketOwners;
+    const KINDS: &'static [RequestKind] = &[RequestKind::SocketOwners];
 
     fn name(&self) -> &'static str {
         "socket owners"
@@ -221,6 +223,7 @@ struct FileHolderReading {
 
 impl HelperReading for FileHolderReading {
     type Value = LockerList;
+    const KINDS: &'static [RequestKind] = &[RequestKind::FileHolders];
 
     fn name(&self) -> &'static str {
         "file holders"

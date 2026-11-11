@@ -16,6 +16,7 @@
 
 use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, ReadClass};
 use crate::helper_link::CallError;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_processes::{OwnerKind, ProcState, ProcessEntry, ProcessPage, MAX_SWEEP};
 use dyno_core::helper_requests::{ProcessQuery, RequestClass, MAX_PROCESS_PAGE};
 use dyno_core::metrics::Reading;
@@ -80,6 +81,7 @@ impl Sweeper {
 
 impl HelperReading for Sweeper {
     type Value = RawSweep;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Processes];
 
     fn name(&self) -> &'static str {
         "processes of every account"

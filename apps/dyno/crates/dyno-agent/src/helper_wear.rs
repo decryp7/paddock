@@ -9,6 +9,7 @@ use crate::helper_first::{HelperCalls, HelperFirst, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::hardware::DiskWear;
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_requests::SmartQuery;
 use dyno_core::metrics::Reading;
 use dyno_core::ports::{DiskWearSource, PlatformError};
@@ -59,6 +60,7 @@ pub fn helper_first_wear_on(
 
 impl HelperReading for SmartWear {
     type Value = Vec<DiskWear>;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Smart];
 
     fn name(&self) -> &'static str {
         "SSD wear"

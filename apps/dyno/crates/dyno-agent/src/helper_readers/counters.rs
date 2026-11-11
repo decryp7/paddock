@@ -13,6 +13,7 @@
 use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::helper_counters::{CounterAnswer, CounterValue, EnergyDomain};
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_requests::{CounterId, CounterQuery, RequestClass};
 use dyno_core::metrics::{Fan, Reading, SystemSample, Temperature};
 use dyno_core::ports::SystemSensors;
@@ -53,6 +54,7 @@ fn outcome<T>(answers: &[CounterAnswer], id: CounterId, pick: impl FnOnce(&Count
 
 impl HelperReading for MacCounters {
     type Value = CounterSet;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Counters];
 
     fn name(&self) -> &'static str {
         "temperatures, fans and CPU energy"
