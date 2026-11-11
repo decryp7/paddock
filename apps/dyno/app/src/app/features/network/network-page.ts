@@ -286,7 +286,7 @@ export class NetworkPage implements OnInit, OnDestroy {
     if (this.tab() === 'connections') {
       return [
         ...prog,
-        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(180px, 320px)', sortable: false },
+        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(180px, 1.5fr)', sortable: false },
         ...(this.store.resolveNames() ? [{ key: 'host', header: 'Host name', value: (r: Row) => (r.kind === 'item' ? (this.hostName(r.item as ConnectionRow) ?? '') : ''), width: 'minmax(90px, 2fr)', sortable: false }] : []),
         { key: 'service', header: 'Service', value: (r) => this.itemService(r), width: 'minmax(70px, 1fr)', sortable: false },
         { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ConnectionRow).proto, (r.item as ConnectionRow).ipv6) : ''), width: '68px', sortable: false },

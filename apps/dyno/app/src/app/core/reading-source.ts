@@ -72,6 +72,7 @@ export function sourceView(via: ReadVia | null | undefined, hint = ''): SourceVi
   styles: `
     :host { display: contents; }
     .chip { display: inline-block; margin: 0; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: var(--fs-xs); color: var(--text-2); }
+    button { align-self: flex-start; }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
   `,
 })

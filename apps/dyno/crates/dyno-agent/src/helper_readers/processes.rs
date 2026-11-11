@@ -32,6 +32,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
+/// What the page says about other accounts' rows until the worker's first sweep has finished.
+pub const AWAITING_FIRST_SWEEP: &str = "Other accounts appear after the helper's first read.";
 /// How often the worker sweeps while the list is being read.
 pub const SWEEP_PERIOD: Duration = Duration::from_secs(5);
 /// Where the worker reads its period: the setting (`Sampling::helper_sweep`, Auto by default), read before every wait so a change
@@ -346,6 +348,8 @@ struct Latest {
     view: Option<SweepView>,
     /// Who answered the last attempt.
     via: ReadVia,
+    /// Whether a sweep has finished at all (with a list or with the reason there is none).
+    swept: bool,
 }
 
 /// The shared state between the worker and the decorator.
@@ -382,17 +386,18 @@ impl SweepStore {
             l.view = view;
         }
         l.via = via;
+        l.swept = true;
     }
 
-    /// The latest sweep when it is fresh, and who answered last.
-    fn take(&self) -> (Option<SweepView>, ReadVia) {
+    /// The latest sweep when it is fresh, who answered last, and whether any sweep has finished yet.
+    fn take(&self) -> (Option<SweepView>, ReadVia, bool) {
         self.pulled_ms.store(self.clock.now_ms().max(1), Ordering::SeqCst);
         let l = self.latest.lock().unwrap_or_else(PoisonError::into_inner);
         let fresh = l
             .view
             .clone()
             .filter(|v| self.clock.monotonic().saturating_sub(v.at) <= STALE_AFTER);
-        (fresh, l.via.clone())
+        (fresh, l.via.clone(), l.swept)
     }
 
     /// Whether the sampler has taken the list lately (a first sweep is also due when it never has: it is about to).
@@ -520,7 +525,7 @@ impl HelperFirstProcesses {
     }
 
     /// What the table says about where it came from, given the local rows and the worker's last word.
-    fn provenance_of(local: &[ProcessSample], view: Option<&SweepView>, worker_via: ReadVia) -> ProcessProvenance {
+    fn provenance_of(local: &[ProcessSample], view: Option<&SweepView>, worker_via: ReadVia, swept: bool) -> ProcessProvenance {
         match view {
             Some(v) => ProcessProvenance {
                 processes: ReadVia::Helper,
@@ -538,7 +543,10 @@ impl HelperFirstProcesses {
                     .iter()
                     .any(|p| p.owner == Owner::Other || p.cpu.is_unavailable() || p.memory.is_unavailable());
                 ProcessProvenance {
-                    processes: if hidden && !matches!(worker_via, ReadVia::Helper) {
+                    processes: if hidden && !swept {
+                        // The helper has not been asked yet: its rows are unread yet, not unreadable.
+                        ReadVia::unavailable(AWAITING_FIRST_SWEEP)
+                    } else if hidden && !matches!(worker_via, ReadVia::Helper) {
                         worker_via
                     } else {
                         ReadVia::Local
@@ -555,8 +563,8 @@ impl HelperFirstProcesses {
 impl ProcessSource for HelperFirstProcesses {
     fn processes(&mut self) -> Vec<ProcessSample> {
         let local = self.local.processes();
-        let (view, via) = self.store.take();
-        self.provenance = Self::provenance_of(&local, view.as_ref(), via);
+        let (view, via, swept) = self.store.take();
+        self.provenance = Self::provenance_of(&local, view.as_ref(), via, swept);
         match view {
             Some(v) => merge(local, &v),
             None => local,
@@ -823,6 +831,27 @@ mod tests {
             all_read.provenance().processes,
             ReadVia::Local,
             "nothing hidden, nothing to ask for"
+        );
+    }
+
+    /// WP-14 (c): before the worker's first sweep has finished, the rows of other accounts are only "unread yet", and the page is told
+    /// so in words (not left with a bare "—"). Once a sweep has answered, even "no helper", the sweep's own word stands.
+    #[test]
+    fn before_the_first_sweep_the_table_says_the_helpers_first_read_is_awaited() {
+        let (mut w, store, _) = worker(false, vec![]);
+        let mut src = HelperFirstProcesses::new(Box::new(Local(local_table())), store.clone());
+        src.processes();
+        let via = src.provenance().processes;
+        assert_eq!(via.reason(), Some(AWAITING_FIRST_SWEEP), "{via:?}");
+        let mut all_read = HelperFirstProcesses::new(Box::new(Local(vec![proc(1, None, "mine", 1.0, 1)])), store.clone());
+        all_read.processes();
+        assert_eq!(all_read.provenance().processes, ReadVia::Local, "nothing hidden, nothing awaited");
+        w.sweep_once();
+        src.processes();
+        assert!(
+            matches!(src.provenance().processes, ReadVia::NeedsHelper { .. }),
+            "{:?}",
+            src.provenance().processes
         );
     }
 

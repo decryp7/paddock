@@ -59,8 +59,8 @@ import { ExtrasStore } from '../../state/extras.store';
     :host { display: block; height: 100%; }
     .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; max-width: 1440px; }
     .page-head { margin-bottom: 0; }
-    /* The Inventory tab is one table: the whole page area, the table fills the height left (the other tabs are sections). */
-    .page.table-page { display: flex; flex-direction: column; max-width: none; min-height: 100%; padding-bottom: var(--sp-4); }
+    /* The Inventory tab is one table that fills the height left (the other tabs are sections); every tab keeps the same width, so switching tabs does not move the page. */
+    .page.table-page { display: flex; flex-direction: column; min-height: 100%; padding-bottom: var(--sp-4); }
     .page.table-page > * { flex: none; }
     .page.table-page > mat-tab-nav-panel { flex: 1 1 auto; display: flex; flex-direction: column; }
   `,

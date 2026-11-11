@@ -11,8 +11,12 @@ import { expect, test, type Page } from '@decryp7/paddock-e2e';
  */
 const SIZES = [
   { width: 1920, height: 1080 },
+  { width: 1440, height: 900 },
   { width: 1280, height: 800 },
+  { width: 1024, height: 768 },
 ] as const;
+/** Both themes: a page that fits in one can overflow in the other only through a token, but the check is cheap. */
+const THEMES = ['light', 'dark'] as const;
 
 type Width = 'wide' | 1440 | 880;
 /**
@@ -41,7 +45,7 @@ const PAGES: { name: string; hash: string; fill?: boolean; width: Width; open?: 
   { name: 'health', hash: '/health', width: 1440 },
   { name: 'power', hash: '/power', width: 1440 },
   { name: 'extras-changes', hash: '/extras?tab=changes', width: 1440 },
-  { name: 'extras-inventory', hash: '/extras?tab=inventory', fill: true, width: 'wide' },
+  { name: 'extras-inventory', hash: '/extras?tab=inventory', fill: true, width: 1440 },
   { name: 'lifespan', hash: '/lifespan', width: 1440 },
   { name: 'diagnostics', hash: '/diagnostics', width: 1440 },
 ];
@@ -73,8 +77,10 @@ async function chartsDrawn(page: Page): Promise<void> {
 
 for (const p of PAGES) {
   for (const size of SIZES) {
-    test(`${p.name} at ${size.width}x${size.height}: fits the window`, async ({ page }) => {
+   for (const theme of THEMES) {
+    test(`${p.name} at ${size.width}x${size.height} (${theme}): fits the window`, async ({ page }) => {
       await page.setViewportSize(size);
+      await page.emulateMedia({ colorScheme: theme }); // the default Appearance follows the system
       await page.goto(`/?latency=0&rows=many#${p.hash}`);
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
       await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'), undefined, { timeout: 30_000 });
@@ -82,7 +88,7 @@ for (const p of PAGES) {
       await expect(page.locator('#pd-main [role=grid] .pd-body [role=row], #pd-main [role=treegrid] .pd-body [role=row]').first()).toBeVisible().catch(() => undefined);
       await chartsDrawn(page);
       const shots = process.env['SHOTS_DIR'];
-      if (shots) await page.screenshot({ path: `${shots}/${p.name}-${size.width}x${size.height}.png` });
+      if (shots) await page.screenshot({ path: `${shots}/${p.name}-${size.width}x${size.height}-${theme}.png` });
       const m = await page.evaluate(() => {
         const main = document.querySelector('#pd-main') as HTMLElement;
         const status = (document.querySelector('[data-pd-region=status]') as HTMLElement).getBoundingClientRect();
@@ -127,5 +133,6 @@ for (const p of PAGES) {
       if (p.width === 'wide') expect(m.width, `a single-table page is narrower than the area: ${why}`).toBeGreaterThanOrEqual(m.area - 1);
       else expect(m.width, `wider than the guide's ${p.width}: ${why}`).toBeLessThanOrEqual(p.width);
     });
+   }
   }
 }

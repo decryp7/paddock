@@ -143,8 +143,9 @@ import { MatMenuModule } from '@angular/material/menu';
     .wrap { height: 100%; display: flex; flex-direction: column; padding: var(--sp-5) var(--sp-6) var(--sp-4); gap: var(--sp-3); min-height: 0; }
     .source { display: contents; }
     .head { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; }
-    .titles { flex: 1; min-width: 200px; display: grid; gap: 2px; }
+    .titles { flex: 1 0 auto; min-width: 200px; display: grid; gap: 2px; }
     .titles p { color: var(--text-3); }
+    .titles .num { white-space: nowrap; }
     .banner { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid color-mix(in srgb, var(--bad) 35%, transparent); border-radius: var(--r-md); background: var(--bad-soft); }
     .banner > dy-icon { color: var(--bad); }
     .banner span { flex: 1; } .banner small { display: block; color: var(--text-2); }
@@ -203,13 +204,13 @@ export class ProcessesPage implements OnInit, OnDestroy {
   });
   protected readonly num = formatCount;
   protected readonly rowKey = (r: Row): string => r.key;
-  /** The columns are the store's sort keys: the table shows the sort and reports a click, the store orders the tree. */
+  /** Narrow table: PID drops first, then Disk (it is also in the details pane), and Account last (plan decision 1). The columns are the store's sort keys: the table shows the sort and reports a click, the store orders the tree. */
   protected readonly columns: PdColumn<Row>[] = [
     { key: 'name', header: 'Name', value: (r) => r.name, required: true, width: 'minmax(200px, 1fr)' },
     { key: 'cpu', sortStart: 'desc', header: 'CPU', value: (r) => r.cpu, align: 'end', width: '84px' },
     { key: 'memory', sortStart: 'desc', header: 'Memory', value: (r) => r.memory, align: 'end', width: '96px' },
-    { key: 'disk', sortStart: 'desc', header: 'Disk', value: (r) => r.disk, align: 'end', width: '96px' },
-    { key: 'user', header: 'Account', value: (r) => r.user, text: (r) => r.user ?? '—', width: '130px', hideBelow: 600 },
+    { key: 'disk', sortStart: 'desc', header: 'Disk', value: (r) => r.disk, align: 'end', width: '96px', hideBelow: 640 },
+    { key: 'user', header: 'Account', value: (r) => r.user, text: (r) => r.user ?? '—', width: '130px', hideBelow: 520 },
     { key: 'pid', header: 'PID', value: (r) => r.pid, text: (r) => (r.pid === null ? '' : String(r.pid)), align: 'end', width: '64px', hideBelow: 760 },
   ];
   /** Apps, processes and their children: the table indents, folds and says the levels. */
