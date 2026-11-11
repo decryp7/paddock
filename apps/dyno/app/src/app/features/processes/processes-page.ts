@@ -35,7 +35,7 @@ import { MatMenuModule } from '@angular/material/menu';
           <p class="num">{{ summary() }}</p>
         </div>
         <pd-segmented-control label="View" [options]="modeSegs()" [value]="store.mode()" (valueChange)="pickMode($event)" />
-        <dy-search-field label="Filter processes" placeholder="Filter by name, account or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
+        <dy-search-field label="Filter processes" placeholder="Filter by name or PID" [value]="store.query()" (valueChange)="store.setQuery($event)" />
         <dy-tree-actions what="processes" [disabled]="store.mode() === 'flat'" (expandAll)="store.expandAll()" (collapseAll)="store.collapseAll()" />
         <button type="button" matButton="outlined" (click)="lockers()"><dy-icon name="lock" /> What is locking this file?</button>
       </header>

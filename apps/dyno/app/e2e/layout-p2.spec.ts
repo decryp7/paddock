@@ -75,17 +75,19 @@ test('firewall: the administrator-readings button is not the card width at 1280'
   expect(box.width, 'the button is as wide as its words').toBeLessThanOrEqual(320);
 });
 
-test('alarms: a long title shows in full at 1280', async ({ page }) => {
+test('alarms: every title of the Active list shows in full at 1280, and State is as wide as its longest word needs', async ({ page }) => {
   await open(page, { width: 1280, height: 800 }, '/alarms');
-  const cut = await page.evaluate(() => {
-    const cells = [...document.querySelectorAll<HTMLElement>('#pd-main [role=gridcell], #pd-main [role=cell]')].filter((c) => (c.textContent ?? '').includes('GPU load is over'));
-    return cells.map((c) => {
-      const t = [c, ...c.querySelectorAll<HTMLElement>('*')].reduce((m, e) => Math.max(m, e.scrollWidth - e.clientWidth), 0);
-      return t;
-    });
+  const m = await page.evaluate(() => {
+    const titles = [...document.querySelectorAll<HTMLElement>('#pd-main [role=gridcell], #pd-main [role=cell]')].filter((c) =>
+      /GPU load is over|node started listening|rustc has used|Macintosh HD is|VirtualBox service/.test(c.textContent ?? ''),
+    );
+    const cut = titles.map((c) => ({ text: (c.textContent ?? '').trim().slice(0, 30), cut: [c, ...c.querySelectorAll<HTMLElement>('*')].reduce((n, e) => Math.max(n, e.scrollWidth - e.clientWidth), 0) }));
+    const state = Math.round([...document.querySelectorAll<HTMLElement>('#pd-main [role=columnheader]')].find((h) => (h.textContent ?? '').trim() === 'State')!.getBoundingClientRect().width);
+    return { cut, state };
   });
-  expect(cut.length).toBeGreaterThan(0);
-  for (const c of cut) expect(c, 'the title is cut').toBeLessThanOrEqual(0);
+  expect(m.cut.length, 'the five mock titles are on the page').toBe(5);
+  for (const c of m.cut) expect(c.cut, `the title "${c.text}" is cut`).toBeLessThanOrEqual(0);
+  expect(m.state, 'the State column is at most as wide as "Returned, not acknowledged" needs').toBeLessThanOrEqual(200);
 });
 
 for (const width of [1024, 1280]) {
@@ -98,6 +100,19 @@ for (const width of [1024, 1280]) {
     expect(h.height, `the subtitle wraps: ${JSON.stringify(h)}`).toBeLessThan(h.line * 1.5);
   });
 }
+
+test('processes: the filter field shows its whole placeholder at 1280', async ({ page }) => {
+  await open(page, { width: 1280, height: 800 }, '/processes');
+  const m = await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('#pd-main dy-search-field input')!;
+    const cs = getComputedStyle(input);
+    const ctx = document.createElement('canvas').getContext('2d')!;
+    ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const room = input.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    return { text: input.placeholder, need: Math.ceil(ctx.measureText(input.placeholder).width), room: Math.floor(room) };
+  });
+  expect(m.need, `the placeholder "${m.text}" needs ${m.need} px of ${m.room}`).toBeLessThanOrEqual(m.room);
+});
 
 /** Decision 1 of the plan: when the table is narrow, Disk goes first and Account stays (Disk is also in the details pane). */
 test('processes: a narrow table drops Disk before Account', async ({ page }) => {
