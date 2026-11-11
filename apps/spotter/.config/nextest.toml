@@ -32,3 +32,10 @@ real-browser = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = "package(spotter-render) & binary(real_browser)"
 test-group = "real-browser"
+
+# waiver: a real browser's start is judged on whether the process is alive or has exited, not on a clock (CI runs 7918 and 7929: a
+# starved shared Mac let the browser wait over 20 s for its first CPU). A working start on a loaded host is waited for and only a
+# hung one fails, after the 120 s START_GUARD of tests/real_browser.rs, then the page; the default 60 s would stop the tests first.
+[[profile.ci.overrides]]
+filter = "package(spotter-render) & binary(real_browser)"
+slow-timeout = { period = "30s", terminate-after = 8 }

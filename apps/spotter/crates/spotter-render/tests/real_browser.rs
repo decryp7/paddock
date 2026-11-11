@@ -17,6 +17,11 @@ const PAGE: &str = "<!doctype html><html><head><title>Rendered</title></head><bo
 <script>setTimeout(()=>{document.getElementById('v').textContent='version 1.2.3';\
 for(let i=1;i<=3;i++){const l=document.createElement('li');l.className='rel';l.textContent='item '+i;r.appendChild(l);}},400)</script></body></html>";
 
+/// The guard for a browser start that hangs. A start ends when the browser is ready or has exited (ADR 0071); on a shared
+/// host a starved browser gets its first CPU late (run 7918 and 7929: over 20 s), and only a start that is still silent
+/// after this long is a failure. nextest's waiver for these tests (apps/spotter/.config/nextest.toml) allows for it.
+const START_GUARD: Duration = Duration::from_secs(120);
+
 /// Real browsers are heavy: started side by side on a small CI runner they starve each other (a DevTools call then
 /// times out and the render is reported as a slow page), so the tests in this file take turns.
 fn serial() -> std::sync::MutexGuard<'static, ()> {
@@ -64,6 +69,7 @@ fn renderer(b: Browser, base: &Path) -> (ChromiumRenderer, NetLog) {
     let r = ChromiumRenderer::new(base, base)
         .with_browser(b)
         .with_mode(Mode::Headless)
+        .with_start_limit(START_GUARD)
         .with_extra_args(flags);
     (r, log)
 }
@@ -112,6 +118,7 @@ async fn off_screen_headful_mode_and_redirects() {
     let marker = base.path().to_string_lossy().to_string();
     let r = ChromiumRenderer::new(base.path(), base.path())
         .with_browser(b)
+        .with_start_limit(START_GUARD)
         .with_extra_args(test_browser_flags());
     let page = r
         .render(&format!("http://127.0.0.1:{port}/redirect"), Some("#done"), Duration::from_secs(40))
@@ -173,7 +180,7 @@ async fn a_server_that_never_answers_is_stopped_at_the_timeout() {
     assert!(matches!(e, RenderError::Failed(_)), "{e:?}\n{}", log.tail());
     // Start-up has its own limit; the hang itself must end at the 6 s page budget, not at the watchdog.
     assert!(
-        t.elapsed() < spotter_render::launch::lifetime_for(Duration::from_secs(6)),
+        t.elapsed() < spotter_render::launch::lifetime_with(START_GUARD, Duration::from_secs(6)),
         "took {:?}",
         t.elapsed()
     );
@@ -204,6 +211,7 @@ async fn a_load_replaced_by_another_navigation_names_it() {
         let mut opts = LaunchOptions::new(&dir);
         opts.extra_args = test_browser_flags();
         opts.mode = Mode::Headless;
+        opts.start_limit = START_GUARD;
         let c = Chromium::launch(&b, &opts).unwrap();
         let page = c.new_page().unwrap();
         std::thread::scope(|s| {
@@ -286,6 +294,7 @@ fn the_watchdog_kills_the_whole_tree_at_the_wall_clock_limit() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
+    opts.start_limit = START_GUARD;
     // The limit runs from the spawn, so it has to leave room for a slow start on a loaded runner (which is not what is tested).
     opts.max_lifetime = spotter_render::launch::START_LIMIT + Duration::from_secs(4);
     let mut c = Chromium::launch(&b, &opts).unwrap();
@@ -312,6 +321,7 @@ fn the_memory_cap_kills_the_tree() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
+    opts.start_limit = START_GUARD;
     opts.memory_cap = Some(1);
     let marker = base.path().to_string_lossy().to_string();
     // The cap also applies while the browser starts: it may be stopped before the connection is up, or after.
@@ -334,6 +344,7 @@ fn dropping_a_running_browser_kills_it_and_removes_the_profile() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
+    opts.start_limit = START_GUARD;
     let c = Chromium::launch(&b, &opts).unwrap();
     let dir = c.profile_dir().to_path_buf();
     let marker = dir.to_string_lossy().to_string();
@@ -350,6 +361,7 @@ fn closing_quits_the_browser_by_itself_before_any_kill() {
     let mut opts = LaunchOptions::new(base.path());
     opts.extra_args = test_browser_flags();
     opts.mode = Mode::Headless;
+    opts.start_limit = START_GUARD;
     let mut c = Chromium::launch(&b, &opts).unwrap();
     let marker = c.profile_dir().to_string_lossy().to_string();
     let t = Instant::now();
