@@ -421,8 +421,28 @@ pub(crate) async fn analysis_announced<R: Runtime, T: Send + 'static>(
     .await
 }
 
-/// The spec of an export to `path` by the window (or the app).
+/// The idempotency key of an import or export (see [`JobSpec::key`]): the window, the kind of work and a fingerprint of what
+/// it is about (`parts`: the sources or the target and the parameters). The fingerprint keeps paths and queries out of the key,
+/// so neither the Jobs record nor a log line carries them.
+pub(crate) fn work_key(what: &str, window: Option<&str>, parts: &[&str]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for p in parts {
+        p.hash(&mut h);
+    }
+    format!("{}|{what}|{:016x}", window.unwrap_or("app"), h.finish())
+}
+
+/// The spec of an export to `path` by the window (or the app). Keyed by the target and the title (what is exported): the same
+/// export asked for while it runs is served by that job.
 pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::Path) -> JobSpec {
+    export_spec_with(title, window, path, "")
+}
+
+/// [`export_spec`] for an export whose result also depends on `params` (the query, the format, what to mask): the key
+/// includes them, so the same file written with other parameters is another job.
+pub(crate) fn export_spec_with(title: &str, window: Option<&str>, path: &std::path::Path, params: &str) -> JobSpec {
+    let key = work_key("export", window, &[title, &path.to_string_lossy(), params]);
     let name = path
         .file_name()
         .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -432,7 +452,7 @@ pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::P
     if let Some(w) = window {
         spec = spec.window(w);
     }
-    spec
+    spec.keyed(key)
 }
 
 /// The progress of an export under way: rows (or events) written of those to write (`total` 0 while unknown) and the
@@ -484,9 +504,16 @@ pub(crate) fn export<R: Runtime>(
     win: &CurrentWindow,
     title: &str,
     path: &std::path::Path,
+    params: &str,
     f: impl FnOnce(&dyn debrief_core::ports::Store) -> CmdResult<String> + Send + 'static,
 ) -> CmdResult<u64> {
-    let spec = export_spec(title, Some(win.label()), path);
+    // The same file with the same parameters from the same project is one job (a second ask joins it).
+    let params = format!(
+        "{}|{}",
+        win.engine.opened_id().map_or_else(String::new, |id| id.to_string()),
+        params
+    );
+    let spec = export_spec_with(title, Some(win.label()), path, &params);
     let w = win.arc().clone();
     let control = debrief_core::ql::QueryControl::new();
     let result = JobResult::file(path.display().to_string());
@@ -562,9 +589,35 @@ where
     if spec.key.is_some() {
         // A keyed request may join a job that already exists, so there is no value to hand back: submit the work itself.
         let end = move |ctx: &JobCtx| service::settle(f(ctx), ctx).0;
-        return jobs.submit_work(spec, controls, end).map_err(|r| r.to_string());
+        let (kind, window) = (spec.kind, spec.source.window.clone());
+        let sub = jobs.submit_keyed_work(spec, controls, end).map_err(|r| r.to_string())?;
+        if !sub.created {
+            tell_joined(app, kind, window.as_deref());
+        }
+        return Ok(sub.id);
     }
     jobs.submit(spec, controls, f).map(|h| h.id).map_err(|r| r.to_string())
+}
+
+/// A second ask for an import or export that is already under way was served by that job: say so, so the user is not left
+/// wondering why nothing new started. Other kinds join silently (they are background work nobody asked for by hand).
+fn tell_joined<R: Runtime>(app: &AppHandle<R>, kind: JobKind, window: Option<&str>) {
+    use crate::notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
+    let (source, body) = match kind {
+        JobKind::Import => (NoticeSource::Import, "Already importing these files; showing that job."),
+        JobKind::Export => (NoticeSource::Job, "Already exporting this; showing that job."),
+        _ => return,
+    };
+    let notice = NewNotice::new(
+        format!("job:joined:{}", kind.as_str()),
+        source,
+        NoticeSeverity::Info,
+        "Already in progress",
+        NoticeScope::Project,
+    )
+    .body(body)
+    .quiet();
+    crate::notification_centre::post(app, window, notice, None);
 }
 
 fn service<R: Runtime>(app: &AppHandle<R>) -> CmdResult<Jobs> {
