@@ -1111,3 +1111,113 @@ fn a_dropped_hunk_finding_shows_where_it_was_and_what_it_said() {
         "{out}"
     );
 }
+
+// The workspace-hack detector: a stand-in for `cargo` plays `cargo hakari generate --diff` (exit 1 and a diff when a member
+// names base64 and the hack does not). The real tool is exercised by the unit tests of `hakari.rs` and by the CI line.
+#[cfg(unix)]
+mod hakari {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const FAKE_CARGO: &str = r#"#!/bin/sh
+# argv: hakari generate --diff, run in <tree>/crates
+[ "$1 $2 $3" = "hakari generate --diff" ] || { echo "unexpected: $*" >&2; exit 2; }
+if grep -q base64 x/Cargo.toml && ! grep -q base64 paddock-workspace-hack/Cargo.toml; then
+  printf 'info: \n--- original\n+++ modified\n+base64 = { version = "0.23" }\n'
+  exit 1
+fi
+exit 0
+"#;
+
+    fn fake_cargo(dir: &Path) -> PathBuf {
+        let p = dir.join("cargo");
+        fs::write(&p, FAKE_CARGO).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    /// A merge of two clean branches: one adds a member that needs base64, the other touches an unrelated file; `fixed` is
+    /// the one that regenerates the hack (as the train's own fix would).
+    fn train(with_config: bool, fixed: bool) -> Repo {
+        let r = Repo::new();
+        if with_config {
+            r.write("crates/.config/hakari.toml", "hakari-package = \"paddock-workspace-hack\"\n");
+        }
+        r.write("crates/paddock-workspace-hack/Cargo.toml", "[dependencies]\nserde = \"1\"\n");
+        r.write("crates/x/Cargo.toml", "[dependencies]\nserde = \"1\"\n");
+        r.write("notes.txt", "one\n");
+        r.commit("base");
+        r.git(&["checkout", "-q", "-b", "other"]);
+        r.write("notes.txt", "one\ntwo\n");
+        if fixed {
+            r.write(
+                "crates/paddock-workspace-hack/Cargo.toml",
+                "[dependencies]\nserde = \"1\"\nbase64 = \"0.23\"\n",
+            );
+        }
+        r.commit("docs: notes");
+        r.git(&["checkout", "-q", "main"]);
+        r.write("crates/x/Cargo.toml", "[dependencies]\nserde = \"1\"\nbase64 = \"0.23\"\n");
+        r.commit("feat: x needs base64");
+        r.git(&["merge", "-q", "--no-ff", "-m", "Merge other", "other"]);
+        r
+    }
+
+    fn check(r: &Repo) -> (i32, String) {
+        let bin = tempfile::tempdir().unwrap();
+        fake_cargo(bin.path());
+        let out = r
+            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
+            .args(["merge", "check", "--root"])
+            .arg(r.path())
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        (out.status.code().unwrap(), text)
+    }
+
+    #[test]
+    fn a_stale_workspace_hack_in_the_merge_result_is_a_finding_with_one_error_naming_the_fix() {
+        let (code, out) = check(&train(true, false));
+        assert_eq!(code, 5, "{out}");
+        assert!(out.contains("[workspace-hack] crates/paddock-workspace-hack/Cargo.toml"), "{out}");
+        assert!(out.contains("+base64"), "{out}");
+        let errors: Vec<&str> = out.lines().filter(|l| l.contains("::error::")).collect();
+        assert_eq!(errors.len(), 1, "{out}");
+        assert!(
+            errors[0].contains("cargo hakari generate") && errors[0].contains("lockfiles"),
+            "{out}"
+        );
+        assert!(!errors[0].contains("Hunks-dropped"), "a merge message cannot excuse it: {out}");
+    }
+
+    #[test]
+    fn a_merge_that_regenerated_the_workspace_hack_is_clean() {
+        let (code, out) = check(&train(true, true));
+        assert_eq!(code, 0, "{out}");
+    }
+
+    #[test]
+    fn a_tree_without_a_hakari_config_is_not_checked() {
+        let (code, out) = check(&train(false, false));
+        assert_eq!(code, 0, "{out}");
+    }
+
+    #[test]
+    fn a_hakari_that_cannot_run_is_not_measured_never_a_pass() {
+        let r = train(true, false);
+        let out = r
+            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
+            .args(["merge", "check", "--root"])
+            .arg(r.path())
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_ne!(out.status.code(), Some(0), "{text}");
+        assert!(text.contains("NOT MEASURED"), "{text}");
+    }
+}
