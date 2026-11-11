@@ -371,14 +371,14 @@ mod tests {
             LaunchSpec {
                 program: "cmd.exe".into(),
                 args: vec!["/d".into(), "/c".into(), "echo out && echo err 1>&2".into()],
-                dir: std::env::temp_dir(),
+                dir: paddock_testkit::boot_volume::boot_volume_temp(),
                 env: vec![],
             }
         } else {
             LaunchSpec {
                 program: "/bin/sh".into(),
                 args: vec!["-c".into(), "echo out; echo err 1>&2".into()],
-                dir: std::env::temp_dir(),
+                dir: paddock_testkit::boot_volume::boot_volume_temp(),
                 env: vec![],
             }
         };
@@ -411,7 +411,7 @@ mod tests {
             &LaunchSpec {
                 program: "/no/such/gitea-runner".into(),
                 args: vec![],
-                dir: std::env::temp_dir(),
+                dir: paddock_testkit::boot_volume::boot_volume_temp(),
                 env: vec![],
             },
             sink,

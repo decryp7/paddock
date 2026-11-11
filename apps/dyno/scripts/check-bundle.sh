@@ -130,7 +130,10 @@ case "$(uname -s)" in
       # The identifier on disk is not the whole story (Dyno 1.0.0 had the right one and the Network page still showed only the
       # agent's own sockets): ask the running bundled agent what it is shown, started the way the login service starts it, as a
       # launchd job. `dyno-agent view` prints `identifier=… announced=… sent=… cut_down=…`.
-      view="$(mktemp "${TMPDIR:-/tmp}/dyno-view-ci.XXXXXX")"
+      # A launchd job is its own responsible process: its output files go on the boot volume, never on an external one, where
+      # macOS (TCC, Removable Volumes) prompts or denies (conformance/ci/boot-volume.sh, the one rule; docs/lessons.md).
+      view_root="$(bash "$(cd "$(dirname "$0")/../../.." && pwd)/conformance/ci/boot-volume.sh" temp "${TMPDIR:-/tmp}")" || view_root="${TMPDIR:-/tmp}"
+      view="$(mktemp "${view_root%/}/dyno-view-ci.XXXXXX")"
       label="net.decryptology.dyno.checkbundle.$$"
       launchctl submit -l "$label" -o "$view" -e "$view.err" -- "$agent" view || err "launchctl could not start the bundled dyno-agent view"
       for _ in $(seq 1 100); do [[ -s "$view" || -s "$view.err" ]] && break; sleep 0.2; done
@@ -138,7 +141,7 @@ case "$(uname -s)" in
         # Neither output file got a byte in 20 s: the job did not run or could not open them. Say what launchd knows.
         state="$(launchctl print "gui/$(id -u)/$label" 2>&1 | grep -E 'state =|last exit code|exit status|spawn' | tr -s ' \t' ' ' | paste -sd';' - | head -c 400 || true)"
         [[ -n "$state" ]] || state="$(launchctl print "user/$(id -u)/$label" 2>&1 | head -c 300 | tr '\n' ';' || true)"
-        err "the launchd job $label (dyno-agent view, output in $view) wrote nothing in 20 s; launchctl print: ${state:-nothing}; TMPDIR=${TMPDIR:-unset} (macOS denies a launchd job a temp folder on an external volume, TCC Removable Volumes: TMPDIR must be on the internal disk, see conformance/ci/job-tmpdir.sh); this is not a code-signing identifier problem"
+        err "the launchd job $label (dyno-agent view, output in $view) wrote nothing in 20 s; launchctl print: ${state:-nothing}; TMPDIR=${TMPDIR:-unset}, output folder $view_root (macOS denies a launchd job a folder on an external volume, TCC Removable Volumes: see conformance/ci/boot-volume.sh); this is not a code-signing identifier problem"
       fi
       launchctl remove "$label" 2>/dev/null || true
       line="$(head -n 1 "$view")"

@@ -1777,6 +1777,11 @@ affected: `job-tmpdir.sh` already puts the job's `TMPDIR` on the internal disk (
 and the build tools never prompted: they run with the runner (which has Full Disk Access) as their responsible process.
 **Lesson (class: a permission belongs to the responsible process, not the parent; second instance after 2026-11-04):** a
 test helper that launches a program disclaimed, or through launchd, keeps that program and its files off removable
-volumes itself, and does not rely on the caller's `TMPDIR`. The supervision harness now uses `getconf
-DARWIN_USER_TEMP_DIR` when `TMPDIR` is under `/Volumes`. Measure prompts with `AUTHREQ_PROMPTING` before you guess the
-binary from the prompt's title: the title shows the file name, and a test fake can share the real program's name.
+volumes itself, and does not rely on the caller's `TMPDIR`. The mechanism is one shared rule (ER-21):
+`conformance/ci/boot-volume.sh` (`diskutil` says the folder's volume, links resolved, is not internal; then `getconf
+DARWIN_USER_TEMP_DIR`), used by `job-tmpdir.sh` and Dyno's `check-bundle.sh` and, for Rust tests, through
+`paddock_testkit::boot_volume::boot_volume_temp()` (Pitcrew's supervision harness and its `launch.rs` and `disclaim.rs`
+tests). Measure prompts with `AUTHREQ_PROMPTING` before you guess the binary from the prompt's title: the title shows the
+file name, and a test fake can share the real program's name. The tccd extracts and the join script are kept in
+`/Volumes/d7sst7/dev-targets/tcc-scratch/` (`tccd-2h.log`, `authreq-since-0600.log`, `after.log`, `after2.log`) and
+`/Volumes/d7sst7/dev-targets/tcc-tools/join.py`, outside the repository (machine logs).

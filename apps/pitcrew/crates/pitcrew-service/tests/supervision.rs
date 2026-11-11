@@ -54,53 +54,13 @@ fn fake_runner() -> PathBuf {
         .clone()
 }
 
-/// The folder the harness puts each test's runner in. The runner is started disclaimed, as its own responsible process
-/// (ADR 0020), so on macOS a `TMPDIR` on another volume (`/Volumes/...`, where agents keep scratch) made TCC ask
-/// "gitea-runner would like to access files on a removable volume" once per test: every test copies the fake runner to a
-/// new path, and TCC keys an unbundled, ad-hoc signed program by its path (tccd log, 2026-11-11). Such a `TMPDIR` is
-/// replaced by the per-user temp folder on the boot volume. CI's job folder is already on the internal disk
-/// (`conformance/ci/job-tmpdir.sh`, docs/lessons.md 2026-11-04), so CI keeps its own folder.
+/// The folder the harness puts each test's runner in. The runner is started disclaimed, so it is its own responsible
+/// process (ADR 0020), and macOS (TCC, Removable Volumes) asked "gitea-runner would like to access files on a removable
+/// volume" once per test when `TMPDIR` was on an external disk: each test copies the fake runner to a new path, and TCC keys
+/// an unbundled ad-hoc program by its path (docs/lessons.md, 2026-11-04 and 2026-11-11). The shared rule keeps it on the
+/// boot volume.
 fn runner_temp_root() -> PathBuf {
-    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-    ROOT.get_or_init(|| {
-        let temp = std::env::temp_dir();
-        let root = runner_temp_root_for(&temp, darwin_user_temp_dir().as_deref());
-        if root != temp {
-            eprintln!(
-                "supervision: runner folders in {} instead of TMPDIR {}: a disclaimed runner on another volume makes macOS ask for removable-volume access",
-                root.display(),
-                temp.display()
-            );
-        }
-        root
-    })
-    .clone()
-}
-
-/// The pure choice behind [`runner_temp_root`]: `user_temp` when `temp` is on another volume and `user_temp` is not.
-fn runner_temp_root_for(temp: &std::path::Path, user_temp: Option<&std::path::Path>) -> PathBuf {
-    let other_volume = |p: &std::path::Path| p.starts_with("/Volumes");
-    match user_temp {
-        Some(user) if other_volume(temp) && !other_volume(user) => user.to_path_buf(),
-        _ => temp.to_path_buf(),
-    }
-}
-
-/// The per-user temp folder macOS gives every process before `TMPDIR` is changed (`getconf DARWIN_USER_TEMP_DIR`).
-#[cfg(target_os = "macos")]
-fn darwin_user_temp_dir() -> Option<PathBuf> {
-    let out = std::process::Command::new("/usr/bin/getconf")
-        .arg("DARWIN_USER_TEMP_DIR")
-        .output()
-        .ok()?;
-    let dir = String::from_utf8(out.stdout).ok()?;
-    let dir = dir.trim();
-    (out.status.success() && dir.starts_with('/')).then(|| PathBuf::from(dir))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn darwin_user_temp_dir() -> Option<PathBuf> {
-    None
+    paddock_testkit::boot_volume::boot_volume_temp()
 }
 
 struct Harness {
@@ -1386,34 +1346,4 @@ fn the_actions_cache_of_a_runner_is_reported_previewed_and_trimmed() {
     });
     assert!(matches!(other, Response::Error(ref e) if e.code == ErrorCode::UnknownRunner));
     h.finish();
-}
-
-#[test]
-fn a_tmpdir_on_another_volume_is_replaced_by_the_boot_volume_user_temp_folder() {
-    use std::path::Path;
-    // The harness's real choice: never a folder on another volume when this macOS has a per-user temp folder.
-    if let Some(user) = darwin_user_temp_dir() {
-        assert!(!runner_temp_root().starts_with("/Volumes") || user.starts_with("/Volumes"));
-    }
-    let user = Path::new("/var/folders/ab/xyz/T");
-    // An agent's TMPDIR on the external CI volume: a disclaimed runner there makes macOS prompt (Removable Volumes).
-    assert_eq!(
-        runner_temp_root_for(Path::new("/Volumes/d7sst7/dev-targets/pitcrew-tmp"), Some(user)),
-        user
-    );
-    // CI's job folder (job-tmpdir.sh already moved it to the internal disk) and the macOS default stay as they are.
-    let internal = Path::new("/Users/someone/gitea-runner/tmp/0123abcd");
-    assert_eq!(runner_temp_root_for(internal, Some(user)), internal);
-    assert_eq!(runner_temp_root_for(user, Some(user)), user);
-    // Not macOS, or getconf gave nothing: unchanged. A name that only starts with "Volumes" is not a volume.
-    assert_eq!(runner_temp_root_for(Path::new("/Volumes/x/tmp"), None), Path::new("/Volumes/x/tmp"));
-    assert_eq!(
-        runner_temp_root_for(Path::new("/Volumesx/tmp"), Some(user)),
-        Path::new("/Volumesx/tmp")
-    );
-    // A user temp folder that is itself on another volume is no better.
-    assert_eq!(
-        runner_temp_root_for(Path::new("/Volumes/a/tmp"), Some(Path::new("/Volumes/b/T"))),
-        Path::new("/Volumes/a/tmp")
-    );
 }
