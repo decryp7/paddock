@@ -22,19 +22,55 @@ pub fn prepare_root(root: &Path) -> Result<(), String> {
 /// # Errors
 /// See [`prepare_root`].
 pub fn prepare_root_with(root: &Path, group_has_others: impl FnOnce(u32) -> bool) -> Result<(), String> {
-    paddock_env::create_private_dir_all(root).map_err(|e| format!("Dyno could not create its data folder ({e})"))?;
     #[cfg(unix)]
-    if let Err(r) = paddock_env::tighten_group_write(root, group_has_others) {
-        log::warn!(Why = r.reason(); "The data folder cannot be made private; run chmod go-w on it");
-        return Err(format!(
-            "the data folder is not safe to use ({}); run chmod go-w {}",
-            r.reason(),
-            root.display()
-        ));
+    if std::fs::symlink_metadata(root).is_ok() {
+        if let Err(r) = paddock_env::tighten_group_write(root, group_has_others) {
+            log::warn!(Why = r.reason(); "The data folder cannot be made private; run chmod go-w on it");
+            return Err(format!(
+                "the data folder is not safe to use ({}); run chmod go-w {}",
+                r.reason(),
+                root.display()
+            ));
+        }
     }
     #[cfg(not(unix))]
     let _ = group_has_others;
-    Ok(())
+    open_private(root, "the data folder")
+        .map(|_| ())
+        .map_err(|e| format!("Dyno cannot use its data folder: {e}"))
+}
+
+/// The one way the agent opens or makes a folder that holds trusted files (ADR 0092 WP-6): an existing folder (a link to the
+/// user's own folder is followed) is checked from its handle, a missing one is made owner-only from creation, and one that is open
+/// to others, owned by another account or under a parent others can change is refused as it is: never tightened, because that
+/// cannot evict what was planted while it was open. A refusal is logged with its reason (no path) and the error text names the
+/// folder and the next step (ER-27). `what` names the folder in the log.
+///
+/// # Errors
+/// [`paddock_env::private::PrivateError`]: refused, or an operation failed.
+pub fn open_private(folder: &Path, what: &str) -> paddock_env::private::PrivateResult<paddock_env::private::PrivateDir> {
+    use paddock_env::private::PrivateDir;
+    let opened = if std::fs::symlink_metadata(folder).is_ok() {
+        PrivateDir::open(folder, paddock_env::Links::Follow)
+    } else {
+        PrivateDir::create_all(folder)
+    };
+    if let Err(e) = &opened {
+        log::warn!(Why = e.reason(); "Not using {what}: it is not safe or could not be made");
+    }
+    opened
+}
+
+/// [`open_private`] with the error as an `io::Error` for callers that return one (the text keeps the folder and the next step).
+///
+/// # Errors
+/// `PermissionDenied` for a refusal, the OS error's kind otherwise.
+pub fn open_private_io(folder: &Path, what: &str) -> std::io::Result<paddock_env::private::PrivateDir> {
+    use paddock_env::private::PrivateError;
+    open_private(folder, what).map_err(|e| match &e {
+        PrivateError::Io { source, .. } => std::io::Error::new(source.kind(), e.to_string()),
+        _ => std::io::Error::new(std::io::ErrorKind::PermissionDenied, e.to_string()),
+    })
 }
 
 /// What to do when no data folder can be used (the same words for the agent and the CLI).
@@ -296,7 +332,7 @@ fn folder_kind(root: &Path, overridden: bool, current: &Path, temp: &Path) -> &'
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
@@ -384,6 +420,50 @@ mod tests {
         // A shared group is refused too.
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
         assert!(prepare_root_with(&root, |_| true).is_err());
+    }
+
+    /// A folder others can write to and replace children of (0777, no sticky bit) inside a private temp folder, and the temp folder.
+    #[cfg(unix)]
+    pub(crate) fn open_parent() -> (tempfile::TempDir, PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        (tmp, open)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_data_folder_under_a_parent_others_can_change_is_refused() {
+        let (_tmp, open) = open_parent();
+        let root = open.join("data");
+        let e = prepare_root_with(&root, |_| false).unwrap_err();
+        assert!(e.contains("chmod go-w"), "the refusal names the next step: {e}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn open_private_makes_a_missing_folder_owner_only_follows_a_link_to_an_own_folder_and_refuses_an_open_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let made = tmp.path().join("a").join("b");
+        open_private(&made, "test").unwrap();
+        assert_eq!(std::fs::metadata(&made).unwrap().permissions().mode() & 0o777, 0o700);
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&made, &link).unwrap();
+        open_private(&link, "test").unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = open_private_io(&open, "test").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(e.to_string().contains("chmod go-w"), "{e}");
+        assert_eq!(
+            std::fs::metadata(&open).unwrap().permissions().mode() & 0o777,
+            0o777,
+            "never tightened"
+        );
     }
 
     #[cfg(unix)]
@@ -476,5 +556,37 @@ mod tests {
     fn the_current_user_gets_a_named_folder() {
         let d = Dirs::current();
         assert!(d.root().to_string_lossy().to_lowercase().contains("dyno"));
+    }
+    /// Windows: a folder in a private temp tree that Everyone may write to (an entry that new items inherit). Owed: runs on the
+    /// Windows runner or VM.
+    #[cfg(windows)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a Windows-only test runs icacls on its own temporary folder to set and read its access list"
+    )]
+    pub(crate) fn everyone_folder() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        let out = std::process::Command::new("icacls")
+            .arg(&open)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "icacls: {}", String::from_utf8_lossy(&out.stdout));
+        (tmp, open)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_a_data_folder_everyone_can_write_is_refused_with_a_next_step_and_a_new_one_is_made() {
+        let (tmp, open) = everyone_folder();
+        let e = prepare_root_with(&open, |_| false).unwrap_err();
+        assert!(e.contains("Security tab") || e.contains("entries"), "{e}");
+        let e = open_private_io(&open, "test").unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+        // A folder made under an Everyone-writable parent is refused (the parent rule), and a fresh one elsewhere is made.
+        assert!(open_private(&open.join("data"), "test").is_err());
+        prepare_root_with(&tmp.path().join("own").join("data"), |_| false).unwrap();
     }
 }

@@ -115,6 +115,19 @@ fn find_device(v: &WolView, wanted: &str) -> Result<u64, ToolError> {
     }
 }
 
+/// Makes or checks the folder that holds the AI access files (`mcp-keys.json`, `mcp.json`, the listener's discovery file) through the
+/// shared private-folder type (ADR 0092, W7): owner-only from creation, and an existing folder others can change, another account's
+/// folder or a folder under a parent others can change is refused as it is (never tightened). The config folder is not the data
+/// folder: portable mode (data beside the executable) puts it outside the user's profile, and `DYNO_DATA_DIR` does not move it.
+///
+/// # Errors
+/// The refusal text names the folder and the next step.
+pub fn prepare_config_folder(config: &std::path::Path) -> Result<(), String> {
+    dyno_agent::paths::open_private(config, "the AI access folder")
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Builds the AI access control the shell manages (`Builder::mcp`): the server with Dyno's tools (off until the user switches it on in
 /// Settings > AI access, every action off until allowed by name), the settings in the config folder, the client keys in the
 /// owner-only `mcp-keys.json` beside them (a hash per key, never the key, and never the OS credential store: opening a Keychain item of another build blocks the app before its window) and the audit log.
@@ -131,6 +144,11 @@ pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit, calls:
         if let Err(e) = server.add_tool(tool) {
             log::error!("a Dyno MCP tool was refused: {e}");
         }
+    }
+    // A refused folder is logged with its next step; the key list and the settings then refuse too (`McpView.keysProblem` says why), so
+    // no key works from an unsafe folder.
+    if let Err(e) = prepare_config_folder(dirs.config()) {
+        log::error!(Cause = e.as_str(); "AI access: its folder is not safe, so no key will work; next step: make the folder owned by you and closed to others, or move it");
     }
     let keys = Arc::new(KeyStore::new());
     let listener = Arc::new(Listener::new(
@@ -555,5 +573,42 @@ mod tests {
         };
         assert!(describe_devices(&off).contains("turned off"));
         assert!(describe_devices(&WolView { enabled: true, ..off }).contains("No computers"));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn the_config_folder_is_made_owner_only_and_an_open_one_is_refused_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let made = tmp.path().join("config");
+        prepare_config_folder(&made).unwrap();
+        assert_eq!(std::fs::metadata(&made).unwrap().permissions().mode() & 0o777, 0o700);
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = prepare_config_folder(&open).unwrap_err();
+        assert!(e.contains("chmod go-w"), "{e}");
+        assert_eq!(std::fs::metadata(&open).unwrap().permissions().mode() & 0o777, 0o777);
+        // A folder under a parent others can change is refused too.
+        let under = open.join("config");
+        assert!(prepare_config_folder(&under).is_err());
+    }
+    #[cfg(windows)]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a Windows-only test runs icacls on its own temporary folder to set and read its access list"
+    )]
+    fn windows_the_ai_access_folder_is_refused_when_everyone_can_write_to_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        let out = std::process::Command::new("icacls")
+            .arg(&open)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(prepare_config_folder(&open).is_err());
+        prepare_config_folder(&tmp.path().join("own").join("config")).unwrap();
     }
 }
