@@ -16,6 +16,9 @@
 //!   ([`StallCause::Paused`]); [`StallReport`] says why a wait looks stuck. [`InstanceLock`]: one instance per folder by a
 //!   held OS lock; [`hint`]: a discovery file is only a hint (rule 53).
 //!
+//! - [`wait_ready_or_exit`], [`warm_up`]: the one start wait of every test and start (ADR 0071): wait while alive until ready or
+//!   exited, with an exit reported at once and one outer hang guard; pay a first run of a program before the start that matters.
+//!
 //! - [`console`]: a GUI-subsystem program (no console window at login) that still prints when run from a terminal.
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
@@ -37,6 +40,7 @@ mod instance;
 #[cfg(windows)]
 mod job;
 mod login;
+mod ready;
 mod run;
 mod runstate;
 pub mod self_test;
@@ -82,6 +86,7 @@ pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
 };
+pub use ready::{Ended, HANG_GUARD, ThreadPace, wait_ready_or_exit, warm_up};
 pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
 pub use runstate::{RunState, run_state};
 pub use stall::{StallAction, StallCause, StallReport};
