@@ -10,13 +10,15 @@
 //! ([`Sourced`]).
 //!
 //! Adding a reading: implement [`HelperReading`] (about 20 lines), build `HelperFirst::new(reading, port)` where the agent is
-//! composed (`agent.rs`), and put `Sourced::via` on the reply type's `via` field. Nothing else in this file changes.
+//! composed (`agent.rs`), and put `Sourced::via` on the reply type's `via` field. Nothing else in this file changes. Say what the
+//! reading asks in [`HelperReading::KINDS`]: the seam registers it, and `tests/helper_wiring.rs` compares it with `readings()`.
 
 use dyno_core::btm::LoginItemsReply;
 use dyno_core::firewall::FirewallSource;
 use dyno_core::helper_counters::CounterAnswer;
 use dyno_core::helper_extras::ExtrasAnswer;
 use dyno_core::helper_holders::{FileHolders, SocketOwners};
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_processes::ProcessPage;
 use dyno_core::helper_requests::{CounterQuery, ExtrasKind, ProcessQuery, SmartQuery};
 use dyno_core::helper_wire::{HelperState, HelperStatus};
@@ -424,10 +426,29 @@ impl ReadyGate {
     }
 }
 
+/// The request kinds that are not readings: the helper's own state and actions, each sent by the code that owns the action, so no
+/// `HelperReading` declares them. `tests/helper_wiring.rs` gives each its reason and checks this list is the same set.
+#[doc(hidden)]
+pub const NOT_A_READING_KINDS: [RequestKind; 8] = [
+    RequestKind::Info,
+    RequestKind::Audit,
+    RequestKind::InstallTool,
+    RequestKind::Uninstall,
+    RequestKind::ScheduleWake,
+    RequestKind::CancelWake,
+    RequestKind::ListWakes,
+    RequestKind::Build,
+];
+
 /// One reading the helper can give better than the agent.
 pub trait HelperReading: Send {
     /// The domain value: the same type from both paths.
     type Value;
+    /// The helper request kinds `via_helper` sends, one per typed call it makes. Required, so a reading that does not say what it
+    /// asks cannot be written; [`HelperFirst::new`] registers them where the composition wires the reading, and
+    /// [`wired_kinds_while`] hands them to the test that compares them with what the helper advertises (only while
+    /// [`HelperReading::helper_applies`] is true: a reading built on every host that this host does not use registers nothing).
+    const KINDS: &'static [RequestKind];
     /// A short name for the log (no user content).
     fn name(&self) -> &'static str;
     /// How long the helper may take: [`ReadClass::Live`] or [`ReadClass::Bulk`]. Every reading says, so none gets a 2 s deadline by
@@ -462,6 +483,45 @@ pub struct Sourced<V> {
     pub via: ReadVia,
 }
 
+thread_local! {
+    /// The kinds of the readings built on this thread while a [`wired_kinds_while`] runs; `None` otherwise (production never records).
+    static WIRED: std::cell::RefCell<Option<std::collections::HashSet<RequestKind>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn note_wired(kinds: &[RequestKind]) {
+    WIRED.with(|w| {
+        if let Some(set) = w.borrow_mut().as_mut() {
+            set.extend(kinds.iter().copied());
+        }
+    });
+}
+
+/// Puts the outer record back when a [`wired_kinds_while`] ends, also when its `build` panics.
+struct WiredScope {
+    outer: Option<std::collections::HashSet<RequestKind>>,
+}
+
+impl Drop for WiredScope {
+    fn drop(&mut self) {
+        WIRED.with(|w| *w.borrow_mut() = self.outer.take());
+    }
+}
+
+/// Runs `build` and returns what it wired: the [`HelperReading::KINDS`] of every reading handed to [`HelperFirst::new`] on this
+/// thread meanwhile whose [`HelperReading::helper_applies`] is true (a reading built on every host that the helper does not read
+/// on this one is not a wired reading). The registry is the seam itself, so a reading composed without it cannot be missed by a
+/// text scan; the composition test (`tests/helper_wiring.rs`) compares the result with the readings the helper advertises. A
+/// nested call keeps its own record and restores the outer one, also on a panic.
+#[doc(hidden)]
+pub fn wired_kinds_while<T>(build: impl FnOnce() -> T) -> (T, std::collections::HashSet<RequestKind>) {
+    let _scope = WiredScope {
+        outer: WIRED.with(|w| w.replace(Some(std::collections::HashSet::new()))),
+    };
+    let built = build();
+    let wired = WIRED.with(|w| w.borrow().clone()).unwrap_or_default();
+    (built, wired)
+}
+
 /// Runs a [`HelperReading`]: helper first, then local, else the reason.
 pub struct HelperFirst<R: HelperReading> {
     reading: R,
@@ -478,6 +538,9 @@ pub struct HelperFirst<R: HelperReading> {
 impl<R: HelperReading> HelperFirst<R> {
     /// The reading over `port`, with the local fallback on (the product choice, plan decision D1).
     pub fn new(reading: R, port: Box<dyn HelperPort>) -> Self {
+        if reading.helper_applies() {
+            note_wired(R::KINDS);
+        }
         HelperFirst {
             reading,
             port,
@@ -1009,6 +1072,7 @@ mod tests {
     struct Classed(Mem, ReadClass);
     impl HelperReading for Classed {
         type Value = MemoryLayout;
+        const KINDS: &'static [RequestKind] = &[RequestKind::MemoryModules];
         fn name(&self) -> &'static str {
             self.0.name()
         }
@@ -1030,6 +1094,7 @@ mod tests {
     }
     impl HelperReading for Mem {
         type Value = MemoryLayout;
+        const KINDS: &'static [RequestKind] = &[RequestKind::MemoryModules];
         fn name(&self) -> &'static str {
             "memory modules"
         }
@@ -1305,6 +1370,73 @@ mod tests {
     }
 
     #[test]
+    fn the_seam_records_the_kinds_of_the_readings_built_while_a_scope_runs() {
+        let (net, clock) = (Net::new(true, vec![]), FakeClock::new());
+        let c = centre(&net, &clock);
+        let before = HelperFirst::new(mem(Reading::Available(total_only(4, "local")), false).0, port(&c));
+        let (inner, wired) = wired_kinds_while(|| {
+            let (r, _) = mem(Reading::Available(total_only(4, "local")), false);
+            // A nested scope keeps its own record and gives the outer one back.
+            let (_, nested) = wired_kinds_while(|| HelperFirst::new(Noisy(mem(Reading::Available(total_only(4, "x")), false).0), port(&c)));
+            assert_eq!(nested.len(), 2);
+            HelperFirst::new(r, port(&c))
+        });
+        assert_eq!(
+            wired,
+            [RequestKind::MemoryModules].into_iter().collect(),
+            "only what was built in the scope, not before it"
+        );
+        drop((before, inner));
+        let (_, none) = wired_kinds_while(|| ());
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn a_panic_inside_a_scope_gives_the_outer_record_back() {
+        let (net, clock) = (Net::new(true, vec![]), FakeClock::new());
+        let c = centre(&net, &clock);
+        let (_, outer) = wired_kinds_while(|| {
+            let gone = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                wired_kinds_while(|| panic!("a build that fails"));
+            }));
+            assert!(gone.is_err());
+            // Still recording into the outer scope after the inner one died.
+            HelperFirst::new(mem(Reading::Available(total_only(4, "local")), false).0, port(&c))
+        });
+        assert_eq!(outer, [RequestKind::MemoryModules].into_iter().collect());
+        let (_, none) = wired_kinds_while(|| ());
+        assert!(none.is_empty(), "no scope is left behind");
+    }
+
+    #[test]
+    fn a_reading_the_helper_does_not_apply_to_registers_nothing() {
+        struct Off(Mem);
+        impl HelperReading for Off {
+            type Value = MemoryLayout;
+            const KINDS: &'static [RequestKind] = &[RequestKind::MemoryModules];
+            fn name(&self) -> &'static str {
+                "off"
+            }
+            fn class(&self) -> ReadClass {
+                ReadClass::Live
+            }
+            fn helper_applies(&self) -> bool {
+                false
+            }
+            fn via_helper(&self, calls: &dyn HelperCalls) -> Result<MemoryLayout, CallError> {
+                self.0.via_helper(calls)
+            }
+            fn local(&mut self) -> Reading<MemoryLayout> {
+                self.0.local()
+            }
+        }
+        let (net, clock) = (Net::new(true, vec![]), FakeClock::new());
+        let c = centre(&net, &clock);
+        let (_, wired) = wired_kinds_while(|| HelperFirst::new(Off(mem(Reading::Available(total_only(4, "x")), false).0), port(&c)));
+        assert!(wired.is_empty());
+    }
+
+    #[test]
     fn a_refusal_is_not_a_strike() {
         let (net, clock) = (Net::new(true, vec![refused(), memory_answer()]), FakeClock::new());
         let c = centre(&net, &clock);
@@ -1324,6 +1456,7 @@ mod tests {
     struct Noisy(Mem);
     impl HelperReading for Noisy {
         type Value = MemoryLayout;
+        const KINDS: &'static [RequestKind] = &[RequestKind::Traffic, RequestKind::MemoryModules];
         fn name(&self) -> &'static str {
             "noisy"
         }

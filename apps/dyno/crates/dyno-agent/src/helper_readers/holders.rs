@@ -10,6 +10,7 @@
 use crate::helper_first::{HelperCalls, HelperFirst, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::helper_holders::{FileHolders, Holder, SocketOwners};
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_processes::OwnerKind;
 use dyno_core::metrics::Reading;
 use dyno_core::network::SocketRow;
@@ -33,6 +34,7 @@ pub struct SocketOwnerReading;
 
 impl HelperReading for SocketOwnerReading {
     type Value = SocketOwners;
+    const KINDS: &'static [RequestKind] = &[RequestKind::SocketOwners];
 
     fn name(&self) -> &'static str {
         "socket owners"
@@ -210,7 +212,7 @@ pub fn locker_of(h: &Holder) -> Locker {
 }
 
 /// The reading behind [`HelperLocks`]: one file, by path for the agent and by device and inode for the helper.
-struct FileHolderReading {
+pub(crate) struct FileHolderReading {
     local: Box<dyn FileLocks>,
     path: PathBuf,
     dev: u64,
@@ -219,8 +221,22 @@ struct FileHolderReading {
     refused: Option<PlatformError>,
 }
 
+impl FileHolderReading {
+    /// A reading over the agent's own reader `local`; the file is set before each read.
+    pub(crate) fn new(local: Box<dyn FileLocks>) -> FileHolderReading {
+        FileHolderReading {
+            local,
+            path: PathBuf::new(),
+            dev: 0,
+            ino: 0,
+            refused: None,
+        }
+    }
+}
+
 impl HelperReading for FileHolderReading {
     type Value = LockerList;
+    const KINDS: &'static [RequestKind] = &[RequestKind::FileHolders];
 
     fn name(&self) -> &'static str {
         "file holders"
@@ -265,15 +281,8 @@ pub struct HelperLocks {
 impl HelperLocks {
     /// `local` is the platform's reader; `seam_port` says where the helper is.
     pub fn new(local: Box<dyn FileLocks>, port: Box<dyn crate::helper_first::HelperPort>) -> HelperLocks {
-        let reading = FileHolderReading {
-            local,
-            path: PathBuf::new(),
-            dev: 0,
-            ino: 0,
-            refused: None,
-        };
         HelperLocks {
-            seam: HelperFirst::new(reading, port),
+            seam: HelperFirst::new(FileHolderReading::new(local), port),
         }
     }
 }
