@@ -1,20 +1,18 @@
-import { EnvironmentProviders, inject, Injectable, Injector, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
+import { EnvironmentProviders, inject, Injector, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
 import { CaptureSummary } from '../core/api.types';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
 import { DROPPED_FILES_HANDLERS, DroppedFilesHandler } from '../core/dropped-files';
-import { CommandContext, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { CommandContext, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { CapturesStore } from './captures.store';
 import { ProfilingPersistence } from './profiling-persistence';
 import { provideProfilingBackend } from './profiling-backend';
-import { PROFILING_VIEW_IDS as V } from './profiling-navigator';
+import { PROFILING_VIEW_IDS as V } from './profiling.ids';
 import { isHeap, isProfile } from './profiling-format';
 import { provideDotnetBackend } from './dotnet/dotnet-backend';
-import { DotnetCommands } from './dotnet/dotnet-commands';
 import { provideNativeBackend } from './native/native-backend';
-import { NativeCommands } from './native/native-commands';
-
-const CATEGORY = $localize`:@@profiling.category:Profiling`;
+import { PROFILING_COMMANDS_CONTRIBUTIONS } from './profiling.contributions';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 /** The profiling views. Same extension point as plugin views; none opens until a capture is. */
 export const PROFILING_VIEWS: DebriefView[] = [
@@ -29,36 +27,6 @@ export const PROFILING_VIEWS: DebriefView[] = [
   { id: V.findings, category: 'Profiling', title: $localize`:@@profiling.views.findings:Profile findings`, icon: 'alert', defaultPosition: 'right', layout: { area: 'side', min: { width: 320, height: 240 }, pref: { width: 372, height: 400 }, priority: 45 }, component: () => import('./findings/findings-view').then((m) => m.FindingsView) },
   { id: V.heap, category: 'Profiling', title: $localize`:@@profiling.views.heap:Memory`, icon: 'metrics', defaultPosition: 'center', layout: { area: 'document', min: { width: 420, height: 240 }, pref: { width: 640, height: 400 }, priority: 55 }, component: () => import('./heap/heap-view').then((m) => m.HeapView) },
 ];
-
-/** Palette commands (and the File menu's "Open performance capture…"). */
-@Injectable({ providedIn: 'root' })
-export class ProfilingCommands {
-  private readonly captures = inject(CapturesStore);
-
-  private show(id: string, title: string, view: string): DebriefCommand {
-    return { id, title, category: CATEGORY, view, run: (ctx) => ctx.showView(view) };
-  }
-
-  readonly commands: DebriefCommand[] = [
-    { id: 'profiling.open', title: $localize`:@@profiling.cmd.open:Open performance capture…`, category: 'File', run: (ctx) => this.open(ctx) },
-    this.show('profiling.captures', $localize`:@@profiling.cmd.captures:Profiling: show captures`, V.captures),
-    this.show('profiling.hotspots', $localize`:@@profiling.cmd.hotspots:Profiling: hotspots`, V.hotspots),
-    this.show('profiling.tree', $localize`:@@profiling.cmd.tree:Profiling: call tree`, V.tree),
-    this.show('profiling.inverted', $localize`:@@profiling.cmd.inverted:Profiling: inverted tree (bottom-up)`, V.inverted),
-    this.show('profiling.butterfly', $localize`:@@profiling.cmd.butterfly:Profiling: callers and callees`, V.butterfly),
-    this.show('profiling.flame', $localize`:@@profiling.cmd.flame:Profiling: flame graph`, V.flame),
-    this.show('profiling.compare', $localize`:@@profiling.cmd.compare:Profiling: compare with a baseline (differential flame graph)`, V.compare),
-    this.show('profiling.threads', $localize`:@@profiling.cmd.threads:Profiling: thread timeline`, V.threads),
-    this.show('profiling.findings', $localize`:@@profiling.cmd.findings:Profiling: findings`, V.findings),
-    this.show('profiling.heap', $localize`:@@profiling.cmd.heap:Profiling: memory (heap snapshots)`, V.heap),
-  ];
-
-  /** Opens captures and shows the most useful view for what was opened. */
-  async open(ctx: CommandContext): Promise<void> {
-    showOpened(ctx, await this.captures.pickAndOpen());
-    if (this.captures.error()) ctx.showView(V.captures);
-  }
-}
 
 /** Profiles open on the hotspots, heap snapshots on the memory view; the captures list follows. */
 export function showOpened(ctx: CommandContext, opened: CaptureSummary[]): void {
@@ -96,10 +64,9 @@ export function provideProfiling(): EnvironmentProviders {
     ...provideProfilingBackend(),
     ...provideDotnetBackend(),
     ...provideNativeBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useValue: PROFILING_VIEWS },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(ProfilingCommands).commands },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(DotnetCommands).commands },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(NativeCommands).commands },
+    ...debriefContributionProviders({ views: PROFILING_VIEWS }),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...PROFILING_COMMANDS_CONTRIBUTIONS,
     { provide: DROPPED_FILES_HANDLERS, multi: true, useFactory: profilingDropHandler },
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(ProfilingPersistence).contribution] },
     provideAppInitializer(() => startProfiling()),

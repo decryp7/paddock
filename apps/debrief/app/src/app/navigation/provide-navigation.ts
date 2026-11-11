@@ -1,20 +1,7 @@
-import { EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { EnvironmentProviders, inject, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { NavigationHistory } from './navigation.service';
-
-const CATEGORY = $localize`:Command category@@navigation.category:Go`;
-
-/** Back and forward as commands (Go menu items in the palette, Alt+Left / Alt+Right). */
-@Injectable({ providedIn: 'root' })
-export class NavigationCommands {
-  private readonly history = inject(NavigationHistory);
-
-  readonly commands: DebriefCommand[] = [
-    { id: 'nav.back', title: $localize`:@@navigation.cmd.back:Go back`, category: CATEGORY, keybinding: 'Alt+Left', when: () => this.history.canBack(), run: () => void this.history.back() },
-    { id: 'nav.forward', title: $localize`:@@navigation.cmd.forward:Go forward`, category: CATEGORY, keybinding: 'Alt+Right', when: () => this.history.canForward(), run: () => void this.history.forward() },
-  ];
-}
+import { NAVIGATION_COMMANDS_CONTRIBUTIONS } from './navigation.contributions';
 
 /** The mouse's back (button 3) and forward (button 4) buttons; returns the listener's remover. */
 export function listenMouseNavigation(history: NavigationHistory, target: Window = window): () => void {
@@ -37,7 +24,8 @@ export function navigationResetContribution(history: NavigationHistory): UiState
 /** One line in `app.config.ts`: back/forward commands, recording of places and the mouse buttons. */
 export function provideNavigation(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(NavigationCommands).commands },
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...NAVIGATION_COMMANDS_CONTRIBUTIONS,
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [navigationResetContribution(inject(NavigationHistory))] },
     provideEnvironmentInitializer(() => {
       const history = inject(NavigationHistory);

@@ -1,7 +1,6 @@
 import { Component, inject, Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { CommandRegistry } from '../extensions/command-registry';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { provideTinyBackendBare } from '../../testing/helpers';
 import { DIALOG_REF, DialogOptions, DialogRef, DialogService } from '../ui/dialog.service';
 import { ConfirmDialog } from '../ui/confirm-dialog';
@@ -9,6 +8,7 @@ import { DialogPresenter } from './dialog-presenter';
 import { ConfirmQuestion, DialogSession, DialogShowRequest } from './dialog-session';
 import { InPageDialogBackend } from './in-page-dialog-backend';
 import { ModalGate } from './modal-gate';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 @Component({ selector: 'debrief-modal-x', template: `<button (click)="ref.close('yes')">ok</button>` })
 class ModalX {
@@ -82,7 +82,7 @@ describe('DialogService with windows', () => {
 
   it('a modal window blocks its parent (commands and the gate) until it closes; a modeless one does not', async () => {
     const ran = vi.fn();
-    TestBed.configureTestingModule({ providers: [...provideTinyBackendBare(), { provide: DEBRIEF_COMMANDS, useValue: [{ id: 't.x', title: 'x', keybinding: 'F9', run: ran }], multi: true }] });
+    TestBed.configureTestingModule({ providers: [...provideTinyBackendBare(), ...debriefContributionProviders({ commands: [{ id: 't.x', title: 'x', keybinding: 'F9', run: ran }] })] });
     const dialogs = TestBed.inject(DialogService);
     const gate = TestBed.inject(ModalGate);
     const registry = TestBed.inject(CommandRegistry);

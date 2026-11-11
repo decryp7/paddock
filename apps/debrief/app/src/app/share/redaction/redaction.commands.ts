@@ -1,9 +1,9 @@
 import { inject, Injectable, Injector } from '@angular/core';
 import { DebriefCommand } from '../../extensions/tokens';
 import { RedactionService } from './redaction.service';
+import { REDACTED_VIEW_KEY } from './redaction-key';
 
-/** Toggles the redacted view (listed in the keyboard cheat sheet). */
-export const REDACTED_VIEW_KEY = 'Mod+Shift+X';
+export { REDACTED_VIEW_KEY } from './redaction-key';
 
 /** Commands for the redacted view and redaction settings (services are resolved when a command runs). */
 @Injectable({ providedIn: 'root' })

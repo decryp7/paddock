@@ -1,0 +1,21 @@
+[
+ {
+  "id": "view",
+  "label": "View",
+  "items": [
+   {
+    "kind": "item",
+    "id": "menu.fields",
+    "label": "Fields"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "menu.otherWindows",
+    "label": "Other windows…"
+   }
+  ]
+ }
+]

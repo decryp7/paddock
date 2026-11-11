@@ -617,12 +617,13 @@ describe('DockKeys', () => {
     done();
   });
 
-  it('runs window commands bound with Alt by physical key when the typed character differs', () => {
+  it('runs window commands bound with Alt by physical key when the typed character differs', async () => {
     TestBed.configureTestingModule({ providers: [provideDocking()] });
     const { dock, press, done } = keys();
     const full = press('keydown', { key: 'Í', code: 'Enter', shiftKey: true, altKey: true });
     expect(full.defaultPrevented).toBe(true);
-    expect(dock.fullScreen()).toBe(true);
+    // The window commands are stubs that load their code on first use.
+    await vi.waitFor(() => expect(dock.fullScreen()).toBe(true));
     // The normal match is left to the command registry (no double run).
     expect(press('keydown', { key: 'Enter', code: 'Enter', shiftKey: true, altKey: true }).defaultPrevented).toBe(false);
     expect(press('keydown', { key: 'q', code: 'KeyQ', altKey: true }).defaultPrevented).toBe(false);

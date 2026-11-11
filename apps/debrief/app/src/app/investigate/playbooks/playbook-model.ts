@@ -1,7 +1,6 @@
 import { Playbook, PlaybookAction, PlaybookExpect, PlaybookRun, PlaybookStatus, PlaybookStep, PlaybookStepRecord } from '../../core/api.types';
 
-/** The id of the Playbooks pane. */
-export const PLAYBOOKS_VIEW = 'playbooks';
+export { PLAYBOOKS_VIEW } from './playbooks.ids';
 
 /** What a step shows before it has a result. */
 export type StepState = PlaybookStatus | 'pending';

@@ -3,13 +3,13 @@ import { TestBed } from '@angular/core/testing';
 import { provideTinyBackend, settle } from '../../testing/helpers';
 import { WorkspaceStore } from '../core/workspace.store';
 import { DockService } from '../dock/dock.service';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { ViewRegistry } from '../extensions/view-registry';
 import { UiStateRegistry } from '../lifecycle/ui-state';
 import { provideTimelines } from './provide-timelines';
 import { defaultConfig, MAX_TIMELINES } from './timeline-config';
 import { TimelineFakeDock } from './timeline-testing';
 import { loadTimelines, saveTimelines, TIMELINES_KEY, TimelineViews } from './timeline-views';
+import { contributed } from '../../testing/contributions';
 
 describe('timeline settings storage', () => {
   beforeEach(() => localStorage.clear());
@@ -119,8 +119,7 @@ describe('TimelineViews', () => {
 
   it('contributes the "New timeline" command', async () => {
     setup();
-    const command = TestBed.inject(DEBRIEF_COMMANDS)
-      .flat()
+    const command = contributed('commands')
       .find((c) => c.id === 'timeline.new');
     expect(command).toMatchObject({ title: 'New timeline', category: 'View' });
     await command!.run({} as never);

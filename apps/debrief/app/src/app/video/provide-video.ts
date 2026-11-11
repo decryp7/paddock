@@ -1,13 +1,15 @@
-import { EnvironmentProviders, inject, Injectable, Injector, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
+import { EnvironmentProviders, inject, Injector, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
 import { VideoView as VideoViewDto } from '../core/generated/video';
 import { DROPPED_FILES_HANDLERS, DroppedFilesHandler } from '../core/dropped-files';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { CommandContext, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { CommandContext, DebriefView } from '../extensions/tokens';
 import { provideVideoBackend } from './video-backend';
 import { VideoStore } from './video.store';
+import { contributeFrom } from '../extensions/contributions';
+import { VIDEO_COMMANDS_CONTRIBUTIONS } from './video.contributions';
+import { VIDEO_VIEW_ID } from './video.ids';
 
-/** The Video view's id. */
-export const VIDEO_VIEW_ID = 'video';
+export { VIDEO_VIEW_ID };
 
 /** The Video view (same extension point as plugin views). */
 export function videoViews(): DebriefView[] {
@@ -26,22 +28,6 @@ export function videoViews(): DebriefView[] {
 /** Shows the Video view once something opened, or when an open failed (the view says why, with Retry). */
 export function showOpened(ctx: CommandContext, opened: readonly VideoViewDto[], failed: boolean): void {
   if (opened.length || failed) ctx.showView(VIDEO_VIEW_ID);
-}
-
-/** File ▸ Open video… and Video: show. */
-@Injectable({ providedIn: 'root' })
-export class VideoCommands {
-  private readonly store = inject(VideoStore);
-
-  readonly commands: DebriefCommand[] = [
-    { id: 'video.open', title: $localize`:@@video.cmd.open:Open video…`, category: 'File', run: (ctx) => this.open(ctx) },
-    { id: 'video.show', title: $localize`:@@video.cmd.show:Video: show`, category: $localize`:@@video.category:Video`, view: VIDEO_VIEW_ID, run: (ctx) => ctx.showView(VIDEO_VIEW_ID) },
-  ];
-
-  async open(ctx: CommandContext): Promise<void> {
-    const opened = await this.store.pickAndOpen();
-    showOpened(ctx, opened, !!this.store.errors().open);
-  }
 }
 
 /** Loads the videos the project already has. */
@@ -64,8 +50,9 @@ export function videoDropHandler(): DroppedFilesHandler {
 export function provideVideo(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...provideVideoBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: videoViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(VideoCommands).commands },
+    ...contributeFrom('views', videoViews),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...VIDEO_COMMANDS_CONTRIBUTIONS,
     { provide: DROPPED_FILES_HANDLERS, multi: true, useFactory: videoDropHandler },
     provideAppInitializer(() => startVideo()),
   ]);

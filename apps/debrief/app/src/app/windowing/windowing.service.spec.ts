@@ -2,7 +2,6 @@ import { TestBed } from '@angular/core/testing';
 import { provideTinyBackend, settle } from '../../testing/helpers';
 import { WorkspaceStore } from '../core/workspace.store';
 import { CommandRegistry } from '../extensions/command-registry';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { DialogService } from '../ui/dialog.service';
 import { LiveTail } from '../workspace/live-tail';
 import { ClosePrompt } from './close-prompt';
@@ -13,11 +12,12 @@ import { UnsavedChangesGuard } from '../projects/unsaved-changes';
 import { isMac } from '../extensions/keybinding';
 import { WindowingBackend } from './windowing-backend';
 import { CAPTURE_COMMAND, WindowingService } from './windowing.service';
+import { contributeFrom } from '../extensions/contributions';
 
 function setup(href = 'http://localhost/?mock-tasks') {
   const backend = new MockWindowingBackend(memoryHost(href));
   TestBed.configureTestingModule({
-    providers: [...provideTinyBackend(), { provide: WindowingBackend, useValue: backend }, { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => TestBed.inject(WindowCommands).commands }],
+    providers: [...provideTinyBackend(), { provide: WindowingBackend, useValue: backend }, ...contributeFrom('commands', () => TestBed.inject(WindowCommands).commands)],
   });
   return { backend, service: TestBed.inject(WindowingService), store: TestBed.inject(WorkspaceStore), dialogs: TestBed.inject(DialogService) };
 }

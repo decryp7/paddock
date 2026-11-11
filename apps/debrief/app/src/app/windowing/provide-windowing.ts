@@ -1,10 +1,9 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
 import { POPOUT_ROUTE } from '../popout/popout-route';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
-import { WindowCommands } from './window-commands';
 import { WindowTitleSync } from './window-title';
 import { provideWindowingBackend } from './windowing-backend';
 import { WindowingService } from './windowing.service';
+import { WINDOWING_COMMANDS_CONTRIBUTIONS } from './windowing.contributions';
 
 /**
  * Multiple windows, the system tray and background work: window commands, the window title and the reactions to the shell's window events.
@@ -13,7 +12,8 @@ import { WindowingService } from './windowing.service';
 export function provideWindowing(): EnvironmentProviders {
   return makeEnvironmentProviders([
     provideWindowingBackend(),
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(WindowCommands).commands },
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...WINDOWING_COMMANDS_CONTRIBUTIONS,
     provideAppInitializer(() => startWindowing()),
   ]);
 }

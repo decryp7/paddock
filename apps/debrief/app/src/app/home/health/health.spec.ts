@@ -2,10 +2,10 @@ import { TestBed } from '@angular/core/testing';
 import { pluginInfo, provideFakeDock, provideTinyBackend } from '../../../testing/helpers';
 import { ExceptionGroup, Finding, fullCoverage, WorkspaceSummary } from '../../core/api.types';
 import { AnalysisBackend } from '../../core/analysis-backend';
+import { FakeCommandContext } from '../../../testing/contributions';
 
 import { COMMAND_CONTEXT } from '../../extensions/command-registry';
 
-import { CommandContext } from '../../extensions/tokens';
 
 import { FormatWizard } from '../../format/format-wizard';
 
@@ -20,16 +20,16 @@ const file: Finding = { kind: 'fileNotOpened', severity: 'info', title: 'File no
 const panel: Finding = { kind: 'dropped', severity: 'info', title: 'Dropped', detail: '3 dropped', action: { kind: 'openPanel', panel: 'pipeline' } };
 const bare: Finding = { severity: 'info', title: 'Note', detail: 'nothing to do', action: null };
 
-class FakeCtx implements CommandContext {
+class FakeCtx extends FakeCommandContext {
   calls: string[] = [];
-  summary = null;
-  openPaths = async () => undefined;
-  setQuery = (p: object) => void this.calls.push(`query:${JSON.stringify(p)}`);
-  addFilter = (f: object) => void this.calls.push(`filter:${JSON.stringify(f)}`);
-  selectRecord = () => undefined;
-  jumpTo = async (id: number) => void this.calls.push(`jump:${id}`);
-  showView = (id: string) => void this.calls.push(`show:${id}`);
-  notifyError = (m: string) => void this.calls.push(`error:${m}`);
+  override summary = null;
+  override openPaths = async () => undefined;
+  override setQuery = (p: object) => void this.calls.push(`query:${JSON.stringify(p)}`);
+  override addFilter = (f: object) => void this.calls.push(`filter:${JSON.stringify(f)}`);
+  override selectRecord = () => undefined;
+  override jumpTo = async (id: number) => void this.calls.push(`jump:${id}`);
+  override showView = (id: string) => void this.calls.push(`show:${id}`);
+  override notifyError = (m: string) => void this.calls.push(`error:${m}`);
 }
 
 const group = (patch: Partial<ExceptionGroup> = {}): ExceptionGroup => ({

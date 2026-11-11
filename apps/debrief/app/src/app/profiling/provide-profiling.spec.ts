@@ -1,10 +1,11 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it } from 'vitest';
-import { flattenContributions, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
 import { CapturesStore } from './captures.store';
 import { PROFILING_VIEW_IDS as V } from './profiling-navigator';
 import { ProfileViewState } from './profile-view-state.store';
-import { ProfilingCommands, PROFILING_VIEWS, provideProfiling, showOpened, startProfiling } from './provide-profiling';
+import { ProfilingCommands } from './profiling-commands';
+import { PROFILING_VIEWS, provideProfiling, showOpened, startProfiling } from './provide-profiling';
 import { DotnetCommands } from './dotnet/dotnet-commands';
 import { NativeCommands } from './native/native-commands';
 import { provideProfilingTesting, setupProfiling } from './testing/profiling-test-support';
@@ -15,6 +16,8 @@ import { DROPPED_FILES_HANDLERS } from '../core/dropped-files';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { PROFILING_STATE_KEY } from './profiling-persistence';
 import { at } from '../../testing/must';
+import { contributed } from '../../testing/contributions';
+import { flattenContributions } from '../extensions/tokens';
 
 const ORDERS = '/demo/profiles/orders.speedscope.json';
 const HEAP1 = '/demo/profiles/heap-1.heapsnapshot';
@@ -153,8 +156,8 @@ describe('startProfiling and provideProfiling', () => {
   it('registers the views and commands under the extension tokens', () => {
     const { providers } = provideProfilingTesting();
     TestBed.configureTestingModule({ providers: [provideProfiling(), ...providers] });
-    const views = flattenContributions<DebriefView>(TestBed.inject(DEBRIEF_VIEWS));
-    const commands = flattenContributions<DebriefCommand>(TestBed.inject(DEBRIEF_COMMANDS));
+    const views = contributed('views');
+    const commands = contributed('commands');
     expect(views).toEqual(PROFILING_VIEWS);
     expect(commands.map((c) => c.id)).toEqual([...TestBed.inject(ProfilingCommands).commands, ...TestBed.inject(DotnetCommands).commands, ...TestBed.inject(NativeCommands).commands].map((c) => c.id));
   });
@@ -162,7 +165,7 @@ describe('startProfiling and provideProfiling', () => {
   it('refreshes at startup and claims dropped captures, leaving other files to the log import', async () => {
     const { providers, doubles } = provideProfilingTesting({ options: { preopen: [ORDERS] } });
     TestBed.configureTestingModule({ providers: [provideProfiling(), ...providers] });
-    TestBed.inject(DEBRIEF_VIEWS);
+    contributed('views');
     await settle();
     const captures = TestBed.inject(CapturesStore);
     expect(captures.profiles()).toHaveLength(1);

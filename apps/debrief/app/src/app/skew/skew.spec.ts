@@ -258,7 +258,8 @@ describe('clock section, commands, sidebar and inspector', () => {
     await settle();
     const registry = TestBed.inject(CommandRegistry);
     const find = (id: string) => registry.all().find((c) => c.id === id)!;
-    expect(registry.available().some((c) => c.id === 'skew.adjust')).toBe(false);
+    // The commands load when the window is idle; until then their stubs are offered.
+    await vi.waitFor(() => expect(registry.available().some((c) => c.id === 'skew.adjust')).toBe(false));
     const r = await rows(backend);
     store.select(at(r, 1));
     expect(registry.available().map((c) => c.id)).toEqual(expect.arrayContaining(['skew.adjust', 'skew.reference']));

@@ -29,7 +29,8 @@ import {
   quickFixOf,
 } from './problems-model';
 import { ProblemsPanel, severityLabel } from './problems-panel';
-import { problemsCommands, problemsViews, startProblemsTitle } from './provide-problems';
+import { problemsCommands } from './problems.commands';
+import { problemsViews, startProblemsTitle } from './provide-problems';
 import { ProblemsStore } from './problems.store';
 import { ProblemKind } from '../core/api.types';
 

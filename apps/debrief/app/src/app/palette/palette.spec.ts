@@ -3,10 +3,11 @@ import { all, el, FakeDock, provideFakeDock, provideTinyBackendBare, settle, tex
 import { provideDebriefPlugin } from '../extensions/provide';
 import { DockService } from '../dock/dock.service';
 import { COMMAND_CONTEXT } from '../extensions';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
 import { CommandPalette } from './command-palette';
 import { PaletteService } from './palette.service';
 import { at } from '../../testing/must';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 describe('CommandPalette', () => {
   let ran: string[];
@@ -18,7 +19,7 @@ describe('CommandPalette', () => {
       providers: [
         provideTinyBackendBare(),
         provideFakeDock(new FakeDock()),
-        { provide: DEBRIEF_COMMANDS, multi: true, useValue: [mk('t.alpha', 'Alpha thing', { category: 'Test', keybinding: 'Mod+Shift+A' }), mk('t.beta', 'Beta thing'), mk('t.gamma', 'Gamma other'), ...extra] },
+        ...debriefContributionProviders({ commands: [mk('t.alpha', 'Alpha thing', { category: 'Test', keybinding: 'Mod+Shift+A' }), mk('t.beta', 'Beta thing'), mk('t.gamma', 'Gamma other'), ...extra] }),
       ],
     });
     const fixture = TestBed.createComponent(CommandPalette);

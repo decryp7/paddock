@@ -1,22 +1,24 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { CommandContext, DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
+import { CommandContext, DebriefCommand } from '../../extensions/tokens';
 import { DialogService } from '../../ui/dialog.service';
 import { provideIncident } from './provide-incident';
+import { contributed } from '../../../testing/contributions';
 
 function setup() {
   TestBed.configureTestingModule({ providers: [provideIncident()] });
   const dialogs = TestBed.inject(DialogService);
-  const command = TestBed.inject(DEBRIEF_COMMANDS).flat().find((c: DebriefCommand) => c.id === 'incident.build') as DebriefCommand;
+  const command = contributed('commands').find((c: DebriefCommand) => c.id === 'incident.build') as DebriefCommand;
   return { dialogs, command };
 }
 const ctx = (total: number) => ({ showView: vi.fn(), summary: { total } }) as unknown as CommandContext;
 
 describe('provideIncident', () => {
-  it('registers the palette command, offered only with data', () => {
+  it('registers the palette command, offered only with data', async () => {
     const { command } = setup();
     expect(command.title).toBe('Report: Incident summary…');
-    expect(command.when?.(ctx(0))).toBe(false);
+    // The command loads when the window is idle; until then its stub is offered.
+    await vi.waitFor(() => expect(command.when?.(ctx(0))).toBe(false));
     expect(command.when?.(ctx(5))).toBe(true);
   });
 

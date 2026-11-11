@@ -23,7 +23,7 @@ export function resolveThemeId(pref: ThemeId | null, systemWantsContrast: boolea
   return pref ?? (systemWantsContrast ? 'contrast' : DEFAULT_THEME_ID);
 }
 
-/** The theme with `id`, or the default one for an unknown id. */
-export function themeById(id: string): ThemeDef {
-  return BUILT_IN_THEMES.find((t) => t.id === id) ?? CALM;
+/** The theme with `id` among `themes` (the first of that id), or the default one for an unknown id. */
+export function themeById(id: string, themes: readonly ThemeDef[] = BUILT_IN_THEMES): ThemeDef {
+  return themes.find((t) => t.id === id) ?? CALM;
 }

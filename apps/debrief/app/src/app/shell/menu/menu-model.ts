@@ -1,6 +1,7 @@
 import { ANALYSIS_MENU_ORDER } from '../../analysis/analysis-menu-order';
 import { ViewCategory } from '../../extensions/tokens';
 import { ThemeId } from '../../theme/theme.types';
+import { DEBRIEF_MENU_ITEMS, type DebriefMenuItemDef } from './menu.contributions';
 
 /**
  * The application menus as plain data, built by a pure function from what is registered (views, commands) and the
@@ -120,6 +121,8 @@ export interface MenuState {
   recent?: { projects: readonly { path: string; name: string }[]; files: readonly string[] };
   /** macOS native menu bar: About and Settings are in the app menu, not in Help/Tools. */
   nativeAppMenu: boolean;
+  /** Where commands sit (the registry's `menus` contributions); Debrief's own placements when left out. */
+  items?: readonly DebriefMenuItemDef[];
 }
 
 /** Order of the core views at the top of the View menu (after Explorer and Fields). */
@@ -211,228 +214,200 @@ function recentMenu(state: MenuState): SubmenuNode | null {
   };
 }
 
-/** Builds the menu bar. Pure: same state, same menus. */
-export function buildMenus(state: MenuState): TopMenu[] {
-  const cmd = (id: string, label?: string, checked?: boolean): MenuItemNode | null => {
-    const c = state.commands.get(id);
-    if (!c) return null;
-    return { kind: 'item', id, label: label ?? c.title, ...(c.keybinding ? { keybinding: c.keybinding } : {}), ...(checked === undefined ? {} : { checked }) };
-  };
-  const sub = (id: string, label: string, items: Part[]): SubmenuNode => ({ kind: 'submenu', id, label, items: tidy(items) });
-  /** In the app menu in native mode, else where it is placed. */
-  const appMenu = (id: (typeof APP_MENU_COMMANDS)[number], label?: string) => (state.nativeAppMenu ? null : cmd(id, label));
-  const undo = (what: string | null) =>
-    cmd('edit.undo', what ? $localize`:@@shell.menu.edit.undo:Undo ${what}:what:` : $localize`:@@shell.menu.edit.undoNothing:Undo (nothing to undo)`);
-  const redo = (what: string | null) =>
-    cmd('edit.redo', what ? $localize`:@@shell.menu.edit.redo:Redo ${what}:what:` : $localize`:@@shell.menu.edit.redoNothing:Redo (nothing to redo)`);
+/**
+ * What a menu holds, top to bottom: the registered commands of a group (by `order`), a separator, a submenu (its own
+ * placements under `db.<menu>.<name>`), or a part that is not a command (views, recent files, windows). Separators
+ * collapse where a part is empty.
+ */
+type LayoutPart = 'sep' | { group: string } | { submenu: string; label: string; place: string; parts: readonly LayoutPart[] } | { slot: (state: MenuState) => Part[] };
 
-  const menus: TopMenu[] = [
-    ...(state.nativeAppMenu
-      ? [
-          {
-            id: 'app',
-            label: 'Debrief',
-            items: tidy([
-              cmd('help.about', $localize`:@@shell.menu.help.about:About Debrief`),
-              cmd('help.checkForUpdates', $localize`:@@shell.menu.help.checkForUpdates:Check for updates…`),
-              SEP,
-              cmd('settings.open', $localize`:@@shell.menu.settings:Settings…`),
-              SEP,
-              cmd('app.quit', $localize`:@@shell.menu.app.quit:Quit Debrief`),
-            ]),
-          },
-        ]
-      : []),
+const SEP_PART = 'sep';
+const group = (name: string): LayoutPart => ({ group: name });
+const submenu = (id: string, label: string, place: string, parts: readonly LayoutPart[]): LayoutPart => ({ submenu: id, label, place, parts });
+const slot = (fn: (state: MenuState) => Part[]): LayoutPart => ({ slot: fn });
+
+/** One top-level menu: its node id and label, where its commands are placed (`menu` of a placement), and its layout. */
+interface TopLayout {
+  id: string;
+  label: string;
+  place: string;
+  parts: readonly LayoutPart[];
+}
+
+/** The menu bar's layout (Debrief's until M2c); the commands in it come from the placements. */
+function layout(): readonly TopLayout[] {
+  return [
+    { id: 'app', label: 'Debrief', place: 'app', parts: [group('about'), SEP_PART, group('settings'), SEP_PART, group('quit')] },
     {
       id: 'file',
       label: $localize`:Top-level menu@@shell.menu.top.file:File`,
-      items: tidy([
-        cmd('project.new'),
-        cmd('window.new'),
-        SEP,
-        cmd('file.openFiles'),
-        cmd('file.openFolder'),
-        cmd('live.open'),
-        cmd('profiling.open'),
-        cmd('dumps.open'),
-        cmd('dumps.openUmdh'),
-        cmd('video.open'),
-        cmd('project.open'),
-        recentMenu(state),
-        SEP,
-        cmd('project.save'),
-        cmd('project.saveAs'),
-        cmd('share.redactedCopy'),
-        SEP,
-        cmd('file.reimport'),
-        cmd('folder.setupAnalysis'),
-        SEP,
-        cmd('file.export'),
-        cmd('report.export'),
-        SEP,
-        cmd('file.close'),
-        cmd('window.close'),
-        SEP,
-        // On macOS Quit is in the app menu.
-        state.nativeAppMenu ? null : cmd('app.quit'),
-      ]),
+      place: 'file',
+      parts: [
+        group('new'),
+        SEP_PART,
+        group('open'),
+        slot((s) => [recentMenu(s)]),
+        SEP_PART,
+        group('save'),
+        SEP_PART,
+        group('reimport'),
+        SEP_PART,
+        group('export'),
+        SEP_PART,
+        group('close'),
+        SEP_PART,
+        group('quit'),
+      ],
     },
+    { id: 'edit', label: $localize`:Top-level menu@@shell.menu.top.edit:Edit`, place: 'edit', parts: [group('undo'), SEP_PART, group('copy'), SEP_PART, group('paste'), SEP_PART, group('find')] },
     {
-      id: 'edit',
-      label: $localize`:Top-level menu@@shell.menu.top.edit:Edit`,
-      items: tidy([undo(state.undoLabel), redo(state.redoLabel), SEP, cmd('edit.copy'), cmd('edit.copyJson'), SEP, cmd('edit.pasteLog'), SEP, cmd('edit.find')]),
+      id: 'view',
+      label: $localize`:Top-level menu@@shell.menu.top.view:View`,
+      place: 'view',
+      parts: [
+        group('sidebar'),
+        slot(coreViews),
+        group('new'),
+        SEP_PART,
+        ...VIEW_SUBMENUS.map((c) => viewSubmenu(c)),
+        SEP_PART,
+        slot(() => [{ kind: 'item', id: MENU_IDS.otherWindows, label: $localize`:@@shell.menu.view.otherWindows:Other windows…` }]),
+        SEP_PART,
+        submenu('view.theme', $localize`:@@shell.menu.view.theme:Theme`, 'db.view.theme', [group('theme'), SEP_PART, group('scheme')]),
+        submenu('view.sourceColors', $localize`:@@shell.menu.view.sourceColors:Source colours`, 'db.view.source-colors', [group('mode')]),
+      ],
     },
-    { id: 'view', label: $localize`:Top-level menu@@shell.menu.top.view:View`, items: viewMenu(state, cmd, sub) },
     {
       id: 'analyze',
       label: $localize`:Top-level menu@@shell.menu.top.analyze:Analyze`,
-      items: tidy([
-        cmd('analyze.search'),
-        cmd('query.focus', $localize`:@@shell.menu.analyze.focusQueryBar:Focus query bar`),
-        cmd('markers.highlight'),
-        cmd('analyze.markedOnly', $localize`:@@shell.menu.analyze.markedOnly:Marked events only`, state.markedOnly),
-        cmd('analyze.clearFilters'),
-        SEP,
-        cmd('analyze.fit'),
-        cmd('analyze.back'),
-        cmd('analyze.forward'),
-        cmd('nav.back'),
-        cmd('nav.forward'),
-        sub('analyze.timezone', $localize`:@@shell.menu.analyze.timeZone:Time zone`, [
-          cmd('analyze.utc', $localize`:@@shell.menu.analyze.utc:UTC`, state.timezone === 'utc'),
-          cmd('analyze.local', $localize`:Time zone option@@shell.menu.analyze.local:Local`, state.timezone === 'local'),
-        ]),
-        SEP,
-        cmd('moment.analyse'),
-        cmd('moment.selected', $localize`:@@shell.menu.analyze.analyseSelectedRange:Analyse the selected range`),
-        sub('analyze.compare', $localize`:Menu@@shell.menu.analyze.compare:Compare time ranges`, [
-          cmd('compare.previous', $localize`:@@shell.menu.analyze.compare.previous:Current range vs previous`),
-          cmd('compare.beforeAfter', $localize`:@@shell.menu.analyze.compare.beforeAfter:Before / after selected time`),
-        ]),
-        cmd('fieldstats.show'),
-        SEP,
-        sub('analyze.ai', $localize`:@@shell.menu.analyze.ai:AI`, [
-          cmd('ai.query', $localize`:@@shell.menu.analyze.ai.query:Ask AI to write a query…`),
-          cmd('ai.summarize', $localize`:@@shell.menu.analyze.ai.summarize:Summarize this range`),
-          cmd('ai.rootCauses', $localize`:@@shell.menu.analyze.ai.rootCauses:Find likely root causes`),
-        ]),
-        SEP,
-        cmd('live.resume'),
-        cmd('live.rules'),
-        SEP,
-        cmd('report.new'),
-        sub('analyze.report', $localize`:@@shell.menu.analyze.addToReport:Add to report`, [
-          cmd('incident.build', $localize`:@@shell.menu.report.incident:Incident summary…`),
-          SEP,
-          cmd('report.addSelected', $localize`:@@shell.menu.report.selectedEvent:Selected event`),
-          cmd('report.addNotes', $localize`:@@shell.menu.report.notes:Notes`),
-          cmd('report.addTimeline', $localize`:@@shell.menu.report.timeline:Timeline`),
-          cmd('report.addAnnotations', $localize`:@@shell.menu.report.annotations:Annotations`),
-          cmd('report.addQueryTable', $localize`:@@shell.menu.report.queryResult:Query result`),
-          cmd('report.addFindings', $localize`:@@shell.menu.report.findings:Health-check findings`),
-          cmd('report.addAnomalies', $localize`:@@shell.menu.report.anomalies:Anomalies as findings`),
-        ]),
-      ]),
+      place: 'db.analyze',
+      parts: [
+        group('filter'),
+        SEP_PART,
+        group('range'),
+        submenu('analyze.timezone', $localize`:@@shell.menu.analyze.timeZone:Time zone`, 'db.analyze.time-zone', [group('zone')]),
+        SEP_PART,
+        group('moment'),
+        submenu('analyze.compare', $localize`:Menu@@shell.menu.analyze.compare:Compare time ranges`, 'db.analyze.compare', [group('compare')]),
+        group('moment-after'),
+        SEP_PART,
+        submenu('analyze.ai', $localize`:@@shell.menu.analyze.ai:AI`, 'db.analyze.ai', [group('ai')]),
+        SEP_PART,
+        group('live'),
+        SEP_PART,
+        group('report'),
+        submenu('analyze.report', $localize`:@@shell.menu.analyze.addToReport:Add to report`, 'db.analyze.report', [group('summary'), SEP_PART, group('parts')]),
+      ],
     },
     {
       id: 'tools',
       label: $localize`:Top-level menu@@shell.menu.top.tools:Tools`,
-      items: tidy([
-        cmd('tools.collect'),
-        cmd('dumps.capture'),
-        cmd('diagnostics.capture'),
-        SEP,
-        cmd('parsers.manage'),
-        SEP,
-        cmd('app.restartElevated'),
-        SEP,
-        appMenu('settings.open', $localize`:@@shell.menu.settings:Settings…`),
-      ]),
+      place: 'db.tools',
+      parts: [group('capture'), SEP_PART, group('parsers'), SEP_PART, group('elevate'), SEP_PART, group('settings')],
     },
-    { id: 'window', label: $localize`:Top-level menu@@shell.menu.top.window:Window`, items: windowMenu(state, cmd, sub) },
+    {
+      id: 'window',
+      label: $localize`:Top-level menu@@shell.menu.top.window:Window`,
+      place: 'window',
+      parts: [
+        submenu('window.perspectives', $localize`:@@shell.menu.window.perspectives:Perspectives`, 'db.window.perspectives', [group('switch'), SEP_PART, group('save'), SEP_PART, group('manage')]),
+        SEP_PART,
+        group('tool-windows'),
+        SEP_PART,
+        group('panel'),
+        SEP_PART,
+        slot(windowGroups),
+      ],
+    },
     {
       id: 'help',
       label: $localize`:Top-level menu@@shell.menu.top.help:Help`,
-      items: tidy([
-        cmd('help.welcome', $localize`:@@shell.menu.help.welcome:Welcome`),
-        cmd('help.demo'),
-        cmd('help.tour'),
-        cmd('help.shortcuts'),
-        SEP,
-        // Commands that are not registered (yet) are left out: these appear when their feature lands.
-        cmd('help.documentation', $localize`:@@shell.menu.help.documentation:Documentation`),
-        cmd('help.whatsNew', $localize`:@@shell.menu.help.whatsNew:What's new`),
-        SEP,
-        cmd('help.reportProblem'),
-        cmd('help.activityLog'),
-        cmd('help.openLogs', $localize`:@@shell.menu.help.openLogs:Open logs folder`),
-        cmd('help.clearCache', $localize`:@@shell.menu.help.clearCache:Clear cache…`),
-        cmd('app.restartSafeMode'),
-        cmd('app.restartNormally'),
-        SEP,
-        appMenu('help.checkForUpdates', $localize`:@@shell.menu.help.checkForUpdates:Check for updates…`),
-        cmd('help.notices', $localize`:@@shell.menu.help.notices:Third-party notices`),
-        appMenu('help.about', $localize`:@@shell.menu.help.about:About Debrief`),
-      ]),
+      place: 'help',
+      parts: [group('start'), SEP_PART, group('docs'), SEP_PART, group('trouble'), SEP_PART, group('about')],
     },
   ];
+}
+
+/** Builds the menu bar. Pure: same state, same menus. */
+export function buildMenus(state: MenuState): TopMenu[] {
+  const placements = state.items ?? DEBRIEF_MENU_ITEMS;
+  const named = new Set<string>();
+  const top = layout().filter((m) => m.id !== 'app' || state.nativeAppMenu);
+  for (const m of top) collectGroups(m.place, m.parts, named);
+  const render = (place: string, parts: readonly LayoutPart[]): Part[] =>
+    parts.flatMap((p): Part[] => {
+      if (p === SEP_PART) return [SEP];
+      if ('group' in p) return placed(state, placements, place, p.group);
+      if ('submenu' in p) return [{ kind: 'submenu', id: p.submenu, label: p.label, items: tidy([...render(p.place, p.parts), ...unnamed(state, placements, p.place, named)]) }];
+      return p.slot(state);
+    });
+  const menus: TopMenu[] = top.map((m) => ({ id: m.id, label: m.label, items: tidy([...render(m.place, m.parts), ...unnamed(state, placements, m.place, named)]) }));
   return menus.filter((m) => m.items.length);
 }
 
-type Cmd = (id: string, label?: string, checked?: boolean) => MenuItemNode | null;
-type Sub = (id: string, label: string, items: Part[]) => SubmenuNode;
+/** The `<menu>/<group>` keys a layout names. */
+function collectGroups(place: string, parts: readonly LayoutPart[], into: Set<string>): void {
+  for (const p of parts) {
+    if (p === SEP_PART || 'slot' in p) continue;
+    if ('group' in p) into.add(`${place}/${p.group}`);
+    else collectGroups(p.place, p.parts, into);
+  }
+}
+
+/** The commands placed in one group of a menu, by order (registration order breaks ties); unavailable ones are left out. */
+function placed(state: MenuState, placements: readonly DebriefMenuItemDef[], menu: string, groupName: string): MenuItemNode[] {
+  return placements
+    .map((p, index) => ({ p, index }))
+    .filter(({ p }) => p.menu === menu && p.group === groupName && !(p.native === 'notNative' && state.nativeAppMenu))
+    .sort((a, b) => a.p.order - b.p.order || a.index - b.index)
+    .flatMap(({ p }) => {
+      const node = menuItem(state, p);
+      return node ? [node] : [];
+    });
+}
+
+/** Placements in groups the layout does not name (a plugin's): after a separator at the end of their menu, grouped. */
+function unnamed(state: MenuState, placements: readonly DebriefMenuItemDef[], menu: string, named: ReadonlySet<string>): Part[] {
+  const groups = new Map<string, number>();
+  for (const p of placements) {
+    if (p.menu !== menu || named.has(`${menu}/${p.group}`)) continue;
+    groups.set(p.group, Math.min(groups.get(p.group) ?? Infinity, p.order));
+  }
+  return [...groups.entries()].sort((a, b) => a[1] - b[1]).flatMap(([g]) => [SEP, ...placed(state, placements, menu, g)]);
+}
+
+/** A placement as a menu item, or null when its command is not available. */
+function menuItem(state: MenuState, p: DebriefMenuItemDef): MenuItemNode | null {
+  const c = state.commands.get(p.command);
+  if (!c) return null;
+  const label = typeof p.label === 'function' ? p.label(state) : (p.label ?? c.title);
+  const checked = p.checked?.(state);
+  return { kind: 'item', id: p.command, label, ...(c.keybinding ? { keybinding: c.keybinding } : {}), ...(checked === undefined ? {} : { checked }) };
+}
 
 function viewItem(v: MenuView): MenuItemNode {
   return { kind: 'item', id: MENU_IDS.view + v.id, label: VIEW_LABELS[v.id] ?? v.title, checked: v.open };
 }
 
-/** Core tool windows at the top, then one submenu per category, then the picker for everything else. */
-function viewMenu(state: MenuState, cmd: Cmd, sub: Sub): MenuNode[] {
-  const listed = state.views.filter((v) => v.menu !== 'palette');
+/** The views listed in the View menu (not the palette-only ones). */
+const listedViews = (state: MenuState) => state.views.filter((v) => v.menu !== 'palette');
+
+/** Fields, then the core tool windows (the known ones in their order, then the others). */
+function coreViews(state: MenuState): Part[] {
+  const listed = listedViews(state);
   const core = CORE_VIEW_ORDER.map((id) => listed.find((v) => v.id === id && v.category === 'core')).filter((v): v is MenuView => !!v);
   const extraCore = listed.filter((v) => v.category === 'core' && !CORE_VIEW_ORDER.includes(v.id));
-  const inCategory = (c: ViewCategory) => listed.filter((v) => (v.category ?? 'Plugins') === c);
-  const submenus = VIEW_SUBMENUS.map((c) => {
-    const id = `view.${c.toLowerCase()}`;
-    const label = CATEGORY_LABELS[c];
-    if (c === 'Plugins') return sub(id, label, pluginItems(inCategory(c)));
-    // Following files live is a view of the data, so its switch is here (F5), next to the live views.
-    if (c === 'Live') return sub(id, label, [cmd('live.toggle'), SEP, ...ordered(c, inCategory(c))]);
-    if (c === 'AI') {
-      return sub(id, label, [
-        ...inCategory(c).map(viewItem),
-        cmd('ai.setup', $localize`:@@shell.menu.view.ai.setup:Connect to Pitwall…`),
-      ]);
-    }
-    return sub(id, label, ordered(c, inCategory(c)));
-  });
-  return tidy([
-    cmd('view.toggleSidebar', $localize`:@@shell.menu.view.explorer:Explorer`, state.sidebarOpen),
-    { kind: 'item', id: MENU_IDS.fields, label: $localize`:@@shell.menu.view.fields:Fields` },
-    ...[...core, ...extraCore].map(viewItem),
-    cmd('timeline.new'),
-    SEP,
-    ...submenus,
-    SEP,
-    { kind: 'item', id: MENU_IDS.otherWindows, label: $localize`:@@shell.menu.view.otherWindows:Other windows…` },
-    SEP,
-    sub('view.theme', $localize`:@@shell.menu.view.theme:Theme`, [
-      cmd('view.theme.system', $localize`:Theme name@@shell.menu.view.theme.system:Follow system`, state.theme === null),
-      cmd('view.theme.calm', $localize`:Theme name@@shell.menu.view.theme.calm:Calm`, state.theme === 'calm'),
-      cmd('view.theme.console', $localize`:Theme name@@shell.menu.view.theme.console:Console`, state.theme === 'console'),
-      cmd('view.theme.precision', $localize`:Theme name@@shell.menu.view.theme.precision:Precision`, state.theme === 'precision'),
-      cmd('view.theme.contrast', $localize`:Theme name@@shell.menu.view.theme.contrast:High contrast`, state.theme === 'contrast'),
-      SEP,
-      cmd('view.scheme.system', $localize`:Colour scheme option@@shell.menu.view.scheme.system:System`, state.scheme === 'system'),
-      cmd('view.scheme.dark', $localize`:Colour scheme option@@shell.menu.view.scheme.dark:Dark`, state.scheme === 'dark'),
-      cmd('view.scheme.light', $localize`:Colour scheme option@@shell.menu.view.scheme.light:Light`, state.scheme === 'light'),
-    ]),
-    sub('view.sourceColors', $localize`:@@shell.menu.view.sourceColors:Source colours`, [
-      cmd('view.sourceColors.source', $localize`:@@shell.menu.view.sourceColors.source:By file`, (state.sourceColors ?? 'source') === 'source'),
-      cmd('view.sourceColors.instance', $localize`:@@shell.menu.view.sourceColors.instance:By instance`, state.sourceColors === 'instance'),
-      cmd('view.sourceColors.off', $localize`:@@shell.menu.view.sourceColors.off:Off`, state.sourceColors === 'off'),
-    ]),
-  ]);
+  return [{ kind: 'item', id: MENU_IDS.fields, label: $localize`:@@shell.menu.view.fields:Fields` }, ...[...core, ...extraCore].map(viewItem)];
+}
+
+/** One View submenu per category; Live starts with the switch to follow files live (F5), AI ends with Connect to Pitwall. */
+function viewSubmenu(c: Exclude<ViewCategory, 'core'>): LayoutPart {
+  const id = `view.${c.toLowerCase()}`;
+  const inCategory = (state: MenuState) => listedViews(state).filter((v) => (v.category ?? 'Plugins') === c);
+  if (c === 'Plugins') return submenu(id, CATEGORY_LABELS[c], 'db.view.plugins', [slot((s) => pluginItems(inCategory(s)))]);
+  if (c === 'Live') return submenu(id, CATEGORY_LABELS[c], 'db.view.live', [group('live'), SEP_PART, slot((s) => ordered(c, inCategory(s)))]);
+  if (c === 'AI') return submenu(id, CATEGORY_LABELS[c], 'db.view.ai', [slot((s) => inCategory(s).map(viewItem)), group('setup')]);
+  return submenu(id, CATEGORY_LABELS[c], `db.view.${c.toLowerCase()}`, [slot((s) => ordered(c, inCategory(s)))]);
 }
 
 /** The plugin manager, then the views of each plugin under the plugin's name (only labelled when several). */
@@ -450,31 +425,14 @@ function pluginItems(views: readonly MenuView[]): MenuNode[] {
   return tidy([...manager.map(viewItem), SEP, ...groups]);
 }
 
-/** Perspectives, tool window and document actions, then the open windows and pop-outs. */
-function windowMenu(state: MenuState, cmd: Cmd, sub: Sub): MenuNode[] {
+/** The open windows and pop-outs (Window ▸). */
+function windowGroups(state: MenuState): Part[] {
   const windows: MenuItemNode[] = state.windows.map((w) => ({ kind: 'item', id: MENU_IDS.window + w.label, label: w.title || w.label, checked: w.current }));
   const popouts: MenuItemNode[] = state.popouts.map((p) => ({ kind: 'item', id: MENU_IDS.popout + p.id, label: p.title }));
-  return tidy([
-    sub('window.perspectives', $localize`:@@shell.menu.window.perspectives:Perspectives`, [
-      ...Array.from({ length: 9 }, (_, i) => cmd(`window.perspective.${i + 1}`, undefined, state.activePerspective === i + 1)),
-      SEP,
-      cmd('window.layout.save'),
-      SEP,
-      cmd('window.layout.manage'),
-      cmd('window.layout.reset'),
-    ]),
-    SEP,
-    cmd('window.autoHideAll'),
-    cmd('window.pinAll'),
-    cmd('window.closeAllDocuments'),
-    SEP,
-    cmd('window.float'),
-    cmd('window.popOut'),
-    cmd('window.fullScreen'),
-    SEP,
+  return [
     windows.length > 1 || popouts.length ? { kind: 'group', label: $localize`:Menu group@@shell.menu.window.windows:Windows`, items: windows } : null,
     popouts.length ? { kind: 'group', label: $localize`:@@shell.menu.window.popoutPanels:Pop-out panels`, items: popouts } : null,
-  ]);
+  ];
 }
 
 /** Every item in a menu tree, depth first. */

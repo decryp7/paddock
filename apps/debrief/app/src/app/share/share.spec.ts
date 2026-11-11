@@ -6,7 +6,7 @@ import { Logger } from '../core/logger';
 import { MockBackend } from '../core/mock/mock-backend';
 import { EMPTY_QUERY } from '../core/workspace.store';
 import { MockAnalysisBackend, recordsFrom } from '../analysis/mock/mock-analysis-backend';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
+import { contributed } from '../../testing/contributions';
 import { MemoryLogger } from '../../testing/helpers';
 import { mockDashboards, mockDashboardsError, mockTileError } from './mock/mock-dashboards';
 import { mockRedactCfg, mockRedactionPreview, MockRedactor } from './mock/mock-redact';
@@ -75,7 +75,7 @@ describe('provideShare', () => {
       ],
     });
     expect(TestBed.inject(ShareBackend)).toBeDefined();
-    expect(Array.isArray(TestBed.inject(DEBRIEF_COMMANDS))).toBe(true);
+    expect(contributed('commands').length).toBeGreaterThan(0);
     expect(TestBed.runInInjectionContext(() => createShareBackend())).toBeDefined();
   });
 });

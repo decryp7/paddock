@@ -12,7 +12,6 @@ import { Logger } from '../core/logger';
 import { WorkspaceStore } from '../core/workspace.store';
 import { PANEL } from '../dock/dock.service';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DEBRIEF_VIEWS } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { mockNotifications, resetMockNotifications } from '../notifications/mock-notifications';
 import { MemoryLogger, settle } from '../../testing/helpers';
@@ -25,7 +24,9 @@ import { kindLabel, linkLabel, queuedLabel, stateLabel } from './jobs-text';
 import { JobsPanel } from './jobs-panel';
 import { releaseMockHolds } from '../core/mock/mock-hold';
 import { MockJobCancelled, MockJobsOptions, MockJobs, mockJobs, mockJobsOptionsFromSearch, mockSteps, resetMockJobs } from './mock-jobs';
-import { jobsCommands, JobsPersistence, jobsViews, provideJobs } from './provide-jobs';
+import { JobsPersistence, jobsViews, provideJobs } from './provide-jobs';
+import { jobsCommands } from './jobs.commands';
+import { contributed } from '../../testing/contributions';
 
 function jobInfo(p: Partial<JobInfo> & { id: number }): JobInfo {
   return {
@@ -1051,9 +1052,9 @@ describe('provide-jobs', () => {
   it('registers the view, commands and saved state (no activity-bar button: the status bar has the jobs and the bell) with one call', async () => {
     const fake = new FakeJobs();
     TestBed.configureTestingModule({ providers: [{ provide: JobsBackend, useValue: fake }, { provide: Logger, useFactory: () => new MemoryLogger() }, provideJobs()] });
-    expect(TestBed.inject(DEBRIEF_VIEWS).flat().map((v) => v.id)).toContain('jobs');
-    expect(TestBed.inject(DEBRIEF_COMMANDS).flat().map((c) => c.id)).toEqual(expect.arrayContaining(['jobs.show', 'jobs.clearFinished']));
-    expect((TestBed.inject(DEBRIEF_ACTIVITY_ITEMS, [], { optional: true }) ?? []).flat().map((i) => i.id)).not.toContain('jobs');
+    expect(contributed('views').map((v) => v.id)).toContain('jobs');
+    expect(contributed('commands').map((c) => c.id)).toEqual(expect.arrayContaining(['jobs.show', 'jobs.clearFinished']));
+    expect(contributed('activityItems').map((i) => i.id)).not.toContain('jobs');
     expect(TestBed.inject(UI_STATE_CONTRIBUTIONS).flat().map((c) => c.key)).toContain('jobs');
     await settle();
     expect(fake.list).toHaveBeenCalled();

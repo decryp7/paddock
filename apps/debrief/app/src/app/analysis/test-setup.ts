@@ -7,6 +7,7 @@ import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
 import { CommandContext } from '../extensions/tokens';
+import { FakeCommandContext } from '../../testing/contributions';
 import { WorkspaceStore } from '../core/workspace.store';
 import { MemoryLogger, settle } from '../../testing/helpers';
 import { HISTORY_STORE, HistoryStore } from './history-store';
@@ -31,17 +32,16 @@ export interface Call {
 }
 
 /** A `CommandContext` that records what the views asked for. */
-export class FakeContext implements CommandContext {
+export class FakeContext extends FakeCommandContext {
   readonly calls: Call[] = [];
-  summary: CommandContext['summary'] = null;
-  openPaths = async (...args: string[][]) => void this.calls.push({ fn: 'openPaths', args });
-  setQuery = (...args: unknown[]) => void this.calls.push({ fn: 'setQuery', args });
-  addFilter = (...args: unknown[]) => void this.calls.push({ fn: 'addFilter', args });
-  selectRecord = (...args: unknown[]) => void this.calls.push({ fn: 'selectRecord', args });
-  jumpTo = async (...args: number[]) => void this.calls.push({ fn: 'jumpTo', args });
-  showView = (...args: unknown[]) => void this.calls.push({ fn: 'showView', args });
-  suggestPerspective = (...args: unknown[]) => void this.calls.push({ fn: 'suggestPerspective', args });
-  notifyError = (...args: unknown[]) => void this.calls.push({ fn: 'notifyError', args });
+  override openPaths = async (...args: string[][]) => void this.calls.push({ fn: 'openPaths', args });
+  override setQuery = (...args: unknown[]) => void this.calls.push({ fn: 'setQuery', args });
+  override addFilter = (...args: unknown[]) => void this.calls.push({ fn: 'addFilter', args });
+  override selectRecord = (...args: unknown[]) => void this.calls.push({ fn: 'selectRecord', args });
+  override jumpTo = async (...args: number[]) => void this.calls.push({ fn: 'jumpTo', args });
+  override showView = (...args: unknown[]) => void this.calls.push({ fn: 'showView', args });
+  override suggestPerspective = (...args: unknown[]) => void this.calls.push({ fn: 'suggestPerspective', args });
+  override notifyError = (...args: unknown[]) => void this.calls.push({ fn: 'notifyError', args });
   last(fn: string): unknown[] | undefined {
     return [...this.calls].reverse().find((c) => c.fn === fn)?.args;
   }

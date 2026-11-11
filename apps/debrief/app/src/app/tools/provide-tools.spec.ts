@@ -15,7 +15,7 @@ import { DialogService } from '../ui/dialog.service';
 import { FakeDock } from '../../testing/helpers';
 import { CollectorDialog } from './collector/collector-dialog';
 import { provideTools, startTools } from './provide-tools';
-import { toolsViews } from './tools-commands';
+import { toolsViews } from './tools-views';
 
 const TOOLS_VIEWS = toolsViews({ listed: () => true });
 

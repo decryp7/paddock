@@ -1,6 +1,7 @@
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
 import { provideConfigDiffBackend } from './config-diff-backend';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 /** The configuration diff panel. Same extension point as plugin views. */
 export const CONFIG_DIFF_VIEWS: DebriefView[] = [
@@ -15,7 +16,7 @@ export const CONFIG_DIFF_COMMANDS: DebriefCommand[] = [
 export function provideConfigDiff(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...provideConfigDiffBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useValue: CONFIG_DIFF_VIEWS },
-    { provide: DEBRIEF_COMMANDS, multi: true, useValue: CONFIG_DIFF_COMMANDS },
+    ...debriefContributionProviders({ views: CONFIG_DIFF_VIEWS }),
+    ...debriefContributionProviders({ commands: CONFIG_DIFF_COMMANDS }),
   ]);
 }

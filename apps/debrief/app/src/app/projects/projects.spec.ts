@@ -4,7 +4,6 @@ import { DebriefBackend } from '../core/backend';
 import { WorkspaceStore } from '../core/workspace.store';
 import { ProjectBackend } from '../core/tools-backend';
 import { CommandRegistry } from '../extensions/command-registry';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { CoreUiState } from '../lifecycle/core-ui-state';
 import { UI_STATE_CONTRIBUTIONS, UiStateRegistry } from '../lifecycle/ui-state';
 import { mockTools, FakePicker, MemoryRecentProjects, provideToolsTesting } from '../tools/mock/test-support';
@@ -20,6 +19,7 @@ import { UnsavedChangesDialog, UnsavedChangesGuard } from './unsaved-changes';
 import { RECENT_PROJECTS } from './recent-projects';
 import { SavedQueryCommands } from './saved-query-commands';
 import { at } from '../../testing/must';
+import { contributeFrom } from '../extensions/contributions';
 
 async function setup() {
   TestBed.configureTestingModule({
@@ -28,7 +28,7 @@ async function setup() {
       { provide: DIALOG_REF, useValue: { close: () => undefined, closed: Promise.resolve(undefined) } },
       { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => TestBed.inject(CoreUiState).contributions },
       { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => TestBed.inject(ProjectUiState).contributions },
-      { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => [...TestBed.inject(ProjectCommands).commands, ...TestBed.inject(SavedQueryCommands).commands] },
+      ...contributeFrom('commands', () => [...TestBed.inject(ProjectCommands).commands, ...TestBed.inject(SavedQueryCommands).commands]),
     ],
   });
   const projects = TestBed.inject(ProjectService);

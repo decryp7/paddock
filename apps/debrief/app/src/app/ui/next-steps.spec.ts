@@ -3,8 +3,8 @@ import { TestBed } from '@angular/core/testing';
 import { buttonByText, provideTinyBackend, query, settle, text } from '../../testing/helpers';
 import { AnalysisState } from '../analysis/analysis-state';
 import { WorkspaceStore } from '../core/workspace.store';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { emptyCause, isFiltered, NextSteps } from './next-steps';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 describe('next steps for empty and failed views', () => {
   it('suggests opening files first, then clearing filters, then the whole time range', () => {
@@ -21,7 +21,7 @@ describe('next steps for empty and failed views', () => {
   async function setup(demo = true) {
     const run = vi.fn();
     TestBed.configureTestingModule({
-      providers: [...provideTinyBackend(), { provide: DEBRIEF_COMMANDS, multi: true, useValue: demo ? [{ id: 'help.demo', title: 'Try the demo', run }] : [] }],
+      providers: [...provideTinyBackend(), ...debriefContributionProviders({ commands: demo ? [{ id: 'help.demo', title: 'Try the demo', run }] : [] })],
     });
     const fixture = TestBed.createComponent(NextSteps);
     const store = TestBed.inject(WorkspaceStore);

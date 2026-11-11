@@ -11,7 +11,10 @@ import { SavedQueries } from '../projects/bookmarks/saved-queries';
 import { ProjectUiState } from '../projects/project-ui-state';
 import { DialogService } from '../ui/dialog.service';
 import { MockStorePaneBackend } from './mock/mock-store-pane-backend';
-import { storePaneCommands, storePaneViews } from './provide-store-pane';
+import { storePaneViews } from './provide-store-pane';
+import { StorePaneCommands, storePaneCommands } from './store-pane.commands';
+import { STORE_PANE_COMMAND_STUBS } from './store-pane.contributions';
+import { stubMismatches } from '../../testing/contributions';
 import { applyCompletion, byteToIndex, completeSql, rowsToTsv, wordAt } from './sql-complete';
 import { SqlConsoleStore } from './sql-console.store';
 import { SqlExportFiles } from './sql-export-files';
@@ -407,5 +410,6 @@ describe('provideStorePane', () => {
     void show.run(context);
     expect(pane.tab()).toBe('overview');
     expect(context.showView).toHaveBeenCalledWith(STORE_VIEW);
+    expect(stubMismatches(STORE_PANE_COMMAND_STUBS, TestBed.inject(StorePaneCommands).commands)).toEqual([]);
   });
 });

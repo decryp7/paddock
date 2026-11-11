@@ -2,9 +2,10 @@ import { ChangeDetectionStrategy, Component, EnvironmentProviders, inject, Injec
 import { AiLauncher } from '../ai/ai-launcher';
 import { DEBRIEF_RECORD_MENU_ITEMS, RecordMenuContribution } from '../context/record-actions';
 import { RecordView } from '../core/api.types';
-import { WorkspaceStore } from '../core/workspace.store';
-import { DEBRIEF_COMMANDS, DEBRIEF_INSPECTOR_SECTIONS, DebriefCommand, DebriefInspectorSection } from '../extensions/tokens';
+import { DebriefInspectorSection } from '../extensions/tokens';
 import { DialogService } from '../ui/dialog.service';
+import { debriefContributionProviders } from '../extensions/contributions';
+import { BROWSER_COMMANDS_CONTRIBUTIONS } from './browser.contributions';
 
 /** "Search the web for this error" from anywhere (menus, inspector, chat, palette). */
 @Injectable({ providedIn: 'root' })
@@ -77,22 +78,6 @@ export const WEB_INSPECTOR_SECTION: DebriefInspectorSection = {
   when: worthSearching,
 };
 
-export function browserCommands(launcher: BrowserLauncher, store: InstanceType<typeof WorkspaceStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@browser.category:Web`;
-  return [
-    {
-      id: 'browser.searchSelected',
-      title: $localize`:@@browser.cmd.searchSelected:Web: Search the web for the selected event…`,
-      category,
-      when: () => !!store.selected(),
-      run: () => {
-        const r = store.selected();
-        if (r) void launcher.searchEvent(r.id);
-      },
-    },
-  ];
-}
-
 /** "Search the web for this error…" in the grid and inspector context menu. */
 export function browserRecordMenu(launcher: BrowserLauncher, ai?: AiLauncher): RecordMenuContribution {
   return (record) => [
@@ -104,8 +89,9 @@ export function browserRecordMenu(launcher: BrowserLauncher, ai?: AiLauncher): R
 /** One line in `app.config.ts`: the browser's commands, menu entries and inspector section. */
 export function provideBrowser(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => browserCommands(inject(BrowserLauncher), inject(WorkspaceStore)) },
+    // Stubs only: the command's code loads when the window is idle or it runs.
+    ...BROWSER_COMMANDS_CONTRIBUTIONS,
     { provide: DEBRIEF_RECORD_MENU_ITEMS, multi: true, useFactory: () => browserRecordMenu(inject(BrowserLauncher), inject(AiLauncher)) },
-    { provide: DEBRIEF_INSPECTOR_SECTIONS, multi: true, useValue: [WEB_INSPECTOR_SECTION] },
+    ...debriefContributionProviders({ inspectorSections: [WEB_INSPECTOR_SECTION] }),
   ]);
 }

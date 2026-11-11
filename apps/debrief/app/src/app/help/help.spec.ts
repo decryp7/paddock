@@ -2,14 +2,16 @@ import { TestBed } from '@angular/core/testing';
 import { all, el, provideFakeDock, provideTinyBackendBare, settle, text, typeInto } from '../../testing/helpers';
 import { CommandRegistry } from '../extensions/command-registry';
 import { KeybindingOverridesStore } from '../extensions/keybinding-overrides.store';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
 import { DialogService } from '../ui/dialog.service';
 import { DockService } from '../dock/dock.service';
 import { CheatSheet, PRINT_CLASS } from './cheat-sheet';
-import { HelpCommands, provideHelp, SHORTCUTS_KEY } from './help.commands';
+import { HelpCommands } from './help-commands';
+import { provideHelp, SHORTCUTS_KEY } from './help.commands';
 import { FIXED_KEYS, shortcutGroups } from './shortcuts';
 import { SettingsDialogService } from '../settings/settings-dialog';
 import { at } from '../../testing/must';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 const cmd = (id: string, title: string, extra: Partial<DebriefCommand> = {}): DebriefCommand => ({ id, title, run: () => undefined, ...extra });
 
@@ -45,7 +47,7 @@ describe('cheat sheet and help commands', () => {
         provideTinyBackendBare(),
         provideFakeDock(),
         provideHelp(),
-        { provide: DEBRIEF_COMMANDS, multi: true, useValue: [cmd('t.open', 'Open files…', { category: 'File', keybinding: 'Mod+O' })] },
+        ...debriefContributionProviders({ commands: [cmd('t.open', 'Open files…', { category: 'File', keybinding: 'Mod+O' })] }),
       ],
     });
     return TestBed.inject(CommandRegistry);
@@ -112,11 +114,7 @@ describe('cheat sheet with user key bindings', () => {
         provideTinyBackendBare(),
         provideFakeDock(),
         provideHelp(),
-        {
-          provide: DEBRIEF_COMMANDS,
-          multi: true,
-          useValue: [cmd('t.open', 'Open files…', { category: 'File', keybinding: 'Mod+O' }), cmd('t.save', 'Save things', { category: 'File', keybinding: 'Mod+S' })],
-        },
+        ...debriefContributionProviders({ commands: [cmd('t.open', 'Open files…', { category: 'File', keybinding: 'Mod+O' }), cmd('t.save', 'Save things', { category: 'File', keybinding: 'Mod+S' })] }),
       ],
     });
     TestBed.inject(KeybindingOverridesStore).set({ 't.open': 'Alt+J', 't.save': null });

@@ -1,23 +1,16 @@
-import { Injector } from '@angular/core';
+import { Injector, runInInjectionContext } from '@angular/core';
+import { contributedItems, DEBRIEF_KIND } from '../extensions/contributions';
 import { Query, RecordView } from '../core/api.types';
-import { DateFormat, TimeZoneMode } from '../core/format';
 import { WorkspaceStore } from '../core/workspace.store';
-import { WorkspaceDataStore } from '../core/workspace/workspace-data.store';
-import { isSchemeMode, isUiFont, UiPrefsStore } from '../core/workspace/ui-prefs.store';
-import { isThemeId } from '../theme/themes';
 import { TimeCursor } from '../analysis/time-cursor';
 import { sanitizeQuery } from '../core/sanitize-query';
 import { LiveFollow, sanitizeFollow } from '../live/live-follow.store';
-import { GridDensity, SettingsStore, SOURCE_COLOR_MODES, SourceColorMode } from '../settings/settings.store';
 import { LiveTail } from '../workspace/live-tail';
 import { SyncedValue } from './ui-sync';
 
 /** The time cursor follows the pointer: other windows get it at most this often. */
 export const CURSOR_SYNC_MS = 50;
 
-const ZONES: readonly TimeZoneMode[] = ['utc', 'local'];
-const DATE_FORMATS: readonly DateFormat[] = ['readable', 'iso'];
-const DENSITIES: readonly GridDensity[] = ['compact', 'comfortable'];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -49,39 +42,6 @@ export type SharedScope =
   | 'summary'
   /** Display settings only (theme, formats, density): a dialog that never reads the workspace. */
   | 'display';
-
-/** Theme and display settings: they need only the preference stores. */
-function displayState(injector: Injector): SyncedValue[] {
-  const prefs = injector.get(UiPrefsStore);
-  const settings = injector.get(SettingsStore);
-  return [
-    { key: 'theme', read: () => prefs.theme(), apply: (v) => (v === null || isThemeId(v)) && prefs.setTheme(v) },
-    { key: 'scheme', read: () => prefs.scheme(), apply: (v) => isSchemeMode(v) && prefs.setScheme(v) },
-    { key: 'uiFont', read: () => prefs.uiFont(), apply: (v) => isUiFont(v) && prefs.setUiFont(v) },
-    { key: 'timezone', read: () => prefs.timezone(), apply: (v) => ZONES.includes(v as TimeZoneMode) && prefs.setTimezone(v as TimeZoneMode) },
-    { key: 'lifecycle', read: () => prefs.alwaysShowLifecycle(), apply: (v) => typeof v === 'boolean' && prefs.setAlwaysShowLifecycle(v) },
-    { key: 'dateFormat', read: () => settings.dateFormat(), apply: (v) => DATE_FORMATS.includes(v as DateFormat) && settings.setDateFormat(v as DateFormat) },
-    { key: 'density', read: () => settings.density(), apply: (v) => DENSITIES.includes(v as GridDensity) && settings.setDensity(v as GridDensity) },
-    {
-      key: 'sourceColors',
-      read: () => settings.sourceColors(),
-      apply: (v) => SOURCE_COLOR_MODES.includes(v as SourceColorMode) && settings.setSourceColors(v as SourceColorMode),
-    },
-  ];
-}
-
-/** The host's data versions: a guest reloads its summary when they move. */
-function dataState(injector: Injector): SyncedValue[] {
-  const data = injector.get(WorkspaceDataStore);
-  return [
-    {
-      key: 'data',
-      direction: 'fromHost',
-      read: () => data.dataVersion() + data.profileVersion() * 1e6,
-      apply: () => void data.refreshSummary().catch(() => undefined),
-    },
-  ];
-}
 
 /** The workspace interaction state: query, selection, jumps, sort and columns, time cursor, live follow and tail. */
 function workspaceState(injector: Injector): SyncedValue[] {
@@ -139,13 +99,41 @@ function workspaceState(injector: Injector): SyncedValue[] {
 }
 
 /**
+ * A group of shared state as a contribution: Debrief's `debriefSharedState` kind until M3a moves it to the shell's
+ * `defineSharedState`. It differs from that design in two ways until then: a group binds several values, and it is
+ * placed in one of three scopes (display, summary, full) where the shell's has two (every window, or the window group);
+ * each value parses what another window sends in its own `apply`. A key already bound by an earlier group is left out.
+ * Registered in `shared-state.contributions.ts` (main window, pop-outs) and `display-state.contributions.ts` (dialog
+ * windows).
+ */
+export interface SharedStateDef {
+  /** Namespaced id: `db.shared.display`. */
+  readonly id: string;
+  /** `display`: every window; `summary`: windows that read the workspace summary and pop-outs; `full`: pop-outs and the host. */
+  readonly scope: SharedScope;
+  values(injector: Injector): SyncedValue[];
+}
+
+/** The scopes each window scope includes. */
+const SCOPE_INCLUDES: Readonly<Record<SharedScope, readonly SharedScope[]>> = {
+  display: ['display'],
+  summary: ['display', 'summary'],
+  full: ['display', 'summary', 'full'],
+};
+
+/** The workspace group: query, selection and jumps, sort and columns, time cursor, live follow and tail (pop-outs and the host). */
+export const WORKSPACE_SHARED_STATE: SharedStateDef = Object.freeze({ id: 'db.shared.workspace', scope: 'full', values: workspaceState });
+
+/**
  * The interaction state a host and its guests share: the query, selection and jumps, time cursor and brushed
- * range, live follow, theme and display settings, plus what only the host decides (data versions, live tail on/off).
+ * range, live follow, theme and display settings, plus what only the host decides (data versions, live tail on/off),
+ * as the window's registered groups bind them (a window that registers none shares nothing).
  * A guest that shows less asks for a narrower `scope`, so it never creates the stores of what it does not show.
  * A window ignores the keys it was not given.
  */
 export function sharedUiState(injector: Injector, scope: SharedScope = 'full'): SyncedValue[] {
-  if (scope === 'display') return displayState(injector);
-  if (scope === 'summary') return [...displayState(injector), ...dataState(injector)];
-  return [...workspaceState(injector), ...displayState(injector), ...dataState(injector)];
+  const registered = runInInjectionContext(injector, () => contributedItems<SharedStateDef>(DEBRIEF_KIND.sharedState));
+  const groups = registered.filter((g) => SCOPE_INCLUDES[scope].includes(g.scope));
+  const seen = new Set<string>();
+  return groups.flatMap((g) => g.values(injector)).filter((v) => !seen.has(v.key) && !!seen.add(v.key));
 }
