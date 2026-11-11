@@ -139,6 +139,18 @@ pub struct Node {
     pub security: Security,
 }
 
+/// Which file a path is, read from the open object without following a link: what stays the same when the path is renamed, and what a
+/// swapped file does not have (round 5 of Pitcrew, P2-3 and P2-9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FileIdentity {
+    /// The volume (Windows: the volume serial number; Unix: the device).
+    pub volume: u64,
+    /// The file on it (Windows: the file index; Unix: the inode).
+    pub index: u64,
+    /// How many names the file has (hard links, directories count as 1 on Windows).
+    pub links: u32,
+}
+
 /// How paths split.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
@@ -154,6 +166,12 @@ pub trait TrustPort: Send {
     fn style(&self) -> Style;
     /// The facts of `path` without following a link; `Ok(None)` when nothing is there.
     fn node(&mut self, path: &str) -> io::Result<Option<Node>>;
+    /// The identity of `path` (see [`FileIdentity`]), without following a link. `Ok(None)` when nothing is there **or the port cannot
+    /// tell** (a fake that models no identities); the real ports always answer for a path that exists. A caller that needs the
+    /// identity for a decision treats `None` as "not known", never as a match.
+    fn identity(&mut self, _path: &str) -> io::Result<Option<FileIdentity>> {
+        Ok(None)
+    }
     /// The path with every link resolved (Unix; used for programs the OS ships, like `/usr/sbin/smartctl`).
     fn canonical(&mut self, path: &str) -> io::Result<String>;
     /// Every entry below `path`, never following a link (a link is listed, not entered), at most `limit`; an error when

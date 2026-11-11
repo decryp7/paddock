@@ -14,7 +14,7 @@ use super::{
     walk_no_follow,
 };
 use crate::privileged::files::FileKind;
-use crate::privileged::trust::{Node, Security, Style, TrustPort};
+use crate::privileged::trust::{FileIdentity, Node, Security, Style, TrustPort};
 use std::io;
 
 impl TrustPort for RealTrust {
@@ -57,6 +57,39 @@ impl TrustPort for RealTrust {
         Ok(Some(Node {
             kind,
             security: Security::Windows(descriptor),
+        }))
+    }
+
+    fn identity(&mut self, path: &str) -> io::Result<Option<FileIdentity>> {
+        use std::os::windows::fs::OpenOptionsExt;
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Foundation::HANDLE;
+        use windows::Win32::Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+        };
+        const FILE_READ_ATTRIBUTES: u32 = 0x0000_0080;
+        const SHARE_ALL: u32 = 7;
+        const BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        // Opened as `node` does: the entry itself, a link not followed, no sharing conflict.
+        let file = match std::fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES)
+            .share_mode(SHARE_ALL)
+            .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
+            .open(path)
+        {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        // SAFETY: the handle is valid for the call (owned by `file`) and `info` is a valid out structure.
+        unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut info) }
+            .map_err(|e| io::Error::other(e.to_string()))?;
+        Ok(Some(FileIdentity {
+            volume: u64::from(info.dwVolumeSerialNumber),
+            index: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+            links: info.nNumberOfLinks,
         }))
     }
 

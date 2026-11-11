@@ -13,7 +13,7 @@ use super::{
     HeldImage, remove_tree_no_follow, rename_aside_free, sweep_aside_free, walk_no_follow,
 };
 use crate::privileged::files::FileKind;
-use crate::privileged::trust::{Node, Security, Style, TrustPort};
+use crate::privileged::trust::{FileIdentity, Node, Security, Style, TrustPort};
 use std::io;
 
 impl TrustPort for RealTrust {
@@ -48,6 +48,19 @@ impl TrustPort for RealTrust {
                     && mac_acl_allows_write(path),
             },
         }))
+    }
+
+    fn identity(&mut self, path: &str) -> io::Result<Option<FileIdentity>> {
+        use std::os::unix::fs::MetadataExt;
+        match std::fs::symlink_metadata(path) {
+            Ok(m) => Ok(Some(FileIdentity {
+                volume: m.dev(),
+                index: m.ino(),
+                links: u32::try_from(m.nlink()).unwrap_or(u32::MAX),
+            })),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     fn canonical(&mut self, path: &str) -> io::Result<String> {

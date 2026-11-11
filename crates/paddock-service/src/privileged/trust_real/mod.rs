@@ -257,6 +257,45 @@ pub(super) mod tests {
         p.to_string_lossy().into_owned()
     }
 
+    /// Round 5 (Pitcrew P2-3, P2-9): the real port tells which file a path is and how many names it has, never following a link.
+    #[cfg(unix)]
+    #[test]
+    fn identity_tells_the_file_and_its_link_count_and_does_not_follow_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::write(&a, "x").unwrap();
+        let mut port = RealTrust;
+        let first = port.identity(&text(&a)).unwrap().expect("exists");
+        assert_eq!(first.links, 1);
+        std::fs::hard_link(&a, &b).unwrap();
+        let again = port.identity(&text(&a)).unwrap().unwrap();
+        assert_eq!(again.links, 2, "a second name for the file");
+        assert_eq!((again.volume, again.index), (first.volume, first.index));
+        assert_eq!(
+            port.identity(&text(&b)).unwrap().unwrap(),
+            again,
+            "the same file by either name"
+        );
+        let other = dir.path().join("c");
+        std::fs::write(&other, "y").unwrap();
+        assert_ne!(
+            port.identity(&text(&other)).unwrap().unwrap().index,
+            first.index
+        );
+        // A link is itself, not its target.
+        let link = dir.path().join("l");
+        std::os::unix::fs::symlink(&a, &link).unwrap();
+        assert_ne!(
+            port.identity(&text(&link)).unwrap().unwrap().index,
+            first.index
+        );
+        assert_eq!(
+            port.identity(&text(&dir.path().join("missing"))).unwrap(),
+            None
+        );
+    }
+
     #[test]
     fn sweep_aside_matches_only_the_exact_name_prefix_and_real_folders_and_keeps_the_newest() {
         let dir = tempfile::tempdir().unwrap();
