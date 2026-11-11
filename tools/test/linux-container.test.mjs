@@ -64,3 +64,14 @@ test('usage errors: no id, bad id, nothing to run, unknown option, no docker', (
   assert.match(none.out, /is needed/);
   assert.deepEqual(calls(bin), [], 'nothing was started');
 });
+
+test('--image runs a ready image as it is: no inspect, no build, the platform passed, the caps kept', () => {
+  const bin = docker();
+  const r = go(bin, ['--id', 'paddock', '--image', 'reg.example/ci:v2', '--platform', 'linux/amd64', '--', 'rustc', '--version']);
+  assert.equal(r.status, 0, r.out);
+  const log = calls(bin);
+  assert.ok(!log.some((l) => l.includes('image inspect') || l.includes('docker build')));
+  const runLine = log.at(-1);
+  assert.match(runLine, /^docker run --rm --label paddock\.tools=paddock --cpus 4 --memory 12g --platform linux\/amd64 /);
+  assert.match(runLine, / reg\.example\/ci:v2 rustc --version$/);
+});

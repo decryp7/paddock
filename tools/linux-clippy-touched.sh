@@ -1,21 +1,28 @@
 #!/usr/bin/env bash
-# Pre-push Linux Clippy for the shared crates a change touches (rule 50h, ER-9): a lint that exists only on Linux (for example
-# `useless_conversion` on `mode_t`, which is a different width on Linux and macOS) is found here, in the container of
-# linux-container.sh (--rm, --cpus 4 --memory 12g), not in CI. Only crates under crates/ whose files differ from the base are
-# checked. Without Docker this prints a warning with the next step and succeeds: the check is skipped, never faked.
+# Linux Clippy of the shared workspace before a push (rule 50h, ER-9): a lint that exists only on Linux (for example
+# `useless_conversion` on `mode_t`, a different width on Linux and macOS) is found here, not in CI. It runs CI's own command,
+# `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` (ci.yml, "Clippy (workspace, every feature)"),
+# in crates/, whenever the change touches crates/ (the crates, Cargo.toml, Cargo.lock, clippy.toml, deny.toml) or .cargo/.
+# The toolchain is CI's: the CI image dev.decryptology.net/decryp7/paddock-ci:v<ci-image/VERSION>, run as it is (amd64, emulated
+# on Apple Silicon), `rustc --version` and `cargo clippy --version` printed first. Container: --rm --cpus 4 --memory 12g.
 #
-#   bash tools/linux-clippy-touched.sh [--base origin/main] [--root <repo>] [--dry-run]
+#   bash tools/linux-clippy-touched.sh [--base origin/main] [--root <repo>] [--image <ref>] [--platform <p>] [--dry-run]
 #
-# Environment: DOCKER (default docker), PADDOCK_LINUX_BASE_IMAGE (rust:1-bookworm; set it to the CI image to match CI exactly).
+# Exit codes: 0 Clippy ran and passed (or nothing under crates/ or .cargo/ changed); Clippy's own code when it found something;
+# 2 usage; 1 the base could not be diffed; 3 NOT MEASURED (no Docker daemon): the check did not run, so nothing is proven.
+# Environment: DOCKER (default docker); PADDOCK_HEAVY, a command prefix for the one-heavy-step lock (for example
+# `heavy.sh`, ER-24), put before the container run; PADDOCK_LINUX_IMAGE and PADDOCK_LINUX_PLATFORM (the --image and --platform).
 set -euo pipefail
 
-base="origin/main"; root="$PWD"; dry=0
+base="origin/main"; root="$PWD"; dry=0; image="${PADDOCK_LINUX_IMAGE:-}"; platform="${PADDOCK_LINUX_PLATFORM:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --base) base="${2:?--base needs a value}"; shift ;;
     --root) root="${2:?--root needs a value}"; shift ;;
+    --image) image="${2:?--image needs a value}"; shift ;;
+    --platform) platform="${2:?--platform needs a value}"; shift ;;
     --dry-run) dry=1 ;;
-    *) echo "::error::linux-clippy-touched: unknown option $1. Usage: [--base <ref>] [--root <repo>] [--dry-run]" >&2; exit 2 ;;
+    *) echo "::error::linux-clippy-touched: unknown option $1. Usage: [--base <ref>] [--root <repo>] [--image <ref>] [--platform <p>] [--dry-run]" >&2; exit 2 ;;
   esac
   shift
 done
@@ -23,31 +30,33 @@ done
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 docker="${DOCKER:-docker}"
 
-files=$(git -C "$root" diff --name-only "$base" -- crates 2>&1) || {
-  echo "::error::linux-clippy-touched: cannot diff against $base ($files). Fetch it (git fetch origin) or pass --base." >&2; exit 1; }
+errfile=$(mktemp)
+trap 'rm -f "$errfile"' EXIT
+fork_point=$(git -C "$root" merge-base "$base" HEAD 2>"$errfile") || {
+  echo "::error::linux-clippy-touched: no merge base of $base and HEAD ($(cat "$errfile")). Fetch it (git fetch origin) or pass --base." >&2; exit 1; }
+files=$(git -C "$root" diff --name-only "$fork_point" -- crates .cargo 2>"$errfile") || {
+  echo "::error::linux-clippy-touched: cannot diff against $fork_point ($(cat "$errfile")). Fetch the base (git fetch origin) or pass --base." >&2; exit 1; }
 
-packages=()
-while IFS= read -r dir; do
-  [ -n "$dir" ] || continue
-  manifest="$root/crates/$dir/Cargo.toml"
-  [ -f "$manifest" ] || continue # a crate deleted by the change has nothing to check
-  name=$(sed -n 's/^name *= *"\([^"]*\)".*/\1/p' "$manifest" | head -n 1)
-  [ -n "$name" ] && packages+=("$name")
-done < <(printf '%s\n' "$files" | sed -n 's#^crates/\([^/]*\)/.*#\1#p' | sort -u)
-
-if [ ${#packages[@]} -eq 0 ]; then
-  echo "linux-clippy-touched: no shared crate touched against $base; nothing to check"
+if [ -z "$files" ]; then
+  echo "linux-clippy-touched: nothing under crates/ or .cargo/ changed since $base; nothing to check"
   exit 0
 fi
 
-pargs=""
-for p in "${packages[@]}"; do pargs="$pargs -p $p"; done
-echo "linux-clippy-touched: Linux Clippy for${pargs}"
+if [ -z "$image" ]; then
+  version=$(tr -d '[:space:]' <"$root/ci-image/VERSION" 2>"$errfile") || {
+    echo "::error::linux-clippy-touched: cannot read ci-image/VERSION ($(cat "$errfile")). Run from a full checkout or pass --image." >&2; exit 1; }
+  image="dev.decryptology.net/decryp7/paddock-ci:v$version"
+  [ -n "$platform" ] || platform="linux/amd64" # the image is amd64 only (ci-image.yml)
+fi
+
+command_line='rustc --version && cargo clippy --version && cd crates && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings'
+echo "linux-clippy-touched: $(printf '%s\n' "$files" | wc -l | tr -d ' ') file(s) changed under crates/ or .cargo/; CI's workspace Clippy in $image"
 [ "$dry" = 0 ] || exit 0
 
 if ! command -v "$docker" >/dev/null 2>&1 || ! "$docker" info >/dev/null 2>&1; then
-  echo "::warning::linux-clippy-touched: Docker is not available, so the Linux Clippy check of${pargs} was SKIPPED. Start Docker or OrbStack and run: bash tools/linux-clippy-touched.sh (CI will run it otherwise)." >&2
-  exit 0
+  echo "::warning::linux-clippy-touched: Linux Clippy NOT MEASURED: Docker/OrbStack is not running. Agents: report this to the coordinator; do not start or restart it (ER-14). People: start it, then rerun: bash tools/linux-clippy-touched.sh" >&2
+  exit 3
 fi
 
-exec bash "$here/linux-container.sh" --id paddock --root "$root" -- sh -c "cd crates && cargo clippy --locked${pargs} --all-targets -- -D warnings"
+# shellcheck disable=SC2086 # PADDOCK_HEAVY is a command prefix, split on purpose
+exec ${PADDOCK_HEAVY:-} bash "$here/linux-container.sh" --id paddock --root "$root" --image "$image" ${platform:+--platform "$platform"} -- sh -c "$command_line"

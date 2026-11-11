@@ -6,6 +6,7 @@
 # created (that label, those names) are ever removed (rule 7).
 #
 #   bash paddock/tools/linux-container.sh --id dyno [--root <repo>] [--packages dyno-platform] -- [command...]
+#   bash paddock/tools/linux-container.sh --id paddock --image <ref> [--platform linux/amd64] -- command...   # a ready image, run as it is
 #   bash paddock/tools/linux-container.sh --id dyno --clean              # stop labelled containers, delete the two volumes
 #
 # With no command: `cargo test -p <packages> && cargo clippy -p <packages> --all-targets -- -D warnings`.
@@ -13,12 +14,14 @@
 # PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
 set -euo pipefail
 
-id=""; root="$PWD"; packages=""; clean=0
+id=""; root="$PWD"; packages=""; clean=0; ready_image=""; platform=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --id) id="${2:?--id needs a value}"; shift ;;
     --root) root="${2:?--root needs a value}"; shift ;;
     --packages) packages="${2:?--packages needs a value}"; shift ;;
+    --image) ready_image="${2:?--image needs a value}"; shift ;;
+    --platform) platform="${2:?--platform needs a value}"; shift ;;
     --clean) clean=1 ;;
     --) shift; break ;;
     *) echo "linux-container: unknown option $1 (a command goes after --)" >&2; exit 2 ;;
@@ -53,7 +56,9 @@ if [ $# -eq 0 ] && [ -z "$packages" ]; then
   exit 2
 fi
 
-if ! "$docker" image inspect "$image" >/dev/null 2>&1; then
+if [ -n "$ready_image" ]; then
+  image="$ready_image" # a ready image (for example the CI image) is run as it is: no layer of ours, no rustup
+elif ! "$docker" image inspect "$image" >/dev/null 2>&1; then
   printf 'FROM %s\nRUN rustup component add clippy rustfmt\n' "$base_image" | "$docker" build --label "$label" -t "$image" -
 fi
 "$docker" volume create --label "$label" "$registry_volume" >/dev/null
@@ -70,6 +75,7 @@ if [ -n "${PADDOCK_LINUX_USER:-}" ]; then
 fi
 
 exec "$docker" run --rm --label "$label" --cpus "$cpus" --memory "$memory" \
+  ${platform:+--platform "$platform"} \
   --mount "type=bind,source=$root,target=/work,readonly" \
   --mount "type=volume,source=$registry_volume,target=/usr/local/cargo/registry" \
   --mount "type=volume,source=$target_volume,target=/target" \

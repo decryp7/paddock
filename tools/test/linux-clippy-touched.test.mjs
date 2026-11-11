@@ -6,15 +6,16 @@ import { calls, run, scratch, shim, write } from './helpers.mjs';
 
 const git = (cwd, ...a) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' });
 
-/** A repo with crates a and b committed on `main`, then `changed` edited on a branch. */
+/** A repo with ci-image/VERSION and crates a and b on `main`, then `changed` edited on a branch. */
 function repo(changed) {
   const root = scratch('paddock-repo-');
   git(root, 'init', '-q', '-b', 'main');
   write(root, {
+    'ci-image/VERSION': '7\n',
+    'crates/Cargo.toml': '[workspace]\n',
+    '.cargo/config.toml': '#\n',
     'crates/paddock-a/Cargo.toml': '[package]\nname = "paddock-a"\n',
     'crates/paddock-a/src/lib.rs': '//',
-    'crates/paddock-b/Cargo.toml': '[package]\nname = "paddock-b"\n',
-    'crates/paddock-b/src/lib.rs': '//',
     'apps/x/file.rs': '//',
   });
   git(root, 'add', '.');
@@ -33,23 +34,50 @@ function bin() {
 const go = (b, root, args = [], env = {}) =>
   run('linux-clippy-touched.sh', ['--base', 'main', '--root', root, ...args], { bin: b, cwd: root, env: { DOCKER: join(b, 'docker'), ...env } });
 
-test('only the touched crates are linted, in the capped container, with -D warnings', () => {
+test("a crate change runs CI's exact workspace command with --locked in the pinned CI image, capped, versions first", () => {
   const b = bin();
   const r = go(b, repo(['crates/paddock-a/src/lib.rs', 'apps/x/file.rs']));
   assert.equal(r.status, 0, r.out);
   const last = calls(b).at(-1);
-  assert.match(last, /^docker run --rm .*--cpus 4 --memory 12g /);
-  assert.match(last, /cargo clippy --locked -p paddock-a --all-targets -- -D warnings$/);
-  assert.doesNotMatch(last, /paddock-b/);
+  assert.match(last, /^docker run --rm .*--cpus 4 --memory 12g --platform linux\/amd64 /);
+  assert.ok(last.includes(' dev.decryptology.net/decryp7/paddock-ci:v7 sh -c '), last);
+  assert.match(last, /rustc --version && cargo clippy --version && cd crates && cargo clippy --workspace --all-targets --all-features --locked -- -D warnings$/);
+  assert.ok(!calls(b).some((l) => l.startsWith('docker build')), 'a ready image gets no layer of ours');
 });
 
-test('two touched crates are both named', () => {
+test('a workspace-level file (crates/Cargo.toml) and .cargo/config.toml each run the same workspace command', () => {
+  for (const f of ['crates/Cargo.toml', '.cargo/config.toml']) {
+    const b = bin();
+    const r = go(b, repo([f]));
+    assert.equal(r.status, 0, r.out);
+    assert.match(calls(b).at(-1), /cargo clippy --workspace --all-targets --all-features --locked -- -D warnings$/, f);
+  }
+});
+
+test('--image replaces the CI image and drops the platform; PADDOCK_HEAVY prefixes the container run', () => {
   const b = bin();
-  go(b, repo(['crates/paddock-a/src/lib.rs', 'crates/paddock-b/src/lib.rs']));
-  assert.match(calls(b).at(-1), /-p paddock-a -p paddock-b --all-targets/);
+  shim(b, 'heavy.sh', 'exec "$@"');
+  go(b, repo(['crates/paddock-a/src/lib.rs']), ['--image', 'rust:1.99.1-bookworm'], { PADDOCK_HEAVY: 'heavy.sh' });
+  const log = calls(b);
+  assert.match(log.find((l) => l.startsWith('heavy.sh')), /^heavy.sh bash .*linux-container.sh --id paddock /);
+  assert.ok(log.at(-1).includes(' rust:1.99.1-bookworm sh -c '));
+  assert.doesNotMatch(log.at(-1), /--platform/);
 });
 
-test('no shared crate touched: nothing runs, not even docker', () => {
+test('the diff starts at the merge base: a change main got meanwhile does not count', () => {
+  const b = bin();
+  const root = repo(['apps/x/file.rs']);
+  git(root, 'checkout', '-q', 'main');
+  write(root, { 'crates/paddock-a/src/lib.rs': '// main moved' });
+  git(root, 'commit', '-qam', 'main moves');
+  git(root, 'checkout', '-q', 'work');
+  const r = go(b, root);
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /nothing to check/);
+  assert.deepEqual(calls(b), []);
+});
+
+test('nothing under crates/ or .cargo/ changed: nothing runs, not even docker', () => {
   const b = bin();
   const r = go(b, repo(['apps/x/file.rs']));
   assert.equal(r.status, 0, r.out);
@@ -57,19 +85,26 @@ test('no shared crate touched: nothing runs, not even docker', () => {
   assert.deepEqual(calls(b), []);
 });
 
-test('no Docker daemon: a ::warning:: with the next step, exit 0, no container started', () => {
+test('no Docker daemon: NOT MEASURED, exit 3, the agent is told not to start Docker, no container started', () => {
   const b = bin();
   const r = go(b, repo(['crates/paddock-a/src/lib.rs']), [], { NO_DOCKER_DAEMON: '1' });
-  assert.equal(r.status, 0, r.out);
-  assert.match(r.out, /::warning::.*SKIPPED.*Start Docker/);
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.out, /::warning::.*NOT MEASURED.*do not start or restart it \(ER-14\)/);
+  assert.doesNotMatch(r.out, /CI will run/);
   assert.ok(!calls(b).some((l) => l.startsWith('docker run')));
 });
 
-test('no docker binary at all: the same warning', () => {
+test('no docker binary at all: the same, exit 3', () => {
   const root = repo(['crates/paddock-a/src/lib.rs']);
   const r = run('linux-clippy-touched.sh', ['--base', 'main', '--root', root], { cwd: root, env: { DOCKER: '/nonexistent/docker' } });
-  assert.equal(r.status, 0, r.out);
-  assert.match(r.out, /::warning::.*SKIPPED/);
+  assert.equal(r.status, 3, r.out);
+  assert.match(r.out, /NOT MEASURED/);
+});
+
+test("Clippy's own failure code is passed through", () => {
+  const b = scratch('paddock-bin-');
+  shim(b, 'docker', 'case "$1" in info) exit 0;; image) exit 0;; run) exit 101;; esac');
+  assert.equal(go(b, repo(['crates/paddock-a/src/lib.rs'])).status, 101);
 });
 
 test('a bad base is an error with the next step; an unknown option is a usage error', () => {
