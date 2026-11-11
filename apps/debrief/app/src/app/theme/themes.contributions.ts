@@ -8,11 +8,12 @@ import type { ThemeDef } from './theme.types';
  * Theme packs as contributions (workbench.md §4.3 M1): Debrief's own kind (`debriefThemes`) in the shell's registry. The
  * shell's `defineTheme` overrides `--pd-*` colour tokens per scheme only; a Debrief pack also sets type, spacing and
  * chrome sizes, its own token names, row and lane sizes per density, and traits (`data-*` switches the timeline draws
- * by), so it is registered as itself until the shell's packs can hold that (the M1 report records the proposal).
- * `ThemeService` resolves the chosen pack from the registry; Settings ▸ Appearance lists them.
+ * by), so it is registered as itself until the shell's packs can hold that (workbench.md §13). There are no plugin
+ * packs yet: the kind accepts the built-in theme ids only. `ThemeService` resolves the chosen pack from the registry;
+ * Settings ▸ Appearance lists them.
  */
 
-/** Registers theme packs (a plugin's, or a test's); the first registration of an id wins. */
+/** Registers theme packs (a test's tuned copy of a built-in one, say); the first registration of an id wins. */
 export function provideThemes(themes: readonly ThemeDef[]): Provider[] {
   return [provideDebriefKinds(), ...contributionProviders('debriefThemes', themes)];
 }

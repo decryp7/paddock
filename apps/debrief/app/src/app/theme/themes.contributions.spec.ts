@@ -32,6 +32,12 @@ describe('theme packs as contributions (M1)', () => {
     expect(TestBed.inject(ThemeService).theme()).toBe(tuned);
   });
 
+  it('refuses a pack whose id is not a built-in theme (the theme id is a closed set: menus, settings and saved preferences name it)', () => {
+    const stray = { ...CONSOLE, id: 'neon' as never };
+    TestBed.configureTestingModule({ providers: [provideThemes([stray])] });
+    expect(contributionProblems(TestBed.inject(Injector))).toContain('theme neon: id "neon" is not a built-in theme (calm, console, precision, contrast)');
+  });
+
   it('reports a pack that lacks tokens', () => {
     const broken = { ...CONSOLE, id: 'precision' as const, common: {} };
     TestBed.configureTestingModule({ providers: [provideThemes([broken])] });

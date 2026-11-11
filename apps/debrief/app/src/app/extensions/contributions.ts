@@ -13,7 +13,7 @@ import {
 } from '@decryp7/paddock-ui/shell/contributions';
 import type { DebriefContext } from './context';
 import { missingTokens } from '../theme/theme-tokens';
-import type { ThemeDef } from '../theme/theme.types';
+import { THEME_IDS, type ThemeDef } from '../theme/theme.types';
 import type { SharedStateDef } from '../popout/shared-state';
 import type { DebriefActivityItem, DebriefCommand, DebriefFieldFormatter, DebriefInspectorSection, DebriefView } from './tokens';
 
@@ -88,12 +88,18 @@ export const DEBRIEF_KINDS: readonly ContributionKind[] = Object.freeze([
     check: (a) => issues(textProblem('id', a.id), textProblem('label', a.label), (typeof a.order !== 'number' || !Number.isFinite(a.order)) && 'order is not a number'),
   }),
   // Debrief's theme packs (ADR 0018): full token sets per scheme and density plus traits, which the shell's `defineTheme`
-  // (`--pd-*` overrides only) cannot hold; see `theme/themes.contributions.ts`.
+  // (`--pd-*` overrides only) cannot hold; see `theme/themes.contributions.ts`. Ids are the built-in ones only: menus,
+  // settings and saved preferences name a theme by `ThemeId`, so there are no other packs yet.
   defineContributionKind<ThemeDef>({
     name: DEBRIEF_KIND.themes,
     label: 'theme',
     identity: (t) => t.id,
-    check: (t) => issues(textProblem('id', t.id), textProblem('name', t.name), ...missingTokens(t).map((m) => `is missing ${m}`)),
+    check: (t) =>
+      issues(
+        !(THEME_IDS as readonly unknown[]).includes(t.id) && `id ${JSON.stringify(t.id)} is not a built-in theme (${THEME_IDS.join(', ')})`,
+        textProblem('name', t.name),
+        ...missingTokens(t).map((m) => `is missing ${m}`),
+      ),
   }),
   // The state a window group keeps in step (`popout/shared-state.ts`); the shell has no `defineSharedState` yet.
   defineContributionKind<SharedStateDef>({
