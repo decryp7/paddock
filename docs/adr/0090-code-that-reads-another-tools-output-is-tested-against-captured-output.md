@@ -1,6 +1,6 @@
 # 90. Code that reads another tool's output is tested against captured output: a register of readers and fixtures, a capture command at the pinned version, and C104
 
-- Status: Accepted 2026-11-10 (user), all decisions as recommended. History: Proposed 2026-11-10. Revision 1
+- Status: Deferred 2026-11-11 (user): nothing here is built until the user asks. ER-37 is now taken by "compare with common practice" (rule 76, 2026-11-11): D9's reserved ER number changes when this ADR is revived. Was: Accepted 2026-11-10 (user), all decisions as recommended. History: Proposed 2026-11-10. Revision 1
   (`0cca8dd30`) was reviewed independently ("changes": P1-1 to P1-6 and ten P2s), revision 2 (`9687d644b`) answered
   them, its re-review ("changes": P1-A, P1-B and six P2s) is answered in revision 3 (see "Review answers"), and the
   independent review approved revision 3 (`22b6a4b16`). Drafted at the coordinator's request of 2026-11-10 (ER-21: one

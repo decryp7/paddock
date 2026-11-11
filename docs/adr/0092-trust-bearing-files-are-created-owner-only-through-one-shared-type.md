@@ -1,11 +1,16 @@
 # 92. Trust-bearing files are created owner-only through one shared type
 
-- Status: Accepted 2026-11-10 (user); D9 (a), D2 tighten default only; other decisions as recommended. Independent
+- Status: Accepted 2026-11-10 (user); D9 (a), D2 tighten default only; other decisions as recommended. **D9 changed
+  2026-11-11 (user): from (a) to the minimum cut, (d): only WP-0 (about 3.5 days; it closes W3, W4 and W5, and W1 is fixed
+  by `073e5a150`) gates Pitwall 1.1. WP-1 (`paddock_env::private`) is built (`feat/private-files-type`, on train 5) and
+  stays; the rest of this ADR is later. Debrief W2 (the elevated bootstrap) is covered by the elevation risk warning and
+  no longer blocks Debrief 1.2 (user, 2026-11-11); WP-7's Pitcrew socket-folder part stays a Pitcrew 1.1 item.** Independent
   review approved revision 2 (`fdfb17c8f`); this text adds the review's last five P2s ("Review answers (acceptance)").
   Revision 2 of the proposal. Drafted at the user's request of 2026-11-10 under ER-21 (rule 40): one
   class, about 23 fixes in six days. Revision 2 answers the independent review of revision 1 (`3ba5a4a16`, CHANGES,
   4 P1s and 8 P2s; "Review answers (revision 2)" at the end). Nothing here is built yet. ER-23 does not apply (no
   drawings).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM beyond WP-1 and the Pitwall minimum: keep WP-0, WP-1 (built), WP-4 (shared adopters), WP-6 Dyno data root, WP-7 (Debrief elevated bootstrap and Pitcrew socket folder; the W-rows that block Pitcrew 1.1 stay, the user decided Pitcrew's SYSTEM-service fix is in Pitcrew 1.1), WP-8, WP-9 and the Clippy `disallowed-methods` entries of WP-3; dropped C106 and its register (rest of WP-3), WP-2 (extended ACLs), WP-10, Dyno's other adopters.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40; rule 53 (reusable OS names) and ADR 0033 (identity by handle); rule 55 and ADR 0034/0075
   (copies register); ADR 0073 (no test doubles in a shipped build: the `test-support` feature); ADR 0077 (tests never
@@ -135,12 +140,12 @@ protected-chain rule of Dyno ADR 0022 §2.1, used by the Dyno helper's `protect.
 | # | Where | What | Rating | Closed by |
 |---|---|---|---|---|
 | W1 | `pitwall-v1.0.3` LocalSystem service log (`git show pitwall-v1.0.3:.../service/windows.rs` lines 488-505) | `%ProgramData%\Pitwall\logs\service.log` made with `create_dir_all`, then size-checked, removed and opened **by path** as SYSTEM: a user who pre-creates the folder plants a link and the service writes or deletes where the link points | **High** (local privilege escalation) where the opt-in service is installed | `073e5a150` on the train, in **Pitwall 1.1**. The user decided on 2026-11-08 to ship the fix in 1.1 only, no 1.0.4, (user decision, 2026-11-08), and kept it after foundation-first pushed 1.1 to about January. Every day 1.1 is later keeps W1 live on installs with the service |
-| W2 | Debrief elevated bootstrap, `debrief-v1.0.0` to `debrief-v1.1.1` and the train (`apps/debrief/crates/debrief-ipc/src/elevation.rs:104-124`) | the unelevated side writes the endpoint, token and sandbox spec to `%TEMP%\debrief-elevate-<random>\bootstrap.json` (at `debrief-v1.1.1` under `temp_dir()` with 8 random bytes, line 113; on the train through `private_tempdir`); the elevated child reads it by path. Any unelevated process of the same user can rewrite it between write and read (the type's limit above) | **Medium**: needs code already running as the user; it crosses the UAC boundary, the same shape as the env-override bypass already blocking Debrief 1.2 | **Debrief 1.2** (WP-7): input through a channel rule 75 allows |
+| W2 | Debrief elevated bootstrap, `debrief-v1.0.0` to `debrief-v1.1.1` and the train (`apps/debrief/crates/debrief-ipc/src/elevation.rs:104-124`) | the unelevated side writes the endpoint, token and sandbox spec to `%TEMP%\debrief-elevate-<random>\bootstrap.json` (at `debrief-v1.1.1` under `temp_dir()` with 8 random bytes, line 113; on the train through `private_tempdir`); the elevated child reads it by path. Any unelevated process of the same user can rewrite it between write and read (the type's limit above) | **Medium**: needs code already running as the user; it crosses the UAC boundary, the same shape as the env-override bypass already blocking Debrief 1.2 | no longer a Debrief 1.2 blocker (user, 2026-11-11): covered by the elevation risk warning; the fix (WP-7: input through a channel rule 75 allows) is later |
 | W3 | `pitwall-v1.0.3` `admin.key` (`auth.rs:110-119` at that tag) | written to a fixed temp name, renamed, then chmod 0600: on Linux, under a 0644 default, another account watching with inotify can read the key in the window | **Low to medium** (Linux, multi-user) | the train writes it through `SecretFile`, but **keeps an existing key** (`auth.rs:24-26`), so a key read in 1.0.3 survives. Pitwall 1.1: rotate the admin key once on the first start after an upgrade from 1.0.3 or earlier (WP-0), or say it in the release notes (D11) |
 | W4 | `apps.json`, `pitwall-v1.0.3` and the train (`auth.rs:134`, `:153-156`; `paths.rs:106-116`) | fixed `apps.tmp`, `fs::write` follows a link, chmod after rename; and the `.bak` fallback: when the primary is damaged the backup is used, which can bring back a key revoked since | **Low to medium** (integrity of the access list) | **Pitwall 1.1** (WP-0) |
 | W5 | `pitwall-v1.0.3` and train `paths::random32` | time-seeded key material when the OS RNG fails | **Low** (an RNG failure is rare) but fails open | **Pitwall 1.1** (WP-0) |
 | W6 | `dyno-v1.1.0` data folder fallback (`paths.rs` line 43 at that tag) | fixed `temp_dir()/Dyno` when no `LOCALAPPDATA` or `HOME` is known | **Low** | `a78d2fc94` on the train; **next Dyno tag** |
-| W7 | `dyno-v1.1.0` MCP key list on Windows | no check, no owner-only creation. It lives in `AppDirs::config()` (`apps/dyno/app/src-tauri/src/mcp.rs:147`), which `DYNO_DATA_DIR` does **not** move; only portable mode (data beside the executable) or `<ID>_HOME` (debug builds only) puts it outside `%LOCALAPPDATA%` | **Low** (portable mode on a folder others can write) | **next Dyno tag** (WP-6) |
+| W7 | `dyno-v1.1.0` MCP key list on Windows | no check, no owner-only creation. It lives in `AppDirs::config()` (`apps/dyno/app/src-tauri/src/mcp.rs:147`), which `DYNO_DATA_DIR` does **not** move; only portable mode (data beside the executable) or `<ID>_HOME` (debug builds only) puts it outside `%LOCALAPPDATA%` | **Low** (portable mode on a folder others can write) | deferred 2026-11-11 (user): the risk is accepted; was the next Dyno tag (WP-6) |
 | W8 | `DYNO_DATA_DIR` on Windows (`paths.rs:98`, honoured in release builds) | the agent's data folder is not checked against others' rights | **Low** (the user sets it) | **next Dyno tag** (WP-6) |
 | W9 | `paddock-secrets` and `paddock-mcp` on Unix (rows 6, 9) | an own folder open to others is chmodded to 0700 and used | **Hardening only**. The reason to refuse instead: tightening cannot evict what was planted while the folder was open (a file, a link, a subfolder another account owns) | the train, ungated (WP-4) |
 
@@ -238,6 +243,10 @@ the elevated side created with a High mandatory label (`S:(ML;OICI;NWNRNX;;;HI)`
 only relative to the handle it created, or after re-reading the label and owner from the handle it opened. An owner-only
 file in the user's folders is not such a channel."
 
+Note (2026-11-11, user): user-chosen elevation (Run or Restart as administrator) is governed by rule 77, not rule 75:
+it needs only a clear risk warning (ADR 0073 amendment `amendments/0073-elevated-helper-2026-11-11.md`). Rule 75 binds
+privileged services and helpers that run on their own.
+
 The last clause closes a rename hole: the folder's parent is the user's, so a medium-integrity process holding
 `FILE_DELETE_CHILD` there can rename the High-label folder away and put its own in its place; only a check on the handle
 the elevated side holds sees that. For input that flows from low to high, as W2's does, the label channel does not apply
@@ -313,7 +322,8 @@ naming reasons without paths (ER-27, as `note_result` does now).
 - **D7 `make_folder_private`.** (a) **test-support only, behind `test-support` (as you decided)** · (b) keep public.
 - **D8 Elevated and protected locations.** (a) **rule 75 as in §4, the protected-chain text lifted from Dyno ADR 0022
   §2.1, app ADRs link it** · (b) leave it in the app ADRs and 0053.
-- **D9 What it gates.** Decided (user, 2026-11-10): **(a)**. (a) the Pitwall 1.1 tag on WP-1 to WP-5, WP-8 and WP-10; the next Dyno tag on WP-6; Debrief 1.2
+- **D9 What it gates.** Decided (user, 2026-11-10): **(a)**. **Changed (user, 2026-11-11): (d), the minimum cut: WP-0
+  only gates Pitwall 1.1; WP-1 is built and stays; the rest is later.** (a) the Pitwall 1.1 tag on WP-1 to WP-5, WP-8 and WP-10; the next Dyno tag on WP-6; Debrief 1.2
   and Pitcrew 1.1 on WP-7 · (b) Pitwall 1.1 on the whole type · (c) gate nothing · (d) an exposure cut, WP-0 (about
   3.5 days), gates Pitwall 1.1; WP-6 gates the next Dyno tag; WP-7 (with W2) gates Debrief 1.2 and Pitcrew 1.1; the type
   and the rest land on the train without gating Pitwall (recommended in revision 2, not chosen).
@@ -344,7 +354,7 @@ naming reasons without paths (ER-27, as `note_result` does now).
 | WP-4 | Shared adopters: `paddock-env` atomic writer and `dirs`, `paddock-proc::hint`, `paddock-secrets` (`secure_folder` refuses, no chmod), `paddock-mcp` key list (gains Windows); failing tests 2 and 3 first | 3 | Pitwall 1.1 |
 | WP-5 | Pitwall onto the type: `admin.key` folder, chat secrets and prefs, slots folder, `cache_db`; delete `paths::write_atomic`, `restrict`, `restrict_dir` | 1.5 | Pitwall 1.1 |
 | WP-6 | Dyno onto the type: data root (W8), `agent.json`, the MCP key list's folder (W7), WoL folder, cache db, geo and intel caches, battery folder (`hardware.rs` copy deleted) | 2 | next Dyno |
-| WP-7 | Debrief: the elevated bootstrap through the verified pipe of rule 75 (address in the arguments, `GetNamedPipeServerProcessId` checked against the requester's pid and start time; W2; failing test 8 first), `private_tempdir` and the IPC socket folder; Pitcrew socket folder | 3 | Debrief 1.2, Pitcrew 1.1 |
+| WP-7 | Debrief: the elevated bootstrap through the verified pipe of rule 75 (address in the arguments, `GetNamedPipeServerProcessId` checked against the requester's pid and start time; W2; failing test 8 first), `private_tempdir` and the IPC socket folder; Pitcrew socket folder | 3 | Pitcrew 1.1 (the Debrief part no longer gates Debrief 1.2, user, 2026-11-11) |
 | WP-8 | `make_folder_private` behind `test-support`; tests through `paddock_testkit::scratch` | 1 | Pitwall 1.1 |
 | WP-9 | Rule 75 text and the family protected-location document; Dyno ADR 0022, Pitwall ADR 0024 and 0053 link it | 1 | none (docs) |
 | WP-10 | Windows positive controls in CI and the test VM: a planted junction, an Everyone-writable folder, portable mode and `DYNO_DATA_DIR` on a folder others can write, a rewritten bootstrap | 1.5 | Pitwall 1.1 |

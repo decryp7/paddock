@@ -7,6 +7,7 @@
   necessary" (the governing principle and the necessity audit, §3). Revision 3 answers the re-review of revision 2
   (`e14fcc4f8`): D13's saving corrected, D13 named as an amendment to rule 54, the landing run made a D11 option. The
   user decided D1 to D13 on 2026-11-09 (§9).
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep fix-round mode (rest of WP-2), the sccache remote-cache spike and service, preflight, Playwright on the shared preset, WebKit off main pushes and the always-red benchmark (part of WP-10), Linux-first OS selection trimmed; dropped WP-0, WP-1, WP-6, WP-7, WP-8, the rest of WP-10; WP-9 belongs to ADR 0038.
 - Date: 2026-11-09
 - Related: ER-36 (speed and quality together; engineering-rules `checklists/speed-and-quality.md`), ER-7/ER-8 and rule 3
   (affected tests, full suite once), ER-9/ER-10 and rule 50 (h) and (i) (local checks overlap CI; fix rounds rerun only

@@ -1,6 +1,7 @@
 # 73. No test double in a shipped build: one gate, one check per app, a dated register
 
 - Status: Accepted 2026-11-09 by the user: D1–D10 as recommended (revision 3). Rule 73.
+- Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-P, WP-C (Pitcrew host check, a security fix), WP-Y, WP-T, WP-S cut to the fakes that reach a release build, and WP-4 (`forbidden_strings` in `./dev release verify`) if ADR 0039's release verify exists; dropped WP-0 (the check), WP-1, WP-2, WP-G, WP-N, WP-B, WP-R; deferred WP-11.
 - Revision 2 (2026-11-09) answers the independent review of revision 1 (`1daeb0fff`, verdict CHANGES, 3 P1 and P2s). The
   review verified the mechanism in a fixture: a self dev-dependency with `required-features` and `CARGO_BIN_EXE_<name>`
   works within one package. It found nothing exploitable in a released app today.

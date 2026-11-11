@@ -6,7 +6,7 @@
 #                  crate is written `<crate>/src/**`), symbols (optional), status ("built" | "planned": a planned
 #                  canonical's files may not exist yet), adr (optional: where the canonical home was decided)
 #   [[mechanism.copy]]  paths, symbols (optional), kind ("copy", the default, or "wiring": a few lines that hook a plugin
-#                  up by hand; covered by the tag check only), owner (an apps/ folder or "paddock"), delete_by
+#                  up by hand; covered by the delete_by warning only), owner (an apps/ folder or "paddock"), delete_by
 #                  (`<owner>-vX.Y.Z`, or `vX.Y.Z` for owner "paddock"), note (facts, not branch names)
 #   symbols: "item:<Name>" (the span of a Rust/TypeScript item named Name) or "text:<literal>" (changed lines that contain
 #            the literal). Without symbols, any counted change to a matching file touches the member. Only non-test source
@@ -19,7 +19,8 @@
 #   - an entry leaves the register only with its copy's files, or with:  Copies-removed: <mechanism-id> <path>: <reason>
 #   - a delete_by date moves only with:  Copies-date: <mechanism-id> <path>: <old> -> <new>: approved: <coordinator|user>: <reason>
 #     (rule 55(d); a move to a later release line needs approved: user)
-#   - a tag `<app>-vX.Y.Z` is refused while a copy owned by that app has a delete_by version <= X.Y.Z.
+#   - a copy owned by an app whose tag `<app>-vX.Y.Z` reaches its delete_by version is a warning, not a tag block
+#     (user, 2026-11-11: this register is a to-do list).
 #
 # Seeded 2026-10-31 from the family survey (family-redesign-and-sharing-2026-10-31) and from the shared crates' own
 # "Taken from" / "Ported from" / "Extracted from" doc comments in crates/ and ui/, at origin/main c3404cdc7. Paths are

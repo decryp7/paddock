@@ -1,6 +1,8 @@
 # 93. Every scheduled CI check has an owner, and a red one cannot be ignored
 
-- Status: Accepted 2026-11-10 (user), all decisions as recommended (D14 (a)). History: Proposed 2026-11-10, revision 4
+- Status: Accepted 2026-11-10 (user), all decisions as recommended (D14 (a)). **Cut 2026-11-11 (user): only the
+  coordinator's morning digest of red night runs is kept; the sweep, the issues and the tag gate are dropped 2026-11-11
+  (user), and so are the register section, waivers and the report-only period; the text below is history.** History: Proposed 2026-11-10, revision 4
   approved by the independent review at `6270bbbbe`. Drafted at the coordinator's request of 2026-11-10, asked for by the user under
   ER-21. Revision 1 (`34e7eeb00`) was reviewed independently ("changes", 5 P1 and a list of P2s); revision 2 answers it
   (see "Review answers (revision 2)"); its re-review of

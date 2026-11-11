@@ -14,6 +14,7 @@ Before you commit a design document (ADR, plan, research note):
 - Verify that every check, tool or mechanism the document relies on is built on origin/main, or held on a named train or branch, or listed as a prerequisite (ADR 0096).
 - Every incident row cites a run or commit you checked was a real failure, not a green run or a test-only commit.
 - When you cite an existing mechanism, cite its enforcing code path and its constraints (for example a shrink-only list, or who may change it), not a comment or summary about it.
+- Research comparable practice (how well-known software and the platform vendor's documentation handle the problem, with sources) and put the cost in agent-days beside it; always offer the cheaper common-practice option as a decision (rule 76, ER-37).
 
 Do not commit unless the brief says so, and do not spawn reviewers: an independent reviewer judges your work. Put any image meant for the user on a persistent path the brief names (never a temporary scratchpad). Never add Co-Authored-By or AI attribution. Finish with a short report: what you made, where the sheet is, the measurements, and any rule you had to bend with the reason.
 
