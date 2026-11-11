@@ -25,6 +25,28 @@
   `dyno_agent::helper_centre`, `dyno_platform::{elevate, processes}`, `app/src-tauri/{tauri*.conf.json, updater.rs,
   windows/installer-hooks.nsh}`. Paddock rules 7, 9, 19, 21, 23, 24, 26.
 
+## Amendment 2026-11-12: the helper takes no updates
+
+The user decided this on 2026-11-08 (Dyno 1.1.1 plan, decision 3). Section 3 promised an `Update` request to the helper and
+the answer "An update is already running." to a second one. That request was never built: `dyno_core::helper_wire` has no
+`UpdateRequest`, and the helper does not receive update files. A helper that took a file from a user process and ran it as
+SYSTEM or root would be a new elevated surface for no need a user has.
+
+What is true now:
+
+- **Windows.** An update goes through `paddock-setup` (ADR 0053), run elevated from the installed folder. It holds the
+  app's installer mutex. A second install while one runs is refused with "Another install of this app is already
+  running." (`Refusal::Busy`, exit code 21, `crates/paddock-setup/src/apply.rs`). The helper takes no part.
+- **macOS and Linux.** There is no installer lock. The updater keeps one state machine in the running app, and a second
+  request while one is in progress answers "busy" (`crates/paddock-updater/src/updater.rs`). Two copies of the app do not
+  share that state. Dyno does not claim more than this on these two systems.
+- **The helper itself** is refreshed by the app's helper centre (ADR 0027, section 4), never from an update file the helper
+  receives.
+
+Sections 3 ("Updates, downgrades, uninstall, repair", the `Update` request) and D5 are therefore not built and are not planned.
+A release row measures the Windows refusal above on the Windows VM, not the old promise. It reads: start an install while
+another one runs and read "Another install of this app is already running." No row measures a helper update.
+
 ## Dyno 1.0 without a helper
 
 Dyno 1.0 has no privileged helper:
@@ -449,7 +471,9 @@ every update is checked by the helper itself.
 
 #### `Update(UpdateRequest { file: FileRef, signature: String })`
 
-**One update at a time.** A lock and the state file `updates/state.json` enforce it. A second request answers "An
+**One update at a time.** *Amended 2026-11-12: the helper has no `Update` request and builds no update lock or
+`updates/state.json`; see "Amendment 2026-11-12" at the top. The text below is the design as first written and is not
+built.* A lock and the state file `updates/state.json` would enforce it. A second request would answer "An
 update is already running."
 
 **1. Receiving the file, not a path** (review P1-2). A path chosen by the caller would make SYSTEM or root open it:
