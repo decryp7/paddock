@@ -277,8 +277,7 @@ fn every_name_is_listed_for_the_name_book_and_graphic_builder_groups_its_spellin
 
 /// A live-follow step (`append_tail`) bumps the store's generation; the idle catalogue loop runs no statement without
 /// news (turns::Gate), so the step must reach it as news: a file that appears under the opened folder is catalogued
-/// without anything waking the thread by hand (`wait_for_catalogue` would). Lines appended to a file the catalogue already
-/// finished are not read again: the catalogue is built per source, as before this change.
+/// without anything waking the thread by hand (`wait_for_catalogue` would).
 #[test]
 fn a_file_that_live_follow_adds_is_catalogued_without_a_manual_wake() {
     let (logs, _dir, store) = setup("tail");
