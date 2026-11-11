@@ -101,7 +101,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 
 ### App (`app/`)
 
-![UI components: state and backend](diagrams/svg/c4-3-ui-state.svg)
+![UI components: state and backends](diagrams/svg/c4-3-ui-state.svg)
 
 The Angular UI is the presentation layer, on the Paddock app shell (`@decryp7/paddock-ui`, ADR 0012 of the family). One
 bundle boots three kinds of window (`src/main.ts`): the main window (the shell's pages frame with Pitwall's pages, menus,

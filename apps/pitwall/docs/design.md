@@ -99,7 +99,7 @@ backend or the mock.
 
 Source: [c4-3-ui-features.drawio](diagrams/c4-3-ui-features.drawio)
 
-![C4 UI state and backend](diagrams/svg/c4-3-ui-state.svg)
+![C4 UI state and backends](diagrams/svg/c4-3-ui-state.svg)
 
 Source: [c4-3-ui-state.drawio](diagrams/c4-3-ui-state.drawio)
 

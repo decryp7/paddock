@@ -163,7 +163,7 @@ Pitwall runs native engines on untrusted model files and answers requests from o
   cargo clippy --workspace --all-targets -- -D warnings
   cargo test --workspace
   cargo deny --workspace check
-  node --test scripts/ci/*.test.mjs
+  node --test scripts/ci/*.test.mjs docs/diagrams/src/*.test.mjs
   node --test conformance/test/*.test.mjs   # (repo root) the shared scripts: commit lint, latest.json, publish, check-index
   (cd app && npm audit --omit=dev --audit-level=high && npx ng lint && npx ng build && npx ng test --watch=false)
   ```

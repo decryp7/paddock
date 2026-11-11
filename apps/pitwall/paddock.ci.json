@@ -16,7 +16,7 @@
   "checks": [
     "node conformance/bin/paddock-conformance.mjs --app pitwall --root apps/pitwall --only C13 --paddock .",
     "cd apps/pitwall",
-    "node --test scripts/ci/*.test.mjs",
+    "node --test scripts/ci/*.test.mjs docs/diagrams/src/*.test.mjs",
     "node scripts/ci/check-icons.mjs",
     "bash scripts/ci/privacy-check.sh"
   ],
