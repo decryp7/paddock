@@ -3107,6 +3107,9 @@
       <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
         <source>Tool</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.tool-description" datatype="html">
+        <source>What it does</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.attach" datatype="html">
         <source>Attach files</source>
       </trans-unit>
@@ -3341,17 +3344,26 @@
       <trans-unit id="pd.wb.assistant.tool.approval.remembered" datatype="html">
         <source>Allowed earlier</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.arguments" datatype="html">
+        <source>Arguments</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.declined" datatype="html">
         <source>Declined</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.details" datatype="html">
+        <source>Details</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.done" datatype="html">
         <source>Done</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.failed" datatype="html">
         <source>Did not finish</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.output" datatype="html">
+        <source>Result</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.running" datatype="html">
         <source>Working…</source>

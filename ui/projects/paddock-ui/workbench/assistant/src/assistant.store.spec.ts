@@ -199,9 +199,9 @@ describe('AssistantStore', () => {
     store.newConversation();
     expect(store.turns()).toEqual([]);
     await store.open(id);
-    // The input of a write is shown while it waits; usage is a live counter; neither is part of the transcript.
+    // The input and the description of a write are shown while it waits; usage is a live counter; neither is part of the transcript.
     const bare = (turns: readonly TurnView[]) =>
-      turns.map((t) => ({ ...t, usage: null, parts: t.parts.map((p) => (p.kind === 'tool' ? { kind: p.kind, card: { ...p.card, input: undefined } } : p)) }));
+      turns.map((t) => ({ ...t, usage: null, parts: t.parts.map((p) => (p.kind === 'tool' ? { kind: p.kind, card: { ...p.card, input: undefined, description: undefined } } : p)) }));
     expect(bare(store.turns())).toEqual(bare(live));
   });
 

@@ -35,6 +35,8 @@ export interface PendingApproval {
   readonly callId: string;
   readonly name: string;
   readonly summary: string;
+  /** What the tool says it does, as the host cleaned it ('' when it has none). */
+  readonly description: string;
   /** The arguments of the call. */
   readonly input: unknown;
   /** What it would change cannot be undone. */
@@ -183,7 +185,7 @@ export const AssistantStore = signalStore(
         if (!t?.running) return null;
         for (const p of t.parts)
           if (p.kind === 'tool' && p.card.state === 'awaiting')
-            return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input, destructive: p.card.destructive, write: p.card.write, remember: p.card.remember === true };
+            return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, description: p.card.description ?? '', input: p.card.input, destructive: p.card.destructive, write: p.card.write, remember: p.card.remember === true };
         return null;
       }),
       /** The chat fills what the model can read: nothing more can be sent in it (the engine refuses it too). */

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, InjectionToken, input, type EnvironmentProviders, makeEnvironmentProviders, type Type } from '@angular/core';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
-import type { ToolCard } from './chat-model';
+import { hasValue, type ToolCard } from './chat-model';
 import type { CitationOpened } from './rich-text';
 
 /**
@@ -62,6 +62,21 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
       @if (approvalText(); as how) {
         <span class="sep" aria-hidden="true">·</span><span class="how" data-testid="assistant-tool-approval">{{ how }}</span>
       }
+      @if (hasDetails()) {
+        <details class="more" data-testid="assistant-tool-details">
+          <summary><pd-glyph class="chev" name="chevron-right" [size]="14" /> {{ detailsLabel }}</summary>
+          <dl>
+            @if (hasArguments()) {
+              <dt>{{ argumentsLabel }}</dt>
+              <dd><pre data-testid="assistant-tool-args">{{ argumentsText() }}</pre></dd>
+            }
+            @if (card().output) {
+              <dt>{{ resultLabel }}</dt>
+              <dd><pre data-testid="assistant-tool-output">{{ card().output }}</pre></dd>
+            }
+          </dl>
+        </details>
+      }
     </div>
   `,
   styles: `
@@ -78,6 +93,16 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
     .result { overflow-wrap: anywhere; }
     .result.muted { color: var(--pd-text-muted); }
     .how, .sep { color: var(--pd-text-muted); }
+    .more { flex: 1 0 100%; min-width: 0; }
+    .more summary { cursor: pointer; color: var(--pd-text-muted); list-style: none; display: inline-flex; align-items: center; gap: var(--pd-space-1); }
+    .more summary::-webkit-details-marker { display: none; }
+    .more summary:focus-visible { outline: 2px solid var(--pd-focus-ring); border-radius: var(--pd-radius-control); }
+    .chev { transition: transform var(--pd-duration-fast, 120ms); }
+    .more[open] .chev { transform: rotate(90deg); }
+    .more dl { margin: var(--pd-space-1) 0 0; display: grid; grid-template-columns: auto 1fr; gap: var(--pd-space-1) var(--pd-space-2); }
+    .more dt { color: var(--pd-text-muted); }
+    .more dd { margin: 0; min-width: 0; }
+    .more pre { margin: 0; max-height: 160px; overflow: auto; font-family: var(--pd-font-mono); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--pd-text); }
   `,
 })
 export class PdAssistantToolCard {
@@ -85,6 +110,21 @@ export class PdAssistantToolCard {
   protected readonly unreadable = $localize`:@@pd.wb.assistant.tool.unreadable:(unreadable call)`;
   protected readonly declinedText = $localize`:@@pd.wb.assistant.tool.declined:Declined`;
   protected readonly stoppedText = $localize`:@@pd.wb.assistant.tool.stopped:Stopped`;
+  protected readonly detailsLabel = $localize`:@@pd.wb.assistant.tool.details:Details`;
+  protected readonly argumentsLabel = $localize`:@@pd.wb.assistant.tool.arguments:Arguments`;
+  protected readonly resultLabel = $localize`:@@pd.wb.assistant.tool.output:Result`;
+  protected hasArguments(): boolean {
+    return hasValue(this.card().input);
+  }
+  /** The arguments as sent, in full (the box scrolls). */
+  protected argumentsText(): string {
+    return JSON.stringify(this.card().input, null, 2) ?? '';
+  }
+  /** A call that ran can be opened to see what it was sent and what it answered. */
+  protected hasDetails(): boolean {
+    const c = this.card();
+    return (c.state === 'ok' || c.state === 'failed') && (this.hasArguments() || !!c.output);
+  }
   /** The user stopped the turn while the call ran: neutral too. */
   protected stopped(): boolean {
     return this.card().stopped === true && this.card().state === 'failed';
