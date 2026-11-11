@@ -185,7 +185,7 @@ fn protect_installed_folder(data_dir: &std::path::Path) -> Result<Option<String>
         RootOutcome::Locked(swept) => {
             let mut note = format!("the data folder {} is protected (administrators and SYSTEM only)", data_dir.display());
             for line in swept.lines() {
-                note.push_str("\n");
+                note.push('\n');
                 note.push_str(&line);
             }
             note
