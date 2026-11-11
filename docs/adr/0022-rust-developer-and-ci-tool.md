@@ -6,6 +6,8 @@
   taken).
 - Amendment 2026-10-31 (generic tools `devkit`, `wiki`, `heavy`; extensibility; tool logging): **Accepted (2026-11-01, after independent review)**,
   section "Amendment (2026-10-31, Proposed amendment)". Its decisions were taken by the user on 2026-10-31 and 2026-11-01 (G.10).
+- Amendment 2026-11-12 (CI steps as `./dev ci <step>`, docs/plans/ci-in-rust.md): decided by the user on 2026-11-12, section
+  "Amendment (2026-11-12)".
 - Date: 2026-10-27
 - Related: rules 3–5 (affected tests, fix locally, failing test first), rule 7 (tests never touch the machine), rule 13
   (bounded parallelism), rule 22 (independent review of images), rule 23 (ad-hoc sealing), rule 40 (recurring bugs mean
@@ -1061,6 +1063,16 @@ Status: **Accepted 2026-11-09 by the user.** It changes two sentences of section
   workflow, which publishes only from `main`.
 - **No new trust.** Section 3.3's trust model is unchanged: the token holder can replace a version, content addressing and the
   checksum catch mix-ups and transport errors only, and release and tag jobs never take a binary from the store.
+
+## Amendment (2026-11-12): CI steps as `./dev ci <step>`
+
+Decided by the user on 2026-11-12, as a low-priority lane: CI logic leaves the workflow YAML for the tool (the xtask pattern);
+YAML keeps only the actions that must stay (`actions/checkout`, `actions/cache`), step wiring and the `./dev` bootstrap. It
+carries out R1 and R10, and R2's release part after the tags, in the order, with the wrapper contract and the parity proof of
+[docs/plans/ci-in-rust.md](../plans/ci-in-rust.md). Two points refine this ADR: the bootstrap that stays in YAML is
+CARGO_BUILD_JOBS and the toolchain install (with its image fast path), because `./dev` hashes and builds itself with that
+compiler; and an action that release jobs use keeps its shell steps for release, rule 54 and tag runs until the release-path
+lane (G.7's guard), with both paths compared by a test meanwhile. Nothing else in this ADR changes.
 
 ## Sources
 
