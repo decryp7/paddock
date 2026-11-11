@@ -277,8 +277,8 @@ test('C85 reads the app\'s tags and the entry\'s commit date through its options
 
 test('the job summary line says how many tests are owed and the nearest expiry', async () => {
   const features = parseToml(`${owedRow('demo-v1.1.0')}\n${owedRow('2026-12-01').replace('id = "models.load"', 'id = "b"')}\n${owedRow('2026-11-20').replace('id = "models.load"', 'id = "c"')}`).tables.feature;
-  assert.equal(owedSummary(features, 'demo'), 'C85 demo: owed 3 tests on 3 features; nearest expiry: 2026-11-20, demo-v1.1.0');
-  assert.equal(owedSummary([], 'demo'), 'C85 demo: owed 0 tests on 0 features; nearest expiry: none');
+  assert.equal(owedSummary(features, 'demo'), 'C85 demo: owed 3 tests on 3 features; nearest expiry: 2026-11-20, demo-v1.1.0; not measured: panes, tray popovers, widget kinds');
+  assert.equal(owedSummary([], 'demo'), 'C85 demo: owed 0 tests on 0 features; nearest expiry: none; not measured: panes, tray popovers, widget kinds');
   const file = join(makeApp({ 'x': '' }), 'summary.md');
   const before = process.env.GITHUB_STEP_SUMMARY;
   process.env.GITHUB_STEP_SUMMARY = file;
@@ -371,4 +371,15 @@ test('a finding carries the line of the thing it is about', async () => {
   const stale = await findingsOf('C85', build({}, GOOD.replace('"route:/chat"', '"route:/gone"')), { options: { now } });
   const gone = stale.find((x) => /names route:\/gone/.test(x.message));
   assert.equal(gone.line, GOOD.split('\n').findIndex((l) => l.includes('route:/gone') || l.includes('surfaces =')) + 1);
+});
+
+test('na = ["tauri"] never hides the real-engine test: a warning in a branch run, an error in a release run', () => {
+  const T = 'app/e2e-tauri/models.e2e.ts#loads a model and reads it back';
+  const text = GOOD.replace(/^tests = .*$/m, `tests = { outcome = "${T}", layout = "${T}" }`) + 'na = ["tauri"]\nna_why = "no UI"\n';
+  const run = (release) => judge({ app: 'demo', appDir: 'app', read: (f) => (f === 'features.toml' ? text : APP_FILES[f] ?? null), now, vmManifest: null, tags: TAGS, release });
+  const branch = run(false).filter((f) => /na "tauri"/.test(f.message));
+  assert.deepEqual(branch.map((f) => f.severity), ['warn']);
+  assert.deepEqual(run(true).filter((f) => /na "tauri"/.test(f.message)).map((f) => f.severity), ['error']);
+  // and tauri is still missing: neither a test nor owed
+  assert.ok(run(false).some((f) => /has no tests\.tauri: neither a test nor/.test(f.message)), 'na does not stand in for tauri');
 });

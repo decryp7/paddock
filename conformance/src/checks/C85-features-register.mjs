@@ -45,6 +45,7 @@ const OS = ['macos', 'windows', 'linux'];
 const DEFAULT_UNLISTED_CAP = 5;
 const MAX_DATE_AHEAD_DAYS = 60;
 const TEST_KINDS = ['tauri', 'outcome', 'layout'];
+const NA_KINDS = ['outcome', 'layout'];
 /** The surface kinds a row may name (ADR 0052 §3.3's list), and the wire kinds (the app's wires, §1.1). Anything else is a typo or a new kind that needs a reader. */
 export const SURFACE_KINDS = ['route', 'dialog', 'settings', 'job', 'pane', 'tray', 'widget', 'http'];
 export const WIRE_KINDS = ['app-command', 'app-agent', 'agent-helper', 'plugin', 'privileged'];
@@ -246,7 +247,7 @@ export function owedSummary(features, app) {
   const nearest = [];
   if (dates.length) nearest.push([...dates].sort()[0]);
   if (tagList.length) nearest.push([...tagList].sort((a, b) => cmpVersion(parts(a), parts(b)))[0]);
-  return `C85 ${app}: owed ${tests} tests on ${rows.size} features; nearest expiry: ${nearest.length ? nearest.join(', ') : 'none'}`;
+  return `C85 ${app}: owed ${tests} tests on ${rows.size} features; nearest expiry: ${nearest.length ? nearest.join(', ') : 'none'}; not measured: panes, tray popovers, widget kinds`;
 }
 
 const privileged = (wires) => wires.some((x) => /^(agent-helper|privileged):/.test(x));
@@ -322,7 +323,11 @@ export function judge({ app, appDir, read, now, vmManifest, caps = {}, tags = nu
     // Kinds of test that do not apply to the feature.
     const na = strings(f.na) ? f.na : [];
     if (f.na !== undefined && !strings(f.na)) out.push(w(FILE, at, `feature ${name}: \`na\` must be a list of strings`, 'na = ["outcome", "layout"]'));
-    for (const k of na) if (!TEST_KINDS.includes(k)) out.push(w(FILE, at, `feature ${name}: na "${k}" is not one of ${TEST_KINDS.join(', ')}`, 'Name the kind of test exactly.'));
+    // `tauri` is never not-applicable: `na` has no bound, so it would hide the real-engine test for good. A feature that cannot have one owes it.
+    for (const k of na) {
+      if (k === 'tauri') out.push(owedFinding(keyLine(f, 'na'), `feature ${name}: na "tauri" hides the real-engine test with no bound`, 'Put "tauri" in `owed` with owed_why and owed_until (a bounded entry); na is for outcome and layout only.'));
+      else if (!NA_KINDS.includes(k)) out.push(w(FILE, at, `feature ${name}: na "${k}" is not one of ${NA_KINDS.join(', ')}`, 'Name the kind of test exactly.'));
+    }
     if (na.length && (typeof f.na_why !== 'string' || !f.na_why.trim())) out.push(w(FILE, at, `feature ${name} marks tests not applicable but gives no \`na_why\``, 'Say why the kind of test does not apply.'));
     // A test that is named is looked up; one that is both named and owed (or not applicable) is a contradiction.
     const named = (kind) => typeof tests[kind] === 'string' && tests[kind] !== '';
@@ -334,7 +339,7 @@ export function judge({ app, appDir, read, now, vmManifest, caps = {}, tags = nu
         if (owed.includes(kind)) out.push(w(FILE, at, `feature ${name} names tests.${kind} and also owes it`, 'Keep one of the two.'));
         if (na.includes(kind)) out.push(w(FILE, at, `feature ${name} names tests.${kind} and also marks it not applicable`, 'Keep one of the two.'));
       } else if (owed.includes(kind) && na.includes(kind)) out.push(w(FILE, at, `feature ${name} owes tests.${kind} and also marks it not applicable`, 'Keep one of the two.'));
-      else if (!owed.includes(kind) && !na.includes(kind)) out.push(w(FILE, at, `feature ${name} has no tests.${kind}: neither a test nor an \`owed\` entry for it`, `Add tests.${kind} = "path#title", put "${kind}" in \`owed\` with owed_why and owed_until, or in \`na\` with na_why.`));
+      else if (!owed.includes(kind) && !(na.includes(kind) && kind !== 'tauri')) out.push(w(FILE, at, `feature ${name} has no tests.${kind}: neither a test nor an \`owed\` entry for it`, `Add tests.${kind} = "path#title", put "${kind}" in \`owed\` with owed_why and owed_until, or in \`na\` with na_why.`));
     }
     const vm = strings(tests.vm) ? tests.vm : [];
     if (tests.vm !== undefined && !strings(tests.vm)) out.push(w(FILE, at, `feature ${name}: tests.vm must be a list of "os:step-id"`, 'vm = ["windows:step-id"]'));
