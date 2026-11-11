@@ -34,7 +34,12 @@ class DynoDiagram extends Diagram {
   }
 }
 export const P = (o) => new DynoDiagram({ app: 'dyno', date: '2026-11-06', ...o });
-export const save = (name, d, bottom) => writeFileSync(`${OUT}/${name}.drawio`, d.finish(bottom));
+/** With DIAGRAM_RECORD set (the code checks, diagrams/tools/code-check.mjs) a diagram is recorded in RECORDED and not written. */
+export const RECORDED = (globalThis.__recordedDiagrams ??= {});
+export const save = (name, d, bottom) => {
+  if (process.env.DIAGRAM_RECORD) RECORDED[name] = { nodes: d.nodes ?? [], classes: d.classes ?? [], messages: d.messages ?? [] };
+  else writeFileSync(`${OUT}/${name}.drawio`, d.finish(bottom));
+};
 /** Port fraction on rect `hub` for the vertical centre of rect `other`. */
 export function tOf(d, hub, other, axis = 1) {
   const [x, y, w, h] = d.rect[hub], [ox, oy, ow, oh] = d.rect[other];

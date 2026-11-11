@@ -97,6 +97,7 @@ export class Diagram {
     if (tech) v += `<br><span style="font-size:12px;color:${ld(this.t.muted)}">${html(`[${tech}]`)}</span>`;
     if (desc) v += `<br><div style="margin-top:4px;font-size:12px">${html(desc)}</div>`;
     this.rect[id] = [x, y, w, h];
+    (this.nodes ??= []).push({ id, name, tech, desc, role });
     this.raw(`<mxCell id="${id}" value="${esc(v)}" style="${this.base(`${this.styleFor(r, { planned })}align=left;verticalAlign=top;spacingLeft=14;spacingRight=14;spacingTop=10;spacingBottom=8;`)}" vertex="1" parent="1"><mxGeometry x="${x}" y="${y}" width="${w}" height="${h}" as="geometry"/></mxCell>`);
     if (person) this.glyph(x + w - 32, y + 10);
     if (planned) this.tag(x + w - 8, y + 8, 'planned', role);
