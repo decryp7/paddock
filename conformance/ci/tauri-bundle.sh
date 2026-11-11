@@ -7,7 +7,10 @@
 # folder is the build-folder action's ($PADDOCK_BUILD_FOLDER), else cargo's $CARGO_TARGET_DIR, else target/.
 # With TAURI_SIGNING_PRIVATE_KEY and TAURI_UPDATER_PUBKEY set the updater artifacts are signed (the keys are stripped of
 # whitespace first); without them (forks, pull requests, secrets not set yet) the build still succeeds, unsigned and without
-# update support. Skips cleanly (exit 0) while <app-dir>/src-tauri does not exist. Run from the repository root.
+# update support. The key reaches `tauri build` only, never `npm ci` or --prepare; in CI the real key only on a tag, and a run
+# that is not a tag signs with a throw-away key made in the job (updater-key.sh; ADR 0085 D7, rule 78). An NSIS or AppImage
+# build uses the pinned bundler tools in <build folder>/.tauri (tauri-tools.mjs, useLocalToolsDir; ADR 0085 WP-9). Skips
+# cleanly (exit 0) while <app-dir>/src-tauri does not exist. Run from the repository root.
 set -euo pipefail
 bundles="${1:?bundles, e.g. deb,appimage}"
 app_dir="app"
@@ -46,44 +49,55 @@ rm -rf "$dir/dist/bundle"
 # Tauri's DMG step skips its Finder window scripting on CI (no Automation permission prompt on a host runner).
 export CI="${CI:-true}"
 
-# Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
-eval "$(node "$here/../release/strip-keys.mjs")"
+# The updater key leaves the environment here (stripped of whitespace: Gitea secrets often end in a newline): npm ci and
+# --prepare run install and build scripts of the branch, which must never read it (ADR 0085 D7). In CI a key on a run that is
+# not a tag fails here, before anything runs.
+# shellcheck source=SCRIPTDIR/updater-key.sh
+source "$here/updater-key.sh"
+updater_key_take
 
 # An unset secret arrives as an empty variable, which Tauri lets override signingIdentity "-" (codesign: `Signing with identity ""`).
 [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
 
 (cd "$root" && npm ci)
 if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
-# An AppImage build needs linuxdeploy and AppRun, which Tauri would fetch from GitHub: put the pinned, verified copies (from the
-# action's cache, else downloaded once) where it looks, so it downloads nothing (Dyno 1.1.1 WP-2; a failure prints its ::error::).
-appimage=false
-case ",$bundles," in *,appimage,*) appimage=true ;; esac
-if [ "$appimage" = true ]; then node "$here/appimage-tools.mjs" install; fi
+# A CI run that is not a tag: sign with a key pair made in this job, so the signing and latest.json path is still exercised.
+updater_key_throwaway "$app_dir"
+# An NSIS or AppImage build needs tools Tauri would fetch from GitHub: they go into <build folder>/.tauri (useLocalToolsDir),
+# emptied and filled with the pinned, verified copies, so Tauri downloads none of them (ADR 0085 WP-9; a failure prints its
+# ::error::). After the build, check compares the folder with the pins (a tag fails on anything unpinned).
+tools=false
+case ",$bundles," in *,appimage,* | *,nsis,*) tools=true ;; esac
+if [ "$tools" = true ]; then node "$here/tauri-tools.mjs" install --bundles "$bundles" --src-tauri "$app_dir/src-tauri"; fi
 (
   cd "$app_dir"
   # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json, rule 23): ad-hoc code under it cannot load a
   # vendor-signed library ("different Team IDs"). A real signing identity turns it back on, as notarization requires.
   extra=()
   mkdir -p ../target
+  if [ "$tools" = true ]; then
+    echo '{"bundle":{"useLocalToolsDir":true}}' > ../target/tools.conf.json
+    extra=(--config ../target/tools.conf.json)
+  fi
   if [ "$(uname -s)" = Darwin ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
     echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
-    extra=(--config ../target/hardened.conf.json)
+    extra=(${extra[@]+"${extra[@]}"} --config ../target/hardened.conf.json)
   fi
-  if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then
-    node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
+  if [ "$updater_key_signing" = true ]; then
+    TAURI_UPDATER_PUBKEY="$updater_pubkey" node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
     extra=(--config ../target/updater.conf.json ${extra[@]+"${extra[@]}"})
   else
     echo '::warning::No updater signing secrets: this build cannot update itself.'
-    unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
   fi
   rc=0
-  npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist || rc=$?
+  # The key is in the environment of this one command only (updater_env is empty when the build does not sign).
+  env ${updater_env[@]+"${updater_env[@]}"} npx tauri build --bundles "$bundles" ${extra[@]+"${extra[@]}"} -- --profile dist || rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "::error::tauri build --bundles $bundles failed (exit $rc). Next step: the last error lines of tauri above name the failing bundle step (a download names its URL and status); fix that and re-run this job."
     exit "$rc"
   fi
 )
-if [ "$appimage" = true ]; then node "$here/appimage-tools.mjs" check; fi
+if [ "$tools" = true ]; then node "$here/tauri-tools.mjs" check --bundles "$bundles" --src-tauri "$app_dir/src-tauri"; fi
 
 # ADR 0032: no binary the Windows installer carries imports the VC++ runtime (a PC without the redistributable cannot start
 # it; CI runners have it, so only this check shows it). The list comes from the Tauri configuration (the app, its

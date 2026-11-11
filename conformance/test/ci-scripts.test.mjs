@@ -210,6 +210,52 @@ test('tauri-bundle: with both secrets the keys are stripped, the updater config 
   assert.deepEqual(JSON.parse(readFileSync(join(root, 'target/updater.conf.json'), 'utf8')), { bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: 'GHIJ' } } });
 });
 
+// ADR 0085 D7 (WP-4): npm ci and --prepare run branch code (install and build scripts); the updater key never reaches them.
+test('tauri-bundle: on a tag the key reaches tauri build only, never npm ci or --prepare', () => {
+  const root = bundleRepo();
+  const seen = '[key=${TAURI_SIGNING_PRIVATE_KEY:-unset}|pw=${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-unset}|pub=${TAURI_UPDATER_PUBKEY:-unset}]';
+  writeFileSync(join(root, 'bin/npm'), `#!/bin/bash\necho "npm $* ${seen}" >> "$BIN_LOG"\n`);
+  const r = bundle(root, ['deb', '--prepare', `echo "prepare ${seen}" >> "$BIN_LOG"`], {
+    GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/tags/demo-v1.2.3', TAURI_SIGNING_PRIVATE_KEY: 'SECRET', TAURI_SIGNING_PRIVATE_KEY_PASSWORD: 'PW', TAURI_UPDATER_PUBKEY: 'PUB',
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const log = readFileSync(join(root, 'calls.log'), 'utf8').split('\n');
+  assert.equal(log[0], 'npm ci [key=unset|pw=unset|pub=unset]');
+  assert.equal(log[1], 'prepare [key=unset|pw=unset|pub=unset]');
+  assert.match(log[2], /^npx tauri build .*\[key=SECRET\|pub=PUB\]$/);
+});
+
+test('tauri-bundle: a CI run that is not a tag refuses a real key before npm ci, and signs with a throw-away key instead', () => {
+  const leaked = bundleRepo();
+  const r = bundle(leaked, ['deb'], { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/fix/x', TAURI_SIGNING_PRIVATE_KEY: 'SECRET', TAURI_UPDATER_PUBKEY: 'PUB' });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout, /^::error::The updater signing key reached a run that is not a tag \(GITHUB_REF=refs\/heads\/fix\/x\)/m);
+  assert.ok(!existsSync(join(leaked, 'calls.log')), 'neither npm ci nor the build ran');
+  assert.doesNotMatch(r.stdout + r.stderr, /SECRET/, 'the key is never printed');
+
+  const root = bundleRepo();
+  // The stub CLI's `tauri signer generate --write-keys <file>` writes <file> and <file>.pub, as tauri-cli 2.12.3's save_keypair does.
+  writeFileSync(join(root, 'bin/npx'), [
+    '#!/bin/bash',
+    'if [ "$1 $2 $3" = "tauri signer generate" ]; then',
+    '  while [ $# -gt 0 ]; do case "$1" in --write-keys) f="$2"; shift ;; esac; shift; done',
+    '  printf "THROWAWAY-SK\\n" > "$f"; printf "THROWAWAY-PK\\n" > "$f.pub"; echo "npx tauri signer generate [key=${TAURI_SIGNING_PRIVATE_KEY:-unset}]" >> "$BIN_LOG"; exit 0',
+    'fi',
+    readFileSync(join(root, 'bin/npx'), 'utf8').split('\n').slice(1).join('\n'),
+  ].join('\n'));
+  const d = bundle(root, ['deb'], { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main', TAURI_UPDATER_PUBKEY: 'REALPUB' });
+  assert.equal(d.status, 0, d.stdout + d.stderr);
+  assert.match(d.stdout, /::notice::This build is signed with a throw-away updater key made in this job/);
+  const log = readFileSync(join(root, 'calls.log'), 'utf8');
+  assert.match(log, /npx tauri signer generate \[key=unset\]/);
+  assert.match(log, /npx tauri build .*\[key=THROWAWAY-SK\|pub=THROWAWAY-PK\]/);
+  assert.equal(JSON.parse(readFileSync(join(root, 'target/updater.conf.json'), 'utf8')).plugins.updater.pubkey, 'THROWAWAY-PK', 'the build carries the throw-away public key');
+  // No public key: the app has no updater, so nothing is signed (and no key pair is made).
+  const plain = bundleRepo();
+  assert.equal(bundle(plain, ['deb'], { GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/heads/main' }).status, 0);
+  assert.match(readFileSync(join(plain, 'calls.log'), 'utf8'), /\[key=unset\|pub=unset\]/);
+});
+
 test('tauri-bundle: an installer of another version fails the build; a missing src-tauri skips; stale bundles are removed first', () => {
   const stale = bundle(bundleRepo({ installers: ['Demo_1.0.0_amd64.deb'] }), ['deb']);
   assert.equal(stale.status, 1);

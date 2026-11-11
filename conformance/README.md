@@ -126,12 +126,20 @@ Windows installer ships, named by the Tauri configuration, imports the VC++ runt
 kin, or is missing; `<file-or-folder>...` checks given paths; pure Node, no dumpbin; `tauri-bundle.sh` runs it after
 every NSIS build).
 
-`ci/appimage-tools.mjs` pins the linuxdeploy and AppRun that `tauri build --bundles appimage` would download from GitHub (URL
-and SHA-256, following tauri-bundler's `prepare_tools`). `install` verifies each (a cached copy too), downloads only a missing
-or changed one, and copies it into Tauri's tools folder; `key` prints the actions/cache key; `check` warns when Tauri fetched a
-linuxdeploy that is not pinned (the CLI moved on: move the pins), and fails a tag run. A test ties the pins to the lockfile's
-`@tauri-apps/cli`. `tauri-bundle.sh` runs `install` and `check` around every AppImage build. linuxdeploy-plugin-appimage is not
-pinned yet: Tauri downloads it unverified (Dyno 1.1.1 plan, WP-17).
+`ci/tauri-tools.mjs` pins the bundler tools `tauri build` would download from GitHub (ADR 0085 WP-9): linuxdeploy and AppRun
+for an AppImage on Linux, the NSIS 3.13 zip and nsis_tauri_utils.dll for an NSIS installer on Windows (URL and SHA-256, read from
+tauri-bundler 2.10.3's `linuxdeploy.rs` and `nsis/mod.rs`). `install` empties `<build folder>/.tauri` (cargo metadata's
+`target_directory`, the folder `useLocalToolsDir` makes Tauri use), puts each verified file there (from the cache folder, else a
+download; a tag run reads no cache) and writes the manifest `<build folder>/.tauri.sha256` (the `--tauri-pins` format of
+`./dev ci release-isolation verify`); `key` prints the actions/cache key; `check` compares the folder with the manifest after
+the build (anything unpinned or changed warns, and fails a tag run). A test ties the pins to the lockfile's `@tauri-apps/cli`.
+`tauri-bundle.sh` and Debrief's bundle step run `install` and `check` around every NSIS and AppImage build.
+linuxdeploy-plugin-appimage is not pinned (no stable release): Tauri downloads it unverified, and `check` names it as a gap
+(Dyno 1.1.1 plan, WP-17).
+
+`ci/updater-key.sh` is sourced by `tauri-bundle.sh` and Debrief's bundle step (ADR 0085 D7, rule 78): it moves the updater key
+out of the environment before `npm ci` and any prepare command, refuses a private key on a CI run that is not a tag, makes a
+throw-away key pair on such a run (`tauri signer generate`), and hands a key to `tauri build` only.
 
 ## Sidecars (`paddock-sidecar`, plan X34)
 

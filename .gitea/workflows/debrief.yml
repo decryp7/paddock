@@ -958,41 +958,51 @@ jobs:
         env:
           # One updater key for the family (ADR 0014, amendment): every release is signed with the shared key only. Copies
           # installed before the move cannot verify it and are reinstalled once by hand (the release notes say so).
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The private key and its password reach this step on a tag only (ADR 0085 D7, rule 78); any other run signs with a
+          # throw-away key made in the job, and inside the step only `tauri build` sees a key (conformance/ci/updater-key.sh).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/') && secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
           # Installers use the size-optimised `dist` profile (thin LTO, one codegen unit, stripped); the sidecars match.
           DEBRIEF_CARGO_PROFILE: dist
         run: |
+          # The key leaves the environment before npm ci (its install scripts are branch code); updater-key.sh strips both
+          # keys of whitespace (strip-keys.mjs) and fails a run that is not a tag but has the private key.
+          source ../../../conformance/ci/updater-key.sh
+          updater_key_take
           [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
+          updater_key_throwaway .
           # Host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
           # installer can never be collected into this release.
           target="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
           bundles='${{ matrix.bundles }}'
-          # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
-          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
-          if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
+          mkdir -p ../target
+          extra=()
+          # NSIS (Windows): the pinned NSIS tools in <build folder>/.tauri, useLocalToolsDir, checked after the build (ADR 0085 WP-9).
+          case ",$bundles," in *,nsis,* | *,appimage,*)
+            node ../../../conformance/ci/tauri-tools.mjs install --bundles "$bundles" --src-tauri src-tauri
+            echo '{"bundle":{"useLocalToolsDir":true}}' > ../target/tools.conf.json
+            extra=(--config ../target/tools.conf.json) ;;
+          esac
           # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json): with it, library validation refuses the
           # bundled libduckdb even after an ad-hoc re-sign (docs/releasing.md). A Developer ID build turns it back on.
-          extra=()
           if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
-            mkdir -p ../target
             echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
-            extra=(--config ../target/hardened.conf.json)
+            extra=(${extra[@]+"${extra[@]}"} --config ../target/hardened.conf.json)
           fi
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+          if [ "$updater_key_signing" = true ]; then
             # macOS updates install from the .app bundle's archive.
             if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
-            mkdir -p ../target
-            node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+            TAURI_UPDATER_PUBKEY="$updater_pubkey" node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
+            extra=(--config ../target/updater.conf.json ${extra[@]+"${extra[@]}"})
           else
             echo '::warning::No updater signing secrets: this build cannot update itself.'
-            unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
           fi
+          # The key is in the environment of this one command only (updater_env is empty when the build does not sign).
+          env ${updater_env[@]+"${updater_env[@]}"} npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+          case ",$bundles," in *,nsis,* | *,appimage,*) node ../../../conformance/ci/tauri-tools.mjs check --bundles "$bundles" --src-tauri src-tauri ;; esac
 
       # ADR 0032: no binary the installer carries (the app, its sidecars, duckdb.dll, named by the Tauri configuration) imports
       # the VC++ runtime; the runner has the redistributable, a user's PC may not.

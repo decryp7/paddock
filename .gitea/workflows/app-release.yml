@@ -24,7 +24,8 @@
 #       secrets: the Tauri keys, RELEASE_TOKEN (the family names its keys PADDOCK_TAURI_*: map them, see pitcrew-release.yml)
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD, TAURI_UPDATER_PUBKEY (the updater; without them the
-# build is unsigned and cannot update itself), APPLE_SIGNING_IDENTITY (empty while the apps are ad-hoc sealed, rule 23),
+# build is unsigned and cannot update itself; the private key and its password reach the build on a tag only, and any other
+# run signs with a throw-away key made in the job: ADR 0085 D7), APPLE_SIGNING_IDENTITY (empty while the apps are ad-hoc sealed, rule 23),
 # RELEASE_TOKEN (a Gitea token with write:repository). Run it by hand (workflow_dispatch in the caller) to build and verify
 # the bundles without releasing: the "one CI build with bundles" of rule 25. The bundle job takes the actions and scripts from the
 # commit it builds (paddock-ref must be github.sha), so only a caller in this repository works; there is no other-repository caller.
@@ -291,6 +292,9 @@ jobs:
           set -euo pipefail
           eval "$STAGE" || { echo "::error::staging paddock-setup.exe failed (command: $STAGE); see the lines above"; exit 1; }
 
+      # The updater key reaches this step only on a tag (ADR 0085 D7, rule 78): a dispatch, nightly or branch run builds branch
+      # code, whose install and build scripts must never read it, and signs with a throw-away key the script makes in the job.
+      # Inside the step the key reaches `tauri build` only, never `npm ci` or `prepare` (conformance/ci/updater-key.sh).
       - uses: ./.gitea/actions/tauri-bundle
         with:
           bundles: ${{ matrix.bundles }}
@@ -298,8 +302,8 @@ jobs:
           root: ${{ inputs.root }}
           prepare: ${{ inputs.prepare }}
           apple-signing-identity: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          signing-private-key: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          signing-key-password: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          signing-private-key: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          signing-key-password: ${{ startsWith(github.ref, 'refs/tags/') && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           updater-pubkey: ${{ secrets.TAURI_UPDATER_PUBKEY }}
 
       # The app's own look at what was built (run paths and the executables a package must carry), before the seal check.

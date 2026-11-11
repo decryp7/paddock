@@ -1,5 +1,5 @@
 name: tauri-bundle
-description: "Builds the installers with tauri build (updater-signed when both keys are given), copies them and their signatures to dist/, and checks they carry this build's version. An AppImage build uses the pinned linuxdeploy and AppRun, kept in actions/cache."
+description: "Builds the installers with tauri build (updater-signed when both keys are given; the key reaches tauri build only, and a CI run that is not a tag signs with a throw-away key), copies them and their signatures to dist/, and checks they carry this build's version. An NSIS or AppImage build uses the pinned bundler tools in <build folder>/.tauri; branch runs keep the verified downloads in actions/cache, tag runs download them."
 inputs:
   bundles:
     description: "Bundle list: nsis | deb,appimage | app,dmg."
@@ -28,27 +28,29 @@ inputs:
 runs:
   using: composite
   steps:
-    # An AppImage build: keep the pinned linuxdeploy and AppRun (conformance/ci/appimage-tools.mjs, SHA-256 checked on every
-    # use) in actions/cache under a key made of their versions and hashes, so a warm cache bundles with GitHub unreachable.
-    # ADR 0022's "release jobs bypass every cache" is about running a cached build of our own tool; this cache is allowed on
-    # release and tag runs because every file in it is re-hashed against its pin before use, so it can only save a download.
-    - name: AppImage tools cache key
-      id: appimage
-      if: runner.os == 'Linux' && contains(format(',{0},', inputs.bundles), ',appimage,')
+    # The pinned bundler tools (conformance/ci/tauri-tools.mjs), SHA-256 checked on every use. In the Linux container the
+    # AppImage tools are kept in actions/cache under a key made of their versions and hashes, so a warm cache bundles with
+    # GitHub unreachable (a Windows host keeps the NSIS downloads in its own folder, LOCALAPPDATA). Branch and dispatch runs
+    # only: a tag run reads no cache at all (ADR 0085 D9) and downloads them; tauri-tools.mjs ignores a kept folder on a tag too.
+    - name: Bundler tools cache key
+      id: tools
+      if: "runner.os == 'Linux' && !startsWith(github.ref, 'refs/tags/')"
       shell: bash
+      env:
+        BUNDLES: ${{ inputs.bundles }}
       run: |
         set -euo pipefail
-        dir="${XDG_CACHE_HOME:-$HOME/.cache}/paddock-appimage-tools"
-        case "$dir" in /*) ;; *) dir="$HOME/.cache/paddock-appimage-tools" ;; esac
-        key="$(node "${{ github.action_path }}/../../../conformance/ci/appimage-tools.mjs" key)"
+        dir="${XDG_CACHE_HOME:-$HOME/.cache}/paddock-tauri-tools"
+        case "$dir" in /*) ;; *) dir="$HOME/.cache/paddock-tauri-tools" ;; esac
+        key="$(node "${{ github.action_path }}/../../../conformance/ci/tauri-tools.mjs" key --bundles "$BUNDLES")"
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
         echo "key=$key" >> "$GITHUB_OUTPUT"
-        echo "PADDOCK_APPIMAGE_TOOLS=$dir" >> "$GITHUB_ENV"
+        echo "PADDOCK_TAURI_TOOLS_CACHE=$dir" >> "$GITHUB_ENV"
     - uses: actions/cache@v4
-      if: steps.appimage.outputs.key != ''
+      if: steps.tools.outputs.key != ''
       with:
-        path: ${{ steps.appimage.outputs.dir }}
-        key: ${{ steps.appimage.outputs.key }}
+        path: ${{ steps.tools.outputs.dir }}
+        key: ${{ steps.tools.outputs.key }}
     - shell: bash
       env:
         BUNDLES: ${{ inputs.bundles }}
