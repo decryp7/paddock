@@ -118,14 +118,21 @@ mod tests {
     }
 
     #[test]
-    fn requests_that_change_something_are_refused_for_everyone_else() {
-        let add = Request::Drain {
-            runner: RunnerName::parse("a").unwrap(),
+    fn requests_that_change_what_runs_are_refused_for_everyone_else_and_operations_are_not() {
+        let save = Request::SaveSettings {
+            config: pitcrew_core::config::Config::default(),
         };
-        let e = authorize(&add, &Caller::Standard).unwrap_err();
+        let e = authorize(&save, &Caller::Standard).unwrap_err();
         assert_eq!(e.code, ErrorCode::PermissionDenied);
         assert!(e.message.contains("administrator"), "{}", e.message);
-        assert!(authorize(&add, &Caller::Elevated).is_ok());
+        assert!(authorize(&save, &Caller::Elevated).is_ok());
+        let stop = Request::Stop {
+            runner: RunnerName::parse("a").unwrap(),
+        };
+        assert!(
+            authorize(&stop, &Caller::Standard).is_ok(),
+            "stopping a runner is open to the pipe's users"
+        );
         assert!(authorize(&Request::Status, &Caller::Standard).is_ok());
         assert!(authorize(&Request::GetSettings, &Caller::Unreadable("x".into())).is_ok());
     }

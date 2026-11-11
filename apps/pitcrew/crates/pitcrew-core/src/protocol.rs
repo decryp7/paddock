@@ -334,10 +334,53 @@ impl Request {
     }
 
     /// Whether the service accepts the request only from an elevated administrator (Windows, where the service runs as
-    /// LocalSystem and its pipe is open to every interactive user): every request that changes something. A request that
-    /// only reads stays open to the pipe's users. The one place to narrow if some change must not need a prompt.
+    /// LocalSystem and its pipe is open to every interactive user; rule 77): a request that changes **what runs or where**,
+    /// that is, the configuration the service later acts on (runners, their programs, folders, sessions and environment, the
+    /// runner's own `config.yaml`, a registration).
+    ///
+    /// Operational requests on an existing runner (start, stop, restart, drain, resume, updates of the managed binary from
+    /// its checked release source, disk and process housekeeping) and every read stay open to the pipe's users, like `sc stop`
+    /// for a service a user may control. The match names every request, so a new one cannot be added without deciding.
     pub fn requires_admin(&self) -> bool {
-        self.mutates()
+        match self {
+            Request::SaveSettings { .. }
+            | Request::AddRunner { .. }
+            | Request::RemoveRunner { .. }
+            | Request::Register { .. }
+            | Request::SaveRunnerConfig { .. } => true,
+            Request::Hello { .. }
+            | Request::Status
+            | Request::Subscribe
+            | Request::Start { .. }
+            | Request::Stop { .. }
+            | Request::Restart { .. }
+            | Request::Drain { .. }
+            | Request::Resume { .. }
+            | Request::Logs { .. }
+            | Request::SearchLogs { .. }
+            | Request::CheckUpdate { .. }
+            | Request::ApplyUpdate { .. }
+            | Request::CancelUpdate { .. }
+            | Request::SkipVersion { .. }
+            | Request::PinVersion { .. }
+            | Request::History { .. }
+            | Request::Disk { .. }
+            | Request::CleanDisk { .. }
+            | Request::GetSettings
+            | Request::Diagnostics
+            | Request::Metrics { .. }
+            | Request::GetRunnerConfig { .. }
+            | Request::PreviewRunnerConfig { .. }
+            | Request::Processes { .. }
+            | Request::StopProcess { .. }
+            | Request::KeepProcess { .. }
+            | Request::EngineReport
+            | Request::EnginePrunePreview { .. }
+            | Request::EnginePrune { .. }
+            | Request::CacheReport { .. }
+            | Request::CachePreview { .. }
+            | Request::CacheClean { .. } => false,
+        }
     }
 }
 
@@ -992,6 +1035,47 @@ mod tests {
         assert!(Request::Drain { runner: name("a") }.mutates());
         assert!(Request::CleanDisk { runner: name("a") }.mutates());
         assert!(!Request::Disk { runner: name("a") }.mutates());
+    }
+
+    #[test]
+    fn only_requests_that_change_what_runs_or_where_need_an_administrator() {
+        let runner: crate::config::RunnerConfig =
+            toml::from_str("name = \"a\"\nkind = \"gitea-runner\"\ndir = '/r'\nsession = \"service\"\n").unwrap();
+        for r in [
+            Request::SaveSettings {
+                config: crate::config::Config::default(),
+            },
+            Request::AddRunner { runner },
+            Request::RemoveRunner { runner: name("a") },
+            Request::Register {
+                runner: name("a"),
+                server_url: "https://git.example.com".into(),
+                token: Secret::new("t").unwrap(),
+                display_name: None,
+            },
+            Request::SaveRunnerConfig {
+                runner: name("a"),
+                edit: ConfigEdit::Raw { text: String::new() },
+                base: String::new(),
+            },
+        ] {
+            assert!(r.requires_admin(), "{r:?}");
+        }
+        for r in [
+            Request::Start { runner: name("a") },
+            Request::Stop { runner: name("a") },
+            Request::Restart { runner: name("a") },
+            Request::Drain { runner: name("a") },
+            Request::Resume { runner: name("a") },
+            Request::CleanDisk { runner: name("a") },
+            Request::Status,
+            Request::GetSettings,
+            Request::Diagnostics,
+        ] {
+            assert!(!r.requires_admin(), "{r:?}");
+        }
+        // A request that needs an administrator always changes something.
+        assert!(Request::Drain { runner: name("a") }.mutates() && !Request::Drain { runner: name("a") }.requires_admin());
     }
 
     #[test]

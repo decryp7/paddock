@@ -533,7 +533,7 @@ mod caller_tests {
     }
 
     #[tokio::test]
-    async fn every_request_that_changes_something_is_refused_for_a_standard_caller() {
+    async fn every_request_that_changes_what_runs_is_refused_for_a_standard_caller() {
         let name = RunnerName::parse("a").unwrap();
         let (mut c, seen) = connect(Caller::Standard).await;
         for r in [
@@ -541,10 +541,14 @@ mod caller_tests {
                 config: pitcrew_core::config::Config::default(),
             },
             Request::RemoveRunner { runner: name.clone() },
-            Request::Drain { runner: name.clone() },
-            Request::CleanDisk { runner: name },
+            Request::Register {
+                runner: name.clone(),
+                server_url: "https://git.example.com".into(),
+                token: pitcrew_core::protocol::Secret::new("t").unwrap(),
+                display_name: None,
+            },
         ] {
-            assert!(r.mutates());
+            assert!(r.requires_admin());
             send(&mut c, &r).await;
             assert!(denied(&recv(&mut c).await), "{r:?}");
         }
@@ -552,11 +556,30 @@ mod caller_tests {
         send(&mut c, &Request::Status).await;
         assert_eq!(recv(&mut c).await, Response::Ok);
         let seen = seen.lock().unwrap();
-        assert_eq!(seen.len(), 5, "{seen:?}");
+        assert_eq!(seen.len(), 4, "{seen:?}");
         assert!(
-            seen[..4].iter().all(|k| k.starts_with("denied:")) && seen[4] == "Status",
+            seen[..3].iter().all(|k| k.starts_with("denied:")) && seen[3] == "Status",
             "{seen:?}"
         );
+    }
+
+    /// Pause, stop, drain, start and restart of an existing runner are like `sc stop`: open to the pipe's users.
+    #[tokio::test]
+    async fn operating_an_existing_runner_is_open_to_a_standard_caller() {
+        let name = RunnerName::parse("a").unwrap();
+        let (mut c, seen) = connect(Caller::Standard).await;
+        for r in [
+            Request::Start { runner: name.clone() },
+            Request::Stop { runner: name.clone() },
+            Request::Restart { runner: name.clone() },
+            Request::Drain { runner: name.clone() },
+            Request::Resume { runner: name },
+        ] {
+            assert!(r.mutates() && !r.requires_admin(), "{r:?}");
+            send(&mut c, &r).await;
+            assert_eq!(recv(&mut c).await, Response::Ok, "{r:?}");
+        }
+        assert_eq!(*seen.lock().unwrap(), ["Start", "Stop", "Restart", "Drain", "Resume"]);
     }
 
     #[tokio::test]

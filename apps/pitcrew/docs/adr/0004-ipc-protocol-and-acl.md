@@ -50,14 +50,22 @@ The decision "authorisation is the ACL" above is reversed on Windows. The pipe s
 service (LocalSystem) runs a program that a request names (`binary_path`, `dir`), so a request that changes something let any
 program of any logged-on user run code as SYSTEM (release blocker, 2026-11-11).
 
-- **Server.** A request with `Request::requires_admin()` (today `mutates()`) is accepted only when the pipe client's own
+- **Server.** A request with `Request::requires_admin()` is accepted only when the pipe client's own
   token has Administrators enabled (`paddock_ipc::endpoint::raw_peer_of_pipe`, `ImpersonateNamedPipeClient`; a UAC-filtered
   token or an unidentifiable caller is refused with `PermissionDenied`). The first such request on a connection asks, so
   reads never do. macOS and Linux: the socket is the user's own and the service runs as that user; nothing is asked.
 - **App.** The app tries as itself; on `PermissionDenied` it runs itself elevated (`runas`) once to forward that single
   request (`--forward-request <file> <sha-256> <file>`; the digest on the command line stops a swap of the request file).
-  One Windows prompt per change; the cost is that Pause, Stop and Drain prompt too. `requires_admin` is the one place to
-  narrow if that proves too much.
+  One Windows prompt per change.
+- **Which requests (rule 77).** `requires_admin` is true for what changes **what runs or where**: `SaveSettings`, `AddRunner`,
+  `RemoveRunner`, `Register` and `SaveRunnerConfig` (the runner's own `config.yaml`). Operating an existing runner (start, stop,
+  restart, drain, resume, update of the managed binary from its checked release source, disk and process housekeeping) and
+  every read stay open to the pipe's users, like `sc stop`. The match names every request, so a new one must decide.
 - **Folders.** The data folder is protected (shared trust rule); a runner that starts with the service's token needs a
   protected program and folder, else it is refused rather than copied (a copy of a runner is large, carries its
   registration and would need repair on every update; moving it is one visible step for the administrator).
+- **Known limits (no code yet).** (1) A service-mode runner in a user-writable folder such as `C:\actions-runner` is refused at
+  start, with the reason and next step shown; runners under `%ProgramData%\Pitcrew\runners` (the app's default) pass.
+  (2) An interactive runner kept in the now-protected data tree has read and execute only for users; it already lacked write
+  there under the inherited ACL, and no test covers it. (3) Only the runner's program and folder are checked, not its
+  `config.yaml`: it sits in the checked folder, but an older file with a weak ACL would not be detected.
