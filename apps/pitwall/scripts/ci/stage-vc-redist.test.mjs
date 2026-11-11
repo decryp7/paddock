@@ -30,8 +30,9 @@ test('the installer hooks compare the registry with the pinned version, and its 
   const hooks = readFileSync(join(here, '../../app/src-tauri/windows/installer-hooks.nsh'), 'utf8');
   const [major, minor, bld] = ['MAJOR', 'MINOR', 'BLD'].map((k) => hooks.match(new RegExp(`!define PITWALL_VC_${k} (\\d+)`))?.[1]);
   assert.equal(`${major}.${minor}.${bld}`, realLock.x64.version.split('.').slice(0, 3).join('.'), 'the NSIS defines and vc-redist.lock.json name one version');
-  assert.match(hooks, /ClearErrors\n\s+StrCpy \$0 "not run"\n\s+ExecWait/, 'the exit code starts as "not run" and errors are cleared');
-  assert.match(hooks, /\$\{If\} \$\{Errors\}/, 'a package that could not start is a failure');
+  assert.match(hooks, /nsExec::Exec \/TIMEOUT=\d+ '"\$PLUGINSDIR\\vc_redist\.x64\.exe" \/install \/quiet \/norestart'\n\s+Pop \$0/, 'the package runs with a time limit and its result (exit code, "error" or "timeout") is read');
+  assert.doesNotMatch(hooks, /ExecWait/, 'no unbounded wait on the package');
+  assert.match(hooks, /\$0 == "timeout"/, 'a package that did not finish has its own words');
   assert.match(hooks, /SetRebootFlag true/);
   assert.match(hooks, /1618/);
   assert.doesNotMatch(hooks, /aka\.ms\/vs\/17/);

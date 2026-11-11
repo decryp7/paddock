@@ -109,8 +109,8 @@
 ; The pinned version is 14.52.37029 (vc-redist.lock.json): the registry value Major.Minor.Bld of HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64
 ; says what is installed, and nothing is run when that is the pinned version or newer. Exit codes of the package: 0 installed, 1638 a newer
 ; version is installed, 3010 and 1641 installed but a restart is advised (the engine starts without one; /norestart keeps the PC from
-; restarting, and SetRebootFlag asks the installer's finish page to offer it), 1618 another installation is running. Any other code, a
-; package that did not run at all, and 1618 are shown in the details and, in a normal run, in a message: Pitwall installs, and the
+; restarting, and SetRebootFlag asks the installer's finish page to offer it), 1618 another installation is running. A package that
+; did not start ("error"), one that did not finish in 10 minutes ("timeout"), 1618 and any other code are shown in the details and, in a normal run, in a message: Pitwall installs, and the
 ; engine's self-test then names the missing runtime and the next step (engines.rs).
 !define PITWALL_VC_MAJOR 14
 !define PITWALL_VC_MINOR 52
@@ -141,12 +141,11 @@
   SetOutPath "$PLUGINSDIR"
   File "${PITWALL_WINDOWS_DIR}\vc_redist.x64.exe"
   DetailPrint "Installing the Microsoft Visual C++ runtime (vc_redist.x64.exe)"
-  ClearErrors
-  StrCpy $0 "not run"
-  ExecWait '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart' $0
-  ${If} ${Errors}
-    StrCpy $0 "not run"
-  ${EndIf}
+  ; nsExec waits at most 10 minutes (a package stuck behind another installation, Windows Update for example, must not hold the
+  ; installer for ever; it keeps running and finishes on its own). The result is the exit code, "error" (it could not be started)
+  ; or "timeout".
+  nsExec::Exec /TIMEOUT=600000 '"$PLUGINSDIR\vc_redist.x64.exe" /install /quiet /norestart'
+  Pop $0
   DetailPrint "vc_redist.x64.exe: exit code $0"
   Delete "$PLUGINSDIR\vc_redist.x64.exe"
   ${If} $0 == 3010
@@ -156,6 +155,10 @@
   ${ElseIf} $0 == 0
   ${OrIf} $0 == 1638
     ; installed, or a newer version is there already
+  ${ElseIf} $0 == "timeout"
+    DetailPrint "WARNING the Visual C++ runtime package did not finish within 10 minutes (another installation or Windows Update may be running); it keeps running."
+    IfSilent vc_runtime_done
+      MessageBox MB_ICONEXCLAMATION|MB_OK "Pitwall is installed, but the Microsoft Visual C++ runtime did not finish installing within 10 minutes (another installation or Windows Update may be running). It keeps installing in the background; restart Pitwall when it is done. The llama.cpp engine cannot start without it."
   ${ElseIf} $0 == 1618
     DetailPrint "WARNING the Visual C++ runtime was not installed: another installation is running (exit code 1618)."
     IfSilent vc_runtime_done
