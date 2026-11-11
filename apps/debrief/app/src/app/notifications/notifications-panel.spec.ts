@@ -16,7 +16,7 @@ import { NotificationsSource } from './notifications-source';
 import { NotificationsBackend } from './notifications-backend';
 import { NotificationsPanel } from './notifications-panel';
 import { NotificationsStore } from './notifications.store';
-import { TOAST_MS } from '../health/notification-host.model';
+import { HOLD_RELEASE_MS, TOAST_MS } from '../health/notification-host.model';
 import { EMPTY_NOTICES, Notice, NoticeAction, NoticesEvent, NoticesSnapshot } from './notifications.types';
 
 function notice(p: Partial<Notice> & { id: number }): Notice {
@@ -369,13 +369,14 @@ describe('notification toasts in the host', () => {
     fake.push(event([b, a], b));
     f.detectChanges();
     actions.run.mockResolvedValueOnce('did not work');
-    at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 0).click();
+    // The newest toast is first: `a` (the older one) is the second.
+    at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 1).click();
     await settle(f);
     f.detectChanges();
     expect(actions.run).toHaveBeenLastCalledWith(expect.objectContaining({ id: 1 }), { type: 'resetPlugin', pluginId: 'p' });
     expect(all(f, '[data-testid=notification]')).toHaveLength(2);
     expect(f.nativeElement.textContent).toContain('did not work');
-    at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 0).click();
+    at(all<HTMLButtonElement>(f, '[data-testid=notification-action-primary]'), 1).click();
     await settle(f);
     f.detectChanges();
     expect(all(f, '[data-testid=notification]')).toHaveLength(1);
@@ -408,7 +409,7 @@ describe('notification toasts in the host', () => {
     expect(fake.dismiss).not.toHaveBeenCalled();
   });
 
-  it('holds a toast while the pointer is on it and removes it after the timeout otherwise', async () => {
+  it('holds the stack while the pointer is on a toast and removes the toasts after the timeout once it has left', async () => {
     const { f, fake } = setup();
     await render(f);
     vi.useFakeTimers();
@@ -417,14 +418,28 @@ describe('notification toasts in the host', () => {
     fake.push(event([a], a));
     fake.push(event([b, a], b));
     f.detectChanges();
-    const toasts = all(f, '[data-testid=notification]');
-    at(toasts, 0).dispatchEvent(new MouseEvent('mouseenter'));
-    vi.advanceTimersByTime(TOAST_MS);
-    f.detectChanges();
-    expect(all(f, '[data-testid=notification]')).toHaveLength(1);
-    at(all(f, '[data-testid=notification]'), 0).dispatchEvent(new FocusEvent('focusin'));
+    // jsdom has no hover: the stack's `:hover` answers what the test says.
+    const stack = el(f, '[data-testid=notification-stack]');
+    let over = true;
+    vi.spyOn(stack, 'matches').mockImplementation((selector: string) => (selector === ':hover' ? over : false));
+    at(all(f, '[data-testid=notification]'), 0).dispatchEvent(new Event('pointerover', { bubbles: true }));
     vi.advanceTimersByTime(TOAST_MS * 3);
     f.detectChanges();
-    expect(all(f, '[data-testid=notification]')).toHaveLength(1);
+    expect(all(f, '[data-testid=notification]')).toHaveLength(2); // the whole stack is held, not only the toast under the pointer
+    const close = el<HTMLButtonElement>(f, 'button[aria-label="Dismiss notification"]');
+    close.focus();
+    close.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    over = false;
+    at(all(f, '[data-testid=notification]'), 0).dispatchEvent(new Event('pointerout', { bubbles: true }));
+    vi.advanceTimersByTime(HOLD_RELEASE_MS + TOAST_MS * 3);
+    f.detectChanges();
+    expect(all(f, '[data-testid=notification]')).toHaveLength(2); // focus still keeps it held
+    close.blur();
+    close.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+    vi.advanceTimersByTime(HOLD_RELEASE_MS);
+    TestBed.tick();
+    vi.advanceTimersByTime(TOAST_MS);
+    f.detectChanges();
+    expect(all(f, '[data-testid=notification]')).toHaveLength(0);
   });
 });

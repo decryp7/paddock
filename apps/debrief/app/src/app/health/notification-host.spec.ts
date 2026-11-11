@@ -1,8 +1,8 @@
 import { signal } from '@angular/core';
-import { TestBed } from '@angular/core/testing';
+import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { all, buttonByText, el, settle, text } from '../../testing/helpers';
-import { MAX_VISIBLE, TOAST_MS, HostNotification, NOTIFICATION_SOURCES, NotificationSource, persists, visibleNotifications } from './notification-host.model';
+import { HOLD_RELEASE_MS, MAX_VISIBLE, TOAST_MS, HostNotification, NOTIFICATION_SOURCES, NotificationSource, persists, visibleNotifications } from './notification-host.model';
 import { NotificationHost } from './notification-host';
 
 const n = (cause: string, extra: Partial<HostNotification> = {}): HostNotification => ({ cause, severity: 'info', title: cause, dismiss: () => undefined, ...extra });
@@ -117,64 +117,6 @@ describe('NotificationHost', () => {
     expect(all(f, '[data-testid=notification]')).toHaveLength(0);
   });
 
-  describe('the stack does not move under the pointer', () => {
-    const order = (f: ReturnType<typeof setup>['f']) => all(f, '[data-testid=notification]').map((t) => t.getAttribute('data-cause'));
-
-    it('the newest toast enters at the top: the ones already there keep their place and their elements', async () => {
-      const { f, list } = setup([n('a')]);
-      await settle(f);
-      const before = el(f, '[data-cause=a]');
-      list.set([n('a'), n('b')]);
-      await settle(f);
-      expect(order(f)).toEqual(['b', 'a']);
-      expect(el(f, '[data-cause=a]')).toBe(before);
-    });
-
-    it('posting a cause again updates it where it is, it does not move to the top', async () => {
-      const { f, list } = setup([n('a'), n('b')]);
-      await settle(f);
-      list.set([n('a', { count: 2 }), n('b')]);
-      await settle(f);
-      expect(order(f)).toEqual(['b', 'a']);
-      expect(el(f, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×2');
-    });
-
-    it('while the pointer is in the stack, new toasts wait, nothing is dropped past the limit, and the order stays', async () => {
-      const { f, list } = setup([n('a'), n('b'), n('c')]);
-      await settle(f);
-      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
-      list.set([n('a'), n('b'), n('c'), n('d'), n('a', { count: 5 })]);
-      await settle(f);
-      expect(order(f)).toEqual(['c', 'b', 'a']);
-      expect(el(f, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×5'); // updated in place
-      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseleave'));
-      await settle(f);
-      expect(order(f)).toEqual(['d', 'c', 'b']);
-    });
-
-    it('while the pointer is in the stack, a toast that goes away still goes away at once', async () => {
-      const { f, list } = setup([n('a'), n('b')]);
-      await settle(f);
-      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
-      list.set([n('a'), n('b'), n('c')]);
-      await settle(f);
-      list.set([n('a'), n('c')]);
-      await settle(f);
-      expect(order(f)).toEqual(['a']);
-    });
-
-    it('a stack that has emptied under the pointer does not hold back what arrives next', async () => {
-      const { f, list } = setup([n('a')]);
-      await settle(f);
-      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
-      list.set([]);
-      await settle(f);
-      list.set([n('z')]);
-      await settle(f);
-      expect(order(f)).toEqual(['z']);
-    });
-  });
-
   describe('time', () => {
     afterEach(() => vi.useRealTimers());
 
@@ -221,36 +163,6 @@ describe('NotificationHost', () => {
       expect(gone).toEqual(['a']);
     });
 
-    it('holds a toast while the pointer or focus is on it and times it out once both have left', async () => {
-      const gone: string[] = [];
-      const { f } = await timed([n('a', { dismiss: () => gone.push('a'), actions: [{ label: 'Go', run: () => undefined }] })]);
-      const stack = el(f, '[data-testid=notification-stack]');
-      stack.dispatchEvent(new MouseEvent('mouseenter'));
-      await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
-      expect(gone).toEqual([]);
-      el<HTMLButtonElement>(f, '[data-testid=notification-action]').focus();
-      stack.dispatchEvent(new MouseEvent('mouseleave'));
-      await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
-      expect(gone).toEqual([]); // focus is still inside
-      el<HTMLButtonElement>(f, '[data-testid=notification-action]').blur();
-      stack.dispatchEvent(new FocusEvent('focusout', { relatedTarget: document.body }));
-      await vi.advanceTimersByTimeAsync(TOAST_MS - 1);
-      expect(gone).toEqual([]);
-      await vi.advanceTimersByTimeAsync(1);
-      expect(gone).toEqual(['a']);
-    });
-
-    it('the pointer on one toast holds the time of every toast in the stack', async () => {
-      const gone: string[] = [];
-      const { f } = await timed([n('a', { dismiss: () => gone.push('a') }), n('b', { dismiss: () => gone.push('b') })]);
-      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
-      await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
-      expect(gone).toEqual([]);
-      el(f, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseleave'));
-      await vi.advanceTimersByTimeAsync(TOAST_MS);
-      expect(gone.sort()).toEqual(['a', 'b']);
-    });
-
     it('a toast that went away loses its timer', async () => {
       const gone: string[] = [];
       const { f, list } = await timed([n('a', { dismiss: () => gone.push('a') })]);
@@ -258,6 +170,174 @@ describe('NotificationHost', () => {
       f.detectChanges();
       await vi.advanceTimersByTimeAsync(TOAST_MS * 2);
       expect(gone).toEqual([]);
+    });
+  });
+  describe('the stack does not move under the pointer', () => {
+    afterEach(() => vi.useRealTimers());
+
+    const order = (f: ComponentFixture<unknown>) => all(f, '[data-testid=notification]').map((t) => t.getAttribute('data-cause'));
+    /** Lets effects, the render and the release check (after the render) run on fake timers. */
+    async function flush(f: ComponentFixture<unknown>) {
+      for (let i = 0; i < 3; i++) {
+        f.detectChanges();
+        TestBed.tick();
+        await vi.advanceTimersByTimeAsync(0);
+      }
+    }
+    async function boot(items: HostNotification[]) {
+      vi.useFakeTimers();
+      const r = setup(items);
+      await flush(r.f);
+      return r;
+    }
+    /** The pointer on the stack's toasts. jsdom has no hover: the stack's `:hover` answers what the test says. */
+    function pointer(f: ComponentFixture<unknown>) {
+      const stack = el(f, '[data-testid=notification-stack]');
+      let over = false;
+      const real = stack.matches.bind(stack);
+      vi.spyOn(stack, 'matches').mockImplementation((selector: string) => (selector === ':hover' ? over : real(selector)));
+      return {
+        enter: () => {
+          over = true;
+          el(f, '[data-testid=notification]').dispatchEvent(new Event('pointerover', { bubbles: true }));
+        },
+        leave: async () => {
+          over = false;
+          el(f, '[data-testid=notification]').dispatchEvent(new Event('pointerout', { bubbles: true }));
+          await vi.advanceTimersByTimeAsync(HOLD_RELEASE_MS);
+        },
+      };
+    }
+    const focusIn = (button: HTMLElement) => {
+      button.focus();
+      button.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+    };
+    const focusOut = (button: HTMLElement) => {
+      button.blur();
+      button.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+    };
+
+    it('the newest toast enters at the top: the ones already there keep their elements', async () => {
+      const { f, list } = await boot([n('a')]);
+      const before = el(f, '[data-cause=a]');
+      list.set([n('a'), n('b')]);
+      await flush(f);
+      expect(order(f)).toEqual(['b', 'a']);
+      expect(el(f, '[data-cause=a]')).toBe(before);
+    });
+
+    it('posting a cause again updates it where it is', async () => {
+      const { f, list } = await boot([n('a'), n('b')]);
+      list.set([n('a', { count: 2 }), n('b')]);
+      await flush(f);
+      expect(order(f)).toEqual(['b', 'a']);
+      expect(el(f, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×2');
+    });
+
+    it('while the pointer is in the stack, a newcomer shows on top, and nothing is dropped or re-ordered until it leaves', async () => {
+      const { f, list } = await boot([n('a'), n('b'), n('c')]);
+      const mouse = pointer(f);
+      mouse.enter();
+      list.set([n('a'), n('b'), n('c'), n('d'), n('a', { count: 5 })]);
+      await flush(f);
+      expect(order(f)).toEqual(['d', 'c', 'b', 'a']); // past the limit of three, but the ones on screen stay
+      expect(el(f, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×5'); // updated in place
+      await mouse.leave();
+      await flush(f);
+      expect(order(f)).toEqual(['d', 'c', 'b']);
+    });
+
+    it('a new persistent toast shows while the stack is held', async () => {
+      const { f, list } = await boot([n('a'), n('b')]);
+      pointer(f).enter();
+      list.set([n('a'), n('b'), n('boom', { severity: 'critical' })]);
+      await flush(f);
+      expect(order(f)).toEqual(['boom', 'b', 'a']);
+      expect(el(f, '[data-cause=boom]').getAttribute('role')).toBe('alert');
+    });
+
+    it('while the pointer is in the stack, a toast that goes away still goes away at once', async () => {
+      const { f, list } = await boot([n('a'), n('b')]);
+      pointer(f).enter();
+      list.set([n('a'), n('b'), n('c')]);
+      await flush(f);
+      list.set([n('a'), n('c')]);
+      await flush(f);
+      expect(order(f)).toEqual(['c', 'a']);
+    });
+
+    it('focus inside a toast that is removed releases the hold', async () => {
+      const { f, list } = await boot([n('a'), n('b'), n('c')]);
+      focusIn(el(f, '[data-cause=a] [data-testid=notification-dismiss]'));
+      list.set([n('a'), n('b'), n('c'), n('d')]);
+      await flush(f);
+      expect(order(f)).toEqual(['d', 'c', 'b', 'a']); // held: nothing dropped
+      list.set([n('b'), n('c'), n('d'), n('e')]); // a goes, and with it the focus
+      await flush(f);
+      expect(order(f)).toEqual(['e', 'd', 'c']); // released: the limit applies again
+    });
+
+    it('focus leaving the stack without a pointer event releases the hold', async () => {
+      const { f, list } = await boot([n('a'), n('b'), n('c')]);
+      const button = el<HTMLButtonElement>(f, '[data-cause=b] [data-testid=notification-dismiss]');
+      focusIn(button);
+      focusOut(button);
+      await vi.advanceTimersByTimeAsync(HOLD_RELEASE_MS);
+      list.set([n('a'), n('b'), n('c'), n('d')]);
+      await flush(f);
+      expect(order(f)).toEqual(['d', 'c', 'b']);
+    });
+
+    it('moving from one toast to the next across the gap does not release the hold', async () => {
+      const { f, list } = await boot([n('a'), n('b'), n('c')]);
+      const mouse = pointer(f);
+      mouse.enter();
+      el(f, '[data-testid=notification]').dispatchEvent(new Event('pointerout', { bubbles: true })); // leaves a toast into the gap
+      await vi.advanceTimersByTimeAsync(HOLD_RELEASE_MS - 1);
+      mouse.enter(); // and enters the next one
+      await vi.advanceTimersByTimeAsync(HOLD_RELEASE_MS);
+      list.set([n('a'), n('b'), n('c'), n('d')]);
+      await flush(f);
+      expect(order(f)).toEqual(['d', 'c', 'b', 'a']);
+    });
+
+    it('holds a toast while the pointer or focus is in the stack and times it out once both have left', async () => {
+      const gone: string[] = [];
+      const { f } = await boot([n('a', { dismiss: () => gone.push('a'), actions: [{ label: 'Go', run: () => undefined }] })]);
+      const mouse = pointer(f);
+      mouse.enter();
+      await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
+      expect(gone).toEqual([]);
+      const go = el<HTMLButtonElement>(f, '[data-testid=notification-action]');
+      focusIn(go);
+      await mouse.leave();
+      await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
+      expect(gone).toEqual([]); // focus is still inside
+      focusOut(go);
+      await vi.advanceTimersByTimeAsync(HOLD_RELEASE_MS);
+      await vi.advanceTimersByTimeAsync(TOAST_MS - 1);
+      expect(gone).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(gone).toEqual(['a']);
+    });
+
+    it('the pointer on the stack holds the time of every toast in it', async () => {
+      const gone: string[] = [];
+      const { f } = await boot([n('a', { dismiss: () => gone.push('a') }), n('b', { dismiss: () => gone.push('b') })]);
+      const mouse = pointer(f);
+      mouse.enter();
+      await vi.advanceTimersByTimeAsync(TOAST_MS * 5);
+      expect(gone).toEqual([]);
+      await mouse.leave();
+      await vi.advanceTimersByTimeAsync(TOAST_MS);
+      expect(gone.sort()).toEqual(['a', 'b']);
+    });
+
+    it('the stack takes no clicks itself, only the toasts do', () => {
+      const css = ((NotificationHost as unknown as { ɵcmp: { styles: string[] } }).ɵcmp.styles ?? []).join('\n').replace(/\s+/g, ' ');
+      expect(css).toMatch(/pointer-events: none;/);
+      expect(css).toMatch(/\.toast\[[^\]]*\] \{ pointer-events: auto;/);
+      expect(css).not.toMatch(/\.stack\[[^\]]*\] \{[^}]*pointer-events: auto/);
     });
   });
 });

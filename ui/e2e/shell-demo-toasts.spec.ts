@@ -62,3 +62,31 @@ for (const width of [360, 400, 640, 1000, 1280]) {
       .toEqual([0, true]);
   });
 }
+
+// The stack takes no clicks itself: in the small-window layout it spans the window's width, and a click beside or between
+// the toasts must reach the page (the hold on the stack comes from the toasts' own events).
+test('in a small window a click beside or between the toasts reaches the page', async ({ app, page }) => {
+  await page.setViewportSize({ width: 400, height: 700 });
+  await app.frame.open();
+  await page.getByRole('region', { name: 'Notifications' }).waitFor({ state: 'attached' });
+  await page.getByRole('button', { name: 'Notify three times' }).click();
+  await expect(page.getByTestId('notification').first()).toBeVisible();
+  const hit = await page.evaluate(() => {
+    const stack = document.querySelector('[data-testid=notification-stack]') as HTMLElement;
+    const toasts = Array.from(document.querySelectorAll('[data-testid=notification]')) as HTMLElement[];
+    const s = stack.getBoundingClientRect();
+    const t = toasts[0]!.getBoundingClientRect();
+    const owner = (x: number, y: number) => document.elementFromPoint(x, y)?.closest('pd-notification-host') !== null;
+    return {
+      stackWidth: s.width,
+      toastWidth: t.width,
+      // The same row as a toast, in the stack's own width but left of the toast.
+      beside: owner(s.left + 2, t.top + t.height / 2),
+      // Between two toasts, when there are two on screen.
+      between: toasts.length > 1 ? owner(t.left + t.width / 2, t.bottom + 4) : false,
+    };
+  });
+  expect(hit.stackWidth, JSON.stringify(hit)).toBeGreaterThan(hit.toastWidth);
+  expect(hit.beside, JSON.stringify(hit)).toBe(false);
+  expect(hit.between, JSON.stringify(hit)).toBe(false);
+});

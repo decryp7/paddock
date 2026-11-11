@@ -34,9 +34,14 @@ describe('Toasts in the family toast host', () => {
     toasts.show('Saved', 'ok');
     toasts.error({ code: 'serverUnavailable', message: 'Server is down' });
     fixture.detectChanges();
-    const shown = Array.from(el.querySelectorAll('[data-testid="notification"]'));
-    expect(shown.map((t) => t.getAttribute('data-severity'))).toEqual(['success', 'error']);
-    expect(shown[1]!.getAttribute('role')).toBe('alert');
+    // The newest toast is first in the host: find each by its cause, not by position.
+    const [saved, down] = toasts.items();
+    const toastOf = (cause: string | undefined) => el.querySelector(`[data-testid="notification"][data-cause="${cause}"]`);
+    expect(toastOf(saved?.cause)?.getAttribute('data-severity')).toBe('success');
+    expect(toastOf(saved?.cause)?.getAttribute('role')).toBe('status');
+    expect(toastOf(down?.cause)?.getAttribute('data-severity')).toBe('error');
+    expect(toastOf(down?.cause)?.getAttribute('role')).toBe('alert');
+    expect(el.querySelectorAll('[data-testid="notification"]')).toHaveLength(2);
     expect(el.textContent).toContain('Server is down');
   });
 
@@ -51,7 +56,11 @@ describe('Toasts in the family toast host', () => {
     toasts.show('First', 'info', 0);
     toasts.show('Second', 'info', 0);
     fixture.detectChanges();
-    (el.querySelector('[data-testid="notification-dismiss"]') as HTMLButtonElement).click();
+    // Dismiss "First" through its own toast's button (the newest toast is first in the host).
+    const first = toasts.items().find((n) => n.title === 'First');
+    const button = el.querySelector(`[data-testid="notification"][data-cause="${first?.cause}"] [data-testid="notification-dismiss"]`) as HTMLButtonElement | null;
+    if (!button) throw new Error('the First toast has no dismiss button');
+    button.click();
     fixture.detectChanges();
     expect(toasts.toasts().map((t) => t.message)).toEqual(['Second']);
   });

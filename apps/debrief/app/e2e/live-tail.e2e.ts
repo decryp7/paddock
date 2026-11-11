@@ -102,8 +102,8 @@ test.describe('live tail: alerts', () => {
     await liveOn(page);
     // The first alert (an error spike) is due 1.5 s of live ticks after live tail starts.
     await page.clock.runFor(2_000);
-    // The toast stack shows the newest three: take a visible error spike (an older toast may be folded away meanwhile).
-    const toast = page.getByTestId('notification').filter({ hasText: 'Error spike', visible: true }).last();
+    // The toast stack shows the newest three, the newest first: take the newest visible error spike.
+    const toast = page.getByTestId('notification').filter({ hasText: 'Error spike', visible: true }).first();
     await expect(toast).toBeVisible();
     await expect(toast).toContainText('Critical');
     await expect(toast).toContainText('Error spike');

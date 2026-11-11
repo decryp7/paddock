@@ -52,6 +52,9 @@ export const TOAST_MS = 8000;
 /** The most toasts at once; older ones wait (hidden) until a newer one goes. */
 export const MAX_VISIBLE = 3;
 
+/** How long after the pointer or focus leaves a toast the host waits before it lets go of the stack (crossing the gap between two toasts). */
+export const HOLD_RELEASE_MS = 150;
+
 /**
  * One toast per cause, in the order the causes first appeared (the later source's entry replaces an earlier one with the
  * same cause and keeps its place: posting a cause again updates it where it is, so nothing moves under the pointer),

@@ -1784,5 +1784,11 @@ the press in the same millisecond, no mute logged. Fix: the newest toast enters 
 and elements, a cause posted again updates in place, and while the pointer or focus is in the stack its time is held and
 its set of toasts is frozen (only what goes away leaves at once). Class: layout shift under the pointer in a stack of
 things that arrive on their own (toasts, banners, lists that refresh); a test that works around it with a synthetic click
-is hiding a product defect. The shared `@decryp7/paddock-ui` shell has its own copy of the host with the same stacking
-(`ui/projects/paddock-ui/shell/notify/src/notification-host.ts`), not yet changed. Source: run 7941 job 35690.
+is hiding a product defect. The shared `@decryp7/paddock-ui` shell had its own copy of the host with the same stacking
+(`ui/projects/paddock-ui/shell/notify/src/notification-host.ts`) and got the same fix in the same change (rule 55; the
+register entry `notification-host` in `docs/known-copies.toml` ties them until Debrief adopts the shell host). The first
+version of the fix had three faults a review found: a newest-first order broke Pitwall's `toasts.spec.ts` (it read the
+toasts by position, now by cause); the stack itself took clicks across its full width (the hold must come from the toasts'
+events while the stack takes none); and the freeze hid new toasts without limit and could stay held when the pointer left
+without an event or the focused toast was removed (the hold now follows the DOM's own answer, focus inside or `:hover`,
+read after each change and after a short grace, and a newcomer always shows). Source: run 7941 job 35690.

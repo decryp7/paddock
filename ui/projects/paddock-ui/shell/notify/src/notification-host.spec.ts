@@ -1,7 +1,7 @@
 import { provideZonelessChangeDetection, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ToastArea } from '@decryp7/paddock-ui/shell';
-import { MAX_VISIBLE, NOTIFY_CLOCK, TOAST_MS } from './notify-config';
+import { HOLD_RELEASE_MS, MAX_VISIBLE, NOTIFY_CLOCK, TOAST_MS } from './notify-config';
 import { NOTIFICATION_SOURCES, persists, visibleNotifications, type HostNotification, type NotificationSource } from './notification-host.model';
 import { PdNotificationHost } from './notification-host';
 import { all, FakeClock, one } from './spec-helpers';
@@ -43,6 +43,35 @@ describe('pd-notification-host', () => {
     const f = TestBed.createComponent(PdNotificationHost);
     return { f, list, clock, el: f.nativeElement as HTMLElement };
   }
+
+  /** The pointer on the stack's toasts. jsdom has no hover: the stack's `:hover` answers what the test says. */
+  function pointer(el: HTMLElement, clock: FakeClock) {
+    const stack = one(el, '[data-testid=notification-stack]');
+    let over = false;
+    const real = stack.matches.bind(stack);
+    vi.spyOn(stack, 'matches').mockImplementation((selector: string) => (selector === ':hover' ? over : real(selector)));
+    const toast = () => one(el, '[data-testid=notification]');
+    return {
+      enter: () => {
+        over = true;
+        toast().dispatchEvent(new Event('pointerover', { bubbles: true }));
+      },
+      leave: () => {
+        over = false;
+        toast().dispatchEvent(new Event('pointerout', { bubbles: true }));
+        clock.advance(HOLD_RELEASE_MS);
+      },
+    };
+  }
+  /** Focus moves into the toast's button (the event a browser sends) or out of it. */
+  const focusIn = (button: HTMLElement) => {
+    button.focus();
+    button.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+  };
+  const focusOut = (button: HTMLElement) => {
+    button.blur();
+    button.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null }));
+  };
 
   it('shows nothing without sources', async () => {
     const { f, el } = setup([], false);
@@ -164,8 +193,8 @@ describe('pd-notification-host', () => {
     const dismiss = vi.fn();
     const { f, list, clock, el } = setup([n('i', { dismiss, ttl: 1000 })]);
     await f.whenStable();
-    const stack = one(el, '[data-testid=notification-stack]');
-    stack.dispatchEvent(new MouseEvent('mouseenter'));
+    const mouse = pointer(el, clock);
+    mouse.enter();
     clock.advance(5000);
     expect(dismiss).not.toHaveBeenCalled();
     // A repeat while held stays held.
@@ -173,22 +202,23 @@ describe('pd-notification-host', () => {
     await f.whenStable();
     clock.advance(5000);
     expect(dismiss).not.toHaveBeenCalled();
-    // Focus moving inside the toast keeps it held.
+    // Focus inside keeps it held after the pointer has gone.
     const button = one(el, '[data-testid=notification-dismiss]');
-    stack.dispatchEvent(new FocusEvent('focusout', { relatedTarget: button }));
+    focusIn(button);
+    mouse.leave();
     clock.advance(5000);
     expect(dismiss).not.toHaveBeenCalled();
-    stack.dispatchEvent(new MouseEvent('mouseleave'));
+    focusOut(button);
+    clock.advance(HOLD_RELEASE_MS);
     clock.advance(999);
     expect(dismiss).not.toHaveBeenCalled();
-    clock.advance(1);
+    // The host looks every 250 ms: its next look after the time ran out.
+    clock.advance(250);
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
   describe('the stack does not move under the pointer', () => {
     const order = (el: HTMLElement) => all(el, '[data-testid=notification]').map((t) => t.getAttribute('data-cause'));
-    const enter = (el: HTMLElement) => one(el, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseenter'));
-    const leave = (el: HTMLElement) => one(el, '[data-testid=notification-stack]').dispatchEvent(new MouseEvent('mouseleave'));
 
     it('the newest toast enters at the top: the ones already there keep their elements', async () => {
       const { f, list, el } = setup([n('a')]);
@@ -209,50 +239,91 @@ describe('pd-notification-host', () => {
       expect(one(el, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×2');
     });
 
-    it('while the pointer is in the stack, new toasts wait, nothing is dropped past the limit, and the order stays', async () => {
-      const { f, list, el } = setup([n('a'), n('b'), n('c')]);
+    it('while the pointer is in the stack, a newcomer shows on top, and nothing is dropped or re-ordered until it leaves', async () => {
+      const { f, list, clock, el } = setup([n('a'), n('b'), n('c')]);
       await f.whenStable();
-      enter(el);
+      const mouse = pointer(el, clock);
+      mouse.enter();
       list.set([n('a'), n('b'), n('c'), n('d'), n('a', { count: 5 })]);
       await f.whenStable();
-      expect(order(el)).toEqual(['c', 'b', 'a']);
-      expect(one(el, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×5');
-      leave(el);
+      expect(order(el)).toEqual(['d', 'c', 'b', 'a']); // past the limit of three, but the ones on screen stay
+      expect(one(el, '[data-cause=a] [data-testid=notification-count]').textContent).toContain('×5'); // updated in place
+      mouse.leave();
       await f.whenStable();
       expect(order(el)).toEqual(['d', 'c', 'b']);
     });
 
-    it('while the pointer is in the stack, a toast that goes away still goes away at once', async () => {
-      const { f, list, el } = setup([n('a'), n('b')]);
+    it('a new persistent toast shows while the stack is held', async () => {
+      const { f, list, clock, el } = setup([n('a'), n('b')]);
       await f.whenStable();
-      enter(el);
+      pointer(el, clock).enter();
+      list.set([n('a'), n('b'), n('boom', { severity: 'critical' })]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['boom', 'b', 'a']);
+      expect(one(el, '[data-cause=boom]').getAttribute('role')).toBe('alert');
+    });
+
+    it('while the pointer is in the stack, a toast that goes away still goes away at once', async () => {
+      const { f, list, clock, el } = setup([n('a'), n('b')]);
+      await f.whenStable();
+      pointer(el, clock).enter();
       list.set([n('a'), n('b'), n('c')]);
       await f.whenStable();
       list.set([n('a'), n('c')]);
       await f.whenStable();
-      expect(order(el)).toEqual(['a']);
+      expect(order(el)).toEqual(['c', 'a']);
     });
 
-    it('a stack that has emptied under the pointer does not hold back what arrives next', async () => {
-      const { f, list, el } = setup([n('a')]);
+    it('focus inside a toast that is removed releases the hold', async () => {
+      const { f, list, el } = setup([n('a'), n('b'), n('c')]);
       await f.whenStable();
-      enter(el);
-      list.set([]);
+      focusIn(one(el, '[data-cause=a] [data-testid=notification-dismiss]'));
+      list.set([n('a'), n('b'), n('c'), n('d')]);
       await f.whenStable();
-      list.set([n('z')]);
+      expect(order(el)).toEqual(['d', 'c', 'b', 'a']); // held: nothing dropped
+      list.set([n('b'), n('c'), n('d'), n('e')]); // a goes, and with it the focus
       await f.whenStable();
-      expect(order(el)).toEqual(['z']);
+      await f.whenStable();
+      expect(order(el)).toEqual(['e', 'd', 'c']); // released: the limit applies again
+    });
+
+    it('focus leaving the stack without a pointer event releases the hold', async () => {
+      const { f, list, clock, el } = setup([n('a'), n('b'), n('c')]);
+      await f.whenStable();
+      const button = one(el, '[data-cause=b] [data-testid=notification-dismiss]');
+      focusIn(button);
+      focusOut(button);
+      clock.advance(HOLD_RELEASE_MS);
+      list.set([n('a'), n('b'), n('c'), n('d')]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['d', 'c', 'b']);
+    });
+
+    it('moving from one toast to the next across the gap does not release the hold', async () => {
+      const { f, list, clock, el } = setup([n('a'), n('b'), n('c')]);
+      await f.whenStable();
+      const mouse = pointer(el, clock);
+      mouse.enter();
+      const stack = one(el, '[data-testid=notification-stack]');
+      stack.dispatchEvent(new Event('pointerout', { bubbles: true })); // leaves a toast into the gap
+      clock.advance(HOLD_RELEASE_MS - 1);
+      mouse.enter(); // and enters the next one
+      clock.advance(HOLD_RELEASE_MS);
+      list.set([n('a'), n('b'), n('c'), n('d')]);
+      await f.whenStable();
+      expect(order(el)).toEqual(['d', 'c', 'b', 'a']);
     });
 
     it('the pointer on the stack holds the time of every toast in it', async () => {
       const gone: string[] = [];
       const { f, clock, el } = setup([n('a', { dismiss: () => gone.push('a') }), n('b', { dismiss: () => gone.push('b') })]);
       await f.whenStable();
-      enter(el);
+      const mouse = pointer(el, clock);
+      mouse.enter();
       clock.advance(TOAST_MS * 5);
       expect(gone).toEqual([]);
-      leave(el);
-      clock.advance(TOAST_MS);
+      mouse.leave();
+      clock.advance(TOAST_MS + 250); // the host looks every 250 ms
       expect(gone.sort()).toEqual(['a', 'b']);
     });
   });
@@ -288,6 +359,13 @@ describe('pd-notification-host in a small window (review 2, P3-14)', () => {
 
   it('keeps the page-footer safe area above the status bar, from tokens, so a toast never covers a footer action', () => {
     expect(css).toMatch(/\bbottom: calc\(var\(--(?:%NS%)?pd-statusbar-height[^)]*\) \+ var\(--(?:%NS%)?pd-page-footer-safe[^)]*\) \+ var\(--(?:%NS%)?pd-space-2\)\)/);
+  });
+
+  it('the stack never takes clicks itself: only the toasts do, so the page beside them stays reachable (also at 480 px and below)', () => {
+    expect(css).toMatch(/^\s*\{ position: fixed;[^}]*pointer-events: none;/);
+    expect(css).toMatch(/\.pd-toast \{ pointer-events: auto;/);
+    expect(css).not.toMatch(/\.pd-stack \{[^}]*pointer-events: auto/);
+    expect(compact).not.toMatch(/pointer-events: auto/);
   });
 
   it('a toast is never wider than 360 px', () => {

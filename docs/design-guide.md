@@ -356,6 +356,14 @@ series beyond 6 fold into one neutral "Other". Known weak pair: light slot 1 and
 - **Toasts**: bottom-right, kept clear of the status bar and of the page footer (`--pd-page-footer-safe`, 56 px: a footer up to 56 px
   tall, such as a wizard's Next, is not covered), 360 max, auto-dismiss 5 s (errors persist until dismissed), at most 3 stacked, with Undo
   where the action is reversible; `role=status` (errors `role=alert`).
+  **A toast never moves under the pointer** (a press is two events; a layout change between them sends the click elsewhere): the
+  stack is anchored at the bottom and the newest toast enters at the top (the DOM lists the newest first), so toasts already there
+  keep their place; a cause posted again updates its toast in place, it does not move to the top. While the pointer or focus is on a
+  toast the whole stack is held: no toast times out, nothing is dropped past the limit of three and nothing is re-ordered (a toast
+  that is dismissed or resolved still goes at once), and a newcomer, a persistent one too, shows on top. The hold ends when neither
+  the pointer nor focus is on the stack any more (checked after each change and a short grace after leaving, so crossing the gap
+  between two toasts keeps it), then the time of every toast starts over. The stack takes no clicks itself, only the toasts do, so
+  the page beside and between them stays reachable at every width.
   **One toast area**: the notification host and the undo toast (a Material snack bar, rule 47) share it. Both are 360 px, bottom right,
   on the same baseline with the same look (surface-3, hairline, shadow); the undo toast is the lowest and the host lifts itself by its
   height (`ToastArea`), so they stack and never overlap at any width. The snack bar is announced by its own polite live region

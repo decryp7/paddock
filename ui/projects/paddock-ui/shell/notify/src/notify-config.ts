@@ -7,6 +7,9 @@ export const TOAST_MS = 8000;
 /** The most toasts at once; older ones wait (hidden) until a newer one goes. */
 export const MAX_VISIBLE = 3;
 
+/** How long after the pointer or focus leaves a toast the host waits before it lets go of the stack (crossing the gap between two toasts). */
+export const HOLD_RELEASE_MS = 150;
+
 /**
  * The clock of the notification host and the centre: the time, and a repeating tick the host uses for its toasts' time.
  * A port, so tests and e2e drive it. Nothing here times out work: a toast going away leaves its message in the centre.
