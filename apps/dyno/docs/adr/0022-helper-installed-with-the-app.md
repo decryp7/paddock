@@ -4,6 +4,7 @@
   without the privileged helper. It runs with the user's rights only, is signed with the family updater key, and
   updates per user through the normal Tauri updater. The design below, including the decisions it records for "1.0"
   (D1, D2, D5, D6), now applies to Dyno 1.1 and must be confirmed again for it.
+- Amendment 2026-11-12 (below): the helper takes no updates; `Update`, D5 and work row 15 are not built.
 - 2026-11-03: ADR 0027 (Accepted 2026-11-03) is the 1.1.0 plan. It adopts sections 2.1, 2.2 (without the program pin as a
   boundary), 4, 5 and 6 of this record, and, as the user chose (its D1 = L), defers the per-machine packaging, the `.pkg` and
   the helper-run updates (sections 1 and 3, D2, D5, D7) until a signing identity exists.
@@ -34,9 +35,13 @@ SYSTEM or root would be a new elevated surface for no need a user has.
 
 What is true now:
 
-- **Windows.** An update goes through `paddock-setup` (ADR 0053), run elevated from the installed folder. It holds the
-  app's installer mutex. A second install while one runs is refused with "Another install of this app is already
-  running." (`Refusal::Busy`, exit code 21, `crates/paddock-setup/src/apply.rs`). The helper takes no part.
+- **Windows.** An update goes through `paddock-setup` (ADR 0053), run elevated from the installed folder. While an
+  installer holds `Global\<id>.setup` (the NSIS hook starts `paddock-setup hold-installing` and keeps it until the installer
+  exits, `paddock-per-machine.nsh`), the app's Install update (`paddock-setup apply-update`) refuses with "Another install of
+  this app is already running." (`Refusal::Busy`, exit code 21, `acquire_mutex`, `crates/paddock-setup/src/apply.rs`). The app
+  shows it as "Not installed: Another install of this app is already running." (`crates/paddock-updater/src/install.rs`).
+  The installer itself only holds the mutex; it does not refuse a second manual installer by this mechanism, and no row claims
+  that it does. The helper takes no part.
 - **macOS and Linux.** There is no installer lock. The updater keeps one state machine in the running app, and a second
   request while one is in progress answers "busy" (`crates/paddock-updater/src/updater.rs`). Two copies of the app do not
   share that state. Dyno does not claim more than this on these two systems.
@@ -44,8 +49,10 @@ What is true now:
   receives.
 
 Sections 3 ("Updates, downgrades, uninstall, repair", the `Update` request) and D5 are therefore not built and are not planned.
-A release row measures the Windows refusal above on the Windows VM, not the old promise. It reads: start an install while
-another one runs and read "Another install of this app is already running." No row measures a helper update.
+The release row `second-install` (`scripts/vm-smoke/win-rows.mjs`; `--only second-install`) measures the refusal on the Windows
+VM: (1) start installer A and hold it past PREINSTALL, (2) press Install update in Dyno, (3) read "Not installed: Another install
+of this app is already running." What a second manual installer does is not measured by this row.
+The driver cannot yet hold an installer open, so the row reports "not measured" and keeps a release run INCOMPLETE until it can.
 
 ## Dyno 1.0 without a helper
 
@@ -115,7 +122,7 @@ This is the coordinator's to put to the user.
 
 Resolve these before this record is accepted for 1.1:
 
-- **P1 (round-3 review): the update key and where updates come from.** The user keeps the family updater key for now.
+- **P1 (round-3 review): the update key and where updates come from.** *(Not built: the helper takes no updates, see Amendment 2026-11-12.)* The user keeps the family updater key for now.
   Every Paddock workflow can read that key (`PADDOCK_TAURI_SIGNING_PRIVATE_KEY`) and `RELEASE_TOKEN` through repository
   secrets. A helper that installs any update signed with that key as SYSTEM or root is therefore **unsafe**: a
   malicious or compromised workflow on any branch could sign a package the helper would run. The separate repository
@@ -167,7 +174,7 @@ The user decided on 2026-10-28:
   because the helper installs them (D5).
 - **No signing purchases**: no Apple Developer ID, no Authenticode.
 - **Any local user** may use the helper. Each caller sees what scope U3 allows (D6, section 6).
-- **D5**: the helper installs Dyno's own signed, newer updates.
+- **D5**: the helper installs Dyno's own signed, newer updates. *(Not built: the helper takes no updates, see Amendment 2026-11-12.)*
 - **D6**: U3.
 
 Dyno stays a read-only monitor (ADR 0021).
@@ -459,7 +466,7 @@ inherit-only and CREATOR OWNER ACEs, a conditional ACE, `/Applications`, and a s
 
 - **Reads:** `Info`, `Traffic`, `Processes`, `Counters` and `MemoryModules` (section 5).
 - **Administrators only:** `Audit`.
-- **The one write:** `Update` (section 3).
+- **The one write:** `Update` (section 3). *(Not built: the helper takes no updates, see Amendment 2026-11-12.)*
 - **Removed:** `Uninstall`, because the package owns the helper's lifecycle.
 
 #### 4. The first install
@@ -838,7 +845,7 @@ or `/etc/dyno/helper.toml`, writable by administrators only, parsed with limits.
 - No program run as SYSTEM or root, and no file the helper checks, sits where a non-administrator can change it.
   Problem 1 is closed for install, update and repair, without any certificate.
 - What remains is same-user injection into the agent, bounded by the read scope (U3) and by `Update` accepting only
-  signed, newer packages.
+  signed, newer packages. *(Not built: the helper takes no updates, see Amendment 2026-11-12.)*
 - The helper gains one write (installing Dyno's own signed updates, D5), a named exception to ADR 0021 point 4,
   alongside the existing `SetPerTcpConnectionEStats` exception.
 - Root and SYSTEM trust exactly one signing key, kept in a separate repository that only the user can push to. No
@@ -867,7 +874,7 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
 | 12 | `Processes` per OS (field allow-list, path redaction, paging, `hidepid`, rule 26 memory), plus a fuzz target for the decoder | L | 3-5 |
 | 13 | `Counters` (Windows disk health and thermal, macOS `powermetrics` parser, Linux RAPL and NVMe) and `MemoryModules` (DMI parser with a fuzz target) | L | 3-5 |
 | 14 | Agent: merge helper pages into the sampler, rates in the core, the "Other users" row, class per request | M | 1.5-2.5 |
-| 15 | `Update` in the helper on 3 OS: handle checks, copy with deadline and free-space check, verify, grammar and version, runner copy with protected `TEMP`, per-OS launch (detached process, one-shot launchd job, `systemd-run`), state file, finishing at the next start, restarting agents per session or uid, clean-up | L | 6-9 |
+| 15 | *(Not built, see Amendment 2026-11-12.)* `Update` in the helper on 3 OS: handle checks, copy with deadline and free-space check, verify, grammar and version, runner copy with protected `TEMP`, per-OS launch (detached process, one-shot launchd job, `systemd-run`), state file, finishing at the next start, restarting agents per session or uid, clean-up | L | 6-9 |
 | 16 | App updater: `check` and `download` only, hand the file to the agent and the helper | S | 0.5-1 |
 | 17 | macOS `.pkg` in CI (`pkgbuild`/`productbuild`, payload layout, scripts, ad-hoc signing of the programs outside the bundle, verification); the app and the launch agent use the fixed agent path; the DMG retired | L | 2.5-4 |
 | 18 | Linux `.deb` maintainer scripts and the unit | S | 0.5-1 |
@@ -915,7 +922,7 @@ Sizes: S is up to half a day, M one to two days, L three to five days. The range
   - no command-line field exists (a test over the type's fields).
 - **Parsers:** the DMI, `powermetrics` and NVMe parsers on recorded sample bytes with invented values (never real user
   data), plus fuzz targets in the existing fuzz workflow.
-- **`Update`:**
+- **`Update`:** *(Not built: the helper takes no updates, see Amendment 2026-11-12.)*
   - a tampered copy, a wrong key, an older version, a wrong target or kind;
   - a link or a 513 MB file as the source;
   - a UNC, `\\?\` or device handle, a FIFO, a FUSE file and a network volume, all refused by handle;
@@ -989,7 +996,7 @@ Decided on 2026-10-28:
 - **D2:** a per-machine Windows install.
 - **D3 and D4:** no signing purchases.
 - **Callers:** any local user.
-- **D5:** the helper installs Dyno's own signed, newer updates (P1). This is a second named exception to ADR 0021.
+- **D5:** the helper installs Dyno's own signed, newer updates (P1). This is a second named exception to ADR 0021. *(Not built: the helper takes no updates, see Amendment 2026-11-12.)*
 - **D6:** scope U3. Other people appear as one total to non-administrators. The policy file can change it.
 
 Still open:
