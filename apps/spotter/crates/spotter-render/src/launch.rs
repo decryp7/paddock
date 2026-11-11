@@ -215,11 +215,14 @@ pub fn lifetime_with(start_limit: Duration, page_budget: Duration) -> Duration {
 /// made on its own so that a start that follows is not charged for it.
 ///
 /// On macOS the first run of a freshly installed bundle is held before its first instruction while the OS assesses it
-/// (XProtect, syspolicyd): measured 21 to 35 s for Chrome for Testing 156 on an idle Mac mini, with no CPU used by the
+/// (XProtect, syspolicyd): measured 4.2 to 42.06 s for Chrome for Testing 156 on an idle Mac mini (docs/performance.md, 2026-11-11), with no CPU used by the
 /// browser and no child process, against 0.4 to 0.7 s for every later start; a loaded CI host stretched it past a 120 s start
 /// guard (CI runs 7918, 7929 and 7932, always the first test of the binary). A process in that state cannot be judged by
 /// its CPU or its output, so this waits for the process to end, with no time limit of its own: the caller's own bound (a test
 /// runner's slow-timeout) is the only guard. Failure says the exit status and the browser's output.
+///
+/// Public, with no product caller yet: it serves the tests until the product's first-start decision (Spotter warms the browser
+/// up right after downloading it, in a "preparing the browser" step without a time limit; queued, not built).
 #[expect(
     clippy::disallowed_methods,
     reason = "the browser, a GUI program: std Command, as the driver is copied between apps"

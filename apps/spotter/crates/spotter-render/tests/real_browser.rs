@@ -29,14 +29,16 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The first run of a browser bundle on macOS is held by the OS for 20 to 35 s on an idle host, far more on a busy one, with
-/// no CPU and no child to judge it by (`launch::warm_up`). The first test of a process pays it here, outside any start guard,
-/// by waiting for the browser's own `--version` to end; nextest's slow-timeout (the waiver in apps/spotter/.config/nextest.toml)
-/// is its only bound. Every later start is then about half a second.
+/// The first run of a browser bundle on macOS is held by the OS for 4.2 to 42.06 s on an idle host (docs/performance.md, 2026-11-11),
+/// far more on a busy one, with no CPU and no child to judge it by (`launch::warm_up`). The first test of a test process pays it
+/// here, outside any start guard, by waiting for the browser's own `--version` to end; only the first pays the OS hold, every
+/// later start is about half a second. Its time comes out of the test's slow-timeout (nextest's 240 s, the waiver in
+/// apps/spotter/.config/nextest.toml), which is its only bound.
 fn warm(b: &Browser) {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
         if cfg!(target_os = "macos") {
+            eprintln!("running the test browser once (first run on this Mac, the OS may hold it for a while)...");
             match spotter_render::launch::warm_up(b) {
                 Ok(took) => eprintln!("the test browser's first run took {took:?}"),
                 Err(e) => panic!("{e}"),
