@@ -266,7 +266,7 @@ platforms = ["macos", "windows", "linux"]
 tests = {}
 supporting = [
   "app/e2e/connected-apps.e2e.ts#not installed and too old are said once, and the actions they name are there",
-  "app/e2e/dialogs.e2e.ts#New app: Create app waits for a name, and answers it",
+  "app/e2e/dialogs.e2e.ts#Connect Dyno: Connect waits for a key, the key is never shown, and Enter answers it trimmed",
 ]
 owed = ["tauri", "outcome", "layout"]
 owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
@@ -375,7 +375,7 @@ wires = [
 platforms = ["macos", "windows", "linux"]
 tests = {}
 supporting = [
-  "app/e2e/tray.e2e.ts#the text check reports a text past the frame and a clipped text",
+  "app/e2e/tray.e2e.ts#the default popup fits 520 px without scrolling",
 ]
 owed = ["tauri", "outcome", "layout"]
 owed_why = "the real-app kit (ADR 0037 WP-7) is not built, so no test drives the real app; C86's outcome harness and the shared layout check (ADR 0052 §3.2) are not built either, and app/e2e specs run against the mock backend"
@@ -456,6 +456,8 @@ supporting = [
   "crates/pitwall-server/tests/it/e2e.rs#streaming_in_all_three_families",
   "crates/pitwall-server/tests/it/llama_e2e.rs#the_real_engine_answers_one_chat_request",
 ]
-owed = ["tauri", "outcome", "layout"]
-owed_why = "the real-app kit (ADR 0037 WP-7) is not built; the server's own tests run it with a fake engine, and the one real-engine test is manual (PITWALL_LLAMA_E2E=1); no UI, so layout and outcome are not applicable until a wire.toml (ADR 0052 WP-A1) says what a visible outcome is for it"
+owed = ["tauri"]
+owed_why = "the real-app kit (ADR 0037 WP-7) is not built; the server's own tests run it with a fake engine, and the one real-engine test is manual (PITWALL_LLAMA_E2E=1)"
+na = ["outcome", "layout"]
+na_why = "the HTTP APIs have no UI: a visible outcome and a real layout do not apply to them"
 owed_until = "pitwall-v1.1.0"
