@@ -1053,3 +1053,36 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.4.0"
   note = "The oracle of `./dev ci timings` (a test compares its Markdown, byte for byte, with this script's output on recorded API replies: tools/paddock-dev/tests/ci-runs/timings/golden.md). It has no CI caller; delete it, and engineering-rules' copy one release later, once the Rust command is the only reader."
+
+# =====================================================================================================================
+# Windows verbatim paths
+# =====================================================================================================================
+
+[[mechanism]]
+id = "verbatim-path"
+title = "Stripping the Windows verbatim prefix (\\\\?\\) from a canonical path before it is compared, shown or passed to a program (ADR 0021 amendment D-P1)"
+canonical = "paddock-env"
+paths = ["crates/paddock-env/src/winpath.rs"]
+status = "built"
+adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-agent/src/disk.rs"]
+  symbols = ["item:without_verbatim"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Private `without_verbatim` over a canonical disk path; it does not refuse the cases winpath::plain refuses (reserved names, trailing dots, over-long paths). Debrief adopts paddock_env::winpath::plain."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-ai/src/models/disk.rs"]
+  symbols = ["item:without_verbatim"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "The same private `without_verbatim` for the model folders. Debrief adopts paddock_env::winpath::plain."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-service/src/privileged/install.rs"]
+  symbols = ["item:without_verbatim_prefix"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "A public str-level strip used by the trust rule's path splitting (two call sites in install.rs). Move those to winpath::plain and delete the function."

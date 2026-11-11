@@ -4,6 +4,7 @@
 tools/paddock-dev
 crates/Cargo.toml
 crates/paddock-cli
+crates/paddock-env
 crates/paddock-proc
 crates/paddock-repo-graph
 crates/paddock-slots

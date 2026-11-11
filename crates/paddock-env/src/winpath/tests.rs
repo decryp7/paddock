@@ -1,5 +1,5 @@
 use super::*;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const W: Os = Os::Windows;
 
@@ -397,6 +397,7 @@ mod on_windows {
 #[test]
 fn a_name_that_is_not_text_is_left_alone_and_refused_for_programs() {
     use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
     let odd = PathBuf::from(std::ffi::OsString::from_vec(vec![b'/', 0xff, b'a']));
     assert_eq!(plain(&odd, W), odd.as_path());
     assert!(!safe_to_strip(&odd, W, Purpose::Plain));
