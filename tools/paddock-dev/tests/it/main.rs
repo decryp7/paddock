@@ -13,6 +13,7 @@ mod ipc_endpoints;
 mod isolation;
 mod release_isolation;
 mod slots;
+mod sparse;
 mod tree;
 mod worktree;
 mod wrapper;

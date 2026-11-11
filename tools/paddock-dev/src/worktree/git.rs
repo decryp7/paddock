@@ -206,6 +206,60 @@ pub fn is_under(child: &str, parent: &str) -> bool {
     c == p || c.starts_with(&format!("{p}/"))
 }
 
+/// What a worktree holds that no remote has: the work `drop` and `clean` must never remove.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct WorkState {
+    /// Files with a change in the index.
+    pub staged: u64,
+    /// Tracked files modified (or deleted) in the folder.
+    pub modified: u64,
+    /// Files git does not track and does not ignore.
+    pub untracked: u64,
+    /// Commits reachable from HEAD that no remote-tracking branch has.
+    pub unpushed: u64,
+}
+
+impl WorkState {
+    /// Reads the worktree at `dir` with two git calls; an error is an unknown state, which callers treat as not removable.
+    pub fn of(dir: &Path) -> Result<WorkState, GitError> {
+        let git = Git::at(dir);
+        let mut s = WorkState::default();
+        for line in git.text(&["status", "--porcelain"])?.lines() {
+            let b = line.as_bytes();
+            if b.len() < 2 {
+                continue;
+            }
+            if b[0] == b'?' {
+                s.untracked += 1;
+                continue;
+            }
+            s.staged += u64::from(b[0] != b' ');
+            s.modified += u64::from(b[1] != b' ');
+        }
+        s.unpushed = git
+            .text(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?
+            .trim()
+            .parse()
+            .unwrap_or(1);
+        Ok(s)
+    }
+
+    /// Nothing that only this folder has.
+    pub fn is_clean(&self) -> bool {
+        *self == WorkState::default()
+    }
+
+    /// The uncommitted part, for a message: `1 staged, 2 modified, 3 untracked`; empty when there is none.
+    pub fn uncommitted(&self) -> String {
+        let parts: Vec<String> = [(self.staged, "staged"), (self.modified, "modified"), (self.untracked, "untracked")]
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, w)| format!("{n} {w}"))
+            .collect();
+        parts.join(", ")
+    }
+}
+
 /// The path as the owner map and `git worktree list` spell it: absolute, real, with `/` separators.
 pub fn key(p: &Path) -> String {
     canonical(p).to_string_lossy().replace('\\', "/")

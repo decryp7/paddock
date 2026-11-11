@@ -68,7 +68,7 @@ export async function main(argv, { log = console.log, err = console.error, env =
     }
     if (cmd === 'list' || cmd === 'commands') {
       // `dev gates check` reads both from the current folder: a sparse checkout is named here, not by a later ENOENT.
-      const sparse = fullCheckoutProblem(resolve('.'));
+      const sparse = fullCheckoutProblem(resolve('.'), env);
       if (sparse) {
         err(sparse);
         return 2;
@@ -116,7 +116,7 @@ export async function main(argv, { log = console.log, err = console.error, env =
       return r.status !== 0 ? r.status : r.findings.length ? 1 : 0;
     }
     const o = parseArgs(argv);
-    const sparse = fullCheckoutProblem(resolve(o.root ?? '.'));
+    const sparse = fullCheckoutProblem(resolve(o.root ?? '.'), env);
     if (sparse) {
       err(sparse);
       return 2;

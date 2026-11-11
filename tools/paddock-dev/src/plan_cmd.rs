@@ -104,6 +104,12 @@ fn env_var(k: &str) -> Option<String> {
 pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let env = env_var;
+    // A sparse checkout makes the planner read a tree with folders missing and answer for it; say so first (local runs only).
+    if !matches!(args.first().map(String::as_str), Some("--commit-range" | "--commit-flags"))
+        && let Some(line) = crate::gates::edge::sparse_problem(&root)
+    {
+        return Err(CliError::failure(line));
+    }
     if let Some(mode) = args.first().filter(|a| *a == "--commit-range" || *a == "--commit-flags") {
         let lint = |name: &str| env(name).unwrap_or_default();
         let (event, reference, before, base, base_ref, app) = (

@@ -23,7 +23,7 @@ test('affected.mjs in a sparse checkout prints the ::error:: naming the folders 
   const script = join(dir, 'scripts/affected.mjs');
   let out;
   try {
-    execFileSync('node', [script, '--all'], { cwd: dir, stdio: 'pipe', encoding: 'utf8' });
+    execFileSync('node', [script, '--all'], { cwd: dir, stdio: 'pipe', encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: '', PADDOCK_ALLOW_SPARSE: '' } });
     assert.fail('expected a failure');
   } catch (e) {
     out = `${e.stderr}${e.stdout}`;

@@ -79,6 +79,24 @@ that quotes a result links to the block instead of carrying the only copy.
 
 - **Notes:** one thread, no parallelism needed at this size; the cheaper scan (a byte-string test before parsing Rust and TypeScript, one parse per YAML file) is in. The debug figure is for a debug `./dev` on this loaded machine. How the wrapper builds `./dev` in CI (profile, cold cache) is not measured here.
 
+### 2026-11-12, full against sparse worktree checkout (fix/worktree-gates-profile)
+
+- **Commit:** e2a318345 (origin/main when measured); the tool is the `./dev` built from main before the change
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; the worktree root on the external d8 disk
+- **Load:** 1-minute load 9.0 to 9.8 at the start and end of the runs (other agents' builds were running)
+- **Build:** the `./dev` wrapper's binary, unchanged by the measurement
+- **Corpus:** this repository: 13,163 tracked files; the cone is `crates,ui,scripts,docs,tools,apps/spotter`
+- **Command:** `HEAVY_LOCK_DIR=/Volumes/d8sst7/dev-targets/heavy-slots engineering-rules/scripts/heavy.sh ./dev worktree add <name> --base origin/main -b <branch> --owner implementer:meas --root /Volumes/d8sst7/dev-targets/wt --agent <id> [--sparse crates,ui,scripts,docs,tools,apps/spotter]`, then `du -sk <folder>`
+- **Runs:** 3 runs of each, interleaved; median and range of the wall time as `date` differences; disk is the same every run
+- **Numbers:**
+
+  | Measure | Sparse cone | Full checkout | Verdict |
+  |---|---|---|---|
+  | wall time, median (range) | 1.2 s (1.2 to 1.3) | 2.7 s (2.6 to 7.1) | full costs about 1.4 s more at median |
+  | disk | 203 MiB | 544 MiB | full costs about 340 MiB more |
+
+- **Notes:** the full checkout's slowest run (7.1 s) came while the load was high. An earlier run on a quieter machine gave 3.1 s and 1.9 s (two runs each, disk the same). Decision: a branch worktree is a full checkout (`--profile gates`), because conformance, `scripts/affected.mjs`, `./dev gates check` and `./dev plan` read most folders and a cone made them fail with ENOENT; agents added folders by hand at least four times on 2026-11-11. `--sparse` stays for `--detach` review copies. Not measured: build output, which is the same for both.
+
 ## All benchmarks
 
 The CI column names the workflow and job. "No" means nobody runs it unless they choose to. Details, env vars and

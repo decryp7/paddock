@@ -103,6 +103,10 @@ fn list_agrees_with_worktree_sh_on_merged_and_dirty() {
 fn clean_removes_the_same_worktrees_as_worktree_sh() {
     let fx = Fixture::new();
     let made = build(&fx);
+    // worktree.sh trusts "merged into local main"; the tool also wants the commits on a remote (it never removes work no remote
+    // has), so the fixture pushes main first, as a landing does.
+    fx.git(&fx.primary, &["push", "-q", "origin", "main"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
     let theirs: Vec<String> = sh(&fx, &["clean", "--base", "main", "--dry-run"])
         .lines()
         .filter_map(|l| l.strip_prefix("would remove "))

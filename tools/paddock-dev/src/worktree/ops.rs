@@ -1,7 +1,7 @@
 //! The commands that change a worktree's ownership or existence: `add`, `claim`, `reassign`, `release` and `drop`
 //! (ADR 0083 §1). Each runs its read-check-write under the owner map's lock, so a refusal never leaves half a change.
 
-use super::git::{Git, GitError, Repo, WorktreeInfo, is_under, key, worktrees};
+use super::git::{Git, GitError, Repo, WorkState, WorktreeInfo, is_under, key, worktrees};
 use super::note::{Note, check_owner, format_utc, now_secs};
 use super::owners::{Claim, OwnerError, OwnerMap, OwnerStore, PENDING_TTL, same_path};
 use paddock_cli::{CliError, Report};
@@ -117,12 +117,87 @@ impl Attach {
         }
     }
 
+    /// For an existing branch: how far it is from `--base` and from its remote, refusing a branch that is already merged
+    /// into the base or that is behind its remote (both are almost always a stale name, and work would start on old code).
+    fn drift(&self, git: &Git, base: &str, base_sha: &str, branch: &str) -> Result<Option<Drift>, CliError> {
+        let tip = match self {
+            Attach::New => return Ok(None),
+            Attach::Local(t) | Attach::Remote(_, t) => t.clone(),
+        };
+        let count = |a: &str, b: &str| -> Result<(u64, u64), CliError> {
+            let out = git
+                .text(&["rev-list", "--left-right", "--count", &format!("{a}...{b}")])
+                .map_err(git_failure)?;
+            let mut it = out.split_whitespace().map(|n| n.parse::<u64>().unwrap_or(0));
+            Ok((it.next().unwrap_or(0), it.next().unwrap_or(0)))
+        };
+        let (behind_base, ahead_base) = count(base_sha, &tip)?;
+        if ahead_base == 0 && behind_base > 0 {
+            return Err(CliError::refused(format!(
+                "The branch `{branch}` is already merged into {base} ({behind_base} commit(s) behind it, none of its own)."
+            ))
+            .with_hint("Use a new branch name for new work, or work on the branch that still has commits."));
+        }
+        let remote = match self {
+            Attach::Remote(r, _) => Some(r.clone()),
+            _ => {
+                let r = format!("origin/{branch}");
+                git.succeeds(&["rev-parse", "--verify", "--quiet", &format!("refs/remotes/{r}")])
+                    .unwrap_or(false)
+                    .then_some(r)
+            }
+        };
+        let vs_remote = match remote {
+            Some(r) => {
+                let (behind, ahead) = count(&format!("refs/remotes/{r}"), &tip)?;
+                if behind > 0 && ahead == 0 {
+                    return Err(CliError::refused(format!(
+                        "The local branch `{branch}` is {behind} commit(s) behind {r}."
+                    ))
+                    .with_hint(format!(
+                        "Fast-forward it first: `git fetch origin && git branch -f {branch} {r}` (safe: it has no commit of its own), then run add again."
+                    )));
+                }
+                Some((r, ahead, behind))
+            }
+            None => None,
+        };
+        Ok(Some(Drift {
+            ahead_base,
+            behind_base,
+            vs_remote,
+        }))
+    }
+
     fn describe(&self) -> Option<String> {
         match self {
             Attach::New => None,
             Attach::Local(_) => Some("local branch".to_string()),
             Attach::Remote(r, _) => Some(format!("remote branch {r}")),
         }
+    }
+}
+
+/// How an attached branch stands against `--base` and its remote.
+struct Drift {
+    ahead_base: u64,
+    behind_base: u64,
+    /// Remote ref, commits ahead, commits behind.
+    vs_remote: Option<(String, u64, u64)>,
+}
+
+impl Drift {
+    fn json(&self) -> serde_json::Value {
+        json!({"ahead_of_base": self.ahead_base, "behind_base": self.behind_base,
+               "remote": self.vs_remote.as_ref().map(|(r, a, b)| json!({"ref": r, "ahead": a, "behind": b}))})
+    }
+
+    fn text(&self, base: &str) -> String {
+        let mut t = format!("The branch is {} ahead of and {} behind {base}", self.ahead_base, self.behind_base);
+        if let Some((r, a, b)) = &self.vs_remote {
+            t.push_str(&format!("; {a} ahead of and {b} behind {r}"));
+        }
+        t + "."
     }
 }
 
@@ -209,7 +284,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     if req.branch.is_some() && !req.sparse.is_empty() {
         return Err(CliError::usage("--sparse is for review copies (--detach); a branch worktree is a full checkout.")
             .with_hint(
-                "The gates (conformance, affected.mjs, `gates check`) read most of the repository, and a full checkout costs about 1 s and 350 MB more than a cone. Drop --sparse, or add --detach for a review copy.",
+                "The gates (conformance, affected.mjs, `gates check`) read most of the repository; a full checkout costs a little more disk and time (docs/benchmarks.md, \"Full against sparse worktree checkout\"). Drop --sparse, or add --detach for a review copy.",
             ));
     }
     let git = repo.git();
@@ -225,6 +300,7 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         Some(b) => Attach::find(&git, b)?,
         None => Attach::New,
     };
+    let drift = attach.drift(&git, req.base, &base_sha, req.branch.unwrap_or_default())?;
     // An existing branch keeps its own commits: the base it was made from is the branch's tip, not `--base`.
     let base_sha = match &attach {
         Attach::New => base_sha,
@@ -289,14 +365,14 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         .unwrap_or(base_sha);
     Ok(Report::new(
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
-               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe()}),
+               "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json)}),
         format!(
             "Made {k} ({}{}), locked: {note}",
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}")),
             attach
                 .describe()
                 .map_or(String::new(), |d| format!(", attached to the existing {d}"))
-        ),
+        ) + &drift.as_ref().map_or(String::new(), |d| format!("\n{}", d.text(req.base))),
     ))
 }
 
@@ -477,21 +553,23 @@ pub fn drop_own(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, Cli
                         .with_hint("`drop` removes only a worktree you claimed yourself."));
                 }
             }
-            let at = Git::at(Path::new(&k));
-            let dirty = at.text(&["status", "--porcelain"]).map_err(git_failure)?;
-            if !dirty.trim().is_empty() {
-                return Err(
-                    CliError::refused(format!("{k} has uncommitted changes or untracked files; nothing was removed."))
-                        .with_hint("Commit and push them, or delete the files you do not need, then drop again."),
-                );
-            }
-            let unpushed = at
-                .text(&["rev-list", "--count", "HEAD", "--not", "--remotes"])
-                .map_err(git_failure)?;
-            if unpushed.trim() != "0" {
+            // Never removes work no remote has, and never with --force: staged, modified and untracked files and commits on
+            // no remote branch each refuse (a failed commit chained before a removal once lost an agent's work).
+            let state = WorkState::of(Path::new(&k)).map_err(|e| {
+                git_failure(e)
+                    .with_hint("The state of the worktree is unknown, so nothing was removed. Fix the git error, then drop again.")
+            })?;
+            let uncommitted = state.uncommitted();
+            if !uncommitted.is_empty() {
                 return Err(CliError::refused(format!(
-                    "{k} has {} commit(s) that are on no remote; nothing was removed.",
-                    unpushed.trim()
+                    "{k} has uncommitted changes or untracked files ({uncommitted}); nothing was removed."
+                ))
+                .with_hint("Commit and push them, or delete the files you do not need, then drop again."));
+            }
+            if state.unpushed > 0 {
+                return Err(CliError::refused(format!(
+                    "{k} has {} commit(s) that are on no remote branch; nothing was removed.",
+                    state.unpushed
                 ))
                 .with_hint("Push them (or cherry-pick what you need elsewhere), then drop again."));
             }

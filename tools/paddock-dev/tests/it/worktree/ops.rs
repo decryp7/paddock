@@ -255,6 +255,9 @@ fn add_attaches_to_an_existing_local_branch() {
     let r = add_branch(&fx, "w", "taken", &[]);
     assert_eq!(r.code, 0, "{} {}", r.json, r.err);
     assert_eq!(r.json["attached"], "local branch");
+    assert_eq!(r.json["drift"]["ahead_of_base"], 1);
+    assert_eq!(r.json["drift"]["behind_base"], 0);
+    assert!(r.json["drift"]["remote"].is_null(), "no remote branch of that name");
     assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "taken");
     assert_eq!(
         fx.git(&path, &["rev-parse", "HEAD"]),
@@ -276,6 +279,82 @@ fn add_attaches_to_a_branch_that_exists_only_on_the_remote() {
     assert_eq!(r.json["attached"], "remote branch origin/pushed");
     assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "pushed");
     assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "pushed@{upstream}"]), "origin/pushed");
+}
+
+/// Advances origin's main by one commit and fetches it, so `origin/main` is ahead of an older branch.
+fn advance_main(fx: &Fixture) {
+    fx.git(&fx.primary, &["commit", "-q", "--allow-empty", "-m", "second"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", "main"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+}
+
+#[test]
+fn add_refuses_a_branch_that_is_already_merged_into_the_base_and_says_how_far_behind() {
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["branch", "old", "origin/main"]);
+    advance_main(&fx);
+    let path = fx.path("w");
+    let r = add_branch(&fx, "w", "old", &[]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(
+        r.err.contains("already merged into origin/main") && r.err.contains("1 commit(s) behind"),
+        "{}",
+        r.err
+    );
+    assert!(r.err.contains("new branch name"), "{}", r.err);
+    assert!(!path.exists());
+    assert_eq!(fx.owner_of(&path), None);
+}
+
+#[test]
+fn add_refuses_a_local_branch_that_is_behind_its_remote_and_gives_the_fast_forward() {
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["branch", "work", "origin/main"]);
+    fx.git(&fx.primary, &["commit", "-q", "--allow-empty", "-m", "remote only"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", "HEAD:refs/heads/work"]);
+    fx.git(&fx.primary, &["reset", "-q", "--hard", "origin/main"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+    let path = fx.path("w");
+    let r = add_branch(&fx, "w", "work", &[]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(r.err.contains("1 commit(s) behind origin/work"), "{}", r.err);
+    assert!(r.err.contains("git branch -f work origin/work"), "{}", r.err);
+    assert!(!path.exists());
+}
+
+#[test]
+fn add_reports_how_far_an_attached_branch_is_from_its_remote() {
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["push", "-q", "origin", "origin/main:refs/heads/mine"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+    fx.git(&fx.primary, &["branch", "mine", "origin/mine"]);
+    fx.git(&fx.primary, &["commit", "-q", "--allow-empty", "-m", "local only"]);
+    fx.git(&fx.primary, &["branch", "-f", "mine", "HEAD"]);
+    fx.git(&fx.primary, &["reset", "-q", "--hard", "origin/main"]);
+    let r = add_branch(&fx, "w", "mine", &[]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["drift"]["remote"]["ref"], "origin/mine");
+    assert_eq!(r.json["drift"]["remote"]["ahead"], 1);
+    assert_eq!(r.json["drift"]["remote"]["behind"], 0);
+    let text = fx
+        .cmd_text(
+            &fx.primary,
+            &["worktree", "add", "w2", "-b", "mine", "--base", "origin/main", "--owner", "a:b"],
+        )
+        .output()
+        .unwrap();
+    // `mine` is now checked out in `w`, so git refuses: the text form is checked on a second branch below.
+    assert!(!text.status.success());
+    fx.git(&fx.primary, &["branch", "mine2", "mine"]);
+    let t = fx
+        .cmd_text(
+            &fx.primary,
+            &["worktree", "add", "w3", "-b", "mine2", "--base", "origin/main", "--owner", "a:b"],
+        )
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&t.stdout);
+    assert!(out.contains("The branch is 1 ahead of and 0 behind origin/main"), "{out}");
 }
 
 #[test]
@@ -559,6 +638,27 @@ fn drop_refuses_uncommitted_changes_and_untracked_files() {
     assert_eq!(fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-R"]).code, 4);
     assert!(fx.lock_reason(&path).is_some(), "a refused drop keeps the lock");
     assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-R"));
+}
+
+#[test]
+fn drop_refuses_staged_modified_and_untracked_work_and_counts_each_kind() {
+    // A commit that failed (a hook, a bad message) leaves staged files; a removal chained after it must not take them along.
+    let fx = Fixture::new();
+    let path = add_copy(&fx, "copy", "agent-R");
+    std::fs::write(path.join("staged.txt"), "s").unwrap();
+    fx.git(&path, &["add", "staged.txt"]);
+    let r = fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-R"]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(r.err.contains("1 staged") && !r.err.contains("untracked,"), "{}", r.err);
+    std::fs::write(path.join("README.md"), "changed\n").unwrap();
+    std::fs::write(path.join("new.txt"), "x").unwrap();
+    let r = fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-R"]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(r.err.contains("1 staged, 1 modified, 1 untracked"), "{}", r.err);
+    for f in ["staged.txt", "README.md", "new.txt"] {
+        assert!(path.join(f).exists(), "{f} survives");
+    }
+    assert!(fx.lock_reason(&path).is_some() && fx.owner_of(&path).as_deref() == Some("agent-R"));
 }
 
 #[test]

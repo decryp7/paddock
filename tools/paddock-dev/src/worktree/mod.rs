@@ -64,7 +64,8 @@ pub struct Common {
     agent_type: Option<String>,
 }
 
-/// What `add` checks out.
+/// What `add` checks out. One profile today: the enum is the place for another one (a named cone someone measured and a gate
+/// reads in full), so `--profile` does not change shape when it comes; until then `--sparse` is the only other choice.
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum Profile {
     /// A full checkout: nothing a gate reads is missing.
@@ -88,11 +89,12 @@ pub struct AddArgs {
     /// A review copy at the base: no branch.
     #[arg(long)]
     detach: bool,
-    /// What to check out: `gates` (the default) is a full checkout, everything conformance, `affected.mjs` and
-    /// `gates check` read. Measured on this repository: about 3 s and 540 MB, against 2 s and 200 MB for a cone.
+    /// What to check out: `gates` (the default) is a full checkout, everything conformance, `affected.mjs`, `gates check`
+    /// and `dev plan` read. Measurements: docs/benchmarks.md, "Full against sparse worktree checkout".
     #[arg(long, value_enum, default_value = "gates", conflicts_with = "sparse")]
     profile: Profile,
-    /// Sparse cone folders (comma separated). Only with --detach (a review copy): a branch worktree is a full checkout.
+    /// Sparse cone folders (comma separated). Only with --detach, for a review copy that reads a few folders. A review copy
+    /// that runs the gates (conformance, `affected.mjs`, `gates check`, `dev plan`) needs no --sparse: leave it out.
     #[arg(long, value_delimiter = ',')]
     sparse: Vec<String>,
     /// The folder all agent worktrees go under (default: git config paddock.worktreeRoot, then PADDOCK_WORKTREE_ROOT).
