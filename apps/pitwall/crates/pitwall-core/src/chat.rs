@@ -10,6 +10,8 @@ use serde_json::Value;
 pub const MAX_MESSAGES: usize = 4096;
 /// Most images in one request.
 pub const MAX_IMAGES: usize = 16;
+/// Most audio clips in one request (judgement: a model that hears takes one clip a turn; a few allow a short history).
+pub const MAX_AUDIO_CLIPS: usize = 4;
 /// Most tools in one request.
 pub const MAX_TOOLS: usize = 256;
 /// Most stop sequences in one request.
@@ -125,6 +127,69 @@ impl Image {
     }
 }
 
+/// An audio clip's encoding: what llama-server's `input_audio` takes (`wav`, `mp3`; OpenAI's two formats).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AudioFormat {
+    /// WAV.
+    Wav,
+    /// MP3.
+    Mp3,
+}
+
+impl AudioFormat {
+    /// From OpenAI's `format` value.
+    pub fn parse(format: &str) -> Option<AudioFormat> {
+        match format.trim().to_ascii_lowercase().as_str() {
+            "wav" => Some(AudioFormat::Wav),
+            "mp3" => Some(AudioFormat::Mp3),
+            _ => None,
+        }
+    }
+
+    /// OpenAI's `format` value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AudioFormat::Wav => "wav",
+            AudioFormat::Mp3 => "mp3",
+        }
+    }
+}
+
+/// Inline audio data (standard base64), for a model that hears. Only inline data is accepted: Pitwall never fetches a URL a
+/// request names (ADR 0001), and never sets llama-server's `--media-path`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Audio {
+    /// Its encoding.
+    pub format: AudioFormat,
+    /// Standard base64, validated.
+    pub data: String,
+}
+
+impl std::fmt::Debug for Audio {
+    // Never the data: it is a recording (no user audio in logs).
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Audio")
+            .field("format", &self.format)
+            .field("base64_bytes", &self.data.len())
+            .finish()
+    }
+}
+
+impl Audio {
+    /// Validates base64 audio data.
+    pub fn from_base64(format: AudioFormat, data: &str) -> Result<Audio, ChatError> {
+        use base64::Engine;
+        let data = data.trim();
+        if data.is_empty() || base64::engine::general_purpose::STANDARD.decode(data).is_err() {
+            return Err(ChatError::Invalid("an audio clip is not valid base64".into()));
+        }
+        Ok(Audio {
+            format,
+            data: data.to_string(),
+        })
+    }
+}
+
 /// A piece of a message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Part {
@@ -132,6 +197,8 @@ pub enum Part {
     Text(String),
     /// An image.
     Image(Image),
+    /// An audio clip, for a model that hears.
+    Audio(Audio),
 }
 
 /// A tool call the model made.
@@ -175,7 +242,7 @@ impl Message {
             .iter()
             .filter_map(|p| match p {
                 Part::Text(t) => Some(t.as_str()),
-                Part::Image(_) => None,
+                Part::Image(_) | Part::Audio(_) => None,
             })
             .collect::<Vec<_>>()
             .join("")
@@ -185,7 +252,15 @@ impl Message {
     pub fn images(&self) -> impl Iterator<Item = &Image> {
         self.parts.iter().filter_map(|p| match p {
             Part::Image(i) => Some(i),
-            Part::Text(_) => None,
+            Part::Text(_) | Part::Audio(_) => None,
+        })
+    }
+
+    /// The audio clips.
+    pub fn audio(&self) -> impl Iterator<Item = &Audio> {
+        self.parts.iter().filter_map(|p| match p {
+            Part::Audio(a) => Some(a),
+            Part::Text(_) | Part::Image(_) => None,
         })
     }
 }
@@ -291,6 +366,9 @@ impl ChatRequest {
         if self.messages.iter().map(|m| m.images().count()).sum::<usize>() > MAX_IMAGES {
             return bad("the request has too many images");
         }
+        if self.messages.iter().map(|m| m.audio().count()).sum::<usize>() > MAX_AUDIO_CLIPS {
+            return bad("the request has too many audio clips");
+        }
         if self.tools.len() > MAX_TOOLS {
             return bad("the request has too many tools");
         }
@@ -314,6 +392,11 @@ impl ChatRequest {
     /// Whether any message carries an image.
     pub fn has_images(&self) -> bool {
         self.messages.iter().any(|m| m.images().next().is_some())
+    }
+
+    /// Whether any message carries an audio clip.
+    pub fn has_audio(&self) -> bool {
+        self.messages.iter().any(|m| m.audio().next().is_some())
     }
 }
 
@@ -495,6 +578,31 @@ mod tests {
             messages: vec![Message::text(Role::User, "hi")],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn audio_is_checked_counted_and_never_printed() {
+        assert_eq!(AudioFormat::parse(" WAV "), Some(AudioFormat::Wav));
+        assert_eq!(AudioFormat::parse("mp3").map(AudioFormat::as_str), Some("mp3"));
+        assert_eq!(AudioFormat::parse("m4a"), None);
+        assert!(Audio::from_base64(AudioFormat::Wav, "***").is_err());
+        assert!(Audio::from_base64(AudioFormat::Wav, " ").is_err());
+        let a = Audio::from_base64(AudioFormat::Wav, "UklGRiQAAABXQVZF").unwrap();
+        assert!(!format!("{a:?}").contains("UklGR"), "no audio in debug output");
+        let msg = |n: usize| Message {
+            role: Role::User,
+            parts: vec![Part::Audio(a.clone()); n],
+            tool_calls: vec![],
+            tool_call_id: None,
+        };
+        let mut r = req();
+        assert!(!r.has_audio());
+        r.messages = vec![msg(MAX_AUDIO_CLIPS)];
+        assert!(r.has_audio() && r.check().is_ok());
+        assert_eq!(r.messages[0].text_content(), "");
+        assert_eq!(r.messages[0].images().count(), 0);
+        r.messages = vec![msg(MAX_AUDIO_CLIPS + 1)];
+        assert!(r.check().unwrap_err().to_string().contains("too many audio clips"));
     }
 
     #[test]
