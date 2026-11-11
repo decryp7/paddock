@@ -713,6 +713,15 @@ pub fn parse_register(text: &str) -> Result<Register, String> {
     })
 }
 
+/// Whether a `deferred_by` reason names an ADR: `ADR`, a space and four digits (`ADR 0072`). The same rule as the strict parser
+/// of the endings harness (`paddock_ipc::testing::endings::ratchet::names_an_adr`; known-copies `ipc-ratchet-parse`).
+pub fn names_an_adr(reason: &str) -> bool {
+    reason.match_indices("ADR ").any(|(i, m)| {
+        let digits = &reason[i + m.len()..];
+        digits.len() >= 4 && digits.as_bytes()[..4].iter().all(u8::is_ascii_digit)
+    })
+}
+
 /// One ratchet entry (`docs/ipc-endpoint-ratchet.toml`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RatchetEntry {
@@ -941,7 +950,10 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
             out.push(format!("{at}: unknown fault `{}`.", r.fault));
         }
         let logging = LOGGING_FAULTS.contains(&r.fault.as_str());
-        let deferred = !r.deferred_by.trim().is_empty();
+        let deferred = names_an_adr(&r.deferred_by);
+        if !r.deferred_by.is_empty() && !deferred {
+            out.push(format!("{at}: `deferred_by` must name an `ADR nnnn` (got `{}`).", r.deferred_by));
+        }
         if r.blocks_tag.is_empty() || (r.blocks_tag == "none" && !logging && !deferred) {
             out.push(format!(
                 "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap or a deferred fault may say `none` (a deferred fault names its decision in `deferred_by`)."
@@ -1017,14 +1029,15 @@ pub fn command(root: Option<PathBuf>, tag: Option<String>) -> Result<Report, Cli
         }
     }
     let text = format!(
-        "C102: {} listen site(s) in non-test code, {} endpoint(s), {} out-of-scope entr{}, {} ratchet entr{} ({} block a tag).",
+        "C102: {} listen site(s) in non-test code, {} endpoint(s), {} out-of-scope entr{}, {} ratchet entr{} ({} block a tag, {} deferred).",
         sites.len(),
         register.endpoints.len(),
         register.out_of_scope.len(),
         if register.out_of_scope.len() == 1 { "y" } else { "ies" },
         ratchet.len(),
         if ratchet.len() == 1 { "y" } else { "ies" },
-        ratchet.iter().filter(|e| e.blocks_tag != "none").count()
+        ratchet.iter().filter(|e| e.blocks_tag != "none").count(),
+        ratchet.iter().filter(|e| !e.deferred_by.is_empty()).count()
     );
     Ok(Report::new(
         json!({"sites": sites.len(), "endpoints": register.endpoints.len(), "outOfScope": register.out_of_scope.len(), "ratchet": ratchet.len()}),

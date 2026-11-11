@@ -2,14 +2,15 @@
 # (`paddock_ipc::testing::endings`) on main's behaviour. Every ending test is green with this file and red without it
 # (`PADDOCK_ENDINGS_NO_RATCHET=1`), and the file only shrinks: a fault that is not listed is a new failure, and a listed fault
 # that no longer happens fails the run until its entry is removed. `./dev check ipc-endpoints` (C102) checks the file's shape;
-# `./dev check ipc-endpoints --tag <tag>` refuses a release tag that matches a `blocks_tag` pattern while an entry remains.
+# `./dev check ipc-endpoints --tag <tag>` refuses a release tag that matches a `blocks_tag` pattern while such an entry remains (a deferred entry says `none`).
 #
-# instance    I1..I27 of the ADR, or WP-7 for the missing end line (a logging gap, which blocks no tag)
+# instance    I1..I27 of the ADR, or WP-7 for the missing end line (a logging gap: it says `none` and blocks no tag)
 # endpoint    the id in docs/ipc-endpoints.toml
 # scenario    a scenario of the harness, or `*` for every scenario that ran
 # fault       the kind the harness reports
 # blocks_tag  the tag pattern a release of which is refused while the entry exists (`none` only for a logging gap or a deferred fault)
-# deferred_by the decision that deferred a fault that is not a logging gap (it then says `blocks_tag = "none"`: listed, visible, no tag blocked)
+# deferred_by the work package of ADR 0072 that the user's 2026-11-11 trim deferred, for a fault that is not a logging gap: it must
+#             contain `ADR nnnn`, and the entry then says `blocks_tag = "none"` (listed and visible, no tag blocked); D8's amendment
 # os          only where the fault is not on every OS (linux, macos, windows)
 
 [[ratchet]]
@@ -18,7 +19,7 @@ endpoint = "ipc-host"
 scenario = "silent-client"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "The handshake watchdog closes the stream when it runs out; the client reads a bare end (handshake.rs bounded)."
 
 [[ratchet]]
@@ -27,7 +28,7 @@ endpoint = "ipc-host"
 scenario = "owner-close-with-calls-in-flight"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-2 (M2): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "Peer::close sends no reason; the order is right since 5528ea2b2, the reason is missing."
 
 [[ratchet]]
@@ -36,7 +37,7 @@ endpoint = "ipc-host"
 scenario = "owner-close-with-calls-in-flight"
 fault = "typed-transport"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-1 (M1): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "IpcError::Closed(String): a said end and a broken stream read alike; M1 makes it Closed(Closure)."
 
 [[ratchet]]
@@ -45,7 +46,7 @@ endpoint = "ipc-host"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-2 (M2): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "Peer::close sends no reason (the owner's stop of an open connection)."
 
 [[ratchet]]
@@ -54,7 +55,7 @@ endpoint = "ipc-host"
 scenario = "listener-stop-with-client-in-backlog"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-4 (M4): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "A listener dropped with a connected client in its backlog: the client reads a bare end and never learns why."
 
 [[ratchet]]
@@ -71,7 +72,7 @@ endpoint = "ipc-link-server"
 scenario = "silent-client"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "As ipc-host: the handshake limit closes the stream."
 
 [[ratchet]]
@@ -80,7 +81,7 @@ endpoint = "ipc-link-server"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-2 and WP-8 (M2): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "LinkServer::stop closes every peer with no reason."
 
 [[ratchet]]
@@ -97,7 +98,7 @@ endpoint = "ipc-launcher"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-2 and WP-8 (M2): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "launch.rs closes the child's peer with no reason."
 
 [[ratchet]]
@@ -114,7 +115,7 @@ endpoint = "dyno-agent"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 and WP-8 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "The agent's stop closes every peer with no reason (server.rs, after the accept loop)."
 
 [[ratchet]]
@@ -131,7 +132,7 @@ endpoint = "dyno-helper"
 scenario = "busy"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 and WP-8 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "'too many connections, one was dropped': the 17th connection is dropped with no answer."
 
 [[ratchet]]
@@ -140,7 +141,7 @@ endpoint = "dyno-helper"
 scenario = "malformed-first-frame"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-2 (M2): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "A frame the peer cannot decode fails the Peer (Peer::fail) with no reason frame."
 
 [[ratchet]]
@@ -157,7 +158,7 @@ endpoint = "mcp-loopback"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-5 (M5): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "Serving::shutdown(Both) after pairing: the bridge reads a bare end."
 
 [[ratchet]]
@@ -174,7 +175,7 @@ endpoint = "pitcrew-service"
 scenario = "malformed-first-frame"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred (rest of WP-11), gates no tag"
+deferred_by = "ADR 0072 the rest of WP-11 (M6): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "An unreadable hello: `_ => return`, no answer (ipc.rs connection())."
 
 [[ratchet]]
@@ -201,7 +202,7 @@ endpoint = "pitcrew-service"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred (rest of WP-11), gates no tag"
+deferred_by = "ADR 0072 the rest of WP-11 (M6): deferred by the 2026-11-11 trim (user), so it gates no tag"
 note = "A stop drops every connection with no reason."
 
 [[ratchet]]
@@ -218,7 +219,7 @@ endpoint = "ipc-host"
 scenario = "wrong-account"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "The account refusal is written, then the stream drops with the client's Hello unread: AF_UNIX on Linux resets, so the client may lose the refusal (macOS does not)."
 
@@ -228,7 +229,7 @@ endpoint = "ipc-host"
 scenario = "busy"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "refuse_busy: as I8, the Hello is unread when the stream drops."
 
@@ -238,7 +239,7 @@ endpoint = "ipc-host"
 scenario = "client-keeps-writing"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "A refused client's bytes after its Hello are not drained: the close resets on Linux."
 
@@ -248,7 +249,7 @@ endpoint = "ipc-host"
 scenario = "listener-stop-with-client-in-backlog"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-4 (M4): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "Closing a listening AF_UNIX socket resets the connections queued in its backlog (Linux): the client reads ECONNRESET."
 
@@ -258,7 +259,7 @@ endpoint = "ipc-link-server"
 scenario = "busy"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "LinkServer refuse_busy: the Hello is unread when the stream drops (reset on Linux)."
 
@@ -268,7 +269,7 @@ endpoint = "ipc-link-server"
 scenario = "client-keeps-writing"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "As ipc-host: a refused client's later bytes are not drained (reset on Linux)."
 
@@ -278,7 +279,7 @@ endpoint = "dyno-agent"
 scenario = "client-keeps-writing"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred, M2 to M4 gate no tag"
+deferred_by = "ADR 0072 WP-3 (M3): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "A refused client's bytes after its Hello are not drained: the close resets on Linux (the agent authenticates inline with paddock-ipc's Host)."
 
@@ -288,6 +289,6 @@ endpoint = "pitcrew-service"
 scenario = "client-keeps-writing"
 fault = "reset"
 blocks_tag = "none"
-deferred_by = "ADR 0072, trimmed 2026-11-11 (user): deferred (rest of WP-11), gates no tag"
+deferred_by = "ADR 0072 the rest of WP-11 (M6): deferred by the 2026-11-11 trim (user), so it gates no tag"
 os = "linux"
 note = "The protocol-mismatch error is written, then the stream drops with the client's later bytes unread: a reset on Linux."

@@ -547,6 +547,30 @@ fn a_deferred_fault_blocks_no_tag_and_one_without_the_reason_still_does() {
     let found = run(&files, GOOD_REGISTER, &both).join("\n");
     assert!(found.contains("a deferred entry says `none`"), "{found}");
 
+    for bad in ["deferred_by = \"   \"", "deferred_by = \"later\"", "deferred_by = \"ADR 72\""] {
+        let found = run(&files, GOOD_REGISTER, &entry("none", bad)).join("\n");
+        assert!(found.contains("`deferred_by` must name an `ADR nnnn`"), "{bad}: {found}");
+    }
+
     let blocking = parse_ratchet(&entry("dyno-v*", "")).unwrap();
     assert_eq!(blocked_by(&blocking, "dyno-v1.1.1").len(), 1, "no reason, still blocks");
+}
+
+/// The sample both parsers read (the other half: paddock-ipc's `testing::endings::ratchet` tests).
+#[test]
+fn the_schema_sample_reads_the_same_here_and_in_the_endings_harness() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/ipc-endpoint-ratchet.schema-sample.toml");
+    let r = parse_ratchet(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let got: Vec<(&str, &str, &str)> = r
+        .iter()
+        .map(|e| (e.instance.as_str(), e.blocks_tag.as_str(), e.deferred_by.as_str()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            ("I24", "pitcrew-v*", ""),
+            ("WP-7", "none", ""),
+            ("I3", "none", "ADR 0072 WP-1 (M1), trimmed 2026-11-11")
+        ]
+    );
 }

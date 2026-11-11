@@ -240,6 +240,10 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/(design-guide|benchmarks)\.md$"), Marks::Projects(&["conformance"])),
         (re(r"^docs/wiki/"), Marks::Projects(&["tools"])),
+        (
+            re(r"^docs/ipc-endpoints?(-ratchet(\.schema-sample)?)?\.toml$"),
+            Marks::Projects(&["crates", "app:dyno", "app:pitcrew", "tools", "conformance"]),
+        ),
         (re(r"^apps/(shell-demo|workbench-demo)/README\.md$"), Marks::Projects(&["tools"])),
         (re(r"(^|/)REVIEWED\.md$"), Marks::Reviewed),
         (
@@ -1095,6 +1099,12 @@ mod tests {
         let capture = plan(&["crates/paddock-service/tests/fixtures/launchctl-print-running.txt"]);
         // The sample repo has no Pitcrew app: the declared input names it, so its explanation does too.
         assert!(capture.to_string().contains("app:pitcrew"), "{capture}");
+        // The IPC register and ratchet are inputs of the endings tests (scripts/affected.mjs DOC_INPUTS says the same).
+        let ratchet = plan(&["docs/ipc-endpoint-ratchet.toml"]);
+        assert!(
+            ratchet.to_string().contains("app:pitcrew") && ratchet.to_string().contains("app:dyno"),
+            "{ratchet}"
+        );
         assert_eq!(plan(&["Mystery"])["all"], true);
     }
 

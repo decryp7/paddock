@@ -20,6 +20,14 @@ pub const FILE_ENV: &str = "PADDOCK_ENDINGS_RATCHET_FILE";
 /// Set to `1` to run an ending test without its ratchet: it then fails on every fault that exists today.
 pub const NO_RATCHET_ENV: &str = "PADDOCK_ENDINGS_NO_RATCHET";
 
+/// Whether a `deferred_by` reason names an ADR: the text `ADR` and a space, then four digits (`ADR 0072`).
+pub fn names_an_adr(reason: &str) -> bool {
+    reason.match_indices("ADR ").any(|(i, m)| {
+        let digits = &reason[i + m.len()..];
+        digits.len() >= 4 && digits.as_bytes()[..4].iter().all(u8::is_ascii_digit)
+    })
+}
+
 /// One expected failure.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Entry {
@@ -33,6 +41,9 @@ pub struct Entry {
     pub fault: String,
     /// The tag pattern a release of which is refused while this entry exists (`dyno-v*`).
     pub blocks_tag: String,
+    /// The decision that deferred a fault which is not a logging gap (it names an `ADR nnnn`); then `blocks_tag` is `none`.
+    /// Empty: the entry blocks. The same rule as `./dev check ipc-endpoints` (tools/paddock-dev), one copy of the parser.
+    pub deferred_by: String,
     /// The operating systems on which the fault happens (`linux`, `macos`, `windows`, comma separated); empty: all. An
     /// entry for another OS is neither expected nor stale here (a reset on a closed listener's backlog is Linux only).
     pub os: String,
@@ -76,6 +87,13 @@ impl Ratchet {
                 scenario: need("scenario")?,
                 fault: need("fault")?,
                 blocks_tag: need("blocks_tag")?,
+                deferred_by: {
+                    let d = get("deferred_by").unwrap_or_default();
+                    if !d.is_empty() && !names_an_adr(&d) {
+                        return Err(format!("the entry before line {at}: `deferred_by` must name an `ADR nnnn` (got `{d}`)"));
+                    }
+                    d
+                },
                 os: get("os").unwrap_or_default(),
                 note: get("note").unwrap_or_default(),
             });
@@ -115,6 +133,7 @@ impl Ratchet {
                 "scenario",
                 "fault",
                 "blocks_tag",
+                "deferred_by",
                 "os",
                 "note",
             ]
@@ -220,5 +239,73 @@ impl Ratchet {
         } else {
             Err(problems.join("\n"))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(extra: &str) -> String {
+        format!(
+            "[[ratchet]]\ninstance = \"I3\"\nendpoint = \"e\"\nscenario = \"s\"\nfault = \"no-reason\"\nblocks_tag = \"none\"\n{extra}\n"
+        )
+    }
+
+    #[test]
+    fn a_deferred_entry_parses_and_a_reason_without_an_adr_does_not() {
+        let ok = Ratchet::parse(&entry(
+            "deferred_by = \"ADR 0072 WP-1, trimmed 2026-11-11\"",
+        ))
+        .unwrap();
+        assert_eq!(
+            ok.entries[0].deferred_by,
+            "ADR 0072 WP-1, trimmed 2026-11-11"
+        );
+        assert_eq!(
+            Ratchet::parse(&entry("")).unwrap().entries[0].deferred_by,
+            ""
+        );
+        for bad in ["", " ", "later", "ADR 72", "ADR  0072", "adr 0072"] {
+            let found = Ratchet::parse(&entry(&format!("deferred_by = \"{bad}\""))).err();
+            if bad.is_empty() {
+                assert!(
+                    found.is_none(),
+                    "an empty reason is no reason, not an error"
+                );
+            } else {
+                assert!(
+                    found.is_some_and(|e| e.contains("must name an `ADR nnnn`")),
+                    "{bad:?}"
+                );
+            }
+        }
+    }
+
+    /// The same sample goes through `./dev check ipc-endpoints`' parser (tools/paddock-dev tests/it/ipc_endpoints.rs).
+    #[test]
+    fn the_schema_sample_reads_the_same_here_and_in_dev() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/ipc-endpoint-ratchet.schema-sample.toml");
+        let r = Ratchet::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let got: Vec<(&str, &str, &str)> = r
+            .entries
+            .iter()
+            .map(|e| {
+                (
+                    e.instance.as_str(),
+                    e.blocks_tag.as_str(),
+                    e.deferred_by.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("I24", "pitcrew-v*", ""),
+                ("WP-7", "none", ""),
+                ("I3", "none", "ADR 0072 WP-1 (M1), trimmed 2026-11-11")
+            ]
+        );
     }
 }

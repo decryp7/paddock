@@ -269,6 +269,7 @@ export const DOC_INPUTS = [
   { re: /^docs\/blocks\//, projects: ['conformance', 'tools'], why: 'the shared doc blocks (conformance sync, release notes, new-app)' },
   { re: /^docs\/(design-guide|benchmarks)\.md$/, projects: ['conformance'], why: 'C100 (./dev gates check) reads the rule-bearing docs and the measurement records' },
   { re: /^docs\/wiki\//, projects: ['tools'], why: 'the project wiki: tools/wiki lints it on every wiki change (ER-30)' },
+  { re: /^docs\/ipc-endpoints?(-ratchet(\.schema-sample)?)?\.toml$/, projects: ['crates', 'app:dyno', 'app:pitcrew', 'tools', 'conformance'], why: 'the IPC endpoint register and ratchet: the endings tests of paddock-ipc, paddock-mcp, dyno-agent, dyno-helper and pitcrew-service read them, ./dev check ipc-endpoints (C102) checks them' },
   { re: /^apps\/(shell-demo|workbench-demo)\/README\.md$/, projects: ['tools'], why: 'new-app.mjs copies its "Start a new app" section' },
   { re: /(^|\/)REVIEWED\.md$/, projects: (f) => (f.startsWith('apps/') ? owners(f) : ['conformance']), why: 'the image reviews conformance C24 checks' },
   { re: /^ui\/projects\/paddock-ui\/format\/src\/storage-cases\.json$/, projects: ['ui', 'app:dyno'], why: "dyno-core units::storage_writes_what_the_ui_writes reads the UI's storage cases" },

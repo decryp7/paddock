@@ -1042,6 +1042,11 @@ describe('contracts', () => {
     const undeclared = [...read].filter((f) => !DOC_INPUTS.some((d) => d.re.test(f)));
     assert.deepEqual(undeclared, []);
     // Read through join(): the rules and blocks that conformance sync, the release notes and new-app read.
+    // The IPC register and ratchet are read by the endings tests of the crates and apps that own an endpoint.
+    for (const f of ['docs/ipc-endpoints.toml', 'docs/ipc-endpoint-ratchet.toml', 'docs/ipc-endpoint-ratchet.schema-sample.toml']) {
+      const d = DOC_INPUTS.find((x) => x.re.test(f));
+      assert.ok(d && ['crates', 'app:dyno', 'app:pitcrew'].every((p) => d.projects.includes(p)), f);
+    }
     for (const f of ['docs/rules.md', 'docs/blocks/first-launch.md', 'docs/blocks/readme-skeleton.md', 'docs/wiki/index.md']) assert.ok(DOC_INPUTS.some((d) => d.re.test(f)), f);
   });
 

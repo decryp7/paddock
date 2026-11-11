@@ -122,6 +122,21 @@ adr = "0001"
   delete_by = "debrief-v1.2.0"
 
 [[mechanism]]
+id = "ipc-ratchet-parse"
+title = "The parser of docs/ipc-endpoint-ratchet.toml (ADR 0072 D8): the harness's dependency-free one and the check's"
+canonical = "paddock-ipc"
+paths = ["crates/paddock-ipc/src/testing/endings/ratchet.rs"]
+status = "built"
+adr = "0072"
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/ipc_endpoints.rs"]
+  symbols = ["item:parse_ratchet", "item:names_an_adr"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "tools/paddock-dev cannot depend on paddock-ipc (the transport and its Windows pipe code) for a parser. Both read docs/ipc-endpoint-ratchet.schema-sample.toml in a test and expect the same triples, so the schema cannot drift."
+
+[[mechanism]]
 id = "ipc-child-launch"
 title = "Starting a child with its endpoint and token on stdin; the child's side of the connection"
 canonical = "paddock-ipc"

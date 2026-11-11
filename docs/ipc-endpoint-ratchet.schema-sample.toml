@@ -1,0 +1,27 @@
+# A sample of the ratchet's schema, read by both parsers of docs/ipc-endpoint-ratchet.toml: the strict one of
+# `paddock_ipc::testing::endings::ratchet` and the one of `./dev check ipc-endpoints` (tools/paddock-dev). Each has a test
+# that parses this file and expects the same (instance, blocks_tag, deferred_by) triples; see known-copies.toml, `ipc-ratchet-parse`.
+
+[[ratchet]]
+instance = "I24"
+endpoint = "pitcrew-service"
+scenario = "busy"
+fault = "unanswered"
+blocks_tag = "pitcrew-v*"
+os = "linux,macos"
+note = "A fault that blocks a tag."
+
+[[ratchet]]
+instance = "WP-7"
+endpoint = "ipc-host"
+scenario = "*"
+fault = "no-end-line"
+blocks_tag = "none"
+
+[[ratchet]]
+instance = "I3"
+endpoint = "ipc-host"
+scenario = "owner-close-with-calls-in-flight"
+fault = "typed-transport"
+blocks_tag = "none"
+deferred_by = "ADR 0072 WP-1 (M1), trimmed 2026-11-11"
