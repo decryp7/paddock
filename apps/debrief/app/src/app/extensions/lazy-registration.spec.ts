@@ -153,6 +153,15 @@ describe('lazyCommands', () => {
     await vi.waitFor(() => expect(runs).toContainEqual(['back']));
   });
 
+  it('loads a set with a keyed gated stub as soon as its commands are read, not when the window is idle', async () => {
+    const registry = setup([...STUBS, { id: 't.back', title: 'Back', keybinding: 'Alt+Left', gated: true }]);
+    registry.all();
+    await vi.waitFor(() => expect(loads).toBe(1));
+    expect(idle.length).toBe(1);
+    const key = new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', altKey: true, cancelable: true });
+    await vi.waitFor(() => expect(registry.runForKey(key)).toBe(true));
+  });
+
   it('answers false when the loaded command is not available after all', async () => {
     const registry = setup();
     expect(registry.available().map((c) => c.id)).toContain('t.close');

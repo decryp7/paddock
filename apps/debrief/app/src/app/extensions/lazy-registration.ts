@@ -38,7 +38,8 @@ export const LAZY_COMMAND_SETS = new InjectionToken<readonly LazyCommandSet[]>('
 
 /**
  * Registers commands whose code loads on first use. The stubs are registered at once; the class loads when the window is
- * idle after start-up, or when one of its commands runs, whichever is first. Until then every stub is offered (its
+ * idle after start-up, or when one of its commands runs, whichever is first (a set with a keyed gated stub loads as
+ * soon as its commands are read). Until then every stub is offered (its
  * `when` cannot be asked yet, as in the shell's `CommandService`); once loaded, each stub answers with its command's
  * `when`, title and category (a toggle's title changes), and readers that track `when` (the registry's `available`) see
  * the change. Running a stub whose id the class does not define fails with that id: `lazy-commands.spec.ts` keeps stubs
@@ -94,6 +95,13 @@ function lazyCommandSet(load: () => Promise<CommandsFactory>, stubs: readonly Co
       idle(() => {
         if (alive) void ensure().catch(() => undefined);
       });
+      // A gated stub's key falls through until the code is loaded, so a set with one loads as soon as its commands are
+      // read (after the first paint, still off its static closure) rather than when the window is idle.
+      if (stubs.some((s) => s.gated && s.keybinding)) {
+        void Promise.resolve().then(() => {
+          if (alive) void ensure().catch(() => undefined);
+        });
+      }
       return stubs.map(({ gated, ...stub }): DebriefCommand => {
         const code = (): DebriefCommand | undefined => loaded()?.get(stub.id);
         return {
