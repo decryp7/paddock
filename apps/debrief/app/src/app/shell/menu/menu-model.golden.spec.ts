@@ -1,11 +1,18 @@
 import { readFileSync } from 'node:fs';
+import { TestBed } from '@angular/core/testing';
+import { ContributionRegistry } from '@decryp7/paddock-ui/shell/contributions';
+import { MemoryLogger } from '../../../testing/helpers';
+import { appConfig } from '../../app.config';
+import { Logger } from '../../core/logger';
 import { buildMenus, MenuState, MenuView } from './menu-model';
+import type { DebriefMenuItemDef } from './menu.contributions';
 
 /**
  * The menu bar pinned for four states (golden files in `golden/`): every command the menus place is registered, so each
  * placement, label, check mark, separator and submenu shows. M1 moved the command placements into `menus`
- * contributions; these files were written by the model before that move and must not change with it. A deliberate
- * change to the menus rewrites them (`ng test -u`) and the diff is reviewed.
+ * contributions; these files are the model's output from before that move, less the two placements dropped with it
+ * (`help.documentation`, `help.openLogs`, whose commands do not exist, so they were never shown). A deliberate change
+ * to the menus rewrites them (delete the files, run this spec) and the diff is reviewed.
  */
 const MENU_SOURCES = ['src/app/shell/menu/menu-model.ts', 'src/app/shell/menu/menu.contributions.ts'];
 
@@ -76,6 +83,13 @@ describe('menus (golden)', () => {
 
   it('in-app menu bar, everything registered', async () => {
     await expect(JSON.stringify(buildMenus(state({})), null, 1)).toMatchFileSnapshot('golden/menus-in-app.json');
+  });
+
+  it('in-app menu bar from the real app’s registry (the placements app.config registers)', async () => {
+    TestBed.configureTestingModule({ providers: [...appConfig.providers, { provide: Logger, useFactory: () => new MemoryLogger() }] });
+    const items = TestBed.inject(ContributionRegistry).items('menus') as readonly DebriefMenuItemDef[];
+    expect(items.length).toBeGreaterThan(100);
+    await expect(JSON.stringify(buildMenus(state({ items })), null, 1)).toMatchFileSnapshot('golden/menus-in-app.json');
   });
 
   it('macOS native menu bar', async () => {
