@@ -961,10 +961,15 @@ async fn x_pair_poll(State(st): S, h: HeaderMap, Path(pid): Path<String>) -> Res
         return fail(&ApiError::new(ErrorKind::Permission, "not a local address"), ApiFamily::Extended);
     }
     // The poll token (from the POST answer) is the proof that this caller made the request; the id alone is not.
-    let v = match st.auth.poll_pairing(&pid, header_str(&h, PAIR_TOKEN_HEADER), now_ms()) {
+    let token = header_str(&h, PAIR_TOKEN_HEADER);
+    let v = match st.auth.poll_pairing(&pid, token, now_ms()) {
         PairStatus::Pending => json!({"status": "pending"}),
         PairStatus::Approved(Some(k)) => json!({"status": "approved", "key": k}),
         PairStatus::Approved(None) => json!({"status": "approved", "key": null, "note": "the key was already delivered"}),
+        // The note depends only on the missing header, never on the id, so it tells an old app what to send and leaks nothing.
+        PairStatus::Denied if token.is_none() => {
+            json!({"status": "denied", "note": "send the X-Pitwall-Pair-Token header (the pollToken of the pairing answer)"})
+        }
         PairStatus::Denied => json!({"status": "denied"}),
     };
     axum::Json(v).into_response()

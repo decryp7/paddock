@@ -11,6 +11,10 @@ arrive in the app as usual.
 
 ### Security
 
+- Pairing needs the `X-Pitwall-Pair-Token` header on every poll, so apps that do not send it cannot pair: older apps (for
+  example Debrief 1.1.x) must update before they can pair with this Pitwall. A poll without the header is answered `denied`
+  with a note saying what to send.
+
 - Windows: the Pitwall service, which runs as the system, is registered only for a Pitwall installed directly in Program
   Files and protected from other accounts, and never for another copy. The installer shows why when it refuses, and what to do
   (uninstall Pitwall, then install it again into Program Files).

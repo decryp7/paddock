@@ -249,10 +249,27 @@ async fn pairing_flow_gives_the_key_once() {
 
     assert_eq!(code.len(), 6);
     // Without the token (or with a wrong one) a poll is denied like an unknown id, and it never carries the key.
-    for extra in [&[][..], &[("x-pitwall-pair-token", "wrong")][..]] {
-        let r = h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, extra).await.json();
-        assert_eq!(r, json!({"status": "denied"}));
-    }
+    let r = h
+        .call(
+            "GET",
+            &format!("/x/v1/pair/{pid}"),
+            None,
+            None,
+            &[("x-pitwall-pair-token", "wrong")],
+        )
+        .await
+        .json();
+    assert_eq!(r, json!({"status": "denied"}));
+    // An old client sends no header: the answer says what to send. The note depends on the missing header only, so an
+    // unknown id gets the very same answer and nothing leaks.
+    let old = h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &[]).await.json();
+    assert_eq!(old["status"], "denied");
+    assert!(old["note"].as_str().unwrap().contains("X-Pitwall-Pair-Token"), "{old}");
+    let unknown = h
+        .call("GET", "/x/v1/pair/pr-00000000000000000000000000000000", None, None, &[])
+        .await
+        .json();
+    assert_eq!(unknown, old);
     assert_eq!(
         h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &with).await.json()["status"],
         "pending"

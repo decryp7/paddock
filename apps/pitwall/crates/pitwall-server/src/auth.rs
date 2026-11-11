@@ -110,6 +110,8 @@ struct Pending {
     poll_hash: String,
     /// Polls that came with a missing or wrong token. After [`MAX_BAD_POLLS`] the request is closed.
     bad_polls: u32,
+    /// The app and key id the approval made, until the key is handed over; closing the request revokes it.
+    approved_key: Option<(String, String)>,
     outcome: Outcome,
 }
 
@@ -460,6 +462,7 @@ impl Auth {
             req: req.clone(),
             poll_hash: keys::hash(&poll_token),
             bad_polls: 0,
+            approved_key: None,
             outcome: Outcome::Waiting,
         });
         drop(p);
@@ -505,6 +508,7 @@ impl Auth {
                 let mut apps = lock(&self.apps);
                 let key = keys::generate(paths::random32()?, now);
                 let secret = key.secret.clone();
+                x.approved_key = Some((x.req.app_id.clone(), key.stored.id.clone()));
                 match apps.iter_mut().find(|a| a.id.as_str() == x.req.app_id) {
                     Some(a) => {
                         // A re-pair revokes every key the app has, with the one revoke rule (not by time: a clock moved
@@ -554,13 +558,24 @@ impl Auth {
             if x.bad_polls >= MAX_BAD_POLLS && !matches!(x.outcome, Outcome::Denied) {
                 log::warn!(target: "pitwall_server", "pairing request {id} closed after {MAX_BAD_POLLS} polls without its token");
                 x.outcome = Outcome::Denied;
+                // The key approved for this request was never collected by its holder: it does not stay valid.
+                if let Some((app, key_id)) = x.approved_key.take() {
+                    let revoked = self.revoke_key(&app, &key_id);
+                    log::warn!(target: "pitwall_server", "pairing request {id}: the uncollected key was revoked ({revoked})");
+                }
             }
             return PairStatus::Denied;
         }
         match &mut x.outcome {
             Outcome::Waiting if now.saturating_sub(x.req.requested_at) >= PAIRING_TTL_MS => PairStatus::Denied,
             Outcome::Waiting => PairStatus::Pending,
-            Outcome::Approved(k) => PairStatus::Approved(k.take()),
+            Outcome::Approved(k) => {
+                let key = k.take();
+                if key.is_some() {
+                    x.approved_key = None; // delivered: it is the app's now
+                }
+                PairStatus::Approved(key)
+            }
             Outcome::Denied => PairStatus::Denied,
         }
     }
@@ -995,6 +1010,35 @@ mod tests {
             assert_eq!(a.poll_pairing(&r.id, Some("guess"), 1002), PairStatus::Denied);
         }
         assert_eq!(a.poll_pairing(&r.id, Some(&t), 1003), PairStatus::Denied, "the request is closed");
+    }
+
+    /// Closing an approved request also revokes the key approved for it: the key nobody collected does not stay valid. A key
+    /// that was already delivered is the app's and stays.
+    #[test]
+    fn closing_an_approved_request_revokes_its_key() {
+        let (_d, a) = auth();
+        let key_count = |a: &Auth| lock(&a.apps).iter().map(|x| x.keys.len()).sum::<usize>();
+        let (r, t) = a.request_pairing("Debrief", 1, false, 1000).unwrap();
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 1001).unwrap());
+        assert_eq!(key_count(&a), 1, "the approval made one key");
+        for _ in 0..MAX_BAD_POLLS {
+            a.poll_pairing(&r.id, Some("guess"), 1002);
+        }
+        assert_eq!(key_count(&a), 0, "the uncollected key is revoked");
+        assert_eq!(a.poll_pairing(&r.id, Some(&t), 1003), PairStatus::Denied);
+
+        let (r, t) = a.request_pairing("Pitwall Two", 1, false, 2000).unwrap();
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 2001).unwrap());
+        let PairStatus::Approved(Some(key)) = a.poll_pairing(&r.id, Some(&t), 2002) else {
+            panic!("delivered")
+        };
+        for _ in 0..MAX_BAD_POLLS {
+            a.poll_pairing(&r.id, Some("guess"), 2003);
+        }
+        assert!(
+            matches!(a.authenticate(Some(&key), false, 2004), Ok(Principal::App { .. })),
+            "a delivered key stays"
+        );
     }
 
     /// ADR 0092 W5 for the admin key: with a failing OS random source there is no admin key, nobody authenticates as the

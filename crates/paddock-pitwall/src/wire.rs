@@ -33,7 +33,7 @@ impl Health {
 }
 
 /// A pairing request Pitwall accepted: the code the user compares in Pitwall.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pairing {
     /// The id to poll with. It is shown in Pitwall's window, so it proves nothing by itself.
@@ -46,6 +46,18 @@ pub struct Pairing {
     /// Seconds until the request expires.
     #[serde(default = "five_minutes")]
     pub expires_in_secs: u64,
+}
+
+/// `poll_token` is a credential, so `Debug` never prints it.
+impl std::fmt::Debug for Pairing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pairing")
+            .field("pairing_id", &self.pairing_id)
+            .field("poll_token", &"<redacted>")
+            .field("code", &self.code)
+            .field("expires_in_secs", &self.expires_in_secs)
+            .finish()
+    }
 }
 
 fn five_minutes() -> u64 {
@@ -298,5 +310,18 @@ mod tests {
             )
         );
         assert_eq!(Usage::from_value(&Value::Null), Usage::default());
+    }
+
+    /// The poll token is a credential: `{:?}` (a log line, a panic message) never shows it.
+    #[test]
+    fn debug_output_redacts_the_poll_token() {
+        let p: Pairing = serde_json::from_str(
+            r#"{"pairingId":"a","pollToken":"SECRET-TOKEN-1","code":"123456"}"#,
+        )
+        .unwrap();
+        let shown = format!("{p:?} {p:#?}");
+        assert!(!shown.contains("SECRET-TOKEN-1"), "{shown}");
+        assert!(shown.contains("poll_token: \"<redacted>\""), "{shown}");
+        assert!(shown.contains("123456"), "the rest stays visible: {shown}");
     }
 }
