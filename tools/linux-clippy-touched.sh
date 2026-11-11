@@ -9,7 +9,9 @@
 #   bash tools/linux-clippy-touched.sh [--base origin/main] [--root <repo>] [--image <ref>] [--platform <p>] [--dry-run]
 #
 # Exit codes: 0 Clippy ran and passed (or nothing under crates/ or .cargo/ changed); Clippy's own code when it found something;
-# 2 usage; 1 the base could not be diffed; 3 NOT MEASURED (no Docker daemon): the check did not run, so nothing is proven.
+# 2 usage; 1 the base could not be diffed; 3 NOT MEASURED (no Docker daemon): the check did not run, so nothing is proven;
+# 125 docker could not start the container (log in or pass --image) and 137 the container was killed (raise PADDOCK_LINUX_MEMORY),
+# each with an ::error:: that names the next step.
 # Environment: DOCKER (default docker); PADDOCK_HEAVY, a command prefix for the one-heavy-step lock (for example
 # `heavy.sh`, ER-24), put before the container run; PADDOCK_LINUX_IMAGE and PADDOCK_LINUX_PLATFORM (the --image and --platform).
 set -euo pipefail
@@ -58,5 +60,13 @@ if ! command -v "$docker" >/dev/null 2>&1 || ! "$docker" info >/dev/null 2>&1; t
   exit 3
 fi
 
+rm -f "$errfile"; trap - EXIT
+# No exec: docker's own failures (125, 137) get a cause and a next step here; every other code (Clippy's) passes through.
+code=0
 # shellcheck disable=SC2086 # PADDOCK_HEAVY is a command prefix, split on purpose
-exec ${PADDOCK_HEAVY:-} bash "$here/linux-container.sh" --id paddock --root "$root" --image "$image" ${platform:+--platform "$platform"} -- sh -c "$command_line"
+${PADDOCK_HEAVY:-} bash "$here/linux-container.sh" --id paddock --root "$root" --image "$image" ${platform:+--platform "$platform"} -- sh -c "$command_line" || code=$?
+case "$code" in
+  125) echo "::error::linux-clippy-touched: docker could not start the container (exit 125; usually the image $image could not be pulled). Run docker login dev.decryptology.net or pass --image <ref>." >&2 ;;
+  137) echo "::error::linux-clippy-touched: the container was killed (exit 137; usually out of memory at ${PADDOCK_LINUX_MEMORY:-12g}). raise PADDOCK_LINUX_MEMORY (for example PADDOCK_LINUX_MEMORY=16g) and rerun." >&2 ;;
+esac
+exit "$code"

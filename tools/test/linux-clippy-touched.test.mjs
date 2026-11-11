@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -114,4 +115,30 @@ test('a bad base is an error with the next step; an unknown option is a usage er
   assert.equal(bad.status, 1);
   assert.match(bad.out, /::error::.*git fetch/);
   assert.equal(go(b, root, ['--wat']).status, 2);
+});
+
+test('the temporary error file is removed after a container run, not only on an early exit', () => {
+  const b = bin();
+  const tmp = scratch('paddock-tmp-');
+  // macOS mktemp ignores TMPDIR without a template, so a shim makes the file where the test can see it.
+  shim(b, 'mktemp', `f="${tmp}/err.$$"; : >"$f"; echo "$f"`);
+  const r = go(b, repo(['crates/paddock-a/src/lib.rs']));
+  assert.equal(r.status, 0, r.out);
+  assert.deepEqual(readdirSync(tmp), []);
+});
+
+test('docker exit 125 (the run could not start) names the cause and the next step, and keeps the code', () => {
+  const b = scratch('paddock-bin-');
+  shim(b, 'docker', 'case "$1" in info) exit 0;; image) exit 0;; run) exit 125;; esac');
+  const r = go(b, repo(['crates/paddock-a/src/lib.rs']));
+  assert.equal(r.status, 125, r.out);
+  assert.match(r.out, /::error::linux-clippy-touched: .*docker login dev\.decryptology\.net or pass --image/);
+});
+
+test('docker exit 137 (the container was killed, usually out of memory) says to raise PADDOCK_LINUX_MEMORY, and keeps the code', () => {
+  const b = scratch('paddock-bin-');
+  shim(b, 'docker', 'case "$1" in info) exit 0;; image) exit 0;; run) exit 137;; esac');
+  const r = go(b, repo(['crates/paddock-a/src/lib.rs']));
+  assert.equal(r.status, 137, r.out);
+  assert.match(r.out, /::error::linux-clippy-touched: .*raise PADDOCK_LINUX_MEMORY/);
 });
