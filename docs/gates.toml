@@ -168,7 +168,7 @@ approved = "coordinator"
 [[not_gated]]
 id = "C85"
 apps = ["debrief", "dyno", "pacenotes", "pitcrew", "pitwall", "shell-demo", "sighter", "spotter", "workbench-demo"]
-reason = "report-only first (ADR 0052 WP-A4, enforced before Pitcrew 1.1): no workflow line runs it for the apps yet. Pitwall's paddock.ci.json conformance line runs it for the one register that exists (apps/pitwall/features.toml); Dyno's and Spotter's registers are not written yet"
+reason = "report-only first (ADR 0052 WP-A4, enforced before Pitcrew 1.1): no workflow line runs it for the apps yet. Pitwall's paddock.ci.json conformance line runs it for the one register that exists (apps/pitwall/features.toml); Dyno's and Spotter's registers are not written yet. Release-time gate (owner: ADR 0052 WP-A4): the plan job of pitwall-release.yml runs C85 with --version on a pitwall-v* tag, which makes the owed findings (an owed_until tag that exists or is past, an expired date, one past the next release line) errors and fails the plan, so no gate or release job runs. NOT measured by C85: panes, tray popovers and widget kinds (their surfaces are checked for spelling only; no reader enumerates them), so a pane with no feature is not seen until ADR 0052 WP-A1's wire.toml names them"
 owner = "ADR 0052 WP-A4"
 since = 2026-11-11
 review_by = 2027-01-10
