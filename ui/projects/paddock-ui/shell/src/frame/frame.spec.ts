@@ -358,7 +358,7 @@ describe('pd-status-bar', () => {
     expect(ids('end')).toEqual(['t.health', 't.jobs', 't.bell', 't.tie', 't.cond']);
     expect(fixture.nativeElement.textContent).toContain('Alpha');
     show.set(false);
-    await TestBed.inject((await import('../context')).ShellContextHost).load();
+    await TestBed.inject((await import('@decryp7/paddock-ui/shell/contributions')).ShellContextHost).load();
     await settle();
     await fixture.whenStable();
     expect(ids('end')).not.toContain('t.cond');

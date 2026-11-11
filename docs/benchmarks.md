@@ -197,6 +197,33 @@ One line each. The dated records are in the app files.
 
 Results of shared crates (rule 48: shared code records here), newest first.
 
+### 2026-11-12, first-paint JS of the shell's contribution registry: `shell/contributions` against `shell` (fix/paddock-ui-light-shell-entry)
+
+- **Commit:** A/B: base c5de1b427 (train/2026-11-11-5) -> change 461cc6128 for Dyno and Pitwall; Debrief: 0c52ca0c1 (feat/debrief-m1-contributions) with and without its six registry imports switched to the new entry (not committed to Debrief)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.1
+- **Load:** 1-minute load 10-18 during the builds (CI running on the same machine)
+- **Build:** production `ng build --stats-json` (Angular application builder, esbuild), `ui/dist` rebuilt from the tree under test with `npm run build`
+- **Corpus:** none (bundle sizes)
+- **Command:** `npx ng build --stats-json` in `apps/<app>/app`, then the static closure of `src/main.ts` (and for Debrief `src/bootstrap.ts`, `src/app/app.ts`, `src/app/app.config.ts`) through `measure()` of `conformance/src/window-weight/measure.mjs`; Material, CDK and paddock-ui kB are the `bytesInOutput` of their inputs in those chunks
+- **Runs:** single (a build is deterministic)
+- **Numbers:** (kB of JS loaded before first paint, minified, not compressed)
+
+  | Window | Measure | Base | Change | Verdict |
+  |---|---|---|---|---|
+  | Debrief M1 main | JS total | 1242.5 | 1189.4 | -53.1 |
+  | Debrief M1 main | `@angular/material` | 56.4 | 14.5 | -41.9 (the root's `material/menu`) |
+  | Debrief M1 main | `@angular/cdk` | 148.7 | 135.3 | -13.4 |
+  | Debrief M1 main | paddock-ui | 19.8 | 10.4 | -9.4 |
+  | Dyno main | JS total | 719.5 | 719.8 | no change (+0.3: chunking) |
+  | Dyno main | Material / CDK / paddock-ui | 157.1 / 166.7 / 208.8 | 157.2 / 166.5 / 208.9 | no change |
+  | Pitwall main | JS total | 702.5 | 702.4 | no change |
+  | Pitwall main | Material / CDK / paddock-ui | 158.4 / 168.0 / 201.2 | 158.4 / 168.0 / 201.1 | no change |
+
+- **Notes:** Dyno and Pitwall main windows already import the paddock-ui root and Material elsewhere (the other files that import `shell` also use the
+  frame, so they stay on `shell`), so switching their registry-only files gains nothing there; they gain only the cleaner import. A first Debrief
+  "before" build ran against a `ui/dist` that already contained the new entry (its `shell` re-exports it) and showed no difference: compare only against a `ui/dist` built from the base tree.
+  The static test `ui/scripts/light-entries.test.mjs` keeps the entry free of the root and Material.
+
 ### 2026-11-08, conformance C99: macOS dependency graph probe and source scan (pitwall/1.1-c99b)
 
 - **Commit:** the head of `pitwall/1.1-c99b` (run on c4da1ca25 plus the C99 follow-up commits)
