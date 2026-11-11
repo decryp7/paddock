@@ -33,9 +33,15 @@ fn own(fd: libc::c_int) -> io::Result<OwnedFd> {
     Ok(unsafe { OwnedFd::from_raw_fd(check(fd)?) })
 }
 
-/// The file type bits of `mode`.
-fn kind(mode: u32) -> u32 {
-    mode & u32::from(libc::S_IFMT)
+/// The file type bits of `mode`, in the OS's own `mode_t` (`u16` on macOS, `u32` on Linux), so no conversion is needed.
+fn kind(mode: libc::mode_t) -> libc::mode_t {
+    mode & libc::S_IFMT
+}
+
+/// `mode` as the `u32` of [`FolderFacts`]: a widening on macOS, the same value on Linux. Generic so that one call is right
+/// on both without a conversion Clippy calls useless on one of them.
+fn widen_mode(mode: impl Into<u32>) -> u32 {
+    mode.into()
 }
 
 fn fstat(fd: &OwnedFd) -> io::Result<libc::stat> {
@@ -48,7 +54,7 @@ fn fstat(fd: &OwnedFd) -> io::Result<libc::stat> {
 fn facts_of(st: &libc::stat) -> FolderFacts {
     FolderFacts {
         uid: st.st_uid,
-        mode: u32::from(st.st_mode),
+        mode: widen_mode(st.st_mode),
     }
 }
 
@@ -106,7 +112,7 @@ impl Dir {
                 libc::AT_SYMLINK_NOFOLLOW,
             )
         };
-        r == 0 && kind(u32::from(st.st_mode)) == u32::from(libc::S_IFLNK)
+        r == 0 && kind(st.st_mode) == libc::S_IFLNK
     }
 
     /// This folder's real parent, found through the held descriptor and not through a name.
@@ -161,7 +167,7 @@ impl Dir {
             },
         )?;
         let st = fstat(&fd)?;
-        if kind(u32::from(st.st_mode)) != u32::from(libc::S_IFREG) {
+        if kind(st.st_mode) != libc::S_IFREG {
             return Err(Refusal::NotAFile.into());
         }
         file_decision(facts_of(&st), *who)?;
