@@ -43,4 +43,5 @@ ctrlc = { workspace = true, features = ["termination"] }
 windows-service = "0.8.1"
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true

@@ -29,6 +29,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"2026-10-01T14:30:00Z", b"2026-10-01 14:30", b"2026-10-01"], |bytes| {
+            parse_time(&String::from_utf8_lossy(bytes))
+        });
+    }
+
+    #[test]
     fn reads_the_documented_forms_as_utc() {
         assert_eq!(parse_time("1970-01-02").unwrap(), 86_400_000);
         assert_eq!(parse_time("1970-01-01 00:01").unwrap(), 60_000);

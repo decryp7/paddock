@@ -6,10 +6,11 @@
 //! the test connects, so the test talks to that server. A [`HeldPort`] keeps the port taken and answers every connection by
 //! closing it, so a client sees a connection that ends without an answer, on every OS and at once.
 //!
-//! No held port can *refuse* a connection portably: a socket bound without listening is refused on Linux and Windows, but
-//! macOS drops the connection attempt and the client times out. A test that needs "refused" injects a connector that
-//! refuses (the code under test has a connector port) or tests its error mapping with a constructed
-//! `ErrorKind::ConnectionRefused`.
+//! No held port can *refuse* a connection on every OS: [`HeldPort::refusing`] (a socket bound without listening) is refused at
+//! once on Linux, after about 2 s of SYN retries on Windows, and not at all on macOS, which drops the attempt so the client
+//! times out. A test that needs "refused" on every OS injects a connector that refuses (the code under test has a connector
+//! port) or tests its error mapping with a constructed `ErrorKind::ConnectionRefused`; an end-to-end refusal test through
+//! `refusing()` runs on Linux only.
 
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
@@ -26,13 +27,15 @@ enum Ending {
     Reset,
 }
 
-/// A loopback port taken for the life of this value, where every connection is accepted and closed at once. Dropping it
-/// stops the accept loop, joins its thread and frees the port.
+/// A loopback port taken for the life of this value, where every connection is accepted and closed at once (or, for
+/// [`HeldPort::refusing`], not listened on at all). Dropping it stops the accept loop, joins its thread and frees the port.
 #[derive(Debug)]
 pub struct HeldPort {
     addr: SocketAddr,
     stop: Arc<AtomicBool>,
     acceptor: Option<JoinHandle<()>>,
+    /// The bound socket of a [`HeldPort::refusing`] port, kept open so the port stays taken.
+    _bound: Option<socket2::Socket>,
 }
 
 impl HeldPort {
@@ -44,6 +47,27 @@ impl HeldPort {
     /// A port that resets: each connection is aborted (`SO_LINGER` 0), so the client gets "connection reset" at once.
     pub fn reset() -> HeldPort {
         HeldPort::start(Ending::Reset)
+    }
+
+    /// A port that refuses: a socket is bound but never listens, so a client's connect is refused where the OS does that (see
+    /// the module notes: Linux at once, Windows after about 2 s, macOS never, the attempt times out). The port stays taken.
+    pub fn refusing() -> HeldPort {
+        let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None)
+            .expect("a TCP socket");
+        socket
+            .bind(&SocketAddr::from((Ipv4Addr::LOCALHOST, 0)).into())
+            .expect("bind a loopback port");
+        let addr = socket
+            .local_addr()
+            .expect("the bound address")
+            .as_socket()
+            .expect("an IP address");
+        HeldPort {
+            addr,
+            stop: Arc::new(AtomicBool::new(false)),
+            acceptor: None,
+            _bound: Some(socket),
+        }
     }
 
     fn start(ending: Ending) -> HeldPort {
@@ -65,6 +89,7 @@ impl HeldPort {
             addr,
             stop,
             acceptor: Some(acceptor),
+            _bound: None,
         }
     }
 

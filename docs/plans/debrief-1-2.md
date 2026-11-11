@@ -471,6 +471,11 @@ Decided by the user on 2026-10-29:
   a shutdown bound, class **S** in ADR 0031 (patience, not wall clocks; proposed on `docs/adr-patience-not-wall-clocks`):
   it stays on the real clock, so the fix is ordering and budget, not patience.
 
+- **The diagnostics agent's scheduled collection still runs at the normal level** (X7, C54, rule 52). The launchd plist now
+  asks for `Standard` because a person may wait for a triggered capture, which removed the C54 waiver. The scheduled
+  collection nobody waits for should still be gentle: lower its collection threads to `QOS_CLASS_UTILITY` / nice 10
+  (rule 52, bulk work) and keep a triggered capture at the normal level. Not built yet.
+
 ## 8. Schedule after the 2026-11-04 decision (full plan)
 
 User decision 2026-11-04: Debrief 1.2 is the full plan. ER-1: Dyno, Spotter and Pitwall land first, so a package that

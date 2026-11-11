@@ -27,3 +27,4 @@ windows.workspace = true
 [dev-dependencies]
 # The shared scratch_dir for fixtures that hand out a path.
 debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }

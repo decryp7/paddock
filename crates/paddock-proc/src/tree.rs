@@ -240,6 +240,18 @@ pub(crate) fn kill_child_tree(root: ProcessId, members: Option<Vec<ProcessId>>) 
     kill_tree_on(&RealOs, root, true, members)
 }
 
+/// Ends the process group led by `pid`, a child of this process that has not been reaped and whose start time could not
+/// be read (so no [`ProcessId`] exists): an unreaped child is ours by definition, its pid cannot have been handed on, and
+/// its group is what it started (ADR 0033 decision 4). Not for a child that may have been reaped: its pid may belong to
+/// another group by now, and with an identity [`kill_tree`] is the call. Windows has no groups: a child there ends through
+/// its handle or job, so this does nothing.
+pub fn end_unreaped_group(pid: u32) {
+    #[cfg(unix)]
+    crate::sys::signal_group(pid, crate::sys::SIGKILL);
+    #[cfg(not(unix))]
+    let _ = pid;
+}
+
 /// Every process below `root` (not including it), from a fresh look at the process table.
 pub fn descendants_of(root: ProcessId) -> Vec<ProcessId> {
     usage::descendants(&usage::snapshot(), root)

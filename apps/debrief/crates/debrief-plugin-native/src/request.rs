@@ -131,6 +131,28 @@ impl CaptureRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_requests_never_panic_on_hostile_json() {
+        paddock_testkit::assert_never_panics(
+            &[
+                br#"{"pid":4242,"duration_sec":5,"rate_hz":1000}"#,
+                br#"{"pid":0}"#,
+                br#"{"pid":4294967295,"duration_sec":-1}"#,
+            ],
+            |bytes| {
+                let args: serde_json::Value = serde_json::from_slice(bytes).unwrap_or(serde_json::Value::Null);
+                (CaptureRequest::parse(&args, false), CaptureRequest::parse(&args, true))
+            },
+        );
+    }
+
+    #[test]
+    fn symbol_path_never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"/srv/symbols;/opt/symbols", b"C:\\symbols;D:\\more", b""], |bytes| {
+            SymbolOptions::parse(&String::from_utf8_lossy(bytes), true)
+        });
+    }
     use serde_json::json;
 
     #[test]
