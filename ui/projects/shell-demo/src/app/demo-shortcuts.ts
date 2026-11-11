@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { CommandService } from '@decryp7/paddock-ui/shell';
+import { CommandService } from '@decryp7/paddock-ui/shell/contributions';
 import { describeConflict, formatKey, Keymap, recordKey } from '@decryp7/paddock-ui/shell/menu';
 
 /**

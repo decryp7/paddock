@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
+- New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the
+  registry, `ShellContext`, the command service, the keys, `msg` and the lazy parts. It imports neither `@decryp7/paddock-ui` nor
+  `@angular/material`, so a window that only declares contributions no longer pulls the root's `@angular/material/menu` into first paint
+  (Debrief M1: main window JS 1242.5 to 1189.4 kB, Material 56.4 to 14.5 kB). Use it where the registry is all you need.
+- New entry `@decryp7/paddock-ui/shell/generated`: the wire types of the shell core (`SHELL_COMMANDS`, dialog kinds and wire types), which
+  `shell/contributions` uses. `@decryp7/paddock-ui/shell` still exports everything it did, now by re-export, so no import breaks.
+- Added to the public API: `describeError` (was the internal `describe`), exported by `shell/contributions` and so by `shell`.
+- Dyno, Pitwall and the shell and workbench demos import the registry from `shell/contributions` where that is all a file uses. Measurements: docs/benchmarks.md.
+
 ### `paddock-secrets`: `write_owner_only`, the secret-file writer for any trust-bearing file (ADR 0092 WP-0)
 - New `paddock_secrets::write_owner_only(path, bytes)`: the mechanism of `SecretFile::write` for a file that is not a secret
   value (Pitwall's `apps.json`, the access list). The folder is made private or refused, then a unique temporary file is

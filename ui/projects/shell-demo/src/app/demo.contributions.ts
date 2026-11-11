@@ -11,7 +11,7 @@ import {
   msg,
   type,
   type ContributionBatch,
-} from '@decryp7/paddock-ui/shell';
+} from '@decryp7/paddock-ui/shell/contributions';
 import { defineSubmenu, type SubmenuDef } from '@decryp7/paddock-ui/shell/menu';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';

@@ -1,5 +1,5 @@
 import { computed, EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, Signal } from '@angular/core';
-import { describe, SHELL_COMMAND_RUNNER, SHELL_PORTS, ShellContext, ShellContextHost } from './context';
+import { describeError, SHELL_COMMAND_RUNNER, SHELL_PORTS, ShellContext, ShellContextHost } from './context';
 import type { CommandDef, Live } from './define';
 import { ContributionRegistry } from './registry';
 
@@ -62,7 +62,7 @@ export class CommandService {
     try {
       ctx = await this.host.load();
     } catch (e) {
-      this.ports.notify({ level: 'error', message: `${command.title.text} failed: ${describe(e)}` });
+      this.ports.notify({ level: 'error', message: `${command.title.text} failed: ${describeError(e)}` });
       return false;
     }
     // Asked again with the loaded context; a throwing `when` or `enabled` makes the command unavailable.
@@ -71,7 +71,7 @@ export class CommandService {
       await command.run(ctx, args);
       return true;
     } catch (e) {
-      this.ports.notify({ level: 'error', message: `${command.title.text} failed: ${describe(e)}` });
+      this.ports.notify({ level: 'error', message: `${command.title.text} failed: ${describeError(e)}` });
       return false;
     }
   }

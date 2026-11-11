@@ -2,7 +2,7 @@ import { fakeDialogContract } from '@decryp7/paddock-ui/shell/testing';
 import { defineCommand, defineDialog, defineHealthService, defineKeybinding, defineMenuItem, defineNotificationKind, definePage, defineSettingsPage, defineStatusItem } from './define';
 import { isMessage, msg } from './message';
 import { type, type IpcCommandName } from './types';
-import type { ShellCommand } from '../generated/shell-commands';
+import type { ShellCommand } from '@decryp7/paddock-ui/shell/generated';
 
 const load = () => Promise.resolve(class {});
 

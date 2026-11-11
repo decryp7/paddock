@@ -179,7 +179,7 @@ export class ShellContextHost {
   prefetchWhenIdle(): void {
     if (this.loaded()) return;
     this.idle(() => {
-      this.load().catch((e: unknown) => this.ports.notify({ level: 'error', message: $localize`:@@pd.shell.context-failed:The app context failed to load: ${describe(e)}:cause:` }));
+      this.load().catch((e: unknown) => this.ports.notify({ level: 'error', message: $localize`:@@pd.shell.context-failed:The app context failed to load: ${describeError(e)}:cause:` }));
     });
   }
 }
@@ -195,6 +195,6 @@ function combine(core: ShellCore, app: object): ShellContext {
   }) as ShellContext;
 }
 
-export function describe(e: unknown): string {
+export function describeError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
