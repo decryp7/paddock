@@ -551,7 +551,7 @@ pub(crate) async fn export_events<R: Runtime>(
     request.path = target.to_string_lossy().into_owned();
     // The same export already running serves this ask (before the overwrite question: the file exists because that job made it),
     // and another export of the file with other settings is refused.
-    let spec = crate::jobs::export_spec_for(&state, "Export events to", &target, &request);
+    let spec = crate::jobs::export_spec_for(&state, "Export events to", &target, &request, request.redact);
     if let Some(id) = crate::jobs::preflight(&app, &spec)? {
         return Ok(id);
     }
@@ -1854,7 +1854,7 @@ mod tests {
         assert_ne!(other_file, first);
         let refused = try_held_export(&app, &dir.0, "a.clef", "json").expect_err("a second writer of one file was started");
         assert!(
-            refused.message.contains("Another export is already writing this file"),
+            refused.message.contains("Another job is still writing this file"),
             "{}",
             refused.message
         );
@@ -1961,7 +1961,7 @@ mod tests {
         // Another export of the same file with other settings is refused, with the reason, before any question.
         let refused = ask("json", true).unwrap_err();
         assert!(
-            refused.message.contains("Another export is already writing this file"),
+            refused.message.contains("Another job is still writing this file"),
             "{}",
             refused.message
         );
@@ -2045,5 +2045,87 @@ mod tests {
         for id in [reload, project, first] {
             crate::test_support::job_end(&app, id);
         }
+    }
+
+    #[test]
+    fn a_second_save_to_a_file_being_saved_is_refused_not_joined_so_its_note_is_not_lost() {
+        let dir = TempDir::new("save-twice");
+        let app = opened(Some(dir.0.clone()), &[samples().join("log4net")]);
+        crate::paths::allow_under(app.handle(), "main", &dir.0);
+        let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+        let file = dir.0.join("p.debriefz").to_string_lossy().into_owned();
+        let save = |ui: Value| {
+            block(save_project(
+                app.handle().clone(),
+                main_window(&app),
+                crate::paths::WindowGrants::of(app.handle(), "main"),
+                OpId::default(),
+                file.clone(),
+                "P".into(),
+                ui,
+                None,
+                Some(true),
+            ))
+        };
+        jobs.hold_starts(true);
+        let first = save(json!({"note": "first"})).unwrap();
+        let refused = save(json!({"note": "second"})).unwrap_err();
+        assert!(
+            refused.message.contains("Another job is still writing this file"),
+            "{}",
+            refused.message
+        );
+        assert_eq!(jobs.find_active(|j| j.kind == JobKind::Export).len(), 1);
+        jobs.hold_starts(false);
+        crate::test_support::job_end(&app, first);
+    }
+
+    #[test]
+    fn an_export_identical_to_a_running_one_that_is_being_cancelled_says_so_and_runs_once_it_ended() {
+        let dir = TempDir::new("export-cancelling");
+        let app = opened(Some(dir.0.clone()), &[samples().join("log4net")]);
+        with_notices(&app);
+        crate::paths::allow_under(app.handle(), "main", &dir.0);
+        let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+        let out = dir.0.join("events.clef");
+        let target = crate::paths::WindowGrants::of(app.handle(), "main")
+            .write(&out.to_string_lossy(), &[])
+            .unwrap()
+            .path()
+            .to_path_buf();
+        let request = |overwrite: bool| -> ExportRequest {
+            serde_json::from_value(json!({"format": "clef", "path": out.to_string_lossy(), "overwrite": overwrite})).unwrap()
+        };
+        // The running job the command would have started for this request, held inside its work.
+        let mut keyed = request(false);
+        keyed.path = target.to_string_lossy().into_owned();
+        let spec = crate::jobs::export_spec_for(&main_window(&app), "Export events to", &target, &keyed, false);
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let running = crate::jobs::export(app.handle(), &main_window(&app), spec, &target, move |_| {
+            let _ = held.recv();
+            Ok("Exported.".to_string())
+        })
+        .unwrap();
+        crate::jobs::wait_until("the export runs", || {
+            jobs.state_of(crate::jobs::JobId(running)) == Some(crate::jobs::JobState::Running)
+        });
+        jobs.cancel(crate::jobs::JobId(running)).unwrap();
+        let ask = || {
+            block(export_events(
+                app.handle().clone(),
+                main_window(&app),
+                OpId::default(),
+                request(false),
+            ))
+        };
+        // Still running (its work has not noticed the Cancel): the same request is not joined, and the reason is its own.
+        let refused = ask().unwrap_err();
+        assert!(refused.message.contains("is being cancelled"), "{}", refused.message);
+        release.send(()).unwrap();
+        crate::test_support::job_end(&app, running);
+        // Ended: the same request starts a new job.
+        let again = ask().unwrap();
+        assert_ne!(again, running);
+        crate::test_support::job_end(&app, again);
     }
 }

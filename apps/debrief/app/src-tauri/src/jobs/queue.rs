@@ -39,8 +39,10 @@ pub enum Refusal {
     },
     /// A keyed spec was given to a call whose handle cannot follow a job it joins (see `Jobs::submit`).
     KeyedWithHandle,
-    /// Another export is already writing the same file, with other parameters: two writers would meet in one file.
+    /// Another job is still writing the same file (an export with other parameters, a Save): two writers would meet in one file.
     TargetBusy,
+    /// An equal export is being cancelled: it still holds its file, and joining it would lose the request.
+    Cancelling,
 }
 
 impl std::fmt::Display for Refusal {
@@ -54,8 +56,9 @@ impl std::fmt::Display for Refusal {
             Refusal::KeyedWithHandle => write!(f, "a keyed job cannot hand its value to a waiter: use submit_work"),
             Refusal::TargetBusy => write!(
                 f,
-                "Another export is already writing this file with other settings; wait for it to finish or cancel it in the Jobs pane, or choose another file"
+                "Another job is still writing this file; try again when it finishes, or choose another file"
             ),
+            Refusal::Cancelling => write!(f, "The export of this file is being cancelled; try again in a moment"),
         }
     }
 }
@@ -265,8 +268,8 @@ impl JobQueue {
     }
 
     /// What a submit of `spec` would meet: the active job that serves an equal keyed request (`Some`), or `None` when it would
-    /// add a job. An export of a file another active export is writing with other parameters is refused
-    /// ([`Refusal::TargetBusy`]); the check is here so it holds for every caller and cannot race the submit.
+    /// add a job. An export of a file another active export is writing with other parameters (or a Save) is refused
+    /// ([`Refusal::TargetBusy`]); the same request as a job being cancelled is refused ([`Refusal::Cancelling`]); the check is here so it holds for every caller and cannot race the submit.
     pub fn preflight(&self, spec: &JobSpec) -> Result<Option<JobId>, Refusal> {
         if let Some(key) = &spec.key {
             if let Some(j) = self.active.iter().find(|j| {
@@ -280,6 +283,16 @@ impl JobQueue {
             }
         }
         if let (JobKind::Export, Some(JobLink::Path { path })) = (spec.kind, &spec.source.link) {
+            // The same request as a job that is being cancelled: say so, rather than "busy" (it is the user's own export).
+            if let Some(key) = &spec.key {
+                if self
+                    .active
+                    .iter()
+                    .any(|j| j.kind == spec.kind && j.key.as_ref() == Some(key) && self.stopping.contains(&j.id))
+                {
+                    return Err(Refusal::Cancelling);
+                }
+            }
             let busy = self.active.iter().any(|j| {
                 j.kind == JobKind::Export
                     && !j.state().is_finished()

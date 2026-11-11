@@ -427,10 +427,11 @@ pub(crate) fn export_key(title: &str, window: Option<&str>, path: &std::path::Pa
     key::JobKey::new("export", window).text(title).path(path)
 }
 
-/// The spec of an export to `path` by the window (or the app), keyed by the work and its target alone: the same export asked
-/// for while it runs is served by that job. An export that depends on a request uses [`export_spec_for`].
+/// The spec of an export to `path` by the window (or the app) that is never merged with another job: a Save or a report whose
+/// content the path and the title do not tell. A second job writing the same file is refused (`Refusal::TargetBusy`). A job
+/// that joins repeated requests has a key built by [`key::JobKey`] from its whole request ([`export_spec_for`]).
 pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::Path) -> JobSpec {
-    export_spec_with(title, window, path, Some(export_key(title, window, path)))
+    export_spec_with(title, window, path, None)
 }
 
 /// An export spec with the key the caller built (`None`: the request could not be fingerprinted, so the job is never merged).
@@ -448,16 +449,27 @@ pub(crate) fn export_spec_with(title: &str, window: Option<&str>, path: &std::pa
 }
 
 /// The spec of an export of the window's logs to `path` described by `request`: keyed by the target, the project, the
-/// profile's `[redact]` rules and the whole request except what only confirms it (`overwrite`, and the path as the user wrote
+/// profile's `[redact]` rules (when `redact`) and the whole request except what only confirms it (`overwrite`, and the path as the user wrote
 /// it, which `path` replaces). The same request while it runs is served by that job.
-pub(crate) fn export_spec_for<T: Serialize>(win: &CurrentWindow, title: &str, path: &std::path::Path, request: &T) -> JobSpec {
-    let key = export_key(title, Some(win.label()), path)
-        .text(&win.engine.opened_id().map_or_else(String::new, |id| id.to_string()))
-        .request(&win.host.compiled().profile.redact, &[])
-        .and_then(|k| {
-            let skip: Vec<&str> = key::CONFIRMATION_ONLY.iter().copied().chain(["path"]).collect();
-            k.request(request, &skip)
-        });
+pub(crate) fn export_spec_for<T: Serialize>(
+    win: &CurrentWindow,
+    title: &str,
+    path: &std::path::Path,
+    request: &T,
+    redact: bool,
+) -> JobSpec {
+    let id = win.engine.opened_id().map_or_else(String::new, |id| id.to_string());
+    let key = export_key(title, Some(win.label()), path).text(&id);
+    // The profile's `[redact]` rules matter only to a request that redacts.
+    let key = if redact {
+        key.request(&win.host.compiled().profile.redact, &[])
+    } else {
+        Some(key)
+    };
+    let key = key.and_then(|k| {
+        let skip: Vec<&str> = key::CONFIRMATION_ONLY.iter().copied().chain(["path"]).collect();
+        k.request(request, &skip)
+    });
     export_spec_with(title, Some(win.label()), path, key)
 }
 

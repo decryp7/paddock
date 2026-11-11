@@ -331,7 +331,7 @@ pub(crate) async fn sql_export<R: Runtime>(
         overwrite,
     };
     // The same export already running serves this ask (before the overwrite question), another export of the file is refused.
-    let spec = crate::jobs::export_spec_for(&state, "Export SQL result to", &target, &request);
+    let spec = crate::jobs::export_spec_for(&state, "Export SQL result to", &target, &request, false);
     if let Some(id) = crate::jobs::preflight(&app, &spec)? {
         return Ok(id);
     }
@@ -779,7 +779,7 @@ mod tests {
         // Another query into the same file is refused while this one writes it.
         let refused = ask("SELECT 2", true).unwrap_err();
         assert!(
-            refused.message.contains("Another export is already writing this file"),
+            refused.message.contains("Another job is still writing this file"),
             "{}",
             refused.message
         );

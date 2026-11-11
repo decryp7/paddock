@@ -261,7 +261,7 @@ pub(crate) async fn export_report<R: Runtime>(
         .path()
         .to_path_buf();
     // The same report export already running serves this ask (before the overwrite question), another export of the file is refused.
-    let spec = crate::jobs::export_spec_for(&state, "Export report", &target, &request);
+    let spec = crate::jobs::export_spec_for(&state, "Export report", &target, &request, request.redact);
     if let Some(id) = crate::jobs::preflight(&app, &spec)? {
         return Ok(id);
     }
