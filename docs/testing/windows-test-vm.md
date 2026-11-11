@@ -138,6 +138,7 @@ found the done marker over SSH and took `clean-baseline` at 18:12.
 
 ```sh
 scripts/vm-win.sh revert                  # back to clean-baseline (the VM is off afterwards)
+scripts/vm-win.sh revert --snapshot admin-baseline   # or another snapshot (elevation tests)
 scripts/vm-win.sh start                   # headless; waits until SSH answers (refuses when the 1-minute load is >= 25)
 scripts/vm-win.sh ssh 'git --version'     # as paddock-test, PowerShell is the remote shell
 scripts/vm-win.sh ssh --admin 'Get-Service sshd'
@@ -150,6 +151,44 @@ paddock-test@$(scripts/vm-win.sh ip):C:/paddock-test/`. Always revert afterwards
 
 Monthly (or before a release test): revert, start, run Windows Update as `paddock-admin`, stop, then replace the
 baseline (`vmrun deleteSnapshot`, `scripts/vm-win.sh snapshot clean-baseline`).
+
+## Snapshots: `clean-baseline` and `admin-baseline`
+
+| Snapshot | What is in it | Use it for |
+| --- | --- | --- |
+| `clean-baseline` (default) | the fresh install: `paddock-test` is a standard user | everything that runs as a standard user |
+| `admin-baseline` | `clean-baseline`, plus `paddock-test` in Administrators (a split token: medium integrity by default, High on consent), UAC consent for administrators on the normal desktop (`ConsentPromptBehaviorAdmin=5`, `PromptOnSecureDesktop=0`, `EnableLUA=1`), and the auto-logon and in-session job runner of `gui-setup` | elevation tests that must measure a real elevated relaunch (UAC stays on) |
+| `gui-baseline` | `clean-baseline` plus the auto-logon and in-session job runner (`vm-win.sh gui-setup`); `paddock-test` stays a standard user | GUI tests that need a desktop, without admin rights |
+| `gui-session-tools` (and `gui-session-tools-no-dyno`) | the session tools: auto-logon, SSH keys, the actor; the `-no-dyno` one has no Dyno of any kind (`scripts/vm-smoke/make-no-dyno-snapshot.sh`) | the Windows smoke suite (`scripts/vm-smoke/run-win.mjs` starts from `gui-session-tools`); other snapshots in `vmrun listSnapshots` are leftovers of single tasks |
+
+`clean-baseline` is never changed. Make or rebuild `admin-baseline` with `scripts/vm-win.sh admin-setup`. It refuses a running VM (it
+never touches one) and a `.vmx` that still has `RemoteDisplay.vnc.*` lines. It takes the lock, reverts to `clean-baseline`, applies
+`scripts/vm-win/admin-setup.ps1` and the `gui-setup.ps1` runner, waits for a clean power-off (a hard power-off is never
+snapshotted), takes the snapshot and reverts to `clean-baseline`. If it fails, hangs at a step (300 s per guest step, a hung SSH call is
+killed) or is interrupted by TERM, INT or HUP, its EXIT trap stops the VM and reverts it to `clean-baseline`. That does not cover a
+SIGKILL of the script or a lost host: then run `scripts/vm-win.sh stop && scripts/vm-win.sh revert`. Choose a snapshot with
+`scripts/vm-win.sh revert --snapshot admin-baseline` (the positional `revert <name>` still works; the default is `clean-baseline`, so
+nothing else changes). Then `start`; after the auto-logon `vm-win.sh job <file.ps1>` runs on the desktop of `paddock-test`, unelevated.
+
+**`vm-win.sh ssh` is elevated in `admin-baseline`.** Measured 2026-11-11 (build 26300.9457): over SSH, `paddock-test` runs at
+`Mandatory Label\High Mandatory Level` with `BUILTIN\Administrators` enabled (sshd gives an administrator its full token), so a
+test that needs the unelevated side, or that must measure a real elevation, must run its unelevated part with `vm-win.sh job`
+(the desktop session, Medium) and never over `ssh`. Over SSH an elevated relaunch proves nothing.
+
+**Answering the consent prompt.** The prompt now appears on the normal desktop, but UI Automation and `SendInput` from the unelevated
+session still cannot drive it (consent.exe is a higher-integrity window: UIPI). The VM's own VNC server can: its input arrives as the
+virtual keyboard's and mouse's. Enable VNC in the `.vmx` for one run (`withVnc` / `stripVnc` in `scripts/vm-smoke/vmx-edit.mjs`, port
+5995, a per-run password, only between revert and start, stripped afterwards) and drive it with vncdotool (`scripts/vm-smoke/win-vnc.mjs`,
+`new Vnc().run([...])`, 1024x768). Measured 2026-11-11 (build 26300.9457): a prompt started from the hidden job runner does not get
+the foreground; it shows only as a flashing taskbar button (the last one, about x=772, y=744), and a key such as `alt-y` does not reach
+it. So: wait on a condition until `consent.exe` runs (poll over SSH, never a fixed sleep), click the flashing taskbar button
+(`move 772 744 click 1`), then click **Yes** (`move 410 531 click 1`; the default button is No); capture a screenshot at each step as
+evidence. These click points are fixed coordinates measured on build 26300.9457 at 1024x768 and are not stable across builds or
+resolutions: a scripted run must take a screenshot and check what is on screen (the taskbar button, the dialog and its Yes button)
+before each click, and fail rather than click blindly. Proof: unelevated `paddock-test` showed `Mandatory Label\Medium Mandatory Level`; `Start-Process cmd -Verb RunAs` with that
+prompt answered over VNC wrote an `elev.txt` showing `Mandatory Label\High Mandatory Level` and `BUILTIN\Administrators` enabled.
+A `vm-win.sh stop` right after an unanswered prompt can hang in its SSH call; `stop` sends the shutdown request in the background,
+powers off after 120 s, ends the request if it is still open and prints `::warning::` with its exit code when it failed.
 
 ## The pre-release update test on Windows
 
