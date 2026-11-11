@@ -38,7 +38,13 @@ pub const CLOSE_GRACE_KEPT: Duration = Duration::from_secs(20);
 /// and more on a loaded host. A process in that state cannot be judged by its CPU or its output, so this waits for the process
 /// to end with no limit of its own: the caller's bound (a test runner's slow-timeout) is the guard. Failure says the exit
 /// status and the browser's output.
+///
+/// macOS only: it returns `Ok(Duration::ZERO)` without starting anything elsewhere, because on Windows `chrome --version`
+/// starts the browser (a window) and on Linux the first run is not held.
 pub fn warm_up(exe: &Browser) -> Result<Duration> {
+    if !cfg!(target_os = "macos") {
+        return Ok(Duration::ZERO);
+    }
     paddock_proc::warm_up(&exe.path, &["--version"]).map_err(Error::Launch)
 }
 

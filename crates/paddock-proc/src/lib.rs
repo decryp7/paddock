@@ -16,8 +16,8 @@
 //!   ([`StallCause::Paused`]); [`StallReport`] says why a wait looks stuck. [`InstanceLock`]: one instance per folder by a
 //!   held OS lock; [`hint`]: a discovery file is only a hint (rule 53).
 //!
-//! - [`wait_ready_or_exit`], [`warm_up`]: the one start wait of every test and start (ADR 0071): wait while alive until ready or
-//!   exited, with an exit reported at once and one outer hang guard; pay a first run of a program before the start that matters.
+//! - [`warm_up`]: pays the first run of a program (`--version`) before the start that matters, memoised by file identity and
+//!   with its duration printed (ADR 0071); the start itself is waited for on ready or exit through [`StartWatch`].
 //!
 //! - [`console`]: a GUI-subsystem program (no console window at login) that still prints when run from a terminal.
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
@@ -40,7 +40,6 @@ mod instance;
 #[cfg(windows)]
 mod job;
 mod login;
-mod ready;
 mod run;
 mod runstate;
 pub mod self_test;
@@ -50,6 +49,7 @@ mod supervised;
 mod sys;
 mod tree;
 mod usage;
+mod warm;
 mod watch;
 
 #[cfg(test)]
@@ -86,7 +86,6 @@ pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
 };
-pub use ready::{Ended, HANG_GUARD, ThreadPace, wait_ready_or_exit, warm_up};
 pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
 pub use runstate::{RunState, run_state};
 pub use stall::{StallAction, StallCause, StallReport};
@@ -105,6 +104,7 @@ pub use usage::{
     tree_cpu_time_from, tree_cpu_time_of, tree_memory, tree_memory_from, tree_memory_of,
     tree_memory_with,
 };
+pub use warm::warm_up;
 pub use watch::{
     MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,
 };

@@ -117,11 +117,11 @@ pub struct StallGuard {
 }
 
 impl StallGuard {
-    /// A guard that calls a count stalled after `limit` without growth, counted from `now`.
-    pub fn new(limit: Duration, now: Duration) -> StallGuard {
+    /// A guard that calls a count stalled after `limit` without growth, counted from `now`, when the count stood at `progress`.
+    pub fn new(limit: Duration, now: Duration, progress: u64) -> StallGuard {
         StallGuard {
             limit,
-            last: 0,
+            last: progress,
             since: now,
         }
     }
@@ -160,7 +160,7 @@ pub fn guarded<T: Send + 'static>(
         );
     });
     let began = Instant::now();
-    let mut guard = StallGuard::new(stall_limit, Duration::ZERO);
+    let mut guard = StallGuard::new(stall_limit, Duration::ZERO, progress.get());
     loop {
         match rx.recv_timeout(LAST) {
             Ok(Ok(value)) => return value,
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn a_count_that_keeps_growing_is_never_stalled_however_long_it_takes() {
-        let mut g = StallGuard::new(S(60), S(0));
+        let mut g = StallGuard::new(S(60), S(0), 0);
         // Two hours of work, one unit every 59 s: far over the limit in total, never over it between units.
         for n in 1..=122u64 {
             assert!(!g.stalled(n, S(n * 59)), "unit {n}");
@@ -285,10 +285,18 @@ mod tests {
 
     #[test]
     fn a_count_that_stops_is_stalled_after_the_limit_and_not_before() {
-        let mut g = StallGuard::new(S(60), S(0));
+        let mut g = StallGuard::new(S(60), S(0), 0);
         assert!(!g.stalled(5, S(100)));
         assert!(!g.stalled(5, S(159)));
         assert!(g.stalled(5, S(160)));
+    }
+
+    #[test]
+    fn a_guard_starts_from_the_count_it_is_given() {
+        // A count that already stood at 5 and never moves is stalled at the limit; a guard that assumed 0 would call 5 growth.
+        let mut g = StallGuard::new(S(60), S(10), 5);
+        assert!(!g.stalled(5, S(69)));
+        assert!(g.stalled(5, S(70)));
     }
 
     #[test]

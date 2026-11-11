@@ -93,7 +93,7 @@ impl PluginSpec {
             exe: exe.into(),
             args: vec!["--plugin".into(), id.into()],
             granted: Vec::new(),
-            connect_window: debrief_ipc::process::START_HANG_GUARD,
+            connect_window: Duration::from_secs(15),
             supervisor: SupervisorConfig {
                 log: Some(log.clone()),
                 ..SupervisorConfig::new(format!("plugin \"{id}\""))

@@ -4,6 +4,12 @@
   (CHANGES) and its re-review (ACCEPTABLE, 2026-11-09), with the re-review's P2s applied.
 - Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-0b, WP-1, WP-2, WP-4a, WP-5 (about 5.5 days); dropped WP-3; deferred WP-4b to WP-4e (migrate a site when its test flakes).
 - Date: 2026-11-09
+- Progress 2026-11-11 (`fix/shared-readiness-wait`): row 2 (the store-worker test: `WorkerConfig::for_tests`, `--self-test` warm-up in
+  the app's health test), row 4 (Debrief's plugin-test harness: `UNTIL_CONNECTED`; no warm-up, the program is a plugin author's) and
+  the first-run warm-up of row 13 for paddock-chromium and Spotter (`paddock_proc::warm_up`, macOS only). `paddock_testkit::guarded`
+  (progress guard) serves the live scans of paddock-dev. Not built: section 1's `wait_ready_or_exit` in `paddock-testkit::start`.
+  **Row 13 is still open**: the 20-40 s receives and deadlines in the real-browser tests of paddock-chromium, Spotter and Debrief's
+  chromium-driver are unchanged. The product's 15 s connect window is unchanged (D4).
 - Related: ER-11 / rule 5 (failing test first), ER-12 (no raised timeouts or sleeps; flaky is red), ER-20 / rule 51
   (parallelism and cost), ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42-43 (share first,
   shared behaviour tested once), ER-27 (logs explain every failure), ER-28 (a cause is confirmed by a run without it),

@@ -224,7 +224,13 @@ pub fn lifetime_with(start_limit: Duration, page_budget: Duration) -> Duration {
 ///
 /// Public, with no product caller yet: it serves the tests until the product's first-start decision (Spotter warms the browser
 /// up right after downloading it, in a "preparing the browser" step without a time limit; queued, not built).
+///
+/// macOS only: it returns `Ok(Duration::ZERO)` without starting anything elsewhere, because on Windows `chrome --version`
+/// starts the browser (a window) and on Linux the first run is not held.
 pub fn warm_up(exe: &Browser) -> Result<Duration> {
+    if !cfg!(target_os = "macos") {
+        return Ok(Duration::ZERO);
+    }
     paddock_proc::warm_up(&exe.path, &["--version"]).map_err(Error::Launch)
 }
 
@@ -795,7 +801,7 @@ mod tests {
 
     /// A stand-in that takes its time before answering (the OS holding a first run): `warm_up` waits for it however long it
     /// takes, with no budget of its own, and reports how long it waited.
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     #[test]
     fn warm_up_waits_for_a_slow_first_run_without_a_budget() {
         use std::os::unix::fs::PermissionsExt;
@@ -813,7 +819,7 @@ mod tests {
     }
 
     /// A first run that fails says its exit status and output; one that cannot be run says why.
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
     #[test]
     fn warm_up_failures_name_the_status_and_the_output() {
         use std::os::unix::fs::PermissionsExt;

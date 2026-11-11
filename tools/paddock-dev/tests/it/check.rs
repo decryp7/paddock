@@ -156,9 +156,10 @@ const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
     clippy::disallowed_methods,
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
-/// [`node`] for a driver that prints one line per unit of work: every line is a tick of `progress`, and the lines are not part
-/// of the answer. The child's end (its exit status) ends the wait; a hang ends it through the progress guard around the call.
-fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) {
+/// [`node`] for a driver that prints a `.` line per unit of work: every such line is a tick of `progress`, and everything else it
+/// prints is the answer, returned. The child's end (its exit status) ends the wait; a hang ends it through the progress guard
+/// around the call.
+fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
     use std::io::{BufRead, Read};
     let mut c = Command::new("node");
     c.args(["--input-type=module", "-e", driver])
@@ -175,15 +176,30 @@ fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit
         drop(stderr.read_to_string(&mut text));
         text
     });
-    for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines() {
-        if line.is_ok() {
+    let mut answer = String::new();
+    for line in std::io::BufReader::new(child.stdout.take().unwrap()).lines().map_while(Result::ok) {
+        if line == "." {
             progress.tick();
+        } else {
+            answer.push_str(&line);
+            answer.push('\n');
         }
     }
     let status = child.wait().unwrap();
     let errors = errors.join().unwrap();
     assert!(status.success(), "node failed: {errors}");
+    answer
 }
+
+/// [`JS_RUN`] printing a `.` line for every file the conformance runner reads (it reads the tree through `readFileSync`, which
+/// the prefix wraps before the runner is imported), so [`node_ticking`] sees the JS host at work, as it does the Rust one.
+const JS_RUN_TICKING: &str = r#"
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const read = fs.readFileSync;
+fs.readFileSync = (...args) => { process.stdout.write('.\n'); return read(...args); };
+syncBuiltinESMExports();
+"#;
 
 const JS_RUN: &str = r#"
 import { pathToFileURL } from 'node:url';
@@ -219,12 +235,14 @@ fn live_tree_findings_equal_the_js_host() {
         return skip("node is not installed");
     }
     let root = repo_root();
-    // The JS host is one node process with no unit to count: it is waited for until it ends, under nextest's backstop.
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "paddock".into())],
-    ))
-    .unwrap();
+    // The JS host prints a line per file it reads and the Rust host ticks per file: both are judged on progress.
+    let js_root = root.clone();
+    let js = paddock_testkit::guarded("the JS check host over the live tree", LIVE_STALL, move |progress| {
+        let driver = format!("{JS_RUN_TICKING}{JS_RUN}");
+        let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
+        let answer = node_ticking(&driver, &env, &progress);
+        serde_json::from_str::<Value>(answer.trim()).unwrap()
+    });
     // The Rust host reports every file it reads: a slow disk passes, a run that reads nothing for LIVE_STALL does not.
     let r = paddock_testkit::guarded("the Rust check host over the live tree", LIVE_STALL, {
         let root = root.clone();

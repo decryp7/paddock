@@ -16,14 +16,14 @@ test-threads = "num-cpus"
 # slowing it down. A test that needs longer is a waiver below (an override with a `# waiver:` line saying why).
 slow-timeout = { period = "30s", terminate-after = 2 }
 
-# waiver: hang-guard backstop only; the whole-repository "live" tests read every tracked file (git ls-files, a syn parse of every .rs file, node over
-# every file). They are judged on progress, not on total time (ADR 0071): each one fails itself when it finishes no file for 120 s
-# (`paddock_testkit::guarded`), so a slow disk passes and a real hang ends within minutes. Measured 2026-11-11: 42-49 s quiet against
-# over 240 s under I/O load, with files finishing all along, which is why no fixed period fits. This override is only the backstop for
-# what has no unit to count (the one node run of the JS host): 20 periods of 60 s, not a hidden flake budget (ER-12).
+# waiver: the whole-repository "live" tests read every tracked file (git ls-files, a syn parse of every .rs file, node over every file);
+# measured 2026-11-11: 42-49 s quiet against over 240 s under I/O load, with files finishing all along. Each one also judges itself on
+# progress (ADR 0071, `paddock_testkit::guarded`): it fails with its own message when it finishes no file for 120 s, so a hang is named
+# and a slow disk is not called one. Four periods of 60 s are nextest's bound on the whole run, kept at the old size (not raised): a
+# run over 240 s in total is still stopped here and is a finding about the host (ER-12).
 [[profile.ci.overrides]]
 filter = "test(/^ipc_endpoints::the_repository_register_is_complete/) | test(/^check::live_/)"
-slow-timeout = { period = "60s", terminate-after = 20 }
+slow-timeout = { period = "60s", terminate-after = 4 }
 
 # waiver: the whole-repository reads of the documentation contract; measured 2026-11-11 like the live tests above (waiting on disk, git
 # and node, not computing), and without a unit of work to count. Four periods of 60 s.

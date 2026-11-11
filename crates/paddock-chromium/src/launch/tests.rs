@@ -1317,7 +1317,7 @@ fn a_sweep_removes_nothing_when_the_process_table_cannot_be_read() {
 
 /// `warm_up` runs the browser's `--version` to its end through the shared `paddock_proc::warm_up` (tested there against a
 /// released-by-gate stand-in) and reports a failed first run as a launch error naming the status and the output.
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn warm_up_is_the_shared_first_run_and_a_failure_is_a_launch_error() {
     use std::os::unix::fs::PermissionsExt;
@@ -1348,4 +1348,15 @@ fn warm_up_is_the_shared_first_run_and_a_failure_is_a_launch_error() {
         path: base.path().join("nope"),
     };
     assert!(matches!(warm_up(&missing), Err(Error::Launch(_))));
+}
+
+/// Off macOS `warm_up` starts nothing: on Windows `chrome --version` starts the browser.
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn warm_up_starts_nothing_off_macos() {
+    let missing = Browser {
+        flavor: crate::discover::Flavor::Chromium,
+        path: std::path::PathBuf::from("/no/such/browser"),
+    };
+    assert_eq!(warm_up(&missing).unwrap(), Duration::ZERO);
 }

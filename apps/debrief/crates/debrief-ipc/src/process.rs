@@ -60,9 +60,7 @@ pub struct SpawnSpec {
     pub label: String,
     /// Prefix of the private address (see [`PrivateEndpoint::create_named`]).
     pub endpoint_prefix: String,
-    /// How long a child that is alive and has not connected is waited for. The default is [`START_HANG_GUARD`], a hang guard and
-    /// not a start budget (ADR 0071): a slow start (the first run of a fresh binary on macOS, a starved host) is waited for until
-    /// the child connects or exits, and an exit ends the wait at once with its status. [`UNTIL_CONNECTED`]: no guard at all.
+    /// How long the child may take to connect ([`UNTIL_CONNECTED`]: until it connects or exits).
     pub connect_window: Duration,
     /// Run at below-normal priority so the analysis stays responsive.
     pub below_normal_priority: bool,
@@ -84,12 +82,10 @@ pub struct SpawnSpec {
 /// started late again (CI 7096). The test runner's hang detector, not a clock, ends a child that never connects.
 pub const UNTIL_CONNECTED: Duration = Duration::MAX;
 
-/// The default [`SpawnSpec::connect_window`]: ready or exit, never a fixed start budget (ADR 0071, rule 71). A child that is alive
-/// is waited for this long, ten minutes, only so that a child that hangs before it connects ends the launch with a message
-/// instead of holding a worker thread for good; the first run of a freshly installed binary held by the OS took 42 s on an idle
-/// Mac and over 240 s under I/O load (CI 7919, 7925: "the store worker did not connect within 15 s" with the old 15 s window).
-// conformance: hang-guard
-pub const START_HANG_GUARD: Duration = Duration::from_secs(600);
+/// The product's connect window: how long a child may take to connect before the launch gives up (an exit ends the wait at once,
+/// whatever this is). Tests that start a fresh binary use [`UNTIL_CONNECTED`] (ADR 0071); the product keeps this bound so a
+/// child that is alive and never connects ends the launch instead of holding the supervisor's lock.
+pub const DEFAULT_CONNECT_WINDOW: Duration = Duration::from_secs(15);
 
 impl SpawnSpec {
     pub fn new(exe: impl Into<PathBuf>, label: impl Into<String>) -> SpawnSpec {
@@ -101,7 +97,7 @@ impl SpawnSpec {
             current_dir: None,
             label: label.into(),
             endpoint_prefix: crate::endpoint::prefix::DEFAULT.into(),
-            connect_window: START_HANG_GUARD,
+            connect_window: DEFAULT_CONNECT_WINDOW,
             below_normal_priority: true,
             log: None,
             sandbox: crate::sandbox::SandboxSpec::unrestricted(),

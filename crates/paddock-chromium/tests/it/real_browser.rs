@@ -106,17 +106,16 @@ fn answer(
 /// 7918). The first start of a process pays it here, outside any start guard, by waiting for the browser's own `--version` to end;
 /// nextest's slow-timeout waiver is its only bound. Every later start is then about half a second.
 fn found() -> Option<paddock_chromium::discover::Browser> {
-    static ONCE: std::sync::Once = std::sync::Once::new();
+    static WARM: std::sync::OnceLock<Result<std::time::Duration, String>> =
+        std::sync::OnceLock::new();
     let exe = find_for_tests();
     if let Some(b) = &exe {
-        ONCE.call_once(|| {
-            if cfg!(target_os = "macos") {
-                match paddock_chromium::launch::warm_up(b) {
-                    Ok(took) => eprintln!("the test browser's first run took {took:?}"),
-                    Err(e) => panic!("{e}"),
-                }
-            }
-        });
+        // A failed first run fails every test of the process, not only the first one to call it.
+        let warm =
+            WARM.get_or_init(|| paddock_chromium::launch::warm_up(b).map_err(|e| e.to_string()));
+        if let Err(e) = warm {
+            panic!("{e}");
+        }
     }
     exe
 }
