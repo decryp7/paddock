@@ -15,8 +15,13 @@
 //! - [`FakeClock`]: the deterministic clock of `paddock_jobs::time`, re-exported so a test needs one dependency.
 //! - [`wait`]: `wait_until` / `wait_for` / `poll_for` / `poll_until_within` / `retry_within`, a bounded poll on a condition instead of a sleep.
 //!
-//! Nothing here touches the user's folders or starts a process; the only real time is [`wait`]'s poll interval.
+//! - [`boot_volume`]: [`boot_volume::boot_volume_temp`], the folder for programs a test starts as their own responsible
+//!   process (disclaimed or by launchd): never on an external volume, where macOS prompts (TCC, Removable Volumes).
+//!
+//! Nothing here touches the user's folders or starts a process, except [`boot_volume`], which runs the shared rule
+//! (`conformance/ci/boot-volume.sh`) once per process on macOS; the only real time is [`wait`]'s poll interval.
 
+pub mod boot_volume;
 pub mod env;
 pub mod golden;
 pub mod hostile;

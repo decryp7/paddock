@@ -1848,3 +1848,27 @@ caches and installs normally); the Edge update (running in the passing runs too)
 directly right after the 1.0.3 install, the 1.1.0 installer right after it, and after a 5-minute wait): 20 to 36 s each. The hung runs
 had a very slow VM (SSH ready after 6 to 20+ minutes, against about 1 minute later), so host disk contention is the best guess; it is
 not confirmed. The installer therefore bounds its wait at 5 minutes and says what to do (the hook comment has the numbers).
+
+## A test's disclaimed fake runner on an external TMPDIR prompted the user once per test (2026-11-11)
+
+The Mac mini showed "gitea-runner would like to access files on a removable volume" again and again. The prompts looked
+like the CI runners', but the tccd log (`AUTHREQ_PROMPTING`, matched to `AUTHREQ_ATTRIBUTION` by msgID) named one
+subject for all 18 prompts from 06:06 on: `<TMPDIR on the external volume>/pitcrew-it-<case>-<pid>/runner/bin/gitea-runner`.
+That is Pitcrew's ad-hoc signed `examples/fake_runner.rs`, which `tests/supervision.rs` copies as `gitea-runner` and the
+supervisor starts disclaimed (ADR 0020), so it is its own responsible process. An agent had run the tests locally with
+`TMPDIR` on the external volume, and each test's new path was a new TCC identity, so each test prompted once. CI was not
+affected: `job-tmpdir.sh` already puts the job's `TMPDIR` on the internal disk (lesson of 2026-11-04). Chrome for Testing
+and the build tools never prompted: they run with the runner (which has Full Disk Access) as their responsible process.
+**Lesson (class: a permission belongs to the responsible process, not the parent; second instance after 2026-11-04):** a
+test helper that launches a program disclaimed, or through launchd, keeps that program and its files off removable
+volumes itself, and does not rely on the caller's `TMPDIR`. The mechanism is one shared rule (ER-21):
+`conformance/ci/boot-volume.sh` (`diskutil` says the folder's volume, links resolved, is not internal; then `getconf
+DARWIN_USER_TEMP_DIR`), used by `job-tmpdir.sh` and Dyno's `check-bundle.sh` and, for Rust tests, through
+`paddock_testkit::boot_volume::boot_volume_temp()` (Pitcrew's supervision harness and its `launch.rs` and `disclaim.rs`
+tests). Measure prompts with `AUTHREQ_PROMPTING` before you guess the binary from the prompt's title: the title shows the
+file name, and a test fake can share the real program's name. Measured on the Mac mini (`log show` of `tccd`, which kept
+entries from 06:06 that day): 18 prompts from 06:06 to 17:44 and 17 more at 17:46-17:47, all for this fake runner, one per
+test path; 0 from the CI runners, the test browser or the build tools (Chrome for Testing's requests were attributed to
+the runner or the terminal; 80 chrome-headless-shell requests were allowed from a stored consent; node's 8 went to the
+runner or the terminal). After the change, two runs of the Pitcrew service tests with `TMPDIR` on the external volume
+made 0 prompts and 0 requests for the test folder, while an unchanged run in the same window prompted.

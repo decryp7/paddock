@@ -3204,6 +3204,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-limits",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-workspace-hack"
 version = "0.1.0"
 dependencies = [
@@ -3457,6 +3468,7 @@ dependencies = [
  "nix",
  "paddock-ipc",
  "paddock-proc",
+ "paddock-testkit",
  "pitcrew-core",
  "serde",
  "serde_json",

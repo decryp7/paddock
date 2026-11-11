@@ -58,6 +58,8 @@ nix = { version = "0.31", default-features = false, features = ["signal", "proce
 libc = "0.2"
 
 [dev-dependencies]
+# The boot-volume temp folder for the runner the tests start disclaimed (tests/supervision.rs, launch.rs, disclaim.rs).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The ending harness of ADR 0072 (tests/endings.rs): the raw-stream client, the scenarios, the ratchet.
 paddock-ipc = { path = "../../../../crates/paddock-ipc", features = ["testing"] }
 # The fake runner (examples/fake_runner.rs) stops on Ctrl+Break / SIGTERM like the real one.

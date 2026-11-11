@@ -53,14 +53,9 @@ job_temp() {
 
 internal_root() { printf '%s\n' "${PADDOCK_INTERNAL_TMP_ROOT:-${HOME:-/tmp}/gitea-runner/tmp}" | sed 's|/*$||'; }
 
-# volume_is_external <folder>: true on macOS when diskutil says the volume holding the folder is not internal.
-volume_is_external() {
-  local mount plist
-  mount="$(df -P "$1" 2>/dev/null | awk 'NR==2 { $1=$2=$3=$4=$5=""; sub(/^ +/, ""); print }')"
-  [ -n "$mount" ] || return 1
-  plist="$(diskutil info -plist "$mount" 2>/dev/null)" || return 1
-  printf '%s\n' "$plist" | awk '/<key>Internal<\/key>/ { getline; if ($0 ~ /<false\/>/) found = 1 } END { exit found ? 0 : 1 }'
-}
+# volume_is_external <folder>: the one rule, in boot-volume.sh (also used by Dyno's check-bundle.sh and paddock_testkit).
+# shellcheck source-path=SCRIPTDIR source=boot-volume.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/boot-volume.sh"
 
 # On a macOS host with an external work folder: the per-job folder on the internal disk (see the header). Prints the folder.
 internal_job_temp() {
