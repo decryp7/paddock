@@ -11,7 +11,7 @@
 //!   `connect <ip:port>` → opens a TCP connection, `ok` or the error.
 //!
 //! Flags: `--leak-endpoint=<prefix>` (makes a private endpoint, prints its address and exits without dropping it),
-//! `--exit-now` (dies before connecting), `--no-connect` (reads the bootstrap, never connects),
+//! `--version` (prints its name and exits: the warm-up of the first start), `--exit-now` (dies before connecting), `--no-connect` (reads the bootstrap, never connects),
 //! `--bad-token` (connects with a wrong token), `--relay` (starts a copy of itself that connects instead: a
 //! process the host did not start), `--garbage` (sends bytes that are not a frame after the handshake),
 //! `--oversize` (announces a 1 GiB frame after the handshake), `--say=<text>` (a line on stderr first),
@@ -210,6 +210,11 @@ mod exit_probe {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--version") {
+        // Run once by the tests before their first real start (`paddock_testkit::warm_first_start`).
+        println!("debrief-ipc-fake-child");
+        return;
+    }
     if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--exit-probe=")) {
         exit_probe::open(dir);
         let r = debrief_ipc::child::child_main_then(

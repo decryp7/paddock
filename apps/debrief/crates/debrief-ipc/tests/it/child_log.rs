@@ -5,30 +5,28 @@ use debrief_ipc::launch::{launch, ChildSpec};
 use debrief_ipc::peer::NoCalls;
 use debrief_ipc::process::{ChildProcess, SpawnSpec};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+
+/// The fake child's first start (a fresh binary the OS has not run yet) is paid here, before a test starts it with a bound it
+/// cannot remove (a child that exits at once must be seen exiting within the OS's publication window).
+fn warm() {
+    paddock_testkit::start::warm_first_start(std::path::Path::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child")), &["--version"]);
+}
 
 fn spec(args: &[&str], log: &str) -> SpawnSpec {
+    warm();
     let mut s = SpawnSpec::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"), "the fake child");
     s.args = args.iter().map(|a| a.to_string()).collect();
     s.endpoint_prefix = "debrief-test".into();
-    s.connect_window = Duration::from_secs(10);
+    s.connect_window = paddock_testkit::HANG_GUARD;
     s.log = Some(ChildLogSpec::new(log, ChildKind::Plugin).with_version("9.9.9"));
     s
-}
-
-fn wait_for(what: &str, f: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !f() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 #[test]
 fn a_crash_is_recorded_with_its_output_and_exit_code() {
     let p = ChildProcess::spawn(&spec(&["--say=boom token=s3cr3t", "--exit-now"], "capture-crash")).unwrap();
     let log = p.log().unwrap().clone();
-    wait_for("the exit line", || log.status().state != ChildRunState::Running);
+    paddock_testkit::wait_until("the exit line", || log.status().state != ChildRunState::Running);
     let s = log.status();
     assert_eq!(s.state, ChildRunState::Crashed, "{s:?}");
     assert_eq!(s.last_exit.as_deref(), Some("exit code 3"));
