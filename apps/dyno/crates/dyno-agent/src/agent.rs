@@ -402,6 +402,8 @@ pub type Built = (Arc<Shared>, Box<dyn dyno_core::ports::SystemSensors>, Box<dyn
 pub struct Shared {
     /// The data folder.
     pub dirs: Dirs,
+    /// The per-run folder standing in for a refused data folder; removed when the agent ends.
+    _scratch: Option<crate::paths::ScratchRoot>,
     /// Guarded state.
     pub core: Mutex<Core>,
     /// OS ports.
@@ -609,21 +611,45 @@ impl Shared {
     ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
-        if let Err(e) = crate::paths::prepare_root(dirs.root()) {
-            notes.push(format!("{e}; history is kept in memory only."));
+        // A data folder that is refused is not used at all (ADR 0092, W8): history is in memory, and every other file the agent reads
+        // or saves (settings, tools, plugins, intel lists, benchmarks) goes to a private per-run scratch folder, so nothing is read from
+        // or written to the refused folder, where another account may have planted files.
+        let mut dirs = dirs;
+        let mut scratch = None;
+        let refused = crate::paths::prepare_root(dirs.root(), dirs.is_users_own()).err();
+        if let Some(e) = &refused {
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "the temp folder is only the parent of a private, unguessably named scratch folder"
+            )]
+            let temp = std::env::temp_dir();
+            let made = crate::paths::scratch_root_in(&temp)
+                .map_err(|why| format!("{e}; no private scratch folder could be made either ({why})"))?;
+            dirs = Dirs::at(made.path()).with_log_folder(dirs.log_folder());
+            scratch = Some(made);
+            notes.push(format!(
+                "{e}; history is kept in memory only, and nothing is read from or saved to that folder."
+            ));
         }
-        let (store, note, store_kind) = match Store::open(&dirs.database(), t) {
-            Ok((s, n)) => (s, n, "file"),
-            Err(e) => {
-                notes.push(format!(
-                    "The history could not be stored on disk ({e}); Dyno keeps it in memory until it restarts."
-                ));
-                (
-                    Store::memory().map_err(|e| format!("SQLite is unavailable: {e}"))?,
-                    None,
-                    "memory (open failed)",
-                )
-            }
+        let (store, note, store_kind) = match refused {
+            Some(_) => (
+                Store::memory().map_err(|e| format!("SQLite is unavailable: {e}"))?,
+                None,
+                "memory (data folder refused)",
+            ),
+            None => match Store::open(&dirs.database(), t) {
+                Ok((s, n)) => (s, n, "file"),
+                Err(e) => {
+                    notes.push(format!(
+                        "The history could not be stored on disk ({e}); Dyno keeps it in memory until it restarts."
+                    ));
+                    (
+                        Store::memory().map_err(|e| format!("SQLite is unavailable: {e}"))?,
+                        None,
+                        "memory (open failed)",
+                    )
+                }
+            },
         };
         notes.extend(note);
         let (settings, warn) = files::load(&dirs.settings(), dyno_core::settings::parse);
@@ -750,6 +776,7 @@ impl Shared {
             intel: crate::intel_centre::IntelCentre::new(dirs.clone(), Arc::new(paddock_jobs::time::SystemClock)),
             plugins: dyno_plugin_host::PluginHost::new(dyno_plugin_host::HostConfig::new(dirs.plugins())),
             dirs,
+            _scratch: scratch,
             core: Mutex::new(core),
             ports: Ports {
                 // Linux: the helper first (it sees every account's descriptors), then the agent's own reader.

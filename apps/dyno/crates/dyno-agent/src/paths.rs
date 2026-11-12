@@ -5,25 +5,26 @@ use std::path::{Path, PathBuf};
 
 /// Makes the data folder `root` ready at the agent's start: created private (0700, whatever the umask), and, when an older Dyno made
 /// it with the umask (0775 under umask 002) so only the account's own private group can write to it, that group write removed once.
-/// A folder others can write to is not touched and is refused later by the folder check.
+/// A folder others can write to is not touched and is refused. Only the default data folder is ever tightened (`is_default`): a
+/// folder the user named with `DYNO_DATA_DIR` is checked and refused as it is, never changed (ADR 0092 D2).
 ///
 /// # Errors
 /// The folder cannot be made, or it is open to others; the text ends with the next step.
-pub fn prepare_root(root: &Path) -> Result<(), String> {
+pub fn prepare_root(root: &Path, is_default: bool) -> Result<(), String> {
     #[cfg(unix)]
     let others = |gid| paddock_env::group_has_other_members(gid, paddock_env::current_uid());
     #[cfg(not(unix))]
     let others = |_| true;
-    prepare_root_with(root, others)
+    prepare_root_with(root, is_default, others)
 }
 
 /// [`prepare_root`] with the group-membership lookup passed in (tests).
 ///
 /// # Errors
 /// See [`prepare_root`].
-pub fn prepare_root_with(root: &Path, group_has_others: impl FnOnce(u32) -> bool) -> Result<(), String> {
+pub fn prepare_root_with(root: &Path, is_default: bool, group_has_others: impl FnOnce(u32) -> bool) -> Result<(), String> {
     #[cfg(unix)]
-    if std::fs::symlink_metadata(root).is_ok() {
+    if is_default && std::fs::symlink_metadata(root).is_ok() {
         if let Err(r) = paddock_env::tighten_group_write(root, group_has_others) {
             log::warn!(Why = r.reason(); "The data folder cannot be made private; run chmod go-w on it");
             return Err(format!(
@@ -34,7 +35,7 @@ pub fn prepare_root_with(root: &Path, group_has_others: impl FnOnce(u32) -> bool
         }
     }
     #[cfg(not(unix))]
-    let _ = group_has_others;
+    let _ = (is_default, group_has_others);
     open_private(root, "the data folder")
         .map(|_| ())
         .map_err(|e| format!("Dyno cannot use its data folder: {e}"))
@@ -71,6 +72,44 @@ pub fn open_private_io(folder: &Path, what: &str) -> std::io::Result<paddock_env
         PrivateError::Io { source, .. } => std::io::Error::new(source.kind(), e.to_string()),
         _ => std::io::Error::new(std::io::ErrorKind::PermissionDenied, e.to_string()),
     })
+}
+
+/// A per-run private folder that stands in for a data folder that was refused (ADR 0092, W8): everything the agent would read from or
+/// save to its data folder goes here instead, so nothing is read from or written to the refused folder. It is made owner-only under
+/// the temp folder with an unguessable name and removed when the agent ends.
+#[derive(Debug)]
+pub struct ScratchRoot(PathBuf);
+
+impl ScratchRoot {
+    /// The folder.
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for ScratchRoot {
+    fn drop(&mut self) {
+        paddock_proc::cleanup::remove_dir_all(&self.0);
+    }
+}
+
+/// Makes a [`ScratchRoot`] under `temp` (refused when `temp` is one others can change, like any private folder).
+///
+/// # Errors
+/// The private folder could not be made; the text names the folder and the next step.
+pub fn scratch_root_in(temp: &Path) -> Result<ScratchRoot, String> {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u32(std::process::id());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    let path = temp.join(format!("Dyno-scratch-{:016x}", h.finish()));
+    open_private(&path, "the scratch data folder")
+        .map(|held| ScratchRoot(held.path().to_path_buf()))
+        .map_err(|e| e.to_string())
 }
 
 /// What to do when no data folder can be used (the same words for the agent and the CLI).
@@ -396,7 +435,7 @@ pub(crate) mod tests {
             protocol: 1,
             build: String::new(),
         };
-        prepare_root_with(&root, |_| false).unwrap();
+        prepare_root_with(&root, true, |_| false).unwrap();
         mine.write(&file).unwrap();
         assert_eq!(crate::discovery::Discovery::read(&file), Some(mine));
         assert_eq!(
@@ -414,12 +453,12 @@ pub(crate) mod tests {
         let root = tmp.path().join("data");
         std::fs::create_dir(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
-        let e = prepare_root_with(&root, |_| false).unwrap_err();
+        let e = prepare_root_with(&root, true, |_| false).unwrap_err();
         assert!(e.contains("chmod go-w"), "{e}");
         assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o777);
         // A shared group is refused too.
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
-        assert!(prepare_root_with(&root, |_| true).is_err());
+        assert!(prepare_root_with(&root, true, |_| true).is_err());
     }
 
     /// A folder others can write to and replace children of (0777, no sticky bit) inside a private temp folder, and the temp folder.
@@ -438,7 +477,7 @@ pub(crate) mod tests {
     fn a_data_folder_under_a_parent_others_can_change_is_refused() {
         let (_tmp, open) = open_parent();
         let root = open.join("data");
-        let e = prepare_root_with(&root, |_| false).unwrap_err();
+        let e = prepare_root_with(&root, true, |_| false).unwrap_err();
         assert!(e.contains("chmod go-w"), "the refusal names the next step: {e}");
     }
 
@@ -472,7 +511,7 @@ pub(crate) mod tests {
         use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("a").join("data");
-        prepare_root_with(&root, |_| false).unwrap();
+        prepare_root_with(&root, true, |_| false).unwrap();
         assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
@@ -581,12 +620,48 @@ pub(crate) mod tests {
     #[test]
     fn windows_a_data_folder_everyone_can_write_is_refused_with_a_next_step_and_a_new_one_is_made() {
         let (tmp, open) = everyone_folder();
-        let e = prepare_root_with(&open, |_| false).unwrap_err();
+        let e = prepare_root_with(&open, true, |_| false).unwrap_err();
         assert!(e.contains("Security tab") || e.contains("entries"), "{e}");
         let e = open_private_io(&open, "test").unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
         // A folder made under an Everyone-writable parent is refused (the parent rule), and a fresh one elsewhere is made.
         assert!(open_private(&open.join("data"), "test").is_err());
-        prepare_root_with(&tmp.path().join("own").join("data"), |_| false).unwrap();
+        prepare_root_with(&tmp.path().join("own").join("data"), true, |_| false).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_the_user_named_is_never_tightened_only_the_default_one_is() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("data");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
+        // DYNO_DATA_DIR: checked and refused as it is, even though it is the account's own private group.
+        let e = prepare_root_with(&root, false, |_| false).unwrap_err();
+        assert!(e.contains("chmod go-w"), "{e}");
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o775,
+            "an override is left as it was"
+        );
+        // The default folder gets the one-time group-write removal.
+        prepare_root_with(&root, true, |_| false).unwrap();
+        assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o755);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_scratch_root_is_private_unguessable_and_removed_with_its_guard_and_refused_under_an_open_temp() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let a = scratch_root_in(tmp.path()).unwrap();
+        let b = scratch_root_in(tmp.path()).unwrap();
+        assert_ne!(a.path(), b.path());
+        assert_eq!(std::fs::metadata(a.path()).unwrap().permissions().mode() & 0o777, 0o700);
+        let gone = a.path().to_path_buf();
+        drop(a);
+        assert!(!gone.exists());
+        let (_t, open) = open_parent();
+        assert!(scratch_root_in(&open).is_err());
     }
 }
