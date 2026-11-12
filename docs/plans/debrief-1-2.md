@@ -13,6 +13,9 @@
   **Restored scope designed (2026-11-12, section 10.6):** 27 packages, 129 raw (116 plus 13 for the `paddock-tools` and
   `paddock-deps` parts .NET needs). **Current total, recomputed in
   section 10.6: about 656 raw, about 782.5 with the buffer, about 2027-06-03** at 5.5 agent-days a day.
+  **Cut review applied 2026-11-12 (section 10.7): Tier A, as the user approved: about 572 raw, about 685 with the buffer, about
+  2027-05-10.** Tier B (dumps, time zones, the folder dialog, 1 billion events) was not approved and is unchanged. Where a
+  row or a total above says otherwise, 10.7 wins; sections 9.3 to 9.5 (critical path, schedule, totals) are history.
 - App: Debrief (`apps/debrief`). Rule 1 holds: Debrief is the one app; the shared work below is done for Debrief's
   release and is adopted by the demos in the same change (monorepo rules 39 and 42), not as a separate Paddock project.
 - Scope:
@@ -281,7 +284,16 @@ and `./dev gates ratchet --release-tag` (the first step of the `debrief.yml` pla
 | LINT-1 | The two clippy paths: `std::env::temp_dir` (158 call sites on 2026-11-08, mostly tests: a test builds its scratch folder from `tempfile`/the test kit or carries `#[allow(..., reason)]`; the production ones get a typed folder from `paddock-env`) and `reqwest::Client::new` (no site today; add the path). Then `clippy_not_yet` is empty. | 1.5 |
 | LINT-2 | The opt-in, one member at a time (46 members, the order of `not_yet`): `[lints] workspace = true`, clippy clean under `-D warnings`, the member leaves the list in the same commit. The review of 2026-11-08 counted about 7,165 `unwrap`/`expect` and 244 `unsafe` in non-test code that the preset flags; each `unwrap` on I/O or user data becomes a typed error, each `unsafe` gets a `// SAFETY:` reason. The count per member (from `cargo clippy` after the opt-in) sizes each step; the estimate is about 150 sites a day for the `unwrap`s and 10 an hour for the `unsafe`s. | about 20 |
 | LINT-3 | Review rounds and CI fixes (about 10 %). | 2 |
-| **Total** | | **about 23.5** |
+| **Total** | | **about 23.5 (about 5.5 after the amendment of 2026-11-12 below)** |
+
+**Amendment 2026-11-12 (user, cut review of 2026-11-12; reverses the decisions of 2026-11-08 and 2026-11-09 above): C13 only bans
+`std::env::temp_dir` and `reqwest::Client::new`.** DBR-LINT is LINT-1 plus default clippy at `-D warnings` per crate, about 5.5
+raw (was 23.5). There is no crate-by-crate ratchet of `unwrap`, `expect` and `unsafe`: LINT-2 is not built for existing code (the
+7,165 `unwrap`/`expect` stay; a panic in a worker is contained by process isolation), and `unwrap_used`/`expect_used` apply to
+new crates and to parsers only. The `[[ratchet]]` of C13 for Debrief in `docs/gates.toml` no longer refuses `debrief-v1.2.0`: its
+target moved to `debrief-v2.0.0` in the same change (`Gates-date:` trailer, approved by the user), and the 46 members stay
+exempt from the opt-in. The keyring paths of `clippy_not_yet` are not part of the 1.2 gate either. Clippy's own README says
+the `restriction` group "should, emphatically, not be enabled as a whole". Earlier text above is history.
 
 It is a row of the table below (DBR-LINT, 23.5) next to the 164 of the waves. It runs beside the waves, member by member, and every step is small and green on its own;
 the tag is the only deadline. The plan's calendar gains about 5 working days at 5 agents if it runs flat out, so it should be spread
@@ -568,11 +580,11 @@ or its ADR.
 
 | # | Package | Days | Depends | Waits |
 |---|---|---|---|---|
-| 1.4 + B1 | `paddock-limits`, with `Bounded` and `Cut` on the same branch | 3 + 2 | 0.5 | **yes** |
+| 1.4 + B1 | `paddock-limits`, with `Bounded` and `Cut` on the same branch (typed error, no registry; B1 lean) | 1.5 + 1 | 0.5 | **yes** |
 | 2.2 | `paddock-proc` and `paddock-metrics` | 2.5 | 0.5 | **yes** |
 | P1, P0's shared half | Per-pid probe. H1 did not show on 2026-11-06 (0.000 to 0.001 cores idle on both sides): verify, then fix or close | 1.5 + 0.5 | P0, 2.2 | **yes** |
-| IP1 | IPC hardening | 4 | 0.5 | **yes** |
-| 2.6c | Stall judge and run state | 4.5 | 0.5 | **yes** |
+| IP1 | IPC hardening, lighter: items 1, 2, 3, 7, 8 only (no peer-uid check, no per-variant versions, no nightly all-crate fuzz) | 1.5 | 0.5 | **yes** |
+| 2.6c | Stall judge reduced to: no whole-call deadline on import calls, streamed items as the heartbeat, Cancel, a plain notice after N seconds of silence (absorbs 2.6d, LV1, LV2 and LV3) | 4 | 0.5 | **yes** |
 | PH1 | Platform crates, domain-free half | 3.5 | 0.4 | **yes** |
 | J1 | Idempotency key in `paddock-jobs` | 1.5 | - | **yes** |
 | 1.2 rest, 1.3 | `expectDialogFits`; list identity | 1 + 3 | 0.5 | **yes** |
@@ -602,35 +614,35 @@ or its ADR.
 | 2.6a | Plugin host features | 4.5 | 1.4, 2.2 | **yes** |
 | 2.6b, then SI-7 | Streamed and host-side calls; `HostFile` read-ahead | 3.5, 1 | 0.5, IP1 | **yes** |
 | PH2a + SI-8 | `debrief.*` namespace; `WireInput` (family ADR 0003's table) | 2 + 1 | PH1; 2.6b and SI-1 for SI-8 | **yes** |
-| 2.6d | Plugin calls on the judge | 4 | 2.6b, 2.6c, IP1 | **yes** |
+| 2.6d | Plugin calls on the judge: folded into 2.6c (cut 2026-11-12, 10.7) | 0 | 2.6b, 2.6c, IP1 | **yes** |
 | PH2b | Debrief on `paddock-plugin-host` | 3.5 | 2.6a, 2.6b, PH1, PH2a | **yes** |
 | PH4 + SI-9 | First-party plugins on protocol 2; EVTX streamed in the plugin | 3.5 + 0.5 | PH2a, 2.6b; PH2b and SI-8 for SI-9 | no (app crates) |
 | 3.4 + SI-10 | Host-side streaming: **the 1.43 GiB event log opens here** | 3 + 2 | PH2b, PH4, SI-8, 2.6d | **yes** |
 | PH3 | Old plugins refused and removed, no key rewrite | 0.5 | PH2b | **yes** (wording in `paddock-plugin-api`) |
 | SI-4, SI-5 | `paddock-archive` members and ratio guard; Debrief on it | 3, 2.5 | 1.4; SI-1 and SI-4 | SI-4 **yes** |
-| SI-12, SI-13 + 3.6, SI-14 | `.etl`, `.blg`, minidump; limit rows; generators and checks | 1, 1 + 3.5, 5 | SI-8, SI-11; 2.3, PH2b, SI-5; SI-3, SI-11, 2.6b | SI-13, SI-14 **yes** |
-| 2.3 | `LimitNotice`, the image viewer | 2.5 | 1.4 | **yes** |
+| SI-12, SI-13 + 3.6, SI-14 | `.etl`, `.blg`, minidump; limit rows (message from the typed error, no registry check); one flat-memory test per input kind (was: generators and a static check for every format) | 1, 0.5 + 1, 1 | SI-8, SI-11; 2.3, PH2b, SI-5; SI-3, SI-11, 2.6b | SI-13, SI-14 **yes** |
+| 2.3 | `LimitNotice` (value, limit and Setting path; a Raise it deep link), the image viewer | 1 | 1.4 | **yes** |
 | Z11, Z12b | Plugin importers through the time reader | 2.5, 1.5 | SI-8 | no |
 | F5b | `class` in the plugin manifest | 1 | F5, PH2a | no |
-| 4.4, 3.2, P5 | Plugin manager; cap UI; idle plugins | 3, 2, 1 | 2.6a, PH4, M2c; PH2b, 2.3; PH2b | P5 **yes** |
-| LV1, LV2 | Other bounds on the judge; tests on conditions | 3, 1 | 2.6d, PH1; 2.6c | no |
+| 4.4, 3.2, P5 | Plugin manager and cap: one Plugins table column and one Setting; idle plugins | 1.5, 0.5, 1 | 2.6a, PH4, M2c; PH2b, 2.3; PH2b | P5 **yes** |
+| LV1, LV2 | ~~Other bounds on the judge; tests on conditions~~ folded into 2.6c (cut 2026-11-12, 10.7) | 0, 0 | 2.6d, PH1; 2.6c | no |
 
 **Layer 4: bounded replies, import throughput, times and the folder dialog (about T+5 to T+35)**
 
 | # | Package | Days | Depends | Waits |
 |---|---|---|---|---|
-| B2, B3, B4, B5, B6 | Limit note; Debrief's cut rows; `Analyzed`; engine and UI instances | 1.5, 1.5, 3, 2, 4 | B1; 0.4; the AI fix landed | B2 **yes** |
-| B7, B7b, B8 | `xtask bounded-check`; conformance; errors on | 5, 1, 3 | B3; 1.4 | B7's CI line, B7b **yes** |
+| B2, B3, B4, B5, B6 | Limit note; Debrief's cut rows; `Analyzed`; engine and UI instances | 1.5, 0.5, 3, 2, 4 | B1; 0.4; the AI fix landed | B2 **yes** |
+| B7, B7b, B8 | ~~`xtask bounded-check`; conformance; errors on~~ not built: no `syn` checker (cut 2026-11-12, 10.7) | 0, 0, 0 | B3; 1.4 | B7's CI line, B7b **yes** |
 | 2.5 rest | `Limit`, `Page`, `Buckets`, the generator, two lints (1 left after ADR 0065) | 1 | 0.5 | **yes** |
 | 4.3 | Budget corpus and footprint | 3.5 | SI-5, D-a | the bench workflow **yes** |
 | P4, IX-C, IX-M, IX-S | Catalogue during the import; the target design; measure; build | 3, 0.5, 1.5, 1.5 | 4.3, IX-B2, CPU-1; BP1 for IX-S | no |
 | BP1 | Priority and thread bounds | 2 | P1, 2.2 | **yes** |
-| 5.1, 5.2, D-b, B1 (bench gates) | fsync and text CPU; deferral; DuckDB budgets; gates | 4, 2, 1, 1.5 | 4.3; IX-S | B1 **yes** |
+| 5.1, 5.2, D-b, B1 (bench gates) | fsync and text CPU; deferral; DuckDB budgets; benchmarks recorded per rule 48 and run before a tag, not CI-gated | 4, 2, 1, 0 | 4.3; IX-S | B1 **yes** |
 | ST-5 (inside ST's 18) | The 1 billion event bench | - | ST-1, ST-2, IX-S | a quiet window |
 | Z4, Z5, Z5b, Z8, Z8b, Z9, Z13 | Conversion at import; re-time; wall segments; detection; UI; live tail | 6, 3.5, 2.5, 3.5, 1, 4, 1.5 | Z1, Z3, IX-B2 for its tee part; Z4; Z5's gate; Z6, F4; Z8; Z5, Z7; Z4, Z5 | no |
 | F4, F7, F8, F9, F9b | Scan job; commands (release path, rule 54); removal by folder; dialog; i18n | 2.5, 2.5, 3, 3.5, 1 | F1, F3; F4, F6; F6; F7, F10; F9 | no |
 | F1b, F10, F10b, F11 | Conformance check; `pd-table` T1 to T6; windowed rows; zip rows | 0.5, 2.5, 1.5, 1.5 | F1; -; F10; SI-4 | **yes** |
-| SI-17, SI-18 (conditional) | UI at 14,000 sources; HDD bound | 2, 1.5 | SI-15's folder; `paddock_proc::threads` | SI-18 **yes** |
+| SI-17, SI-18 (conditional) | ~~UI at 14,000 sources; HDD bound~~ cut (2026-11-12, 10.7) | 0, 0 | SI-15's folder; `paddock_proc::threads` | SI-18 **yes** |
 
 **Layer 5: shell, lists, timeline, AI and family obligations (about T+3 to T+105; shared, all wait)**
 
@@ -641,10 +653,10 @@ or its ADR.
 | Drawing build, W0 | Pixels, not events; the binary wire gate | 6.5, 3 | before 2.4 and 4.1; before 3.3's reply shape |
 | Y12 | Workbench move (0a, baseline retake, phases 1, 2b, 2c, 3) | 15 | M1 |
 | N3, N4, N0, N7, N8, Y2 (with X55), Y1 | Packs; harvest; coverage; synonyms; docs; semantic search; AI memory. **N4, N0, N7, Y2 and Y1 moved to a later release** (section 10); N3 and N8 stay | 2, 2, 0.5, 1.5, 0.5, 9.5, 10.5 | -; N3; N3, N4; X55; N1 to N6; -; M3b for M3 and M6 |
-| MEM-6 ADR | Capture formats, measured; the 8 to 12 day build is the user's call | 3 | MEM-2 |
-| X2, X3, X4, X6, X8, X9, Y5, Y16 | **Y5 moved to a later release** (section 10). Per-machine install; ADR 0052 and 0054 gates; logging ADR and adoption; copies and driver; release path; tray; About and deps | 3, 1.75, 2.5, 4, 7.5, 2, 5, 15 | Dyno's versions on main |
-| Y6, Y7, Y8, Y10, Y14 | Architecture check; screenshot determinism; test architecture; rule 47 views (**Y10 stays in 1.2, start by 2026-12-01**, section 10); the redesign's rest (**Y14's R5 UI items, 8, moved to a later release**; R0 and R3 stay) | 3, 2, 8, 18.5, 14 | M3b for Y10 |
-| SI-15, SI-16, F12 | Bundle acceptance (14,000 files, 7.6 GiB, 1 billion events nightly); old traits deleted; folder acceptance | 3, 6, 3 | all of ADR 0064; SI-15; all of ADR 0067 |
+| MEM-6 ADR | ~~Capture formats, measured; the 8 to 12 day build is the user's call~~ cut until MEM-2's budget is measured short (2026-11-12, 10.7) | 0 | MEM-2 |
+| X2, X3, X4, X6, X8, X9, Y5, Y16 | **Y5 moved to a later release** (section 10). Per-machine install; ADR 0052 and 0054 gates; logging ADR and adoption; copies and driver (X8 shrunk to Debrief's own driver onto `paddock-chromium`, 2026-11-12); release path; tray; About and deps | 3, 1.75, 2.5, 4, 3, 2, 5, 15 | Dyno's versions on main |
+| Y6, Y7, Y8, Y10, Y14 | ~~Architecture check~~ (Y6 cut 2026-11-12); screenshot determinism; ~~test architecture~~ (Y8 cut 2026-11-12, after v1 as approved earlier); rule 47 views (**Y10 stays in 1.2, start by 2026-12-01**, section 10); the redesign's rest (**Y14's R5 UI items, 8, moved to a later release**; R0 and R3 stay) | 0, 2, 0, 18.5, 14 | M3b for Y10 |
+| SI-15, SI-16, F12 | Bundle acceptance (14,000 files, 7.6 GiB; the nightly 1 billion run is dropped from the gate); old traits deleted as their callers move; folder acceptance | 2, 3, 3 | all of ADR 0064; SI-15; all of ADR 0067 |
 
 **Layer 6: release (last, about 8 days serial)**
 
@@ -654,7 +666,7 @@ or its ADR.
 | 5.4 | Independent reviews, rolling from about T+20; the last batch here | 2 | layers 3 to 5 |
 | X5 | Rule 71 positive controls | 1 | the bench gates |
 | M5 | Safety net on the merged candidate, with **the one Linux and Windows run** (paths, plugin memory watcher, file locking, installer) | 2.5 | all |
-| F, LV3, R | Fix buffer; liveness on the user's Mac; release preparation, rule 54 dispatch, VM pass, tag | 2, 0.5, 1 | M5 |
+| F, LV3, R | Fix buffer; ~~liveness on the user's Mac~~ (LV3 folded into 2.6c, 2026-11-12); release preparation, rule 54 dispatch, VM pass, tag | 2, 0, 1 | M5 |
 
 ### 9.3 Critical path
 
@@ -831,10 +843,10 @@ The user decided on 2026-11-07: **the full foundation in 1.2, then one function 
 | WP-1 | ADR 0068's model, wire, limits and the `CheckReport` contract (ADR 0068 work package WP-1; the rest of ADR 0068 is back in 1.2, section 10.6) | implementer | - | 4 | As ADR 0068's test plan lists for WP-1 |
 | FD-I | ADR 0068's `CheckReport` as the shared finding: health, profiling and heap findings mapped; the report's Finding block typed | implementer | WP-1 | 1 | Each producer's findings map without loss; a report Finding block round-trips its typed verdict, confidence and evidence |
 | FD-F | Analyses at scale ADR: which analyses are import-time accumulated, store-side over all rows or sampled with a stated coverage; the query language's refusal over 2M matches (`qlang.rs:66-77`) with known issues and playbooks on store-side counts; Parallelism and cost per class | researcher, then reviewer | Q-1, 4.3 | 3 | (design) measurements on the 4.3 corpus, recorded per rule 48 |
-| FD-G | MEM-6 ADR's scope widened to dump and UMDH documents (a byte budget instead of `MAX_DOCS = 32`) | designer | MEM-6 ADR | 1 | (design) |
+| FD-G | ~~MEM-6 ADR's scope widened to dump and UMDH documents (a byte budget instead of `MAX_DOCS = 32`)~~ cut 2026-11-12 with the MEM-6 ADR (10.7) | designer | MEM-6 ADR | 0 | - |
 | FD-K | Analysis run log lines: kind, query hash, coverage, Settings hash, duration; no user content (ER-27) | implementer | FD-F | 0.5 | A run's log line has the five fields and no message text |
-| FD-M | Planted-incident generator over the 4.3 corpus (spike, leak, restart, skewed clock, deadlock dump, UMDH series) with an expected-findings file and a recall check per analysis, nightly; invented data only (ER-14) | implementer | 4.3 | 3 | The recall check fails on a planted incident that no analysis reports |
-| | **Total** | | | **22.75** (22.5 less FD-B's seen-set, Q-U2 (b2), plus FD-P's run split) | |
+| FD-M | Planted incidents (spike, leak, restart, skewed clock, deadlock dump, UMDH series) as plain invented test files with an expected-findings file and a recall test per analysis (2026-11-12, 10.7: was a generator over the 4.3 corpus with a nightly recall check); invented data only (ER-14) | implementer | 4.3 | 1 | The recall check fails on a planted incident that no analysis reports |
+| | **Total** | | | **19.75** (22.75 less FD-G 1 and FD-M 2, cut 2026-11-12, 10.7; 22.75 was 22.5 less FD-B's seen-set, Q-U2 (b2), plus FD-P's run split) | |
 
 ### 10.2 Correctness packages (in 1.2)
 
@@ -936,3 +948,57 @@ days from 2026-11-09: about 2027-06-03** (no holidays or CI queues counted), aga
 (the built-in engine removed, PH1 −1 and LV1 −0.75, against its removal work) are not netted here [U]; its plan table
 owns them. Q-U6 (b), .NET conditional (not chosen, 2026-11-12), would have taken out 13 raw if `paddock-tools` lands on its own schedule (about 3 working days
 earlier) and 28 if it misses the date (about 6 working days earlier).
+
+### 10.7 Cut review, Tier A applied (user, 2026-11-12)
+
+The cut review of 2026-11-12 (`cut-review-debrief.md`, ER-37: each piece against comparable software) found Tier A, apparatus
+with no feature lost, and Tier B, feature depth. **The user approved all of Tier A and not Tier B.** Tier B rows are unchanged:
+Z (time zones, ADR 0066), the folder import dialog (ADR 0067 F-packages and FM), the 1 billion event target (ST-5, FD-F, exact
+positions, W0), the dump checks (ADR 0068 WP-3, WP-12, PT-1, PT-2), the investigation folder, Y10 and Y16. The ST-5 1 billion
+bench stays in ST's 18 days for now; only the nightly 1 billion run leaves SI-15's gate (below).
+
+| # | Piece | Plan ids | Was | Now | Saved |
+|---|---|---|---|---|---|
+| 1 | Streaming import: less apparatus | SI-14 (static check plus a generator for every format) becomes one flat-memory test per input kind; SI-15 keeps the 7.6 GiB bundle and drops the nightly 1 billion run; SI-16 deletes old callers as they move; SI-17 and SI-18 cut | SI-14 5, SI-15 3, SI-16 6, SI-17 2, SI-18 1.5 | 1, 2, 3, 0, 0 | 11.5 |
+| 3 | Stall judge: no whole-call deadline on import calls, streamed items as the heartbeat, Cancel, a plain notice after N seconds of silence; an idle plugin is not auto-killed | 2.6c, 2.6d, LV1, LV2, LV3 | 4.5, 4, 3, 1, 0.5 (13) | 4 (2.6c absorbs the rest) | 9 |
+| 4 | IPC hardening, lighter: items 1, 2, 3, 7, 8 (real defects); no peer-uid check, no per-variant versions, no nightly all-crate fuzz (run by hand before a tag) | IP1 | 4 | 1.5 | 2.5 |
+| 5 | Plugin governance: OverMemory-is-not-a-crash and the lifecycle stay; one Plugins table column and one Setting | 4.4, 3.2 | 3, 2 | 1.5, 0.5 | 3 |
+| 6 | Limits: a typed error with value, limit and Setting path, a message built from it, a Raise it deep link; no registry completeness check, no `limit_case!` per row, no generated Help page | 1.4, 3.6, 2.3, SI-13 | 3, 3.5, 2.5, 1 (10) | 1.5, 1, 1, 0.5 (4) | 6 |
+| 7 | Bounded replies: the `Cut` and `Analyzed` types (B1 lean), the AI coverage fix (B4), the one UI note (B2), the named instances (B5, B6); no `syn` checker, no conformance, no errors-on sweep | B1, B3, B7, B7b, B8 | 2, 1.5, 5, 1, 3 | 1, 0.5, 0, 0, 0 | 11 |
+| 11 | Benchmarks recorded per rule 48 and run before a tag, not CI-gated; planted incidents are plain test files | B1 bench gates, FD-M | 1.5, 3 | 0, 1 | 3.5 |
+| 14 | MEM-6 ADR and FD-G cut until MEM-2's budget is measured short | MEM-6 ADR, FD-G | 3, 1 | 0, 0 | 4 |
+| 15 | C13 only bans `temp_dir` and `reqwest` (reverses 2026-11-08 and 2026-11-09): LINT-1 plus default clippy per crate; no `unwrap` ratchet on existing code | DBR-LINT (LINT-2, LINT-3) | 23.5 | 5.5 | 18 |
+| 18 | Test architecture (Y8) and architecture check (Y6) are after v1, as decided earlier | Y8, Y6 | 8, 3 | 0, 0 | 11 |
+| 19 | X8 is Debrief's own Chromium driver onto `paddock-chromium`; other copies wait | X8 | 7.5 | 3 | 4.5 |
+| | **Tier A, raw** | | | | **84** |
+
+The review's own figure for Tier A is about 88. Its rows add to 86 with row 5, and 2 of those 86 are "quiet-window slips 4 to
+2", which is calendar time and not agent-days (kept at 4 below: the slips are not removed from the calendar until a benchmark run
+shows they are not needed). This plan counts **84**.
+
+**Total and calendar, recomputed** [calc; marks as in section 9]:
+
+| | Raw agent-days | Basis |
+|---|---|---|
+| Total before this section (10.6) | about 656 | [calc] |
+| Tier A | -84 | the table above |
+| **Total** | **about 572 raw** | [calc] |
+| **With 20 %** (on everything but DBR-LINT, which carries its own allowance) | **about 685.3** | 566.5 x 1.2 + 5.5 (DBR-LINT was 23.5; 572 = 566.5 + 5.5 after the cut) |
+
+(Check: before the cut 632.5 x 1.2 + 23.5 = 782.5; after it the non-lint part is 632.5 - 66 = 566.5 (Tier A 84 less the 18 of C13) and 566.5 x 1.2 + 5.5 = 685.3.)
+
+At 5.5 agent-days a working day: 685.3 / 5.5 = 124.6, plus Spotter 2.5 and quiet-window slips 4, **about 131 working days
+from 2026-11-09: about 2027-05-10** (no holidays or CI queues counted), against 2027-06-03 before: about 18 working days (3.5
+weeks) earlier. The time-critical path (event log open about T+17 to T+19, folder dialog about T+30) does not change: capacity
+sets the end date. If Tier B were approved as well the review's figure is about 495 with the buffer, about 2027-03-24; it is not.
+
+**Risks accepted** (from the review's rows): the next whole-file read is caught by a review or a test, not by a static check; an
+idle or paused plugin is not auto-killed, the person cancels it; a malicious same-user plugin can claim a different uid (it
+already runs as the user); a new limit can ship without a message and a new silent cap can appear, review catches them; a slow
+regression is found at the tag, not per pull request; existing `unwrap`s stay.
+
+**Enforcing data changed with this section:** `docs/gates.toml`, the C13 `[[ratchet]]` of Debrief, target `debrief-v1.2.0` to
+`debrief-v2.0.0` (`Gates-date:` trailer, approved by the user 2026-11-12). The ADRs carry dated amendment lines: family ADR
+0019 (limits), 0031 (stall judge) and 0060 (C13 ratchet), and Debrief ADR 0064 (streaming import, IP1) and 0065 (bounded replies).
+**ER-37 section missing** (cut review, P2): ADRs 0065, 0066 and 0067 name no comparable software; a short section for each is
+a follow-up when the user decides Tier B.

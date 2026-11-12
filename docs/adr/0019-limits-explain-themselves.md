@@ -1,6 +1,7 @@
 # 19. Limits explain themselves
 
 - Status: Accepted (2026-10-27, by the user)
+- Amendment 2026-11-12 (user, cut review of 2026-11-12; Tier A of the Debrief 1.2 plan, [section 10.7](../plans/debrief-1-2.md#107-cut-review-tier-a-applied-user-2026-11-12)): Debrief's use of the registry is shrunk to a typed error carrying the value, the limit and the Setting path, a message built from it, and a Raise it deep link. No registry completeness check, no `limit_case!` per limit and no generated Help page for Debrief; 10 days become 4. Earlier text is history.
 - Date: 2026-10-27
 - Related: rule 19 (every "X is not running" has a working Repair), rule 21 (tunables are Settings), rule 40; ADR 0001
   (plugin platform crates), ADR 0010 (notifications with cause keys and service health), ADR 0018 (bounded loading);

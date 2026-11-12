@@ -1092,11 +1092,13 @@ approved = "coordinator"
 # added yet), and `./dev gates ratchet --release-tag` refuses a debrief-v1.2.0 tag (or a later one) while either list is not
 # empty. Both lists only shrink. The whole cleanup (both clippy paths and all 46 members) stays in Debrief 1.2.
 # approved: user 2026-11-08 (target debrief-v1.2.0, not v1.3.0); scope decided again by the user 2026-11-09.
+# 2026-11-12 (user, cut review): C13 only bans temp_dir and reqwest; no crate-by-crate unwrap ratchet. The target moved to debrief-v2.0.0 so this
+# list no longer refuses debrief-v1.2.0 (Gates-date trailer in the commit; docs/plans/debrief-1-2.md section 10.7).
 [[ratchet]]
 id = "C13"
 app = "debrief"
 not_yet = ["app/src-tauri", "crates/cargo-debrief-plugin", "crates/chromium-driver", "crates/debrief-agent", "crates/debrief-ai", "crates/debrief-ai-worker", "crates/debrief-alloc", "crates/debrief-batch", "crates/debrief-cli", "crates/debrief-collect", "crates/debrief-core", "crates/debrief-dump", "crates/debrief-etw", "crates/debrief-ipc", "crates/debrief-monitor", "crates/debrief-notes", "crates/debrief-pdf", "crates/debrief-plugin-api", "crates/debrief-plugin-dotnet", "crates/debrief-plugin-dumps", "crates/debrief-plugin-e2e", "crates/debrief-plugin-formats", "crates/debrief-plugin-host", "crates/debrief-plugin-native", "crates/debrief-plugin-otel", "crates/debrief-plugin-package", "crates/debrief-plugin-profiling", "crates/debrief-plugin-registry", "crates/debrief-plugin-syslog", "crates/debrief-plugin-test", "crates/debrief-plugin-tools", "crates/debrief-plugin-web", "crates/debrief-plugin-windows", "crates/debrief-plugins", "crates/debrief-profile", "crates/debrief-store-client", "crates/debrief-store-duck", "crates/debrief-store-worker", "crates/debrief-symbols", "crates/debrief-video", "examples/plugins/annotator-example", "examples/plugins/collector-example", "examples/plugins/importer-example", "examples/plugins/tool-example", "examples/plugins/transform-example", "xtask"]
 clippy_not_yet = ["keyring::Entry", "keyring_core::Entry"]
 owner = "Debrief 1.2 DBR-LINT (docs/plans/debrief-1-2.md)"
-target = "debrief-v1.2.0"
+target = "debrief-v2.0.0"
 approved = "user"
