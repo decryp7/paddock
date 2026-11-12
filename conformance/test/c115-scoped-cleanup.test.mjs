@@ -213,3 +213,11 @@ test('C115 skips the tests/fixtures folders', () => {
   assert.equal(isCleanupSource('tools/heavy/tests/fixtures/plock.sh'), false);
   assert.equal(isCleanupSource('tools/heavy/tests/plock.sh'), true);
 });
+
+test('C115 does not count a value that only climbs (dot segments) as a literal path part', () => {
+  assert.deepEqual(lines('x="$ROOT/.."\nrm -rf "$x"\n'), [2]);
+  assert.deepEqual(lines('x="$ROOT/../.."\nrm -rf "$x"\n'), [2]);
+  assert.deepEqual(lines('x=$HOME/.\nrm -rf "$x"\n'), [2]);
+  assert.deepEqual(lines('x="$ROOT/a/.."\nrm -rf "$x"\n'), [2]);
+  assert.deepEqual(lines('x="$ROOT/.cache"\nrm -rf "$x"\n'), []);
+});

@@ -22,6 +22,8 @@
 // The guard hook (`tools/paddock-dev/src/hook/rules/no_unscoped_cleanup.rs`) refuses the worktree and container shapes at run time; both
 // answer the rows of `tools/paddock-dev/tests/fixtures/cleanup-corpus.tsv` the same way (each tests against it).
 // Not read: full-line comments, the hook rule file, this check, `conformance/test` and `conformance/fixtures`, every `tests/fixtures/` folder (sample scripts, the paddock-dev oracle files), `node_modules`, build output and vendored code.
+// Known heuristic: the names that count as the script's own (mktemp, literal-part values) are collected over the whole file, not by
+// scope or order, so `x="$A/b"; ...; x="$1"; rm -rf "$x"` passes. Keep a variable that is cleaned up assigned once.
 // A site that only touches its own items carries `// conformance: scoped-cleanup — <why>` (or the `#` form) on the line or the line
 // above; the check lists the waived sites in one warning. Existing sites (the `rm -r` on a bare variable of scripts that clean up their
 // own folders) sit in `conformance/baselines/C115.json` as {file, hash of the normalised line}, as C71's do: a listed site passes, any
@@ -98,12 +100,16 @@ function wideClean(words) {
 }
 
 /** Names the file assigns from `mktemp`: the script's own folders. */
-const tempNames = (code) =>
-  new Set([
-    ...code.matchAll(/(?:^|[\s;&(])(?:(?:local|export|declare|readonly)\s+)?(\w+)=["']?(?:\$\(|`)\s*mktemp\b/g),
-    // `stage="$dir/setup-disc"`: a value with a literal path part below a variable is a folder the script names itself.
-    ...code.matchAll(/(?:^|[\s;&(])(?:(?:local|export|declare|readonly)\s+)?(\w+)=["']?[^\s"']*\$\{?\w+\}?\/[A-Za-z0-9._-]+/g),
-  ].map((m) => m[1]));
+const tempNames = (code) => {
+  const names = new Set([...code.matchAll(/(?:^|[\s;&(])(?:(?:local|export|declare|readonly)\s+)?(\w+)=["']?(?:\$\(|`)\s*mktemp\b/g)].map((m) => m[1]));
+  // `stage="$dir/setup-disc"`: a value with a literal path part below a variable is a folder the script names itself. A segment of
+  // only dots (`"$ROOT/.."`, `$HOME/.`) climbs out of the variable's folder, so it does not count.
+  for (const m of code.matchAll(/(?:^|[\s;&(])(?:(?:local|export|declare|readonly)\s+)?(\w+)=["']?([^\s"';&|)]*)/g)) {
+    const value = m[2];
+    if (/\$\{?\w+\}?\/[A-Za-z0-9._-]+/.test(value) && !value.split('/').some((seg) => /^\.+$/.test(seg))) names.add(m[1]);
+  }
+  return names;
+};
 
 /** Whether an `rm` target is bare: an unguarded variable, `~`, `.`, `*`, `/*` (not a mktemp variable of this file). */
 function bareTarget(raw, temps) {
