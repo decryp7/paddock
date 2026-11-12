@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { enforceShrinkOnly } from '../src/util/baseline.mjs';
 import { parseJobs, parseSteps } from '../src/util/workflows.mjs';
 import { PADDOCK } from './helpers.mjs';
 
@@ -19,6 +20,11 @@ const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');
  */
 export const REQUIRED_ENV = {
   'setup-rust': [
+    { name: 'PADDOCK_DEV_DOWNLOAD', value: /^"0"$|refs\/tags\//, why: 'the release expression (or "0" in a release job)' },
+    { name: 'PADDOCK_DEV_TOKEN', value: /secrets\.BUILD_INPUTS_TOKEN/, unless: (env) => env.PADDOCK_DEV_DOWNLOAD === '"0"', why: 'secrets.BUILD_INPUTS_TOKEN' },
+  ],
+  // job-isolation builds and runs ./dev (its acquire step), so it needs the same download setting and read credential.
+  'job-isolation': [
     { name: 'PADDOCK_DEV_DOWNLOAD', value: /^"0"$|refs\/tags\//, why: 'the release expression (or "0" in a release job)' },
     { name: 'PADDOCK_DEV_TOKEN', value: /secrets\.BUILD_INPUTS_TOKEN/, unless: (env) => env.PADDOCK_DEV_DOWNLOAD === '"0"', why: 'secrets.BUILD_INPUTS_TOKEN' },
   ],
@@ -64,21 +70,32 @@ export function missingEnv(file, text, table = REQUIRED_ENV) {
   return problems;
 }
 
-// The jobs below predate the table. The list only shrinks: an entry whose job now sets its env fails the test until it is removed
-// (so a fixed job cannot regress), and a job that is not listed must be right. ci.yml's wiki, heavy and crates are fixed by
-// feat/ci-in-rust-setup-rust; dev-tool.yml runs on main only and publishes the tool itself.
-const BASELINE = join(PADDOCK, 'conformance', 'baselines', 'ci-action-env.json');
+// The jobs below predate the table. The list only shrinks (conformance/src/util/baseline.mjs): a job that is not listed must be right, a
+// listed job that is now right only warns "remove it", and an entry that the merge base's list lacks fails. ci.yml's wiki, heavy and
+// crates are fixed by feat/ci-in-rust-setup-rust; dev-tool.yml runs on main only and publishes the tool itself.
+const BASELINE_PATH = 'conformance/baselines/ci-action-env.json';
+const BASELINE = join(PADDOCK, BASELINE_PATH);
+
+/** The problems not in `listed`, and the listed keys no problem matches any more. */
+export function judge(found, listed) {
+  const keys = new Set(found.map((p) => p.split(': ')[0]));
+  return { fresh: found.filter((p) => !listed.has(p.split(': ')[0])), gone: [...listed].filter((k) => !keys.has(k)) };
+}
 
 test('every job that uses a shared action sets the environment that action needs (table: REQUIRED_ENV), except the listed ones that only shrink', () => {
   const listed = new Set(existsSync(BASELINE) ? JSON.parse(readFileSync(BASELINE, 'utf8')).jobs : []);
   const found = readdirSync(WORKFLOWS)
     .filter((f) => f.endsWith('.yml'))
     .flatMap((f) => missingEnv(f, readFileSync(join(WORKFLOWS, f), 'utf8')));
-  const keys = new Set(found.map((p) => p.split(': ')[0]));
-  const fresh = found.filter((p) => !listed.has(p.split(': ')[0]));
+  const { fresh, gone } = judge(found, listed);
   assert.deepEqual(fresh, [], `${fresh.length} job(s) lack settings. Next step: copy the env lines of a sibling job of the same file.`);
-  const fixed = [...listed].filter((k) => !keys.has(k));
-  assert.deepEqual(fixed, [], `${fixed.length} listed job(s) are fixed. Next step: remove them from conformance/baselines/ci-action-env.json.`);
+  enforceShrinkOnly({ root: PADDOCK, path: BASELINE_PATH, current: [...listed], gone, keyOf: (k) => k, entriesOf: (j) => j.jobs });
+});
+
+test('judge: a fixed listed job is gone (a warning, not a failure); an unlisted problem is fresh', () => {
+  const r = judge(['a.yml:j:V: x'], new Set(['a.yml:j:V', 'b.yml:k:V']));
+  assert.deepEqual(r, { fresh: [], gone: ['b.yml:k:V'] });
+  assert.equal(judge(['c.yml:z:V: x'], new Set()).fresh.length, 1);
 });
 
 test('the checker itself: a job without the settings is named, one with them (job, workflow or step level) is not, a release job needs no token', () => {
@@ -95,4 +112,12 @@ test('the checker itself: a job without the settings is named, one with them (jo
   assert.equal(wrong.length, 2, wrong.join('\n'));
   const stepLevel = "name: t\njobs:\n  b:\n    runs-on: x\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n        env:\n          PADDOCK_DEV_DOWNLOAD: \"0\"\n";
   assert.deepEqual(missingEnv('t.yml', stepLevel), [], 'env on the step that uses the action counts');
+});
+
+test('job-isolation needs the same settings as setup-rust (it builds and runs ./dev)', () => {
+  const wf = (env) => `name: t\njobs:\n  b:\n    runs-on: x\n${env}    steps:\n      - uses: ./.gitea/actions/job-isolation\n`;
+  const bad = missingEnv('t.yml', wf(''));
+  assert.equal(bad.length, 2, bad.join('\n'));
+  assert.match(bad[0], /uses job-isolation without PADDOCK_DEV_DOWNLOAD/);
+  assert.deepEqual(missingEnv('t.yml', wf('    env:\n      PADDOCK_DEV_DOWNLOAD: "0"\n')), []);
 });
