@@ -127,16 +127,7 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
     let now_ms = time::now_secs() as f64 * 1000.0;
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, &server, &repo, &token);
-    let runs = if event == "schedule" {
-        schedule_skip::read(&mut client, now_ms)
-    } else {
-        Ok(Vec::new())
-    };
-    let mut d = schedule_skip::decide(&event, runs, now_ms);
-    if d.skip() {
-        let past = schedule_skip::read_past(&mut client, &a.workflow);
-        d = schedule_skip::bounded(d, &a.workflow, past, now_ms, a.max_gap_hours);
-    }
+    let d = schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours);
     let answer = format!("skip={}", d.skip());
     let mut text: Vec<String> = d.annotation().into_iter().collect();
     match env("GITHUB_OUTPUT") {

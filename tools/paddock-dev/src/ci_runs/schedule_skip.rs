@@ -225,6 +225,22 @@ pub fn read_past(client: &mut Client, workflow: &str) -> Result<Vec<Past>, Strin
     Ok(out)
 }
 
+/// The whole decision for a run of `workflow`: read the dispatch runs (scheduled runs only), decide, and when that says skip, bound
+/// the skip by the workflow's own scheduled history. A reading that fails runs the workflow (it fails open).
+pub fn decide_scheduled(client: &mut Client, event: &str, workflow: &str, now_ms: f64, max_gap_hours: f64) -> Decision {
+    let runs = if event == "schedule" {
+        read(client, now_ms)
+    } else {
+        Ok(Vec::new())
+    };
+    let d = decide(event, runs, now_ms);
+    if d.skip() {
+        let past = read_past(client, workflow);
+        return bounded(d, workflow, past, now_ms, max_gap_hours);
+    }
+    d
+}
+
 /// The train branch a run's `path` names (`ci.yml@refs/heads/train/x` is `train/x`), `None` for any other ref.
 pub fn train_branch(path: &str) -> Option<&str> {
     path.split_once('@')
@@ -495,6 +511,33 @@ mod tests {
             [(30, true), (27, false)]
         );
         assert!(bound("nightly.yml", &p, now(), 36.0).unwrap().contains("never skipped twice"));
+    }
+
+    #[test]
+    fn a_train_in_ci_after_a_skipped_last_run_still_runs_the_workflow() {
+        let api = "https://gitea.invalid/api/v1/repos/o/r/actions";
+        let mut http = Fake::default();
+        http.json(
+            &format!("{api}/runs?event=workflow_dispatch&limit=50&page=1"),
+            json!({"workflow_runs": [{"id": 7990, "path": "ci.yml@refs/heads/train/t", "event": "workflow_dispatch", "status": "queued", "created_at": "2026-11-12T05:10:00+08:00"}]}),
+        );
+        http.json(
+            &format!("{api}/runs?event=schedule&limit=50&page=1"),
+            json!({"workflow_runs": [{"id": 30, "path": "nightly.yml@refs/heads/main", "event": "schedule", "status": "completed", "conclusion": "success", "created_at": "2026-11-12T05:03:00+08:00"}]}),
+        );
+        http.json(
+            &format!("{api}/runs/30/jobs?limit=50&page=1"),
+            json!({"jobs": [{"id": 300, "name": "gate", "conclusion": "success", "runner_id": 1, "steps": [{"name": "Run ./.gitea/actions/plan"}]}]}),
+        );
+        http.log(
+            300,
+            "::notice::skipped: train train/x in CI (runs ci.yml 1); runs on the next schedule after it lands\n",
+        );
+        let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
+        client.backoff_ms = 0;
+        let d = decide_scheduled(&mut client, "schedule", "nightly.yml", now(), 36.0);
+        assert!(!d.skip(), "{d:?}");
+        assert!(d.annotation().unwrap().contains("never skipped twice"), "{d:?}");
     }
 
     #[test]
