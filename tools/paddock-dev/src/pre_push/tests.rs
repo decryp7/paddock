@@ -670,6 +670,8 @@ fn a_pushed_commit_is_checked_out_in_a_throw_away_worktree_that_is_removed() {
     git(&["init", "-q", "-b", "main"]);
     git(&["config", "user.email", "t@t"]);
     git(&["config", "user.name", "t"]);
+    // The test is about which commit is checked out, not line endings: a Windows machine's `core.autocrlf=true` would give CRLF.
+    git(&["config", "core.autocrlf", "false"]);
     std::fs::write(main.join("a.txt"), "pushed\n").unwrap();
     git(&["add", "a.txt"]);
     git(&["commit", "-q", "-m", "one"]);

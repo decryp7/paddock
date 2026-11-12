@@ -186,16 +186,14 @@ pub fn tail_flat(text: &str, n: usize) -> String {
 /// Whether `program` is on `PATH` (`command -v`), by looking at the folders of the job's own `PATH`.
 pub fn on_path(env: &HashMap<String, String>, program: &str) -> bool {
     let Some(path) = env.get("PATH") else { return false };
-    std::env::split_paths(path).any(|d| {
-        let base = d.join(program);
-        if cfg!(windows) {
-            ["", ".exe", ".cmd", ".bat"]
-                .iter()
-                .any(|e| std::path::PathBuf::from(format!("{}{e}", base.display())).is_file())
-        } else {
-            is_executable(&base)
-        }
-    })
+    let pathext = env.get("PATHEXT").map(String::as_str);
+    crate::release_isolation::pathfind::find_program(
+        path,
+        program,
+        cfg!(windows),
+        &crate::release_isolation::pathfind::extensions(pathext),
+    )
+    .is_some()
 }
 
 /// A file with an execute bit (any file on Windows).
@@ -220,10 +218,17 @@ pub(crate) fn canonical_tempdir() -> tempfile::TempDir {
     let parent = probe
         .path()
         .parent()
-        .and_then(|p| p.canonicalize().ok())
+        .and_then(|p| paddock_env::winpath::real(p).ok())
         .expect("a canonical parent");
     drop(probe);
     tempfile::Builder::new().tempdir_in(parent).expect("a temp folder")
+}
+
+/// A path as the kept-folder tools print it: `/` separators on every OS and no `\\?\` prefix (`C:/a/b`). Expected values of the
+/// tests of this module are built with it, never with `format!("{}/..", path.display())`, which mixes `\` and `/` on Windows.
+#[cfg(test)]
+pub(crate) fn fwd(path: &Path) -> String {
+    paddock_env::winpath::lexical_text(path, paddock_env::Os::current())
 }
 
 #[cfg(test)]

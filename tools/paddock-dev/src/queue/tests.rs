@@ -1321,12 +1321,18 @@ fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
     put("src/lib.rs", "", false);
     put(
         "build.rs",
-        &format!("fn main() {{ std::fs::write(\"{}\", \"x\").unwrap(); }}\n", sentinel.display()),
+        &format!(
+            "fn main() {{ std::fs::write({:?}, \"x\").unwrap(); }}\n",
+            sentinel.to_string_lossy()
+        ),
         false,
     );
     put(
         "crates/x/build.rs",
-        &format!("fn main() {{ std::fs::write(\"{}\", \"x\").unwrap(); }}\n", sentinel.display()),
+        &format!(
+            "fn main() {{ std::fs::write({:?}, \"x\").unwrap(); }}\n",
+            sentinel.to_string_lossy()
+        ),
         false,
     );
     git(&w.repos.author, &["add", "-A"]);
@@ -1717,6 +1723,11 @@ fn a_train_whose_main_moved_is_rebuilt_even_when_its_pull_requests_did_not_chang
 
 // ---- the gates the tick no longer runs are jobs of the dispatched workflow ------------------------------------------------------------
 
+/// ci.yml as the tests read it: a Windows checkout has CRLF line endings (`core.autocrlf`), and every search below is for `\n`.
+fn ci_yml() -> String {
+    include_str!("../../../../.gitea/workflows/ci.yml").replace("\r\n", "\n")
+}
+
 fn job_block(yml: &str, job: &str) -> String {
     let head = format!("\n  {job}:\n");
     let start = yml.find(&head).unwrap_or_else(|| panic!("ci.yml has no job {job}")) + 1;
@@ -1747,8 +1758,8 @@ fn job_block(yml: &str, job: &str) -> String {
 
 #[test]
 fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a_token() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
-    let gates = job_block(ci, "train-gates");
+    let ci = ci_yml();
+    let gates = job_block(&ci, "train-gates");
     for needle in [
         "./dev gates check",
         "paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS",
@@ -1766,17 +1777,17 @@ fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a
     );
     // The conformance line is in one place, read by both jobs that run it.
     assert_eq!(ci.matches("--only C06").count(), 1, "the conformance arguments are written once");
-    assert!(job_block(ci, "conformance").contains("paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"));
+    assert!(job_block(&ci, "conformance").contains("paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"));
     assert!(ci.contains("\nenv:\n  PADDOCK_CONFORMANCE_ARGS: \"--app paddock"));
     // The commit lint is the commits job, which runs on every dispatch.
-    assert!(job_block(ci, "commits").contains("commit-lint"));
+    assert!(job_block(&ci, "commits").contains("commit-lint"));
     // The planner's table knows the job, so a rerun of its failure plans it.
     assert!(crate::plan_gitea::CI_JOBS.iter().any(|(j, _)| *j == "train-gates"));
 }
 
 #[test]
 fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let ci = ci_yml();
     let top = ci.split("\njobs:\n").next().unwrap();
     assert!(
         top.contains("\npermissions:\n  contents: read\n  actions: read\n"),
@@ -1809,14 +1820,14 @@ fn step_run(block: &str, name: &str) -> String {
 }
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
 #[test]
 fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_no_fixture() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let ci = ci_yml();
     let script = step_run(
-        &job_block(ci, "train-gates"),
+        &job_block(&ci, "train-gates"),
         "Lockfiles are current (cargo metadata of every workspace)",
     );
     // The real loop, on the real repository, with a cargo that only says where it was run.
@@ -1854,8 +1865,8 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
 
 #[test]
 fn the_publish_dry_run_of_the_train_gates_installs_and_builds_what_it_needs() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
-    let gates = job_block(ci, "train-gates");
+    let ci = ci_yml();
+    let gates = job_block(&ci, "train-gates");
     let publish = gates.find("node scripts/publish.mjs").expect("a publish dry run");
     assert!(
         !gates[publish..].lines().next().unwrap().contains("--skip-build"),

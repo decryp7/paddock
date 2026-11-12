@@ -6,6 +6,7 @@
 //! `verify`) and prints one `::error::` per stale file with the fix. `sync` runs only cargo, cargo-hakari and npm to regenerate
 //! them; a lockfile is never edited by hand (ER-40). The commands run through a [`Runner`], so the plan is tested without them.
 
+use crate::release_isolation::pathfind::{extensions, find_program};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_proc::{Limits, command, run_bounded};
 use serde_json::{Value, json};
@@ -150,6 +151,17 @@ pub trait Runner: Sync {
     fn run(&self, dir: &Path, argv: &[String]) -> Ran;
 }
 
+/// The file to start for a command's program. On Windows npm is `npm.cmd`, and Rust finds only `.exe` programs there, so a bare `npm`
+/// was "not available on this computer" on every Windows machine that has it: the program is looked up on `path` the way a job does
+/// (`PATHEXT` order, [`find_program`]), and the bare name stays when nothing is found (the run then says so). Never changes anything
+/// off Windows.
+fn program_for(program: &str, path: &str, pathext: Option<&str>, windows: bool) -> String {
+    if !windows {
+        return program.to_string();
+    }
+    find_program(path, program, true, &extensions(pathext)).map_or_else(|| program.to_string(), |p| p.display().to_string())
+}
+
 /// The real runner: bounded and started through `paddock-proc`.
 pub struct Real;
 
@@ -161,7 +173,12 @@ impl Runner for Real {
                 tail: "no command".into(),
             };
         };
-        let mut cmd = command(program);
+        let mut cmd = command(program_for(
+            program,
+            &std::env::var("PATH").unwrap_or_default(),
+            std::env::var("PATHEXT").ok().as_deref(),
+            cfg!(windows),
+        ));
         cmd.current_dir(dir).args(args);
         match run_bounded(cmd, Limits::new(LIMIT).max_output(1 << 22)) {
             Ok(o) => Ran {
@@ -369,4 +386,20 @@ pub fn run_sync(runner: &dyn Runner, root: &Path) -> Result<Report, CliError> {
     } else {
         report.with_exit(Exit::Findings)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::program_for;
+
+    #[test]
+    fn a_program_is_found_with_its_windows_extension_and_the_bare_name_stays_when_missing_or_off_windows() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("npm.cmd"), "x").unwrap();
+        let path = d.path().to_string_lossy().to_string();
+        let found = program_for("npm", &path, Some(".COM;.EXE;.CMD"), true);
+        assert_eq!(std::path::PathBuf::from(found), d.path().join("npm.cmd"));
+        assert_eq!(program_for("cargo", &path, None, true), "cargo", "not on the path: unchanged");
+        assert_eq!(program_for("npm", &path, None, false), "npm", "off Windows nothing changes");
+    }
 }

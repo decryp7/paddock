@@ -1282,7 +1282,9 @@ mod tests {
             me: other,
             presence: &running,
         };
-        let held = acquire(&first, "file:/l line:ready").unwrap();
+        // The key names the absolute spelling of the file (`C:\l` on Windows, where `/l` has no drive).
+        let key = format!("file:{} line:ready", absolute(Path::new("/l")));
+        let held = acquire(&first, &key).unwrap();
         let files = FakeFiles::default();
         files.put("/l", "ready\n");
         let a = args(&["--file", "/l", "--line", "ready", "--include-past", "--max", "5s"]);
@@ -1313,7 +1315,7 @@ mod tests {
             presence: &running,
         }));
         let e = r.unwrap_err();
-        assert!(e.message.contains("pid 4242 already waits for file:/l line:ready"), "{}", e.message);
+        assert!(e.message.contains(&format!("pid 4242 already waits for {key}")), "{}", e.message);
         assert!(
             e.hint.contains("Next:") && e.hint.contains(".lock"),
             "the hint names the lock file: {}",
@@ -1345,7 +1347,7 @@ mod tests {
             me: ProcessId::new(4242, StartTime::from_micros(7)),
             presence: &running,
         };
-        let _held = acquire(&first, "file:/l line:ready").unwrap();
+        let _held = acquire(&first, &format!("file:{} line:ready", absolute(Path::new("/l")))).unwrap();
         let files = FakeFiles::default();
         files.put("/l", "ready\ngo\n");
         files.put("/m", "ready\n");

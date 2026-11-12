@@ -560,7 +560,10 @@ mod tests {
     }
 
     fn kept(sc: &Scene) -> String {
-        format!("{}/.paddock-ci/src/decryp7_paddock-crate-s1", sc.dir.path().join("home").display())
+        format!(
+            "{}/.paddock-ci/src/decryp7_paddock-crate-s1",
+            crate::ci_host::fwd(&sc.dir.path().join("home"))
+        )
     }
 
     #[test]
