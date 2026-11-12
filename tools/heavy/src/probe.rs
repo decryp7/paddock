@@ -23,7 +23,8 @@ pub fn exists(pid: u32) -> bool {
 /// Whether `pid` names an existing process.
 #[cfg(not(unix))]
 pub fn exists(pid: u32) -> bool {
-    paddock_proc::is_alive(pid) || paddock_proc::ProcessId::of(pid).is_some()
+    // conformance: pid-liveness — existence of a lock record's pid; Unknown counts as existing, never as free
+    paddock_proc::presence(pid).may_be_alive() || paddock_proc::ProcessId::of(pid).is_some()
 }
 
 /// Identity of a file or directory, to notice that it was replaced: (device or volume, inode or file index).

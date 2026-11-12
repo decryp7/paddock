@@ -389,7 +389,7 @@ fn a_killed_owner_that_is_not_collected_yet_reads_as_not_open_at_once() {
     // Not waited for: the child stays a zombie until `wait` below. The kill is delivered when the signal call returns, but the
     // process table changes a moment later, so look until it is a zombie (a condition, not a delay).
     let id = paddock_proc::ProcessId::of(owner.id()).unwrap();
-    while id.is_alive() {
+    while !id.has_ended() {
         std::thread::yield_now();
     }
     let started = std::time::Instant::now();

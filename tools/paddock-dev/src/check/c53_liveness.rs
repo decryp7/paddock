@@ -328,7 +328,7 @@ pub struct LivenessRun {
 
 /// The liveness findings of the whole tree (appended after the kill findings, as the JavaScript does).
 pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
-    let fix = "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`.";
+    let fix = "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`.";
     let mut out = Vec::new();
     let mut sites: Vec<Site> = Vec::new();
     for f in ctx.files().iter() {

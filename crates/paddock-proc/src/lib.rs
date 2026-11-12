@@ -16,6 +16,22 @@
 //!   ([`StallCause::Paused`]); [`StallReport`] says why a wait looks stuck. [`InstanceLock`]: one instance per folder by a
 //!   held OS lock; [`hint`]: a discovery file is only a hint (rule 53).
 //!
+//! - Liveness of a raw pid has one public answer, the three-valued [`presence`] (rule 53): "could not look" is
+//!   [`Presence::Unknown`], never "gone". There is no bool `is_alive(pid)`:
+//!
+//!   ```compile_fail,E0425
+//!   let _ = paddock_proc::is_alive(1);
+//!   ```
+//!
+//!   ```compile_fail,E0425
+//!   let _ = paddock_proc::may_be_alive(1);
+//!   ```
+//!
+//!   A [`ProcessId`] answers [`ProcessId::confirmed_running`] and [`ProcessId::has_ended`], both false on `Unknown`.
+//!   `Unknown` can persist: for a root-owned process (pid 1, a service) whose start time a non-root user cannot read, it is
+//!   the answer every time. A wait on [`ProcessId::has_ended`] therefore always carries its own deadline and reports on
+//!   expiry; it never loops on "not yet gone".
+//!
 //! - [`warm_up`]: pays the first run of a program (`--version`) before the start that matters, memoised by file identity and
 //!   with its duration printed (ADR 0071); the start itself is waited for on ready or exit through [`StartWatch`].
 //!
@@ -96,9 +112,8 @@ pub use start::{
 };
 pub use supervised::{MemoryCap, Registry, Sampler, Supervised, end_all, global_registry};
 pub use tree::{
-    Presence, Terminated, TreeEnding, ask, descendants_of, end, end_unreaped_group, is_alive,
-    kill_tree, may_be_alive, presence, processes_mentioning, processes_with_command_lines,
-    terminate,
+    Presence, Terminated, TreeEnding, ask, descendants_of, end, end_unreaped_group, kill_tree,
+    presence, processes_mentioning, processes_with_command_lines, terminate,
 };
 pub use usage::{
     CpuSample, MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants, identity,

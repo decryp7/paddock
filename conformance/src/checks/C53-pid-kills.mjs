@@ -17,9 +17,9 @@
 //   paddock.waivers.toml, so the follow-up cannot be forgotten.
 // Liveness (user 2026-11-12, same rule, a baseline instead of an error for the sites that exist): asking whether a RAW pid
 // is alive has the same reuse problem as ending it (the answer can be about another program), in tests as much as in product
-// code: `paddock_proc::is_alive(pid)` / `may_be_alive(pid)` / `presence(pid)` (also bare, in a file that imports them, and
+// code: `presence(pid)` (the bare-bool `is_alive(pid)` / `may_be_alive(pid)` no longer exist in paddock-proc; the names still count for copies; also bare, in a file that imports them, and
 // `crate::` inside paddock-proc), `kill(pid, 0)`, `OpenProcess(` and sysinfo's `Pid::from_u32(` lookups. Ask a
-// `paddock_proc::ProcessId` (pid plus start time) instead: `id.is_alive()`, `id.presence()`. Existing sites sit in
+// `paddock_proc::ProcessId` (pid plus start time) instead: `id.presence()`, `id.has_ended()`, `id.may_be_alive()`. Existing sites sit in
 // `conformance/baselines/C53.json` (file + hash of the normalised line; it may only shrink, the same helpers as C71's baseline);
 // a new site needs a `// conformance: pid-liveness — <reason>` (for example: the pid came from a handle this process owns).
 // Limits: a pid passed to another program by other means (a script file, a shell string built at run time) is not seen.
@@ -157,7 +157,7 @@ export default {
 
 function livenessFindings(ctx) {
   const out = [];
-  const fix = 'Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`.';
+  const fix = 'Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`.';
   const sites = [];
   for (const f of ctx.files()) {
     if (!f.endsWith('.rs') || /^apps\/[^/]+\/vendor\//.test(f)) continue;
