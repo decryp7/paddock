@@ -104,6 +104,7 @@ export const CI_JOBS = {
   conformance: ['conformance'],
   c99: ['c99'], // the Keychain check (C99); its job reads the c99 output
   'ipc-endpoints': ['conformance'], // the endpoint register (C102); runs on every run
+  gitleaks: ['conformance'], // the secret scan (.gitea/actions/gitleaks); runs on every run
   tools: ['tools'],
   'tools-macos': ['tools'], // the VM tooling tests on the Mac host
   wiki: ['tools'], // tools/wiki, the wiki lint
