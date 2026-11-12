@@ -180,6 +180,25 @@ mod tests {
         assert!(refusal(&found(Some(Kind::Slot)), State::Merged).unwrap().contains("CI kit"));
     }
 
+    /// A folder opened so its time can be set: Windows refuses that on a plain `File::open` (access denied) and needs write access
+    /// and the backup-semantics flag to open a directory at all.
+    fn open_dir_for_write(dir: &Path) -> std::fs::File {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+                .open(dir)
+                .unwrap()
+        }
+        #[cfg(not(windows))]
+        {
+            std::fs::File::open(dir).unwrap()
+        }
+    }
+
     fn old_record(dir: &Path, kind: Kind, link: &str) {
         let mut r = Record::new(kind, "implementer:t");
         r.created = 1_000_000;
@@ -188,7 +207,7 @@ mod tests {
         record::write(dir, &r).unwrap();
         // The folder's own time counts as use too: age it.
         let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
-        std::fs::File::open(dir).unwrap().set_modified(old).unwrap();
+        open_dir_for_write(dir).set_modified(old).unwrap();
     }
 
     fn setup() -> (tempfile::TempDir, CleanArgs) {
@@ -215,6 +234,8 @@ mod tests {
         (d, a)
     }
 
+    // Windows cannot read other processes' folders, so it never judges a folder unused: see the test below.
+    #[cfg(not(windows))]
     #[test]
     fn the_default_is_a_dry_run_that_removes_nothing_and_names_what_it_would() {
         let (d, a) = setup();
@@ -226,6 +247,8 @@ mod tests {
         }
     }
 
+    // Windows cannot read other processes' folders, so it never judges a folder unused: see the test below.
+    #[cfg(not(windows))]
     #[test]
     fn apply_removes_only_the_stale_recorded_build_folder_and_logs_its_path_and_size() {
         let (d, mut a) = setup();
@@ -246,6 +269,8 @@ mod tests {
         assert_eq!(r.data["removed"].as_array().unwrap().len(), 1);
     }
 
+    // Windows cannot read other processes' folders, so it never judges a folder unused: see the test below.
+    #[cfg(not(windows))]
     #[test]
     fn a_folder_used_after_it_was_judged_removable_is_judged_again_and_kept() {
         let (d, mut a) = setup();
@@ -264,6 +289,23 @@ mod tests {
         assert!(victim.is_dir(), "it became live while cleaning and must stay");
         assert!(logged.iter().any(|l| l.contains("became live")), "{logged:?}");
         assert_eq!(r.data["removed"].as_array().unwrap().len(), 0);
+    }
+
+    /// Windows cannot read what other processes use, so a dry run would remove nothing and `--apply` is refused: no folder is ever
+    /// removed on a guess (the cleaning tests above run where the process list can be read).
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_a_dry_run_would_remove_nothing_and_apply_is_refused() {
+        let (d, mut a) = setup();
+        let r = run(&a, &|_| None, &mut |_| {}).unwrap();
+        assert!(r.text.contains("Would remove 0 folder(s)"), "{}", r.text);
+        assert!(r.text.contains("not implemented on this OS"), "{}", r.text);
+        a.apply = true;
+        let e = run(&a, &|_| None, &mut |_| {}).unwrap_err();
+        assert!(e.message.contains("cannot be read here"), "{}", e.message);
+        for n in ["stale-build", "fresh-build", "stale-slot", "stale-orphan"] {
+            assert!(d.path().join("dev-targets").join(n).is_dir(), "{n} must still be there");
+        }
     }
 
     #[test]
