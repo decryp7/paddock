@@ -170,7 +170,7 @@ pub fn command(a: &CheckArgs) -> Result<Report, CliError> {
     } else {
         changed_since(&root, &a.base)?
     };
-    check_with(&reg, &root, &changed, a.all, &a.only, &run::Real, &|l| eprintln!("{l}"))
+    check_with(&reg, &root, &changed, a.all, &a.only, &run::Real::new(&root), &|l| eprintln!("{l}"))
 }
 
 /// The paths changed in the working tree since the merge base of `base` and HEAD (committed, staged, unstaged and new files).

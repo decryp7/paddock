@@ -30,12 +30,15 @@ fn the_registry_of_the_repository_is_well_formed_and_names_what_exists() {
 
 struct Repo {
     dir: tempfile::TempDir,
+    /// The build-folder root (`PADDOCK_DEV_TARGET_DIR`): outside the repository, as the tool requires.
+    builds: tempfile::TempDir,
 }
 
 impl Repo {
     fn new(registry: &str) -> Repo {
         let r = Repo {
             dir: tempfile::tempdir().unwrap(),
+            builds: tempfile::tempdir().unwrap(),
         };
         r.git(&["init", "-q", "-b", "main"]);
         r.write("docs/generators.toml", registry);
@@ -90,6 +93,7 @@ impl Repo {
     fn dev(&self, args: &[&str]) -> (i32, String) {
         let out = self
             .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .env("PADDOCK_DEV_TARGET_DIR", self.builds.path())
             .args(args)
             .arg("--root")
             .arg(self.dir.path())

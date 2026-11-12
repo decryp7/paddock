@@ -305,6 +305,40 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -
     Vec::new()
 }
 
+/// The command that puts a heavy step through the machine-wide slot: [`heavy_prefix`], else the `heavy` built from the tree at
+/// `root` (once, kept in `built`; `left` bounds that build). The one resolver of the push gate and of `./dev gen check`, so
+/// both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_HEAVY=off`.
+pub fn heavy_command_for(
+    root: &Path,
+    env: &HashMap<String, String>,
+    has_tool: &dyn Fn(&str) -> bool,
+    built: &std::sync::OnceLock<Result<PathBuf, String>>,
+    left: Duration,
+) -> Result<Vec<String>, String> {
+    if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
+        // Only a test may run without the slot: anything else is an override that makes the gate not measured.
+        return if env.contains_key(TEST_HEAVY_OFF) {
+            Ok(Vec::new())
+        } else {
+            Err("PADDOCK_HEAVY=off is set without the test-only variable PADDOCK_TEST_HEAVY_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
+        };
+    }
+    let found = heavy_prefix(env, has_tool);
+    if !found.is_empty() {
+        return Ok(found);
+    }
+    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left)) {
+        Ok(bin) => Ok(vec![bin.display().to_string(), "run".into(), "pre-push".into(), "--".into()]),
+        Err(e) => Err(e.clone()),
+    }
+}
+
+/// Whether `program` is a file in a folder of `env`'s `PATH`.
+pub fn on_path(env: &HashMap<String, String>, program: &str) -> bool {
+    let path = env.get("PATH").cloned().unwrap_or_default();
+    std::env::split_paths(&path).any(|d| exists(&d, program))
+}
+
 /// Whether the output of a gate run through `heavy` shows that it never got the slot: it printed who holds the lock
 /// ("the lock is held by <name> (pid <n>) ...") and never "<name> holds the lock". Returns the phrase for the verdict.
 pub fn slot_wait(log: &str) -> Option<String> {
@@ -368,26 +402,8 @@ impl RealExec {
     /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the `heavy`
     /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_HEAVY=off` (hermetic tests only); `Err` when the build failed.
     fn heavy_command(&self) -> Result<Vec<String>, String> {
-        if self.env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
-            // Only a test may run without the slot: anything else is an override that makes the gate not measured.
-            return if self.env.contains_key(TEST_HEAVY_OFF) {
-                Ok(Vec::new())
-            } else {
-                Err("PADDOCK_HEAVY=off is set without the test-only variable PADDOCK_TEST_HEAVY_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
-            };
-        }
-        let found = heavy_prefix(&self.env, &|p| self.has_tool(p));
-        if !found.is_empty() {
-            return Ok(found);
-        }
         let left = self.budget_end.saturating_duration_since(Instant::now());
-        match self
-            .built_heavy
-            .get_or_init(|| super::heavy_tool::ensure(&self.root, &self.env, left))
-        {
-            Ok(bin) => Ok(vec![bin.display().to_string(), "run".into(), "pre-push".into(), "--".into()]),
-            Err(e) => Err(e.clone()),
-        }
+        heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left)
     }
 
     fn call(&self, gate: &Gate, left: Duration, log: &Path, label: Option<&str>) -> ToolCall {
@@ -461,8 +477,7 @@ fn run_token() -> String {
 
 impl Exec for RealExec {
     fn has_tool(&self, program: &str) -> bool {
-        let path = self.env.get("PATH").cloned().unwrap_or_default();
-        std::env::split_paths(&path).any(|d| exists(&d, program))
+        on_path(&self.env, program)
     }
 
     fn docker_up(&self) -> bool {
