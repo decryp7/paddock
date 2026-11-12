@@ -243,7 +243,7 @@ fn stream(
     // silent: the watcher has already ended when its receiver is gone (the tool ended or was stopped); the join below judges it
     #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
     let _ = done_tx.send(());
-    paddock_proc::cleanup::join("the tool watcher", watcher);
+    paddock_proc::cleanup::join_warn("the tool watcher", watcher);
     if timed_out.load(Ordering::SeqCst) {
         return Err(PlatformError::Timeout(format!(
             "{program} did not finish within {} s.",

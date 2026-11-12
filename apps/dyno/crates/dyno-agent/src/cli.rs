@@ -434,7 +434,7 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
     let (updates, reported_cpu, reported_mem) = *crate::agent::lock(&seen);
     drop((peer, listener));
     running.stop();
-    paddock_proc::cleanup::remove_dir_all(&tmp);
+    paddock_proc::cleanup::remove_dir_all_warn(&tmp);
     let report = serde_json::json!({
         "subscriber": who,
         "seconds": started.elapsed().as_secs_f32(),

@@ -178,11 +178,13 @@ impl Recents {
     }
 
     /// Takes `path` out of list `id`; whether it was there.
+    #[must_use = "whether the entry was there and the lists were rewritten"]
     pub fn remove(&self, id: &str, path: &str) -> bool {
         self.change(id, |entries| entries.retain(|e| !same(&e.path, path)))
     }
 
     /// Empties list `id`; whether it had entries.
+    #[must_use = "whether the list had entries and was rewritten"]
     pub fn clear(&self, id: &str) -> bool {
         self.change(id, Vec::clear)
     }

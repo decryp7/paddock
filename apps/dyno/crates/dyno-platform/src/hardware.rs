@@ -591,7 +591,7 @@ fn with_report<T>(temp: &Path, produce: impl FnOnce(&Path) -> T) -> std::io::Res
     let file = dir.join("battery-report.xml");
     let made = produce(&file);
     let text = read_report(&file);
-    paddock_proc::cleanup::remove_dir_all(&dir);
+    paddock_proc::cleanup::remove_dir_all_warn(&dir);
     Ok((made, text))
 }
 
