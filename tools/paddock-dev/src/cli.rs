@@ -199,9 +199,9 @@ enum SlotCommand {
 #[derive(Subcommand)]
 enum LocksCommand {
     /// Every Cargo.lock resolves `--locked`, the npm lockfile is in sync with its package.json and the workspace hack is
-    /// current. One `::error::` per stale file with the fix; exits 1 when any is stale.
+    /// current. One `::error::` per stale file with the fix; exits 5 (findings) when any is stale.
     Check(LocksArgs),
-    /// Regenerate them: cargo hakari (manage-deps, generate), `cargo update --workspace`, `npm install --package-lock-only`.
+    /// Regenerate them (ER-40: never by hand): cargo hakari (manage-deps, generate), `cargo update --workspace`, `npm install --package-lock-only`.
     Sync(LocksArgs),
 }
 

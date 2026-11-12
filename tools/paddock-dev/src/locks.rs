@@ -61,6 +61,25 @@ fn argv(parts: &[&str]) -> Vec<String> {
     parts.iter().map(|s| (*s).to_string()).collect()
 }
 
+/// The golden repository of the planner's tests: its lockfiles are test data, not workspaces anyone builds. Only this one folder is
+/// skipped; any other lockfile is checked, so a new workspace under a folder named `tests` is not skipped by accident.
+const TEST_DATA: &str = "tools/paddock-dev/tests/golden/fixture/";
+
+fn is_test_data(file: &str) -> bool {
+    file.starts_with(TEST_DATA)
+}
+
+/// The tracked lockfiles and hack configs that [`plan`] leaves out as test data, so a run can say what it did not look at.
+pub fn skipped(tracked: &[String]) -> Vec<String> {
+    let mut v: Vec<String> = tracked
+        .iter()
+        .filter(|f| is_test_data(f) && (f.ends_with("Cargo.lock") || f.ends_with("package-lock.json")))
+        .cloned()
+        .collect();
+    v.sort();
+    v
+}
+
 /// The targets for a list of tracked files (paths relative to the root, `/` separated).
 pub fn plan(tracked: &[String]) -> Vec<Target> {
     let has = |p: &str| tracked.iter().any(|t| t == p);
@@ -68,8 +87,7 @@ pub fn plan(tracked: &[String]) -> Vec<Target> {
     let mut files: Vec<&String> = tracked.iter().collect();
     files.sort();
     for f in files {
-        // Fixture trees hold lockfiles that are test data (a golden repository), not workspaces anyone builds.
-        if f.split('/').any(|c| matches!(c, "tests" | "fixture" | "fixtures")) {
+        if is_test_data(f) {
             continue;
         }
         let dir = Path::new(f).parent().map(Path::to_path_buf).unwrap_or_default();
@@ -160,7 +178,14 @@ impl Runner for Real {
 
 /// The last non-empty lines of a command's output, one line.
 fn tail(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    // npm prints the cause first, then its usage text and the path of its debug log; neither says why it refused.
+    let cause = text.split("Clean install a project").next().unwrap_or(text);
+    let mut lines: Vec<&str> = cause
+        .lines()
+        .map(|l| l.trim().trim_start_matches("npm error").trim())
+        .filter(|l| !l.is_empty() && !l.contains("A complete log of this run can be found"))
+        .collect();
+    lines.dedup();
     lines[lines.len().saturating_sub(3)..].join(" | ")
 }
 
@@ -281,7 +306,9 @@ fn root_of(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
 
 /// [`check`] with the runner and root given.
 pub fn run_check(runner: &dyn Runner, root: &Path) -> Result<Report, CliError> {
-    let targets = plan(&tracked(root)?);
+    let files = tracked(root)?;
+    let targets = plan(&files);
+    let skipped = skipped(&files);
     if targets.is_empty() {
         return Err(CliError::failure(format!("No lockfile found under {}.", root.display()))
             .with_hint("Run it in the repository root, or pass --root."));
@@ -290,13 +317,18 @@ pub fn run_check(runner: &dyn Runner, root: &Path) -> Result<Report, CliError> {
     let stale = check_all(runner, root, &targets);
     let mut text: String = stale.iter().map(|s| annotation(s) + "\n").collect();
     text.push_str(&format!(
-        "locks: {} checked, {} stale ({} ms)\n",
+        "locks: {} checked, {} stale, {} skipped as test data ({} ms)\n",
         targets.len(),
         stale.len(),
+        skipped.len(),
         started.elapsed().as_millis()
     ));
+    for f in &skipped {
+        text.push_str(&format!("locks: skipped {f} (test data of the planner's golden repository)\n"));
+    }
     let data = json!({
         "checked": targets.len(),
+        "skipped": skipped,
         "annotations": stale.iter().map(annotation).collect::<Vec<String>>(),
         "stale": stale.iter().map(|s| json!({"file": s.target.file, "command": s.command, "fix": s.target.fix_text()})).collect::<Vec<Value>>(),
     });
@@ -326,7 +358,7 @@ pub fn run_sync(runner: &dyn Runner, root: &Path) -> Result<Report, CliError> {
         })
         .collect();
     text.push_str(&format!(
-        "locks: {} synced, {} failed. Review the diff and commit it; run `./dev locks check` to confirm.\n",
+        "locks: {} synced, {} failed. Review the diff and commit it (never edit a lockfile by hand, ER-40); run `./dev locks check` to confirm.\n",
         targets.len() - failed.len(),
         failed.len()
     ));
