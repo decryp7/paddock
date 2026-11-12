@@ -348,6 +348,38 @@ mod tests {
     }
 
     #[test]
+    fn a_trailer_of_a_later_branch_commit_is_still_a_trailer_in_the_joined_messages() {
+        use crate::gates::register::date_history;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let init = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
+        let git_c = |args: &[&str]| git(root, &[&init[..], args].concat());
+        let write = |text: String| {
+            std::fs::create_dir_all(root.join("docs")).unwrap();
+            std::fs::write(root.join("docs/gates.toml"), text).unwrap();
+        };
+        git(root, &["init", "-q", "-b", "main"]);
+        write(entry("2026-12-06"));
+        git(root, &["add", "."]);
+        git_c(&["commit", "-q", "-m", "feat: register"]);
+        git(root, &["checkout", "-q", "-b", "topic"]);
+        // an earlier commit of the branch touches the register without moving a date, the later one moves it with its trailer
+        write(format!("{}# note\n", entry("2026-12-06")));
+        git_c(&["commit", "-q", "-am", "docs: a note"]);
+        write(format!("{}# note\n", entry("2026-12-20")));
+        git_c(&[
+            "commit",
+            "-q",
+            "-am",
+            "docs: re-plan",
+            "-m",
+            "Gates-date: X 2026-12-06 -> 2026-12-20; approved: coordinator",
+        ]);
+        let h = register_history(root, "main").unwrap();
+        assert!(date_history(&h).is_empty(), "{:?} in {:?}", date_history(&h), h.last().map(|v| &v.message));
+    }
+
+    #[test]
     fn a_branch_is_compared_with_its_merge_base_not_with_the_moved_target() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();

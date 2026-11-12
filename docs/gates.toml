@@ -1094,6 +1094,7 @@ approved = "coordinator"
 # approved: user 2026-11-08 (target debrief-v1.2.0, not v1.3.0); scope decided again by the user 2026-11-09.
 # 2026-11-12 (user, Debrief 1.2 Tier A): C13 is limited to the temp_dir and reqwest bans and there is no crate-by-crate ratchet before
 # debrief-v1.2.0, so `blocks_tag = "report-only"`: `./dev gates ratchet --release-tag` reports the open lists and never refuses the tag.
+# The move is recorded by the `Gates-date: C13 debrief blocks_tag blocking -> report-only; approved: user` trailer of the commit that touches this line.
 [[ratchet]]
 id = "C13"
 app = "debrief"
