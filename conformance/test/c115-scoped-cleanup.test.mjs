@@ -165,6 +165,21 @@ test('C115 skips only its own rule file and the oracle fixtures', () => {
   assert.equal(isCleanupSource('tools/paddock-dev/src/hook/lex.rs'), true);
 });
 
+test('C115 skips the guard hooks\' deny-case tests under .claude/hooks/, and only those', async () => {
+  // A hook's .test.sh feeds the hook the commands it must refuse (`expect ... deny ... 'docker system prune -f'`): data, never run.
+  const f = await findingsOf(
+    'C115',
+    makeApp({
+      '.claude/hooks/docker-guard.test.sh': "#!/bin/sh\nexpect 'prune' deny agent \"$WT\" 'docker system prune -f'\n",
+      '.claude/hooks/docker-guard.sh': '#!/bin/sh\ndocker system prune -f\n',
+    }),
+  );
+  assert.deepEqual(f.filter((x) => x.severity === 'error').map((x) => x.file), ['.claude/hooks/docker-guard.sh']);
+  assert.equal(isCleanupSource('.claude/hooks/docker-guard.test.sh', '#!/bin/sh\n'), false);
+  assert.equal(isCleanupSource('.claude/hooks/docker-guard.sh', '#!/bin/sh\n'), true);
+  assert.equal(isCleanupSource('.claude/hooks/lib/x.test.sh', '#!/bin/sh\n'), true, 'only the hook folder itself');
+});
+
 test('C115 summarises the sites it let through on a waiver', async () => {
   const f = await findingsOf('C115', makeApp({ 'scripts/ok.sh': '#!/bin/sh\n# conformance: scoped-cleanup — our own folder\nrm -rf "$tmp"\n' }));
   assert.deepEqual(f.map((x) => x.severity), ['warn']);

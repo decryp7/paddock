@@ -21,7 +21,8 @@
 // only. Accepted gaps: `xargs rm -rf`, `find <root> -delete`, and a command assembled at run time; Rust `remove_dir_all` and JS `rmSync`.
 // The guard hook (`tools/paddock-dev/src/hook/rules/no_unscoped_cleanup.rs`) refuses the worktree and container shapes at run time; both
 // answer the rows of `tools/paddock-dev/tests/fixtures/cleanup-corpus.tsv` the same way (each tests against it).
-// Not read: full-line comments, the hook rule file, this check, `conformance/test` and `conformance/fixtures`, every `tests/fixtures/` folder (sample scripts, the paddock-dev oracle files), `node_modules`, build output and vendored code.
+// Not read: full-line comments, the hook rule file, the guard hooks' deny-case tests (`.claude/hooks/*.test.sh`: commands fed to a
+// hook as data, never run), this check, `conformance/test` and `conformance/fixtures`, every `tests/fixtures/` folder (sample scripts, the paddock-dev oracle files), `node_modules`, build output and vendored code.
 // Known heuristic: the names that count as the script's own (mktemp, literal-part values) are collected over the whole file, not by
 // scope or order, so `x="$A/b"; ...; x="$1"; rm -rf "$x"` passes. Keep a variable that is cleaned up assigned once.
 // A site that only touches its own items carries `// conformance: scoped-cleanup — <why>` (or the `#` form) on the line or the line
@@ -38,7 +39,7 @@ const BARE_WAIVER = /conformance:\s*scoped-cleanup/;
 const SOURCE = /\.(?:rs|sh|bash|ps1|psm1|js|mjs|cjs|ya?ml)$/;
 const CODE = /\.(?:rs|js|mjs|cjs)$/;
 const SKIP_PATH =
-  /^conformance\/(?:test\/|fixtures\/|src\/checks\/C115)|(?:^|\/)(?:node_modules|dist|target)\/|(?:^|\/)tests\/fixtures\/|^apps\/[^/]+\/vendor\/|^tools\/paddock-dev\/(?:tests\/fixtures\/|src\/hook\/rules\/no_unscoped_cleanup\.rs$)/;
+  /^conformance\/(?:test\/|fixtures\/|src\/checks\/C115)|(?:^|\/)(?:node_modules|dist|target)\/|(?:^|\/)tests\/fixtures\/|^apps\/[^/]+\/vendor\/|^tools\/paddock-dev\/(?:tests\/fixtures\/|src\/hook\/rules\/no_unscoped_cleanup\.rs$)|^\.claude\/hooks\/[^/]+\.test\.sh$/;
 const Q = '["\'`]';
 const ENGINE = '(?:docker|podman)';
 const KIND = '(?:(?:container|volume|image|network)\\s+)?';
