@@ -105,20 +105,41 @@ fn run_may_be_alive(pid: u32, start_micros: u64) -> bool {
     start_micros == 0 || paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(start_micros)).may_be_alive()
 }
 
-/// Removes the throw-away worktrees of runs that were killed (a second Ctrl+C, a crash, a power cut): unlock, then
-/// `git worktree remove --force`, and a prune for the ones whose folder is already gone.
+/// Removes the throw-away worktrees of runs that were killed (a second Ctrl+C, a crash, a power cut). Only our own: the entries of
+/// git's `worktrees/` admin folder whose `gitdir` points at a `pp-*` folder directly under `trees`. For each one whose run ended:
+/// unlock, `git worktree remove --force`, and when its folder was already gone (so git cannot remove it) delete just that entry's admin
+/// folder. Never `git worktree prune`: that drops the record of every unlocked worktree whose folder is missing, such as an agent's on a
+/// drive that is not mounted.
 fn sweep_stale(main: &Path, trees: &Path, alive: &dyn Fn(u32, u64) -> bool) -> usize {
-    let names: Vec<String> = std::fs::read_dir(trees)
-        .map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect())
-        .unwrap_or_default();
-    let stale = stale_trees(&names, alive);
-    for name in &stale {
-        let p = trees.join(name).to_string_lossy().to_string();
+    let Some(common) = git_text(main, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).map(|t| PathBuf::from(t.trim())) else {
+        return 0;
+    };
+    let admin = common.join("worktrees");
+    let mut swept = 0;
+    for entry in std::fs::read_dir(&admin).into_iter().flatten().flatten() {
+        let Ok(gitdir) = std::fs::read_to_string(entry.path().join("gitdir")) else {
+            continue;
+        };
+        let wt = PathBuf::from(gitdir.trim()).parent().map(Path::to_path_buf).unwrap_or_default();
+        let ours = wt
+            .parent()
+            .and_then(|p| p.canonicalize().ok())
+            .is_some_and(|p| Some(p) == trees.canonicalize().ok())
+            && wt
+                .file_name()
+                .is_some_and(|n| stale_trees(&[n.to_string_lossy().to_string()], alive).len() == 1);
+        if !ours {
+            continue;
+        }
+        let p = wt.to_string_lossy().to_string();
         let _ = git_text(main, &["worktree", "unlock", &p]);
         let _ = git_text(main, &["worktree", "remove", "--force", &p]);
+        if !wt.exists() && entry.path().exists() {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+        swept += 1;
     }
-    let _ = git_text(main, &["worktree", "prune"]);
-    stale.len()
+    swept
 }
 
 /// The folder pre-push worktrees and kept build folders go under: `PADDOCK_PREPUSH_WORKTREES`, else a `pre-push` folder in the
@@ -143,13 +164,31 @@ fn work_base(main: &Path, env: &HashMap<String, String>) -> Result<PathBuf, CliE
     Ok(base)
 }
 
-/// A folder inside the home folder is refused: builds and checkouts do not go on the internal disk (ER-14).
+/// A folder inside the home folder is refused: builds and checkouts do not go on the internal disk (ER-14). A relative path and a
+/// literal `~` are refused (they depend on where the tool runs); the folder is created, then it and `home` are resolved (symlinks
+/// followed) before they are compared, so a link into home cannot hide it.
 fn refuse_home(path: &Path, home: Option<&str>) -> Result<(), CliError> {
-    match home.filter(|h| !h.is_empty() && *h != "/") {
-        Some(h) if path.starts_with(h) => Err(CliError::refused(format!("{} is inside the home folder {h}.", path.display()))
-            .with_hint("Use a work disk: set PADDOCK_PREPUSH_WORKTREES (or paddock.worktreeRoot) to a folder outside your home.")),
-        _ => Ok(()),
+    let hint = "Use a work disk: set PADDOCK_PREPUSH_WORKTREES (or paddock.worktreeRoot) to an absolute folder outside your home.";
+    if !path.is_absolute() || path.to_string_lossy().starts_with('~') {
+        return Err(CliError::refused(format!("{} is not an absolute path.", path.display())).with_hint(hint));
     }
+    std::fs::create_dir_all(path).map_err(|e| CliError::failure(format!("{} cannot be created: {e}.", path.display())))?;
+    let resolved = path
+        .canonicalize()
+        .map_err(|e| CliError::failure(format!("{} cannot be resolved: {e}.", path.display())))?;
+    let Some(h) = home.filter(|h| !h.is_empty() && *h != "/") else {
+        return Ok(());
+    };
+    let home_resolved = Path::new(h).canonicalize().unwrap_or_else(|_| PathBuf::from(h));
+    if resolved.starts_with(&home_resolved) {
+        return Err(CliError::refused(format!(
+            "{} is inside the home folder {}.",
+            resolved.display(),
+            home_resolved.display()
+        ))
+        .with_hint(hint));
+    }
+    Ok(())
 }
 
 impl Detached {

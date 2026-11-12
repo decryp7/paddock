@@ -697,11 +697,14 @@ fn worktree_folders_name_their_run_by_pid_and_start_time_and_only_ended_runs_are
 #[test]
 fn the_pre_push_folder_is_never_in_the_home_folder() {
     use super::refuse_home;
-    use std::path::Path;
-    assert!(refuse_home(Path::new("/Users/me/work/pre-push"), Some("/Users/me")).is_err());
-    assert!(refuse_home(Path::new("/Users/me"), Some("/Users/me")).is_err());
-    assert!(refuse_home(Path::new("/Volumes/d7/wt/pre-push"), Some("/Users/me")).is_ok());
-    assert!(refuse_home(Path::new("/anywhere"), None).is_ok());
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let h = home.to_str().unwrap();
+    assert!(refuse_home(&home.join("work/pre-push"), Some(h)).is_err());
+    assert!(refuse_home(&home, Some(h)).is_err());
+    assert!(refuse_home(&d.path().join("disk/pre-push"), Some(h)).is_ok());
+    assert!(refuse_home(&d.path().join("anywhere"), None).is_ok());
 }
 
 /// A crashed run's locked worktree is found and removed by the next run, a live one is left alone.
@@ -749,4 +752,55 @@ fn extra_pushed_refs_are_not_measured_rows_and_never_passes() {
             .all(|(_, v)| matches!(v, Verdict::NotMeasured { next, .. } if next.contains("one at a time")))
     );
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+}
+
+/// The sweep touches only its own `pp-*` entries under its own base: another agent's worktree whose folder is missing (an unmounted
+/// drive) keeps its record, and a leftover of ours whose folder is gone is removed.
+#[test]
+fn the_sweep_never_drops_a_foreign_worktree_whose_folder_is_missing() {
+    use crate::plan_repo::git_text;
+    let d = tempfile::tempdir().unwrap();
+    let main = d.path().join("main");
+    std::fs::create_dir(&main).unwrap();
+    let git = |args: &[&str]| git_text(&main, args).unwrap_or_else(|| panic!("git {args:?}"));
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@t"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(main.join("a.txt"), "x\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&["commit", "-q", "-m", "one"]);
+    let sha = git(&["rev-parse", "HEAD"]).trim().to_string();
+    // Somebody else's worktree, unlocked, on a drive that is not mounted now.
+    let foreign = d.path().join("other-drive").join("agent-wt");
+    git(&["worktree", "add", "--detach", foreign.to_str().unwrap(), &sha]);
+    std::fs::remove_dir_all(&foreign).unwrap();
+    // Our own leftover, whose folder is gone too.
+    let trees = d.path().join("trees");
+    let crashed = super::Detached::new(&main, &trees, &sha).unwrap();
+    let ours = crashed.path.clone();
+    std::mem::forget(crashed);
+    std::fs::remove_dir_all(&ours).unwrap();
+    assert_eq!(super::sweep_stale(&main, &trees, &|_, _| false), 1);
+    let list = git(&["worktree", "list", "--porcelain"]);
+    assert!(list.contains("agent-wt"), "the foreign worktree's record survives:\n{list}");
+    assert!(!list.contains("pp-"), "our leftover is removed:\n{list}");
+}
+
+/// A symlink, a relative path and `~` cannot hide a folder inside the home folder.
+#[cfg(unix)]
+#[test]
+fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
+    use super::refuse_home;
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path().join("home");
+    std::fs::create_dir_all(home.join("work")).unwrap();
+    let link = d.path().join("elsewhere");
+    std::os::unix::fs::symlink(home.join("work"), &link).unwrap();
+    let h = home.to_str().unwrap();
+    assert!(refuse_home(&link.join("pre-push"), Some(h)).is_err(), "through a symlink");
+    assert!(refuse_home(std::path::Path::new("relative/pre-push"), Some(h)).is_err());
+    assert!(refuse_home(std::path::Path::new("~/pre-push"), Some(h)).is_err());
+    let outside = d.path().join("disk").join("pre-push");
+    assert!(refuse_home(&outside, Some(h)).is_ok());
+    assert!(outside.exists(), "the folder is created so it can be resolved");
 }
