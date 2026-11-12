@@ -32,7 +32,8 @@
    "cargo apps/x/app/src-tauri reaches crates/a"
   ],
   "conformance": [
-   "docs/rules.md"
+   "docs/rules.md",
+   "conformance always runs"
   ],
   "crates": [
    "crates/a/CHANGELOG.md",

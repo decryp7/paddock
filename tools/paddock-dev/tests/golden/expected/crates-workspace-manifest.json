@@ -3,7 +3,7 @@
  "crates": true,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "c99": true,
  "tools": false,
  "icons": false,
@@ -33,6 +33,9 @@
   ],
   "c99": [
    "C99 reads crates/Cargo.toml"
+  ],
+  "conformance": [
+   "conformance always runs"
   ],
   "crates": [
    "crates/Cargo.toml"

@@ -47,7 +47,8 @@
    "everything (no base)"
   ],
   "conformance": [
-   "everything (no base)"
+   "everything (no base)",
+   "conformance always runs"
   ],
   "crates": [
    "everything (no base)"

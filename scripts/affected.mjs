@@ -803,6 +803,10 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
     kind(p, /src-tauri$/.test(d) ? 'all' : 'ui');
   }
 
+  // The conformance job is in every plan, whatever changed (user decision 2026-11-12): its checks and tests read app code, specs and
+  // workflows, and a check that is skipped on the change that introduces its class never sees it. Mirrors `affected` in
+  // tools/paddock-dev/src/plan.rs (the golden test compares them).
+  mark('conformance', 'conformance always runs');
   const set = new Set([...why.keys()].filter(Boolean));
   const packages = {};
   for (const d of crates) (packages[cargo.get(d).workspace] ??= []).push(cargo.get(d).name);

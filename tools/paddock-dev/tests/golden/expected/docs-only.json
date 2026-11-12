@@ -3,7 +3,7 @@
  "crates": false,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "c99": false,
  "tools": false,
  "icons": false,
@@ -13,5 +13,9 @@
  "apps": [],
  "kinds": {},
  "packages": {},
- "why": {}
+ "why": {
+  "conformance": [
+   "conformance always runs"
+  ]
+ }
 }

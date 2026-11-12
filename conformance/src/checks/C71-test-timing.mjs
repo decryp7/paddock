@@ -24,11 +24,11 @@
 // In TypeScript specs: `vi.waitFor`, `waitFor`, `waitUntil`, `expect.poll` or `.toPass` with `{ timeout: n }` under 40 000 ms.
 // Also (ER-12): a Playwright config (`playwright*.config.*`) whose `retries` can be above 0 sets `failOnFlakyTests` (not `false`), so a
 // retry never turns a red run green; a config with `retries: 0` or no `retries` is fine.
-// Not yet (ADR 0041 §4 amendment, "first slice"): Instant/SystemTime/Date.now, recv_timeout/wait_timeout/Deadline::after,
+// Not yet (ADR 0041 §4 amendment, "first slice"): Instant/SystemTime/Date.now, Deadline::after,
 // performance.now, page.clock.install without pauseAt, vi.waitFor under fake timers, the live-status spread, C30's elapsed asserts,
 // vm-smoke `observe()`, the ESLint rule.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { baselineGrowth as sharedGrowth } from '../util/baseline.mjs';
 import { error, warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
@@ -399,38 +399,20 @@ export function shrinkBaseline(sites, entries) {
   return kept;
 }
 
-const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
-
 /**
- * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash), or null with the
- * reason it could not be measured. A baseline that does not exist at the base is the first introduction: nothing was added.
+ * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash), or `{ reason }`
+ * when it could not be measured. One shrink-only rule for every baseline file: conformance/src/util/baseline.mjs.
  */
 export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
-  const git = ctx.options.git ?? defaultGit(ctx.root);
-  let base;
-  let text;
-  try {
-    const ref = ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF ?? 'origin/main';
-    const head = git(['rev-parse', 'HEAD']).trim();
-    base = git(['merge-base', 'HEAD', ref]).trim();
-    if (base === head) base = git(['rev-parse', 'HEAD^1']).trim(); // on the target branch itself: this commit against its parent
-  } catch (e) {
-    return { reason: `no merge base (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
-  }
-  try {
-    text = git(['show', `${base}:${path}`]);
-  } catch (e) {
-    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [] };
-    return { reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
-  }
-  const left = new Map();
-  for (const e of JSON.parse(text).sites ?? []) left.set(key(e), (left.get(key(e)) ?? 0) + 1);
-  const added = [];
-  for (const e of current) {
-    if ((left.get(key(e)) ?? 0) > 0) left.set(key(e), left.get(key(e)) - 1);
-    else added.push(e);
-  }
-  return { base, added };
+  return sharedGrowth({
+    root: ctx.root,
+    path,
+    current,
+    keyOf: key,
+    entriesOf: (json) => json.sites ?? [],
+    ...(ctx.options.git ? { git: ctx.options.git } : {}),
+    ...(ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF ? { baseRef: ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF } : {}),
+  });
 }
 
 const PW_CONFIG = /(?:^|\/)playwright[^/]*\.config\.(?:ts|mts|cts|js|mjs|cjs)$/;
