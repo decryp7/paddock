@@ -1,18 +1,32 @@
-# Release tags are made here and nowhere else (ER-15, rule 9): an agent or a person requests a tag, this workflow checks the
-# commit and the release bot pushes it. Tag protection (tag pattern * allowing only release-bot) is switched on by the repository's
-# owner, so a tag pushed by hand is refused by the server.
+# Release tags are made here (ER-15, rule 9): an agent or a person requests a tag, this workflow checks the commit and the release
+# bot pushes it. Tag protection (pattern * allowing only release-bot) is switched on by the repository's owner, so a tag pushed by
+# hand is refused by the server.
 #
-# Checked, each failing with one ::error:: and the next step (conformance/ci/request-tag.mjs): the tag's name, the sha is on origin,
-# it is not a skip-ci commit (ER-16), the tag does not exist, the app's version source says the tag's version, the newest run of
-# the app's gate workflow on exactly that sha is green (ER-31 (c)); then, for an app tag, the tag gates the release workflows also
-# run (`./dev gates ratchet`, `./dev check ipc-endpoints --tag`). The ADR 0093 scheduled-CI gate (WP-5) is not built yet; it joins here when it is.
+# THIS IS A GUARD RAIL AGAINST MISTAKES, NOT A SECURITY BOUNDARY. Any repository writer can dispatch a workflow from their own
+# ref, and repository secrets reach every non-fork run, so a hostile writer could read RELEASE_BOT_TOKEN. The setup is single-user
+# (ER-37, common practice for a personal repository); the job below runs only from main so a slip cannot use an old copy of it.
+#
+# Two jobs. `check` runs the checker from the DISPATCH ref's checkout (main, in `trusted/`) and reads the tag's commit only as
+# data: `git show <sha>:path` for the version source and paddock.ci.json, and a `git archive` extraction for the tag gates, which
+# the main-built ./dev reads. No script of the tagged tree is ever run. `push` is a fresh container with no checkout and the bot's
+# token, which is the only place the token exists. Checked, each failing with one ::error:: and the next step
+# (conformance/ci/request-tag.mjs):
+#   - the tag's name; the sha is on origin/main or origin/release/*; it is not a skip-ci commit (ER-16); the tag does not exist;
+#   - the app's version source says the tag's version;
+#   - the newest FULL run of the app's gate workflow on exactly that sha is green. Full means a push to main, or a run whose plan
+#     job logged `plan mode: full=true` (plan_since::MODE_LINE; only debrief.yml prints it so far). A since_run rerun or a base
+#     dispatch is never full, so it cannot clear a red full run;
+#   - for an app tag, the tag gates the release workflows also run (`./dev gates ratchet`, `./dev check ipc-endpoints --tag`).
+# The ADR 0093 scheduled-CI gate (WP-5) is not built yet; it joins here when it is.
+# Not covered (TOCTOU): a run can change between the check and the push (a rerun going red); the tag's own release workflow runs
+# the gates again on the tag. A tag that already exists is refused by the server, never moved.
 #
 # The push uses RELEASE_BOT_TOKEN, a personal token of the user release-bot. A tag pushed with it starts the release workflow
 # (an <app>-v* push); one pushed with the job's own token would not (Gitea ignores events whose doer is the Actions user:
-# services/actions/notifier_helper.go, notify()). The token is used by the push step only and is masked.
+# services/actions/notifier_helper.go, notify()). The token reaches git through GIT_ASKPASS from an env var, never argv, and is masked.
 #
-#   ./dev release tag <tag> --sha <sha>   or   POST /api/v1/repos/decryp7/paddock/actions/workflows/tag.yml/dispatches
-#                                         with {"ref":"main","inputs":{"tag":"...","sha":"..."}}
+# Request a tag: POST /api/v1/repos/decryp7/paddock/actions/workflows/tag.yml/dispatches
+#                with {"ref":"main","inputs":{"tag":"...","sha":"..."}}
 
 name: tag
 
@@ -36,9 +50,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
-    name: tag
+  check:
+    name: check
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # actions: read lists runs and reads the plan job's log; unnamed scopes are None on this Gitea, so it must be named.
+    permissions:
+      contents: read
+      actions: read
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
@@ -59,44 +78,89 @@ jobs:
             exit 1
           fi
 
-      # The commit to tag, not the dispatch ref: every check and the tag gates read the tree that will be tagged.
+      # The trusted code: main, the dispatch ref, in its own folder. The tagged commit is never checked out.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.sha }}
+          ref: main
+          path: trusted
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checks
         shell: bash
+        working-directory: trusted
         env:
           GITEA_TOKEN: ${{ github.token }}
         run: |
           node conformance/ci/request-tag.mjs --tag "$TAG" --sha "$SHA" --root . \
             --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}"
 
+      # The gates read the tagged commit as data: an extracted archive (no hooks, no checkout), looked at by the ./dev built from main.
       - name: Tag gates (apps)
-        if: ${{ !startsWith(inputs.tag, 'v') }}
         shell: bash
+        working-directory: trusted
         run: |
-          ./dev gates ratchet --release-tag "$TAG"
-          ./dev check ipc-endpoints --tag "$TAG"
+          if [[ "$TAG" =~ ^v[0-9] ]]; then
+            echo "The shared-package tag $TAG has no app tag gates."
+            exit 0
+          fi
+          target="$RUNNER_TEMP/target"
+          rm -rf "$target"
+          mkdir -p "$target"
+          git -c core.hooksPath=/dev/null archive "$SHA" | tar -x -C "$target"
+          git -c core.hooksPath=/dev/null -C "$target" init -q
+          git -c core.hooksPath=/dev/null -C "$target" fetch -q "$GITHUB_WORKSPACE/trusted" main:refs/remotes/origin/main
+          ./dev gates ratchet --root "$target" --release-tag "$TAG"
+          ./dev check ipc-endpoints --root "$target" --tag "$TAG"
 
-      # The only step that sees the bot's token. git sends it as a basic-auth header for this one command; it is masked first.
+  # The bot's push: a fresh container, no checkout of any tree, nothing of the repository to run. It fetches the sha with the job's
+  # own read token, makes the annotated tag and pushes it with the bot's token. Hooks are off for every git command.
+  push:
+    name: push
+    needs: [check]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      TAG: ${{ inputs.tag }}
+      SHA: ${{ inputs.sha }}
+    steps:
       - name: Make the tag as release-bot and push it
         shell: bash
         env:
           RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+          JOB_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$RELEASE_BOT_TOKEN" ]; then
             echo "::error::tag: the secret RELEASE_BOT_TOKEN is not set. Ask the repository owner to add the release-bot token as a secret."
             exit 1
           fi
           echo "::add-mask::$RELEASE_BOT_TOKEN"
-          auth=$(printf 'release-bot:%s' "$RELEASE_BOT_TOKEN" | base64 | tr -d '\n')
-          echo "::add-mask::$auth"
-          git -c user.name=release-bot -c user.email=release-bot@users.noreply.dev.decryptology.net tag -a "$TAG" "$SHA" -m "Release $TAG"
-          if ! git -c "http.extraheader=Authorization: Basic $auth" push "${{ github.server_url }}/${{ github.repository }}.git" "refs/tags/$TAG" 2>push.err; then
-            sed -e "s/$RELEASE_BOT_TOKEN/***/g" push.err | tail -n 5
+          # The inputs are checked again here: this job does not trust the other one's word for them.
+          if ! [[ "$TAG" =~ ^[a-z0-9]+(-[a-z0-9]+)*-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ || "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::tag: the tag or the sha is malformed. Run the workflow again with valid inputs."
+            exit 1
+          fi
+          # Credentials reach git through an askpass script that reads the environment: nothing secret is on a command line.
+          askpass="$RUNNER_TEMP/askpass.sh"
+          printf '%s\n' '#!/bin/sh' 'case "$1" in Username*) echo "$GIT_AUTH_USER" ;; *) echo "$GIT_AUTH_PASS" ;; esac' > "$askpass"
+          chmod 700 "$askpass"
+          export GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0
+          url="${{ github.server_url }}/${{ github.repository }}.git"
+          dir="$RUNNER_TEMP/tagrepo"
+          rm -rf "$dir"
+          git init -q "$dir"
+          cd "$dir"
+          if ! GIT_AUTH_USER=gitea-actions GIT_AUTH_PASS="$JOB_TOKEN" git -c core.hooksPath=/dev/null fetch -q --no-tags "$url" "$SHA"; then
+            echo "::error::tag: the commit $SHA could not be fetched. Check the sha is on origin and the job may read the repository."
+            exit 1
+          fi
+          git -c core.hooksPath=/dev/null -c user.name=release-bot -c user.email=release-bot@users.noreply.dev.decryptology.net tag -a "$TAG" "$SHA" -m "Release $TAG"
+          if ! GIT_AUTH_USER=release-bot GIT_AUTH_PASS="$RELEASE_BOT_TOKEN" git -c core.hooksPath=/dev/null push "$url" "refs/tags/$TAG" 2>push.err; then
+            tail -n 5 push.err
             echo "::error::tag: the push of $TAG was refused. Check that release-bot has Write on the repository, is on the tag protection allow-list, and the token has write:repository."
             exit 1
           fi

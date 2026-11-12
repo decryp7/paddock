@@ -13,7 +13,9 @@ fine; it is never published.
    `{{app}}-vX.Y.Z` and `sha` = the full commit id; API: `POST /api/v1/repos/decryp7/paddock/actions/workflows/tag.yml/dispatches`
    with `{"ref":"main","inputs":{"tag":"...","sha":"..."}}`). It checks that the commit is on origin, is not `[skip ci]`, that
    the tag is new, that the version matches and that the app's workflow is green on exactly that commit, then the release
-   bot pushes an annotated tag. Tag protection refuses any other pusher. The tag workflow runs the gates
+   bot pushes an annotated tag. Tag protection refuses any other pusher. This is a guard rail against mistakes, not a security boundary: any repo writer can
+   dispatch from their own ref and repo secrets reach non-fork runs (single-user setup, ER-37). Only a full CI run counts (a
+   push to main, or a run whose plan job logged `plan mode: full=true`), and the commit must be on `main` or `release/*`. The tag workflow runs the gates
    again, builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
    and the DMG), publishes the release with its notes and `latest.json`.
 4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.

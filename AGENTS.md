@@ -109,7 +109,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   attribution.
 - Tags: `v*` for the shared packages (publish.yml), `<app>-vX.Y.Z` per app (its `<app>-release.yml`), never from a
   workstation and never pushed by an agent: request a tag with the `tag` workflow (`.gitea/workflows/tag.yml`), whose release bot
-  pushes it. ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
+  pushes it. It is a guard rail against mistakes, not a security boundary (any repo writer can dispatch from their own ref;
+  single-user setup). ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
 
 <!-- The sections below are docs/blocks (the engineering rules common to every app), copied verbatim;
      scripts/affected.test.mjs fails when they drift. Change them in docs/blocks first. -->
