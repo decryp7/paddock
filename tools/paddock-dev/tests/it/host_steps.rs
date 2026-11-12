@@ -116,6 +116,7 @@ fn norm(text: &str, fx: &Fx) -> String {
 
 /// Every file, folder and link below the fixture's `work`, `home`, `ws`, `mount` and `tmp` folders (the job's own files `github-*` and `calls` are
 /// compared separately): `kind path` or `l path -> target`.
+/// Left out: `.paddock-owner.toml`, which the Rust kit writes through dev-disk's slot paths and the shell fallback (deleted at WP-11) does not.
 fn tree(fx: &Fx) -> Vec<String> {
     let mut out = Vec::new();
     let root = fx.root();
