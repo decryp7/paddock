@@ -16,29 +16,33 @@ use std::path::{Path, PathBuf};
 /// # Errors
 /// The text to show: the cause, the next step, and that nothing was started or changed.
 pub fn check_root(dirs: &Dirs) -> Result<(), String> {
-    check_root_with(dirs.root(), !dirs.is_users_own())?;
-    check_app_folders(
+    check_places(
+        dirs.root(),
+        !dirs.is_users_own(),
         &paddock_env::AppId::new(crate::logging::APP_ID, crate::logging::APP_NAME)
             .and_then(|id| paddock_env::AppDirs::for_app(&id))
             .ok(),
     )
 }
 
-/// The folders of the app's own places that the user supplied (portable mode, `<ID>_HOME`): the logs, the crash marker and the run
-/// marker go there, and they are refused like a named data folder (the OS's own places are not checked).
+/// Every place the agent or the app writes into at start: the data folder and, when the user supplied the app's folders (portable mode,
+/// `<ID>_HOME`), their `data` and `logs` (the log, the crash marker and the run marker go there). All the checks run first and nothing
+/// is made before they all pass, so a refused `<ID>_HOME` leaves a named `DYNO_DATA_DIR` uncreated too.
 ///
 /// # Errors
 /// As [`check_root`].
-fn check_app_folders(app_dirs: &Option<paddock_env::AppDirs>) -> Result<(), String> {
-    let Some(app_dirs) = app_dirs.as_ref().filter(|a| a.source() != paddock_env::Source::Os) else {
-        return Ok(());
-    };
-    // Every check first, then anything is made: a refused `<ID>_HOME` is left without a `data` or `logs` folder inside it.
-    let folders = [app_dirs.data(), app_dirs.logs()];
-    for folder in folders {
+fn check_places(root: &Path, supplied: bool, app_dirs: &Option<paddock_env::AppDirs>) -> Result<(), String> {
+    let app_folders: Vec<&Path> = app_dirs
+        .as_ref()
+        .filter(|a| a.source() != paddock_env::Source::Os)
+        .map(|a| vec![a.data(), a.logs()])
+        .unwrap_or_default();
+    let named = supplied.then_some(root).into_iter().chain(app_folders.iter().copied());
+    for folder in named {
         paddock_env::private::check_named_folder(folder).map_err(|e| refusal_text(&e.to_string()))?;
     }
-    for folder in folders {
+    check_root_with(root, supplied)?;
+    for folder in app_folders {
         check_root_with(folder, true)?;
     }
     Ok(())
@@ -456,7 +460,7 @@ mod tests {
         let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
         let vars = paddock_env::MapVars::new().with("DYNO_HOME", root.clone().into_os_string());
         let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
-        let e = check_app_folders(&supplied).unwrap_err();
+        let e = check_places(&tmp.path().join("none"), false, &supplied).unwrap_err();
         assert!(
             e.contains("did not start") && e.contains("chmod go-w"),
             "logs, crash marker and run marker: {e}"
@@ -469,7 +473,11 @@ mod tests {
             false,
         )
         .ok();
-        assert_eq!(check_app_folders(&os_own), Ok(()), "the OS's own places are not checked");
+        assert_eq!(
+            check_places(&tmp.path().join("default"), false, &os_own),
+            Ok(()),
+            "the OS's own places are not checked"
+        );
     }
 
     #[cfg(unix)]
@@ -487,12 +495,29 @@ mod tests {
         let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
         let vars = paddock_env::MapVars::new().with("DYNO_HOME", home.clone().into_os_string());
         let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
-        assert!(check_app_folders(&supplied).is_err());
+        assert!(check_places(&tmp.path().join("none"), false, &supplied).is_err());
         assert_eq!(
             std::fs::read_dir(&home).unwrap().count(),
             0,
             "nothing was made inside the refused folder"
         );
+    }
+
+    /// P2: a named data folder is not made when a supplied `<ID>_HOME` is refused: all the checks run before anything is created.
+    #[cfg(unix)]
+    #[test]
+    fn a_named_data_folder_is_not_made_when_a_supplied_app_home_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
+        let vars = paddock_env::MapVars::new().with("DYNO_HOME", home.into_os_string());
+        let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
+        let named = tmp.path().join("named");
+        assert!(check_places(&named, true, &supplied).is_err());
+        assert!(!named.exists(), "the named data folder was not made before the refusal");
     }
 
     #[cfg(unix)]

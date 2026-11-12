@@ -587,64 +587,74 @@ pub fn run() {
         std::process::exit(78);
     }
     // A data folder the user named that other accounts can write is refused (ADR 0092, W8): the agent will not start in it either, so the
-    // app says why and what to do, and ends, instead of waiting for an agent that never comes. Decided first of all: before the
-    // diagnostics export, the log, and the shell, link, tray and plugins that read the settings, clear the quit marker, register the
-    // service, read `agent.json` and start the agent (on macOS the launcher writes a plist into the folder). The gate it returns is the
-    // only way to the Builder below.
-    let gate = match StartGate::open(&dyno_agent::paths::Dirs::current()) {
-        Ok(gate) => gate,
-        Err(text) => {
+    // app says why and what to do, and ends, instead of waiting for an agent that never comes. `start` decides it first of all: before
+    // the diagnostics export, the log, and the shell, link, tray and plugins that read the settings, clear the quit marker, register
+    // the service, read `agent.json` and start the agent (on macOS the launcher writes a plist into the folder). It is the only way
+    // to the Builder (`gate::StartGate` cannot be made anywhere else).
+    let started = start(
+        &dyno_agent::paths::Dirs::current(),
+        || {
+            // A window that failed to start can still be reported: `--export-diagnostics` writes the report and exits, with no window.
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            if args.iter().any(|a| a.starts_with(paddock_diag::export::FLAG)) {
+                let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+                let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
+                if let Some(code) = report::export_cli(&args, &info) {
+                    std::process::exit(code);
+                }
+            }
+            // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
+            // own lines stay in its agent-side log.
+            let log = paddock_shell::logging::install_with_commit(
+                &AppIdentity::new(APP_ID, APP_NAME, VERSION),
+                option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""),
+            );
+            if let Some(handle) = &log {
+                logging::set_handle(handle.clone());
+            }
+            crash_reports::log_at_start_in_background(
+                crash_reports::default_folders(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)),
+            );
+            log
+        },
+        || {
+            let cwd = std::env::current_dir().ok();
+            #[allow(unused_mut)]
+            let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
+            #[cfg(target_os = "macos")]
+            let asked_hidden = std::mem::replace(&mut launch.hidden, true);
+            #[cfg(not(target_os = "macos"))]
+            let asked_hidden = false;
+            let hub = health::Hub::<tauri::Wry>::default();
+            let shell = shell::<tauri::Wry>(Place::Installed, &hub, Arc::new(shell::NativePixels));
+            let builder = tauri::Builder::default()
+                // First: a second launch shows the running app's window instead of starting another app.
+                .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
+                .plugin(tauri_plugin_notification::init())
+                .plugin(tauri_plugin_opener::init())
+                .plugin(tauri_plugin_dialog::init())
+                .plugin(tauri_plugin_updater::Builder::new().build());
+            // The icons start as the saved layout (read from the agent's settings file), not the defaults: a custom layout must not flash.
+            let items = shell::saved_items(&dyno_agent::paths::Dirs::current().settings());
+            let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
+            // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
+            (builder, asked_hidden)
+        },
+    );
+    let (_log, (builder, asked_hidden)) = match started {
+        Started::Go(log, built) => (log, built),
+        Started::Refused(text) => {
             refuse(&text);
             return;
         }
     };
-    // A window that failed to start can still be reported: `--export-diagnostics` writes the report and exits, with no window.
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| a.starts_with(paddock_diag::export::FLAG)) {
-        let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
-        let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
-        if let Some(code) = report::export_cli(&args, &info) {
-            std::process::exit(code);
-        }
-    }
-    // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
-    // own lines stay in its agent-side log.
-    let _log = paddock_shell::logging::install_with_commit(
-        &AppIdentity::new(APP_ID, APP_NAME, VERSION),
-        option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""),
-    );
-    if let Some(handle) = &_log {
-        logging::set_handle(handle.clone());
-    }
-    crash_reports::log_at_start_in_background(
-        crash_reports::default_folders(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)),
-    );
-    let cwd = std::env::current_dir().ok();
-    #[allow(unused_mut)]
-    let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
-    #[cfg(target_os = "macos")]
-    let asked_hidden = std::mem::replace(&mut launch.hidden, true);
-    let builder = gate.builder(move || {
-        let hub = health::Hub::<tauri::Wry>::default();
-        let shell = shell::<tauri::Wry>(Place::Installed, &hub, Arc::new(shell::NativePixels));
-        let builder = tauri::Builder::default()
-            // First: a second launch shows the running app's window instead of starting another app.
-            .plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance))
-            .plugin(tauri_plugin_notification::init())
-            .plugin(tauri_plugin_opener::init())
-            .plugin(tauri_plugin_dialog::init())
-            .plugin(tauri_plugin_updater::Builder::new().build());
-        // The icons start as the saved layout (read from the agent's settings file), not the defaults: a custom layout must not flash.
-        let items = shell::saved_items(&dyno_agent::paths::Dirs::current().settings());
-        let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
-        // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
-        let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
-        builder
-    });
+    #[cfg(not(target_os = "macos"))]
+    let _ = asked_hidden;
     // `Builder::run` is `build` then `run` with no callback; the callback is only for macOS's login-start decision.
     match builder.build(context()) {
         Ok(app) => app.run(move |_handle, _event| {
@@ -704,23 +714,47 @@ pub fn run() {
     }
 }
 
-/// The proof that the data folder was checked and is usable: the only way `run` gets a Builder (`StartGate::builder`), so the shell, the
-/// link, the tray and the plugins cannot be built for a refused folder, and deleting the check in [`StartGate::open`] fails a test.
-struct StartGate(());
+/// The proof that the data folder was checked and is usable lives in its own module with a private field: nothing outside it can make a
+/// `StartGate` except [`gate::StartGate::open`], which runs the check, so the Builder (only reachable through the gate) cannot be built
+/// for a refused folder.
+mod gate {
+    /// The proof that the data folder was checked and is usable.
+    pub struct StartGate(());
 
-impl StartGate {
-    /// Checks the data folder first of all.
-    ///
-    /// # Errors
-    /// The text to show when the folder is refused (the cause and the next step).
-    fn open(dirs: &dyno_agent::paths::Dirs) -> Result<StartGate, String> {
-        dyno_agent::paths::check_root(dirs).map(|()| StartGate(()))
-    }
+    impl StartGate {
+        /// Checks the data folder first of all.
+        ///
+        /// # Errors
+        /// The text to show when the folder is refused (the cause and the next step).
+        pub fn open(dirs: &dyno_agent::paths::Dirs) -> Result<StartGate, String> {
+            dyno_agent::paths::check_root(dirs).map(|()| StartGate(()))
+        }
 
-    /// Builds the app's Builder; only a gate that was opened can.
-    fn builder<B>(self, make: impl FnOnce() -> B) -> B {
-        make()
+        /// Builds the app's Builder; only a gate that was opened can.
+        pub fn builder<B>(self, make: impl FnOnce() -> B) -> B {
+            make()
+        }
     }
+}
+use gate::StartGate;
+
+/// What [`start`] decided.
+enum Started<G, B> {
+    /// The folder is usable: what `after_gate` kept alive, and what `make` built.
+    Go(G, B),
+    /// The folder is refused: the text to show. Neither closure ran.
+    Refused(String),
+}
+
+/// The decision, testable without Tauri: opens the gate (the data-folder check), then runs `after_gate` (the diagnostics export, the
+/// log) and `make` (the Builder). For a refused folder neither runs.
+fn start<G, B>(dirs: &dyno_agent::paths::Dirs, after_gate: impl FnOnce() -> G, make: impl FnOnce() -> B) -> Started<G, B> {
+    let gate = match StartGate::open(dirs) {
+        Ok(gate) => gate,
+        Err(text) => return Started::Refused(text),
+    };
+    let kept = after_gate();
+    Started::Go(kept, gate.builder(make))
 }
 
 /// Logs the refusal (ER-27) where the log can go, shows why and ends with the refusal code: the log goes to the OS's own logs folder
@@ -778,7 +812,6 @@ fn refuse_to_start(text: String) {
 
 #[cfg(test)]
 mod refusal_tests {
-    #[cfg(unix)]
     use super::*;
 
     /// `Dirs::at` is a folder the user named, so it is checked; the default folder is not (`paths::check_root_with`).
@@ -800,11 +833,53 @@ mod refusal_tests {
             0o777,
             "never tightened"
         );
-        // A usable folder opens the gate, and only the gate builds: the closure runs once, and never for a refused folder (no gate).
-        let gate = StartGate::open(&dyno_agent::paths::Dirs::at(tmp.path().join("own"))).expect("usable");
-        let mut built = 0;
-        gate.builder(|| built += 1);
-        assert_eq!(built, 1);
+    }
+
+    /// `start` is how `run` gets its Builder: for a refused folder neither the diagnostics/log step nor the Builder step runs; for a
+    /// usable one each runs once, the log step first.
+    #[cfg(unix)]
+    #[test]
+    fn start_runs_neither_step_for_a_refused_folder_and_each_once_for_a_usable_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let (mut after, mut made) = (0, 0);
+        let refused = start(&dyno_agent::paths::Dirs::at(&open), || after += 1, || made += 1);
+        assert!(matches!(refused, Started::Refused(ref t) if t.contains("did not start")));
+        assert_eq!((after, made), (0, 0), "nothing ran for a refused folder");
+        let order = std::cell::RefCell::new(Vec::new());
+        let go = start(
+            &dyno_agent::paths::Dirs::at(tmp.path().join("own")),
+            || order.borrow_mut().push("log"),
+            || order.borrow_mut().push("builder"),
+        );
+        assert!(matches!(go, Started::Go(..)));
+        assert_eq!(*order.borrow(), ["log", "builder"]);
+    }
+
+    /// Windows twin: a named folder Everyone may write is refused by `start` before either step. Owed to the Windows runner or VM.
+    #[cfg(windows)]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a Windows-only test runs icacls on its own temporary folder to set its access list"
+    )]
+    fn windows_start_runs_neither_step_for_a_named_folder_everyone_can_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        let out = std::process::Command::new("icacls")
+            .arg(&open)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let (mut after, mut made) = (0, 0);
+        let refused = start(&dyno_agent::paths::Dirs::at(&open), || after += 1, || made += 1);
+        assert!(matches!(refused, Started::Refused(ref t) if t.contains("did not start")));
+        assert_eq!((after, made), (0, 0));
     }
 
     /// Nothing of the shell is built for a refused folder: `agent_setup` (settings read, quit marker, registration, `agent.json`
