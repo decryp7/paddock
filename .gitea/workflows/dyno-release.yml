@@ -85,6 +85,8 @@ jobs:
   # A manual run with `gates: true` runs the gates beside the installers; both must be green for the run to be.
   installers:
     name: installers
+    # paddock-timing-job: macos — the macOS bundle starts every sidecar from the built app and bounds it (the --version start check)
+    # paddock-timing-overlap: only a manual run with `gates: true` overlaps the gates (ci.yml legs); a tag run orders release after gates. Gitea 28.2 skips a reusable-workflow job whose need was skipped, so this job cannot need `gates` without building nothing on a push (see above). Fix: one gated copy of this job, or a Gitea that honours `if` on skipped needs.
     needs: [plan]
     if: ${{ needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/') }}
     uses: ./.gitea/workflows/app-release.yml

@@ -577,8 +577,11 @@ jobs:
   # Full runs only (main, debrief-v* tags, nightly, `bundles: true`), never on branch or pull request runs.
   tauri-smoke:
     name: real-app smoke (${{ matrix.os }})
-    needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    # After the bundle and the macOS Rust tests: the macOS leg's start-up benchmark is a timing gate and must not share the
+    # runner with this run's heavy builds (debrief.yml 8007 measured 1.8x its budgets beside the LTO bundle job). A failed
+    # bundle or test leg does not skip the smoke (!cancelled); a failed rust-lint still does.
+    needs: [plan, rust-lint, bundle, rust-test-macos]
+    if: ${{ !cancelled() && needs.rust-lint.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -586,6 +589,7 @@ jobs:
         # app stays up and quits within 10 s (scripts/ci/macos-smoke.sh). The v1.0.1 store-worker abort reached users
         # because no macOS job ever started the sidecars.
         os: [ubuntu-latest, windows-latest, macos-latest]
+    # paddock-timing-job: macos — the start-up benchmark and the quit-within-10-s check read the clock (C110)
     runs-on: ${{ matrix.os }}
     env:
       # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a tag run builds from source).

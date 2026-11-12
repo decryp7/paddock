@@ -1061,9 +1061,9 @@ test('Debrief runs its installers and real-app smoke tests only on main, debrief
   assert.match(full, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
   assert.match(full, /github\.event_name == 'workflow_dispatch' && \(inputs\.bundles == true/);
   assert.doesNotMatch(full, /pull_request/);
-  for (const job of ['tauri-smoke', 'bundle']) {
-    assert.match(jobBlock(yml, job), /^    if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${job}: full runs only`);
-  }
+  assert.match(jobBlock(yml, 'bundle'), /^    if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, 'bundle: full runs only');
+  // The smoke runs after the bundle (C110: its start-up benchmark is a timing gate), so its condition is wrapped in !cancelled().
+  assert.match(jobBlock(yml, 'tauri-smoke'), /^    if: \$\{\{ !cancelled\(\) && .*needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true' \}\}$/m, 'tauri-smoke: full runs only');
   // The release needs them, and a tag run is always a full run.
   assert.match(jobBlock(yml, 'release'), /needs: \[[^\]]*\bbundle\b[^\]]*\btauri-smoke\b/);
 });
