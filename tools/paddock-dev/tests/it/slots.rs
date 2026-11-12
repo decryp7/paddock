@@ -383,6 +383,16 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
     assert!(is_free(&root, 1), "no holder was started");
 }
 
+/// Sets the flag when it goes out of scope, so a panic in the test body still stops the prober (a flag set only on the success path
+/// left the prober, and with it the test run, waiting forever).
+struct StopOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 #[test]
 fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     let d = tempfile::tempdir().unwrap();
@@ -392,15 +402,36 @@ fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     std::thread::scope(|s| {
         s.spawn(|| {
             let locks = FsLocks::new(&root);
-            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            // Its own deadline as well: the probe ends even if nothing ever sets the flag.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) && std::time::Instant::now() < deadline {
                 let _ = paddock_slots::slot_states(&locks, 1);
             }
         });
+        let _stop = StopOnDrop(&stop);
         for _ in 0..8 {
             let (slot, token) = take(&root, &job, "1");
             assert_eq!(release(&root, &slot, &token).0, 0);
         }
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+}
+
+/// A probe that holds the slot's lock for a while (a stalled process on a loaded machine) gets no refusal either: the acquirer
+/// keeps trying within its wait (1 run in 25 at load 85 was refused with "All 1 slots are busy").
+#[test]
+fn acquire_waits_for_a_probe_that_holds_the_lock_instead_of_refusing() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    std::fs::create_dir_all(&root).unwrap();
+    let probe = FsLocks::new(&root).try_lock(SlotId::new(1).unwrap()).unwrap().unwrap();
+    std::thread::scope(|s| {
+        s.spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(700));
+            drop(probe);
+        });
+        let (slot, token) = take(&root, &job, "1");
+        assert_eq!(release(&root, &slot, &token).0, 0);
     });
 }
 

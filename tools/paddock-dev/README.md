@@ -47,7 +47,7 @@ cleanup removes a locked one. Run it from any checkout of the repository (or pas
   are errors; the coordinator records the current ones with `--accept-untracked`. Without `--live` it prints `liveness: not
   measured` and calls no lock stale. Exit codes: 0 ok, **5** a problem was found, **6** only checks that could not run (not
   measured; never a pass), as `paddock-cli` plus this one.
-- Tests: `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh`
+- Tests: run them with `cargo nextest run` (per-test time bound, default profile: stops a test after 120 s; a plain `cargo test` can hang forever on a test that waits for something that never comes). `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh`
   adds the oracle comparison with `worktree.sh` (otherwise those tests print `not measured`).
 
 ## Not ported yet (R0b gaps, listed on purpose)

@@ -1,4 +1,4 @@
-use crate::{FsLocks, OwnerInfo, SlotError, SlotId, SlotLocks, acquire_retry};
+use crate::{FsLocks, OwnerInfo, SlotError, SlotId, SlotLocks};
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -67,9 +67,30 @@ impl HoldProbe for FsProbe<'_> {
     }
 }
 
-/// How many times a holder tries all slots when they all look busy (readers take a lock for an instant).
-pub const ACQUIRE_ATTEMPTS: u32 = 5;
+/// How long a holder keeps trying when every slot looks busy. A reader (a status probe) takes a lock only for an instant, but on
+/// a loaded machine the instant can last seconds; a full house that stays full is refused after this wait.
+pub const ACQUIRE_GRACE: Duration = Duration::from_secs(5);
 const ACQUIRE_PAUSE: Duration = Duration::from_millis(10);
+
+/// [`crate::acquire_first`] repeated until `grace` has passed: the first free slot, or `None` when every slot stayed busy for the
+/// whole wait. It tries once even with a zero wait and returns at once on an error.
+pub fn acquire_within<L: SlotLocks>(
+    locks: &L,
+    max: u32,
+    grace: Duration,
+    pause: Duration,
+) -> Result<Option<(SlotId, L::Guard)>, SlotError> {
+    let deadline = Instant::now() + grace;
+    loop {
+        if let Some(got) = crate::acquire_first(locks, max)? {
+            return Ok(Some(got));
+        }
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(pause);
+    }
+}
 
 /// A token no other holder has had: process id, clock and a counter, in hex.
 pub fn fresh_token() -> String {
@@ -117,7 +138,7 @@ impl Announcement {
     }
 }
 
-/// The holder process's whole job: take the first free slot of `max` (retrying briefly, see [`acquire_retry`]), write
+/// The holder process's whole job: take the first free slot of `max` (retrying for [`ACQUIRE_GRACE`], see [`acquire_within`]), write
 /// [`Announcement`] to `announce`, then keep the slot until `owner` disappears or a release with the holder's token is
 /// requested, or `max_hold` has passed (`None`: no cap), and let go. If the process is killed, the kernel releases the lock; the owner and release files left behind
 /// are only information and are overwritten by the next holder.
@@ -129,10 +150,7 @@ pub fn hold(
     max_hold: Option<Duration>,
     announce: &mut dyn Write,
 ) -> Result<Option<(SlotId, HoldEnd)>, SlotError> {
-    let Some((id, guard)) = acquire_retry(locks, max, ACQUIRE_ATTEMPTS, || {
-        std::thread::sleep(ACQUIRE_PAUSE)
-    })?
-    else {
+    let Some((id, guard)) = acquire_within(locks, max, ACQUIRE_GRACE, ACQUIRE_PAUSE)? else {
         let _ = announce
             .write_all(Announcement::None.line().as_bytes())
             .and_then(|()| announce.flush());
@@ -243,6 +261,56 @@ pub fn release(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A status probe that stalls (a loaded machine) while it holds the slot's lock must not make an acquirer refuse: the
+    /// acquirer keeps trying within its wait (1 run in 25 at load 85 was refused with "All 1 slots are busy").
+    #[test]
+    fn a_probe_that_holds_the_lock_for_a_while_does_not_make_acquire_refuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let locks = FsLocks::new(dir.path());
+        let probe = locks.try_lock(SlotId::new(1).unwrap()).unwrap().unwrap();
+        let owner = dir.path().join("job");
+        std::fs::create_dir(&owner).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            drop(probe);
+            let _ = tx.send(());
+        });
+        let mut announced = Vec::new();
+        let got = hold(
+            &locks,
+            1,
+            &owner,
+            Duration::from_millis(5),
+            Some(Duration::ZERO),
+            &mut announced,
+        )
+        .unwrap();
+        assert!(
+            got.is_some(),
+            "refused: {}",
+            String::from_utf8_lossy(&announced)
+        );
+        rx.recv().unwrap();
+    }
+
+    /// A full house that stays full is still refused, after the wait.
+    #[test]
+    fn a_full_house_is_refused_after_the_wait() {
+        let dir = tempfile::tempdir().unwrap();
+        let locks = FsLocks::new(dir.path());
+        let _held = locks.try_lock(SlotId::new(1).unwrap()).unwrap().unwrap();
+        let started = Instant::now();
+        let got = acquire_within(
+            &locks,
+            1,
+            Duration::from_millis(150),
+            Duration::from_millis(5),
+        )
+        .unwrap();
+        assert!(got.is_none() && started.elapsed() >= Duration::from_millis(150));
+    }
 
     struct Script {
         release_after: Option<u32>,
