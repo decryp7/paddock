@@ -191,6 +191,12 @@ enum CiCommand {
     /// flaky tests found exit 5 only with --fail-on-flakes;
     /// cancelled runs are counted and listed but never change the exit code.
     Flakes(ci_runs::FlakesArgs),
+    /// For each failed test of a finished run: NEW, ALREADY FAILING ON MAIN (the last main run of the same workflow) or FLAKY (its
+    /// `ci flakes` history). UNKNOWN when nothing proves either way. Read-only: it never quarantines or marks anything green (ER-12).
+    Triage(ci_runs::TriageArgs),
+    /// Record finished runs as test fixtures (run, jobs, failed-job logs), with people, e-mail addresses, avatars and runner names
+    /// replaced by invented values on capture. Conformance C110 fails a fixture that holds a real one.
+    RecordFixture(ci_runs::RecordArgs),
     /// Real CI timings of the family from the Gitea API (the port of scripts/ci-timings.mjs, same Markdown).
     Timings(ci_runs::TimingsArgs),
     /// Is there a full green run of a workflow on a commit? The one reader of the runs for that verdict (the tag workflow asks
@@ -449,6 +455,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Flakes(a),
         } => ci_runs::flakes(&a),
+        Command::Ci {
+            command: CiCommand::RecordFixture(a),
+        } => ci_runs::record::command(&a),
+        Command::Ci {
+            command: CiCommand::Triage(a),
+        } => ci_runs::triage(&a),
         Command::Ci {
             command: CiCommand::Timings(a),
         } => ci_runs::timings(&a),

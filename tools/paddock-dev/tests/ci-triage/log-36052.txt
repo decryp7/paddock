@@ -1,0 +1,7 @@
+2026-11-11T20:40:10.5509900Z Job: rust-test-macos
+2026-11-11T20:55:25.4992730Z [32;1m    Starting[0m [1m4217[0m tests across [1m101[0m binaries ([1m31[0m tests [33;1mskipped[0m)
+2026-11-11T21:02:29.3792380Z [31;1m     TIMEOUT[0m [  90.041s] (4066/4217) [35;1mdebrief-store-duck::it[0m [36mregress_1_2[0m[36m::[0m[34;1mbuilding_the_catalogue_keeps_its_unsaved_rows_bounded[0m
+2026-11-11T21:03:03.7074600Z [31;1m     Summary[0m [ 458.208s] [1m4217[0m tests run: [1m4216[0m [32;1mpassed[0m ([1m15[0m [33;1mslow[0m), [1m1[0m [31;1mtimed out[0m, [1m31[0m [33;1mskipped[0m
+2026-11-11T21:03:03.7074650Z [31;1m     TIMEOUT[0m [  90.041s] (4066/4217) [35;1mdebrief-store-duck::it[0m [36mregress_1_2[0m[36m::[0m[34;1mbuilding_the_catalogue_keeps_its_unsaved_rows_bounded[0m
+2026-11-11T21:03:03.8432990Z ##[error]Process completed with exit code 100.
+2026-11-11T21:03:41.6201570Z ##[error]Process completed with exit code 1.

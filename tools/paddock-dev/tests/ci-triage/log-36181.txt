@@ -1,0 +1,6 @@
+2026-11-11T22:08:18.7239184Z Job: rust-test
+2026-11-11T22:10:01.8330683Z [32;1m    Starting[0m [1m4222[0m tests across [1m101[0m binaries ([1m30[0m tests [33;1mskipped[0m)
+2026-11-11T22:10:46.9118687Z [31;1m        FAIL[0m [   0.056s] (2275/4222) [35;1mdebrief-app[0m [36mjobs::service::tests[0m[36m::[0m[34;1mprobes_and_reports_reach_the_snapshot_through_the_ticker[0m
+2026-11-11T22:12:39.6569536Z [31;1m     Summary[0m [ 157.817s] [1m4222[0m tests run: [1m4221[0m [32;1mpassed[0m ([1m5[0m [33;1mslow[0m), [1m1[0m [31;1mfailed[0m, [1m30[0m [33;1mskipped[0m
+2026-11-11T22:12:39.6569579Z [31;1m        FAIL[0m [   0.056s] (2275/4222) [35;1mdebrief-app[0m [36mjobs::service::tests[0m[36m::[0m[34;1mprobes_and_reports_reach_the_snapshot_through_the_ticker[0m
+2026-11-11T22:12:39.7001037Z ##[error]Process completed with exit code 100.

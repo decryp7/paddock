@@ -36,6 +36,11 @@ impl RunInfo {
         self.path.split('@').next().unwrap_or("")
     }
 
+    /// The ref the workflow ran on (`refs/heads/main`), empty when the path has none.
+    pub fn git_ref(&self) -> &str {
+        self.path.split_once('@').map_or("", |(_, r)| r)
+    }
+
     /// Whether the run is over (the API says `completed`; older servers put the conclusion in `status`).
     pub fn finished(&self) -> bool {
         self.status == "completed" || matches!(self.status.as_str(), "success" | "failure" | "cancelled" | "skipped")
@@ -177,6 +182,12 @@ impl<'a> Client<'a> {
             }
         }
         Ok(None)
+    }
+
+    /// One run by id; `Ok(None)` when the server has no such run (404).
+    pub fn run(&mut self, id: u64) -> Result<Option<RunInfo>, String> {
+        let url = format!("{}/runs/{id}", self.api());
+        Ok(self.retry(|c| c.http.get_json(&url, &c.token))?.map(|v| RunInfo::from_json(&v)))
     }
 
     /// Page `page` of the run list (50 a page), an empty page for a missing one.
