@@ -127,8 +127,8 @@ impl Train for TestTrain {
     fn pr_files(&mut self, m: &str, h: &str) -> Result<Vec<String>, String> {
         self.inner.pr_files(m, h)
     }
-    fn verify_train(&mut self, b: Option<&str>, h: &str, p: &[(u64, String)]) -> Result<Option<String>, String> {
-        self.inner.verify_train(b, h, p)
+    fn verify_train(&mut self, b: Option<&str>, h: &str, p: &[TrainMember], m: &Marker) -> Result<Option<String>, String> {
+        self.inner.verify_train(b, h, p, m)
     }
     fn affected(&mut self, _main: &str, head: &str) -> Result<BTreeSet<String>, String> {
         Ok(self.reach.get(head).cloned().unwrap_or_default())
@@ -834,10 +834,30 @@ fn only_review_bots_official_approval_of_the_exact_head_counts_and_a_later_chang
         r(2, bot, "REQUEST_CHANGES", "h1", false, true),
         r(1, bot, "APPROVED", "h1", false, true)
     ]));
-    // Nobody else's review vetoes or approves.
+    // A human's change request on the current head blocks even when the bot approved; an old one, a dismissed one or an
+    // unofficial one does not; and their approval never approves.
+    for (who, commit, dismissed, official, blocks) in [
+        ("the-user", "h1", false, true, true),
+        ("a-maintainer", "h1", false, true, true),
+        ("the-user", "h0", false, true, false),
+        ("the-user", "h1", true, true, false),
+        ("a-stranger", "h1", false, false, false),
+    ] {
+        let reviews = [
+            r(1, bot, "APPROVED", "h1", false, true),
+            r(2, who, "REQUEST_CHANGES", commit, dismissed, official),
+        ];
+        assert_eq!(!ok(&reviews), blocks, "{who} on {commit} dismissed={dismissed} official={official}");
+    }
+    assert!(
+        !ok(&[r(1, "the-user", "APPROVED", "h1", false, true)]),
+        "the user's approval is not review-bot's"
+    );
+    // A later approval from the human lifts their own change request.
     assert!(ok(&[
         r(1, bot, "APPROVED", "h1", false, true),
-        r(2, "c", "REQUEST_CHANGES", "h1", false, true)
+        r(2, "the-user", "REQUEST_CHANGES", "h1", false, true),
+        r(3, "the-user", "APPROVED", "h1", false, true)
     ]));
     assert!(!ok(&[]) && !approved_at(&[r(1, bot, "APPROVED", "", false, true)], "", allowed));
 }
@@ -1769,13 +1789,7 @@ fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
         checkouts,
         "every checkout drops its credentials, as tag.yml's does"
     );
-    // Gitea refuses a workflow whose map repeats a key (run 7998: two `with:` in a checkout step, no jobs at all).
-    for step in ci.split("\n      - ") {
-        assert!(
-            step.lines().filter(|l| *l == "        with:").count() <= 1,
-            "a step repeats `with:`:\n{step}"
-        );
-    }
+    // Repeated keys (run 7998: two `with:` in a checkout step) are C111's: it parses every workflow with unique keys.
 }
 
 /// The shell of a step: the `run:` text of the step named `name` in a job block.
@@ -1905,9 +1919,45 @@ fn the_commits_job_lints_a_real_train_with_the_base_the_tick_dispatches() {
 
 // ---- a train is a train only when its structure says so -------------------------------------------------------------------------------
 
-/// A branch pushed over `train/queue` by hand: the given merges (second parent, an extra file put into the merge), then a marker
-/// commit (an extra file put into it) and, optionally, one more commit on top that copies the marker's message.
-fn forge(w: &World, merges: &[(&str, Option<&str>)], prs: &str, marker_file: Option<&str>, on_top: Option<&str>) -> String {
+/// One merge of a hand-made train: the branch and approved head its message names, the commit actually merged, an extra file put
+/// into the merge.
+struct Merge<'a> {
+    branch: &'a str,
+    msg_head: &'a str,
+    parent2: &'a str,
+    extra: Option<&'a str>,
+}
+
+/// The merge of a pull request the way the queue writes it (the approved head, nothing extra).
+fn plain<'a>(branch: &'a str, head: &'a str) -> Merge<'a> {
+    Merge {
+        branch,
+        msg_head: head,
+        parent2: head,
+        extra: None,
+    }
+}
+
+const MARKER_BODY: &str = "Queue-Prs: 1\nQueue-Round: 1";
+
+/// A branch pushed over `train/queue` by hand, from main: `before` (a non-merge commit), the merges with the queue's own messages,
+/// then the marker commit - `marker_message` (default: the queue's), an extra file in it, or a second parent - and optionally one
+/// more commit on top that copies the marker's message.
+struct Forged<'a> {
+    before: Option<&'a str>,
+    merges: Vec<Merge<'a>>,
+    marker_message: Option<&'a str>,
+    marker_file: Option<&'a str>,
+    marker_second_parent: Option<&'a str>,
+    on_top: Option<&'a str>,
+    prs: &'a str,
+    /// Extra trailer lines appended to the marker body.
+    body_extra: Option<&'a str>,
+    /// A third parent for the first merge (an octopus merge).
+    octopus: Option<&'a str>,
+}
+
+fn forge(w: &World, f: Forged) -> String {
     let a = &w.repos.author;
     git(a, &["fetch", "--quiet", "origin"]);
     git(a, &["checkout", "--quiet", "-B", "forged", "origin/main"]);
@@ -1915,35 +1965,55 @@ fn forge(w: &World, merges: &[(&str, Option<&str>)], prs: &str, marker_file: Opt
         std::fs::write(a.join(file), "evil\n").unwrap();
         git(a, &["add", file]);
     };
-    for (sha, extra) in merges {
-        git(a, &["merge", "--no-ff", "--no-commit", "--quiet", sha]);
-        if let Some(f) = extra {
-            put(f);
+    if let Some(file) = f.before {
+        put(file);
+        git(a, &["commit", "--quiet", "-m", "chore: sneaked in"]);
+    }
+    for m in &f.merges {
+        let mut args = vec!["merge", "--no-ff", "--no-commit", "--quiet", m.parent2];
+        if let Some(o) = f.octopus.filter(|_| std::ptr::eq(m, &f.merges[0])) {
+            args.push(o);
         }
-        git(a, &["commit", "--quiet", "-m", "Merge forged"]);
+        git(a, &args);
+        if let Some(x) = m.extra {
+            put(x);
+        }
+        let msg = format!("Merge {} ({}) into train", m.branch, &m.msg_head[..9]);
+        git(a, &["commit", "--quiet", "-m", &msg]);
     }
-    let message = format!("Queue-Prs: {prs}\nQueue-Round: 1");
-    if let Some(f) = marker_file {
-        put(f);
+    let mut body = format!("Queue-Prs: {}\nQueue-Round: 1", f.prs);
+    if let Some(x) = f.body_extra {
+        body.push_str(&format!("\n{x}"));
     }
-    git(
-        a,
-        &[
-            "commit",
-            "--quiet",
-            "--allow-empty",
-            "-m",
-            "chore(queue): train round 1",
-            "-m",
-            &message,
-        ],
-    );
-    if let Some(f) = on_top {
-        put(f);
-        git(a, &["commit", "--quiet", "-m", "chore(queue): train round 1", "-m", &message]);
+    let subject = f.marker_message.unwrap_or("chore(queue): train round 1");
+    if let Some(x) = f.marker_file {
+        put(x);
+    }
+    if let Some(p2) = f.marker_second_parent {
+        git(a, &["merge", "--no-ff", "-s", "ours", "--quiet", "-m", subject, "-m", &body, p2]);
+    } else {
+        git(a, &["commit", "--quiet", "--allow-empty", "-m", subject, "-m", &body]);
+    }
+    if let Some(x) = f.on_top {
+        put(x);
+        git(a, &["commit", "--quiet", "-m", subject, "-m", &body]);
     }
     git(a, &["push", "--quiet", "--force", "origin", "forged:refs/heads/train/queue"]);
     git(a, &["rev-parse", "HEAD"])
+}
+
+fn forged_default<'a>(merges: Vec<Merge<'a>>) -> Forged<'a> {
+    Forged {
+        before: None,
+        merges,
+        marker_message: None,
+        marker_file: None,
+        marker_second_parent: None,
+        on_top: None,
+        prs: "1",
+        body_extra: None,
+        octopus: None,
+    }
 }
 
 fn forged_train_is_rebuilt_not_landed(make: impl FnOnce(&World, &str) -> String, what: &str) {
@@ -1967,9 +2037,8 @@ fn forged_train_is_rebuilt_not_landed(make: impl FnOnce(&World, &str) -> String,
 #[test]
 fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
     forged_train_is_rebuilt_not_landed(
-        |w, pr| {
+        |w, _| {
             // The reviewer's attack: the real train plus evil.txt, with the marker's own message.
-            let _ = pr;
             let legit = w.train_head();
             let a = &w.repos.author;
             git(a, &["fetch", "--quiet", "origin"]);
@@ -1984,30 +2053,66 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         "a commit on top of the real train",
     );
     forged_train_is_rebuilt_not_landed(
-        |w, pr| forge(w, &[(pr, None)], "1", Some("evil.txt"), None),
+        |w, _| {
+            // An empty commit with the marker's message on top: the tree is right, the chain is not.
+            let legit = w.train_head();
+            let a = &w.repos.author;
+            git(a, &["fetch", "--quiet", "origin"]);
+            git(a, &["checkout", "--quiet", "-B", "forged", &legit]);
+            let message = git(a, &["log", "-1", "--format=%B"]);
+            git(a, &["commit", "--quiet", "--allow-empty", "-m", &message]);
+            git(a, &["push", "--quiet", "--force", "origin", "forged:refs/heads/train/queue"]);
+            git(a, &["rev-parse", "HEAD"])
+        },
+        "an empty commit on top of the real train",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            forge(
+                w,
+                Forged {
+                    marker_file: Some("evil.txt"),
+                    ..forged_default(vec![plain("feat/pr1", pr)])
+                },
+            )
+        },
         "the marker commit changes the tree",
     );
     forged_train_is_rebuilt_not_landed(
-        |w, pr| forge(w, &[(pr, Some("evil.txt"))], "1", None, None),
+        |w, pr| {
+            forge(
+                w,
+                forged_default(vec![Merge {
+                    extra: Some("evil.txt"),
+                    ..plain("feat/pr1", pr)
+                }]),
+            )
+        },
         "a merge that is not what merging gives",
     );
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
-            // A descendant of the approved head (not the approved head) is merged.
+            // A descendant of the approved head (not the approved head) is merged, under the approved head's message.
             let a = &w.repos.author;
             git(a, &["checkout", "--quiet", "-B", "descendant", pr]);
             std::fs::write(a.join("sneaky.txt"), "x\n").unwrap();
             git(a, &["add", "."]);
             git(a, &["commit", "--quiet", "-m", "feat: sneaky"]);
             let sneaky = git(a, &["rev-parse", "HEAD"]);
-            forge(w, &[(&sneaky, None)], "1", None, None)
+            forge(
+                w,
+                forged_default(vec![Merge {
+                    parent2: &sneaky,
+                    ..plain("feat/pr1", pr)
+                }]),
+            )
         },
         "a merge of a commit that is not the approved head",
     );
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             let other = w.repos.branch("other", "docs/other.md");
-            forge(w, &[(pr, None), (&other, None)], "1", None, None)
+            forge(w, forged_default(vec![plain("feat/pr1", pr), plain("other", &other)]))
         },
         "an extra merge the marker does not list",
     );
@@ -2026,13 +2131,113 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
                     "-m",
                     "chore(queue): train round 1",
                     "-m",
-                    "Queue-Prs: 1\nQueue-Round: 1",
+                    MARKER_BODY,
                 ],
             );
             git(a, &["push", "--quiet", "--force", "origin", "forged:refs/heads/train/queue"]);
             git(a, &["rev-parse", "HEAD"])
         },
         "no --no-ff merge",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            forge(
+                w,
+                Forged {
+                    before: Some("sneaked.txt"),
+                    ..forged_default(vec![plain("feat/pr1", pr)])
+                },
+            )
+        },
+        "a non-merge commit between main and the first merge",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            // An octopus merge: a third parent that changes nothing, so the tree is still what merging two parents gives.
+            let a = &w.repos.author;
+            git(a, &["checkout", "--quiet", "-B", "empty", "origin/main"]);
+            git(a, &["commit", "--quiet", "--allow-empty", "-m", "chore: nothing"]);
+            git(a, &["push", "--quiet", "--force", "origin", "empty"]);
+            let empty = git(a, &["rev-parse", "HEAD"]);
+            forge(
+                w,
+                Forged {
+                    octopus: Some(&empty),
+                    ..forged_default(vec![plain("feat/pr1", pr)])
+                },
+            )
+        },
+        "a merge with a third parent",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            forge(
+                w,
+                Forged {
+                    body_extra: Some("Queue-Since-Run: 5\nQueue-Since-Workflow: ci.yml"),
+                    ..forged_default(vec![plain("feat/pr1", pr)])
+                },
+            )
+        },
+        "a since-run on round 1",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            let other = w.repos.branch("other", "docs/other.md");
+            forge(
+                w,
+                Forged {
+                    marker_second_parent: Some(&other),
+                    ..forged_default(vec![plain("feat/pr1", pr)])
+                },
+            )
+        },
+        "a marker commit with two parents",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            forge(
+                w,
+                Forged {
+                    marker_message: Some("chore(queue): train round 1 [skip ci]"),
+                    ..forged_default(vec![plain("feat/pr1", pr)])
+                },
+            )
+        },
+        "a marker message with [skip ci]",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            // The merge message carries the directive; everything else is right.
+            let a = &w.repos.author;
+            git(a, &["fetch", "--quiet", "origin"]);
+            git(a, &["checkout", "--quiet", "-B", "forged", "origin/main"]);
+            git(a, &["merge", "--no-ff", "--no-commit", "--quiet", pr]);
+            git(
+                a,
+                &[
+                    "commit",
+                    "--quiet",
+                    "-m",
+                    &format!("Merge feat/pr1 ({}) into train [skip ci]", &pr[..9]),
+                ],
+            );
+            git(
+                a,
+                &[
+                    "commit",
+                    "--quiet",
+                    "--allow-empty",
+                    "-m",
+                    "chore(queue): train round 1",
+                    "-m",
+                    MARKER_BODY,
+                ],
+            );
+            git(a, &["push", "--quiet", "--force", "origin", "forged:refs/heads/train/queue"]);
+            git(a, &["rev-parse", "HEAD"])
+        },
+        "a merge message with [skip ci]",
     );
 }
 
@@ -2041,9 +2246,46 @@ fn a_train_built_by_hand_exactly_the_way_the_queue_builds_one_is_accepted() {
     let mut w = World::new();
     let pr_head = w.approved(1, "crates/x/a.rs", &["x"]);
     w.tick();
-    let hand = forge(&w, &[(&pr_head, None)], "1", None, None);
+    let hand = forge(&w, forged_default(vec![plain("feat/pr1", &pr_head)]));
     w.run(&hand, 9002, RunState::Running);
     assert_eq!(w.tick(), Tick::Waiting(9002), "a structurally right train is judged, not rebuilt");
+}
+
+#[test]
+fn a_rejected_marker_steers_nothing_in_the_rebuild() {
+    // Two pull requests are in the train. A forged head lists three in its marker, claims a failed run to rerun and has a failed run
+    // in CI: if the marker drove the rebuild, the new train would rerun only that run's failures (since_run) and be round 2.
+    let mut w = World::new();
+    let h1 = w.approved(1, "crates/x/a.rs", &["x"]);
+    w.approved(2, "ui/b.ts", &["ui"]);
+    w.tick();
+    let forged = forge(
+        &w,
+        Forged {
+            prs: "1,2,3",
+            marker_message: Some("chore(queue): train round 4"),
+            ..forged_default(vec![plain("feat/pr1", &h1)])
+        },
+    );
+    w.run(&forged, 5555, RunState::Failed("failure".into()));
+    let Tick::Built { head, prs, .. } = w.tick() else {
+        panic!("rebuilt")
+    };
+    assert_eq!(prs, vec![1, 2], "the pull requests are the labelled ones, not the forged marker's");
+    let marker = GitTrain::for_clone(w.repos.queue.clone(), w.repos.origin.to_str().unwrap());
+    git(&w.repos.queue, &["fetch", "--quiet", "origin"]);
+    let m = real::parse_marker(&git(&w.repos.queue, &["show", "-s", "--format=%B", &head])).unwrap();
+    let _ = marker;
+    assert_eq!(
+        (m.round, m.since_run),
+        (1, None),
+        "a fresh round: nothing a forged marker says steers it"
+    );
+    assert!(matches!(w.tick(), Tick::Dispatched { .. }));
+    assert!(
+        !w.ci.dispatched.last().unwrap().iter().any(|(k, _)| k == "since_run"),
+        "no since_run from a forged run"
+    );
 }
 
 #[test]
@@ -2052,7 +2294,13 @@ fn a_forged_marker_on_a_commit_main_already_has_does_not_label_pull_requests_lan
     let pr_head = w.approved(1, "crates/x/a.rs", &["x"]);
     w.tick();
     // A forged train (the marker on top of an extra commit) lands on main by someone's push; the queue must not call it its own.
-    let forged = forge(&w, &[(&pr_head, None)], "1", None, Some("evil.txt"));
+    let forged = forge(
+        &w,
+        Forged {
+            on_top: Some("evil.txt"),
+            ..forged_default(vec![plain("feat/pr1", &pr_head)])
+        },
+    );
     git(
         &w.repos.author,
         &["push", "--quiet", "origin", &format!("{forged}:refs/heads/main")],

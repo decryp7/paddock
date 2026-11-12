@@ -103,22 +103,25 @@ pub struct Review {
     pub official: bool,
 }
 
-/// Whether the reviews approve exactly `head`: counting only official, undismissed reviews of the accounts in `allowed` (the
-/// queue accepts review-bot's alone: reviewer agents post their approval through it after a passing review round), in id order,
-/// some reviewer's last decisive (approving or requesting changes) review is an approval made on `head`, and no allowed
-/// reviewer's last decisive review requests changes.
+/// Whether the reviews approve exactly `head`: some account in `allowed` (the queue accepts review-bot's alone: reviewer agents post
+/// their approval through it after a passing review round) has an official, undismissed approving review on `head` as its last
+/// decisive review, and NO official reviewer at all (the user, a maintainer) has a last decisive review that requests changes on
+/// `head`: a human's change request blocks even when the bot approved. Reviews are read in id order.
 pub fn approved_at(reviews: &[Review], head: &str, allowed: &[&str]) -> bool {
     let mut sorted: Vec<&Review> = reviews
         .iter()
-        .filter(|r| r.official && !r.dismissed && allowed.contains(&r.reviewer.as_str()))
-        .filter(|r| matches!(r.state.as_str(), "APPROVED" | "REQUEST_CHANGES"))
+        .filter(|r| r.official && !r.dismissed && matches!(r.state.as_str(), "APPROVED" | "REQUEST_CHANGES"))
         .collect();
     sorted.sort_by_key(|r| r.id);
     let mut last: std::collections::BTreeMap<&str, &Review> = std::collections::BTreeMap::new();
     for r in sorted {
         last.insert(r.reviewer.as_str(), r);
     }
-    !head.is_empty() && last.values().all(|r| r.state == "APPROVED") && last.values().any(|r| r.commit_id == head)
+    let blocked = last.values().any(|r| r.state == "REQUEST_CHANGES" && r.commit_id == head);
+    let approved = last
+        .values()
+        .any(|r| r.state == "APPROVED" && r.commit_id == head && allowed.contains(&r.reviewer.as_str()));
+    !head.is_empty() && approved && !blocked
 }
 
 /// One CI run of a commit: workflow file, run id, and its result (`success`, `failure`, `cancelled`, or the status while it runs).

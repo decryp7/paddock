@@ -10,7 +10,7 @@
 //! register, commit lint, workspace hack, publish dry run, cargo metadata) are jobs of the dispatched workflow, which runs
 //! without the queue's token.
 
-use super::ports::{Blame, Built, Ci, CiRun, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train};
+use super::ports::{Blame, Built, Ci, CiRun, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, TrainMember};
 use crate::ci_runs::client::Client;
 use crate::ci_runs::triage::{self, Status, Test};
 use crate::ci_runs::verdict::{self, Verdict};
@@ -567,30 +567,16 @@ impl Train for GitTrain {
             .collect())
     }
 
-    fn verify_train(&mut self, base: Option<&str>, head: &str, prs: &[(u64, String)]) -> Result<Option<String>, String> {
-        let n = prs.len();
-        if n == 0 {
+    fn verify_train(&mut self, base: Option<&str>, head: &str, members: &[TrainMember], marker: &Marker) -> Result<Option<String>, String> {
+        if members.is_empty() {
             return Ok(Some("it merges no pull request".into()));
         }
-        let base = match base {
-            Some(b) => b.to_string(),
-            None => match self.git(&["rev-parse", "--verify", "--quiet", &format!("{head}~{}", n + 1)])? {
-                (true, out) => out.trim().to_string(),
-                _ => return Ok(Some("its first-parent chain is shorter than its marker says".into())),
-            },
-        };
-        let chain: Vec<String> = self
-            .ok(&["rev-list", "--first-parent", &format!("{base}..{head}")])?
-            .lines()
-            .map(str::to_string)
-            .collect();
-        if chain.len() != n + 1 {
-            return Ok(Some(format!(
-                "its first-parent chain from {} has {} commits, a train of {n} has {}",
-                short_id(&base),
-                chain.len(),
-                n + 1
-            )));
+        let numbers: Vec<u64> = members.iter().map(|m| m.number).collect();
+        if marker.prs != numbers {
+            return Ok(Some("its marker lists other pull requests than the train's".into()));
+        }
+        if marker.round == 0 || (marker.round == 1 && (marker.since_run.is_some() || marker.since_workflow.is_some())) {
+            return Ok(Some("its marker has a since-run on round 1, or round 0".into()));
         }
         let parents = |g: &GitTrain, c: &str| -> Result<Vec<String>, String> {
             Ok(g.ok(&["rev-list", "--parents", "-n", "1", c])?
@@ -601,33 +587,61 @@ impl Train for GitTrain {
         };
         let tree =
             |g: &GitTrain, c: &str| -> Result<String, String> { Ok(g.ok(&["rev-parse", &format!("{c}^{{tree}}")])?.trim().to_string()) };
-        let mut prev = base;
-        for (i, (number, approved)) in prs.iter().enumerate() {
-            let c = &chain[n - i]; // oldest merge first
-            let ps = parents(self, c)?;
-            if ps.len() != 2 || ps[0] != prev || ps[1] != *approved {
+        // The message of a commit, byte for byte (what follows the headers' blank line).
+        let message = |g: &GitTrain, c: &str| -> Result<String, String> {
+            let raw = g.ok(&["cat-file", "commit", c])?;
+            Ok(raw.split_once("\n\n").map(|(_, m)| m.to_string()).unwrap_or_default())
+        };
+        // The marker commit.
+        let mut cur = head.to_string();
+        let expected = format!("chore(queue): train round {}\n\n{}", marker.round, marker_text(marker));
+        if message(self, &cur)? != expected {
+            return Ok(Some(format!(
+                "the marker commit {} has a message the queue did not write",
+                short_id(&cur)
+            )));
+        }
+        let ps = parents(self, &cur)?;
+        if ps.len() != 1 || tree(self, &cur)? != tree(self, &ps[0])? {
+            return Ok(Some(format!(
+                "the marker commit {} does not have exactly one parent and its parent's tree",
+                short_id(&cur)
+            )));
+        }
+        cur = ps[0].clone();
+        // The merges, last first: every first-parent commit down to the base is one of them.
+        for m in members.iter().rev() {
+            let ps = parents(self, &cur)?;
+            if ps.len() != 2 || ps[1] != m.head {
                 return Ok(Some(format!(
-                    "commit {} is not a --no-ff merge of #{number}'s approved head {} onto the train so far",
-                    short_id(c),
-                    short_id(approved)
+                    "commit {} is not a --no-ff merge of #{}'s approved head {}",
+                    short_id(&cur),
+                    m.number,
+                    short_id(&m.head)
+                )));
+            }
+            let want = format!("Merge {} ({}) into train\n", m.branch, m.head.get(..9).unwrap_or(&m.head));
+            if message(self, &cur)? != want {
+                return Ok(Some(format!(
+                    "the merge {} of #{} has a message the queue did not write",
+                    short_id(&cur),
+                    m.number
                 )));
             }
             let (ok, out) = self.git(&["merge-tree", "--write-tree", "--no-messages", &ps[0], &ps[1]])?;
-            if !ok || out.lines().next().map(str::trim) != Some(tree(self, c)?.as_str()) {
+            if !ok || out.lines().next().map(str::trim) != Some(tree(self, &cur)?.as_str()) {
                 return Ok(Some(format!(
-                    "the tree of the merge of #{number} ({}) is not what merging its parents gives",
-                    short_id(c)
+                    "the tree of the merge of #{} ({}) is not what merging its parents gives",
+                    m.number,
+                    short_id(&cur)
                 )));
             }
-            prev = c.clone();
+            cur = ps[0].clone();
         }
-        let marker = &chain[0];
-        let ps = parents(self, marker)?;
-        if ps.len() != 1 || ps[0] != prev || tree(self, marker)? != tree(self, &prev)? {
-            return Ok(Some(format!(
-                "the marker commit {} does not sit on the last merge with an unchanged tree",
-                short_id(marker)
-            )));
+        if let Some(b) = base
+            && cur != b
+        {
+            return Ok(Some(format!("it does not start at {} but at {}", short_id(b), short_id(&cur))));
         }
         Ok(None)
     }

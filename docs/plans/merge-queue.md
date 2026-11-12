@@ -165,9 +165,13 @@ state in the PR labels and the train branch, so a tick can stop anywhere and the
   `[review-bot]` (so its approvals are official), `required_approvals` 0, normal push allowed, force-push off; review-bot has
   Write on paddock and its token is the secret `REVIEW_BOT_TOKEN`.
 - **The train branch.** `train/queue` is protected: push by queue-bot only, no force-push. The tick still checks the branch
-  before it trusts it: the first-parent chain from main is exactly one `--no-ff` merge per marker pull request, each merge's
-  second parent is that pull request's approved head and its tree is what merging its parents gives, then one marker commit on
-  an unchanged tree; any other head is rebuilt, never landed.
+  before it trusts it, walking the first-parent chain down from its head: the marker commit (one parent, its parent's tree, its
+  message exactly what the queue writes, so no `[skip ci]` and no forged trailer), then for each marker pull request in reverse
+  one `--no-ff` merge (two parents, the second its approved head, the message the queue writes, the tree merging its parents
+  gives), ending at main. Every first-parent commit is one of those, so a commit slipped in anywhere is refused; any other head
+  is rebuilt from the labels alone (a fresh round, no `since_run`), never landed, and nothing its marker says steers the rebuild.
+- **Change requests.** An official reviewer's (the user's, a maintainer's) request for changes on the current head blocks the pull
+  request even when review-bot approved; the same reviewer's later approval lifts it.
 - **Labels.** `queue/hold` and `queue/blocked` exist on the server (`./dev pr sync`).
 - **Workflow files.** ci.yml is read-only (`permissions: contents: read, actions: read`) and its checkouts keep no credentials
   (`persist-credentials: false`), as tag.yml's do. A train is dispatched with `base` set to main's commit id, never a ref name:

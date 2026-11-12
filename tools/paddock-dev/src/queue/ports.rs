@@ -42,6 +42,17 @@ pub struct Marker {
     pub since_workflow: Option<String>,
 }
 
+/// A pull request in a train: what the merge commit records.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainMember {
+    /// The pull request's number.
+    pub number: u64,
+    /// Its branch (the merge message names it).
+    pub branch: String,
+    /// Its approved head (the merge's second parent).
+    pub head: String,
+}
+
 /// The result of building the train.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Built {
@@ -86,11 +97,13 @@ pub trait Train {
     fn build(&mut self, main: &str, prs: &[Pull], marker: &Marker) -> Result<Built, String>;
     /// The files a pull request changes against `main`.
     fn pr_files(&mut self, main: &str, head: &str) -> Result<Vec<String>, String>;
-    /// Whether `head` is a train built the way the queue builds one: the first-parent chain from `base` is one `--no-ff` merge per
-    /// pull request of `prs` (number, approved head), in order, each merge's second parent is that head and its tree is what
-    /// merging its parents gives, then one marker commit with its parent's tree. `Some(reason)` when it is not. A branch anyone
-    /// can push to is not a train until this says so.
-    fn verify_train(&mut self, base: Option<&str>, head: &str, prs: &[(u64, String)]) -> Result<Option<String>, String>;
+    /// Whether `head` is a train the queue built, from `base` (`None`: a train already on main, whatever it was built on): walking
+    /// the first-parent chain down from `head`, the marker commit (one parent, its parent's tree, its message exactly what the
+    /// queue writes for `marker`: no `[skip ci]`, no forged trailer), then for each member in reverse a `--no-ff` merge (two
+    /// parents, the second the member's approved head, its message exactly what the queue writes, its tree what merging its
+    /// parents gives), ending at `base`. Every first-parent commit is one of those, so a commit slipped in between is refused.
+    /// `Some(reason)` when it is not. A branch anyone can push to is not a train until this says so.
+    fn verify_train(&mut self, base: Option<&str>, head: &str, members: &[TrainMember], marker: &Marker) -> Result<Option<String>, String>;
     /// The projects a pull request reaches (the planner's answer for `main`..`head`, run from a checkout of `main`, never of the
     /// pull request), normalised.
     fn affected(&mut self, main: &str, head: &str) -> Result<BTreeSet<String>, String>;

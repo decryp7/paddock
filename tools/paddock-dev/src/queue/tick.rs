@@ -20,7 +20,7 @@
 //! - a green run that is not a full one: dispatch the full run (ER-8); main is fast-forwarded only when EVERY reached workflow has
 //!   a full green run per `ci verdict`, outside the backup window, with no hold. A verdict that is not measured never lands.
 
-use super::ports::{Blame, Built, Ci, CiRun, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, label};
+use super::ports::{Blame, Built, Ci, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, TrainMember, label};
 use crate::ci_runs::verdict::Verdict;
 use crate::pr::gitea::Pull;
 
@@ -295,12 +295,7 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
     {
         // Pushed to main, then the tick ended before the labels: finish the landing, when the head is the train the queue built
         // (a forged marker on an old commit must not label pull requests landed).
-        let prs: Vec<(u64, String)> = in_train.iter().map(|x| (x.number, x.head.clone())).collect();
-        let mut in_main = true;
-        for (_, ph) in &prs {
-            in_main &= p.train.contains(ph, &main)?;
-        }
-        if in_main && p.train.verify_train(None, h, &prs)?.is_none() {
+        if p.train.verify_train(None, h, &members(in_train), m)?.is_none() {
             return finish_landing(p, h, in_train);
         }
     }
@@ -316,16 +311,13 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
     };
     // A branch anyone with write access can push to is not a train until its structure says so: one --no-ff merge per pull request
     // at its approved head, each merge exactly what merging its parents gives, then the marker commit on an unchanged tree.
-    let (mut valid, mut marker) = (valid, marker);
-    if valid && let Some(h) = &head {
-        let prs: Vec<(u64, String)> = in_train.iter().map(|x| (x.number, x.head.clone())).collect();
-        if p.train.verify_train(Some(&main), h, &prs)?.is_some() {
-            valid = false;
-            marker = None; // what a forged head says is not evidence of anything
-        }
+    let mut valid = valid;
+    if valid && let (Some(h), Some(m)) = (&head, &marker) {
+        valid = p.train.verify_train(Some(&main), h, &members(in_train), m)?.is_none();
     }
+    // A head or marker the queue did not write steers nothing: the rebuild uses only the labels and the ledger.
     if !valid {
-        return rebuild_stale(p, in_train, head, marker, &main);
+        return rebuild_stale(p, in_train, head, &main);
     }
     if in_train.iter().any(|x| has(x, label::BLOCKED)) {
         return Ok(Tick::Stuck {
@@ -345,49 +337,27 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
     judge(p, env, in_train, &head, &marker, &main)
 }
 
-/// The train does not match the labels: rebuild from the labelled pull requests. A pull request whose head moved after it
-/// entered the train goes back to review; when the stale train held more pull requests than are labelled now (a drop was
-/// interrupted), the rebuild reruns only what that train's failed run failed.
-fn rebuild_stale(p: &mut Ports, in_train: &[&Pull], old: Option<String>, marker: Option<Marker>, main: &str) -> Result<Tick, String> {
-    let mut prs: Vec<Pull> = Vec::new();
-    for pr in in_train {
-        let moved = match (&old, &marker) {
-            (Some(h), Some(m)) if m.prs.contains(&pr.number) => !p.train.contains(&pr.head, h)?,
-            _ => false,
-        };
-        if moved {
-            send_back(
-                p,
-                pr.number,
-                "its head changed after it entered the train, so what was tested is not what is approved.",
-            )?;
-        } else {
-            prs.push((*pr).clone());
-        }
-    }
-    let (mut round, mut since, mut since_wf) = (1, None, None);
-    if let (Some(h), Some(m)) = (&old, &marker)
-        && prs.iter().all(|pr| m.prs.contains(&pr.number))
-        && prs.len() < m.prs.len()
-        && p.train.contains(main, h)?
-    {
-        round = m.round + 1;
-        for wf in p.train.reached_workflows(main, h)? {
-            if let Some(id) = newest_failed(p.ci.runs(&wf, h)?) {
-                since = Some(id);
-                since_wf = Some(wf);
-                break;
-            }
-        }
-    }
+/// The train does not match the labels, or is not one the queue built: rebuild it from the labelled pull requests alone (a fresh
+/// round, no `since_run`): nothing a head or a marker says on the train branch steers the rebuild. A pull request whose head moved
+/// is already back in review, because its new head has no approval.
+fn rebuild_stale(p: &mut Ports, in_train: &[&Pull], old: Option<String>, main: &str) -> Result<Tick, String> {
+    let _ = main;
+    let prs: Vec<Pull> = in_train.iter().map(|x| (*x).clone()).collect();
     if prs.is_empty() {
         return Ok(Tick::Idle("the train was stale and no pull request is left in it".into()));
     }
-    build_round(p, prs, round, since, since_wf, old)
+    build_round(p, prs, 1, None, None, old)
 }
 
-fn newest_failed(runs: Vec<CiRun>) -> Option<u64> {
-    runs.into_iter().find(|r| matches!(r.state, RunState::Failed(_))).map(|r| r.id)
+fn members(in_train: &[&Pull]) -> Vec<TrainMember> {
+    in_train
+        .iter()
+        .map(|x| TrainMember {
+            number: x.number,
+            branch: x.branch.clone(),
+            head: x.head.clone(),
+        })
+        .collect()
 }
 
 /// Merges the batch into a fresh train and pushes it. No code of any pull request runs: git and the merge check only.
