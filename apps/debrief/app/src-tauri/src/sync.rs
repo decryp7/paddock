@@ -29,9 +29,18 @@ pub async fn blocking<T: Send + 'static, E: From<CmdError> + Send + 'static>(
     what: &str,
     f: impl FnOnce() -> Result<T, E> + Send + 'static,
 ) -> Result<T, E> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| E::from(CmdError::new(ErrorCode::Internal, format!("{what} stopped unexpectedly ({e})"))))?
+    // Two phases, one correlation id: queued on the blocking pool, then running (ER-27). A request that never
+    // finishes shows in the log as the phase that stayed open, with the other open waits beside it.
+    let queued = debrief_core::wait_log::watch(format!("{what}: queued on the blocking pool"));
+    let id = queued.id();
+    let what_run = what.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        drop(queued);
+        let _running = debrief_core::wait_log::watch(format!("{what_run}: running (request #{id})"));
+        f()
+    })
+    .await
+    .map_err(|e| E::from(CmdError::new(ErrorCode::Internal, format!("{what} stopped unexpectedly ({e})"))))?
 }
 
 /// [`blocking`] for work that fails with `anyhow` (its whole chain becomes the message).
@@ -67,5 +76,46 @@ mod tests {
             Err(anyhow::anyhow!("inner").context("outer"))
         }));
         assert!(failed.unwrap_err().contains("outer: inner"));
+    }
+
+    /// A request stuck on the blocking pool leaves its phase in the log: `running` begins at once, the watchdog says
+    /// the wait is "still open" with the request id, and the end line has the duration (ER-27).
+    #[test]
+    fn a_blocked_request_logs_its_phase_and_a_still_open_line() {
+        // The global set reads this when first used; tests run one process each under nextest.
+        std::env::set_var("DEBRIEF_WAIT_STILL_MS", "20");
+        let _log = crate::activity::test_capture();
+        let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let request = std::thread::spawn(move || {
+            crate::test_support::block(blocking::<u8, CmdError>("reading the parsers of the sources", move || {
+                held_tx.send(()).unwrap();
+                // Held until the test has seen the line: the condition, not a sleep.
+                release_rx.recv().unwrap();
+                Ok(1)
+            }))
+        });
+        held_rx.recv().unwrap();
+        let still = loop {
+            let hit = crate::activity::captured().into_iter().find(|c| c.message.contains("still open"));
+            match hit {
+                Some(c) => break c,
+                None => std::thread::yield_now(),
+            }
+        };
+        assert_eq!(still.level, log::Level::Warn);
+        assert!(
+            still.message.contains("reading the parsers of the sources: running (request #"),
+            "{}",
+            still.message
+        );
+        release_tx.send(()).unwrap();
+        assert_eq!(request.join().unwrap().unwrap(), 1);
+        let all: Vec<String> = crate::activity::captured().into_iter().map(|c| c.message).collect();
+        assert!(
+            all.iter()
+                .any(|m| m.contains("ended after") && m.contains("reading the parsers of the sources: running")),
+            "{all:?}"
+        );
     }
 }

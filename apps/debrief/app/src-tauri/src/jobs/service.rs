@@ -720,6 +720,7 @@ impl Jobs {
             }
         };
         // No answer: the waiter stopped waiting (`unwait`) or Debrief is closing; the job's state now.
+        let _w = debrief_core::wait_log::watch(format!("waiting for job {} to end", id.0));
         rx.recv().unwrap_or_else(|_| match self.lock().queue.get(id) {
             Some(j) => JobOutcome::of(j, None),
             None => JobOutcome {

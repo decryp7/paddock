@@ -34,6 +34,16 @@ static BORROWED: AtomicUsize = AtomicUsize::new(0);
 /// Weak: a closed connection's handle goes with it, and is pruned at the next registration.
 static INTERRUPTS: std::sync::Mutex<Vec<std::sync::Weak<duckdb::InterruptHandle>>> = std::sync::Mutex::new(Vec::new());
 
+/// What the exit gate counts now, for the "still open" lines of `wait_log`.
+pub(crate) fn state() -> String {
+    format!(
+        "{} store statements running, {} borrowed in all, shutting down: {}",
+        ACTIVE.load(Ordering::SeqCst),
+        BORROWED.load(Ordering::Relaxed),
+        down()
+    )
+}
+
 /// Whether the process is exiting: background steps stop before their next statement.
 pub(crate) fn down() -> bool {
     DOWN.load(Ordering::SeqCst)

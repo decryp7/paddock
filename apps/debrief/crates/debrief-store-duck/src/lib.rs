@@ -55,6 +55,7 @@ use debrief_core::ports::{
     ImportReport, ImportSession, IndexStatus, Ingest, Search, SearchReply, SearchRequest, StoreError, StoreResult, TailAppend,
 };
 use debrief_core::profile::{CompiledProfile, Profile};
+use debrief_core::wait_log;
 use debrief_core::workspace::{ImportProgress, NOT_IMPORTED};
 use debrief_core::PluginRegistry;
 use duckdb::{params, Config, Connection};
@@ -375,6 +376,8 @@ pub(crate) struct Conn<'a> {
     relay: Option<progress::Relay>,
     /// Counts this connection as running, for the exit handler (`shutdown`).
     _active: shutdown::Active,
+    /// The watch of the borrow (ends last: the connection is back in the pool).
+    _held: wait_log::Watch,
 }
 
 impl std::ops::Deref for Conn<'_> {
@@ -388,9 +391,10 @@ impl Drop for Conn<'_> {
     fn drop(&mut self) {
         if let Some(c) = self.conn.take() {
             if let Some(relay) = self.relay.take() {
+                let _w = wait_log::watch("store query progress poller stops");
                 relay.finish(&c);
             }
-            let mut pool = lock(&self.inner.pool);
+            let mut pool = wait_log::lock_watched(&self.inner.pool, "store connection pool lock (returning)");
             if pool.len() < POOL {
                 pool.push(c);
             }
@@ -496,18 +500,37 @@ impl Inner {
         }
     }
 
+    /// Borrows a connection. Every wait in it is a watched phase (`debrief_core::wait_log`), and the borrow itself is
+    /// one for as long as the connection is held, named by the caller's source location: a statement that never
+    /// returns shows up as "still open" with who started it (ER-27).
+    #[track_caller]
     pub(crate) fn conn(&self) -> StoreResult<Conn<'_>> {
-        let active = shutdown::Active::enter().ok_or(StoreError::Cancelled)?;
-        let pooled = lock(&self.pool).pop();
+        let held = wait_log::watch_with("store statement holds a connection", shutdown::state);
+        let Some(active) = shutdown::Active::enter() else {
+            log::debug!(
+                "a store statement was refused: the process is shutting down ({})",
+                shutdown::state()
+            );
+            return Err(StoreError::Cancelled);
+        };
+        let pooled = wait_log::lock_watched(&self.pool, "store connection pool lock").pop();
         let conn = match pooled {
             Some(c) => c,
-            None => lock(&self.db).try_clone().map_err(engine)?,
+            None => {
+                let db = wait_log::lock_watched(&self.db, "store database handle lock");
+                let _clone = wait_log::watch_with("DuckDB opens another connection", shutdown::state);
+                db.try_clone().map_err(engine)?
+            }
         };
         let mut relay = None;
         let interrupt = match debrief_core::ql::QueryControl::current() {
-            Some(control) if control.is_cancelled() => return Err(StoreError::Cancelled),
+            Some(control) if control.is_cancelled() => {
+                log::debug!("a store statement was refused: its query was cancelled before it started");
+                return Err(StoreError::Cancelled);
+            }
             Some(control) => {
                 let handle = conn.interrupt_handle();
+                let _w = wait_log::watch("store query progress poller starts");
                 relay = progress::Relay::start(&conn, control.clone(), progress::POLL);
                 Some(control.on_cancel(Box::new(move || handle.interrupt())))
             }
@@ -519,6 +542,7 @@ impl Inner {
             _interrupt: interrupt,
             relay,
             _active: active,
+            _held: held,
         })
     }
 
@@ -565,7 +589,10 @@ impl Inner {
     /// `aside_*` tables and the old segment files on disk, so [`Inner::restore_aside`] can bring them back.
     pub(crate) fn set_aside_events(&self) -> StoreResult<Aside> {
         let conn = self.conn()?;
-        let _writing = lock(&self.write_lock);
+        let _writing = debrief_core::wait_log::lock_watched(
+            &self.write_lock,
+            "store write lock (held by the catalogue, the indexer or another write)",
+        );
         let files = writer::segment_files(&conn, &self.dir).map_err(|e| engine(format!("{e:#}")))?;
         let mut sql = String::from("BEGIN TRANSACTION;");
         for t in ASIDE_TABLES {
@@ -606,7 +633,10 @@ impl Inner {
     /// The new import did not complete: removes what it wrote and puts the kept rows and files back.
     pub(crate) fn restore_aside(&self, aside: Aside) -> StoreResult<()> {
         let conn = self.conn()?;
-        let _writing = lock(&self.write_lock);
+        let _writing = debrief_core::wait_log::lock_watched(
+            &self.write_lock,
+            "store write lock (held by the catalogue, the indexer or another write)",
+        );
         let new_files = writer::segment_files(&conn, &self.dir).map_err(|e| engine(format!("{e:#}")))?;
         let mut sql = String::from("BEGIN TRANSACTION;");
         for t in ASIDE_TABLES {
@@ -635,7 +665,10 @@ impl Inner {
     /// refreshed and the segment files deleted (or moved to `trash` while a reader holds them).
     pub(crate) fn forget_events(&self) -> StoreResult<()> {
         let conn = self.conn()?;
-        let _writing = lock(&self.write_lock);
+        let _writing = debrief_core::wait_log::lock_watched(
+            &self.write_lock,
+            "store write lock (held by the catalogue, the indexer or another write)",
+        );
         let files = writer::segment_files(&conn, &self.dir).map_err(|e| engine(format!("{e:#}")))?;
         conn.execute_batch(
             "BEGIN TRANSACTION; DELETE FROM segments; DELETE FROM segment_fields; DELETE FROM segment_blocks; DELETE FROM histogram; DELETE FROM ord; DELETE FROM diagnostics; DELETE FROM tail_offsets; DELETE FROM source_encodings; DELETE FROM source_fingerprints; DELETE FROM sources; COMMIT;",
@@ -709,7 +742,10 @@ impl Inner {
             jitter: Some(self.import_jitter.load(Ordering::Relaxed)).filter(|s| *s != 0),
             ..StreamOptions::default()
         };
-        let _writing = lock(&self.write_lock);
+        let _writing = debrief_core::wait_log::lock_watched(
+            &self.write_lock,
+            "store write lock (held by the catalogue, the indexer or another write)",
+        );
         let sink = writer::SegmentSink::new(
             conn.try_clone().map_err(engine)?,
             &self.dir,
@@ -1050,7 +1086,10 @@ impl DuckStore {
     /// events again through the one guarded path when segments were rewritten (as the Store pane's Compact does).
     pub fn compact(&self) -> StoreResult<Compaction> {
         self.idle()?;
-        let _writing = lock(&self.inner.write_lock);
+        let _writing = debrief_core::wait_log::lock_watched(
+            &self.inner.write_lock,
+            "store write lock (held by the catalogue, the indexer or another write)",
+        );
         let conn = self.inner.conn()?;
         let c = compact::compact(&conn, &self.inner.dir, &self.inner.schema).map_err(|e| engine(format!("{e:#}")))?;
         let notice = if c.replaced > 0 { self.inner.reorder(&conn) } else { None };
@@ -1198,7 +1237,10 @@ impl Ingest for DuckStore {
     fn refresh(&self, changed: &[PathBuf]) -> StoreResult<ImportSession> {
         self.idle()?;
         {
-            let _writing = lock(&self.inner.write_lock);
+            let _writing = debrief_core::wait_log::lock_watched(
+                &self.inner.write_lock,
+                "store write lock (held by the catalogue, the indexer or another write)",
+            );
             let conn = self.inner.conn()?;
             let mut gone = Vec::new();
             for p in changed {
@@ -1257,7 +1299,10 @@ impl Ingest for DuckStore {
         let Some(path) = path else {
             return Err(StoreError::NotFound(format!("source {id}")));
         };
-        let _writing = lock(&self.inner.write_lock);
+        let _writing = debrief_core::wait_log::lock_watched(
+            &self.inner.write_lock,
+            "store write lock (held by the catalogue, the indexer or another write)",
+        );
         // The view hides the source's rows at once; compaction rewrites its segments.
         for sql in [
             "DELETE FROM diagnostics WHERE source = ?",

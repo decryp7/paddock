@@ -1348,6 +1348,7 @@ pub(crate) mod test_support {
     }
 
     fn manage_in(app: tauri::App<MockRuntime>, profile_dir: Option<PathBuf>, safe_mode: bool) -> tauri::App<MockRuntime> {
+        activity::install_test_logger();
         let plugins = std::sync::Arc::new(if safe_mode {
             debrief_plugin_host::Builtins::none()
         } else {
