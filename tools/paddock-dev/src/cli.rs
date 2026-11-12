@@ -1,5 +1,5 @@
 use crate::{
-    check, ci_isolation, ci_runs, ci_setup_rust, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation,
+    check, ci_build_jobs, ci_isolation, ci_runs, ci_setup_rust, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation,
     slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
@@ -165,6 +165,9 @@ enum CiCommand {
     /// the setup-rust action's shell steps. The action keeps CARGO_BUILD_JOBS and the toolchain install in YAML (./dev needs
     /// rustc first). Messages and `::warning::` lines on standard output, one `::error::` line on failure.
     SetupRust(ci_setup_rust::SetupRustArgs),
+    /// CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for the job: the runner's share of the host (the port of
+    /// conformance/ci/build-jobs.sh). Assignments to $GITHUB_ENV (or standard output without it), the reason on standard error.
+    BuildJobs(ci_build_jobs::BuildJobsArgs),
     /// Release mode (ADR 0085): a tag build reads nothing kept. `setup` makes the job's folders, `record` is the only
     /// ledger writer, `verify` proves it.
     ReleaseIsolation {
@@ -349,6 +352,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         // A CI step's contract: plain lines (the shell's), one `::error::` line on failure, no report.
         return ci_setup_rust::run(a, out, err);
     }
+    if let Command::Ci {
+        command: CiCommand::BuildJobs(a),
+    } = &cli.command
+    {
+        // A CI step's contract: plain lines (the shell's), one `::error::` line on failure, no report.
+        return ci_build_jobs::run(a, out, err);
+    }
     if matches!(cli.command, Command::Hook { .. }) {
         // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
         return hook::pre_tool_use(&mut std::io::stdin(), out, err);
@@ -401,6 +411,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::SetupRust(_),
         } => Err(CliError::failure("`ci setup-rust` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::BuildJobs(_),
+        } => Err(CliError::failure("`ci build-jobs` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::ReleaseIsolation { command },
         } => release_isolation::command(command),
