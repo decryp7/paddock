@@ -1,4 +1,5 @@
-//! Starting a process that outlives its starter without carrying the starter's handles ([`spawn_detached`]).
+//! Starting a process that outlives its starter, optionally without the starter's handles ([`spawn_detached`],
+//! [`spawn_detached_clearing_handles`]).
 //!
 //! A detached child that keeps a pipe the starter's parent gave it blocks that parent: the Gitea runner waits 10 s for a step's
 //! pipe after the step ends, then ends every process of the step's job object (gitea/runner `internal/pkg/process/treekill.go`),
@@ -15,19 +16,22 @@
 //! - **Windows:** `CreateProcessW` is called with handle inheritance on, so a child gets every inheritable handle of its parent,
 //!   not only its standard handles. The runner's step pipe reaches a Rust starter as a plain inherited handle when it was started
 //!   by another Rust program (std starts children with inheritance on, so the parent's own standard handles travel along beside
-//!   the child's). `spawn_detached` therefore clears the inherit flag of EVERY handle of this process
+//!   the child's). [`spawn_detached_clearing_handles`] therefore clears the inherit flag of EVERY handle of this process
 //!   ([`keep_handles_from_children`]); std makes the child's own stdio inheritable at the spawn, after that. The change is
-//!   process-wide and stays: call it from a program that starts no other child relying on an inherited handle. The documented
-//!   alternative, `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`, is unstable in std (`CommandExt::spawn_with_attributes`, issue 114854).
-//!   The flags are `DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`.
+//!   process-wide and stays, and it races any other thread that spawns a child or whose library does (std, WebView2): only a
+//!   single-threaded program may use it. A multithreaded program uses [`spawn_detached`], which sets the flags only. The
+//!   documented alternative, `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`, is unstable in std (`CommandExt::spawn_with_attributes`,
+//!   issue 114854). The flags differ on purpose, each as its callers already had them: [`spawn_detached`] sets
+//!   `DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`, the clearing variant `CREATE_NO_WINDOW |
+//!   CREATE_NEW_PROCESS_GROUP`.
 
 use std::process::{Child, Command};
 
 /// Why [`spawn_detached`] did not start the child.
 #[derive(Debug, thiserror::Error)]
 pub enum DetachError {
-    /// Not every handle of this process could be kept from the child (Windows): starting it would leak one, and a leaked pipe
-    /// ends the child with the step that started it. Nothing was started.
+    /// Not every handle of this process could be kept from the child (Windows, [`spawn_detached_clearing_handles`] only):
+    /// starting it would leak one, and a leaked pipe ends the child with the step that started it. Nothing was started.
     #[error(
         "this process's handles could not be kept from the detached child ({0}), so it would be ended with its starter's step"
     )]
@@ -43,32 +47,59 @@ pub enum DetachError {
     },
 }
 
-/// Windows process creation flags of a detached child: no console at all, no window, its own process group.
+/// Windows creation flags of [`spawn_detached`]: no console at all, no window, its own process group.
 #[cfg(windows)]
 const DETACHED_FLAGS: u32 = 0x0000_0008 | crate::CREATE_NO_WINDOW | 0x0000_0200;
 
-/// Starts `cmd` as a process that outlives this one and shares nothing with it but what `cmd` passes explicitly (its standard
-/// streams): its own process group (Unix) or process group and no console (Windows), and on Windows no inherited handle but its
-/// standard streams. Fail closed: when the handles cannot all be kept from it, nothing is started ([`DetachError::Handles`]).
+/// Windows creation flags of [`spawn_detached_clearing_handles`]: no window, its own process group (a console child; the CI slot
+/// holder's flags since a7605e049).
+#[cfg(windows)]
+const CLEARING_FLAGS: u32 = crate::CREATE_NO_WINDOW | 0x0000_0200;
+
+/// Starts `cmd` as a process that outlives this one: its own process group (Unix), or on Windows no console, no window and its
+/// own process group. It changes nothing in this process, so it is safe from a multithreaded program. It does NOT keep this
+/// process's inheritable handles from the child (Windows): use [`spawn_detached_clearing_handles`] where that matters and the
+/// caller is single-threaded.
 ///
-/// Build `cmd` with [`crate::command`]; set its arguments, working directory and standard streams first (a `stdout` pipe is
-/// the usual announcement channel). The flags set here replace any creation flags already on `cmd`. On Unix the started
-/// program should call [`close_inherited`] before it opens anything of its own.
+/// Build `cmd` with [`crate::command`] and set its arguments, working directory and standard streams first. The flags set here
+/// replace any creation flags already on `cmd`. On Unix the started program should call [`close_inherited`] first.
 ///
 /// # Errors
-/// [`DetachError::Handles`] on Windows when a handle could not be made non-inheritable; [`DetachError::Spawn`] when the
-/// program could not be started.
+/// [`DetachError::Spawn`] when the program could not be started.
 pub fn spawn_detached(cmd: &mut Command) -> Result<Child, DetachError> {
-    keep_handles_from_children().map_err(DetachError::Handles)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(DETACHED_FLAGS);
+    }
+    start(cmd)
+}
+
+/// [`spawn_detached`], and on Windows first clears the inherit flag of every handle of this process ([`keep_handles_from_children`]),
+/// so the child shares nothing with it but the standard streams `cmd` names. Fail closed: when the handles cannot all be kept
+/// from it, nothing is started ([`DetachError::Handles`]). The creation flags are `CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP`.
+///
+/// Precondition: the caller is single-threaded with respect to spawning, no other thread (or library, such as WebView2) starts a
+/// process while this runs and none relies on an inheritable handle afterwards: the clear is process-wide and permanent.
+///
+/// # Errors
+/// [`DetachError::Handles`] on Windows when a handle could not be made non-inheritable; [`DetachError::Spawn`] as for
+/// [`spawn_detached`].
+pub fn spawn_detached_clearing_handles(cmd: &mut Command) -> Result<Child, DetachError> {
+    keep_handles_from_children().map_err(DetachError::Handles)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CLEARING_FLAGS);
+    }
+    start(cmd)
+}
+
+fn start(cmd: &mut Command) -> Result<Child, DetachError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
     }
     cmd.spawn().map_err(|source| DetachError::Spawn {
         program: cmd.get_program().to_string_lossy().into_owned(),
@@ -464,5 +495,32 @@ mod tests {
             }
             other => panic!("expected a spawn error, got {other:?}"),
         }
+    }
+
+    /// The clearing variant starts the child too and keeps the streams it was given.
+    #[test]
+    fn the_clearing_variant_starts_a_child_with_its_streams() {
+        use std::io::Read;
+        let mut cmd = crate::command(std::env::current_exe().unwrap());
+        cmd.args([
+            "--exact",
+            "detach::tests::detached_child_half",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("PADDOCK_PROC_DETACH_SAY", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+        let mut child = spawn_detached_clearing_handles(&mut cmd).unwrap();
+        let mut said = String::new();
+        child
+            .stdout
+            .take()
+            .unwrap()
+            .read_to_string(&mut said)
+            .unwrap();
+        child.wait().unwrap();
+        assert!(said.contains("DETACHED-OK"), "{said}");
     }
 }

@@ -139,8 +139,9 @@ impl Launcher for ProcessLauncher {
         }
         let exe = (self.exe)()?;
         // Our own agent, which reports problems through its log and exits. It outlives this app and is never waited on, so it
-        // starts through `paddock_proc::spawn_detached`: its own process group, no console, and no inherited handle but its
-        // (null) standard streams, so it cannot keep a pipe of whoever started the app (rule 55).
+        // starts through `paddock_proc::spawn_detached` (rule 55): its own process group and the creation flags it always had
+        // (DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP). Not the handle-clearing variant: this app is multithreaded
+        // (WebView2, std spawns) and a process-wide clear would race them.
         let mut cmd = paddock_proc::command(&exe);
         cmd.arg("run")
             .stdin(std::process::Stdio::null())
@@ -148,7 +149,7 @@ impl Launcher for ProcessLauncher {
             .stderr(std::process::Stdio::null());
         let child = paddock_proc::spawn_detached(&mut cmd).map_err(|e| match e {
             paddock_proc::DetachError::Spawn { source, .. } => format!("The Dyno agent ({}) could not be started: {source}", exe.display()),
-            handles => format!("The Dyno agent ({}) was not started: {handles}", exe.display()),
+            other => format!("The Dyno agent ({}) was not started: {other}", exe.display()),
         })?;
         slot.child = Some(child);
         slot.exited = None;
