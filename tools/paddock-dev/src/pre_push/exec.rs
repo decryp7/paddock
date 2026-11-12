@@ -40,6 +40,11 @@ pub trait Exec: Sync {
     fn docker_up(&self) -> bool;
     /// Runs the gate for at most `left`. `Err`: it could not be started (the program is missing).
     fn run(&self, gate: &Gate, left: Duration) -> Result<Done, String>;
+    /// Why a heavy gate has no machine-wide slot to go through (no `heavy` on PATH and the build of tools/heavy failed), or
+    /// `None`: it would otherwise compete with every other push (ER-24), so it is not measured instead.
+    fn heavy_unavailable(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The outcome of one table row.
@@ -110,6 +115,14 @@ pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration) -> Verdict {
             };
         }
         _ => {}
+    }
+    if gate.heavy
+        && let Some(why) = exec.heavy_unavailable()
+    {
+        return Verdict::NotMeasured {
+            reason: format!("no heavy slot tool, so a compile would run beside every other push's: {why}"),
+            next: "fix the build error above and re-run `./dev check --pre-push`; an agent reports this (ER-24, ER-33)".into(),
+        };
     }
     let started = Instant::now();
     match exec.run(gate, left) {
@@ -278,6 +291,9 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
 /// on PATH. Empty when there is none (the caller says so).
 pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
     if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
+        if h.trim() == "off" {
+            return Vec::new();
+        }
         return h.split_whitespace().map(str::to_string).collect();
     }
     if has("heavy.sh") {
@@ -287,6 +303,17 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -
         return ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
     }
     Vec::new()
+}
+
+/// Whether the output of a gate run through `heavy` shows that it never got the slot: it printed who holds the lock
+/// ("the lock is held by <name> (pid <n>) ...") and never "<name> holds the lock". Returns the phrase for the verdict.
+pub fn slot_wait(log: &str) -> Option<String> {
+    if log.lines().any(|l| l.contains(" holds the lock (pid ")) {
+        return None;
+    }
+    let held = log.lines().rev().find_map(|l| l.split("the lock is held by ").nth(1))?;
+    let who = held.split(" for ").next().unwrap_or(held).trim();
+    Some(format!("waiting for the heavy slot, held by {who}"))
 }
 
 /// The real machine: processes through [`ToolCall`] (bounded, environment listed, output in a file per gate).
@@ -299,6 +326,10 @@ pub struct RealExec {
     pub logs: PathBuf,
     /// Set by SIGINT or SIGTERM: the running gates' process trees are ended.
     pub stop: Arc<AtomicBool>,
+    /// The `heavy` built from tools/heavy when none is on PATH, built once per run (or the reason it could not be).
+    pub built_heavy: std::sync::OnceLock<Result<PathBuf, String>>,
+    /// When the push gate's budget ends: the build of heavy is cut off there.
+    pub budget_end: Instant,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -323,6 +354,9 @@ const PASS: &[&str] = &[
     "npm_config_*",
 ];
 
+/// The variable that, with `PADDOCK_HEAVY=off`, lets a test run a heavy gate without the slot.
+pub const TEST_HEAVY_OFF: &str = "PADDOCK_TEST_HEAVY_OFF";
+
 /// The label that marks the container of one run, so only it is ever stopped (ER-14).
 const RUN_LABEL: &str = "paddock.run";
 
@@ -331,9 +365,34 @@ fn slug(id: &str) -> String {
 }
 
 impl RealExec {
+    /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the `heavy`
+    /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_HEAVY=off` (hermetic tests only); `Err` when the build failed.
+    fn heavy_command(&self) -> Result<Vec<String>, String> {
+        if self.env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
+            // Only a test may run without the slot: anything else is an override that makes the gate not measured.
+            return if self.env.contains_key(TEST_HEAVY_OFF) {
+                Ok(Vec::new())
+            } else {
+                Err("PADDOCK_HEAVY=off is set without the test-only variable PADDOCK_TEST_HEAVY_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
+            };
+        }
+        let found = heavy_prefix(&self.env, &|p| self.has_tool(p));
+        if !found.is_empty() {
+            return Ok(found);
+        }
+        let left = self.budget_end.saturating_duration_since(Instant::now());
+        match self
+            .built_heavy
+            .get_or_init(|| super::heavy_tool::ensure(&self.root, &self.env, left))
+        {
+            Ok(bin) => Ok(vec![bin.display().to_string(), "run".into(), "pre-push".into(), "--".into()]),
+            Err(e) => Err(e.clone()),
+        }
+    }
+
     fn call(&self, gate: &Gate, left: Duration, log: &Path, label: Option<&str>) -> ToolCall {
         let heavy = if gate.heavy {
-            heavy_prefix(&self.env, &|p| self.has_tool(p))
+            self.heavy_command().unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -410,11 +469,22 @@ impl Exec for RealExec {
         docker_answers(&self.env)
     }
 
+    fn heavy_unavailable(&self) -> Option<String> {
+        self.heavy_command().err()
+    }
+
     fn run(&self, gate: &Gate, left: Duration) -> Result<Done, String> {
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", slug(&gate.id)));
         let label = (gate.need == Need::Docker).then(run_token);
-        let ran = self.call(gate, left, &log, label.as_deref()).run(&self.env, &mut std::io::sink())?;
+        let mut ran = self.call(gate, left, &log, label.as_deref()).run(&self.env, &mut std::io::sink())?;
+        // Cut short while queued for the heavy slot: say so, the gate itself never ran (ER-33: not measured, with that reason).
+        if gate.heavy && !ran.success && ran.how.starts_with("timed out") {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            if let Some(w) = slot_wait(&text) {
+                ran.how = format!("{}: {w}", ran.how);
+            }
+        }
         if let Some(l) = &label
             && !ran.success
             && matches!(ran.how.as_str(), h if h == "cancelled" || h.starts_with("timed out"))
@@ -499,6 +569,247 @@ mod tests {
         assert_eq!(heavy_prefix(&env, &|p| p == "heavy"), ["heavy", "run", "pre-push", "--"]);
         let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
         assert_eq!(heavy_prefix(&set, &|_| true), ["my-heavy", "--x"]);
+    }
+
+    #[test]
+    fn a_log_that_only_waited_names_the_holder() {
+        let waited =
+            "heavy: the lock is held by Bob (pid 12) for 3m, running: cargo clippy\nheavy: the lock is held by Bob (pid 12) for 4m\n";
+        assert_eq!(
+            slot_wait(waited).as_deref(),
+            Some("waiting for the heavy slot, held by Bob (pid 12)")
+        );
+        let ran = format!("{waited}heavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 5s\n");
+        assert_eq!(slot_wait(&ran), None);
+        assert_eq!(slot_wait("error: boom\n"), None);
+    }
+
+    #[test]
+    fn heavy_off_runs_without_the_slot_and_is_the_only_way_to() {
+        let off = HashMap::from([("PADDOCK_HEAVY".to_string(), "off".to_string())]);
+        assert!(heavy_prefix(&off, &|_| true).is_empty());
+    }
+
+    /// A stand-in for `heavy`: a directory is the lock (`mkdir`), a waiter prints who holds it as heavy does, the holder runs
+    /// its command with the lock held. Fake commands only (ER-14): no real build runs.
+    #[cfg(unix)]
+    mod slot {
+        use super::*;
+        use crate::pre_push::gates::Gate;
+
+        const FAKE_HEAVY: &str = r#"
+lock="$1"; shift
+while ! mkdir "$lock" 2>/dev/null; do
+  echo "heavy: the lock is held by $(cat "$lock/owner" 2>/dev/null || echo other) (pid 1) for 0m" >&2
+  sleep 0.1
+done
+echo "pre-push holds the lock (pid $$) at now, waited 0s" >&2
+echo "$$" > "$lock/owner"
+"$@"; rc=$?
+rm -rf "$lock"
+exit $rc
+"#;
+
+        fn real(dir: &Path, lock: &Path) -> RealExec {
+            let script = dir.join("fake-heavy.sh");
+            std::fs::write(&script, FAKE_HEAVY).unwrap();
+            RealExec {
+                root: dir.to_path_buf(),
+                env: HashMap::from([
+                    ("PADDOCK_HEAVY".to_string(), format!("sh {} {}", script.display(), lock.display())),
+                    ("PATH".to_string(), std::env::var("PATH").unwrap_or_default()),
+                ]),
+                logs: dir.join("logs"),
+                stop: Arc::new(AtomicBool::new(false)),
+                built_heavy: Default::default(),
+                budget_end: Instant::now() + Duration::from_secs(60),
+            }
+        }
+
+        fn gate(id: &str, command: &str) -> Gate {
+            Gate {
+                id: id.into(),
+                cwd: String::new(),
+                program: "sh".into(),
+                args: vec!["-c".into(), command.into()],
+                env: Vec::new(),
+                heavy: true,
+                need: Need::Nothing,
+                rank: 2,
+                next: "fix it".into(),
+            }
+        }
+
+        #[test]
+        fn two_pushes_at_once_take_the_slot_in_turn() {
+            let d = tempfile::tempdir().unwrap();
+            let lock = d.path().join("slot.lock");
+            let ex = real(d.path(), &lock);
+            let trace = d.path().join("trace");
+            let cmd = |n: &str| format!("echo start-{n} >> {t}; sleep 1; echo end-{n} >> {t}", t = trace.display());
+            std::thread::scope(|s| {
+                for n in ["a", "b"] {
+                    let (ex, g) = (&ex, gate(&format!("clippy {n}"), &cmd(n)));
+                    s.spawn(move || assert!(matches!(decide(&g, ex, Duration::from_secs(60)), Verdict::Passed { .. })));
+                }
+            });
+            let lines: Vec<String> = std::fs::read_to_string(&trace).unwrap().lines().map(String::from).collect();
+            assert_eq!(lines.len(), 4, "{lines:?}");
+            // Never two starts in a row: the second waited for the first to end.
+            assert!(lines[0].starts_with("start-") && lines[1].starts_with("end-"), "{lines:?}");
+            assert_eq!(
+                lines[0].trim_start_matches("start-"),
+                lines[1].trim_start_matches("end-"),
+                "{lines:?}"
+            );
+        }
+
+        #[test]
+        fn a_slot_held_past_the_budget_is_not_measured_and_says_who_holds_it() {
+            let d = tempfile::tempdir().unwrap();
+            let lock = d.path().join("slot.lock");
+            std::fs::create_dir(&lock).unwrap();
+            std::fs::write(lock.join("owner"), "Bob").unwrap();
+            let ex = real(d.path(), &lock);
+            let g = gate("clippy a", "echo never runs");
+            match decide(&g, &ex, Duration::from_secs(2)) {
+                Verdict::NotMeasured { reason, .. } => {
+                    assert!(reason.contains("waiting for the heavy slot, held by Bob"), "{reason}");
+                }
+                v => panic!("a slot that was never taken is not a pass or a failure: {v:?}"),
+            }
+        }
+
+        /// A repository with the heavy tool's inputs committed, and a `cargo` that "builds" a fake heavy (a script that records
+        /// its arguments and runs the gate's command), found first on the PATH of the run (ER-14: no real build).
+        fn repo_with_fake_cargo(d: &Path, cargo_ok: bool) -> RealExec {
+            let git = |args: &[&str]| {
+                let ok = paddock_proc::command("git")
+                    .args(args)
+                    .current_dir(d)
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .output()
+                    .unwrap();
+                assert!(ok.status.success(), "{args:?}: {}", String::from_utf8_lossy(&ok.stderr));
+            };
+            std::fs::create_dir_all(d.join("tools/heavy")).unwrap();
+            std::fs::write(d.join("tools/heavy/inputs.txt"), "tools/heavy\n").unwrap();
+            std::fs::write(d.join("tools/heavy/Cargo.toml"), "# fake\n").unwrap();
+            git(&["init", "-q"]);
+            git(&["add", "."]);
+            git(&["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x"]);
+            let bin = d.join("fakebin");
+            std::fs::create_dir_all(&bin).unwrap();
+            let body = if cargo_ok {
+                format!(
+                    "mkdir -p \"$CARGO_TARGET_DIR/release\"\ncat > \"$CARGO_TARGET_DIR/release/heavy\" <<'EOS'\n#!/bin/sh\n[ \"$1\" = --version ] && {{ echo heavy-fake; exit 0; }}\necho \"$@\" >> {m}\nshift 3\nexec \"$@\"\nEOS\nchmod +x \"$CARGO_TARGET_DIR/release/heavy\"\n",
+                    m = d.join("heavy-calls").display()
+                )
+            } else {
+                "echo 'error[E0432]: unresolved import' >&2\nexit 101\n".to_string()
+            };
+            let cargo = bin.join("cargo");
+            std::fs::write(&cargo, format!("#!/bin/sh\n{body}")).unwrap();
+            std::fs::set_permissions(&cargo, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+            let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+            RealExec {
+                root: d.to_path_buf(),
+                env: HashMap::from([
+                    ("PATH".to_string(), path),
+                    ("PADDOCK_DEV_HOME".to_string(), d.join("home").display().to_string()),
+                    ("HOME".to_string(), d.display().to_string()),
+                    ("PADDOCK_DEV_TARGET_DIR".to_string(), d.join("tgt").display().to_string()),
+                ]),
+                logs: d.join("logs"),
+                stop: Arc::new(AtomicBool::new(false)),
+                built_heavy: Default::default(),
+                budget_end: Instant::now() + Duration::from_secs(60),
+            }
+        }
+
+        #[test]
+        fn a_heavy_built_from_the_tree_carries_the_gate_and_is_cached_under_its_hash() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = repo_with_fake_cargo(d.path(), true);
+            let g = gate("clippy a", "echo ran >> out.txt");
+            assert!(matches!(decide(&g, &ex, Duration::from_secs(60)), Verdict::Passed { .. }));
+            let calls = std::fs::read_to_string(d.path().join("heavy-calls")).unwrap();
+            assert!(calls.contains("run pre-push --"), "{calls}");
+            assert!(d.path().join("out.txt").is_file(), "the gate's command ran under the built heavy");
+            let cached: Vec<_> = std::fs::read_dir(d.path().join("home/bin")).unwrap().flatten().collect();
+            assert!(
+                cached.len() == 1 && cached[0].file_name().to_string_lossy().starts_with("heavy-"),
+                "{cached:?}"
+            );
+            // The per-build folder is gone (not under the cache folder: the build folder is `PADDOCK_DEV_TARGET_DIR`).
+            let left: Vec<_> = std::fs::read_dir(d.path().join("tgt"))
+                .map(|r| r.flatten().collect())
+                .unwrap_or_default();
+            assert!(left.is_empty(), "the build folder was not removed: {left:?}");
+            assert!(!d.path().join("home").join("target-heavy-x").exists());
+            // A second run finds it in the cache: cargo is not needed.
+            std::fs::remove_file(d.path().join("fakebin/cargo")).unwrap();
+            let ex2 = RealExec {
+                built_heavy: Default::default(),
+                budget_end: Instant::now() + Duration::from_secs(60),
+                env: ex.env.clone(),
+                root: ex.root.clone(),
+                logs: ex.logs.clone(),
+                stop: ex.stop.clone(),
+            };
+            assert!(matches!(decide(&g, &ex2, Duration::from_secs(60)), Verdict::Passed { .. }));
+        }
+
+        #[test]
+        fn a_heavy_that_will_not_build_is_not_measured_and_names_the_error() {
+            let d = tempfile::tempdir().unwrap();
+            let ex = repo_with_fake_cargo(d.path(), false);
+            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(60)) {
+                Verdict::NotMeasured { reason, next } => {
+                    assert!(
+                        reason.contains("unresolved import") && reason.contains("no heavy slot tool"),
+                        "{reason}"
+                    );
+                    assert!(next.contains("re-run"), "{next}");
+                }
+                v => panic!("{v:?}"),
+            }
+        }
+
+        #[test]
+        fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
+            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
+                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("OVERRIDE SET"), "{reason}"),
+                v => panic!("{v:?}"),
+            }
+        }
+
+        #[test]
+        fn a_build_after_the_budget_is_not_started() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = repo_with_fake_cargo(d.path(), true);
+            ex.budget_end = Instant::now();
+            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
+                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("budget was spent"), "{reason}"),
+                v => panic!("{v:?}"),
+            }
+        }
+
+        #[test]
+        fn heavy_off_still_runs_without_the_slot_for_hermetic_tests() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
+            ex.env.insert(TEST_HEAVY_OFF.into(), "1".into());
+            ex.env.insert("PATH".into(), "/usr/bin:/bin".into());
+            assert!(matches!(
+                decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)),
+                Verdict::Passed { .. }
+            ));
+        }
     }
 
     #[cfg(unix)]

@@ -365,10 +365,21 @@ pub fn compute(
     vars: &[(String, String)],
     root: &Path,
 ) -> Result<InputHash, CliError> {
-    let tool = root.join("tools/paddock-dev");
+    compute_for(exec, env, vars, root, "tools/paddock-dev")
+}
+
+/// [`compute`] for another tool of the repository (`tools/heavy`): the same hash over the `inputs.txt` in its folder `tool_dir`
+/// (relative to `root`), so a tool built on demand is cached under its own content address.
+pub fn compute_for(
+    exec: &dyn Exec,
+    env: &dyn Fn(&str) -> Option<String>,
+    vars: &[(String, String)],
+    root: &Path,
+    tool_dir: &str,
+) -> Result<InputHash, CliError> {
+    let tool = root.join(tool_dir);
     let list = std::fs::read_to_string(tool.join("inputs.txt")).map_err(|e| {
-        CliError::failure(format!("tools/paddock-dev/inputs.txt could not be read: {e}."))
-            .with_hint("Run ./dev inside the Paddock repository.")
+        CliError::failure(format!("{tool_dir}/inputs.txt could not be read: {e}.")).with_hint("Run ./dev inside the Paddock repository.")
     })?;
     let inputs = parse_inputs(&list)?;
     let configs: Vec<String> = config_files(root, env)
