@@ -89,9 +89,9 @@ dev_isolation() {
       if [ -n "$bin" ]; then
         PADDOCK_DEV="$bin"
         export PADDOCK_DEV
-        exec "$bin" ci isolation acquire
+        job_setup "$bin" ci isolation acquire
       fi
-      exec bash "$root/dev" ci isolation acquire
+      job_setup bash "$root/dev" ci isolation acquire
       ;;
     *)
       # The pinned tool when the job has one (acquire pinned it), else the wrapper.
@@ -100,6 +100,18 @@ dev_isolation() {
       exec bash "$root/dev" ci isolation "$@"
       ;;
   esac
+}
+
+# job_setup <command>: runs a job's setup step (build-jobs, the isolation acquire) and never returns. When it fails the job must not go
+# on: later steps that run after a failure (`if: !cancelled()`, so one run reports every failed check) would test without the
+# job's slot, temp folders or core share (run 8027, crate on Windows ran its tests after ./dev could not be built). The failure
+# is written to GITHUB_ENV as PADDOCK_JOB_ABORTED=1, which those steps test, and said once as an annotation.
+job_setup() {
+  "$@" && exit 0
+  rc=$?
+  echo "::error::A job setup step failed (exit $rc: $*). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job." >&2
+  if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || true; fi
+  exit "$rc"
 }
 
 # first_build_jobs: the core limit for the tool's own first build (see the header: build-jobs).
@@ -180,9 +192,9 @@ case "${1:-}" in
       dev_env
       tools_home
       first_build_jobs
-      exec bash "$root/dev" ci build-jobs "$@"
+      job_setup bash "$root/dev" ci build-jobs "$@"
     fi
-    exec bash "$here/build-jobs.sh" "$@"
+    job_setup bash "$here/build-jobs.sh" "$@"
     ;;
   *)
     echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | host <step> <args>" >&2

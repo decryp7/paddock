@@ -105,6 +105,15 @@ if ! printf '%s\n' "$compiler" | grep -q '^release:'; then
   exit 2
 fi
 host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
+# The compiler's own key (its commit, else its release): a build folder is never shared between two compilers, because cargo
+# keeps rlibs of the old one beside the new ones and a half-replaced toolchain reads them as E0514 (run 8027, pitwall-mac).
+ckey=$(printf '%s\n' "$compiler" | sed -n 's/^commit-hash: //p' | cut -c1-12)
+[ -n "$ckey" ] || ckey=$(printf '%s\n' "$compiler" | sed -n 's/^release: //p' | tr -c 'A-Za-z0-9.\n' '_')
+
+# compiler_now: the `compiler` lines of the compiler as it is now (empty when it does not run), asked the way it was asked above.
+compiler_now() {
+  (cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r' | grep -E '^(commit-hash|release):') || true
+}
 
 # only_build_folder <file>: the config sets nothing but the build folder (`target-dir` in `[build]`, or a top-level
 # `build.target-dir`), besides blank lines and comments. The build folder never changes the binary (CARGO_TARGET_DIR is not
@@ -168,14 +177,30 @@ refuse_build_target() {
   }
 }
 
-build() { # build <target dir>: the binary ends up in <target dir>/release/paddock-dev
+# build <target dir> [hash]: the binary ends up in <target dir>/release/paddock-dev. Returns 0, 1 (failed, said aloud) or 75 (the
+# compiler changed during the build: the caller starts over once, see restart_or_fail).
+build() {
   refuse_build_target
   (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet) || {
     code=$?
-    echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2
-    exit 1
+    toolchain_changed "$code" || return $?
+    echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code, build folder $1). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2
+    return 1
   }
+  toolchain_changed 0 || return $?
   built_check "$1"
+}
+# The compiler is the one the hash named, or the build is not trusted: a rustup update during the build (the toolchain folder is
+# replaced in place) gives cargo errors that look like a broken build (E0514, a missing rustc.exe on Windows) and a binary the
+# hash does not describe. Once per run the wrapper starts over with the new compiler (a new hash, a new build folder); the second
+# time it says so and fails.
+toolchain_changed() { # toolchain_changed <cargo exit code>
+  now=$(compiler_now)
+  [ "$now" = "$compiler" ] && return 0
+  echo "::warning::./dev: the Rust compiler changed while paddock-dev was building (it was: $(printf '%s' "$compiler" | tr '\n' ' '); now: $(printf '%s' "${now:-not found}" | tr '\n' ' '); cargo exit $1), probably a rustup update on this host." >&2
+  if [ -z "${PADDOCK_DEV_RESTARTED:-}" ]; then return 75; fi
+  echo "::error::./dev: the Rust compiler changed again during the second build, so paddock-dev was not built. Wait for the toolchain update on this host to finish, then run ./dev again (see 'rustup show')." >&2
+  return 1
 }
 # A `build.target` in a cargo config (or --target in cargo's own settings) puts the binary under <target>/<triple>/: say so
 # instead of failing later on a missing file.
@@ -257,6 +282,18 @@ download_prebuilt() {
   return 0
 }
 
+# restart_or_fail <build status> <the wrapper's arguments>: 75 starts the wrapper over once (the compiler changed under the build),
+# anything else ends it (the failure was said aloud).
+restart_or_fail() {
+  _rc=$1
+  shift
+  if [ "$_rc" -eq 75 ]; then
+    echo "dev: starting over once with the compiler that is installed now." >&2
+    PADDOCK_DEV_RESTARTED=1 exec /bin/sh "$0" "$@"
+  fi
+  exit 1
+}
+
 if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
   refuse_build_target
   fresh=$(mktemp -d)
@@ -273,8 +310,11 @@ if [ -n "$dirty" ]; then
     echo "dev: --print-binary: the tool's inputs have uncommitted changes, so there is no cached binary to name." >&2
     exit 3
   fi
-  build "${PADDOCK_DEV_TARGET_DIR:-$tool/target}" dirty
-  exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
+  # One folder per compiler: cargo's rlibs of another compiler are never in it. Cargo's own lock on the folder serialises two
+  # builds of the same compiler; the tool built here is nobody's cached tool.
+  dirty_target="${PADDOCK_DEV_TARGET_DIR:-$tool/target}/rustc-$ckey"
+  build "$dirty_target" dirty || restart_or_fail $? "$@"
+  exec "$dirty_target/release/paddock-dev$exe" "$@"
 fi
 
 cache="$home/$binroot/$hash"
@@ -287,18 +327,20 @@ if [ ! -x "$cache/$name" ]; then
   fetched=
   if download_enabled && download_prebuilt; then fetched=1; fi
   if [ -z "$fetched" ]; then
-    if [ -n "$kept_target" ]; then
-      # A folder of this process: a second job of the same hash on the mount builds in its own, so neither deletes the other's.
-      mkdir -p "$home"
-      target=$(mktemp -d "$home/target-$hash.XXXXXX")
-    else
-      target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
-      if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
-        echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
-      fi
+    # A build folder of this process, never shared (runs 8027: two jobs of one host built in one kept folder and broke each
+    # other's compiler outputs): next to the cache in a kept mount, else inside PADDOCK_DEV_TARGET_DIR (or the tool's own
+    # target folder), where the sweep below removes one that was left behind.
+    if [ -n "$kept_target" ]; then tbase=$home; else tbase=${PADDOCK_DEV_TARGET_DIR:-$tool/target}; fi
+    if [ -z "$kept_target" ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+      echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
+    fi
+    if ! mkdir -p "$tbase" || ! target=$(mktemp -d "$tbase/target-$hash.XXXXXX"); then
+      echo "::error::./dev cannot make a build folder in $tbase. Make it writable or set PADDOCK_DEV_TARGET_DIR to a folder you can write, then run ./dev again." >&2
+      exit 1
     fi
     _b0=$(date +%s)
-    build "$target" "$hash"
+    echo "dev: building paddock-dev $hash in $target (compiler $ckey)." >&2
+    build "$target" "$hash" || { _rc=$?; rm -rf "$target" || true; restart_or_fail $_rc "$@"; }
     mkdir -p "$cache"
     # A name of our own in the cache folder (never a PID: the folder may be shared by containers whose PIDs repeat), checked for the
     # hash it was built for before it replaces anything, then published by an atomic rename.
@@ -307,13 +349,22 @@ if [ ! -x "$cache/$name" ]; then
     chmod +x "$tmp"
     if ! "$tmp" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
       rm -f "$tmp"
-      echo "::error::./dev built a paddock-dev that is not for hash $hash (another job replaced the build folder, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, delete $target." >&2
+      echo "::error::./dev built a paddock-dev that is not for hash $hash (the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, report it with this log (build folder $target)." >&2
       exit 1
     fi
-    mv -f "$tmp" "$cache/$name"
+    if ! mv -f "$tmp" "$cache/$name"; then
+      # Windows cannot replace a tool that another job is running: the same hash, so that tool is as good as ours.
+      rm -f "$tmp"
+      if runs "$cache/$name" && "$cache/$name" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+        echo "dev: another run published paddock-dev $hash first; using it." >&2
+      else
+        echo "::error::./dev could not publish paddock-dev $hash into $cache. Close programs that use it or delete the folder, then run ./dev again." >&2
+        exit 1
+      fi
+    fi
     echo "dev: built paddock-dev $hash in $(($(date +%s) - _b0)) s (not downloaded)." >&2
     # The per-hash build folder is about 465 MB; the verified tool is all a later run needs.
-    if [ -n "$kept_target" ]; then rm -rf "$target" || true; fi
+    rm -rf "$target" || true
   fi
   # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A tool used within the last
   # day is never removed: a job on the same mount (several runners share a host's tools folder) runs it again at its end, when its
@@ -324,13 +375,10 @@ if [ ! -x "$cache/$name" ]; then
       [ -d "$home/bin/$old" ] || [ -d "$home/bin-source/$old" ] || rm -rf "${home:?}/target-$old" "${home:?}/target-$old".* || true
     fi
   done
-  # A build folder whose tool was never published (the build or the hash check failed) goes when an hour old: a build in
-  # progress has no tool yet either, and cargo does not touch the folder itself while it runs.
-  for t in "$home"/target-*; do
+  # A build folder left behind (the build or the hash check failed, or the job was killed) goes when an hour old: a build in
+  # progress is younger, and cargo does not touch the folder itself while it runs.
+  for t in "$home"/target-* "${PADDOCK_DEV_TARGET_DIR:-$tool/target}"/target-*; do
     [ -d "$t" ] || continue
-    h=${t##*/target-}; h=${h%%.*}
-    [ -d "$home/bin/$h" ] && continue
-    [ -d "$home/bin-source/$h" ] && continue
     if [ -n "$(find "$t" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then rm -rf "$t" || true; fi
   done
 fi
