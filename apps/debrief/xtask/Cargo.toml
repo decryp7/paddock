@@ -18,4 +18,5 @@ toml.workspace = true
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../crates/paddock-testkit" }
 tempfile.workspace = true

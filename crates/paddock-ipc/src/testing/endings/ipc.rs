@@ -17,6 +17,9 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+/// How long no further end line may arrive before a scenario's window is over (see [`LogCapture::wait_settled`]).
+const SETTLE: Duration = Duration::from_millis(100);
+
 /// The wait for something that must already have happened.
 const GUARD: Duration = Duration::from_secs(30);
 
@@ -231,7 +234,33 @@ fn typed_of(result: &Result<Vec<u8>, IpcError>) -> Typed {
 
 /// The in-process suite for `paddock-ipc`'s own host (accept, authenticate) and peer (the ordered close): the endpoint
 /// register's `ipc-host` and `ipc-peer` entries.
-pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), &'static str> {
+pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), String> {
+    logged(|| in_process_inner(scenario))
+}
+
+/// Runs `run` and puts the process's log lines of the run into [`Observed::log`], after the end line (if one is expected)
+/// arrived. The rig fails, not passes, when the log cannot be captured.
+pub fn logged<E: std::fmt::Display>(
+    run: impl FnOnce() -> Result<(Observed, Expect), E>,
+) -> Result<(Observed, Expect), String> {
+    let capture = super::log::process_capture()?;
+    let from = capture.len();
+    let (mut observed, expect) = run().map_err(|e| e.to_string())?;
+    if expect.end_line {
+        // A missing line is the judge's finding (`no-end-line`); an endpoint that never stops ending connections is the rig's.
+        if capture.wait_settled(from, expect.ends, GUARD, SETTLE) == super::log::Settled::NeverQuiet
+        {
+            return Err(format!(
+                "the endpoint kept logging end lines for {} s and never went quiet; the scenario's window cannot be closed",
+                GUARD.as_secs()
+            ));
+        }
+    }
+    observed.log = capture.since(from);
+    Ok((observed, expect))
+}
+
+fn in_process_inner(scenario: Scenario) -> Result<(Observed, Expect), &'static str> {
     let limit = FrameLimit::default();
     match scenario {
         Scenario::WrongToken
@@ -289,7 +318,19 @@ pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), &'static str
                 // The write itself failed because the listener was already gone: still no reason.
                 o.decoded = Decoded::default();
             }
-            Ok((o, Expect::reason(&["stopping"])))
+            // Today the stop accepts nothing, so no connection exists to end and no end line is due: the ratchet's I11 entry
+            // (`no-reason`) says the client reads a bare end. The moment the stop accepts and refuses the backlog, the client
+            // gets a reason and a connection ended, so the end line becomes required (the expectation follows the reason).
+            let told = !o.decoded.reasons.is_empty();
+            let expect = Expect::reason(&["stopping"]);
+            Ok((
+                o,
+                if told {
+                    expect
+                } else {
+                    expect.without_end_line()
+                },
+            ))
         }
         Scenario::OwnerCloseWithCallsInFlight
         | Scenario::OwnerCloseWhilePeerNotReading
@@ -340,6 +381,7 @@ pub fn in_process(scenario: Scenario) -> Result<(Observed, Expect), &'static str
                 Expect {
                     reason: super::ReasonRule::Optional,
                     end_line: false,
+                    ends: 1,
                     unread_input: false,
                 },
             ))
@@ -435,7 +477,9 @@ fn peer_scenario(scenario: Scenario) -> Result<(Observed, Expect), &'static str>
             }
             owner.close();
             o.typed = call.join().ok().map(|r| typed_of(&r));
-            Ok((o, Expect::reason(&["stopping", "closed"])))
+            // Three connections ended in this scenario: the raw one above, and the typed pair's two sides (each side logs its own
+            // end, ADR 0072 §6).
+            Ok((o, Expect::reason(&["stopping", "closed"]).with_ends(3)))
         }
         Scenario::OwnerCloseWhilePeerNotReading => {
             let (x, mut y) = endpoint::pair().map_err(|_| "no pair")?;

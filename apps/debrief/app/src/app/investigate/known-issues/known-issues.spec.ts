@@ -7,15 +7,17 @@ import { IssueMatch, IssueReport } from '../../core/api.types';
 import { CmdError } from '../../core/cmd-error';
 import { WorkspaceStore } from '../../core/workspace.store';
 import { COMMAND_CONTEXT } from '../../extensions/command-registry';
-import { CommandContext, DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
+import { CommandContext } from '../../extensions/tokens';
 import { PROBLEMS_VIEW } from '../../problems/problems-model';
 import { ProblemsPanel } from '../../problems/problems-panel';
 import { KnownIssuesBackend } from '../investigate-backend';
 import { MockKnownIssuesBackend } from '../mock/mock-investigate-backends';
 import { KnownIssues } from './known-issues';
 import { KnownIssuesStore } from './known-issues.store';
-import { knownIssuesCommands, provideKnownIssues } from './provide-known-issues';
+import { knownIssuesCommands } from './known-issues.commands';
+import { provideKnownIssues } from './provide-known-issues';
 import { DebriefBackend } from '../../core/backend';
+import { contributed } from '../../../testing/contributions';
 
 const match = (patch: Partial<IssueMatch> = {}): IssueMatch => ({
   issue: { id: 'gw', title: 'Payment gateway timeouts', fix: 'Raise the timeout.\nCheck the provider.', matcher: { type: 'pattern', pattern: 'timed out' }, file: 'Payments' },
@@ -321,7 +323,7 @@ describe('known-issues command', () => {
     TestBed.configureTestingModule({
       providers: [...provideTinyBackend(), ...provideFakeDock(), provideKnownIssues(), { provide: COMMAND_CONTEXT, useValue: {} }],
     });
-    const commands = TestBed.inject(DEBRIEF_COMMANDS) as unknown as (DebriefCommand | DebriefCommand[])[];
+    const commands = contributed('commands');
     expect(commands.flat().some((c) => c.id === 'knownIssues.check')).toBe(true);
   });
 });

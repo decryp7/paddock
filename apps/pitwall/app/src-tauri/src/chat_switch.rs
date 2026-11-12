@@ -1,10 +1,10 @@
-//! Whether this build has the Playground's chat (ADR 0023). Temporary: Rust decides from the Cargo feature `chat` (on for
-//! the internal proof-of-concept build, off by default and so off in the release workflow) until ADR 0049's switches
+//! Whether this build has the Playground's chat (ADR 0023). Temporary: Rust decides from the Cargo feature `chat` (a default
+//! feature, so on in the release workflow) until ADR 0049's switches
 //! (`apps/pitwall/switches.toml`) replace it. The UI shows the Chat tab only when this says so.
 
 use pitwall_core::mgmt::CommandError;
 
-/// The chat is built in (`--features chat`).
+/// The chat is built in (the default `chat` feature).
 pub const CHAT_ENABLED: bool = cfg!(feature = "chat");
 
 /// Whether the window offers the chat.
@@ -24,6 +24,6 @@ mod tests {
         #[cfg(not(feature = "chat"))]
         assert!(!answer, "a build without the feature has no chat");
         #[cfg(feature = "chat")]
-        assert!(answer, "the proof-of-concept build has the chat");
+        assert!(answer, "a build with the feature has the chat");
     }
 }

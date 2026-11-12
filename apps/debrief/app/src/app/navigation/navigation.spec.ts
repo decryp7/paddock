@@ -6,7 +6,8 @@ import { WorkspaceStore } from '../core/workspace.store';
 import { CommandRegistry } from '../extensions/command-registry';
 import { UiStateRegistry } from '../lifecycle/ui-state';
 import { NavigationHistory } from './navigation.service';
-import { listenMouseNavigation, NavigationCommands, navigationResetContribution, provideNavigation } from './provide-navigation';
+import { NavigationCommands } from './navigation-commands';
+import { listenMouseNavigation, navigationResetContribution, provideNavigation } from './provide-navigation';
 
 const row = (id: number): RecordView => ({ id, ts: id, tsState: 'parsed', level: 'Information', message: 'm', template: null, exception: null, fields: {}, source: 0, sourceName: 's', line: id }) as RecordView;
 

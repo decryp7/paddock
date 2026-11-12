@@ -337,7 +337,9 @@ One root `renovate.json` (the apps' configs are identical today):
   (`crates/*/src/lib.rs`, root `package.json`, `.gitea/`, `renovate.json`) are changed by the integrating agent only.
 - **Worktrees:** every agent still works in its own worktree of `paddock` (rule 2). Worktrees share one object store, so
   a new one costs only its checkout (about 300 MB for the whole tree, without build output). For app work, an agent uses
-  a sparse checkout: `git sparse-checkout set --cone crates ui scripts docs apps/<app>`. `CARGO_TARGET_DIR` is per
+  a sparse checkout: `git sparse-checkout set --cone crates ui scripts docs apps/<app>` (amended 2026-11-12: sparse cones apply to
+  `--detach` review copies only; a branch worktree is a full checkout, because conformance, `affected.mjs`, `gates check` and `plan`
+  read most folders and failed on a cone; see docs/benchmarks.md). `CARGO_TARGET_DIR` is per
   worktree and per app (`$TMPDIR/cargo/<worktree>/<app>`) and is kept between tasks: reusing a worktree for the same app
   is what makes local rebuilds fast. sccache is shared but gives almost nothing across worktrees on the Mac (its key
   carries both paths, §1); do not count on it locally.

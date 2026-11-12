@@ -7,7 +7,7 @@
 
 use crate::plan_gitea::{GiteaSource, TRACED_SCRIPT, gitea_targets};
 use paddock_cli::{CliError, Report};
-use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph, real_path};
+use paddock_repo_graph::{CargoCli, FileSource, GitHistory, Graph, GraphError, History, cargo_graph, lock_diff, npm_graph};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -81,6 +81,10 @@ static NOTICES_INPUTS: LazyLock<Regex> =
 
 /// Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui).
 static GENERATED: LazyLock<Regex> = LazyLock::new(|| re(r"^ui/.*/generated/[^/]+\.(ts|json)$"));
+/// The hand-written files in a `generated` folder (they make `shell/generated` an entry); the regex crate has no look-ahead.
+fn is_generated(f: &str) -> bool {
+    GENERATED.is_match(f) && !f.ends_with("/public-api.ts") && !f.ends_with("/ng-package.json")
+}
 
 /// JavaScript truthiness of a `paddock.ci.json` field.
 fn truthy(v: &Value) -> bool {
@@ -614,7 +618,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         }
         // A generated TypeScript or JSON file under ui/ is compared with its Rust source by a crate's test: a stale one must
         // fail on the branch, so the crates that name the file are tested (all crates when none does).
-        if GENERATED.is_match(f) {
+        if is_generated(f) {
             st.mark(Some("crates".to_string()), format!("generated file {f}"));
             let named = opts.crates_naming.map(|g| g(f)).unwrap_or_default();
             let named: Vec<String> = named
@@ -776,14 +780,24 @@ pub fn apps_of(files: &[String]) -> BTreeSet<String> {
         .collect()
 }
 
+/// The resolved root as cargo is given it and as its output is read: plain, `/` separators; a root that has no such spelling
+/// (a volume without a drive letter, a path over 259 units) is refused with the next step, never passed on with its prefix.
+fn graph_root(resolved: &Path, os: paddock_env::Os) -> Result<(PathBuf, String), GraphError> {
+    let text = paddock_env::winpath::for_tools(resolved, os).map_err(|e| GraphError::Read {
+        path: resolved.display().to_string(),
+        reason: e.to_string(),
+    })?;
+    Ok((PathBuf::from(&text), text))
+}
+
 /// Reads the graphs of the repository at `root` (tracked files only, as `git ls-files` lists them).
 pub fn read_graph(root: &Path, history: &dyn History) -> Result<RepoGraph, GraphError> {
     let files = history.tracked_files()?;
     // The root in the spelling cargo prints its paths in (a temp folder's short name or a symlinked workspace is not).
-    let root = real_path(root);
+    let resolved = paddock_env::winpath::real_verbatim(root).unwrap_or_else(|_| root.to_path_buf());
+    let (root, root_text) = graph_root(&resolved, paddock_env::Os::current())?;
     let root = root.as_path();
     let disk = DiskFiles(root.to_path_buf());
-    let root_text = root.to_string_lossy().replace('\\', "/");
     let cargo = cargo_graph(&files, &disk, &CargoCli::new(root, TIMEOUT), &root_text)?;
     let apps = apps_of(&files);
     let mut configs = BTreeMap::new();
@@ -914,6 +928,17 @@ pub fn command(req: &Request) -> Result<Report, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_graph_root_over_the_limit_is_refused_and_a_short_verbatim_one_is_plain() {
+        let long = format!(r"\\?\C:\{}", vec!["a".repeat(50); 6].join(r"\"));
+        let e = graph_root(Path::new(&long), paddock_env::Os::Windows).unwrap_err().to_string();
+        assert!(e.contains("longer than Windows") && e.contains("shorter path"), "{e}");
+        let (path, text) = graph_root(Path::new(r"\\?\C:\w\repo"), paddock_env::Os::Windows).unwrap();
+        assert_eq!((path, text.as_str()), (PathBuf::from("C:/w/repo"), "C:/w/repo"));
+        let (_, unix) = graph_root(Path::new("/w/repo"), paddock_env::Os::Linux).unwrap();
+        assert_eq!(unix, "/w/repo");
+    }
     use paddock_repo_graph::Node;
 
     fn node(name: &str, workspace: &str, deps: &[&str]) -> Node {

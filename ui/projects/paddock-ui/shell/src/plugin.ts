@@ -1,6 +1,5 @@
 import { makeEnvironmentProviders, provideAppInitializer, type EnvironmentProviders } from '@angular/core';
-import { SHELL_PLUGIN, SHELL_VERSION, type VersionReply } from '../generated/shell';
-import { SHELL_COMMANDS, type ShellCommand } from '../generated/shell-commands';
+import { SHELL_COMMANDS, SHELL_PLUGIN, SHELL_VERSION, type ShellCommand, type VersionReply } from '@decryp7/paddock-ui/shell/generated';
 import { dialogCommandLedger, recordDialogCommand } from './dialog-commands';
 
 /*

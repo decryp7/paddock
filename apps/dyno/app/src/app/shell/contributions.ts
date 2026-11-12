@@ -10,7 +10,7 @@ import {
   msg,
   type,
   type ContributionBatch,
-} from '@decryp7/paddock-ui/shell';
+} from '@decryp7/paddock-ui/shell/contributions';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
 import { defineMcpKeyDialog, defineMcpRevokeDialog, defineMcpSettingsPage } from '@decryp7/paddock-ui/shell/mcp';

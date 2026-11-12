@@ -100,6 +100,10 @@ fn heard(w: &WebviewWindow<MockRuntime>, event: &'static str) -> Calls {
     seen
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "an existing path resolved at the edge between the OS and the app; paddock-window has no paddock-env dependency to use winpath, WP-P2 moves it (ADR 0021 amendment 2026-11-11)"
+)]
 fn src_dir() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("src")

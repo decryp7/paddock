@@ -89,21 +89,26 @@ fn an_unknown_root_certificate_is_refused_and_explained() {
     );
 }
 
+/// End to end: a connect to a port that is bound but not listening is refused and reads as offline (Linux only: see
+/// `paddock_testkit::net`); the test below covers the mapping on every OS.
+#[cfg(target_os = "linux")]
 #[test]
-fn nothing_listening_is_offline_and_an_unreachable_proxy_is_the_proxy() {
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-    let err = client().get(&format!("https://127.0.0.1:{port}/")).call().unwrap_err();
+fn a_port_nothing_listens_on_is_offline_end_to_end() {
+    let held = paddock_testkit::net::HeldPort::refusing();
+    let err = client().get(&format!("https://127.0.0.1:{}/", held.port())).call().unwrap_err();
     let e = net::classify(err, "127.0.0.1", false);
     assert!(matches!(&e, AiError::Connection(n) if n.kind == NetKind::Offline), "{e:?}");
+}
+
+#[test]
+fn nothing_listening_is_offline_and_an_unreachable_proxy_is_the_proxy() {
+    // A refused connection cannot be provoked portably (a freed port may belong to another test's server): the mapping of
+    // `ConnectionRefused`, which is what the OS reports for a port nobody listens on, is tested.
+    let refused = || ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+    let e = net::classify(refused(), "127.0.0.1", false);
+    assert!(matches!(&e, AiError::Connection(n) if n.kind == NetKind::Offline), "{e:?}");
     assert!(e.is_transient());
-    let via = net::agent(&HttpConfig {
-        proxy: Some(format!("http://127.0.0.1:{port}")),
-        connect_timeout: Duration::from_secs(5),
-        timeout: Duration::from_secs(10),
-    })
-    .unwrap();
-    let err = via.get("https://huggingface.co/").call().unwrap_err();
-    let e = net::classify(err, "huggingface.co", true);
+    let e = net::classify(refused(), "huggingface.co", true);
     assert!(matches!(&e, AiError::Connection(n) if n.kind == NetKind::Proxy), "{e:?}");
     assert!(e.to_string().contains("proxy settings"));
 }

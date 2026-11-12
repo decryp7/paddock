@@ -28,3 +28,6 @@ windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_Fil
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }
 tempfile = "3"
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Globalization"] }

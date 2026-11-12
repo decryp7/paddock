@@ -1,5 +1,5 @@
 import type { EnvironmentProviders, Provider } from '@angular/core';
-import type { SettingsPageDef } from '@decryp7/paddock-ui/shell';
+import type { SettingsPageDef } from '@decryp7/paddock-ui/shell/contributions';
 import { settingsWindowProviders } from '@decryp7/paddock-ui/shell/settings/window';
 import type { PitwallBackend } from '../core/backend';
 import { createBackend } from '../core/backend-factory';

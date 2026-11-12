@@ -67,6 +67,8 @@ export function mockStartupOverview(all: StartupEntry[], filter: StartupFilter):
     signedCount: all.filter((e) => kind(e) === 'signed').length,
     unavailable: [],
     btmVia: 'local',
+    signerRead: true,
+    coverage: null,
   };
 }
 

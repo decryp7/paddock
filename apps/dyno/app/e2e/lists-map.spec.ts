@@ -94,13 +94,13 @@ test.describe('firewall', () => {
 
 test.describe('firewall rule table at the smallest window (900 px)', () => {
   test.use({ viewport: { width: 900, height: 800 } });
-  const PROGRAM = 'C:\\Program Files\\WindowsApps\\ExampleVendor.ExampleSync_12.4.2026.0_x64__8wekyb3d8bbwe\\Helper\\ExampleSyncBackgroundService.exe';
+  const PROGRAM = '/Applications/Example Sync.app/Contents/Library/LoginItems/Example Sync Background Service.app/Contents/MacOS/Example Sync Background Service';
 
   test('a long program path is cut in the middle: the file name stays, the full path is the tooltip, the cell is reachable by keyboard', async ({ page }) => {
-    await page.goto('/?latency=0&mock=windows#/firewall'); // the mock drops ".exe" for the other systems
+    await page.goto('/?latency=0#/firewall'); // the mock is a Mac
     const path = page.locator('[data-source="applicationFirewall"] [data-testid="path-text"]').first();
     await expect(path).toBeVisible();
-    await expect(path.locator('.pd-shown'), 'the end of the path (the program and its extension) stays').toContainText(/Service\.exe$/);
+    await expect(path.locator('.pd-shown'), 'the end of the path (the program and its extension) stays').toContainText(/Service$/);
     await expect(path.locator('.pd-shown')).toContainText('…');
     await expect(path, 'a cut path is a keyboard stop').toHaveAttribute('tabindex', '0');
     await path.hover();
@@ -113,7 +113,7 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
   });
 
   test('the full path shows when the cut path is reached by the keyboard', async ({ page }) => {
-    await page.goto('/?latency=0&mock=windows#/firewall');
+    await page.goto('/?latency=0#/firewall');
     const path = page.locator('[data-source="applicationFirewall"] [data-testid="path-text"]').first();
     await expect(path).toBeVisible();
     for (let i = 0; i < 60; i++) {
@@ -126,7 +126,7 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
   });
 
   test('the direction and the network are readable at 900 px (under the program, as the columns drop out)', async ({ page }) => {
-    await page.goto('/?latency=0&mock=windows#/firewall');
+    await page.goto('/?latency=0#/firewall');
     const rows = page.locator('[data-source="applicationFirewall"] pd-table');
     await expect(rows.getByText('Direction', { exact: true }), 'the Direction column is not drawn at 900 px').toHaveCount(0);
     await expect(rows).toContainText('Outgoing');
@@ -134,7 +134,7 @@ test.describe('firewall rule table at the smallest window (900 px)', () => {
   });
 
   test('the rule name wraps to at most two lines', async ({ page }) => {
-    await page.goto('/?latency=0&mock=windows#/firewall'); // the mock drops ".exe" for the other systems
+    await page.goto('/?latency=0#/firewall'); // the mock is a Mac
     const name = page.locator('[data-source="applicationFirewall"]').getByText('Example Sync helper (all networks)');
     await expect(name).toBeVisible();
     const lines = await name.evaluate((el) => {

@@ -13,6 +13,7 @@ export const WIN_ROWS = {
   'install-rows': { aliases: ['38', '39', 'kill-installer', 'install-again', 'reinstall'], phase: 'after', manifest: ['win-reinstall', 'kill-installer', 'install-again'] },
   'upgrade-swap': { aliases: ['40', 'swap'], phase: 'after', needs: ['old-installer'], manifest: ['upgrade-swap'] },
   'second-user': { aliases: ['41'], phase: 'after', manifest: ['second-user'] },
+  'second-install': { aliases: [], phase: 'after', manifest: ['second-install'] },
   'restart-tray': { aliases: [], phase: 'reboot', manifest: ['restart-tray'] },
 };
 

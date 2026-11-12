@@ -8,7 +8,6 @@ import { DebriefBackend } from '../core/backend';
 import { MockAnalysisBackend, recordsFrom } from '../mock-backends';
 import { WorkspaceStore } from '../core/workspace.store';
 import { COMMAND_CONTEXT, CommandRegistry } from '../extensions/command-registry';
-import { CommandContext } from '../extensions/tokens';
 import { ViewRegistry } from '../extensions/view-registry';
 import { ShareBackend } from '../share/share-backend';
 import { HealthFindingsStore } from './health/health-findings.store';
@@ -20,20 +19,21 @@ import { ProjectService } from '../projects/project.service';
 import { HomeAutoOpen, provideHome } from './home.plugin';
 import { HomeStore, RefreshLimiter } from './home.store';
 import { HomeView } from './home-view';
+import { FakeCommandContext } from '../../testing/contributions';
 
 const crash: Finding = { kind: 'crash', severity: 'critical', title: 'Crash', detail: 'WEB01 stopped', action: { kind: 'zoom', from: 1000, to: 2000, recordId: 7 } };
 const file: Finding = { kind: 'fileNotOpened', severity: 'info', title: 'File not opened', detail: 'x.reg: no importer', action: { kind: 'setupFormat', path: '/logs/x.reg' } };
 
-class FakeCtx implements CommandContext {
+class FakeCtx extends FakeCommandContext {
   calls: string[] = [];
-  summary = null;
-  openPaths = async () => undefined;
-  setQuery = (p: object) => void this.calls.push(`query:${JSON.stringify(p)}`);
-  addFilter = () => undefined;
-  selectRecord = () => undefined;
-  jumpTo = async () => undefined;
-  showView = (id: string) => void this.calls.push(`show:${id}`);
-  notifyError = (m: string) => void this.calls.push(`error:${m}`);
+  override summary = null;
+  override openPaths = async () => undefined;
+  override setQuery = (p: object) => void this.calls.push(`query:${JSON.stringify(p)}`);
+  override addFilter = () => undefined;
+  override selectRecord = () => undefined;
+  override jumpTo = async () => undefined;
+  override showView = (id: string) => void this.calls.push(`show:${id}`);
+  override notifyError = (m: string) => void this.calls.push(`error:${m}`);
 }
 
 describe('HomePrefs', () => {

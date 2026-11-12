@@ -201,17 +201,10 @@ fn process_is_alive(pid: u32) -> bool {
     sys.process(p).is_some()
 }
 
-/// Kills the worker child this test started (its pid comes from the supervisor, never from a name).
-#[expect(
-    clippy::disallowed_methods,
-    reason = "ADR 0033 WP-5 (test): kills the worker by the pid the supervisor reported; use paddock_proc::end"
-)]
+/// Kills the worker child this test started: by identity (pid plus start time), taken from the supervisor's report.
 fn kill_process(pid: u32) {
-    let p = sysinfo::Pid::from_u32(pid);
-    let mut sys = sysinfo::System::new().expect("a System");
-    sys.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), true);
-    if let Some(process) = sys.process(p) {
-        process.kill();
+    if let Some(id) = paddock_proc::ProcessId::of(pid) {
+        let _ = paddock_proc::end(id);
     }
 }
 

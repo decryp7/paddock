@@ -101,7 +101,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 
 ### App (`app/`)
 
-![UI components: state and backend](diagrams/svg/c4-3-ui-state.svg)
+![UI components: state and backends](diagrams/svg/c4-3-ui-state.svg)
 
 The Angular UI is the presentation layer, on the Paddock app shell (`@decryp7/paddock-ui`, ADR 0012 of the family). One
 bundle boots three kinds of window (`src/main.ts`): the main window (the shell's pages frame with Pitwall's pages, menus,
@@ -112,8 +112,7 @@ tray popover. Standalone components with signals and OnPush, SignalStores for st
 ECharts for charts, and Pitwall's own SVG icon set in the `pw` namespace. Components never call Tauri `invoke`; they use
 the backend service injected by the `BACKEND` token. The pages are `dashboard`, `models`, `engines`, `apps`, `requests`,
 `playground` and `benchmarks`; Settings is the shell's Settings window with Pitwall's page. The UI does not re-implement
-domain rules: fit verdicts, release countdowns and model selection come from the core through the server. (The C4 UI
-diagrams above still show the 1.0 sidebar and settings route; redrawing them is a follow-up with its own review.)
+domain rules: fit verdicts, release countdowns and model selection come from the core through the server. (The C4 UI diagrams above show the 1.1 screens and the shell.)
 
 The Tauri shell (`app/src-tauri`, a workspace member) holds no model or request state of its own. It talks to the
 server only through a `ServerClient` trait (loopback HTTP to the management API and its live feed; a fake in tests):

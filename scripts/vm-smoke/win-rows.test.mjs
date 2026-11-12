@@ -14,6 +14,10 @@ test('the helper is needed only by the rows that read through it', () => {
   assert.equal(selectRows('tray-menu,disk-space').helper, false);
   assert.equal(selectRows('29').helper, true);
 });
+test('the second-install row is its own row, run after Quit', () => {
+  const s = selectRows('second-install');
+  assert.deepEqual([s.after, s.manifest], [['second-install'], ['second-install']]);
+});
 test('the swap row needs the older installer', () => assert.equal(selectRows('40').oldInstaller, true));
 test('a suite part passes through when no row is named', () => assert.deepEqual([selectRows('start').suitePart, selectRows('start').rows], ['start', []]));
 test('rows mixed with a suite part, or restart-tray mixed with rows, are refused', () => {

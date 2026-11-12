@@ -9,7 +9,7 @@ import { CmdError } from '../core/cmd-error';
 import { Logger } from '../core/logger';
 import { WorkspaceStore } from '../core/workspace.store';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { CommandContext, flattenContributions, DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { CommandContext } from '../extensions/tokens';
 import { NOTES_VIEW } from '../notes/note-actions';
 import { ExceptionFocus } from '../analysis/exception-focus';
 import { KnowledgeBackend } from '../ai/knowledge/knowledge-backend';
@@ -18,13 +18,17 @@ import { DialogService } from '../ui/dialog.service';
 import { MockAnalysisBackend, MockKnowledgeBackend, MockNotesBackend, recordsFrom } from '../mock-backends';
 import { EMPTY_QUERY } from '../core/workspace/query.store';
 import { mockSnippet, MockSearchEverythingBackend } from './mock/mock-search-everything-backend';
-import { provideSearchEverything, SEARCH_EVERYTHING_COMMAND, SEARCH_EVERYTHING_KEYBINDING, searchEverythingCommands } from './provide-search-everything';
+import { provideSearchEverything, SEARCH_EVERYTHING_COMMAND, SEARCH_EVERYTHING_KEYBINDING } from './provide-search-everything';
+import { SearchEverythingCommands, searchEverythingCommands } from './search-everything.commands';
+import { SEARCH_EVERYTHING_COMMAND_STUBS } from './search-everything.contributions';
+import { stubMismatches } from '../../testing/contributions';
 import { flatRows, KIND_ORDER, outcomeNotice, resultGroups } from './search-everything.model';
 import { SearchEverythingBackend, TauriSearchEverythingBackend } from './search-everything-backend';
 import { SearchEverythingLauncher } from './search-everything-launcher';
 import { EVENTS_VIEW, EXCEPTIONS_VIEW, SearchEverythingNavigator } from './search-everything-navigator';
 import { SearchEverythingPalette } from './search-everything-palette';
 import { SEARCH_DEBOUNCE_MS, SearchEverythingStore } from './search-everything.store';
+import { contributed } from '../../testing/contributions';
 
 const none = <T>(): KindHits<T> => ({ total: 0, items: [], outcome: { kind: 'complete' } });
 const part = (text: string, mark = false) => ({ text, mark });
@@ -622,9 +626,14 @@ describe('search everything command and launcher', () => {
 
   it('is the only command of the app on its key', () => {
     TestBed.configureTestingModule({ providers: [...appConfig.providers, { provide: Logger, useFactory: () => new MemoryLogger() }] });
-    const commands = flattenContributions<DebriefCommand>(TestBed.inject(DEBRIEF_COMMANDS, null) ?? []);
+    const commands = contributed('commands');
     const bound = commands.filter((c) => c.keybinding?.toLowerCase() === SEARCH_EVERYTHING_KEYBINDING.toLowerCase());
     expect(bound.map((c) => c.id)).toEqual([SEARCH_EVERYTHING_COMMAND]);
     expect(typeof provideSearchEverything).toBe('function');
+  });
+
+  it('registers a stub equal to the command, so the launcher loads on first use', () => {
+    provide();
+    expect(stubMismatches(SEARCH_EVERYTHING_COMMAND_STUBS, TestBed.inject(SearchEverythingCommands).commands)).toEqual([]);
   });
 });

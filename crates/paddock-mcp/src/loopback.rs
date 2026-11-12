@@ -13,6 +13,7 @@
 use crate::keys::KeyVerifier;
 use crate::lines::{Line, read_line, serve_lines};
 use crate::server::{Server, Session};
+use paddock_ipc::endlog::{self, ConnId, DrainOutcome, End, EndCode, Phase, ReasonOutcome};
 use serde_json::{Value, json};
 use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -79,6 +80,23 @@ impl Watched {
             empty_slices: 0,
         })
     }
+}
+
+/// Why a connection's read half could not be set up.
+#[derive(Debug)]
+enum Setup {
+    /// The socket was cloned but would not take its read timeout: the client has already left (macOS answers `EINVAL` once the
+    /// connection was reset), so there is nothing to serve or drain.
+    Gone(io::Error),
+    /// The socket could not be cloned (no descriptor left): a failure of this side.
+    Failed(io::Error),
+}
+
+/// The read half of `stream`, watched for `stop`. Built BEFORE a refusal is written: the client may leave the moment it has
+/// read it, and a socket the client already reset cannot take a timeout any more.
+fn read_half(stream: &TcpStream, stop: Arc<AtomicBool>) -> Result<Watched, Setup> {
+    let cloned = stream.try_clone().map_err(Setup::Failed)?;
+    Watched::new(cloned, stop).map_err(Setup::Gone)
 }
 
 impl Read for Watched {
@@ -406,14 +424,29 @@ impl Refusal {
     }
 }
 
+/// A handshake that failed: the refusal the client was sent, why it ended (the end line's code), whether the refusal line was
+/// written, and the cause for the log (never the key).
+#[derive(Debug)]
+struct Refused {
+    end: EndCode,
+    sent: ReasonOutcome,
+    cause: String,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.cause)
+    }
+}
+
 /// Writes the refusal line in one write: written piece by piece (as `writeln!` of a JSON value does), a close in between left
 /// the client a cut-off line.
-fn refuse(stream: &mut impl Write, refusal: Refusal, why: &str) {
+fn refuse(stream: &mut impl Write, refusal: Refusal, why: &str) -> ReasonOutcome {
     let line = format!(
         "{}\n",
         json!({"ok": false, "code": refusal.code(), "error": why})
     );
-    let _ = stream.write_all(line.as_bytes());
+    ReasonOutcome::of_write(stream.write_all(line.as_bytes()).is_ok())
 }
 
 /// How a refused connection's drain ended (ADR 0072 §2 step 5), in the ADR's words for the log.
@@ -472,13 +505,68 @@ fn drain(reader: &mut BufReader<Watched>, until: Instant) -> (usize, DrainEnd) {
     }
 }
 
+/// The end code of a failed read: a client that went away is `closed`, anything else is this side's.
+fn end_of_read_error(kind: io::ErrorKind) -> EndCode {
+    match kind {
+        io::ErrorKind::ConnectionReset
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::BrokenPipe
+        | io::ErrorKind::UnexpectedEof => EndCode::Closed,
+        _ => EndCode::Internal,
+    }
+}
+
+/// The drain outcome in the end line's words ([`DrainEnd::word`] keeps the kind of a failed read for the drain line).
+fn drain_outcome(end: DrainEnd) -> DrainOutcome {
+    match end {
+        DrainEnd::Eof => DrainOutcome::Eof,
+        DrainEnd::BytesCap => DrainOutcome::ByteCap,
+        DrainEnd::TimeCap => DrainOutcome::TimeCap,
+        DrainEnd::Stopped => DrainOutcome::Stopped,
+        DrainEnd::Failed(_) => DrainOutcome::Failed,
+        DrainEnd::PoolFull => DrainOutcome::PoolFull,
+    }
+}
+
+/// What a refused connection's end line needs besides its drain: the id, the code and whether the refusal was written.
+#[derive(Clone, Copy)]
+struct Refusing {
+    id: u64,
+    accepted: Instant,
+    code: EndCode,
+    sent: ReasonOutcome,
+}
+
+/// The connection's end line (ADR 0072 §6, WP-7; ER-27), through paddock-ipc's one implementation.
+#[allow(clippy::too_many_arguments)]
+fn log_end(
+    id: u64,
+    accepted: Instant,
+    code: EndCode,
+    phase: Phase,
+    reason: ReasonOutcome,
+    drain: DrainOutcome,
+    bytes: usize,
+    detail: &str,
+) {
+    endlog::log_end(&End {
+        reason,
+        drain,
+        bytes,
+        open_ms: accepted.elapsed().as_millis(),
+        detail,
+        ..End::new(ConnId::Accept(id), "an MCP client", phase, code)
+    });
+}
+
 /// Logs how a refused connection's drain ended and how long after the accept (ADR 0072 §6; ER-27: a client that saw a reset
-/// is explained by the app's log).
-fn log_drain(id: u64, accepted: Instant, (read, end): (usize, DrainEnd)) {
+/// is explained by the app's log), then the connection's end line.
+fn log_drain(r: Refusing, (read, end): (usize, DrainEnd)) {
+    let id = r.id;
     let line = format!(
-        "paddock_mcp: connection #{id} drained {read} byte(s) after its refusal: drain {} after {} ms",
+        "paddock_mcp: connection a{id} drained {read} byte(s) after its refusal: drain {} after {} ms",
         end.word(),
-        accepted.elapsed().as_millis()
+        r.accepted.elapsed().as_millis()
     );
     match end {
         DrainEnd::Eof => log::info!("{line}"),
@@ -487,6 +575,16 @@ fn log_drain(id: u64, accepted: Instant, (read, end): (usize, DrainEnd)) {
         ),
         _ => log::warn!("{line}; the client may see a reset"),
     }
+    log_end(
+        id,
+        r.accepted,
+        r.code,
+        Phase::Hello,
+        r.sent,
+        drain_outcome(end),
+        read,
+        "refused",
+    );
 }
 
 /// Reads the key line, waiting at most `timeout` ([`HANDSHAKE_TIMEOUT`] when serving), and answers it. `Err` holds the cause
@@ -496,24 +594,28 @@ fn handshake(
     reader: &mut BufReader<Watched>,
     keys: &dyn KeyVerifier,
     timeout: Duration,
-) -> Result<String, String> {
+) -> Result<String, Refused> {
     const SEND: &str = "send {\"key\": \"...\"} as the first line";
     reader.get_mut().deadline = Some(Instant::now() + timeout);
-    let (why, cause) = match read_line(reader, HANDSHAKE_MAX) {
+    let (why, cause, end) = match read_line(reader, HANDSHAKE_MAX) {
         Ok(Line::Text(t)) => {
             let key = serde_json::from_str::<Value>(&t)
                 .ok()
                 .and_then(|v| v.get("key").and_then(Value::as_str).map(str::to_string));
             let Some(client) = key.as_deref().and_then(|k| keys.verify(k)) else {
-                refuse(
+                let sent = refuse(
                     stream,
                     Refusal::Key,
                     "the key is missing, wrong or revoked; issue a new one in the app's MCP settings",
                 );
-                return Err(if key.is_some() {
-                    "the key is wrong or revoked".into()
-                } else {
-                    "the first line holds no key".into()
+                return Err(Refused {
+                    end: EndCode::Auth,
+                    sent,
+                    cause: if key.is_some() {
+                        "the key is wrong or revoked".into()
+                    } else {
+                        "the first line holds no key".into()
+                    },
                 });
             };
             reader.get_mut().deadline = None;
@@ -525,26 +627,31 @@ fn handshake(
         Ok(Line::Eof) if reader.get_ref().stop.load(Ordering::SeqCst) => (
             "the app is stopping AI access".to_string(),
             "the listener stopped before the key line".to_string(),
+            EndCode::Stopping,
         ),
         Ok(Line::Eof) => (
             format!("the connection ended before the key line; {SEND}"),
             "the client sent no key line before closing its side".to_string(),
+            EndCode::Closed,
         ),
         Ok(Line::TooLong) => (
             format!("the first line is longer than {HANDSHAKE_MAX} bytes; {SEND}"),
             format!("the first line was longer than {HANDSHAKE_MAX} bytes"),
+            EndCode::Protocol,
         ),
         Err(e) if e.kind() == io::ErrorKind::TimedOut => (
             format!("no key line within {} s; {SEND}", timeout.as_secs()),
             format!("no key line within {} s", timeout.as_secs()),
+            EndCode::Timeout,
         ),
         Err(e) => (
             "the app could not read the key line; try again".to_string(),
             format!("reading the key line failed: {e} ({:?})", e.kind()),
+            end_of_read_error(e.kind()),
         ),
     };
-    refuse(stream, Refusal::Handshake, &why);
-    Err(cause)
+    let sent = refuse(stream, Refusal::Handshake, &why);
+    Err(Refused { end, sent, cause })
 }
 
 /// Serves one accepted connection: the handshake, then the lines, and one log line for how it ended (ER-27: a client that saw
@@ -562,15 +669,26 @@ fn serve_connection(
     bounds: &Bounds,
 ) {
     let began = Instant::now();
-    let read_half = match stream
-        .try_clone()
-        .and_then(|s| Watched::new(s, stop.clone()))
-    {
+    let read_half = match read_half(stream, stop.clone()) {
         Ok(r) => r,
-        Err(e) => {
+        Err(setup) => {
+            let (code, detail, e) = match setup {
+                Setup::Gone(e) => (EndCode::Closed, "the client left before it was served", e),
+                Setup::Failed(e) => (EndCode::Internal, "could not be served", e),
+            };
             log::warn!(
-                "paddock_mcp: connection #{id} could not be served: {e} ({:?})",
+                "paddock_mcp: connection a{id} could not be served: {e} ({:?}); {detail}",
                 e.kind()
+            );
+            log_end(
+                id,
+                began,
+                code,
+                Phase::Hello,
+                ReasonOutcome::Unsent,
+                DrainOutcome::None,
+                0,
+                detail,
             );
             return;
         }
@@ -579,13 +697,21 @@ fn serve_connection(
     let mut writer: &TcpStream = stream;
     let client = match handshake(&mut writer, &mut reader, keys, bounds.handshake) {
         Ok(client) => client,
-        Err(cause) => {
+        Err(Refused {
+            end, sent, cause, ..
+        }) => {
             log::warn!(
-                "paddock_mcp: connection #{id} refused after {} ms: {cause}; {} read(s) interrupted by a signal and read again; {} empty read slice(s)",
+                "paddock_mcp: connection a{id} refused after {} ms: {cause}; {} read(s) interrupted by a signal and read again; {} empty read slice(s)",
                 began.elapsed().as_millis(),
                 reader.get_ref().interrupted.load(Ordering::SeqCst),
                 reader.get_ref().empty_slices
             );
+            let refusing = Refusing {
+                id,
+                accepted: began,
+                code: end,
+                sent,
+            };
             // The place goes back before the client can see the end; the drain holds a drain place instead.
             let draining = Place::take(&bounds.drain_places, DRAIN_PLACES);
             drop(place);
@@ -593,26 +719,43 @@ fn serve_connection(
             match draining {
                 Some(draining) => {
                     log_drain(
-                        id,
-                        began,
+                        refusing,
                         drain(&mut reader, Instant::now() + bounds.drain_time),
                     );
                     drop(draining);
                 }
-                None => log_drain(id, began, (0, DrainEnd::PoolFull)),
+                None => log_drain(refusing, (0, DrainEnd::PoolFull)),
             }
             return;
         }
     };
-    log::info!("paddock_mcp: connection #{id} paired with client {client}");
+    log::info!("paddock_mcp: connection a{id} paired with client {client}");
     let ended = serve_lines(server, &Session::new(&client), &mut reader, &mut writer);
     // Given back before the caller closes the connection: a client that has seen its end can connect again at once.
     drop(place);
     let interrupted = reader.get_ref().interrupted.load(Ordering::SeqCst);
     let ms = began.elapsed().as_millis();
+    // No closing notification is written today, so the reason never reaches the client (`reason=unsent`).
+    let (code, detail) = match &ended {
+        Ok(()) if stop.load(Ordering::SeqCst) => {
+            (EndCode::Stopping, "the listener stopped".to_string())
+        }
+        Ok(()) => (EndCode::Closed, "the client closed its side".to_string()),
+        Err(e) => (end_of_read_error(e.kind()), format!("{:?}", e.kind())),
+    };
+    log_end(
+        id,
+        began,
+        code,
+        Phase::Open,
+        ReasonOutcome::Unsent,
+        DrainOutcome::None,
+        0,
+        &detail,
+    );
     match ended {
         Ok(()) => log::info!(
-            "paddock_mcp: connection #{id} ({client}) ended after {ms} ms: {}; {interrupted} read(s) interrupted by a signal and read again",
+            "paddock_mcp: connection a{id} ({client}) ended after {ms} ms: {}; {interrupted} read(s) interrupted by a signal and read again",
             if stop.load(Ordering::SeqCst) {
                 "the listener stopped"
             } else {
@@ -620,7 +763,7 @@ fn serve_connection(
             }
         ),
         Err(e) => log::warn!(
-            "paddock_mcp: connection #{id} ({client}) failed after {ms} ms: {e} ({:?}); {interrupted} read(s) interrupted by a signal and read again",
+            "paddock_mcp: connection a{id} ({client}) failed after {ms} ms: {e} ({:?}); {interrupted} read(s) interrupted by a signal and read again",
             e.kind()
         ),
     }
@@ -628,26 +771,41 @@ fn serve_connection(
 
 /// Drains a connection refused before its key line was read (busy): its key line and anything after it are read and
 /// dropped under the refusal drain's bounds ([`REFUSAL_DRAIN_TIME`] in all, ADR 0072 §7; the [`drain`] byte cap).
-fn drain_unread(
-    id: u64,
-    accepted: Instant,
-    stream: &TcpStream,
-    stop: Arc<AtomicBool>,
-    bounds: &Bounds,
-) {
-    match stream.try_clone().and_then(|s| Watched::new(s, stop)) {
+fn drain_unread(refusing: Refusing, read_half: Result<Watched, Setup>, bounds: &Bounds) {
+    match read_half {
         Ok(read_half) => log_drain(
-            id,
-            accepted,
+            refusing,
             drain(
                 &mut BufReader::new(read_half),
                 Instant::now() + bounds.drain_time,
             ),
         ),
-        Err(e) => log::warn!(
-            "paddock_mcp: connection #{id} could not be drained after its refusal: {e} ({:?}); the client may see a reset",
-            e.kind()
-        ),
+        // The client read its refusal and left before the drain was set up: its end is the end of the drain, as `eof`.
+        Err(Setup::Gone(e)) => {
+            log::info!(
+                "paddock_mcp: connection a{} had already left when its drain was set up: {e} ({:?}); nothing to drain",
+                refusing.id,
+                e.kind()
+            );
+            log_drain(refusing, (0, DrainEnd::Eof));
+        }
+        Err(Setup::Failed(e)) => {
+            log::warn!(
+                "paddock_mcp: connection a{} could not be drained after its refusal: {e} ({:?}); the client may see a reset",
+                refusing.id,
+                e.kind()
+            );
+            log_end(
+                refusing.id,
+                refusing.accepted,
+                refusing.code,
+                Phase::Hello,
+                refusing.sent,
+                DrainOutcome::Failed,
+                0,
+                "the refused connection could not be drained",
+            );
+        }
     }
 }
 
@@ -701,7 +859,6 @@ fn serve_with(
         stop: stop.clone(),
         conns: conns.clone(),
         taken: Arc::new(AtomicUsize::new(0)),
-        ids: AtomicU64::new(0),
         stop_bound: bounds.stop,
         bounds: Arc::new(bounds),
     };
@@ -779,7 +936,6 @@ struct Accepting {
     stop: Arc<AtomicBool>,
     conns: Conns,
     taken: Arc<AtomicUsize>,
-    ids: AtomicU64,
     stop_bound: Duration,
     bounds: Arc<Bounds>,
 }
@@ -812,10 +968,23 @@ impl Accepting {
                         let stream = TcpStream::from(stream);
                         match stream.set_nonblocking(false) {
                             Ok(()) => self.serve(stream),
-                            Err(e) => log::warn!(
-                                "paddock_mcp: an accepted connection could not be served: {e} ({:?}); it is closed",
-                                e.kind()
-                            ),
+                            Err(e) => {
+                                log::warn!(
+                                    "paddock_mcp: an accepted connection could not be served: {e} ({:?}); it is closed",
+                                    e.kind()
+                                );
+                                let id = endlog::next_accept_number();
+                                log_end(
+                                    id,
+                                    Instant::now(),
+                                    EndCode::Internal,
+                                    Phase::Hello,
+                                    ReasonOutcome::Unsent,
+                                    DrainOutcome::None,
+                                    0,
+                                    "could not be switched to blocking reads",
+                                );
+                            }
                         }
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
@@ -836,7 +1005,18 @@ impl Accepting {
     /// [`serve_connection`], or refused `busy` here and drained.
     fn serve(&self, mut stream: TcpStream) {
         let accepted = Instant::now();
+        let id = endlog::next_accept_number();
         if !stream.peer_addr().is_ok_and(|p| p.ip().is_loopback()) {
+            log_end(
+                id,
+                accepted,
+                EndCode::Auth,
+                Phase::Hello,
+                ReasonOutcome::Unsent,
+                DrainOutcome::None,
+                0,
+                "not a loopback client",
+            );
             return;
         }
         let mut list = self
@@ -850,6 +1030,16 @@ impl Accepting {
             log::info!(
                 "paddock_mcp: a connection from port {peer} closed: the listener is stopping"
             );
+            log_end(
+                id,
+                accepted,
+                EndCode::Stopping,
+                Phase::Hello,
+                ReasonOutcome::Unsent,
+                DrainOutcome::None,
+                0,
+                "the listener is stopping",
+            );
             return;
         }
         let (done, live): (Vec<_>, Vec<_>) = std::mem::take(&mut *list)
@@ -859,18 +1049,25 @@ impl Accepting {
         for m in done {
             let _ = m.handle.join();
         }
-        let id = self.ids.fetch_add(1, Ordering::SeqCst) + 1;
         let peer = stream.peer_addr().map_or(0, |p| p.port());
         let max_connections = self.max_connections;
         let Some(place) = Place::take(&self.taken, max_connections) else {
             log::warn!(
-                "paddock_mcp: connection #{id} from port {peer} refused: all {max_connections} places are taken"
+                "paddock_mcp: connection a{id} from port {peer} refused: all {max_connections} places are taken"
             );
-            refuse(
+            // Before the refusal is written: the client may leave the moment it has read it (see `read_half`).
+            let watched = read_half(&stream, self.stop.clone());
+            let sent = refuse(
                 &mut stream,
                 Refusal::Busy,
                 "too many MCP clients are connected",
             );
+            let refusing = Refusing {
+                id,
+                accepted,
+                code: EndCode::Busy,
+                sent,
+            };
             // The client sees the refusal and then the end at once, but the socket is closed only once the client's input is
             // drained: a socket closed with unread data is reset, and the reset can reach the client before the refusal
             // (2026-11-07). The drain has its own thread, at most [`DRAIN_PLACES`] at a time.
@@ -880,23 +1077,23 @@ impl Accepting {
                 Some(draining) => {
                     let stream = Arc::new(stream);
                     let kept = Arc::downgrade(&stream);
-                    let (stop, bounds) = (self.stop.clone(), self.bounds.clone());
+                    let bounds = self.bounds.clone();
                     spawn_member(
                         &mut list,
-                        format!("the drain of connection #{id}"),
+                        format!("the drain of connection a{id}"),
                         kept,
                         move || {
-                            drain_unread(id, accepted, &stream, stop, &bounds);
+                            drain_unread(refusing, watched, &bounds);
                             drop(draining);
                             drop(stream);
                         },
                     );
                 }
-                None => log_drain(id, accepted, (0, DrainEnd::PoolFull)),
+                None => log_drain(refusing, (0, DrainEnd::PoolFull)),
             }
             return;
         };
-        log::info!("paddock_mcp: connection #{id} from port {peer} accepted");
+        log::info!("paddock_mcp: connection a{id} from port {peer} accepted");
         let stream = Arc::new(stream);
         let kept = Arc::downgrade(&stream);
         let (server, keys, stop, bounds) = (
@@ -905,7 +1102,7 @@ impl Accepting {
             self.stop.clone(),
             self.bounds.clone(),
         );
-        spawn_member(&mut list, format!("connection #{id}"), kept, move || {
+        spawn_member(&mut list, format!("connection a{id}"), kept, move || {
             // Gives the place back before the client can see the end of its connection; then the last handle (the read half
             // is already closed) is closed here, which ends it.
             serve_connection(id, &server, &stream, keys.as_ref(), stop, place, &bounds);
@@ -1131,6 +1328,7 @@ mod tests {
         assert!(
             handshake(&mut out, &mut reader, &keys, HANDSHAKE_TIMEOUT)
                 .unwrap_err()
+                .cause
                 .contains("listener stopped")
         );
         let stopping: Value = serde_json::from_slice(&out).unwrap();
@@ -1164,9 +1362,9 @@ mod tests {
 
     /// Waits for the line about connection `id` that holds `text`.
     fn wait_logged(id: u64, text: &str) -> String {
-        let prefix = format!("paddock_mcp: connection #{id} ");
+        let prefix = format!("paddock_mcp: connection a{id} ");
         wait_for_line(|l| l.starts_with(&prefix) && l.contains(text), GUARD)
-            .unwrap_or_else(|| panic!("no line for connection #{id} with {text:?}"))
+            .unwrap_or_else(|| panic!("no line for connection a{id} with {text:?}"))
     }
 
     /// The id the listener gave the connection whose client end is `client`, from its "accepted" or "refused" line (logged
@@ -1174,7 +1372,7 @@ mod tests {
     fn id_by_port(client: &TcpStream) -> u64 {
         let needle = format!(" from port {} ", client.local_addr().unwrap().port());
         let line = wait_for_line(|l| l.contains(&needle), GUARD).unwrap();
-        line["paddock_mcp: connection #".len()..]
+        line["paddock_mcp: connection a".len()..]
             .split(' ')
             .next()
             .unwrap()
@@ -1209,6 +1407,51 @@ mod tests {
         }
     }
 
+    /// A busy client that read its refusal and left (reset) before the drain was set up is not a failed drain: the end line says
+    /// `drain=eof` (bug of the WP-7 review: `drain=failed` on 3 of 20 runs of the ending test on macOS).
+    #[test]
+    fn a_busy_client_that_left_before_the_drain_was_set_up_ends_as_eof_not_failed() {
+        capture_logs();
+        let id = endlog::next_accept_number();
+        let refusing = Refusing {
+            id,
+            accepted: Instant::now(),
+            code: EndCode::Busy,
+            sent: ReasonOutcome::Sent,
+        };
+        let gone = io::Error::from(io::ErrorKind::InvalidInput);
+        drain_unread(refusing, Err(Setup::Gone(gone)), &Bounds::serving());
+        let needle = format!("connection ended id=a{id} ");
+        let line = wait_for_line(|l| l.contains(&needle), GUARD).expect("an end line");
+        assert!(
+            line.contains("code=busy") && line.contains("reason=sent"),
+            "{line}"
+        );
+        assert!(line.contains("drain=eof"), "{line}");
+        // A failure of this side (no descriptor for the clone) stays a failed drain.
+        let id = endlog::next_accept_number();
+        let refusing = Refusing { id, ..refusing };
+        let none = io::Error::from(io::ErrorKind::OutOfMemory);
+        drain_unread(refusing, Err(Setup::Failed(none)), &Bounds::serving());
+        let needle = format!("connection ended id=a{id} ");
+        let line = wait_for_line(|l| l.contains(&needle), GUARD).expect("an end line");
+        assert!(line.contains("drain=failed"), "{line}");
+    }
+
+    /// The cause, measured: on macOS a socket the client has reset takes no read timeout any more, so the read half set up
+    /// after the refusal was written fails (ER-28: the failing step is `set_read_timeout`, not the clone).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_refuses_a_read_timeout_on_a_reset_socket() {
+        let (server_end, client) = pair();
+        reset_on_close(&client);
+        drop(client);
+        let stop = Arc::new(AtomicBool::new(false));
+        paddock_testkit::wait_until_within("the reset to reach the socket", GUARD, || {
+            matches!(read_half(&server_end, stop.clone()), Err(Setup::Gone(_)))
+        });
+    }
+
     /// A listener whose one place is held by a paired client, so the next client is refused `busy`.
     fn busy_listener(bounds: Bounds) -> (Serving, TcpStream) {
         let keys = Arc::new(crate::keys::KeyStore::new());
@@ -1234,7 +1477,7 @@ mod tests {
 
     /// The captured line about connection `id` that holds `text`, if any.
     fn logged(id: u64, text: &str) -> Option<String> {
-        let prefix = format!("paddock_mcp: connection #{id} ");
+        let prefix = format!("paddock_mcp: connection a{id} ");
         LOGGED
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -1254,7 +1497,7 @@ mod tests {
             .iter()
             .find(|l| l.ends_with(&needle))
             .unwrap_or_else(|| panic!("no accepted line for port {port}"));
-        line["paddock_mcp: connection #".len()..]
+        line["paddock_mcp: connection a".len()..]
             .split(' ')
             .next()
             .unwrap()
@@ -1452,7 +1695,10 @@ mod tests {
         drop(client);
         let mut out = Vec::new();
         let cause = handshake(&mut out, &mut reader, &keys, HANDSHAKE_TIMEOUT).unwrap_err();
-        assert!(cause.contains("reading the key line failed"), "{cause}");
+        assert!(
+            cause.cause.contains("reading the key line failed"),
+            "{cause}"
+        );
         let refusal: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(refusal["code"], "handshake", "{refusal}");
         assert!(
@@ -1473,7 +1719,7 @@ mod tests {
         let mut out = Vec::new();
         // A zero timeout ends the wait after the first empty slice.
         let cause = handshake(&mut out, &mut reader, &keys, Duration::ZERO).unwrap_err();
-        assert!(cause.contains("no key line within 0 s"), "{cause}");
+        assert!(cause.cause.contains("no key line within 0 s"), "{cause}");
         let refusal: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(refusal["code"], "handshake", "{refusal}");
     }
@@ -1803,7 +2049,6 @@ mod tests {
             stop: serving.stop.clone(),
             conns: serving.conns.clone(),
             taken: Arc::default(),
-            ids: AtomicU64::new(1000),
             stop_bound: serving.stop_bound,
             bounds: Arc::new(Bounds::serving()),
         }

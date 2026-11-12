@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { Logger } from '../core/logger';
 import { DockService } from '../dock/dock.service';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { NOTIFICATIONS_VIEW } from './notice-actions';
 import { NotificationsSource } from './notifications-source';
@@ -19,6 +19,8 @@ import { provideNotificationSource } from '../health/provide-notification-host';
 import { NotificationsBackend } from './notifications-backend';
 import { NotificationsStore } from './notifications.store';
 import { NoticesRecord } from './notifications.types';
+import { contributeFrom } from '../extensions/contributions';
+import { NOTIFICATIONS_COMMANDS_CONTRIBUTIONS } from './notifications.contributions';
 
 export function notificationsViews(): DebriefView[] {
   return [
@@ -30,14 +32,6 @@ export function notificationsViews(): DebriefView[] {
       defaultPosition: 'right', layout: { area: 'status', min: { width: 320, height: 180 }, pref: { width: 480, height: 360 }, priority: 20 },
       component: () => import('./notifications-panel').then((m) => m.NotificationsPanel),
     },
-  ];
-}
-
-export function notificationsCommands(store: InstanceType<typeof NotificationsStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@notifications.category:View`;
-  return [
-    { id: 'notifications.show', title: $localize`:@@notifications.cmd.show:View: Notifications`, category, view: NOTIFICATIONS_VIEW, run: (ctx) => ctx.showView(NOTIFICATIONS_VIEW) },
-    { id: 'notifications.markAllRead', title: $localize`:@@notifications.cmd.markAll:Notifications: Mark all read`, category, when: () => store.unread() > 0, run: () => void store.markAllRead() },
   ];
 }
 
@@ -109,8 +103,9 @@ export function startNotifications(): void {
 /** One line in `app.config.ts`: Notifications (view, button, commands, toasts, saved project messages). */
 export function provideNotifications(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: notificationsViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => notificationsCommands(inject(NotificationsStore)) },
+    ...contributeFrom('views', notificationsViews),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...NOTIFICATIONS_COMMANDS_CONTRIBUTIONS,
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(NotificationsPersistence).contribution] },
     provideNotificationSource(NotificationsSource),
     provideAppInitializer(() => startNotifications()),

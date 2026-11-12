@@ -82,7 +82,7 @@ impl Scratch {
             .prefix("paddock-testkit-")
             .tempdir()?;
         // Canonical, so paths compare equal to what the code under test resolves (macOS /var vs /private/var).
-        let root = dir.path().canonicalize()?;
+        let root = paddock_env::winpath::real(dir.path())?;
         for sub in ["work", "home", "tmp"] {
             fs::create_dir(root.join(sub))?;
         }

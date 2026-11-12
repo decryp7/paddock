@@ -2,6 +2,9 @@
 # (lint/clippy.toml) apply here: the shared crates are where the process helpers live, so `Command::new` and `temp_dir`
 # stay allowed in them, and paddock-secrets is the one door to the OS credential store, so keyring::Entry stays allowed.
 disallowed-methods = [
+    # ADR 0021 amendment 2026-11-11 (D-P2): a canonical path keeps Windows' verbatim `\\?\` prefix and later meets git, cargo, text or a plain path. Go through paddock_env::winpath, which holds the one #[expect].
+    { path = "std::fs::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },
+    { path = "std::path::Path::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },
     # ADR 0033: nothing is ended by a bare pid. A pid may name another process by the time it is signalled; end it through
     # paddock-proc with a ProcessId, or through a handle or job this process owns. A justified site carries
     # #[expect(clippy::disallowed_methods, reason = "...")].

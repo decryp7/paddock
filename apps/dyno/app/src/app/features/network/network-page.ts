@@ -205,7 +205,9 @@ function readCollapsed(): Set<string> {
     .summary { margin: 0; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
     .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
     .summary .this-pc { margin-left: auto; color: var(--text-3); }
-    .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
+    /* All of the controls (search, two checks, three segmented controls, expand and collapse) fit one row at 1280 and at 1240 (a wider font or scrollbar): the search gives way first, down to 96 px. */
+    .bar { display: flex; gap: var(--sp-2) var(--sp-3); align-items: center; flex-wrap: wrap; }
+    .bar dy-search-field { flex: 1 1 96px; min-width: 96px; max-width: 220px; }
     .traffic { margin-left: auto; flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .reach { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-xs); white-space: nowrap; }
     .reach dy-icon { --icon-size: 13px; }
@@ -286,7 +288,7 @@ export class NetworkPage implements OnInit, OnDestroy {
     if (this.tab() === 'connections') {
       return [
         ...prog,
-        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(180px, 320px)', sortable: false },
+        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(180px, 1.5fr)', sortable: false },
         ...(this.store.resolveNames() ? [{ key: 'host', header: 'Host name', value: (r: Row) => (r.kind === 'item' ? (this.hostName(r.item as ConnectionRow) ?? '') : ''), width: 'minmax(90px, 2fr)', sortable: false }] : []),
         { key: 'service', header: 'Service', value: (r) => this.itemService(r), width: 'minmax(70px, 1fr)', sortable: false },
         { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ConnectionRow).proto, (r.item as ConnectionRow).ipv6) : ''), width: '68px', sortable: false },

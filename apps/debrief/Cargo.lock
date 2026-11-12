@@ -839,6 +839,7 @@ dependencies = [
  "debrief-plugin-api",
  "debrief-plugin-package",
  "debrief-plugin-test",
+ "paddock-testkit",
  "semver",
  "serde",
  "serde_json",
@@ -1579,6 +1580,7 @@ dependencies = [
  "debrief-plugin-tools",
  "globset",
  "log",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "sysinfo",
@@ -1731,6 +1733,7 @@ dependencies = [
  "debrief-store-client",
  "debrief-store-duck",
  "paddock-env",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "tempfile",
@@ -1745,6 +1748,7 @@ dependencies = [
  "debrief-core",
  "globset",
  "log",
+ "paddock-proc",
  "regex",
  "serde",
  "serde_json",
@@ -2057,6 +2061,7 @@ dependencies = [
  "debrief-plugin-profiling",
  "debrief-profile",
  "debrief-symbols",
+ "paddock-testkit",
  "proptest",
  "serde",
  "serde_json",
@@ -2156,6 +2161,7 @@ dependencies = [
  "debrief-monitor",
  "debrief-plugin-api",
  "debrief-plugin-windows",
+ "paddock-testkit",
  "quick-xml",
  "serde",
  "serde_json",
@@ -2188,6 +2194,7 @@ dependencies = [
  "evtx",
  "insta",
  "minidump",
+ "paddock-proc",
  "proptest",
  "quick-xml",
  "serde",
@@ -2311,7 +2318,6 @@ dependencies = [
  "paddock-testkit-start",
  "serde",
  "serde_json",
- "sysinfo",
  "tempfile",
 ]
 
@@ -5389,6 +5395,7 @@ dependencies = [
 name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",
@@ -9617,6 +9624,7 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "flate2",
+ "paddock-testkit",
  "sha2 0.11.1",
  "tar",
  "tempfile",

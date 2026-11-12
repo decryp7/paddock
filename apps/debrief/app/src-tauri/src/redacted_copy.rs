@@ -129,6 +129,24 @@ fn redacted_ui(redactor: &Redactor, ui: &Value, reports: &[Value]) -> Result<Str
     serde_json::to_string(&doc).map_err(|e| CmdError::new(crate::ErrorCode::Internal, e.to_string()))
 }
 
+/// The idempotency key of a redacted copy: the target, the project, the redaction rules, the name, the UI state and the
+/// reports, the settings overrides: every input of the archive's content (`None`: they cannot be fingerprinted).
+fn copy_key(
+    win: &CurrentWindow,
+    out: &std::path::Path,
+    cfg: &RedactCfg,
+    name: &str,
+    ui: &Value,
+    reports: &[Value],
+    overrides: &str,
+) -> Option<crate::jobs::key::JobKey> {
+    let id = win.engine.opened_id().map_or_else(String::new, |id| id.to_string());
+    let inputs = serde_json::json!({ "cfg": cfg, "name": name, "ui": ui, "reports": reports, "overrides": overrides });
+    crate::jobs::export_key("Redacted copy", Some(win.label()), out)
+        .text(&id)
+        .request(&inputs, &[])
+}
+
 /// Writes the window's project as `<name>.debriefz` with everything redacted (see the module docs). A file job does the
 /// work (the command returns its id at once): its value (`jobs_wait`) is what the copy holds and what it left out.
 #[tauri::command]
@@ -148,17 +166,20 @@ pub(crate) async fn export_redacted_copy<R: Runtime>(
     crate::share::refuse_bundle_folder(&path)?;
     let target = grants.write(&path, &[debrief_core::package::ARCHIVE_EXTENSION])?;
     let file = target.path().to_path_buf();
-    debrief_core::overwrite::check_overwrite(&file, overwrite.unwrap_or(false))?;
     let base = state.host.compiled().profile.redact.clone();
     let cfg = config_for(&base, &options).map_err(|m| CmdError::invalid(m).field("options"))?;
+    let reports = reports.unwrap_or_default();
     let redactor = Redactor::from_config(&cfg, Salt::random()).map_err(|e| CmdError::invalid(format!("{e:#}")))?;
-    let ui_json = redacted_ui(&redactor, &ui, &reports.unwrap_or_default())?;
+    let ui_json = redacted_ui(&redactor, &ui, &reports)?;
     let mut counts = Counts::new();
+    let overrides = state.profile_doc().toml;
     let manifest = ProjectManifest {
         name: redactor.apply(&name, &mut counts).into_owned(),
-        profile_overrides: state.profile_doc().toml,
+        profile_overrides: overrides.clone(),
         ..ProjectManifest::default()
     };
+    // What the copy depends on, as the user gave it (the redacted forms carry a fresh salt, so they differ on every ask).
+    let key = copy_key(&state, &file, &cfg, &name, &ui, &reports, &overrides);
     let request = RedactedExportRequest {
         cfg,
         manifest,
@@ -167,7 +188,12 @@ pub(crate) async fn export_redacted_copy<R: Runtime>(
     };
     // A file job: the Jobs pane shows each stage (events redacted, the copy imported, the archive written) with its
     // counts, and Cancel stops the copy and removes its work folder and any partial archive.
-    let spec = crate::jobs::export_spec("Redacted copy", Some(state.label()), &request.out);
+    let spec = crate::jobs::export_spec_with("Redacted copy", Some(state.label()), &request.out, key);
+    // The same copy already running serves this ask (before the overwrite question), another export of the file is refused.
+    if let Some(id) = crate::jobs::preflight(&app, &spec)? {
+        return Ok(id);
+    }
+    debrief_core::overwrite::check_overwrite(&request.out, overwrite.unwrap_or(false))?;
     let result = crate::jobs::JobResult::file(request.out.display().to_string());
     let (controls, control) = crate::jobs::store_cancel(Default::default());
     let controls = crate::jobs::with_stage_probe(controls, &control, "Redacting events", "Writing the archive");
@@ -375,5 +401,33 @@ mod tests {
         assert_eq!((report.sources, report.events), (1, 2));
         let bytes = std::fs::read(&out).unwrap();
         assert!(!bytes.windows(7).any(|w| w == b"invente"));
+    }
+
+    #[test]
+    fn a_redacted_copy_is_keyed_by_everything_its_archive_holds() {
+        let app = crate::test_support::test_app(None);
+        let win = crate::test_support::main_window(&app);
+        let out = std::path::Path::new("/tmp/copy.debriefz");
+        let ui = serde_json::json!({"panel": 1});
+        let reports = vec![serde_json::json!({"id": "r1"})];
+        let key = |cfg: &RedactCfg, name: &str, ui: &Value, reports: &[Value], overrides: &str| {
+            copy_key(&win, out, cfg, name, ui, reports, overrides).unwrap().finish()
+        };
+        let same = key(&base(), "Case", &ui, &reports, "");
+        assert_eq!(same, key(&base(), "Case", &ui, &reports, ""), "an identical ask is another job");
+        assert_ne!(same, key(&base(), "Other", &ui, &reports, ""), "the name");
+        assert_ne!(
+            same,
+            key(&base(), "Case", &serde_json::json!({"panel": 2}), &reports, ""),
+            "the UI state"
+        );
+        assert_ne!(
+            same,
+            key(&base(), "Case", &ui, &[serde_json::json!({"id": "r2"})], ""),
+            "the reports"
+        );
+        assert_ne!(same, key(&base(), "Case", &ui, &[], ""), "the set of reports");
+        assert_ne!(same, key(&base(), "Case", &ui, &reports, "[parse]"), "the settings overrides");
+        assert_ne!(same, key(&RedactCfg::default(), "Case", &ui, &reports, ""), "the redaction rules");
     }
 }

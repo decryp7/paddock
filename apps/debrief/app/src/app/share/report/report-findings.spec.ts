@@ -54,10 +54,11 @@ describe('health-check findings and events in reports', () => {
     const items = TestBed.inject(RecordActions).itemsFor(at(rows, 0));
     const add = items.find((i) => i.label === 'Add to report')!;
     add.run();
-    expect(blocksOf(reports.active()!)[0]).toMatchObject({ type: 'events', ids: [at(rows, 0).id] });
+    // The entry loads the report's code on use (M1: lazy by construction); wait for its block.
+    await vi.waitFor(() => expect(blocksOf(reports.active()!)[0]).toMatchObject({ type: 'events', ids: [at(rows, 0).id] }));
     const multi = TestBed.inject(RecordActions).itemsFor(at(rows, 0), { records: rows });
     multi.find((i) => i.label === 'Add 3 events to report')!.run();
-    expect(blocksOf(reports.active()!)[1]).toMatchObject({ type: 'events', ids: rows.map((r) => r.id) });
+    await vi.waitFor(() => expect(blocksOf(reports.active()!)[1]).toMatchObject({ type: 'events', ids: rows.map((r) => r.id) }));
     expect(TestBed.inject(ReportActions).addEvents([])).toBe(false);
   });
 

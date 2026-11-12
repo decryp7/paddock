@@ -79,6 +79,8 @@ windows = { workspace = true, features = [
 # The self dev-dependency that turns `test-support` on for this package's tests and builds the fake engine for them.
 pitwall-server = { path = ".", features = ["test-support"] }
 tempfile.workspace = true
+# A held loopback port for "nothing answers there" (C39): the speech engine's dead-port test.
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs", "io-util", "sync", "signal"] }
 
 [lints]

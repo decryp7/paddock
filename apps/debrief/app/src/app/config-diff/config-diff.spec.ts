@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { all, buttonByText, el, MemoryLogger, settle, text, typeInto, settleUntil } from '../../testing/helpers';
 import { Logger } from '../core/logger';
 import { CHANGE_KINDS, DiffOptions, SnapshotFile } from '../core/config-diff.types';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { DebriefCommand, DebriefView } from '../extensions/tokens';
 import { ConfigDiffBackend, provideConfigDiffBackend, TauriConfigDiffBackend } from './config-diff-backend';
 import { ConfigDiffPicker, Side } from './config-diff-picker';
 import { ConfigDiffView, valueText } from './config-diff-view';
@@ -10,6 +10,7 @@ import { ConfigDiffStore, PAGE_SIZE, parsePatterns } from './config-diff.store';
 import { demoEntries, MOCK_DEFAULT_IGNORE, MockConfigDiffBackend, mockPage } from './mock/mock-config-diff-backend';
 import { CONFIG_DIFF_COMMANDS, CONFIG_DIFF_VIEWS, provideConfigDiff } from './provide-config-diff';
 import { at } from '../../testing/must';
+import { contributed } from '../../testing/contributions';
 
 class FakePicker {
   file: Record<Side, string | null> = { left: '/l/a.json', right: '/r/a.json' };
@@ -449,9 +450,9 @@ describe('ConfigDiffView', () => {
 describe('provideConfigDiff', () => {
   it('registers the view, the command and a browser backend', async () => {
     TestBed.configureTestingModule({ providers: [provideConfigDiff(), { provide: Logger, useFactory: () => new MemoryLogger() }] });
-    const views = TestBed.inject(DEBRIEF_VIEWS).flat() as DebriefView[];
+    const views = contributed('views') as DebriefView[];
     expect(views.map((v) => v.id)).toContain('config-diff');
-    const commands = TestBed.inject(DEBRIEF_COMMANDS).flat() as DebriefCommand[];
+    const commands = contributed('commands') as DebriefCommand[];
     const cmd = commands.find((c) => c.id === 'tools.configDiff.show')!;
     const showView = vi.fn();
     await cmd.run({ showView } as never);

@@ -680,6 +680,16 @@ impl AppState {
                 ),
             ));
         }
+        // A clip reaches only a model whose engine says it hears (`/props` `modalities.audio`, ADR 0023 Decision 5).
+        if req.has_audio() && !busy.model().audio {
+            return Err(ApiError::new(
+                ErrorKind::InvalidRequest,
+                format!(
+                    "the model {} cannot hear audio. Choose a model that hears (one downloaded with its audio projector, such as Gemma 4 E4B or Voxtral).",
+                    resolved.id
+                ),
+            ));
+        }
         let memory_bytes = self.serving.footprint(&resolved.id);
         if let Some(p) = &perms {
             limits::check_memory(memory_bytes, self.serving.memory_now().total, p.limits.max_memory_percent).map_err(denied)?;
@@ -1009,6 +1019,7 @@ fn request_text(req: &ChatRequest) -> String {
             match p {
                 Part::Text(t) => out.push_str(t),
                 Part::Image(_) => out.push_str("[image]"),
+                Part::Audio(_) => out.push_str("[audio]"),
             }
         }
         out.push('\n');

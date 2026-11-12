@@ -1,7 +1,8 @@
 import { computed, DestroyRef, DOCUMENT, effect, inject, Injectable, Injector, signal } from '@angular/core';
 import { SettingsStore } from '../../settings/settings.store';
 import { effectiveTraits, resolveTokens, traitAttributes, withUiFont } from '../../theme/theme-tokens';
-import { resolveThemeId, themeById } from '../../theme/themes';
+import { BUILT_IN_THEMES, resolveThemeId, themeById } from '../../theme/themes';
+import { contributedItems, DEBRIEF_KIND } from '../../extensions/contributions';
 import { Density, Scheme, ThemeDef, ThemeTraits, TokenSet } from '../../theme/theme.types';
 import { UiPrefsStore } from './ui-prefs.store';
 
@@ -25,8 +26,14 @@ export class ThemeService {
   private readonly systemScheme = signal<Scheme>(this.media?.matches ? 'light' : 'dark');
   private started = false;
 
+  /**
+   * The registered theme packs (`theme/themes.contributions.ts`), in registration order; the built-in ones in a window
+   * that registers none (a unit test, a window composed without them).
+   */
+  readonly packs: readonly ThemeDef[] = ((registered) => (registered.length ? registered : BUILT_IN_THEMES))(contributedItems<ThemeDef>(DEBRIEF_KIND.themes));
+
   /** The theme in effect. */
-  readonly theme = computed<ThemeDef>(() => themeById(resolveThemeId(this.prefs.theme(), this.systemContrast())));
+  readonly theme = computed<ThemeDef>(() => themeById(resolveThemeId(this.prefs.theme(), this.systemContrast()), this.packs));
   /** The scheme in effect ("system" resolved). */
   readonly scheme = computed<Scheme>(() => {
     const mode = this.prefs.scheme();

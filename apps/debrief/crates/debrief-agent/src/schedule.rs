@@ -125,6 +125,13 @@ pub fn human(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durations_never_panic_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"30s", b"15m", b"18446744073709551615d", b"-5", b"1.5h"], |bytes| {
+            parse_duration(&String::from_utf8_lossy(bytes))
+        });
+    }
     use chrono::TimeZone;
 
     fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32, s: u32) -> DateTime<Utc> {

@@ -1,5 +1,4 @@
-import { SHELL_PLUGIN, SHELL_VERSION } from '../generated/shell';
-import { SHELL_COMMANDS } from '../generated/shell-commands';
+import { SHELL_COMMANDS, SHELL_PLUGIN, SHELL_VERSION } from '@decryp7/paddock-ui/shell/generated';
 import { checkShellVersion, isShellCommand, shellCommand, shellInvoke, shellVersionProblem } from './plugin';
 
 /** Node's `fs`, loaded at run time (the spec programme has no Node types). */

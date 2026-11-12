@@ -327,7 +327,7 @@ impl Fixture {
         // Plain, not `\\?\C:\...`: the fixture hands these paths to git (HOME) and writes them into files, and git on Windows cannot open
         // a config file through a verbatim path ("unknown error occurred while reading the configuration files").
         assert!(root.exists(), "root exists");
-        let root = paddock_repo_graph::real_path(root);
+        let root = paddock_env::winpath::real_or_given(root);
         let home = root.join("home");
         let temp = root.join("job");
         let dev = root.join("tools-home").join("release-1234-bundle");

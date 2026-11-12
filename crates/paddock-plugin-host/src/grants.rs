@@ -108,7 +108,7 @@ impl Grants {
             };
             let inside = roots
                 .iter()
-                .filter_map(|r| std::fs::canonicalize(r).ok())
+                .filter_map(|r| paddock_env::winpath::real_verbatim(r).ok())
                 .any(|r| resolved.starts_with(&r));
             if inside {
                 Ok(resolved)
@@ -129,13 +129,13 @@ impl Grants {
 /// Resolves `path` to an absolute path with links followed. A path that does not exist yet (`allow_missing`) is resolved by
 /// its folder.
 pub fn resolve(path: &Path, allow_missing: bool) -> std::io::Result<PathBuf> {
-    match std::fs::canonicalize(path) {
+    match paddock_env::winpath::real_verbatim(path) {
         Ok(p) => Ok(p),
         Err(e) if allow_missing && e.kind() == std::io::ErrorKind::NotFound => {
             let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
                 return Err(e);
             };
-            Ok(std::fs::canonicalize(dir)?.join(name))
+            Ok(paddock_env::winpath::real_verbatim(dir)?.join(name))
         }
         Err(e) => Err(e),
     }
@@ -396,7 +396,10 @@ reason = "r"
             PathAccess::Read,
         )
         .unwrap();
-        assert_eq!(ok, std::fs::canonicalize(docs.join("a.txt")).unwrap());
+        assert_eq!(
+            ok,
+            paddock_env::winpath::real_verbatim(&docs.join("a.txt")).unwrap()
+        );
         // A folder itself is inside its grant; a file in a folder that is only readable is not writable.
         policy(docs.to_str().unwrap(), PathKind::Dir, PathAccess::Read).unwrap();
         let no_write = policy(

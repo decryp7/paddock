@@ -30,6 +30,7 @@ pub fn prefix_key(app: &str, req: &ChatRequest) -> PrefixKey {
             match p {
                 Part::Text(t) => h.update(t.as_bytes()),
                 Part::Image(_) => h.update(b"[image]"),
+                Part::Audio(_) => h.update(b"[audio]"),
             }
             h.update([0]);
         }

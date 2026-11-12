@@ -329,9 +329,21 @@ on demand; they are never written to disk and are gone when Pitwall stops. Works
 
 ![Playground](screenshots/playground-light.png)
 
-Chat with any installed model from Pitwall's own window, streamed through the same pipeline apps use (so it queues, loads and
-releases exactly like theirs). Works. Side-by-side comparison of two models in one view is a design goal and is not confirmed
-yet.
+Two tabs. **Compare** sends one text question to two models and shows both answers, streamed through the same pipeline apps
+use, so it queues, loads and releases like theirs. Works.
+
+**Chat** is a conversation with one model, in the same window and through the same pipeline. Built and shipped. What it does:
+
+- **Text and code attachments**: up to 16 per question, UTF-8, 256 KiB each, checked again in Rust. Works.
+- **Pictures**: PNG, JPEG, WebP or GIF, read by content, turned upright, shrunk to what the model's vision file takes and
+  stripped of metadata. A model without vision gets an explanation and a switch offer, not a silent drop. Works.
+- **Saved chats**: one file per chat on this computer, attachments by SHA-256 beside them, a per-chat "Don't save this chat"
+  that writes nothing to disk, Settings > Chats for the default and Delete all, and limits (1,000 chats, 16 MiB a chat, 2 GiB of
+  attachments). Not encrypted, and never in Report a problem. Works.
+- **Tools from connected apps** (MCP): Settings > Connected apps holds a key you paste for each app; Dyno is the one app
+  today. A read-only tool asks the first time and can be allowed always; an action asks on every call; every call and result
+  shows in the chat, and a result is cut at 16 KiB. The host lives in the app, never in the server. Works.
+- **Not built**: speech input, a per-chat chooser for tools, and a cap on a result by the model's context size.
 
 ## Benchmarks
 

@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
-import { CommandService, ShellContextHost, type CommandDef } from '@decryp7/paddock-ui/shell';
+import { CommandService, ShellContextHost, type CommandDef } from '@decryp7/paddock-ui/shell/contributions';
 import { PdContextMenu } from '@decryp7/paddock-ui/shell/menu';
 import type { DemoContext } from '../demo-context';
 import { DemoNote } from '../demo-note';

@@ -2,9 +2,10 @@ import { TestBed } from '@angular/core/testing';
 import { all, el, provideFakeDock, provideTinyBackendBare, settle, typeInto } from '../../../testing/helpers';
 import { CommandRegistry } from '../../extensions/command-registry';
 import { KeybindingOverridesStore } from '../../extensions/keybinding-overrides.store';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
+import { DebriefCommand } from '../../extensions/tokens';
 import { KeyboardSettings } from './keyboard-settings';
 import { shortcutRows } from './shortcut-rows';
+import { debriefContributionProviders } from '../../extensions/contributions';
 
 const cmd = (id: string, title: string, extra: Partial<DebriefCommand> = {}): DebriefCommand => ({ id, title, run: () => undefined, ...extra });
 const COMMANDS = [
@@ -34,7 +35,7 @@ describe('KeyboardSettings', () => {
 
   async function setup() {
     TestBed.configureTestingModule({
-      providers: [provideTinyBackendBare(), provideFakeDock(), { provide: DEBRIEF_COMMANDS, multi: true, useValue: COMMANDS }],
+      providers: [provideTinyBackendBare(), provideFakeDock(), ...debriefContributionProviders({ commands: COMMANDS })],
     });
     const fixture = TestBed.createComponent(KeyboardSettings);
     await settle(fixture);

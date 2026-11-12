@@ -8,6 +8,8 @@ import { WorkspaceStore } from '../core/workspace.store';
 import { MemoryLogger, settle } from '../../testing/helpers';
 import { AnalysisActions } from './analysis-actions';
 import { AnalysisCommands } from './analysis-commands';
+import { ANALYSIS_COMMAND_STUBS } from './analysis.contributions';
+import { stubMismatches } from '../../testing/contributions';
 import { AnalysisTargets, windowQuery } from './analysis-targets';
 import { AnalysisTime } from './analysis-time';
 import { ANALYSIS_VIEWS, createAnalysisBackend, provideAnalysis } from './analysis.plugin';
@@ -224,6 +226,11 @@ describe('analysis plugin', () => {
     // The browser build gets the mock backend, wrapped so failures are logged.
     expect(TestBed.inject(AnalysisBackend)).toBeDefined();
     expect(await TestBed.inject(AnalysisBackend).checkQuery('| nope')).not.toBeNull();
+  });
+
+  it('registers a stub for every command of AnalysisCommands, equal to it, so the class loads on first use', () => {
+    TestBed.configureTestingModule({ providers: provideAnalysisTesting() });
+    expect(stubMismatches(ANALYSIS_COMMAND_STUBS, TestBed.inject(AnalysisCommands).commands)).toEqual([]);
   });
 
   it('loads every view component lazily', async () => {

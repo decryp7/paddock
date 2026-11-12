@@ -388,7 +388,7 @@ export async function winMcpStep() {
 }
 
 /** The release rows the Windows suite cannot drive yet, as not-measured steps with their reasons. */
-export const winUndrivenRows = () => [['winReinstall'], ['winFirstUninstall'], ['hungPage'], ['secondUser'], ['killInstaller'], ['installAgain']].map(([k]) => notDriven(ROW_TITLES[k], NOT_DRIVEN[k]));
+export const winUndrivenRows = () => [['winReinstall'], ['winFirstUninstall'], ['hungPage'], ['secondUser'], ['secondInstall'], ['killInstaller'], ['installAgain']].map(([k]) => notDriven(ROW_TITLES[k], NOT_DRIVEN[k]));
 
 /**
  * The Jobs panel across an agent restart: the agent is ended, the app starts a new one, and "The jobs could not be read" must be gone from the open panel once it answers.

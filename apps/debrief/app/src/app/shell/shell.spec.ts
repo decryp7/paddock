@@ -5,14 +5,16 @@ import { all, buttonByText, el, FakeDock, provideFakeDock, provideTinyBackend, s
 import { PaletteService } from '../palette/palette.service';
 import { Platform } from '../core/platform';
 import { WorkspaceStore } from '../core/workspace.store';
+import { WorkspaceStatusStore } from '../core/workspace/status.store';
 import { TimelineZoom } from '../timeline/zoom';
 import { provideToolsBackend } from '../core/tools-backend';
 import { LifecycleService } from '../lifecycle/lifecycle.service';
 import { LiveTail } from '../workspace/live-tail';
 import { Sidebar } from './sidebar';
 import { StatusBar } from './status-bar';
+import { provideDebriefStatusItems } from './status/status-items.contributions';
+import { StatusCounts } from './status/workspace-counts';
 import { openedFolderName, TitleBar } from './title-bar';
-import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { memoryHost, MockWindowingBackend } from '../windowing/mock-windowing-backend';
 import { WindowCommands } from '../windowing/window-commands';
 import { WindowingBackend } from '../windowing/windowing-backend';
@@ -21,6 +23,7 @@ import { MENU_MODE } from './menu/app-menu.service';
 import { NATIVE_MENU_GATE, NATIVE_MENU_PORT, NATIVE_MENU_TIMING, NativeMenuPort } from './menu/native-menu';
 import { NativeMenuModel } from './menu/native-menu.types';
 import { at } from '../../testing/must';
+import { contributeFrom } from '../extensions/contributions';
 
 const DROP_DEBUG_PROFILE = `name = "p"\n[[pipeline]]\nstep = "drop"\nwhen = [{ field = "@level", op = "eq", value = "Debug" }]\n`;
 
@@ -34,7 +37,9 @@ const fakePlatform = {
 
 function setup<T>(cmp: Type<T>, backend = tinyBackend()) {
   const dock = new FakeDock();
-  TestBed.configureTestingModule({ providers: [provideTinyBackend(backend), provideFakeDock(dock), provideToolsBackend(), { provide: Platform, useValue: fakePlatform }] });
+  TestBed.configureTestingModule({
+    providers: [provideTinyBackend(backend), provideFakeDock(dock), provideToolsBackend(), ...provideDebriefStatusItems(), { provide: Platform, useValue: fakePlatform }],
+  });
   const fixture = TestBed.createComponent(cmp);
   return { fixture, store: TestBed.inject(WorkspaceStore), backend, dock };
 }
@@ -140,7 +145,7 @@ describe('TitleBar', () => {
   it('has a Window menu with one checkable item per window; New and Close window are in File', async () => {
     const windowing = new MockWindowingBackend(memoryHost());
     TestBed.configureTestingModule({
-      providers: [{ provide: WindowingBackend, useValue: windowing }, { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => TestBed.inject(WindowCommands).commands }],
+      providers: [{ provide: WindowingBackend, useValue: windowing }, ...contributeFrom('commands', () => TestBed.inject(WindowCommands).commands)],
     });
     const { fixture } = setup(TitleBar);
     await TestBed.inject(WindowingService).init();
@@ -245,18 +250,46 @@ describe('openedFolderName', () => {
 });
 
 describe('StatusBar', () => {
+  /** The bar's items load after the first paint (they are contributions): waits until the last one is there. */
+  const itemsShown = (fixture: ComponentFixture<unknown>) => settleUntil(fixture, () => el(fixture, '[data-testid=status-details]'));
+
+  it('says the workspace is loading before it has loaded (items load on import, not when the window is idle)', async () => {
+    const backend = tinyBackend();
+    let release: () => void = () => undefined;
+    const real = backend.workspaceSummary.bind(backend);
+    vi.spyOn(backend, 'workspaceSummary').mockImplementation(() => new Promise((resolve) => (release = () => resolve(real()))));
+    const { fixture } = setup(StatusBar, backend);
+    await itemsShown(fixture);
+    expect(text(fixture)).toContain('No workspace');
+    expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Loading workspace');
+    release();
+    await settleUntil(fixture, () => expect(text(fixture)).toMatch(/\d+ events/));
+    expect(fixture.nativeElement.querySelector('[data-testid=status-busy]')).toBeNull();
+  });
+
   it('shows busy work other than imports with a spinner (E1)', async () => {
     const { fixture } = setup(StatusBar);
+    await itemsShown(fixture);
+    const status = TestBed.inject(WorkspaceStatusStore);
+    status.setBusy({ kind: 'op', label: 'Clearing workspace…' });
     fixture.detectChanges();
-    expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Loading workspace');
+    expect(el(fixture, '[data-testid=status-busy]').textContent).toContain('Clearing workspace');
+    // An import has its own item: no second spinner.
+    status.setBusy({ kind: 'import', label: 'Importing', jobId: null });
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('[data-testid=status-busy]')).toBeNull();
+    status.setBusy(null);
     await settle(fixture);
     expect(fixture.nativeElement.querySelector('[data-testid=status-busy]')).toBeNull();
   });
 
   it('summarises the workspace', async () => {
     const { fixture, store } = setup(StatusBar);
-    fixture.detectChanges();
-    expect(text(fixture)).toContain('No workspace');
+    // Before the workspace loads, the counts item says so.
+    const counts = TestBed.createComponent(StatusCounts);
+    counts.detectChanges();
+    expect(text(counts)).toContain('No workspace');
+    await itemsShown(fixture);
     await settle(fixture);
     store.setMatchTotal(3);
     await settle(fixture);
@@ -293,6 +326,7 @@ describe('StatusBar', () => {
 
   it('shows how many events the pipeline dropped', async () => {
     const { fixture, store, backend } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     el<HTMLButtonElement>(fixture, '[data-testid=status-details]').click();
     fixture.detectChanges();
@@ -305,6 +339,7 @@ describe('StatusBar', () => {
 
   it('has a Live tail toggle that reflects and switches the live state', async () => {
     const { fixture, store } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     const live = TestBed.inject(LiveTail);
     const button = el<HTMLButtonElement>(fixture, 'button[aria-label="Live tail"]');
@@ -332,6 +367,7 @@ describe('StatusBar', () => {
 
   it('shows why live tail failed', async () => {
     const { fixture, backend } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     vi.spyOn(backend, 'setLive').mockRejectedValueOnce('watch limit reached');
     el<HTMLButtonElement>(fixture, 'button[aria-label="Live tail"]').click();
@@ -345,6 +381,7 @@ describe('StatusBar', () => {
 
   it('counts the sources in the Details popover', async () => {
     const { fixture, store } = setup(StatusBar);
+    await itemsShown(fixture);
     await settle(fixture);
     await store.removeSource(1);
     await settle(fixture);

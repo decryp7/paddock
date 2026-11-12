@@ -12,6 +12,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Fixed
 
+- **Jobs:** Starting the same import (the same files in any order, the same project or bundle) or the same export (the same file with the same settings) while it is still running no longer starts a second job: the request is served by the running one, and a message tells you to follow it in the Jobs pane. This also holds when the export's file already exists and Debrief asks whether to replace it. A different file still runs beside it; an export of a file another export is writing with other settings is refused, with the reason, instead of two exports writing one file.
 - **Sandbox:** On Linux a child's log sometimes said that a thread had started before the lockdown and kept its file access. The thread was the start-up handshake thread, finished but not yet removed by the kernel; the child now waits for it to go before it locks itself down (and logs it if it does not go within two seconds).
 - **Names:** Following a log live now keeps the field and name list current: a name or field value that first appears in lines added to a file you already follow (for example a new tenant or program) is added to the name list within moments, without opening the file again. Only the added lines are read, so it stays cheap on a large log
 - **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end

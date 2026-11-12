@@ -4,7 +4,8 @@ import { FakeDock, provideFakeDock, provideTinyBackendBare, settle, testLogger }
 import { ActivityItems, activityItemProblem, viewCategoryMenu } from './activity-items';
 import { CommandRegistry } from './command-registry';
 import { provideDebriefPlugin } from './provide';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefActivityItem, DebriefCommand, DebriefView } from './tokens';
+import { DebriefActivityItem, DebriefCommand, DebriefView } from './tokens';
+import { debriefContributionProviders } from './contributions';
 
 @Component({ selector: 'debrief-test-view', template: '' })
 class TestView {}
@@ -20,9 +21,7 @@ function setup(items: unknown[], extra: { views?: DebriefView[]; commands?: Debr
     providers: [
       ...provideTinyBackendBare(),
       provideFakeDock(dock),
-      { provide: DEBRIEF_VIEWS, multi: true, useValue: extra.views ?? [] },
-      { provide: DEBRIEF_COMMANDS, multi: true, useValue: commands },
-      { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useValue: items },
+      ...debriefContributionProviders({ views: extra.views ?? [], commands, activityItems: items as DebriefActivityItem[] }),
       ...(extra.providers ?? []),
     ],
   });

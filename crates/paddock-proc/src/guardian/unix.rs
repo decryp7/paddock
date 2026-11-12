@@ -251,6 +251,10 @@ impl Drop for Registration {
 /// not removed by the guardian; the reason is logged).
 fn mark(folder: &Path, me: ProcessId) -> Option<PathBuf> {
     use std::os::unix::fs::OpenOptionsExt;
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let canonical = std::fs::canonicalize(folder).ok()?;
     let written = std::fs::OpenOptions::new()
         .create(true)
@@ -542,7 +546,12 @@ pub(crate) fn removable(
     if let Some(why) = never_removed(folder, home) {
         return Err(format!("refused: {why}"));
     }
-    if std::fs::canonicalize(folder).ok().as_deref() != Some(folder) {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
+    let canonical = std::fs::canonicalize(folder).ok();
+    if canonical.as_deref() != Some(folder) {
         return Err("refused: not a canonical path to an existing folder".into());
     }
     if !std::fs::symlink_metadata(folder).is_ok_and(|m| m.is_dir()) {
@@ -646,6 +655,10 @@ impl Ends for OsEnds {
     }
     fn remove(&mut self, folder: &Path) -> Result<(), String> {
         let home = std::env::var_os("HOME").map(PathBuf::from);
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+        )]
         let home = home
             .as_deref()
             .map(|h| std::fs::canonicalize(h).unwrap_or_else(|_| h.to_path_buf()));
@@ -689,11 +702,19 @@ fn serve(input: impl BufRead) -> i32 {
         ends.log(&format!("refused to serve: {OWNER_ENV} names no owner"));
         return 2;
     };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let mut ends = OsEnds {
         log,
         owner,
         cat: cat().and_then(|c| std::fs::canonicalize(c).ok()),
     };
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a real canonical path of an existing file; Unix has no verbatim form, and paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+    )]
     let me = std::env::current_exe()
         .ok()
         .and_then(|e| std::fs::canonicalize(e).ok());

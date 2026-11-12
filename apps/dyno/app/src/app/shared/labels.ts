@@ -89,6 +89,9 @@ export const LOCATION_LABEL: Record<StartupLocation, string> = {
   userLaunchAgent: 'Launch agent (you)',
   systemLaunchAgent: 'Launch agent (system)',
   loginItem: 'Login item',
+  userRunOnceKey: 'Registry: next sign-in only (you)',
+  machineRunOnceKey: 'Registry: next sign-in only (all users)',
+  packagedApp: 'Store app',
 };
 
 export const IMPACT_LABEL: Record<ImpactRating, string> = { notMeasured: 'Not measured', low: 'Low', medium: 'Medium', high: 'High' };

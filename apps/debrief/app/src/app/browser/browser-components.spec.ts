@@ -18,7 +18,8 @@ import { AgentApprovalCard, AgentPaused, LinkCard } from './chat-cards';
 import { ChatBrowserBar } from './chat-browser-bar';
 import { ChatBrowserStore } from './chat-browser.store';
 import { MockBrowserBackend, MockWeb, resetMockWeb } from './mock-browser-backend';
-import { browserCommands, browserRecordMenu, BrowserLauncher, worthSearching, WEB_INSPECTOR_SECTION } from './provide-browser';
+import { browserCommands } from './browser.commands';
+import { browserRecordMenu, BrowserLauncher, worthSearching, WEB_INSPECTOR_SECTION } from './provide-browser';
 import { SearchWebDialog } from './search-web-dialog';
 
 let web: MockWeb;

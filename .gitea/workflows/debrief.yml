@@ -481,6 +481,10 @@ jobs:
           (cd ../../.. && npm ci)
           npm audit --omit=dev --audit-level=high
 
+      # The app imports the shared library from ui/dist (tsconfig paths), which lint, the build and the tests need.
+      - name: Build the shared UI
+        run: (cd ../../.. && npm run build -w ui)
+
       - name: Lint
         run: npm run lint
 
@@ -551,6 +555,10 @@ jobs:
       - name: Install
         run: (cd ../../.. && npm ci)
 
+      # The app imports the shared library from ui/dist (tsconfig paths), which lint, the build and the tests need.
+      - name: Build the shared UI
+        run: (cd ../../.. && npm run build -w ui)
+
       # One production build serves every project of this shard, under the Tauri CSP.
       - name: Production build for the end-to-end tests
         run: npx ng build
@@ -577,8 +585,11 @@ jobs:
   # Full runs only (main, debrief-v* tags, nightly, `bundles: true`), never on branch or pull request runs.
   tauri-smoke:
     name: real-app smoke (${{ matrix.os }})
-    needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    # After the bundle and the macOS Rust tests: the macOS leg's start-up benchmark is a timing gate and must not share the
+    # runner with this run's heavy builds (debrief.yml 8007 measured 1.8x its budgets beside the LTO bundle job). A failed
+    # bundle or test leg does not skip the smoke (!cancelled); a failed rust-lint still does.
+    needs: [plan, rust-lint, bundle, rust-test-macos]
+    if: ${{ !cancelled() && needs.rust-lint.result == 'success' && needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -718,6 +729,8 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief/app
         run: |
           [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
+          # The app imports the shared library from ui/dist (tsconfig paths).
+          (cd ../../.. && npm run build -w ui)
           npm run e2e:tauri:build
 
       # macOS: a real debug .app (ad-hoc sealed by tauri.macos.conf.json) with the sidecars and libduckdb inside, the same
@@ -729,6 +742,8 @@ jobs:
           DEBRIEF_CARGO_PROFILE: debug
         run: |
           (cd ../../.. && npm ci)
+          # The app imports the shared library from ui/dist (tsconfig paths).
+          (cd ../../.. && npm run build -w ui)
           npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json
 
       - name: Smoke test, sidecars and quit within 10 s (macOS)
@@ -890,7 +905,7 @@ jobs:
 
       # npm's download cache on the Windows host (node-caches keeps it elsewhere): the job slot's kept folder npm-s<n>.
       - name: npm cache (Windows)
-        if: runner.os == 'Windows'
+        if: ${{ runner.os == 'Windows' && !startsWith(github.ref, 'refs/tags/') }}
         working-directory: .
         run: |
           dir="$(bash conformance/ci/job-isolation.sh path npm)"
@@ -931,20 +946,33 @@ jobs:
           fi
           node --version
 
+      # Not on a tag (rule 78): the kept npm and Angular caches are written by branch runs. A tag gets a cache of its own.
       - uses: ./.gitea/actions/node-caches
-        if: runner.os != 'Windows'
+        if: ${{ runner.os != 'Windows' && !startsWith(github.ref, 'refs/tags/') }}
         with:
           angular-dir: apps/debrief/app
           name: debrief-bundle
+
+      - name: Fresh npm cache and no kept Angular cache on a tag
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: bash conformance/ci/tag-node-caches.sh apps/debrief/app
 
       - name: libduckdb
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: bash scripts/ci/libduckdb-env.sh
 
+      # Not on a tag (rule 78): the kept node_modules is written by branch runs. A tag removes a junction a killed job left
+      # (only the link, never its target) and the build step runs a fresh npm ci.
       - name: Reuse node_modules for this lockfile (Windows)
-        if: runner.os == 'Windows'
+        if: ${{ runner.os == 'Windows' && !startsWith(github.ref, 'refs/tags/') }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
         run: bash apps/debrief/scripts/ci/windows-node-modules.sh link
+
+      - name: No kept node_modules on a tag (Windows)
+        if: ${{ runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/') }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
+        run: bash apps/debrief/scripts/ci/windows-node-modules.sh unlink
 
       # No cargo-about and no notices regeneration here: the licences job fails when the committed notices
       # (app/src-tauri/resources, app/src/app/about/generated) are out of date, and a release needs that job.
@@ -958,40 +986,68 @@ jobs:
         env:
           # One updater key for the family (ADR 0014, amendment): every release is signed with the shared key only. Copies
           # installed before the move cannot verify it and are reinstalled once by hand (the release notes say so).
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # The private key and its password reach this step on a debrief-v* release tag only (ADR 0085 D7, rule 78); any other
+          # run signs with a throw-away key made in the job, and inside the step only `tauri build` sees a key, in its environment
+          # (conformance/ci/updater-key.sh). The UI and sidecar builds (beforeBuildCommand) run first, without it.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ startsWith(github.ref, 'refs/tags/debrief-v') && secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/debrief-v') && secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.PADDOCK_TAURI_UPDATER_PUBKEY }}
           # Installers use the size-optimised `dist` profile (thin LTO, one codegen unit, stripped); the sidecars match.
           DEBRIEF_CARGO_PROFILE: dist
         run: |
-          [ -d ../../../node_modules ] || (cd ../../.. && npm ci)
+          # The key leaves the environment before npm ci (its install scripts are branch code); updater-key.sh strips both
+          # keys of whitespace (strip-keys.mjs) and fails a run that is not a tag but has the private key.
+          source ../../../conformance/ci/updater-key.sh
+          updater_key_take
+          # A tag installs fresh (rule 78): never a node_modules an earlier run left in a kept checkout.
+          case "$GITHUB_REF" in
+            refs/tags/*) (cd ../../.. && npm ci) ;;
+            *) [ -d ../../../node_modules ] || (cd ../../.. && npm ci) ;;
+          esac
+          # The app imports the shared library from ui/dist (tsconfig paths), which the app build (beforeBuildCommand) needs. It runs
+          # here, after updater_key_take, so no key is in its environment.
+          (cd ../../.. && npm run build -w ui)
+          updater_key_throwaway .
           # Host runners keep their build folder between runs: drop old installers so an earlier version's (signed)
           # installer can never be collected into this release.
           target="$PADDOCK_BUILD_FOLDER"
           if command -v cygpath >/dev/null; then target="$(cygpath -u "$target")"; fi
           rm -rf "$target/dist/bundle"
           bundles='${{ matrix.bundles }}'
-          # Secrets pasted into Gitea often carry a trailing newline or a line break; both keys are single-line base64.
-          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | tr -d ' \t\r\n')"; fi
-          if [ -n "${TAURI_UPDATER_PUBKEY:-}" ]; then export TAURI_UPDATER_PUBKEY="$(printf '%s' "$TAURI_UPDATER_PUBKEY" | tr -d ' \t\r\n')"; fi
+          mkdir -p ../target
+          extra=()
+          # NSIS (Windows): the pinned NSIS tools in <build folder>/.tauri, useLocalToolsDir, checked after the build (ADR 0085 WP-9).
+          case ",$bundles," in *,nsis,* | *,appimage,*)
+            node ../../../conformance/ci/tauri-tools.mjs install --bundles "$bundles" --src-tauri src-tauri
+            echo '{"bundle":{"useLocalToolsDir":true}}' > ../target/tools.conf.json
+            extra=(--config ../target/tools.conf.json) ;;
+          esac
           # Ad-hoc builds ship WITHOUT the hardened runtime (tauri.macos.conf.json): with it, library validation refuses the
           # bundled libduckdb even after an ad-hoc re-sign (docs/releasing.md). A Developer ID build turns it back on.
-          extra=()
           if [ "$RUNNER_OS" = macOS ] && [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ "$APPLE_SIGNING_IDENTITY" != "-" ]; then
-            mkdir -p ../target
             echo '{"bundle":{"macOS":{"hardenedRuntime":true}}}' > ../target/hardened.conf.json
-            extra=(--config ../target/hardened.conf.json)
+            extra=(${extra[@]+"${extra[@]}"} --config ../target/hardened.conf.json)
           fi
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ] && [ -n "$TAURI_UPDATER_PUBKEY" ]; then
+          if [ "$updater_key_signing" = true ]; then
             # macOS updates install from the .app bundle's archive.
             if [ "$RUNNER_OS" = macOS ]; then bundles="app,$bundles"; fi
-            mkdir -p ../target
-            node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
-            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json --config ../target/updater.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+            TAURI_UPDATER_PUBKEY="$updater_pubkey" node -e 'process.stdout.write(JSON.stringify({ bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: process.env.TAURI_UPDATER_PUBKEY } } }))' > ../target/updater.conf.json
+            extra=(--config ../target/updater.conf.json ${extra[@]+"${extra[@]}"})
           else
             echo '::warning::No updater signing secrets: this build cannot update itself.'
-            unset TAURI_UPDATER_PUBKEY TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
-            npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} -- --profile dist
+          fi
+          # The UI and sidecar builds (beforeBuildCommand, merged with tauri.sidecars.conf.json) run here without the key;
+          # tauri build gets a configuration that empties the hook (ADR 0085 D7).
+          node ../../../conformance/ci/before-build.mjs --app-dir . --config src-tauri/tauri.sidecars.conf.json
+          echo '{"build":{"beforeBuildCommand":null}}' > ../target/no-hook.conf.json
+          # The key is in the environment of this one command only, never in its arguments (updater_key_exec).
+          updater_key_exec npx tauri build --bundles "$bundles" --config src-tauri/tauri.sidecars.conf.json ${extra[@]+"${extra[@]}"} --config ../target/no-hook.conf.json -- --profile dist
+          case ",$bundles," in *,nsis,* | *,appimage,*) node ../../../conformance/ci/tauri-tools.mjs check --bundles "$bundles" --src-tauri src-tauri ;; esac
+          # Every updater signature verifies against the one public key this build carries.
+          if [ "$updater_key_signing" = true ]; then
+            sigdir="$target/dist/bundle"
+            if command -v cygpath >/dev/null; then sigdir="$(cygpath -m "$sigdir")"; fi
+            node ../../../conformance/release/updater-key-check.mjs --pubkey "$updater_pubkey" --dir "$sigdir"
           fi
 
       # ADR 0032: no binary the installer carries (the app, its sidecars, duckdb.dll, named by the Tauri configuration) imports

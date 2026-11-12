@@ -1,5 +1,9 @@
 # Amendments to the API design, section 4.6 (`paddock-limits`, packages 1.4 and B1)
 
+> **History (2026-11-12).** Folded into the API design [debrief-1-2-api.md](debrief-1-2-api.md), revision 6: L1 to L11
+> and the reviews' changes into §4.6, L12 into §13.2, I1 to I9 into §4.1 (I4, I7) and §4.3 (I1 to I3, I5, I6, I8, I9),
+> package 1.4b into §4.6. The design is the authority; this file is kept as the record of what the code settled and why.
+
 Next to `docs/plans/debrief-1-2-api.md` (revision 5, on `docs/debrief-1-2-api`), so the packages that use `paddock-limits`
 read the contract as built on branch `debrief/1.2-limits`. Each row is a point the design left open or that the code
 had to settle. Review 1 (of 479dcff3f) settled L6 and L8; see the last section.

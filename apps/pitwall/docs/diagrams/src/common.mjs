@@ -3,7 +3,9 @@ import { sequence, dot, cls } from '../../../../../diagrams/tools/uml.mjs';
 import { writeFileSync } from 'node:fs';
 export { link, g8, sequence, dot, cls };
 export const OUT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
-export const P = (o) => new Diagram({ app: 'pitwall', date: '2026-10-31', ...o });
+/** The footer date of every diagram; a diagram redrawn on its own passes its own `date` (YYYY-MM-DD) instead. */
+export const DATE = '2026-10-31';
+export const P = ({ date = DATE, ...o }) => new Diagram({ app: 'pitwall', date, ...o });
 export const save = (name, d, bottom) => writeFileSync(`${OUT}/${name}.drawio`, d.finish(bottom));
 /** Port fraction on rect `id` for the vertical centre of rect `other` (for straight links from a tall hub). */
 export function tOf(d, hub, other, axis = 1) {

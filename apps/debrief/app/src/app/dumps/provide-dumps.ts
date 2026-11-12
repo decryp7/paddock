@@ -1,17 +1,19 @@
-import { EnvironmentProviders, inject, Injectable, Injector, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
+import { EnvironmentProviders, inject, Injector, makeEnvironmentProviders, provideAppInitializer } from '@angular/core';
 import { DumpDocSummary } from '../core/api.types';
 import { DROPPED_FILES_HANDLERS, DroppedFilesHandler } from '../core/dropped-files';
 import { TOOL_IDS } from '../core/tools.types';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { CommandContext, DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { CommandContext, DebriefView } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS } from '../lifecycle/ui-state';
 import { ToolCatalog } from '../tools/tool-catalog.store';
 import { provideDumpsBackend } from './dumps-backend';
 import { DumpsPersistence } from './dumps-persistence';
-import { DumpFileKind, DumpsStore } from './dumps.store';
+import { DUMP_VIEW_IDS } from './dumps.ids';
+import { DUMPS_COMMANDS_CONTRIBUTIONS } from './dumps.contributions';
+import { DumpsStore } from './dumps.store';
+import { contributeFrom } from '../extensions/contributions';
 
-/** The views' ids. */
-export const DUMP_VIEW_IDS = { dump: 'dump', umdh: 'umdh', capture: 'dump-capture' } as const;
+export { DUMP_VIEW_IDS };
 const V = DUMP_VIEW_IDS;
 
 /** The dump views (same extension point as plugin views). */
@@ -27,27 +29,6 @@ export function dumpsViews(tools: { listed(id: string): boolean }): DebriefView[
 export function showOpened(ctx: CommandContext, opened: readonly DumpDocSummary[]): void {
   if (opened.some((d) => d.kind !== 'dump')) ctx.showView(V.umdh);
   if (opened.some((d) => d.kind === 'dump')) ctx.showView(V.dump);
-}
-
-/** File ▸ Open dump… / Open UMDH snapshots…, Tools ▸ Create dump of process…, and the views. */
-@Injectable({ providedIn: 'root' })
-export class DumpsCommands {
-  private readonly store = inject(DumpsStore);
-  private readonly catalog = inject(ToolCatalog);
-
-  readonly commands: DebriefCommand[] = [
-    { id: 'dumps.open', title: $localize`:@@dumps.cmd.open:Open dump…`, category: 'File', run: (ctx) => this.open(ctx, 'dump') },
-    { id: 'dumps.openUmdh', title: $localize`:@@dumps.cmd.openUmdh:Open UMDH snapshots…`, category: 'File', run: (ctx) => this.open(ctx, 'umdh') },
-    { id: 'dumps.capture', title: $localize`:@@dumps.cmd.capture:Create dump of process…`, category: $localize`:@@tools.category.tools:Tools`, when: () => this.catalog.listed(TOOL_IDS.dumpCapture), view: V.capture, run: (ctx) => ctx.showView(V.capture) },
-    { id: 'dumps.show', title: $localize`:@@dumps.cmd.show:Dumps: show the dump`, category: $localize`:@@dumps.category:Dumps`, view: V.dump, run: (ctx) => ctx.showView(V.dump) },
-    { id: 'dumps.showUmdh', title: $localize`:@@dumps.cmd.showUmdh:Dumps: UMDH heap growth`, category: $localize`:@@dumps.category:Dumps`, view: V.umdh, run: (ctx) => ctx.showView(V.umdh) },
-  ];
-
-  async open(ctx: CommandContext, kind: DumpFileKind): Promise<void> {
-    const opened = await this.store.pickAndOpen(kind);
-    showOpened(ctx, opened);
-    if (!opened.length && this.store.error()) ctx.showView(kind === 'dump' ? V.dump : V.umdh);
-  }
 }
 
 /** Loads the documents the engine already has open in this window. */
@@ -72,8 +53,9 @@ export function dumpsDropHandler(): DroppedFilesHandler {
 export function provideDumps(): EnvironmentProviders {
   return makeEnvironmentProviders([
     ...provideDumpsBackend(),
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: () => dumpsViews(inject(ToolCatalog)) },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(DumpsCommands).commands },
+    ...contributeFrom('views', () => dumpsViews(inject(ToolCatalog))),
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...DUMPS_COMMANDS_CONTRIBUTIONS,
     { provide: DROPPED_FILES_HANDLERS, multi: true, useFactory: dumpsDropHandler },
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [inject(DumpsPersistence).contribution] },
     provideAppInitializer(() => startDumps()),

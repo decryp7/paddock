@@ -35,6 +35,7 @@ impl ProcessSource for Helped {
                 memory: Measured::Value(3 << 30),
                 partial: false,
             }),
+            hint: None,
         }
     }
 }

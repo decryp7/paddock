@@ -1,6 +1,7 @@
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { provideDebriefPlugin } from '../extensions/provide';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 /** Palette commands of runs between lifecycle markers. */
 export const RUNS_COMMANDS: DebriefCommand[] = [
@@ -14,6 +15,6 @@ export function provideRuns(): EnvironmentProviders {
     provideDebriefPlugin({
       views: [{ id: 'runs', category: 'Analysis', title: $localize`:View title|@@runs.view.viewTitle:Runs`, icon: 'timeline', defaultPosition: 'bottom', layout: { area: 'analysis', min: { width: 420, height: 180 }, pref: { width: 560, height: 280 }, priority: 50 }, component: () => import('./runs-view').then((m) => m.RunsView) }],
     }),
-    { provide: DEBRIEF_COMMANDS, multi: true, useValue: RUNS_COMMANDS },
+    ...debriefContributionProviders({ commands: RUNS_COMMANDS }),
   ]);
 }

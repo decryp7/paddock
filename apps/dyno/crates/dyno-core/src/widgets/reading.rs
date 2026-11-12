@@ -125,7 +125,13 @@ pub fn read_metric(metric: &Metric, update: &LiveUpdate, thresholds: &Thresholds
         }
         Metric::DiskActivity => match s.disk_io.busy.value() {
             Some(busy) => percent_reading(f64::from(*busy), thresholds),
-            None => unavailable("The disk's busy time is not reported here."),
+            None => unavailable(
+                s.disk_io
+                    .busy
+                    .unavailable_reason()
+                    .filter(|why| !why.is_empty())
+                    .unwrap_or("The disk's busy time is not reported here."),
+            ),
         },
         Metric::DiskFree => match s.disks.first().filter(|d| d.total > 0) {
             Some(d) => percent_reading(d.free as f64 / d.total as f64 * 100.0, thresholds),
@@ -285,6 +291,25 @@ mod tests {
             read_metric(&Metric::Swap, &no_swap, &none()).reason.as_deref(),
             Some("No swap is configured.")
         );
+    }
+
+    /// WP-14 (d): a disk activity card that cannot read says why the platform said it cannot (macOS: "Measuring ..." before the
+    /// second reading, or the failed IOKit call), not one fixed sentence for every cause.
+    #[test]
+    fn disk_activity_gives_the_reason_the_platform_reported() {
+        let mut u = update();
+        u.system.disk_io.busy = Reading::unavailable("Measuring (needs two readings)");
+        let r = read_metric(&Metric::DiskActivity, &u, &none());
+        assert_eq!(r.value, None);
+        assert_eq!(r.reason.as_deref(), Some("Measuring (needs two readings)"));
+        u.system.disk_io.busy = Reading::unavailable("");
+        assert_eq!(
+            read_metric(&Metric::DiskActivity, &u, &none()).reason.as_deref(),
+            Some("The disk's busy time is not reported here."),
+            "an empty reason falls back to the general sentence"
+        );
+        u.system.disk_io.busy = Reading::Available(40.0);
+        assert_eq!(read_metric(&Metric::DiskActivity, &u, &none()).percent, Some(40.0));
     }
 
     #[test]

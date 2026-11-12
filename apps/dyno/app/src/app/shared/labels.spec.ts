@@ -1,4 +1,5 @@
 import {
+  LOCATION_LABEL,
   forecastText,
   readingReason,
   readingValue,
@@ -7,6 +8,13 @@ import {
 } from './labels';
 
 describe('labels', () => {
+  it('every startup location has its own words, the appended ones included', () => {
+    const labels = Object.values(LOCATION_LABEL);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(LOCATION_LABEL.userRunOnceKey).toContain('next sign-in only');
+    expect(LOCATION_LABEL.packagedApp).toBe('Store app');
+  });
+
   it('startupStateText', () => {
     expect(startupStateText('enabled')).toBe('Enabled');
     expect(startupStateText('disabled')).toBe('Disabled');

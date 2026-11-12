@@ -1,10 +1,13 @@
 import { ChangeDetectionStrategy, Component, inject, Injectable, InjectionToken, input, type OnDestroy, provideZonelessChangeDetection, signal, type Type } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { msg } from '../message';
-import { defineStatusItem, type StatusItemDef } from '../define';
-import { provideContributions } from '../provide';
-import { provideShellContext } from '../context';
-import type { LazyPart } from '../lazy';
+import {
+  defineStatusItem,
+  type LazyPart,
+  msg,
+  provideContributions,
+  provideShellContext,
+  type StatusItemDef,
+} from '@decryp7/paddock-ui/shell/contributions';
 import { iconLetter, PdIcon, PdShellIcon, provideShellIcon } from './icon';
 import { PD_ICON_PATHS } from '@decryp7/paddock-ui/icons';
 import { PdPartOutlet } from './part-outlet';
@@ -358,7 +361,7 @@ describe('pd-status-bar', () => {
     expect(ids('end')).toEqual(['t.health', 't.jobs', 't.bell', 't.tie', 't.cond']);
     expect(fixture.nativeElement.textContent).toContain('Alpha');
     show.set(false);
-    await TestBed.inject((await import('../context')).ShellContextHost).load();
+    await TestBed.inject((await import('@decryp7/paddock-ui/shell/contributions')).ShellContextHost).load();
     await settle();
     await fixture.whenStable();
     expect(ids('end')).not.toContain('t.cond');

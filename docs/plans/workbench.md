@@ -351,6 +351,9 @@ retry and checkpoint debounce then go back to `setTimeout`. A lint must express 
   image) before shell/integrate is merged to main, so coverage is confirmed locally first (rule 3).
 - `paddock-download` has no free-disk pre-check (Debrief has one): add it (bounded, platform call, clear "needs N GB,
   M GB free" error before connecting) before Pitwall's model downloads move onto it.
+- `defineTheme` (S15) holds `--pd-*` colour overrides per scheme only; Debrief's packs also set sizes per density, traits
+  (`data-*` switches) and their own token names, so Debrief M1 (2026-11-12) registers them as its own `debriefThemes` kind
+  until the shell's packs carry per-density tokens and traits, or Debrief's packs shrink to colours at M3.
 
 ## 14. What's New is a view, not a popup (user, 2026-10-24)
 

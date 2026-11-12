@@ -373,7 +373,8 @@ mod tests {
         fn gone(pid: u32) -> bool {
             (0..40).any(|_| {
                 std::thread::sleep(Duration::from_millis(50));
-                !chromium_driver::process::process_exists(pid)
+                // A look that could not be made (Unknown) is not "gone": a blind probe must fail the check, not pass it.
+                paddock_proc::presence(pid) == paddock_proc::Presence::Gone
             })
         }
 
@@ -490,7 +491,7 @@ mod tests {
             let (dir, pid) = research_step(&r);
             r.renderers.current("main").unwrap().handed_off.store(true, Ordering::SeqCst);
             assert_eq!(r.renderers.finish("main"), Finish::KeptOpen(TookPart::PageNeededThem));
-            assert!(chromium_driver::process::process_exists(pid) && dir.exists());
+            assert!(paddock_proc::is_alive(pid) && dir.exists());
             assert!(r.renderers.close("main"), "the user's Close");
             assert!(gone(pid));
             assert!(!dir.exists());

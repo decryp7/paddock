@@ -1,10 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { AbstractType, EnvironmentInjector, Injector } from '@angular/core';
+import { AbstractType } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { MemoryLogger } from '../../../testing/helpers';
 import { appConfig } from '../../app.config';
-import { COMMAND_CONTEXT, CommandRegistry } from '../../extensions/command-registry';
-import { CommandContext, flattenContributions, DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
 import { Logger, withFailureLogging } from '../logger';
 import { isActivityTracked, methodKind } from './backend-activity';
 import { activity } from './runtime';
@@ -12,8 +10,8 @@ import { activity } from './runtime';
 /**
  * The coverage guard: makes un-instrumented user operations impossible rather than hoping.
  *
- * - every registered command (all built-ins and plugins of the real app) produces exactly one activity entry
- *   when it runs, and nothing runs a command except the registry;
+ * - the command half (every registered command logs exactly one entry; nothing runs a command except the registry)
+ *   moved with the commands to the shell's registry in M1: `extensions/command-coverage.spec.ts`;
  * - every backend of the app is behind the shared proxy, so each of its methods is attributed to the current
  *   operation, and every method that changes something becomes an operation of its own when none is current;
  * - every Tauri command call goes through `core/activity/ipc.ts`, which sends the operation id to Rust (whose
@@ -36,42 +34,6 @@ const PENDING_DIRECT_INVOKE = new Set<string>();
 
 describe('activity coverage guard', () => {
   beforeEach(() => activity.reset());
-
-  it('every registered command logs exactly one entry when run', async () => {
-    // The real app's providers, with the logger captured; only the command list is read from them.
-    TestBed.configureTestingModule({ providers: [...appConfig.providers, { provide: Logger, useFactory: () => new MemoryLogger() }] });
-    const real = flattenContributions<DebriefCommand>(TestBed.inject(DEBRIEF_COMMANDS, null) ?? []);
-    expect(real.length).toBeGreaterThan(50);
-
-    // Run each through a registry of stubs (the guard is about the path, not about what commands do).
-    const ran: string[] = [];
-    const stubs = real.map((c) => ({ ...c, when: undefined, run: () => void ran.push(c.id) }));
-    const scope = Injector.create({
-      providers: [{ provide: COMMAND_CONTEXT, useValue: {} as CommandContext }, { provide: DEBRIEF_COMMANDS, multi: true, useValue: stubs }, CommandRegistry],
-      parent: TestBed.inject(EnvironmentInjector),
-    });
-    const registry = scope.get(CommandRegistry);
-    const logger = TestBed.inject(Logger) as MemoryLogger;
-    const ids = [...new Set(stubs.map((c) => c.id))];
-    const missing: string[] = [];
-    for (const id of ids) {
-      const before = logger.entries.filter((e) => e.category === 'Debrief.Activity').length;
-      await registry.run(id);
-      const after = logger.entries.filter((e) => e.category === 'Debrief.Activity');
-      if (after.length !== before + 1 || at(after, after.length - 1).props?.['Operation'] !== id) missing.push(id);
-    }
-    expect(missing).toEqual([]);
-    expect(ran.length).toBe(ids.length);
-    await settle();
-  });
-
-  it('nothing runs a command except the registry', () => {
-    const offenders = sources()
-      .filter((f) => f.path !== 'extensions/command-registry.ts')
-      .filter((f) => /\b(command|cmd)\.run\(\s*(this\.)?(context|ctx)\b/.test(f.text) || /DEBRIEF_COMMANDS[\s\S]*\.run\(\s*(this\.)?(context|ctx)\b/.test(f.text))
-      .map((f) => f.path);
-    expect(offenders).toEqual([]);
-  });
 
   it('every backend of the app is behind the shared proxy', async () => {
     // All backend ports: `export abstract class XxxBackend` anywhere in the app.
@@ -182,7 +144,7 @@ import { NotesBackend } from '../../notes/notes-backend';
 import { SearchEverythingBackend } from '../../search-everything/search-everything-backend';
 import { DragGhostBackend } from '../../popout/drag-ghost-backend';
 import { HomeBackend } from '../../home/home-backend';
-import { at, must } from '../../../testing/must';
+import { must } from '../../../testing/must';
 
 const BACKEND_TOKENS: Record<string, AbstractType<unknown>> = {
   AiBackend,

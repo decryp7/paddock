@@ -1,7 +1,8 @@
-import { inject, Injectable } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { RecordView } from '../core/api.types';
 import { valueToString } from '../core/format';
-import { flattenContributions, DEBRIEF_FIELD_FORMATTERS, DebriefFieldFormatter } from './tokens';
+import { contributedItems, DEBRIEF_KIND } from './contributions';
+import { DebriefFieldFormatter } from './tokens';
 
 /** Picks the first formatter registered for a field. Pure, so it is easy to test. */
 export function findFormatter(formatters: readonly DebriefFieldFormatter[], field: string): DebriefFieldFormatter | undefined {
@@ -11,7 +12,7 @@ export function findFormatter(formatters: readonly DebriefFieldFormatter[], fiel
 /** Formats field values for display, falling back to the plain string form. */
 @Injectable({ providedIn: 'root' })
 export class FieldFormatters {
-  private readonly formatters = flattenContributions<DebriefFieldFormatter>(inject(DEBRIEF_FIELD_FORMATTERS, { optional: true }));
+  private readonly formatters = contributedItems<DebriefFieldFormatter>(DEBRIEF_KIND.fieldFormatters);
 
   format(field: string, value: unknown, record: RecordView): string {
     const formatter = findFormatter(this.formatters, field);

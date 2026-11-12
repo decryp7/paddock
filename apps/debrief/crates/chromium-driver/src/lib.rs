@@ -25,7 +25,6 @@ pub mod fake;
 pub mod install;
 pub mod launch;
 pub mod page;
-pub mod process;
 pub mod ready;
 
 /// Set (to anything) in the environment of a test's fake browser process. Not behind `test-support`: the app checks it at

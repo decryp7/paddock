@@ -3,7 +3,6 @@ import { ThemeService } from '../core/workspace/theme.service';
 import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
 import { SOURCE_COLOR_LABELS } from '../sources/source-colors';
 import { resolveTokens } from '../theme/theme-tokens';
-import { BUILT_IN_THEMES } from '../theme/themes';
 import { Density, DENSITIES, SCHEME_MODES, SchemeMode, ThemeId, UI_FONTS, UiFont } from '../theme/theme.types';
 import { THEMED_CONTROLS } from './themed-controls';
 import { HelpHint } from '../ui/help-hint';
@@ -122,7 +121,7 @@ export class AppearanceSettings {
 
   /** The built-in themes with their preview colours in the scheme in effect. */
   protected readonly themes = computed(() =>
-    BUILT_IN_THEMES.map((t) => {
+    this.theme.packs.map((t) => {
       const tokens = resolveTokens(t, this.theme.scheme(), this.theme.density());
       return { id: t.id, name: THEME_NAMES[t.id], about: THEME_ABOUT[t.id], swatches: PREVIEW.map((n) => tokens[n] ?? '') };
     }),

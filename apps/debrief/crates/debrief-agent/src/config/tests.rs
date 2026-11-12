@@ -1,5 +1,12 @@
 use super::*;
 
+#[test]
+fn never_panics_on_hostile_text() {
+    paddock_testkit::assert_never_panics(&[EXAMPLE.as_bytes(), b"version = 1\n"], |bytes| {
+        AgentConfigFile::parse(&String::from_utf8_lossy(bytes))
+    });
+}
+
 const EXAMPLE: &str = include_str!("../../debrief-agent.example.toml");
 
 fn base() -> PathBuf {

@@ -1,12 +1,12 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders, untracked } from '@angular/core';
 import { ACTIVITY_DOCK } from '../core/activity/observers';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
-import { DockCommands } from './dock-commands';
 import { DockService } from './dock.service';
 import { perspectiveActivityItems } from './perspective-activity';
 import { Perspectives } from './perspectives';
 import { readLayout, toEnvelope } from './layout-store';
+import { contributeFrom } from '../extensions/contributions';
+import { DOCK_COMMANDS_CONTRIBUTIONS } from './dock.contributions';
 
 /**
  * The whole dock arrangement in projects and sessions (grid, auto-hidden tool windows, pinned tabs and pop-out
@@ -35,8 +35,9 @@ export function dockLayoutContribution(dock: DockService): UiStateContribution {
 export function provideDocking(): EnvironmentProviders {
   return makeEnvironmentProviders([
     { provide: ACTIVITY_DOCK, useExisting: DockService },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(DockCommands).commands },
-    { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: () => perspectiveActivityItems(inject(Perspectives)) },
+    // Stubs only: the commands' code loads when the window is idle or one runs.
+    ...DOCK_COMMANDS_CONTRIBUTIONS,
+    ...contributeFrom('activityItems', () => perspectiveActivityItems(inject(Perspectives))),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [dockLayoutContribution(inject(DockService))] },
   ]);
 }

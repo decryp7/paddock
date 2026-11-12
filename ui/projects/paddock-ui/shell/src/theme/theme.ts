@@ -1,5 +1,10 @@
-import { defineContributionKind, type ContributionKind } from '../kinds';
-import { CONTRIBUTION_ID, isMessage, type Message } from '../message';
+import {
+  CONTRIBUTION_ID,
+  type ContributionKind,
+  defineContributionKind,
+  isMessage,
+  type Message,
+} from '@decryp7/paddock-ui/shell/contributions';
 import { contrast, over, tryParseColor, type Rgba } from './color';
 
 /** The colour schemes a theme pack can tune. */

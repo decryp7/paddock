@@ -16,6 +16,7 @@
 //!
 //! Event: `debrief://jobs` (the window's [`JobsSnapshot`]). Wire contract: `app/src/app/jobs/jobs.types.ts`.
 
+pub(crate) mod key;
 pub mod model;
 pub mod persist;
 pub mod queue;
@@ -421,8 +422,20 @@ pub(crate) async fn analysis_announced<R: Runtime, T: Send + 'static>(
     .await
 }
 
-/// The spec of an export to `path` by the window (or the app).
+/// The key of an export of `title` to `path` by `window`: the work and its target.
+pub(crate) fn export_key(title: &str, window: Option<&str>, path: &std::path::Path) -> key::JobKey {
+    key::JobKey::new("export", window).text(title).path(path)
+}
+
+/// The spec of an export to `path` by the window (or the app) that is never merged with another job: a Save or a report whose
+/// content the path and the title do not tell. A second job writing the same file is refused (`Refusal::TargetBusy`). A job
+/// that joins repeated requests has a key built by [`key::JobKey`] from its whole request ([`export_spec_for`]).
 pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::Path) -> JobSpec {
+    export_spec_with(title, window, path, None)
+}
+
+/// An export spec with the key the caller built (`None`: the request could not be fingerprinted, so the job is never merged).
+pub(crate) fn export_spec_with(title: &str, window: Option<&str>, path: &std::path::Path, key: Option<key::JobKey>) -> JobSpec {
     let name = path
         .file_name()
         .map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
@@ -432,7 +445,47 @@ pub(crate) fn export_spec(title: &str, window: Option<&str>, path: &std::path::P
     if let Some(w) = window {
         spec = spec.window(w);
     }
-    spec
+    key::keyed(spec, key)
+}
+
+/// The spec of an export of the window's logs to `path` described by `request`: keyed by the target, the project, the
+/// profile's `[redact]` rules (when `redact`) and the whole request except what only confirms it (`overwrite`, and the path as the user wrote
+/// it, which `path` replaces). The same request while it runs is served by that job.
+pub(crate) fn export_spec_for<T: Serialize>(
+    win: &CurrentWindow,
+    title: &str,
+    path: &std::path::Path,
+    request: &T,
+    redact: bool,
+) -> JobSpec {
+    let id = win.engine.opened_id().map_or_else(String::new, |id| id.to_string());
+    let key = export_key(title, Some(win.label()), path).text(&id);
+    // The profile's `[redact]` rules matter only to a request that redacts.
+    let key = if redact {
+        key.request(&win.host.compiled().profile.redact, &[])
+    } else {
+        Some(key)
+    };
+    let key = key.and_then(|k| {
+        let skip: Vec<&str> = key::CONFIRMATION_ONLY.iter().copied().chain(["path"]).collect();
+        k.request(request, &skip)
+    });
+    export_spec_with(title, Some(win.label()), path, key)
+}
+
+/// Before a command checks what the user must confirm (an existing file): the job that already serves `spec`, if one runs
+/// (a repeated request joins it, and the user is told), or the refusal of an export of a file another export is writing with
+/// other settings. `None`: nothing in the way.
+pub(crate) fn preflight<R: Runtime>(app: &AppHandle<R>, spec: &JobSpec) -> CmdResult<Option<u64>> {
+    let Some(jobs) = app.try_state::<Jobs>() else { return Ok(None) };
+    match jobs.preflight(spec) {
+        Ok(Some(id)) => {
+            tell_joined(app, spec.kind, spec.source.window.as_deref());
+            Ok(Some(id.0))
+        }
+        Ok(None) => Ok(None),
+        Err(refusal) => Err(refusal.to_string().into()),
+    }
 }
 
 /// The progress of an export under way: rows (or events) written of those to write (`total` 0 while unknown) and the
@@ -478,15 +531,15 @@ pub(crate) fn start_file<R: Runtime>(
     )
 }
 
-/// An export of the window's logs to `path` as a background export job (two at a time); see [`start_file`].
+/// An export of the window's logs to `path` as a background export job (two at a time); see [`start_file`]. `spec` is
+/// [`export_spec_for`]'s.
 pub(crate) fn export<R: Runtime>(
     app: &AppHandle<R>,
     win: &CurrentWindow,
-    title: &str,
+    spec: JobSpec,
     path: &std::path::Path,
     f: impl FnOnce(&dyn debrief_core::ports::Store) -> CmdResult<String> + Send + 'static,
 ) -> CmdResult<u64> {
-    let spec = export_spec(title, Some(win.label()), path);
     let w = win.arc().clone();
     let control = debrief_core::ql::QueryControl::new();
     let result = JobResult::file(path.display().to_string());
@@ -562,9 +615,35 @@ where
     if spec.key.is_some() {
         // A keyed request may join a job that already exists, so there is no value to hand back: submit the work itself.
         let end = move |ctx: &JobCtx| service::settle(f(ctx), ctx).0;
-        return jobs.submit_work(spec, controls, end).map_err(|r| r.to_string());
+        let (kind, window) = (spec.kind, spec.source.window.clone());
+        let sub = jobs.submit_keyed_work(spec, controls, end).map_err(|r| r.to_string())?;
+        if !sub.created {
+            tell_joined(app, kind, window.as_deref());
+        }
+        return Ok(sub.id);
     }
     jobs.submit(spec, controls, f).map(|h| h.id).map_err(|r| r.to_string())
+}
+
+/// A second ask for an import or export that is already under way was served by that job: say so, so the user is not left
+/// wondering why nothing new started. Other kinds join silently (they are background work nobody asked for by hand).
+fn tell_joined<R: Runtime>(app: &AppHandle<R>, kind: JobKind, window: Option<&str>) {
+    use crate::notification_centre::centre::{NewNotice, NoticeScope, NoticeSeverity, NoticeSource};
+    let (source, body) = match kind {
+        JobKind::Import => (NoticeSource::Import, "Already importing these files; follow it in the Jobs pane."),
+        JobKind::Export => (NoticeSource::Job, "Already exporting this; follow it in the Jobs pane."),
+        _ => return,
+    };
+    let notice = NewNotice::new(
+        format!("job:joined:{}", kind.as_str()),
+        source,
+        NoticeSeverity::Info,
+        "Already in progress",
+        NoticeScope::Project,
+    )
+    .body(body)
+    .quiet();
+    crate::notification_centre::post(app, window, notice, None);
 }
 
 fn service<R: Runtime>(app: &AppHandle<R>) -> CmdResult<Jobs> {

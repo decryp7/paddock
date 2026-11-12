@@ -19,7 +19,8 @@ import { FolderSetupWizard } from './folder-setup-wizard';
 import { mockJobs } from '../../jobs/mock-jobs';
 import { MockFolderSetupBackend, naiveDiff, snippet } from './mock-folder-setup-backend';
 import { FolderSetupPreview } from './proposal-preview';
-import { folderSetupCommands, FolderSetupLauncher, hasOpenFiles } from './provide-folder-setup';
+import { folderSetupCommands } from './folder-setup.commands';
+import { FolderSetupLauncher, hasOpenFiles } from './provide-folder-setup';
 import { ProposalPreview } from './folder-setup.types';
 
 function setup(aiMode: 'ready' | 'setup' | 'off' = 'off') {

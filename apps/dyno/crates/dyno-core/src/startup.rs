@@ -25,6 +25,12 @@ pub enum StartupLocation {
     SystemLaunchAgent,
     /// A macOS login item.
     LoginItem,
+    /// `HKCU\…\RunOnce` (this user; runs at the next sign-in, then Windows removes it). Appended: ADR 0033 D3.
+    UserRunOnceKey,
+    /// `HKLM\…\RunOnce` (every user; runs at the next sign-in, then Windows removes it).
+    MachineRunOnceKey,
+    /// A packaged (Store) app's startup task. Nothing lists it yet: the reader is deferred (ADR 0033, WP-5b).
+    PackagedApp,
 }
 
 impl StartupLocation {
@@ -39,6 +45,9 @@ impl StartupLocation {
             StartupLocation::UserLaunchAgent => "Launch agent (this user)",
             StartupLocation::SystemLaunchAgent => "Launch agent (all users)",
             StartupLocation::LoginItem => "Login item",
+            StartupLocation::UserRunOnceKey => "Registry, next sign-in only (this user)",
+            StartupLocation::MachineRunOnceKey => "Registry, next sign-in only (all users)",
+            StartupLocation::PackagedApp => "Store app",
         }
     }
 }
@@ -173,8 +182,8 @@ pub fn is_os_owned(entry: &StartupEntry, os: crate::os::Os) -> bool {
             let after_drive = exe.get(2..).unwrap_or("");
             let in_windows = exe.as_bytes().get(1) == Some(&b':') && after_drive.starts_with("/windows/");
             in_windows
-                || name.starts_with("/microsoft/windows/")
-                || norm_path(&entry.id).contains(":/microsoft/windows/")
+                || (entry.id.starts_with("task:") && name.starts_with("/microsoft/windows/"))
+                || (entry.id.starts_with("task:") && norm_path(&entry.id).contains(":/microsoft/windows/"))
                 || entry
                     .publisher
                     .as_deref()
@@ -224,12 +233,36 @@ pub struct StartupOverview {
     /// Who read the login items and background tasks (macOS).
     #[serde(default)]
     pub btm_via: crate::read_via::ReadVia,
+    /// Whether this system's reader reads publishers. `false` (Windows in 1.1.1, ADR 0033 D8) means no entry has one, so the
+    /// "Hide signed apps" filter cannot work and the page says so; it is the engine's answer, never decided from the OS name.
+    #[serde(default = "signer_read_default")]
+    pub signer_read: bool,
+    /// What the list covers and does not, once, under the list (Windows: Run and RunOnce keys and Startup folders; ADR 0033 §4.1).
+    /// Coverage is not a failure, so it is not in `unavailable`.
+    #[serde(default)]
+    pub coverage: Option<String>,
+}
+
+fn signer_read_default() -> bool {
+    true
 }
 
 impl StartupOverview {
     /// The same overview with the login items read by `via`.
     pub fn with_btm_via(mut self, via: crate::read_via::ReadVia) -> StartupOverview {
         self.btm_via = via;
+        self
+    }
+
+    /// The same overview with `signer_read` set.
+    pub fn with_signer_read(mut self, read: bool) -> StartupOverview {
+        self.signer_read = read;
+        self
+    }
+
+    /// The same overview with the coverage sentence set.
+    pub fn with_coverage(mut self, coverage: Option<String>) -> StartupOverview {
+        self.coverage = coverage;
         self
     }
 }
@@ -259,6 +292,8 @@ pub fn overview(entries: Vec<StartupEntry>, filter: StartupFilter, os: crate::os
         signed_count,
         unavailable: Vec::new(),
         btm_via: crate::read_via::ReadVia::Local,
+        signer_read: true,
+        coverage: None,
     }
 }
 
@@ -325,8 +360,32 @@ mod tests {
             StartupLocation::UserLaunchAgent,
             StartupLocation::SystemLaunchAgent,
             StartupLocation::LoginItem,
+            StartupLocation::UserRunOnceKey,
+            StartupLocation::MachineRunOnceKey,
+            StartupLocation::PackagedApp,
         ];
         assert!(all.iter().all(|l| !l.label().is_empty()));
+        let labels: std::collections::HashSet<_> = all.iter().map(StartupLocation::label).collect();
+        assert_eq!(labels.len(), all.len(), "two locations share a label");
+    }
+
+    /// The wire is positional postcard: the old variants keep their index and the new ones are appended after `LoginItem`
+    /// (ADR 0033 D3), so an older reader still decodes every value it knew.
+    #[test]
+    fn the_new_locations_are_appended_after_the_old_ones() {
+        let index = |l: StartupLocation| postcard::to_stdvec(&l).unwrap();
+        assert_eq!(index(StartupLocation::UserRunKey), [0]);
+        assert_eq!(index(StartupLocation::LoginItem), [7]);
+        assert_eq!(index(StartupLocation::UserRunOnceKey), [8]);
+        assert_eq!(index(StartupLocation::MachineRunOnceKey), [9]);
+        assert_eq!(index(StartupLocation::PackagedApp), [10]);
+        for l in [
+            StartupLocation::UserRunOnceKey,
+            StartupLocation::MachineRunOnceKey,
+            StartupLocation::PackagedApp,
+        ] {
+            assert_eq!(postcard::from_bytes::<StartupLocation>(&index(l.clone())).unwrap(), l);
+        }
     }
 }
 
@@ -366,6 +425,7 @@ mod filter_tests {
         ));
         let mut task = entry("\\Microsoft\\Windows\\Defrag\\ScheduledDefrag", "", ImpactRating::Low);
         task.exe = None;
+        task.id = "task:\\Microsoft\\Windows\\Defrag\\ScheduledDefrag".into();
         assert!(is_os_owned(&task, Os::Windows));
         assert!(is_os_owned(&signed("x", "D:\\a.exe", "Microsoft Windows"), Os::Windows));
         assert!(is_os_owned(
@@ -376,6 +436,69 @@ mod filter_tests {
             &entry("syncthing", "/home/me/bin/syncthing", ImpactRating::Low),
             Os::Linux
         ));
+    }
+
+    #[test]
+    fn windows_ids_say_whose_entry_it_is_by_their_kind_not_by_a_name_that_mimics_a_task() {
+        let with_id = |id: &str, name: &str, exe: &str| {
+            let mut e = entry(name, exe, ImpactRating::Low);
+            e.id = id.into();
+            e
+        };
+        // A task under \Microsoft\Windows\ is the OS's, whatever its action runs.
+        assert!(is_os_owned(
+            &with_id("task:\\Microsoft\\Windows\\Defrag\\ScheduledDefrag", "ScheduledDefrag", "D:\\x.exe"),
+            Os::Windows
+        ));
+        // A Run key of the OS's own CurrentVersion path is not a Windows folder entry; an HKLM Run id is not the OS's.
+        assert!(!is_os_owned(
+            &with_id("reg:HKLM:run:64:Acme", "Acme", "C:\\Program Files\\Acme\\a.exe"),
+            Os::Windows
+        ));
+        assert!(!is_os_owned(
+            &with_id("reg:HKCU:runonce:64:Acme", "Acme", "C:\\Users\\me\\a.exe"),
+            Os::Windows
+        ));
+        // A registry value that is merely named like a task path is not a task.
+        assert!(!is_os_owned(
+            &with_id(
+                "reg:HKCU:run:64:x:\\Microsoft\\Windows\\y",
+                "x:\\Microsoft\\Windows\\y",
+                "C:\\Users\\me\\a.exe"
+            ),
+            Os::Windows
+        ));
+        // A Run value whose name starts like a task's path is still a Run value: the task-name check is for `task:` ids only.
+        assert!(!is_os_owned(
+            &with_id(
+                "reg:HKCU:run:64:\\Microsoft\\Windows\\x",
+                "\\Microsoft\\Windows\\x",
+                "C:\\Users\\me\\a.exe"
+            ),
+            Os::Windows
+        ));
+        assert!(!is_os_owned(
+            &with_id("folder:user:Acme.lnk", "Acme", "C:\\Users\\me\\a.exe"),
+            Os::Windows
+        ));
+        assert!(is_os_owned(
+            &with_id(
+                "reg:HKLM:run:64:SecurityHealth",
+                "SecurityHealth",
+                "C:\\Windows\\System32\\SecurityHealthSystray.exe"
+            ),
+            Os::Windows
+        ));
+    }
+
+    #[test]
+    fn the_overview_says_whether_signers_were_read_and_what_is_covered() {
+        let o = overview(vec![], StartupFilter::default(), Os::Windows);
+        assert!(o.signer_read, "an engine that reads publishers says so by default");
+        assert_eq!(o.coverage, None);
+        let o = o.with_signer_read(false).with_coverage(Some("Lists X.".into()));
+        assert!(!o.signer_read);
+        assert_eq!(o.coverage.as_deref(), Some("Lists X."));
     }
 
     #[test]

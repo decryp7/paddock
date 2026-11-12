@@ -79,6 +79,24 @@ that quotes a result links to the block instead of carrying the only copy.
 
 - **Notes:** one thread, no parallelism needed at this size; the cheaper scan (a byte-string test before parsing Rust and TypeScript, one parse per YAML file) is in. The debug figure is for a debug `./dev` on this loaded machine. How the wrapper builds `./dev` in CI (profile, cold cache) is not measured here.
 
+### 2026-11-12, full against sparse worktree checkout (fix/worktree-gates-profile)
+
+- **Commit:** e2a318345 (origin/main when measured); the tool is the `./dev` built from main before the change
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; the worktree root on the external d8 disk
+- **Load:** 1-minute load 9.0 to 9.8 at the start and end of the runs (other agents' builds were running)
+- **Build:** the `./dev` wrapper's binary, unchanged by the measurement
+- **Corpus:** this repository: 13,163 tracked files; the cone is `crates,ui,scripts,docs,tools,apps/spotter`
+- **Command:** `HEAVY_LOCK_DIR=/Volumes/d8sst7/dev-targets/heavy-slots engineering-rules/scripts/heavy.sh ./dev worktree add <name> --base origin/main -b <branch> --owner implementer:meas --root /Volumes/d8sst7/dev-targets/wt --agent <id> [--sparse crates,ui,scripts,docs,tools,apps/spotter]`, then `du -sk <folder>`
+- **Runs:** 3 runs of each, interleaved; median and range of the wall time as `date` differences; disk is the same every run
+- **Numbers:**
+
+  | Measure | Sparse cone | Full checkout | Verdict |
+  |---|---|---|---|
+  | wall time, median (range) | 1.2 s (1.2 to 1.3) | 2.7 s (2.6 to 7.1) | full costs about 1.4 s more at median |
+  | disk | 203 MiB | 544 MiB | full costs about 340 MiB more |
+
+- **Notes:** the full checkout's slowest run (7.1 s) came while the load was high. An earlier run on a quieter machine gave 3.1 s and 1.9 s (two runs each, disk the same). Decision: a branch worktree is a full checkout (`--profile gates`), because conformance, `scripts/affected.mjs`, `./dev gates check` and `./dev plan` read most folders and a cone made them fail with ENOENT; agents added folders by hand at least four times on 2026-11-11. `--sparse` stays for `--detach` review copies. Not measured: build output, which is the same for both.
+
 ## All benchmarks
 
 The CI column names the workflow and job. "No" means nobody runs it unless they choose to. Details, env vars and
@@ -196,6 +214,39 @@ One line each. The dated records are in the app files.
 ## Shared-crate results
 
 Results of shared crates (rule 48: shared code records here), newest first.
+
+### 2026-11-12, first-paint JS of the shell's contribution registry: `shell/contributions` against `shell` (fix/paddock-ui-light-shell-entry)
+
+- **Commit:** A/B: base c5de1b427 (train/2026-11-11-5) -> change 461cc6128 for Dyno and Pitwall; Debrief: 0c52ca0c1 (feat/debrief-m1-contributions) with and without its six registry imports switched to the new entry (not committed to Debrief)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.1
+- **Load:** 1-minute load 10-18 during the builds (CI running on the same machine)
+- **Build:** production `ng build --stats-json` (Angular application builder, esbuild), `ui/dist` rebuilt from the tree under test with `npm run build`
+- **Corpus:** none (bundle sizes)
+- **Command:** `npm run build -w ui`, then in `apps/<app>/app` `npx ng build --stats-json --output-path <scratch>/<name>`, then
+  `node ui/scripts/first-paint-weight.mjs <scratch>/<name>/browser-stats.json src/main.ts` (Debrief: add `src/bootstrap.ts src/app/app.ts src/app/app.config.ts`).
+  The script is the static closure of the entry chunks through `measure()` of `conformance/src/window-weight/measure.mjs`; Material, CDK and paddock-ui kB are the `bytesInOutput` of their inputs in those chunks
+- **Debrief files switched for the "change" build** (6, from `apps/debrief/app/src/app/`): `extensions/command-context.ts`, `extensions/command-registry.ts`,
+  `extensions/context.ts`, `extensions/contributions.ts`, `extensions/lazy-registration.ts` and `testing/contributions.ts`: `@decryp7/paddock-ui/shell` became `@decryp7/paddock-ui/shell/contributions`
+- **Runs:** single (a build is deterministic)
+- **Numbers:** (kB of JS loaded before first paint, minified, not compressed)
+
+  | Window | Measure | Base | Change | Verdict |
+  |---|---|---|---|---|
+  | Debrief M1 main | JS total | 1242.5 | 1189.4 | -53.1 |
+  | Debrief M1 main | `@angular/material` | 56.4 | 14.5 | -41.9 (the root's `material/menu`) |
+  | Debrief M1 main | `@angular/cdk` | 148.7 | 135.3 | -13.4 |
+  | Debrief M1 main | paddock-ui | 19.8 | 10.4 | -9.4 |
+  | Dyno main | JS total | 719.5 | 719.8 | no change (+0.3: chunking) |
+  | Dyno main | Material / CDK / paddock-ui | 157.1 / 166.7 / 208.8 | 157.2 / 166.5 / 208.9 | no change |
+  | Pitwall main | JS total | 702.5 | 702.4 | no change |
+  | Pitwall main | Material / CDK / paddock-ui | 158.4 / 168.0 / 201.2 | 158.4 / 168.0 / 201.1 | no change |
+
+- **Memory measure:** n/a (bundle sizes, no process measured)
+- **Budget:** none asserted for these windows (rule 35 budgets: Debrief main 1355 kB, see Budgets); Debrief M1's main window at 1189.4 kB is under its 1355 kB
+- **Notes:** Dyno and Pitwall main windows already import the paddock-ui root and Material elsewhere (the other files that import `shell` also use the
+  frame, so they stay on `shell`), so switching their registry-only files gains nothing there; they gain only the cleaner import. A first Debrief
+  "before" build ran against a `ui/dist` that already contained the new entry (its `shell` re-exports it) and showed no difference: compare only against a `ui/dist` built from the base tree.
+  The static test `ui/scripts/light-entries.test.mjs` keeps the entry free of the root and Material.
 
 ### 2026-11-08, conformance C99: macOS dependency graph probe and source scan (pitwall/1.1-c99b)
 

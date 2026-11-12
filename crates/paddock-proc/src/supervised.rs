@@ -491,8 +491,7 @@ impl Supervised {
                         "Ending child {} without its identity: through its handle and its process group only",
                         self.pid
                     );
-                    #[cfg(unix)]
-                    crate::sys::signal_group(self.pid, crate::sys::SIGKILL);
+                    crate::tree::end_unreaped_group(self.pid);
                 }
                 None => {}
             }

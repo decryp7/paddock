@@ -2,7 +2,7 @@ import { ApplicationConfig, provideBrowserGlobalErrorListeners } from '@angular/
 import { provideDebriefBuiltins } from './builtin/provide-builtins';
 import { provideBackend } from './core/backend';
 import { provideErrorLogging, provideLogger } from './core/logger';
-import { provideDebriefPlugin } from './extensions';
+import { provideDebriefPlugin, provideDebriefShellCore } from './extensions';
 import { provideDiagnostics } from './diagnostics/provide-diagnostics';
 import { provideAnalysis } from './analysis/analysis.plugin';
 import { provideLive } from './live/provide-live';
@@ -51,11 +51,17 @@ import { WorkspaceSource } from './shell/workspace-source';
 import { provideStartupContract } from './core/startup/startup-contract';
 import { provideStartupTimings } from './core/startup/startup-timings';
 import { provideRecovery } from './lifecycle/recovery';
+import { provideDebriefStatusItems } from './shell/status/status-items.contributions';
+import { provideDebriefMenus } from './shell/menu/menu.contributions';
+import { provideDebriefThemes } from './theme/themes.contributions';
+import { provideDebriefSharedState } from './popout/shared-state.contributions';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
     provideNativeFeel(),
+    ...provideDebriefThemes(),
+    ...provideDebriefSharedState(),
     provideLogger(),
     provideErrorLogging(),
     provideDiagnostics(),
@@ -104,10 +110,16 @@ export const appConfig: ApplicationConfig = {
     provideServiceHealth(),
     provideNotificationHost(),
     provideNotificationSource(WorkspaceSource),
+    // The status bar's items: data and loaders; their components load after the first paint.
+    ...provideDebriefStatusItems(),
+    // Where the commands sit in the menus (the shell's menus kind).
+    ...provideDebriefMenus(),
     // Reports ready after the first paint; Rust's watchdog recovers a window that never does (ADR 0058).
     provideStartupContract(),
     // The main window's start-up marks for Rust's "Startup timings" line (rule 16).
     provideStartupTimings(),
     provideRecovery(),
+    // The shell's command runner and ports are Debrief's own until M2 and M3 move them (workbench.md §4.3).
+    provideDebriefShellCore(),
   ],
 };

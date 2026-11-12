@@ -1,11 +1,12 @@
-import { inject, Injectable } from '@angular/core';
+import { Injectable } from '@angular/core';
 import { RecordView } from '../core/api.types';
-import { flattenContributions, DEBRIEF_INSPECTOR_SECTIONS, DebriefInspectorSection } from './tokens';
+import { contributedItems, DEBRIEF_KIND } from './contributions';
+import { DebriefInspectorSection } from './tokens';
 
 /** Plugin sections for the inspector, ordered, filtered per record. */
 @Injectable({ providedIn: 'root' })
 export class InspectorSections {
-  private readonly sections = flattenContributions<DebriefInspectorSection>(inject(DEBRIEF_INSPECTOR_SECTIONS, { optional: true })).sort(
+  private readonly sections = contributedItems<DebriefInspectorSection>(DEBRIEF_KIND.inspectorSections).sort(
     (a, b) => a.order - b.order,
   );
 

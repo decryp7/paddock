@@ -16,9 +16,8 @@
 //! Every wait that gives up logs the command, the step and the bound or reason (ER-27), and its error says the same.
 
 use crate::cdp::{Connection, Pending};
-use crate::process::Supervised;
 use crate::{Error, Result};
-use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StallCause, StartProbe, StartState, StartWatch, Watched};
+use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StallCause, StartProbe, StartState, StartWatch, Supervised, Watched};
 use serde_json::Value;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};

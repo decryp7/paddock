@@ -2,8 +2,7 @@ import { DiagnosticRow, FixEvaluation, ProblemKind, QuickFix, Severity } from '.
 import { formatCount } from '../core/format';
 import { plural } from '../i18n/locale';
 
-/** The Problems pane's view id. */
-export const PROBLEMS_VIEW = 'problems';
+export { PROBLEMS_VIEW } from './problems.ids';
 
 /** One diagnostic row with a stable key (the pane's selection and tree ids). */
 export interface ProblemItem {

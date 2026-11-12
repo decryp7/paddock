@@ -1,8 +1,7 @@
 import { ApplicationRef, Injector, runInInjectionContext } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { applyStoredAppearance, AppearanceStore, BrowserAppearanceBackend, IpcAppearanceBackend, MATCH_MEDIA, provideAppearance, provideThemes, type MatchMedia } from '@decryp7/paddock-ui/shell';
-import { ContributionRegistry } from '../registry';
-import { msg } from '../message';
+import { ContributionRegistry, msg } from '@decryp7/paddock-ui/shell/contributions';
 import { DEFAULT_APPEARANCE, parseAppearance, resolveAppearance, sameAppearance, serializeAppearance, type Appearance } from './appearance';
 import { APPEARANCE_EVENT, APPEARANCE_KEY, type AppearanceChannel, type AppearanceStorage } from './appearance-backend';
 import { applyAppearanceTo } from './appearance.store';

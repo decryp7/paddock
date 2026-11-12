@@ -80,6 +80,15 @@ function job(fx, sha, { os = 'macOS', slot = 's1', env = {}, hash = Math.random(
   return { ...r, ws, ghEnv, out: r.stdout + r.stderr, stable: (s = slot) => join(fx.root, 'home', '.paddock-ci', 'src', `decryp7_paddock-crate-${s}`) };
 }
 
+test('no profile excludes a whole top-level folder or a whole apps/<x>: those are what the sparse-checkout guard counts as missing', () => {
+  // conformance/src/util/full-checkout.mjs reads a missing top-level folder (or apps/<x>) as "a sparse checkout without it"; a profile
+  // excludes folders below those (ui/docs/review, apps/*/docs/images), so a kept clone is never mistaken for one.
+  const whole = declared()
+    .filter((d) => d.kind === 'exclude')
+    .filter((d) => /^[^/]+\/?$/.test(d.parts[1]) || /^apps\/(\*|[^/]+)\/?$/.test(d.parts[1]));
+  assert.deepEqual(whole.map((d) => d.line), []);
+});
+
 test('kept-clone creates the slot\'s clone at the job\'s exact commit without the profile\'s excluded paths, and says so', () => {
   const fx = fixture();
   const sha = git(fx.work, fx.root, 'rev-parse', 'HEAD');

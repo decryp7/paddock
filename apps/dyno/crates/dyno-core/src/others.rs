@@ -19,6 +19,9 @@ pub struct ProcessProvenance {
     /// The total of other accounts' processes the helper counted for a caller who may not see them one by one; it replaces what
     /// the list adds up to.
     pub others_total: Option<OtherUsers>,
+    /// A one-line note for a reading that is not a failure but not complete yet (the helper's first read is awaited): shown as a hint,
+    /// never counted as unavailable.
+    pub hint: Option<String>,
 }
 
 impl ProcessProvenance {

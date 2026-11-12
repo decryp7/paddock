@@ -1,6 +1,7 @@
 //! The server's integration tests, one binary (conformance C37): each file is a module.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod audio_parts;
 mod caching;
 mod cancel;
 mod common;

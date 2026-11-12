@@ -24,6 +24,7 @@ pub mod paths;
 pub mod process;
 pub mod service;
 pub mod serving;
+pub mod speech;
 pub mod system;
 pub mod updates;
 pub mod warm;

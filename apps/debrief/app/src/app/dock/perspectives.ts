@@ -20,8 +20,7 @@ export interface PerspectiveInfo {
 const SAVED_PREFIX = 'saved:';
 export const PERSPECTIVES_KEY = 'debrief.perspectives';
 const VERSION = 1;
-/** Perspectives with a Ctrl+n key. */
-export const PERSPECTIVE_KEYS = 9;
+export { PERSPECTIVE_KEYS } from './dock.ids';
 
 /** What is kept between runs: the active perspective and each perspective's arrangement as the user left it. */
 export interface PerspectiveState {

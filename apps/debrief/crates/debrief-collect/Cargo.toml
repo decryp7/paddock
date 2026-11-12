@@ -30,3 +30,6 @@ tempfile.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 zip.workspace = true
+
+[dev-dependencies]
+paddock-proc = { path = "../../../../crates/paddock-proc" }

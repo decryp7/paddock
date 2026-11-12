@@ -170,7 +170,7 @@ pub fn par_walk(
     }
     let mut visited = HashSet::new();
     if opts.symlinks == SymlinkPolicy::Follow
-        && let Ok(c) = fs::canonicalize(root)
+        && let Ok(c) = paddock_env::winpath::real_verbatim(root)
     {
         visited.insert(c);
     }
@@ -361,7 +361,7 @@ impl Walk<'_> {
         if self.opts.symlinks != SymlinkPolicy::Follow {
             return true;
         }
-        self.note(path, fs::canonicalize(path))
+        self.note(path, paddock_env::winpath::real_verbatim(path))
             .is_some_and(|c| guard(&self.visited).insert(c))
     }
 }

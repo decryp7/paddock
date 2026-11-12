@@ -204,6 +204,8 @@ export interface LiveVia {
   processes: ReadVia;
   others: ReadVia;
   temperatures: ReadVia;
+  /** A note beside the process list while part of it is still to come; not a failure. */
+  processesHint?: string | null;
 }
 
 export interface Locker {
@@ -747,7 +749,10 @@ export type StartupLocation =
   | 'scheduledTask'
   | 'userLaunchAgent'
   | 'systemLaunchAgent'
-  | 'loginItem';
+  | 'loginItem'
+  | 'userRunOnceKey'
+  | 'machineRunOnceKey'
+  | 'packagedApp';
 
 export type StartupState = 'enabled' | 'disabled';
 
@@ -1890,6 +1895,10 @@ export interface StartupOverview {
   unavailable: string[];
   /** Who read the login items and background tasks (macOS). */
   btmVia: ReadVia;
+  /** Whether this system's reader gives entries a publisher. False (Windows): "Hide signed apps" cannot work, and the page says so. */
+  signerRead: boolean;
+  /** What the list covers and does not, once, under the list (Windows); null when there is nothing to add. */
+  coverage: string | null;
 }
 
 export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved';

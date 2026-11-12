@@ -37,6 +37,7 @@ default = ["symbol-server"]
 symbol-server = ["debrief-symbols/server"]
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 proptest.workspace = true
 
 # The profiling target of the integration tests: a busy loop, lock contention and a growing heap

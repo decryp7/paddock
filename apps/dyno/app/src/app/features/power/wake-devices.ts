@@ -6,7 +6,7 @@ import { MatInputModule } from '@angular/material/input';
 import { ErrorStateMatcher } from '@angular/material/core';
 import { confirm } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
-import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell/contributions';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import type { Neighbour, ReadinessItem, WolDevice, WolDeviceInput } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';

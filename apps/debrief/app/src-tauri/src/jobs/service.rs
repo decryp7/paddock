@@ -397,12 +397,13 @@ impl Jobs {
         work: impl FnOnce(&JobCtx) -> JobEnd + Send + 'static,
     ) -> Result<Submission, Refusal> {
         let now = self.now();
+        let kind = spec.kind;
         let id = {
             let mut inner = self.lock();
             let Submission { id, created } = inner.queue.submit_or_existing(spec, now)?;
             if !created {
                 // The same keyed request is already queued or running: it serves this one; `work` is dropped unrun.
-                log::info!(Job = id.0; "job.joined: an equal keyed request is served by this job");
+                log::info!(Job = id.0, Kind = kind.as_str(); "job.joined: an equal keyed request is served by this job");
                 return Ok(Submission { id, created: false });
             }
             inner.controls.insert(
@@ -746,6 +747,11 @@ impl Jobs {
     /// Reports a running job's progress (for producers that learn it from elsewhere, like a tool).
     pub fn report(&self, id: JobId, progress: JobProgress) {
         self.lock().queue.report(id, Some(progress), None);
+    }
+
+    /// What a submit of `spec` would meet now (see [`JobQueue::preflight`]): the id of the job that would serve it.
+    pub fn preflight(&self, spec: &JobSpec) -> Result<Option<JobId>, Refusal> {
+        self.lock().queue.preflight(spec)
     }
 
     /// The queued and running jobs matching `pred` (e.g. a window's waiting AI requests).

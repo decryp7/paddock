@@ -8,8 +8,9 @@ import { JobsBackend } from './jobs-backend';
 import { JobInfo, JobResult } from './jobs.types';
 import type { FolderRefinement, SurveyOutcome } from '../ai/folder-setup/folder-setup.types';
 import type { StorageClearResult } from '../settings/storage/storage.types';
+import { JOBS_VIEW } from './jobs.ids';
 
-export const JOBS_VIEW = 'jobs';
+export { JOBS_VIEW } from './jobs.ids';
 const AI_CHAT_VIEW = 'ai-chat';
 
 /** The analysis views a job's `view` result names (the engine's names are the view ids). */
