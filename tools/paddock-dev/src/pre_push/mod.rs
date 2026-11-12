@@ -23,6 +23,7 @@
 pub mod ci_line;
 pub mod exec;
 pub mod gates;
+pub mod heavy_tool;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -312,6 +313,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         env: env.clone(),
         logs: state.join("logs"),
         stop: Arc::clone(&stop),
+        built_heavy: Default::default(),
     };
     let history = GitHistory::new(&work, GIT_TIMEOUT);
     let req = Request {
@@ -348,7 +350,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
             notes.push("PADDOCK_HEAVY=off: compiles run without the machine-wide slot (CARGO_BUILD_JOBS=2 still applies)".into());
         } else {
-            notes.push("no heavy.sh or heavy on PATH and PADDOCK_HEAVY is not set: the compiles (clippy, xwin, Linux) are not measured, because they would run beside every other push's (ER-24); install tools/heavy or set PADDOCK_HEAVY=off".into());
+            notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
         }
     }
     let head = format!(

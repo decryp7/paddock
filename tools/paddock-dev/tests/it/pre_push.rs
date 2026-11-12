@@ -37,6 +37,11 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>) -> (i32, String, St
         .env("PATH", path)
         .env_remove("PADDOCK_HEAVY")
         .envs(heavy.map(|h| ("PADDOCK_HEAVY", h)))
+        // An empty cache: the heavy tool is built (by the fake cargo, which builds nothing) and never taken from the user's.
+        .env(
+            "PADDOCK_DEV_HOME",
+            path.split(':').next().unwrap_or("/nonexistent").to_string() + "/home",
+        )
         .output()
         .unwrap();
     (
@@ -114,7 +119,7 @@ fn everything_that_runs_green_is_exit_0() {
 }
 
 #[test]
-fn without_a_heavy_slot_the_compiles_are_not_measured_exit_6_never_a_pass() {
+fn when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), "exit 0");
     let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None);
