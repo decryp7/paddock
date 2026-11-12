@@ -72,11 +72,13 @@ jobs:
       BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # Installers for a manual run: they need only the plan, never `gates`.
-  # Gitea 28.2 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs
+  # Gitea 28.3.0 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs
   # built nothing), so a job that waits on the optional `gates` job can not be the one that builds on a push or a dispatch.
   # A manual run with `gates: true` runs the gates beside the installers; both must be green for the run to be.
   installers:
     name: installers
+    # paddock-timing-job: macos — the macOS bundle starts every sidecar from the built app and bounds it (the --version start check)
+    # paddock-timing-overlap: only a manual run with `gates: true` overlaps the gates (ci.yml legs); a tag run orders release after gates. Gitea 28.3.0 skips a reusable-workflow job whose need was skipped, so this job cannot need `gates` without building nothing on a push (see above). Remove this waiver, and make the job need `gates`, once go-gitea #40126 / #40221 (an `if` on a job with a skipped need) is in the runner's Gitea; or use one gated copy of this job.
     needs: [plan]
     if: ${{ needs.plan.outputs.run == 'true' && !startsWith(github.ref, 'refs/tags/') }}
     uses: ./.gitea/workflows/app-release.yml

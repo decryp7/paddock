@@ -88,6 +88,7 @@ jobs:
 
   bench:
     name: engine benchmarks
+    # paddock-timing-job: linux — a benchmark: its numbers are the result (C113 checks only this file: its overlap with debrief.yml's jobs is not checked)
     needs: [plan]
     if: needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
@@ -163,6 +164,7 @@ jobs:
   # demand only (about 15 minutes); the corpus (3.7 GB of CLEF) is generated once into a cached folder.
   store-bench:
     name: store benchmarks (10M events)
+    # paddock-timing-job: linux — a benchmark: its numbers are the result (C113 checks only this file: its overlap with debrief.yml's jobs is not checked)
     needs: [plan]
     if: needs.plan.outputs.run == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest

@@ -527,6 +527,7 @@ fn a_reused_pid_is_not_the_browser_that_ended() {
         paddock_proc::StartTime::from_micros(me.started().as_micros().saturating_sub(5_000_000));
     let ended_browser = paddock_proc::ProcessId::new(me.pid(), earlier);
     assert!(
+        // conformance: pid-liveness — the test's own process
         paddock_proc::is_alive(me.pid()),
         "the pid is held (by this test)"
     );
