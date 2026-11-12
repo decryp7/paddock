@@ -1769,6 +1769,13 @@ fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
         checkouts,
         "every checkout drops its credentials, as tag.yml's does"
     );
+    // Gitea refuses a workflow whose map repeats a key (run 7998: two `with:` in a checkout step, no jobs at all).
+    for step in ci.split("\n      - ") {
+        assert!(
+            step.lines().filter(|l| *l == "        with:").count() <= 1,
+            "a step repeats `with:`:\n{step}"
+        );
+    }
 }
 
 /// The shell of a step: the `run:` text of the step named `name` in a job block.

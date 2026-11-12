@@ -471,10 +471,9 @@ jobs:
       # The engineering rules, one more rules source for the copied-text check. Optional: when the runner's token cannot read
       # that repository the step fails softly and the lint skips the missing file.
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
         continue-on-error: true
         with:
+          persist-credentials: false
           repository: decryp7/engineering-rules
           path: engineering-rules
 
@@ -773,10 +772,9 @@ jobs:
         if: runner.os == 'Linux'
 
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
         if: runner.os != 'Linux'
         with:
+          persist-credentials: false
           sparse-checkout: |
             .cargo
             .gitea
@@ -1043,10 +1041,9 @@ jobs:
         if: runner.os == 'Linux'
 
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
         if: runner.os != 'Linux'
         with:
+          persist-credentials: false
           sparse-checkout: |
             .cargo
             .gitea
@@ -1214,17 +1211,15 @@ jobs:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
         if: runner.os == 'Linux'
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
         if: runner.os != 'Linux'
         with:
+          persist-credentials: false
           sparse-checkout: |
             .cargo
             .gitea
