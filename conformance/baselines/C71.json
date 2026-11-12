@@ -343,7 +343,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/core/activity/coverage-guard.spec.ts",
-   "line": 26,
+   "line": 24,
    "hash": "71c8ba03aec8805d"
   },
   {
@@ -378,7 +378,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/diagnostics/diagnostics.spec.ts",
-   "line": 191,
+   "line": 192,
    "hash": "64bbf516d7b23e4c"
   },
   {
@@ -723,22 +723,22 @@
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 352,
+   "line": 356,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 586,
+   "line": 590,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 591,
+   "line": 595,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 596,
+   "line": 600,
    "hash": "fab39cd8206d4975"
   },
   {
@@ -888,22 +888,17 @@
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
-   "line": 405,
+   "line": 410,
    "hash": "42e24ddec41c190f"
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
-   "line": 500,
+   "line": 521,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
-   "line": 332,
-   "hash": "d6b395f9d534be1a"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
-   "line": 377,
+   "line": 392,
    "hash": "a837550434f7c685"
   },
   {
@@ -1073,7 +1068,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-monitor/src/source.rs",
-   "line": 192,
+   "line": 238,
    "hash": "4cad119e99fa6b8c"
   },
   {
@@ -1168,22 +1163,22 @@
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 111,
+   "line": 120,
    "hash": "c69aa0a4d55d7a61"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 116,
+   "line": 125,
    "hash": "af4d226ec4967c29"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 145,
+   "line": 154,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 243,
+   "line": 252,
    "hash": "a837550434f7c685"
   },
   {
@@ -1438,27 +1433,27 @@
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 413,
+   "line": 406,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 542,
+   "line": 535,
    "hash": "a101d0b50615fe0b"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 557,
+   "line": 550,
    "hash": "1f59029f9370b7f7"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 570,
+   "line": 563,
    "hash": "a101d0b50615fe0b"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 674,
+   "line": 667,
    "hash": "8a7b239b74fa9163"
   },
   {
@@ -1498,17 +1493,17 @@
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 19,
+   "line": 20,
    "hash": "58bc5f6c17c7dc29"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 28,
+   "line": 29,
    "hash": "767f0cb771c9e849"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 41,
+   "line": 42,
    "hash": "7ea17622a91efd03"
   },
   {
@@ -2058,7 +2053,7 @@
   },
   {
    "file": "apps/pitwall/crates/pitwall-loopback/src/lib.rs",
-   "line": 394,
+   "line": 427,
    "hash": "6dd9cc9ffe53f850"
   },
   {

@@ -43,5 +43,6 @@ ctrlc = { workspace = true, features = ["termination"] }
 windows-service = "0.8.1"
 
 [dev-dependencies]
-paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
+# Waiting on a condition instead of a guessed time (ADR 0041 §3).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }

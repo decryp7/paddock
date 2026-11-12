@@ -1126,6 +1126,12 @@ test('Debrief runs its installers and real-app smoke tests only on main, debrief
     const parts = conjuncts(workflowJob(loadWorkflow('debrief.yml'), job).if);
     for (const want of ["needs.plan.outputs.run == 'true'", "needs.plan.outputs.full == 'true'", gate]) assert.ok(parts.includes(want), `${job}: full runs only (${want}); its if has: ${parts.join(' && ')}`);
   }
+  // The smoke runs after the bundle and the macOS Rust tests (its macOS start-up benchmark is a timing gate that must not share
+  // the runner with this run's heavy builds); a failed bundle or test leg does not skip it, a failed rust-lint does.
+  const smoke = workflowJob(loadWorkflow('debrief.yml'), 'tauri-smoke');
+  const smokeIf = conjuncts(smoke.if);
+  for (const want of ['!cancelled()', "needs.rust-lint.result == 'success'"]) assert.ok(smokeIf.includes(want), `tauri-smoke: ${want}; its if has: ${smokeIf.join(' | ')}`);
+  for (const n of ['bundle', 'rust-test-macos']) assert.ok(needsOf(smoke).includes(n), `tauri-smoke: after ${n}`);
   // The release needs them, and a tag run is always a full run.
   assert.ok(['bundle', 'tauri-smoke'].every((n) => needsOf(workflowJob(loadWorkflow('debrief.yml'), 'release')).includes(n)));
 });

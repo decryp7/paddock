@@ -329,7 +329,6 @@ fn pitwall_dying_mid_stream_fails_the_request_and_marks_it_gone() {
     assert!(!pw.view().usable);
     // Quit: nothing listens any more.
     fake.kill();
-    std::thread::sleep(Duration::from_millis(50));
     let (r, _) = ask(&p, &hello());
     assert!(r.unwrap_err().to_string().contains("not running"));
     assert_eq!(
@@ -337,6 +336,22 @@ fn pitwall_dying_mid_stream_fails_the_request_and_marks_it_gone() {
         FoundKind::Installed,
         "the discovery file names a port nobody answers on"
     );
+}
+
+#[test]
+fn kill_returns_only_after_the_listener_is_closed() {
+    // ADR 0071: no sleep between `kill` and the check; `kill` joins the accept thread, so the port is closed on return.
+    for _ in 0..20 {
+        let fake = FakePitwall::start(FakeState::default());
+        let port = fake.port;
+        // Once a connection was accepted the accept thread is in its loop (and, being idle, asleep between polls).
+        let first = std::net::TcpStream::connect(("127.0.0.1", port)).expect("the fake listens");
+        paddock_testkit::wait_until("the fake accepted the first connection", || fake.reading() >= 1);
+        drop(first);
+        fake.kill();
+        let err = std::net::TcpStream::connect(("127.0.0.1", port)).expect_err("nothing listens after kill");
+        assert_eq!(err.kind(), std::io::ErrorKind::ConnectionRefused);
+    }
 }
 
 #[test]
