@@ -505,7 +505,7 @@ mod tests {
         let mut f = outputs.create("f", "x", 10).unwrap();
         f.write_all(b"partial").unwrap();
         drop(f);
-        let why = seen_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let why = seen_rx.recv_timeout(paddock_testkit::HANG_GUARD).unwrap();
         assert!(why.contains("discarded the output"), "{why}");
         // Pulling a stream that does not exist is refused.
         let ctx_free: Result<OutputEnd, _> =

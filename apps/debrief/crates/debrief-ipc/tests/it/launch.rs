@@ -12,11 +12,18 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// The fake child's first start (a fresh binary the OS has not run yet) is paid here, before a test starts it with a bound it
+/// cannot remove (a child that exits at once must be seen exiting within the OS's publication window).
+fn warm() {
+    paddock_testkit_start::warm_first_start(std::path::Path::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child")), &["--version"]);
+}
+
 fn spec(args: &[&str]) -> ChildSpec {
+    warm();
     let mut s = SpawnSpec::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"), "the fake child");
     s.args = args.iter().map(|a| a.to_string()).collect();
     s.endpoint_prefix = "debrief-test".into();
-    s.connect_window = Duration::from_secs(10);
+    s.connect_window = paddock_testkit::HANG_GUARD;
     ChildSpec::new(s)
 }
 
@@ -62,11 +69,7 @@ fn a_child_connects_authenticates_and_answers() {
     // A large answer within the frame limit.
     assert_eq!(ask(&c, "big 2000000").unwrap().len(), 2_000_000);
     c.stop();
-    let started = Instant::now();
-    while !c.exited() && started.elapsed() < Duration::from_secs(5) {
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert!(c.exited());
+    paddock_testkit::wait_until("the child to exit once stopped", || c.exited());
 }
 
 /// The folders named `prefix-*` where private sockets are made: every base `create_named` tries, from the one list it uses
@@ -121,6 +124,7 @@ fn the_private_socket_folder_is_gone_once_the_child_is_connected() {
     // A child that never connects leaves nothing either.
     let mut s = spec(&["--no-connect"]);
     s.spawn.endpoint_prefix = prefix.clone();
+    // conformance: expiry-under-test — the window of a child that never connects is what this launch runs out of
     s.spawn.connect_window = Duration::from_millis(300);
     assert!(launch(&s, Arc::new(NoCalls)).is_err());
     assert!(socket_dirs(&prefix).is_empty());
@@ -134,6 +138,7 @@ fn children_that_die_or_never_connect_fail_the_launch() {
         Ok(_) => panic!("launched"),
     }
     let mut s = spec(&["--no-connect"]);
+    // conformance: expiry-under-test — the window of a child that never connects is what this launch runs out of
     s.spawn.connect_window = Duration::from_millis(500);
     match launch(&s, Arc::new(NoCalls)) {
         Err(IpcError::Died(m)) => assert!(m.contains("did not connect"), "{m}"),
@@ -473,14 +478,7 @@ fn the_memory_watcher_tells_the_host_at_80_percent_at_the_stop_and_at_the_end() 
     };
     let events = |heard: &std::sync::Mutex<Vec<(String, MemoryEvent)>>| heard.lock().unwrap().clone();
     let wait_for = |what: &dyn Fn(&MemoryEvent) -> bool| {
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while std::time::Instant::now() < deadline {
-            if events(&heard).iter().any(|(_, e)| what(e)) {
-                return true;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-        false
+        paddock_testkit::poll_until_within(paddock_testkit::HANG_GUARD, || events(&heard).iter().any(|(_, e)| what(e)))
     };
     // 220 MB held for a second in a child capped at 256 MB: past 80%, under the cap.
     let c = launch(&capped(256), Arc::new(NoCalls)).unwrap();

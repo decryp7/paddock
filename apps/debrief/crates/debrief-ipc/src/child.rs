@@ -482,7 +482,7 @@ mod tests {
         let (done, ended) = std::sync::mpsc::channel();
         std::thread::spawn(move || main_lost_claim(Duration::from_millis(30), || done.send(()).unwrap()));
         assert!(
-            ended.recv_timeout(Duration::from_secs(30)).is_ok(),
+            ended.recv_timeout(paddock_testkit::HANG_GUARD).is_ok(),
             "the late main did not end the process"
         );
     }

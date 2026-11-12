@@ -30,4 +30,6 @@ sha2.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 
 [dev-dependencies]
+# Condition waits in the tests (ADR 0041, 0071).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true

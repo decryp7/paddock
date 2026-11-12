@@ -133,11 +133,7 @@ fn dropping_a_stream_cancels_the_call() {
     let mut s = a.stream(Vec::new(), 2).unwrap();
     assert!(matches!(s.next(T).unwrap(), StreamEvent::Item(_)));
     drop(s);
-    let started = Instant::now();
-    while !saw_cancel.load(Ordering::SeqCst) && started.elapsed() < Duration::from_secs(5) {
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    assert!(saw_cancel.load(Ordering::SeqCst));
+    paddock_testkit::wait_until("the producer to see the cancel", || saw_cancel.load(Ordering::SeqCst));
     // An explicit cancel that the callee honours ends the stream.
     let mut s = a.stream(Vec::new(), 2).unwrap();
     assert!(s.cancel_and_wait().is_ok());
@@ -150,11 +146,7 @@ fn a_callee_that_ignores_the_deadline_and_the_cancel_is_a_timeout() {
         if body == b"polite" {
             // The probe sees the cancel from another thread (e.g. a watcher interrupting a statement).
             let probe = ctx.cancel_probe();
-            let watcher = std::thread::spawn(move || {
-                while !probe.is_cancelled() {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
-            });
+            let watcher = std::thread::spawn(move || paddock_testkit::wait_until("the probe to see the cancel", || probe.is_cancelled()));
             let _ = watcher.join();
             assert!(ctx.is_cancelled());
             return Err(CallCtx::cancelled_error());
@@ -200,10 +192,11 @@ fn handlers_may_call_back_while_they_answer() {
 fn too_many_concurrent_calls_are_refused_as_busy() {
     let gate = Arc::new(AtomicBool::new(false));
     let g2 = gate.clone();
+    let entered = Arc::new(AtomicBool::new(false));
+    let e2 = entered.clone();
     let blocking: Arc<dyn Handler> = Arc::new(move |_: &CallCtx, _: &[u8]| -> Result<Vec<u8>, RemoteError> {
-        while !g2.load(Ordering::SeqCst) {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        e2.store(true, Ordering::SeqCst);
+        paddock_testkit::wait_until("the gate to open", || g2.load(Ordering::SeqCst));
         Ok(Vec::new())
     });
     let (x, y) = tokio::io::duplex(1 << 16);
@@ -213,7 +206,9 @@ fn too_many_concurrent_calls_are_refused_as_busy() {
     let _b = Peer::start(y, blocking, opts, rt().handle());
     let a2 = a.clone();
     let first = std::thread::spawn(move || a2.call(Vec::new(), T));
-    std::thread::sleep(Duration::from_millis(100));
+    // The first call holds the only slot once its handler runs: the second is refused only after that.
+    paddock_testkit::wait_until("the first call to be inside its handler", || entered.load(Ordering::SeqCst));
+    // conformance: ordered — the wait is for the handler that holds the only slot; the refusal is the second call's own reply
     assert!(matches!(a.call(Vec::new(), T), Err(IpcError::Remote(e)) if e.code == code::BUSY));
     gate.store(true, Ordering::SeqCst);
     assert!(first.join().unwrap().is_ok());
@@ -221,16 +216,18 @@ fn too_many_concurrent_calls_are_refused_as_busy() {
 
 #[test]
 fn closing_fails_pending_calls_on_both_sides() {
-    let slow: Arc<dyn Handler> = Arc::new(|ctx: &CallCtx, _: &[u8]| -> Result<Vec<u8>, RemoteError> {
-        while !ctx.is_cancelled() {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+    let entered = Arc::new(AtomicBool::new(false));
+    let e2 = entered.clone();
+    let slow: Arc<dyn Handler> = Arc::new(move |ctx: &CallCtx, _: &[u8]| -> Result<Vec<u8>, RemoteError> {
+        e2.store(true, Ordering::SeqCst);
+        paddock_testkit::wait_until("the call to be cancelled", || ctx.is_cancelled());
         Err(CallCtx::cancelled_error())
     });
     let (a, b) = pair(Arc::new(NoCalls), slow);
     let a2 = a.clone();
     let pending = std::thread::spawn(move || a2.call(Vec::new(), T));
-    std::thread::sleep(Duration::from_millis(100));
+    // The call is pending on both sides once the callee's handler runs.
+    paddock_testkit::wait_until("the call to be inside its handler", || entered.load(Ordering::SeqCst));
     b.close();
     assert!(matches!(pending.join().unwrap(), Err(IpcError::Died(_))));
     assert!(a.wait_closed(Some(Duration::from_secs(5))));

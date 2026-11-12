@@ -1553,7 +1553,7 @@ fn stopping_never_waits_for_the_batch_in_flight() {
     );
     let sink = factory.sinks.lock().unwrap()[0].clone();
     sink(WatchSignal::Paths(vec![d.0.join("app.log")]));
-    in_batch.recv_timeout(Duration::from_secs(5)).unwrap();
+    in_batch.recv_timeout(paddock_testkit::HANG_GUARD).unwrap();
     let started = Instant::now();
     drop(live);
     assert!(started.elapsed() < Duration::from_secs(1), "stopping returned at once");
@@ -1586,7 +1586,7 @@ fn a_session_dropped_from_its_own_batch_does_not_deadlock() {
     *slot.lock().unwrap() = Some(live);
     let sink = factory.sinks.lock().unwrap()[0].clone();
     sink(WatchSignal::Paths(vec![d.0.join("app.log")]));
-    finished.recv_timeout(Duration::from_secs(5)).expect("the batch finished");
+    finished.recv_timeout(paddock_testkit::HANG_GUARD).expect("the batch finished");
     assert!(slot.lock().unwrap().is_none());
 }
 

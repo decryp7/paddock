@@ -44,6 +44,8 @@ proptest.workspace = true
 debrief-ipc = { path = ".", features = ["test-support"] }
 # Condition waits in the tests (`wait_until`, a 40 s hang guard): never a sleep that guesses an order (ADR 0041, 0071).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+# The wait for a started program (wait_ready_or_exit, wait_exit, warm_first_start; ADR 0071 section 1).
+paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 # The paused clock: a test of a wait that runs for virtual minutes (link.rs).
 tokio = { workspace = true, features = ["test-util"] }
 
