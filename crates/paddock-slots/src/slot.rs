@@ -44,6 +44,12 @@ pub trait SlotLocks {
 
     /// Takes slot `id` if it is free.
     fn try_lock(&self, id: SlotId) -> Result<Option<Self::Guard>, SlotError>;
+
+    /// Whether somebody holds slot `id` right now. It must not compete with an acquirer: the default tries the lock and lets go,
+    /// which makes a concurrent acquirer skip the slot for an instant (so an adapter that can look without locking overrides it).
+    fn is_held(&self, id: SlotId) -> Result<bool, SlotError> {
+        Ok(self.try_lock(id)?.is_none())
+    }
 }
 
 /// Takes the first free slot among `s1..=sMAX`, or `None` when all are busy (or `max` is 0).
@@ -55,26 +61,6 @@ pub fn acquire_first<L: SlotLocks>(
         let id = SlotId(n);
         if let Some(guard) = locks.try_lock(id)? {
             return Ok(Some((id, guard)));
-        }
-    }
-    Ok(None)
-}
-
-/// [`acquire_first`] with a few more tries when every slot looked busy. A status probe (or any other reader) takes a
-/// lock for an instant, so a free slot can look busy once; a full house that stays full is refused after `attempts`
-/// tries. `pause` runs between tries (a short sleep in production, a probe letting go in a test).
-pub fn acquire_retry<L: SlotLocks>(
-    locks: &L,
-    max: u32,
-    attempts: u32,
-    mut pause: impl FnMut(),
-) -> Result<Option<(SlotId, L::Guard)>, SlotError> {
-    for attempt in 0..attempts.max(1) {
-        if attempt > 0 {
-            pause();
-        }
-        if let Some(got) = acquire_first(locks, max)? {
-            return Ok(Some(got));
         }
     }
     Ok(None)
@@ -107,14 +93,14 @@ pub struct SlotState {
     pub busy: bool,
 }
 
-/// Which of `s1..=sMAX` are busy. It tries each lock and lets go at once.
+/// Which of `s1..=sMAX` are busy, asked of [`SlotLocks::is_held`].
 pub fn slot_states<L: SlotLocks>(locks: &L, max: u32) -> Result<Vec<SlotState>, SlotError> {
     (1..=max)
         .map(|n| {
             let id = SlotId(n);
             Ok(SlotState {
                 id,
-                busy: locks.try_lock(id)?.is_none(),
+                busy: locks.is_held(id)?,
             })
         })
         .collect()
@@ -161,36 +147,6 @@ mod tests {
         assert_eq!(acquire_first(&f, 4).unwrap().unwrap().0.number(), 4);
         assert!(acquire_first(&f, 0).unwrap().is_none());
     }
-
-    #[test]
-    fn a_slot_that_looked_busy_for_a_moment_is_taken_on_a_later_try() {
-        // Slot 1 is "held" by a probe that lets go when the acquirer pauses.
-        let f = Fake(RefCell::new(BTreeSet::from([1])), None);
-        let mut pauses = 0;
-        let got = acquire_retry(&f, 1, 5, || {
-            pauses += 1;
-            f.0.borrow_mut().remove(&1);
-        })
-        .unwrap();
-        assert_eq!((got.map(|g| g.0.number()), pauses), (Some(1), 1));
-        // A full house that stays full is refused after exactly the tries given, pausing between them.
-        let full = Fake(RefCell::new(BTreeSet::from([1, 2])), None);
-        let mut pauses = 0;
-        assert!(
-            acquire_retry(&full, 2, 4, || pauses += 1)
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(pauses, 3);
-        // Zero attempts still tries once; errors end the tries at once.
-        noop();
-        let empty = Fake(RefCell::new(BTreeSet::new()), None);
-        assert!(acquire_retry(&empty, 1, 0, noop).unwrap().is_some());
-        let failing = Fake(RefCell::new(BTreeSet::new()), Some(1));
-        assert!(acquire_retry(&failing, 1, 3, noop).is_err());
-    }
-
-    fn noop() {}
 
     #[test]
     fn idle_work_runs_only_on_a_free_slot_and_keeps_it_locked_throughout() {

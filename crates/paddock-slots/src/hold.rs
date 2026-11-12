@@ -67,8 +67,10 @@ impl HoldProbe for FsProbe<'_> {
     }
 }
 
-/// How long a holder keeps trying when every slot looks busy. A reader (a status probe) takes a lock only for an instant, but on
-/// a loaded machine the instant can last seconds; a full house that stays full is refused after this wait.
+/// How long a holder keeps trying when every slot looks busy. A status probe no longer takes the lock acquirers contend on
+/// ([`FsLocks`] probes `sN.live`), so what is left to wait out is a releaser's `wait_free` poll and an idle sweep
+/// ([`crate::with_idle`]) that holds a slot while it deletes the slot's kept folders. 5 s covers a poll (an instant) and a small
+/// sweep; a long sweep is not measured, and the refusal says how long it waited so a case shows in the logs (ER-27, ER-28).
 pub const ACQUIRE_GRACE: Duration = Duration::from_secs(5);
 const ACQUIRE_PAUSE: Duration = Duration::from_millis(10);
 
@@ -150,7 +152,20 @@ pub fn hold(
     max_hold: Option<Duration>,
     announce: &mut dyn Write,
 ) -> Result<Option<(SlotId, HoldEnd)>, SlotError> {
-    let Some((id, guard)) = acquire_within(locks, max, ACQUIRE_GRACE, ACQUIRE_PAUSE)? else {
+    hold_with(locks, max, owner, poll, max_hold, ACQUIRE_GRACE, announce)
+}
+
+/// [`hold`] with its own wait for a free slot (a test, or a caller that knows better than [`ACQUIRE_GRACE`]).
+pub fn hold_with(
+    locks: &FsLocks,
+    max: u32,
+    owner: &Path,
+    poll: Duration,
+    max_hold: Option<Duration>,
+    grace: Duration,
+    announce: &mut dyn Write,
+) -> Result<Option<(SlotId, HoldEnd)>, SlotError> {
+    let Some((id, guard)) = acquire_within(locks, max, grace, ACQUIRE_PAUSE)? else {
         let _ = announce
             .write_all(Announcement::None.line().as_bytes())
             .and_then(|()| announce.flush());
@@ -262,54 +277,63 @@ pub fn release(
 mod tests {
     use super::*;
 
-    /// A status probe that stalls (a loaded machine) while it holds the slot's lock must not make an acquirer refuse: the
-    /// acquirer keeps trying within its wait (1 run in 25 at load 85 was refused with "All 1 slots are busy").
+    /// A lock that looks busy for the first `busy` tries and then free: a releaser's or sweep's instant, with no timer.
+    struct BusyThenFree {
+        busy: u32,
+        tries: std::cell::Cell<u32>,
+    }
+
+    impl SlotLocks for BusyThenFree {
+        type Guard = ();
+        fn try_lock(&self, _: SlotId) -> Result<Option<()>, SlotError> {
+            self.tries.set(self.tries.get() + 1);
+            Ok((self.tries.get() > self.busy).then_some(()))
+        }
+    }
+
     #[test]
-    fn a_probe_that_holds_the_lock_for_a_while_does_not_make_acquire_refuse() {
+    fn acquire_keeps_trying_within_its_wait_while_the_slot_looks_busy() {
+        let locks = BusyThenFree {
+            busy: 50,
+            tries: 0.into(),
+        };
+        // An hour of grace and no pause: it ends by the 51st try succeeding, not by a clock.
+        let got = acquire_within(&locks, 1, Duration::from_secs(3600), Duration::ZERO).unwrap();
+        assert!(got.is_some());
+        assert_eq!(locks.tries.get(), 51);
+    }
+
+    /// A full house that stays full is refused once the wait is over; a zero wait is exactly one try.
+    #[test]
+    fn a_full_house_is_refused_after_the_wait() {
+        let locks = BusyThenFree {
+            busy: u32::MAX,
+            tries: 0.into(),
+        };
+        assert!(
+            acquire_within(&locks, 1, Duration::ZERO, Duration::ZERO)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(locks.tries.get(), 1);
         let dir = tempfile::tempdir().unwrap();
-        let locks = FsLocks::new(dir.path());
-        let probe = locks.try_lock(SlotId::new(1).unwrap()).unwrap().unwrap();
+        let fs = FsLocks::new(dir.path());
+        let _held = fs.try_lock(SlotId::new(1).unwrap()).unwrap().unwrap();
         let owner = dir.path().join("job");
         std::fs::create_dir(&owner).unwrap();
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(400));
-            drop(probe);
-            let _ = tx.send(());
-        });
-        let mut announced = Vec::new();
-        let got = hold(
-            &locks,
+        let mut said = Vec::new();
+        let got = hold_with(
+            &fs,
             1,
             &owner,
             Duration::from_millis(5),
-            Some(Duration::ZERO),
-            &mut announced,
+            None,
+            Duration::ZERO,
+            &mut said,
         )
         .unwrap();
-        assert!(
-            got.is_some(),
-            "refused: {}",
-            String::from_utf8_lossy(&announced)
-        );
-        rx.recv().unwrap();
-    }
-
-    /// A full house that stays full is still refused, after the wait.
-    #[test]
-    fn a_full_house_is_refused_after_the_wait() {
-        let dir = tempfile::tempdir().unwrap();
-        let locks = FsLocks::new(dir.path());
-        let _held = locks.try_lock(SlotId::new(1).unwrap()).unwrap().unwrap();
-        let started = Instant::now();
-        let got = acquire_within(
-            &locks,
-            1,
-            Duration::from_millis(150),
-            Duration::from_millis(5),
-        )
-        .unwrap();
-        assert!(got.is_none() && started.elapsed() >= Duration::from_millis(150));
+        assert!(got.is_none());
+        assert_eq!(String::from_utf8_lossy(&said), "none\n");
     }
 
     struct Script {

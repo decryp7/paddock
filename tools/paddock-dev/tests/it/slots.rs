@@ -39,6 +39,9 @@ fn acquire(root: &Path, owner: &Path, max: &str) -> (i32, Value, String) {
         // Whatever a failing test leaves behind ends by itself (tests leave no process on the machine).
         "--max-hold-secs",
         "120",
+        // A full house is refused after 50 ms, not the production 5 s.
+        "--acquire-grace-ms",
+        "50",
     ])
 }
 
@@ -416,23 +419,17 @@ fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     });
 }
 
-/// A probe that holds the slot's lock for a while (a stalled process on a loaded machine) gets no refusal either: the acquirer
-/// keeps trying within its wait (1 run in 25 at load 85 was refused with "All 1 slots are busy").
+/// The refusal says how long the holder kept trying (ER-27); a probe in flight is covered in paddock-slots (fs.rs).
 #[test]
-fn acquire_waits_for_a_probe_that_holds_the_lock_instead_of_refusing() {
+fn a_refusal_says_how_long_the_holder_kept_trying() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
-    std::fs::create_dir_all(&root).unwrap();
-    let probe = FsLocks::new(&root).try_lock(SlotId::new(1).unwrap()).unwrap().unwrap();
-    std::thread::scope(|s| {
-        s.spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(700));
-            drop(probe);
-        });
-        let (slot, token) = take(&root, &job, "1");
-        assert_eq!(release(&root, &slot, &token).0, 0);
-    });
+    let (_, token) = take(&root, &job, "1");
+    let (code, v, err) = acquire(&root, &job, "1");
+    assert_eq!((code, v["kind"].clone()), (4, "refused".into()));
+    assert!(err.contains("kept trying for 0.1 s"), "{err}");
+    assert_eq!(release(&root, "s1", &token).0, 0);
 }
 
 #[test]

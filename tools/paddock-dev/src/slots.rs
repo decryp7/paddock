@@ -43,6 +43,8 @@ pub const HOLD_MARGIN_SECS: u64 = 30 * 60;
 pub const DEFAULT_MAX_HOLD_SECS: u64 = RUNNER_JOB_TIMEOUT_SECS + HOLD_MARGIN_SECS;
 /// How long `acquire` waits for the holder's first line (its slot, or `none`) before it gives up and stops the holder.
 const DEFAULT_FIRST_LINE_SECS: u64 = 30;
+/// How long the holder keeps trying while every slot looks busy (paddock_slots::ACQUIRE_GRACE, in milliseconds).
+const DEFAULT_GRACE_MS: u64 = 5000;
 
 /// `acquire`'s arguments.
 #[derive(Args)]
@@ -65,6 +67,9 @@ pub struct AcquireArgs {
     /// How long to wait for the holder to take a slot, in seconds.
     #[arg(long, default_value_t = DEFAULT_FIRST_LINE_SECS, hide = true)]
     holder_timeout_secs: u64,
+    /// How long the holder keeps trying while every slot looks busy before it says so (milliseconds; tests shorten it).
+    #[arg(long, default_value_t = DEFAULT_GRACE_MS, hide = true)]
+    acquire_grace_ms: u64,
 }
 
 /// `release`'s arguments.
@@ -127,6 +132,9 @@ pub struct HoldArgs {
     /// The longest the holder keeps the slot, in seconds (0: no limit).
     #[arg(long, default_value_t = DEFAULT_MAX_HOLD_SECS)]
     max_hold_secs: u64,
+    /// How long to keep trying while every slot looks busy (milliseconds).
+    #[arg(long, default_value_t = DEFAULT_GRACE_MS, hide = true)]
+    acquire_grace_ms: u64,
 }
 
 fn check_max(max: u32) -> Result<(), CliError> {
@@ -165,6 +173,8 @@ pub fn holder_args(a: &AcquireArgs, owner: &Path) -> Vec<String> {
         a.poll_ms.to_string(),
         "--max-hold-secs".into(),
         a.max_hold_secs.to_string(),
+        "--acquire-grace-ms".into(),
+        a.acquire_grace_ms.to_string(),
     ]
 }
 
@@ -304,7 +314,12 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
         }
         Announcement::None => {
             let _ = child.wait();
-            Err(CliError::refused(format!("All {} slots are busy.", a.max)).with_hint("Wait for a job to finish or raise --max."))
+            Err(CliError::refused(format!(
+                "All {} slots are busy (the holder kept trying for {:.1} s).",
+                a.max,
+                a.acquire_grace_ms as f64 / 1000.0
+            ))
+            .with_hint("Wait for a job to finish or raise --max."))
         }
     }
 }
@@ -319,12 +334,13 @@ pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
     // Before anything else: descriptors inherited from the job (a pipe the runner waits on) must not outlive the step.
     crate::fds::close_inherited();
     let locks = FsLocks::new(&a.root);
-    let end = paddock_slots::hold(
+    let end = paddock_slots::hold_with(
         &locks,
         a.max,
         &a.owner,
         Duration::from_millis(a.poll_ms.max(1)),
         (a.max_hold_secs > 0).then(|| Duration::from_secs(a.max_hold_secs)),
+        Duration::from_millis(a.acquire_grace_ms),
         &mut std::io::stdout(),
     )
     .map_err(failure)?;
@@ -436,12 +452,14 @@ mod tests {
             poll_ms: 7,
             max_hold_secs: 9,
             holder_timeout_secs: 30,
+            acquire_grace_ms: 1234,
         };
         let args = holder_args(&a, Path::new("/abs/o"));
         assert_eq!(args[..3], ["ci", "slot", "hold"]);
         assert!(args.windows(2).any(|w| w == ["--owner", "/abs/o"]));
         assert!(args.windows(2).any(|w| w == ["--poll-ms", "7"]));
         assert!(args.windows(2).any(|w| w == ["--max-hold-secs", "9"]));
+        assert!(args.windows(2).any(|w| w == ["--acquire-grace-ms", "1234"]));
     }
 
     #[test]
@@ -516,6 +534,7 @@ mod tests {
             poll_ms: 20,
             max_hold_secs: 0,
             holder_timeout_secs: 30,
+            acquire_grace_ms: 50,
         }
     }
 

@@ -9,10 +9,12 @@ pub struct FsLocks {
     dir: PathBuf,
 }
 
-/// A held slot: dropping it closes the file and so releases the lock.
+/// A held slot: dropping it closes the files and so releases both locks.
 #[derive(Debug)]
 pub struct FsGuard {
     _file: File,
+    /// `sN.live`, locked exclusively for as long as the slot is held: what a status probe looks at.
+    _live: File,
 }
 
 /// Who holds a slot, as written next to its lock for `status`.
@@ -38,6 +40,30 @@ impl FsLocks {
     pub fn new(root: impl AsRef<Path>) -> FsLocks {
         FsLocks {
             dir: root.as_ref().join("slots"),
+        }
+    }
+
+    fn open(&self, path: &Path) -> Result<File, SlotError> {
+        OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(path)
+            .map_err(io(path))
+    }
+
+    /// A status probe: `Some(file)` when no holder has `sN.live`, with a shared lock on it that ends when the file is dropped;
+    /// `None` when a holder has it. It never touches `sN.lock`, the lock acquirers contend on, so a probe cannot make an acquirer
+    /// skip a slot (a probe that stalls on a loaded machine got `ci slot acquire` refused, 1 run in 25 at load 85). A holder that
+    /// is between taking `sN.lock` and `sN.live` looks free for that instant; it is a status, not an arbiter.
+    fn live_probe(&self, id: SlotId) -> Result<Option<File>, SlotError> {
+        std::fs::create_dir_all(&self.dir).map_err(io(&self.dir))?;
+        let p = self.file(id, "live");
+        let file = self.open(&p)?;
+        match file.try_lock_shared() {
+            Ok(()) => Ok(Some(file)),
+            Err(TryLockError::WouldBlock) => Ok(None),
+            Err(TryLockError::Error(e)) => Err(io(&p)(e)),
         }
     }
 
@@ -112,18 +138,43 @@ impl SlotLocks for FsLocks {
             .write(true)
             .open(&p)
             .map_err(io(&p))?;
-        lock_outcome(file.try_lock(), file, &p)
+        let Some(lock) = lock_outcome(file.try_lock(), file, &p)? else {
+            return Ok(None);
+        };
+        // The holder has the slot; it now says so on `sN.live`. A probe holds that file for an instant only, so waiting for it
+        // is brief, and no acquirer ever takes it.
+        let live_path = self.file(id, "live");
+        let live = self.open(&live_path)?;
+        live.lock().map_err(io(&live_path))?;
+        Ok(Some(FsGuard {
+            _file: lock.into_file(),
+            _live: live,
+        }))
+    }
+
+    fn is_held(&self, id: SlotId) -> Result<bool, SlotError> {
+        Ok(self.live_probe(id)?.is_none())
     }
 }
 
-/// The guard when the lock was taken, `None` when somebody else holds it; any other failure is an error.
+/// The file whose lock was taken.
+#[derive(Debug)]
+struct Locked(File);
+
+impl Locked {
+    fn into_file(self) -> File {
+        self.0
+    }
+}
+
+/// The lock when it was taken, `None` when somebody else holds it; any other failure is an error.
 fn lock_outcome(
     result: Result<(), TryLockError>,
     file: File,
     path: &Path,
-) -> Result<Option<FsGuard>, SlotError> {
+) -> Result<Option<Locked>, SlotError> {
     match result {
-        Ok(()) => Ok(Some(FsGuard { _file: file })),
+        Ok(()) => Ok(Some(Locked(file))),
         Err(TryLockError::WouldBlock) => Ok(None),
         Err(TryLockError::Error(e)) => Err(io(path)(e)),
     }
@@ -132,6 +183,36 @@ fn lock_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A status probe in flight (it has `sN.live` locked shared) leaves the lock acquirers contend on alone: no sleep, no timing.
+    #[test]
+    fn a_probe_in_flight_does_not_touch_the_lock_acquirers_take() {
+        let dir = tempfile::tempdir().unwrap();
+        let locks = FsLocks::new(dir.path());
+        let s1 = SlotId::new(1).unwrap();
+        let _probe = locks
+            .live_probe(s1)
+            .unwrap()
+            .expect("a free slot looks free");
+        let lock = locks.open(&locks.file(s1, "lock")).unwrap();
+        assert!(lock.try_lock().is_ok(), "the probe did not take sN.lock");
+    }
+
+    #[test]
+    fn a_held_slot_looks_held_to_a_probe_and_a_released_one_free() {
+        let dir = tempfile::tempdir().unwrap();
+        let locks = FsLocks::new(dir.path());
+        let s1 = SlotId::new(1).unwrap();
+        assert!(!locks.is_held(s1).unwrap());
+        let guard = locks.try_lock(s1).unwrap().unwrap();
+        assert!(locks.is_held(s1).unwrap());
+        assert!(
+            locks.try_lock(s1).unwrap().is_none(),
+            "a second acquirer is refused by sN.lock"
+        );
+        drop(guard);
+        assert!(!locks.is_held(s1).unwrap());
+    }
 
     #[test]
     fn lock_outcomes() {

@@ -1,6 +1,6 @@
 use paddock_slots::{
     Announcement, FsLocks, HoldEnd, OwnerInfo, ReleaseLocks, SlotError, SlotId, SlotLocks,
-    acquire_first, acquire_retry, fresh_token, hold, release, slot_states, wait_free,
+    acquire_first, fresh_token, hold, hold_with, release, slot_states, wait_free,
 };
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
@@ -128,7 +128,7 @@ fn hold_announces_and_ends_when_the_owner_folder_goes() {
     // A second holder with every slot busy reports `none`.
     let mut out = Vec::new();
     assert!(
-        hold(&locks, 1, &owner, POLL, None, &mut out)
+        hold_with(&locks, 1, &owner, POLL, None, Duration::ZERO, &mut out)
             .unwrap()
             .is_none()
     );
@@ -252,22 +252,6 @@ fn a_holder_ignores_a_release_request_with_another_token() {
     assert_eq!(t.join().unwrap().unwrap(), Some((slot, HoldEnd::OwnerGone)));
     assert!(wait_free(&locks, slot, LONG, POLL).unwrap());
     assert_ne!(token, "someone-else");
-}
-
-#[test]
-fn a_probe_holding_a_lock_for_an_instant_does_not_make_acquire_refuse() {
-    let _gate = crate::share_gate();
-    let dir = tempfile::tempdir().unwrap();
-    let locks = FsLocks::new(dir.path());
-    // A status probe has slot s1 locked right now...
-    let mut probe = Some(locks.try_lock(id(1)).unwrap().unwrap());
-    // ...and lets go while the acquirer pauses between its tries.
-    let (slot, _guard) = acquire_retry(&locks, 1, 3, || drop(probe.take()))
-        .unwrap()
-        .unwrap();
-    assert_eq!(slot, id(1));
-    // A real holder keeps the slot through every try.
-    assert!(acquire_retry(&locks, 1, 3, || {}).unwrap().is_none());
 }
 
 #[test]
