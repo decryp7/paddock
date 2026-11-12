@@ -150,6 +150,12 @@ pub trait Runner: Sync {
     fn run(&self, dir: &Path, argv: &[String]) -> Ran;
 }
 
+/// The file to start for a command's program. npm is `npm.cmd` on Windows, and Rust finds only `.exe` programs there, so a bare
+/// `npm` was "not available on this computer" on every Windows machine that has it.
+fn program_for(program: &str, windows: bool) -> &str {
+    if windows && program == "npm" { "npm.cmd" } else { program }
+}
+
 /// The real runner: bounded and started through `paddock-proc`.
 pub struct Real;
 
@@ -161,7 +167,7 @@ impl Runner for Real {
                 tail: "no command".into(),
             };
         };
-        let mut cmd = command(program);
+        let mut cmd = command(program_for(program, cfg!(windows)));
         cmd.current_dir(dir).args(args);
         match run_bounded(cmd, Limits::new(LIMIT).max_output(1 << 22)) {
             Ok(o) => Ran {
@@ -369,4 +375,16 @@ pub fn run_sync(runner: &dyn Runner, root: &Path) -> Result<Report, CliError> {
     } else {
         report.with_exit(Exit::Findings)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::program_for;
+
+    #[test]
+    fn npm_is_started_as_its_cmd_file_on_windows_and_nothing_else_changes() {
+        assert_eq!(program_for("npm", true), "npm.cmd");
+        assert_eq!(program_for("npm", false), "npm");
+        assert_eq!(program_for("cargo", true), "cargo");
+    }
 }
