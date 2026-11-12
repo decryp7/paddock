@@ -186,10 +186,14 @@ pub fn ratchet(root: Option<&Path>, base: &str, tag: &str) -> Result<Report, Cli
     for r in &refusals {
         text.push_str(&format!("::error file=docs/gates.toml::C100 ratchet {r}\n"));
     }
+    let reports = super::register::release_reports(register.as_deref(), tag);
+    for r in &reports {
+        text.push_str(&format!("::warning file=docs/gates.toml::C100 ratchet {r}\n"));
+    }
     if refusals.is_empty() {
         text.push_str(&format!("C100 ratchet: tag {tag} is not refused by any lint-adoption ratchet\n"));
     }
-    let report = Report::new(json!({"tag": tag, "refusals": refusals}), text);
+    let report = Report::new(json!({"tag": tag, "refusals": refusals, "reports": reports}), text);
     Ok(if refusals.is_empty() {
         report
     } else {

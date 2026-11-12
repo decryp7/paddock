@@ -161,7 +161,13 @@ pub struct Ratchet {
     pub clippy_not_yet: Vec<String>,
     /// The release whose tag is refused while the list is not empty (`debrief-v1.3.0`).
     pub target: String,
+    /// `report-only` when the open lists are reported at the target release and never refuse its tag (the same value as C102's
+    /// `blocks_tag`); empty when the tag is refused.
+    pub blocks_tag: String,
 }
+
+/// The `blocks_tag` value of a ratchet that is reported and never refuses a tag (ADR 0060 amendment of 2026-11-12).
+pub const REPORT_ONLY: &str = "report-only";
 
 /// A harness: files outside CI that run checks.
 #[derive(Debug, Clone, PartialEq)]
@@ -379,6 +385,7 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
             clippy_not_yet: strings(e, "clippy_not_yet"),
             owner,
             target,
+            blocks_tag: text(e, "blocks_tag").unwrap_or_default(),
         });
     }
     for (i, e) in tables(&table, "defect").into_iter().enumerate() {
@@ -490,6 +497,14 @@ fn dated(r: &Register) -> BTreeMap<String, Date> {
     m
 }
 
+/// Each ratchet's target release, keyed `<id> <app>`.
+fn targets(r: &Register) -> BTreeMap<String, String> {
+    r.ratchet
+        .iter()
+        .map(|x| (format!("{} {}", x.id, x.app), x.target.clone()))
+        .collect()
+}
+
 fn entry_key_matches(key: &str, id: &str) -> bool {
     key == id || key.starts_with(&format!("{id} ["))
 }
@@ -501,9 +516,29 @@ pub fn date_history(versions: &[Version]) -> Vec<Problem> {
     let mut out = Vec::new();
     let mut moves: BTreeMap<String, u32> = BTreeMap::new();
     let mut prev: Option<BTreeMap<String, Date>> = None;
+    let mut prev_targets: Option<BTreeMap<String, String>> = None;
     for v in versions {
         let (r, _) = parse(&v.text);
         let now = dated(&r);
+        let now_targets = targets(&r);
+        if let Some(before) = &prev_targets {
+            for (k, new) in &now_targets {
+                if let Some(old) = before.get(k).filter(|o| *o != new) {
+                    let id = k.split(' ').next().unwrap_or(k);
+                    let want = format!("Gates-date: {id} {old} -> {new}; approved: user");
+                    if !v.message.lines().any(|l| l.trim().starts_with(&want)) {
+                        out.push(Problem {
+                            message: format!(
+                                "commit {} moved the target of [[ratchet]] {k} from {old} to {new} without a `{want}` trailer",
+                                short(&v.sha)
+                            ),
+                            fix: "Make the move in a commit whose message carries the trailer (approved by the user), or put the target back.".into(),
+                        });
+                    }
+                }
+            }
+        }
+        prev_targets = Some(now_targets);
         if let Some(before) = &prev {
             for (k, new) in &now {
                 if let Some(old) = before.get(k).filter(|o| *o != new) {
@@ -568,15 +603,6 @@ pub fn check_ratchets(r: &Register, base: Option<&Register>, release_tag: Option
                     fix: "Add the path to the app's clippy.toml and justify its call sites instead.".into(),
                 });
             }
-            if b.target != rt.target {
-                out.push(Problem {
-                    message: format!(
-                        "[[ratchet]] {} {}: target moved from {} to {} (needs a `Gates-date:` trailer approved by the user)",
-                        rt.id, rt.app, b.target, rt.target
-                    ),
-                    fix: "Put the target back, or move it in a commit with `Gates-date: <id> <old> -> <new>; approved: user`.".into(),
-                });
-            }
         }
     }
     if let Some(tag) = release_tag {
@@ -597,44 +623,81 @@ fn parse_tag(tag: &str) -> Option<(String, Vec<u64>)> {
 /// The problems a release tag has with the ratchets of its app: a tag of the target release or a later one is refused while a list
 /// is not empty, and a tag or target that cannot be read is refused (fail closed). Other apps' ratchets are not looked at.
 fn ratchet_release_problems(r: &Register, tag: &str) -> Vec<Problem> {
+    ratchet_release_findings(r, tag)
+        .into_iter()
+        .filter_map(|(p, report_only)| (!report_only).then_some(p))
+        .collect()
+}
+
+/// The findings a release tag has with the open lists of its app's ratchets, each with whether its ratchet is report-only (listed,
+/// never refusing the tag). Unreadable tags and targets are always blocking.
+fn ratchet_release_findings(r: &Register, tag: &str) -> Vec<(Problem, bool)> {
     let mut out = Vec::new();
     let Some((app, version)) = parse_tag(tag) else {
-        return vec![Problem {
-            message: format!(
-                "tag {tag} is refused: it is not of the form <app>-v<major>.<minor>.<patch>, so it cannot be compared with a ratchet's target"
-            ),
-            fix: "Tag as <app>-vX.Y.Z (a pre-release suffix such as -rc.1 is allowed).".into(),
-        }];
+        return vec![(
+            Problem {
+                message: format!(
+                    "tag {tag} is refused: it is not of the form <app>-v<major>.<minor>.<patch>, so it cannot be compared with a ratchet's target"
+                ),
+                fix: "Tag as <app>-vX.Y.Z (a pre-release suffix such as -rc.1 is allowed).".into(),
+            },
+            false,
+        )];
     };
     for rt in r.ratchet.iter().filter(|rt| rt.app == app) {
         let Some((_, target)) = parse_tag(&rt.target) else {
-            out.push(Problem {
-                message: format!(
-                    "tag {tag} is refused: [[ratchet]] {} {} has a target `{}` that is not <app>-vX.Y.Z",
-                    rt.id, rt.app, rt.target
-                ),
-                fix: "Fix the target in docs/gates.toml.".into(),
-            });
+            out.push((
+                Problem {
+                    message: format!(
+                        "tag {tag} is refused: [[ratchet]] {} {} has a target `{}` that is not <app>-vX.Y.Z",
+                        rt.id, rt.app, rt.target
+                    ),
+                    fix: "Fix the target in docs/gates.toml.".into(),
+                },
+                false,
+            ));
             continue;
         };
         let open = !rt.not_yet.is_empty() || !rt.clippy_not_yet.is_empty();
         if open && version >= target {
             let mut left = rt.not_yet.clone();
             left.extend(rt.clippy_not_yet.iter().map(|p| format!("clippy path {p}")));
-            out.push(Problem {
-                message: format!(
-                    "tag {tag} is refused: [[ratchet]] {} {} still lists {} entries (target {}): {}",
-                    rt.id,
-                    rt.app,
-                    left.len(),
-                    rt.target,
-                    left.join(", ")
-                ),
-                fix: "Opt the remaining members in (each clippy-clean under the preset) and clean up the listed clippy paths before tagging this release.".into(),
-            });
+            let report_only = rt.blocks_tag == REPORT_ONLY;
+            out.push((
+                Problem {
+                    message: format!(
+                        "tag {tag} {}: [[ratchet]] {} {} still lists {} entries (target {}): {}",
+                        if report_only {
+                            "is not refused (report-only)"
+                        } else {
+                            "is refused"
+                        },
+                        rt.id,
+                        rt.app,
+                        left.len(),
+                        rt.target,
+                        left.join(", ")
+                    ),
+                    fix: "Opt the remaining members in (each clippy-clean under the preset) and clean up the listed clippy paths.".into(),
+                },
+                report_only,
+            ));
         }
     }
     out
+}
+
+/// The open lists of the tag's app's report-only ratchets, as messages that do not refuse the tag (ADR 0060 amendment 2026-11-12).
+pub fn release_reports(register: Option<&str>, tag: &str) -> Vec<String> {
+    let Some(text) = register else { return Vec::new() };
+    let (reg, errors) = parse(text);
+    if !errors.is_empty() {
+        return Vec::new();
+    }
+    ratchet_release_findings(&reg, tag)
+        .into_iter()
+        .filter_map(|(p, report_only)| report_only.then(|| format!("{} Fix: {}", p.message, p.fix)))
+        .collect()
 }
 
 /// Whether the release tag is refused by the ratchets, from the register text and the register at the base (ADR 0060 3.2). Only the
@@ -883,6 +946,58 @@ approved = "user"
             .replace("not_yet = [\"xtask\", \"crates/a\"]", "not_yet = []")
             .replace("clippy_not_yet = [\"std::env::temp_dir\"]", "clippy_not_yet = []");
         assert!(release_refusals(Some(&empty), Some(RATCHET), "debrief-v1.2.0").is_empty());
+    }
+
+    #[test]
+    fn a_report_only_ratchet_lists_its_open_lists_and_never_refuses_the_tag() {
+        let report_only = RATCHET.replace(
+            "target = \"debrief-v1.2.0\"\n",
+            "target = \"debrief-v1.2.0\"\nblocks_tag = \"report-only\"\n",
+        );
+        for tag in ["debrief-v1.2.0", "debrief-v1.2.1", "debrief-v2.0.0"] {
+            assert!(release_refusals(Some(&report_only), Some(&report_only), tag).is_empty(), "{tag}");
+            let rep = release_reports(Some(&report_only), tag);
+            assert_eq!(rep.len(), 1, "{tag}: {rep:?}");
+            assert!(rep[0].contains("report-only") && rep[0].contains("xtask"), "{rep:?}");
+        }
+        // below the target nothing is reported; without the value the tag is still refused and nothing is only reported
+        assert!(release_reports(Some(&report_only), "debrief-v1.1.5").is_empty());
+        assert!(!release_refusals(Some(RATCHET), Some(RATCHET), "debrief-v1.2.0").is_empty());
+        assert!(release_reports(Some(RATCHET), "debrief-v1.2.0").is_empty());
+    }
+
+    #[test]
+    fn a_ratchet_target_moves_with_the_trailer_the_adr_names_and_not_without_it() {
+        let moved = RATCHET.replace("debrief-v1.2.0", "debrief-v1.3.0");
+        let bad = date_history(&[version("a1", "feat: add", RATCHET), version("b2", "fix: later", &moved)]);
+        assert!(
+            bad.iter().any(|p| p.message.contains("target of [[ratchet]] C13 debrief")
+                && p.message
+                    .contains("without a `Gates-date: C13 debrief-v1.2.0 -> debrief-v1.3.0; approved: user`")),
+            "{bad:?}"
+        );
+        let ok = date_history(&[
+            version("a1", "feat: add", RATCHET),
+            version(
+                "b2",
+                "fix: later\n\nGates-date: C13 debrief-v1.2.0 -> debrief-v1.3.0; approved: user",
+                &moved,
+            ),
+        ]);
+        assert!(ok.is_empty(), "{ok:?}");
+        // the coordinator cannot approve a target move
+        let coord = date_history(&[
+            version("a1", "feat: add", RATCHET),
+            version(
+                "b2",
+                "x\n\nGates-date: C13 debrief-v1.2.0 -> debrief-v1.3.0; approved: coordinator",
+                &moved,
+            ),
+        ]);
+        assert!(!coord.is_empty());
+        // the base comparison alone no longer rejects the move
+        let (base, _) = parse(RATCHET);
+        assert!(check_ratchets(&parse(&moved).0, Some(&base), None).is_empty());
     }
 
     #[test]

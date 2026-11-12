@@ -1092,6 +1092,8 @@ approved = "coordinator"
 # added yet), and `./dev gates ratchet --release-tag` refuses a debrief-v1.2.0 tag (or a later one) while either list is not
 # empty. Both lists only shrink. The whole cleanup (both clippy paths and all 46 members) stays in Debrief 1.2.
 # approved: user 2026-11-08 (target debrief-v1.2.0, not v1.3.0); scope decided again by the user 2026-11-09.
+# 2026-11-12 (user, Debrief 1.2 Tier A): C13 is limited to the temp_dir and reqwest bans and there is no crate-by-crate ratchet before
+# debrief-v1.2.0, so `blocks_tag = "report-only"`: `./dev gates ratchet --release-tag` reports the open lists and never refuses the tag.
 [[ratchet]]
 id = "C13"
 app = "debrief"
@@ -1099,4 +1101,5 @@ not_yet = ["app/src-tauri", "crates/cargo-debrief-plugin", "crates/chromium-driv
 clippy_not_yet = ["keyring::Entry", "keyring_core::Entry"]
 owner = "Debrief 1.2 DBR-LINT (docs/plans/debrief-1-2.md)"
 target = "debrief-v1.2.0"
+blocks_tag = "report-only"
 approved = "user"
