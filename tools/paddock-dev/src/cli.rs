@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots, wait,
-    worktree,
+    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, locks, merge_check, plan, plan_cmd, release_isolation, slots,
+    wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -37,6 +37,11 @@ enum Command {
     Gates {
         #[command(subcommand)]
         command: GatesCommand,
+    },
+    /// Lockfiles: are they all current, and regenerate them with cargo, cargo-hakari and npm (never by hand).
+    Locks {
+        #[command(subcommand)]
+        command: LocksCommand,
     },
     /// Repository checks of the family.
     Check {
@@ -189,6 +194,22 @@ enum SlotCommand {
     /// The detached holder that `acquire` starts. Not for people.
     #[command(hide = true)]
     Hold(slots::HoldArgs),
+}
+
+#[derive(Subcommand)]
+enum LocksCommand {
+    /// Every Cargo.lock resolves `--locked`, the npm lockfile is in sync with its package.json and the workspace hack is
+    /// current. One `::error::` per stale file with the fix; exits 1 when any is stale.
+    Check(LocksArgs),
+    /// Regenerate them: cargo hakari (manage-deps, generate), `cargo update --workspace`, `npm install --package-lock-only`.
+    Sync(LocksArgs),
+}
+
+#[derive(Args)]
+struct LocksArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -397,6 +418,12 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::Timings(a),
         } => ci_runs::timings(&a),
         Command::Wait(a) => wait::command(&a),
+        Command::Locks {
+            command: LocksCommand::Check(a),
+        } => locks::check(a.root),
+        Command::Locks {
+            command: LocksCommand::Sync(a),
+        } => locks::sync(a.root),
         Command::Gates {
             command: GatesCommand::Model(a),
         } => gates::command::model(a.root.as_deref()),

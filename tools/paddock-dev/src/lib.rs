@@ -19,6 +19,7 @@
 //!   [--app]`, `--commit-range`, `--explain`): the matrix, the base of a run and the commit lint's range in [`plan_ci`], the
 //!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
+//! - `locks check|sync`: every lockfile and the workspace hack current, and the command that regenerates them ([`locks`]).
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
@@ -34,6 +35,7 @@ pub mod gates;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
+pub mod locks;
 pub mod log_text;
 pub mod merge_check;
 pub mod nextest_log;

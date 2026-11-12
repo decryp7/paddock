@@ -11,6 +11,7 @@ mod hostile;
 mod inputs;
 mod ipc_endpoints;
 mod isolation;
+mod locks;
 mod merge_check;
 mod release_isolation;
 mod slots;
