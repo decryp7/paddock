@@ -650,7 +650,7 @@ test('app-release.yml: the kit of the bundle job is this very commit (paddock-re
 });
 
 test('node-caches links the Angular cache inside the kept clone, not the Windows bootstrap folder', () => {
-  const action = read(join(PADDOCK, '.gitea', 'actions', 'node-caches', 'action.yml'));
+  const action = read(join(PADDOCK, 'conformance', 'ci', 'host', 'node-caches.sh'));
   assert.match(action, /\$\{PADDOCK_WORKSPACE:-\$GITHUB_WORKSPACE\}/, 'the workspace is PADDOCK_WORKSPACE when set');
   assert.doesNotMatch(action.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n'), /"\$GITHUB_WORKSPACE\/\$ANGULAR_DIR/, 'no path built on GITHUB_WORKSPACE alone');
 });

@@ -10,9 +10,9 @@ a bad option and never touches anything outside what it names.
 | `verify-installed.sh --name Pitcrew --label ... --unit ... --service ...` | read-only check of an installed app: bundle, launchd agent or systemd user unit, socket, service answer, log tail | Pitcrew/Pitwall `macos-verify.sh`, `linux-verify.sh`; Dyno `linux-verify.sh` |
 | `linux-container.sh --id dyno --packages dyno-platform` | cargo test and clippy in a Linux container; labelled containers and volumes only; `--clean` | Dyno `linux-container.sh`; Pitwall `linux-container-verify.sh` |
 | `macos-vm-smoke.sh --old <N> --new <N+1> [--guest macos\|linux]` | run a smoke that registers real services (launch agent, systemd user unit) in a fresh, always-deleted Tart VM from a pinned image; disk, load and one-VM-at-a-time checks | the service-after-update smoke (rule 7) |
-| `prune-build-folders.sh <folder> <max-gb>` | keep a persistent CI build folder under a cap (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
+| `prune-build-folders.sh <folder> <max-gb>` (CI runs `./dev ci prune-folder`; this script is the release-path copy until WP-11) | keep a persistent CI build folder under a cap (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
 | `prune-ci-build-folder.sh <folder> <max-gb> [--drop-bundles]` | the CI form: caps only a kept build folder of this job's slot (`job-isolation.sh owns <folder> target`: `target-<name>-<slot>` in the CI home, resolved, no symlinks), else leaves it alone | the `prune-build-folder` action |
-| `prune-build-folders.ps1 -App debrief [-Remove -Keep 6c]` | list and remove build folders of finished worktrees (Windows) | Debrief `clean-build-dirs.ps1` |
+| `./dev ci prune-agent-builds --app debrief [--remove --keep 6c]` | list and remove build folders of finished worktrees (every OS; the port of `prune-build-folders.ps1`, WP-4) | Debrief `clean-build-dirs.ps1` |
 | `host-cleanup.sh --id pitwall --process-pattern '{build}[/\\]debug[/\\]pitwall-server'` | this job's stray test processes (patterns anchored on its own folders; PowerShell on Windows) and temp folders on a host runner, then a leak check; used by the `host-cleanup` CI action | Pitwall `ci/macos-cleanup.sh` |
 
 Parameters carry what differed between the copies: the product name, the launchd label, the systemd unit, the service

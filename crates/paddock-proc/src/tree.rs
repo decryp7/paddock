@@ -460,6 +460,44 @@ pub(crate) fn processes_mentioning_with(
         .collect()
 }
 
+/// Every process whose command line can be read, as its identity (pid and start time) and its command line (the arguments
+/// joined by a space). The identities come from one look at the table and the command lines from the next, so a pid handed on
+/// between the two keeps the identity of the process that had it first: ending the result ([`end`], [`terminate`]) finds the
+/// new holder and leaves it alone. Code that matches command lines and then ends the matches takes this list and nothing else,
+/// so it never holds a bare pid (ADR 0033); empty when the table cannot be read.
+pub fn processes_with_command_lines() -> Vec<(ProcessId, String)> {
+    processes_with_command_lines_with(sysinfo::System::new)
+}
+
+/// [`processes_with_command_lines`] over a constructor.
+pub(crate) fn processes_with_command_lines_with(
+    make: impl Fn() -> Result<sysinfo::System, sysinfo::Error>,
+) -> Vec<(ProcessId, String)> {
+    let table: Table = usage::snapshot_with(&make);
+    let Some(mut sys) = usage::new_system_with(&make) else {
+        return Vec::new();
+    };
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_cmd(sysinfo::UpdateKind::Always),
+    );
+    sys.processes()
+        .iter()
+        .filter_map(|(pid, p)| {
+            let line = p
+                .cmd()
+                .iter()
+                .map(|a| a.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!line.is_empty())
+                .then(|| usage::identity(&table, pid.as_u32()).map(|id| (id, line)))
+                .flatten()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod port_tests {
     use super::*;
@@ -1275,5 +1313,19 @@ mod tests {
         let empty = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(empty.path().join("self")).unwrap();
         assert_eq!(group_runs_in_proc(empty.path(), 7), None);
+    }
+
+    #[test]
+    fn a_table_that_cannot_be_read_lists_nothing_and_this_process_is_listed_with_its_identity() {
+        assert!(processes_with_command_lines_with(|| Err(sysinfo::Error::Unsupported)).is_empty());
+        let own = std::process::id();
+        let me = ProcessId::of(own).unwrap();
+        let listed = processes_with_command_lines();
+        assert!(
+            listed
+                .iter()
+                .any(|(id, line)| *id == me && !line.is_empty()),
+            "this test process is in the list with the identity ProcessId::of gives"
+        );
     }
 }

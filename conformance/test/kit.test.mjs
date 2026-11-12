@@ -232,3 +232,74 @@ test('an unknown step is a usage error', () => {
     c.done();
   }
 });
+
+// ---- host steps (docs/plans/ci-in-rust.md, WP-4): `kit.sh host <step> <args>` ----
+
+/** The checkout of `checkout()` plus fake host scripts that log their name, arguments and the inputs they read from the environment. */
+function hostCheckout() {
+  const c = checkout();
+  const log = join(c.root, 'log');
+  const note = (who) => `echo "${who} $* name=\${NAME:-} angular=\${ANGULAR_DIR-unset}" >> '${log}'`;
+  mkdirSync(join(c.root, 'conformance', 'ci', 'host'), { recursive: true });
+  mkdirSync(join(c.root, 'tools'), { recursive: true });
+  for (const step of ['stable-workspace', 'node-caches', 'host-tools', 'sccache-stats']) exe(join(c.root, 'conformance', 'ci', 'host', `${step}.sh`), note(`host/${step}.sh`));
+  exe(join(c.root, 'conformance', 'ci', 'build-folder.sh'), note('build-folder.sh'));
+  for (const s of ['prune-build-folders.sh', 'prune-ci-build-folder.sh', 'host-cleanup.sh']) exe(join(c.root, 'tools', s), note(s));
+  return c;
+}
+
+test('kit.sh host runs a host step as ./dev ci <step> off the release path, with the action inputs as options', () => {
+  const c = hostCheckout();
+  try {
+    // The tool's own folder is asked of job-isolation.sh first on a host (tools_home): that call is not the step.
+    const dev = (args, env = {}) =>
+      c.run(['host', ...args], env).log.trim().split('\n').filter((l) => !l.startsWith('job-isolation.sh ')).map((l) => l.replace(/ home=.*$/, ''));
+    assert.deepEqual(dev(['stable-workspace', 'org/repo-job']), ['dev ci stable-workspace --name org/repo-job']);
+    assert.deepEqual(dev(['node-caches', 'ui', 'e2e-1']), ['dev ci node-caches --angular-dir ui --name e2e-1']);
+    assert.deepEqual(dev(['node-caches', '', 'e2e-1']), ['dev ci node-caches --angular-dir  --name e2e-1'], 'an empty angular dir keeps only npm');
+    assert.deepEqual(dev(['host-tools']), ['dev ci host-tools']);
+    assert.deepEqual(dev(['build-folder', '/ws', 'app-job']), ['dev ci build-folder /ws app-job']);
+    assert.deepEqual(dev(['prune-build-folder', '20', 'false']), ['dev ci prune-build-folder --max-gb 20']);
+    assert.deepEqual(dev(['prune-build-folder', '5', 'true']), ['dev ci prune-build-folder --max-gb 5 --drop-bundles']);
+    assert.deepEqual(dev(['prune-folder', '/x', '7']), ['dev ci prune-folder /x 7']);
+    assert.deepEqual(dev(['host-cleanup', '--id', 'pitwall', '--process-pattern', '{build}/x']), ['dev ci host-cleanup --id pitwall --process-pattern {build}/x']);
+    // The tool the job pinned is used as it is.
+    assert.deepEqual(dev(['host-tools'], { PADDOCK_DEV: join(c.root, 'pinned-tool') }), ['pinned ci host-tools']);
+  } finally {
+    c.done();
+  }
+});
+
+test('kit.sh host runs the shell a step had on a tag run, a run that never downloads the tool, and PADDOCK_CI_KIT=shell', () => {
+  const c = hostCheckout();
+  try {
+    for (const env of [{ GITHUB_REF: 'refs/tags/pitwall-v1.1.0' }, { PADDOCK_DEV_DOWNLOAD: '0' }, { PADDOCK_CI_KIT: 'shell' }]) {
+      const sh = (args, more = {}) => c.run(['host', ...args], { ...env, ...more }).log.trim();
+      assert.equal(sh(['stable-workspace', 'org/repo-job']), 'host/stable-workspace.sh  name=org/repo-job angular=unset', JSON.stringify(env));
+      assert.equal(sh(['node-caches', 'ui', 'e2e-1']), 'host/node-caches.sh  name=e2e-1 angular=ui');
+      assert.equal(sh(['node-caches', '', 'e2e-1']), 'host/node-caches.sh  name=e2e-1 angular=');
+      assert.match(sh(['host-tools']), /^host\/host-tools\.sh /);
+      assert.match(sh(['build-folder', '/ws', 'app-job']), /^build-folder\.sh \/ws app-job /);
+      assert.match(sh(['prune-folder', '/x', '7']), /^prune-build-folders\.sh \/x 7 /);
+      assert.match(sh(['host-cleanup', '--id', 'x']), /^host-cleanup\.sh --id x /);
+      assert.match(sh(['prune-build-folder', '5', 'true'], { PADDOCK_BUILD_FOLDER: '/ci/target-x-s1' }), /^prune-ci-build-folder\.sh \/ci\/target-x-s1 5 --drop-bundles /);
+      assert.match(sh(['prune-build-folder', '20', 'false'], { PADDOCK_BUILD_FOLDER: '/ci/target-x-s1' }), /^prune-ci-build-folder\.sh \/ci\/target-x-s1 20 name=/m);
+    }
+  } finally {
+    c.done();
+  }
+});
+
+test('kit.sh host fetches no tool for what has nothing to do: a Linux container for stable-workspace, no sccache for sccache-stats', () => {
+  const c = hostCheckout();
+  try {
+    assert.equal(c.run(['host', 'stable-workspace', 'x'], { RUNNER_OS: 'Linux' }).log, '', 'neither the tool nor the script ran');
+    assert.equal(c.run(['host', 'sccache-stats']).log, '', 'no sccache on PATH');
+    exe(join(c.root, 'bin', 'sccache'), 'exit 0');
+    assert.match(c.run(['host', 'sccache-stats']).log, /^dev ci sccache-stats/m, 'with sccache the step runs');
+    assert.equal(c.run(['host', 'bogus']).status, 2, 'an unknown step is a usage error');
+    assert.equal(c.run(['host']).status, 2);
+  } finally {
+    c.done();
+  }
+});

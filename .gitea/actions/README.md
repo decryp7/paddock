@@ -125,6 +125,13 @@ Windows runner's `runner.timeout` is not verified. Linux jobs run in a container
 | sccache server port, the WebKit job's ports | `kit.sh isolation port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
 | Tart VMs (service-smoke) | a host-wide VM slot under `TART_HOME` (`tools/macos-vm-smoke.sh`), VM names with the job's `PADDOCK_VM_PREFIX` | one VM at a time on the Mac (two at most, macOS's limit); the leftover check sees only the job's own VMs |
 
+**Host steps in Rust (WP-4).** `stable-workspace`, `node-caches`, `host-tools`, `sccache-stats`, `build-folder`, `prune-build-folder` and
+`host-cleanup` run `./dev ci <step>` (`tools/paddock-dev/src/ci_host`) through `bash conformance/ci/kit.sh host <step> <args>`, which keeps
+the shell they had (`conformance/ci/host/*.sh`, `build-folder.sh`, `tools/prune-*.sh`, `tools/host-cleanup.sh`) for tag, release and rule 54
+runs until the release-path lane deletes it; `tools/paddock-dev/tests/it/host_steps.rs` runs both on the same inputs. Every deletion in
+them goes through one guarded remove (`ci_host/safe_remove.rs`): under an explicit root, never a home folder or a drive root, a link
+removed as a link. A process is ended through `paddock_proc` after the identity check.
+
 The kept folders are declared once, in `conformance/ci/kept-folders.txt` (kind, layout, `slot` or `shared`). A new cache is
 one line there and `bash conformance/ci/kit.sh isolation path <kind> [<name>]` where it is used.
 

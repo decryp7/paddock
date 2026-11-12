@@ -7,12 +7,21 @@
 #   kit.sh which                     prints dev or shell (the reason goes to stderr)
 #   kit.sh isolation <args>          `./dev ci isolation <args>` (or job-isolation.sh <args>)
 #   kit.sh build-jobs [<split>]      `./dev ci build-jobs [<split>]` (or build-jobs.sh [<split>])
+#   kit.sh host <step> <args>        a host-runner step (WP-4), in Rust or in the shell it had:
+#     stable-workspace <name>                     ci stable-workspace --name | host/stable-workspace.sh (NAME)
+#     node-caches <angular-dir> <name>            ci node-caches --angular-dir --name | host/node-caches.sh (ANGULAR_DIR, NAME)
+#     host-tools | sccache-stats                  ci host-tools | ci sccache-stats | host/<step>.sh
+#     build-folder <workspace> <name>             ci build-folder | build-folder.sh
+#     prune-build-folder <max-gb> [drop-bundles]  ci prune-build-folder --max-gb [--drop-bundles] | tools/prune-ci-build-folder.sh
+#     prune-folder <folder> <max-gb>              ci prune-folder | tools/prune-build-folders.sh
+#     host-cleanup <host-cleanup options>         ci host-cleanup | tools/host-cleanup.sh
 #
 # The shell is used for: PADDOCK_CI_KIT=shell (the fallback switch: one variable away, plan section 7), a tag run, a run that never
 # downloads the tool (PADDOCK_DEV_DOWNLOAD=0: release and rule 54 jobs), a checkout without tools/paddock-dev (another repository
 # using the actions) and a machine without rustc (./dev hashes and builds itself with it). Every call prints one `kit:` line on
 # standard error naming the choice and why (ER-27). The scripts stay until WP-11 deletes them with this shim; both implementations are
-# held equal by tools/paddock-dev/tests/it/build_jobs.rs and conformance/test/job-isolation.test.mjs (ISOLATION_CMD).
+# held equal by tools/paddock-dev/tests/it/build_jobs.rs, tools/paddock-dev/tests/it/host_steps.rs and
+# conformance/test/job-isolation.test.mjs (ISOLATION_CMD).
 #
 # One tool per job: on a host runner the tool is fetched or built in the CI home's shared `tools` folder, never in the runner's own
 # home (a Windows job folder must stay deletable while the slot's holder runs). The folder is asked of job-isolation.sh in shell, so
@@ -93,8 +102,73 @@ dev_isolation() {
   esac
 }
 
+# first_build_jobs: the core limit for the tool's own first build (see the header: build-jobs).
+first_build_jobs() {
+  CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
+  export CARGO_BUILD_JOBS
+}
+
+# dev_run <args>: `./dev ci <args>`: the pinned tool when the job has one, else the wrapper (which builds it in the shared tools folder).
+dev_run() {
+  dev_env
+  if [ -n "${PADDOCK_DEV:-}" ]; then exec "$PADDOCK_DEV" ci "$@"; fi
+  tools_home
+  first_build_jobs
+  exec bash "$root/dev" ci "$@"
+}
+
+host_usage() {
+  echo "usage: kit.sh host stable-workspace <name> | node-caches <angular-dir> <name> | host-tools | sccache-stats | build-folder <workspace> <name> | prune-build-folder <max-gb> [drop-bundles] | prune-folder <folder> <max-gb> | host-cleanup <options>" >&2
+  exit 2
+}
+
+# kit_host <step> <args>: a host step in Rust or in its shell (the runner's `bash -e -o pipefail` for the inline ones it had).
+kit_host() {
+  step="${1:-}"
+  [ -n "$step" ] || host_usage
+  shift
+  # Nothing to do, so no tool is fetched or built for it: a Linux container has a fixed workspace, and without sccache there are no
+  # statistics.
+  case "$step" in
+    stable-workspace) [ "${RUNNER_OS:-}" != Linux ] || exit 0 ;;
+    sccache-stats) command -v sccache >/dev/null 2>&1 || exit 0 ;;
+  esac
+  if [ "$kit" = dev ]; then
+    case "$step" in
+      stable-workspace) dev_run stable-workspace --name "${1:?stable-workspace needs a name}" ;;
+      node-caches) dev_run node-caches --angular-dir "${1-}" --name "${2:?node-caches needs a name}" ;;
+      host-tools | sccache-stats) dev_run "$step" ;;
+      build-folder | prune-folder | host-cleanup) dev_run "$step" "$@" ;;
+      prune-build-folder)
+        if [ "${2:-}" = true ]; then dev_run prune-build-folder --max-gb "${1:-20}" --drop-bundles; fi
+        dev_run prune-build-folder --max-gb "${1:-20}"
+        ;;
+      *) host_usage ;;
+    esac
+  fi
+  case "$step" in
+    stable-workspace) NAME="${1:?stable-workspace needs a name}" exec bash -e -o pipefail "$here/host/stable-workspace.sh" ;;
+    node-caches) ANGULAR_DIR="${1-}" NAME="${2:?node-caches needs a name}" exec bash -e -o pipefail "$here/host/node-caches.sh" ;;
+    host-tools | sccache-stats) exec bash -e -o pipefail "$here/host/$step.sh" ;;
+    build-folder) exec bash "$here/build-folder.sh" "$@" ;;
+    prune-folder) exec bash "$root/tools/prune-build-folders.sh" "$@" ;;
+    host-cleanup) exec bash "$root/tools/host-cleanup.sh" "$@" ;;
+    prune-build-folder)
+      dir="${PADDOCK_BUILD_FOLDER:-}"
+      if [ -n "$dir" ] && command -v cygpath >/dev/null; then dir="$(cygpath -u "$dir")"; fi
+      extra=""; if [ "${2:-}" = true ]; then extra="--drop-bundles"; fi
+      exec bash "$root/tools/prune-ci-build-folder.sh" "$dir" "${1:-20}" ${extra:+"$extra"}
+      ;;
+    *) host_usage ;;
+  esac
+}
+
 case "${1:-}" in
   which) echo "$kit" ;;
+  host)
+    shift
+    kit_host "$@"
+    ;;
   isolation)
     shift
     if [ "$kit" = dev ]; then dev_isolation "$@"; fi
@@ -105,14 +179,13 @@ case "${1:-}" in
     if [ "$kit" = dev ]; then
       dev_env
       tools_home
-      CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"
-      export CARGO_BUILD_JOBS
+      first_build_jobs
       exec bash "$root/dev" ci build-jobs "$@"
     fi
     exec bash "$here/build-jobs.sh" "$@"
     ;;
   *)
-    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>]" >&2
+    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | host <step> <args>" >&2
     exit 2
     ;;
 esac

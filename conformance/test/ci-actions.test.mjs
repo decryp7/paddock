@@ -343,9 +343,10 @@ test('setup-rust installs a pinned, checksum-verified sccache when the runner ha
 });
 
 test('the sccache-stats action prints the statistics and tolerates a missing sccache; every Rust job of Paddock CI uses both on every OS', () => {
-  const stats = read(join(ACTIONS, 'sccache-stats', 'action.yml'));
+  const stats = read(join(PADDOCK, 'conformance', 'ci', 'host', 'sccache-stats.sh'));
   assert.match(stats, /sccache --show-stats/);
   assert.match(stats, /command -v sccache/);
+  assert.match(read(join(ACTIONS, 'sccache-stats', 'action.yml')), /kit\.sh" host sccache-stats/, 'through the kit shim (Rust, or this script on the release path)');
   const ci = read(join(WORKFLOWS, 'ci.yml'));
   // The jobs that build Rust, by name (a new job that builds Rust joins this list; a count would hide which one).
   const jobsUsing = (action) => {
@@ -570,10 +571,8 @@ test('every Node script decides it is the main module with isMain, which resolve
 });
 
 function runStableWorkspace(os, root, over = {}) {
-  const text = read(join(ACTIONS, 'stable-workspace', 'action.yml'));
-  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
-  const script = join(root, 'step.sh');
-  writeFileSync(script, body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'stable-workspace')));
+  // The shell copy of the step (conformance/ci/host/stable-workspace.sh); the Rust command is held equal to it by tests/it/host_steps.rs.
+  const script = join(PADDOCK, 'conformance', 'ci', 'host', 'stable-workspace.sh');
   return spawnSync('bash', ['-e', '-o', 'pipefail', script], {
     env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'work', 'abc', 'hostexecutor'), GITHUB_ENV: join(root, 'github-env'), NAME: 'decryp7/paddock-crate', ...over },
     encoding: 'utf8',
@@ -811,8 +810,7 @@ test('paddock-dev has the same nextest ci profile as the crates, and its longer 
 /** Runs host-tools' script with a PATH of shims; `nextest` is the version the shim `cargo-nextest` reports. */
 function runHostTools(os, { kept = null, onPath = null } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-host-tools-')));
-  const text = read(join(ACTIONS, 'host-tools', 'action.yml'));
-  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
+  const body = read(join(PADDOCK, 'conformance', 'ci', 'host', 'host-tools.sh'));
   const version = /^VERSION=(\S+)$/m.exec(body)[1];
   const shim = (dir, v) => {
     mkdirSync(dir, { recursive: true });
@@ -824,8 +822,7 @@ function runHostTools(os, { kept = null, onPath = null } = {}) {
   writeFileSync(join(bin, 'curl'), '#!/bin/sh\necho "curl was called" >&2\nexit 7\n', { mode: 0o755 });
   if (kept) shim(join(root, 'home', '.paddock-ci', 'tools', 'cargo-nextest', version), kept === 'pin' ? version : kept);
   if (onPath) shim(bin, onPath === 'pin' ? version : onPath);
-  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'host-tools')));
-  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(PADDOCK, 'conformance', 'ci', 'host', 'host-tools.sh')], {
     env: { PATH: `${bin}:/usr/bin:/bin`, HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_PATH: join(root, 'github-path') },
     encoding: 'utf8',
   });
@@ -848,9 +845,9 @@ test('host-tools keeps the pinned cargo-nextest on a host and checks the version
 });
 
 test('the host-tools pin is a release version with SHA-256 sums', () => {
-  const pin = /^\s+VERSION=(\S+)$/m.exec(read(join(ACTIONS, 'host-tools', 'action.yml')))[1];
+  const pin = /^\s*VERSION=(\S+)$/m.exec(read(join(PADDOCK, 'conformance', 'ci', 'host', 'host-tools.sh')))[1];
   assert.match(pin, /^\d+\.\d+\.\d+$/);
-  for (const sum of read(join(ACTIONS, 'host-tools', 'action.yml')).matchAll(/SUM=(\S+);/g)) assert.match(sum[1], /^[0-9a-f]{64}$/);
+  for (const sum of read(join(PADDOCK, 'conformance', 'ci', 'host', 'host-tools.sh')).matchAll(/SUM=(\S+);/g)) assert.match(sum[1], /^[0-9a-f]{64}$/);
 });
 
 // ---- The apps on the shared kit (ci.yml's app leg through paddock.ci.json, <app>-release.yml through app-release.yml) ----
@@ -1072,12 +1069,9 @@ test('a manual ci.yml run can ask for WebKit (workflow_dispatch input), compared
 
 function runNodeCaches(os, env = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-node-caches-')));
-  const text = read(join(ACTIONS, 'node-caches', 'action.yml'));
-  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(root, 'ws', 'ui', '.angular', 'cache'), { recursive: true });
   writeFileSync(join(root, 'ws', 'ui', '.angular', 'cache', 'stale'), '');
-  writeFileSync(join(root, 'step.sh'), body.replaceAll('${{ github.action_path }}', join(ACTIONS, 'node-caches')));
-  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(root, 'step.sh')], {
+  const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(PADDOCK, 'conformance', 'ci', 'host', 'node-caches.sh')], {
     env: { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: os, PADDOCK_CI_SLOT: 's1', GITHUB_WORKSPACE: join(root, 'ws'), GITHUB_ENV: join(root, 'github-env'), ANGULAR_DIR: 'ui', NAME: 'e2e-1', PADDOCK_CI_MOUNT: join(root, 'no-mount'), ...env },
     encoding: 'utf8',
   });
@@ -1292,8 +1286,10 @@ test('every host job that keeps a build folder caps it at the end, with the shar
   assert.match(rel, /- uses: \.\/\.gitea\/actions\/prune-build-folder\n\s+if: always\(\) && runner\.os != 'Linux'\n\s+with:\n\s+drop-bundles: "true"/, "app-release's bundle job prunes on the hosts after the upload");
   assert.ok(rel.indexOf('actions/prune-build-folder') > rel.indexOf('actions/upload-artifact'), 'only after the installers are uploaded');
   const action = read(join(ACTIONS, 'prune-build-folder', 'action.yml'));
-  assert.match(action, /dir="\$\{PADDOCK_BUILD_FOLDER:-\}"/, 'only the job\'s own build folder');
-  assert.match(action, /prune-ci-build-folder\.sh" "\$dir" "\$MAX_GB"/, 'through the guard that accepts only target-* in the CI home');
+  assert.match(action, /kit\.sh" host prune-build-folder "\$MAX_GB" "\$DROP_BUNDLES"/, 'through the kit shim: ./dev ci prune-build-folder, or the shell on the release path');
+  const kit = read(join(PADDOCK, 'conformance', 'ci', 'kit.sh'));
+  assert.match(kit, /dir="\$\{PADDOCK_BUILD_FOLDER:-\}"/, 'only the job\'s own build folder');
+  assert.match(kit, /prune-ci-build-folder\.sh" "\$dir" "\$\{1:-20\}"/, 'through the guard that accepts only target-* in the CI home');
   assert.match(action, /default: "20"/, 'the cap the old Dyno workflow had');
 });
 

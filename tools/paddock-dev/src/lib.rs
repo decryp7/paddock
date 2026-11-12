@@ -24,6 +24,9 @@
 //! - `ci build-jobs [<split>]`: CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for a job, the port of `conformance/ci/build-jobs.sh`
 //!   ([`ci_build_jobs`]).
 //! - `locks check|sync`: every lockfile and the workspace hack current, and the command that regenerates them ([`locks`]).
+//! - `ci stable-workspace|node-caches|host-tools|sccache-stats|build-folder|prune-build-folder|prune-folder|prune-agent-builds|
+//!   host-cleanup`: the host-runner steps of the kit, the ports of the actions of the same names and of `build-folder.sh`, the prune
+//!   scripts and `host-cleanup.sh` ([`ci_host`], docs/plans/ci-in-rust.md WP-4). Every deletion goes through its guarded remove.
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
 //! - `disk check|report|scan|clean|adopt|record`: free-space check, usage tracking (owner records and a SQLite index) and clean-up
 //!   of merged and stale-pushed folders ([`disk`]).
@@ -41,6 +44,7 @@ pub mod brief_check;
 pub mod check;
 pub mod child_env;
 pub mod ci_build_jobs;
+pub mod ci_host;
 pub mod ci_isolation;
 pub mod ci_runs;
 pub mod ci_setup_rust;

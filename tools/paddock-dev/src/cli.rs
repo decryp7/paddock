@@ -1,6 +1,6 @@
 use crate::{
-    brief_check, check, ci_build_jobs, ci_isolation, ci_runs, ci_setup_rust, disk, gates, hook, input_hash, ipc_endpoints, load, locks,
-    merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    brief_check, check, ci_build_jobs, ci_host, ci_isolation, ci_runs, ci_setup_rust, disk, gates, hook, input_hash, ipc_endpoints, load,
+    locks, merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -201,6 +201,8 @@ enum CiCommand {
     /// CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for the job: the runner's share of the host (the port of
     /// conformance/ci/build-jobs.sh). Assignments to $GITHUB_ENV (or standard output without it), the reason on standard error.
     BuildJobs(ci_build_jobs::BuildJobsArgs),
+    #[command(flatten)]
+    Host(ci_host::HostStep),
     /// Release mode (ADR 0085): a tag build reads nothing kept. `setup` makes the job's folders, `record` is the only
     /// ledger writer, `verify` proves it.
     ReleaseIsolation {
@@ -431,6 +433,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         // CI annotations (`::warning::`, `::error::`) on standard error and the exit code: like `ci isolation`, no report.
         return disk::check::run(a, &|k| std::env::var(k).ok(), out, err);
     }
+    if let Command::Ci {
+        command: CiCommand::Host(step),
+    } = &cli.command
+    {
+        // A CI step's contract: plain lines (the shell's), one `::error::` line on failure, no report.
+        return ci_host::run(step, out, err);
+    }
     if matches!(cli.command, Command::Hook { .. }) {
         // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
         return hook::pre_tool_use(&mut std::io::stdin(), out, err);
@@ -486,6 +495,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::BuildJobs(_),
         } => Err(CliError::failure("`ci build-jobs` was dispatched through the report path.")),
+        Command::Ci {
+            command: CiCommand::Host(_),
+        } => Err(CliError::failure("a `ci` host step was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::ReleaseIsolation { command },
         } => release_isolation::command(command),

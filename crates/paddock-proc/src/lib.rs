@@ -99,7 +99,8 @@ pub use start::{
 pub use supervised::{MemoryCap, Registry, Sampler, Supervised, end_all, global_registry};
 pub use tree::{
     Presence, Terminated, TreeEnding, ask, descendants_of, end, end_unreaped_group, is_alive,
-    kill_tree, may_be_alive, presence, processes_mentioning, terminate,
+    kill_tree, may_be_alive, presence, processes_mentioning, processes_with_command_lines,
+    terminate,
 };
 pub use usage::{
     CpuSample, MAX_TREE, OsSource, ProcEntry, ProcessSource, Row, Table, descendants, identity,
