@@ -476,6 +476,12 @@ jobs:
   # outside 00:00-04:00 local), one Linux slot. `--all` exits 5 on a stale file and 6 on a check that could not run.
   generators:
     name: generators (every registry check)
+    # Measured once (2026-11-12, container on a Mac, amd64 emulated, 4 CPUs): 92 min. Before a real run, the limit is the sum of the hang guards of the heavy entries (tools/paddock-dev
+    # generators/run.rs: 1800 s each, 24 of them, would be 12 h, so this takes the longest known chain instead): the UI and
+    # e2e builds (about 15 min) plus the heaviest checks measured on 2026-11-12 on a loaded Mac (ts-debrief-wire 12 min cold,
+    # ts-dyno-shell 6 min, ts-shared-crates and the rest about 40 min together) and a cold cargo-about install (5 min), with a
+    # margin of 2: 150 minutes. Replace with the measured duration plus 50 % after the first run.
+    timeout-minutes: 150
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -490,6 +496,11 @@ jobs:
       - uses: ./.gitea/actions/node-caches
       - name: Install
         run: npm ci
+      # The Debrief store crates link the official libduckdb: the image's when it has the pinned version, else the pinned download
+      # (as debrief.yml does before it builds the workspace).
+      - name: libduckdb
+        working-directory: apps/debrief
+        run: bash scripts/ci/libduckdb-env.sh
       # i18n:check and the publish dry run read the built package.
       - name: Build the UI package
         run: npm run build -w ui && npm run build:e2e -w ui
@@ -499,9 +510,10 @@ jobs:
       - name: ./dev gen check --all
         run: ./dev gen check --all
 
+  # `generators` joins this list after its first green nightly run (docs/ci-schedules.md).
   mark:
     name: mark the green nightly
-    needs: [ci, generators, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
+    needs: [ci, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:
