@@ -122,20 +122,73 @@ run_bounded() {
   wait "$_pid"
 }
 
+# proc_stamp <pid>: the start time of a process, empty when it is not running ("-" when it runs and the platform's ps cannot say when).
+proc_stamp() {
+  kill -0 "$1" 2>/dev/null || return 0
+  _st=$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//') || _st=
+  printf '%s\n' "${_st:--}"
+}
+
+# toolchain_lock <acquire|release> <pin>: one `rustup toolchain install` of a pin at a time on a host (two installs of one pin
+# in one RUSTUP_HOME corrupt each other). A `mkdir` lock in RUSTUP_HOME with the owner's pid and start time. A lock whose owner is gone,
+# or whose pid now belongs to another process (another start time), is taken over; a lock is never judged by its age (rule 53).
+# The wait for a live owner is bounded by the install time limit.
+toolchain_lock() {
+  _lk="${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}/.paddock-install-$2.lock"
+  if [ "$1" = release ]; then rm -rf "${_lk:?}" || true; return 0; fi
+  _w0=$(date +%s)
+  while ! mkdir "$_lk" 2>/dev/null; do
+    _op=$(sed -n 1p "$_lk/owner" 2>/dev/null || true)
+    _os=$(sed -n 2p "$_lk/owner" 2>/dev/null || true)
+    if [ -n "$_op" ] && [ "$(proc_stamp "$_op")" != "$_os" ]; then
+      echo "dev: the toolchain install lock $_lk belongs to a process ($_op) that is gone; taking it over." >&2
+      rm -rf "${_lk:?}" || true
+      continue
+    fi
+    if [ $(($(date +%s) - _w0)) -ge "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" ]; then
+      echo "::error::./dev: another install of the toolchain $2 (pid ${_op:-unknown}) holds $_lk and did not finish within ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s. Wait for it, or if no install runs on this host, delete $_lk and run ./dev again." >&2
+      return 1
+    fi
+    sleep 1
+  done
+  printf '%s\n%s\n' "$$" "$(proc_stamp "$$")" >"$_lk/owner"
+  return 0
+}
+
 # ensure_toolchain: the toolchain the repository pins (rust-toolchain.toml, with the profile and components it asks for) is installed.
 # rustup 1.28 no longer installs a pinned toolchain by itself, so a runner that has rustup but not yet that version has a `rustc` shim
 # that cannot run (run 8034: build-jobs ran ./dev before setup-rust, and the wrapper fell back to an old cached tool). Only when rustc
-# does not run, rustup exists, no compiler was named by RUSTC or a cargo config, and a toolchain file exists. Bounded by
-# PADDOCK_DEV_TOOLCHAIN_TIMEOUT (seconds, default 900), logged with its duration; a failure says the next step. Returns 0 when rustc
-# runs afterwards.
+# does not run, rustup exists, no compiler was named by RUSTC or a cargo config, a toolchain file exists and an earlier step of the job
+# did not already fail to install it (PADDOCK_TOOLCHAIN_FAILED). One install of a pin at a time per host (toolchain_lock), bounded by
+# PADDOCK_DEV_TOOLCHAIN_TIMEOUT (seconds, default 900), logged with its duration; a failure says the next step, and a timeout
+# uninstalls the half-installed toolchain. Returns 0 when the install finished.
 ensure_toolchain() {
   [ -z "${rustc_cmd:-}" ] || return 1
   command -v rustup >/dev/null 2>&1 || return 1
   tf=$(toolchain_file) || return 1
+  if [ "${PADDOCK_TOOLCHAIN_FAILED:-}" = 1 ]; then
+    echo "dev: not installing the toolchain $tf pins again: an earlier step of this job failed to (PADDOCK_TOOLCHAIN_FAILED=1)." >&2
+    return 1
+  fi
+  pin=$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$tf" | head -n 1 | tr -d '\r')
+  [ -n "$pin" ] || pin=$(tr -d '\r' <"$tf" | head -n 1)
   _i0=$(date +%s)
-  echo "dev: rustc does not run here; installing the toolchain $tf pins with rustup (at most ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s)." >&2
+  mkdir -p "${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}" 2>/dev/null || true
+  toolchain_lock acquire "$pin" || return 1
+  # The holder before us may have installed it.
+  if (cd "$tool" && rustc -vV >/dev/null 2>&1); then
+    toolchain_lock release "$pin"
+    echo "dev: the toolchain $pin was installed by another run meanwhile." >&2
+    return 0
+  fi
+  echo "dev: rustc does not run here; installing the toolchain $tf pins ($pin) with rustup (at most ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s)." >&2
   _rc=0
   (cd "$tool" && run_bounded "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" rustup toolchain install >&2) || _rc=$?
+  if [ "$_rc" -eq 124 ]; then
+    echo "dev: the install ran out of time; removing the half-installed toolchain $pin." >&2
+    (cd "$tool" && run_bounded 120 rustup toolchain uninstall "$pin" >&2) || true
+  fi
+  toolchain_lock release "$pin"
   if [ "$_rc" -ne 0 ]; then
     echo "::error::./dev: 'rustup toolchain install' for $tf failed (exit $_rc, $(($(date +%s) - _i0)) s; 124 means the time limit). Run it by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
     return 1

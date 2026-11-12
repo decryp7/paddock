@@ -51,14 +51,27 @@ kit_choice() {
   if [ -z "$top" ] || [ ! -f "$top/tools/paddock-dev/Cargo.toml" ]; then echo "shell no tools/paddock-dev in this checkout"; return; fi
   if [ ! -f "$root/dev" ]; then echo "shell no ./dev wrapper beside this script"; return; fi
   if ! command -v rustc >/dev/null 2>&1; then echo "shell no rustc on PATH"; return; fi
+  # A rustup shim passes `command -v` and still cannot run when the pinned toolchain is missing: the steps that must always work
+  # (host-cleanup, prune, release) then use the shell kit instead of exiting 2 and hiding it behind `|| true`.
+  if [ "${PADDOCK_TOOLCHAIN_FAILED:-}" = 1 ] || ! (cd "$top/tools/paddock-dev" && rustc -vV >/dev/null 2>&1); then
+    echo "shell rustc does not run in this checkout (the pinned toolchain is not installed)"
+    return
+  fi
   echo "dev ./dev ci steps are available"
 }
 
 # The toolchain the repository pins is installed before the first ./dev or rustc call of the job (run 8034: on Windows build-jobs ran
 # before setup-rust, the pinned version was not there yet, `rustc` could not run and the wrapper fell back). `./dev --ensure-toolchain`
 # installs it with rustup when rustc does not run (bounded, logged); a machine without rustup is left to the choice below.
-if [ "${GITHUB_ACTIONS:-}" = true ] && command -v rustup >/dev/null 2>&1 && [ -f "$root/dev" ] && [ -f "$root/tools/paddock-dev/Cargo.toml" ]; then
-  bash "$root/dev" --ensure-toolchain || echo "::warning::kit.sh: the pinned Rust toolchain could not be installed (see above); steps that need Rust will fail with their own message." >&2
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${PADDOCK_TOOLCHAIN_FAILED:-}" != 1 ] && command -v rustup >/dev/null 2>&1 && [ -f "$root/dev" ] && [ -f "$root/tools/paddock-dev/Cargo.toml" ]; then
+  if ! bash "$root/dev" --ensure-toolchain; then
+    # Remembered for the rest of the job: later steps do not try again (900 s each) and use the shell kit, which needs no Rust.
+    PADDOCK_TOOLCHAIN_FAILED=1
+    PADDOCK_CI_KIT=shell
+    export PADDOCK_TOOLCHAIN_FAILED PADDOCK_CI_KIT
+    if [ -n "${GITHUB_ENV:-}" ]; then printf 'PADDOCK_TOOLCHAIN_FAILED=1\nPADDOCK_CI_KIT=shell\n' >> "$GITHUB_ENV" || true; fi
+    echo "::warning::kit.sh: the pinned Rust toolchain could not be installed (see above); the rest of this job uses the shell kit, and steps that need Rust will fail with their own message." >&2
+  fi
 fi
 
 choice=$(kit_choice)

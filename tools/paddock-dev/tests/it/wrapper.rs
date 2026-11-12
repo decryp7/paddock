@@ -402,6 +402,8 @@ fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)]
         .env("PADDOCK_DEV_HOME", home)
         .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
         .env("CARGO_HOME", f.cargo_home.path())
+        // The toolchain install lock lives in RUSTUP_HOME: never the user's.
+        .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTC")
         .env_remove("CARGO_BUILD_RUSTC")
         // `dev` changes its messages and defaults on a CI runner; a test opts in through `extra_env`.
@@ -531,7 +533,10 @@ fn a_runner_with_rustup_but_without_the_pinned_toolchain_installs_it_before_buil
 #[cfg(unix)]
 #[test]
 fn a_failed_or_stuck_toolchain_install_is_an_error_with_the_next_step_and_runs_no_cached_tool() {
-    for (body, timeout, want) in [("exit 1", "30", "exit 1"), ("exec sleep 30", "1", "exit 124")] {
+    for (body, timeout, want) in [
+        ("exit 1", "30", "exit 1"),
+        ("[ \"$1 $2\" = 'toolchain install' ] && exec sleep 30; exit 0", "1", "exit 124"),
+    ] {
         let f = Fixture::new();
         let scratch = tempfile::tempdir().unwrap();
         let home = scratch.path().join("home");
@@ -564,6 +569,7 @@ fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
             .current_dir(f.root())
             .env("PATH", &path)
             .env("CARGO_HOME", f.cargo_home.path())
+            .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
             .env_remove("RUSTC")
             .env_remove("CARGO_BUILD_RUSTC")
             .output()
@@ -1295,4 +1301,106 @@ fn build_folders_of_old_compilers_go_after_a_week_and_the_one_in_use_never() {
         target.join("rustc-aaaa").exists(),
         "the compiler in use keeps its folder whatever its age"
     );
+}
+
+/// The start time of a running process as the wrapper records it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+fn stamp_of(pid: u32) -> String {
+    let out = Command::new("ps").args(["-o", "lstart=", "-p", &pid.to_string()]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(unix)]
+fn install_lock(f: &Fixture, owner_pid: u32, stamp: &str) -> PathBuf {
+    let lock = f.cargo_home.path().join("rustup/.paddock-install-1.90.0.lock");
+    std::fs::create_dir_all(&lock).unwrap();
+    std::fs::write(lock.join("owner"), format!("{owner_pid}\n{stamp}\n")).unwrap();
+    lock
+}
+
+#[cfg(unix)]
+#[test]
+fn a_timed_out_install_is_uninstalled_so_no_half_toolchain_is_left() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && exec sleep 30; exit 0");
+    let (code, _, err) = run_wrapper(
+        &f,
+        &scratch.path().join("home"),
+        &[("PADDOCK_DEV_TOOLCHAIN_TIMEOUT", "1".to_string())],
+    );
+    assert_eq!(code, 2, "{err}");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(log.contains("toolchain uninstall 1.90.0"), "{log}");
+    assert!(
+        !f.cargo_home.path().join("rustup/.paddock-install-1.90.0.lock").exists(),
+        "the lock is released"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_install_waits_for_a_live_holder_of_the_lock_and_never_runs_beside_it() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    // This test process is a live owner (pid and start time match), however old the lock is.
+    let me = std::process::id();
+    let lock = install_lock(&f, me, &stamp_of(me));
+    let (code, _, err) = run_wrapper(
+        &f,
+        &scratch.path().join("home"),
+        &[("PADDOCK_DEV_TOOLCHAIN_TIMEOUT", "2".to_string())],
+    );
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("holds") && err.contains(&me.to_string()), "{err}");
+    assert!(lock.exists(), "a live holder's lock is not taken");
+    assert!(
+        !log.exists() || !std::fs::read_to_string(log).unwrap().contains("toolchain install"),
+        "no install beside the holder"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_of_a_gone_owner_or_of_a_reused_pid_is_taken_over_whatever_its_age() {
+    let me = std::process::id();
+    let dead = {
+        let mut c = Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let pid = c.id();
+        c.wait().unwrap();
+        pid
+    };
+    for (pid, stamp) in [
+        (dead, "Mon Jan 1 00:00:00 2001".to_string()),
+        (me, "Mon Jan 1 00:00:00 2001".to_string()),
+    ] {
+        let f = Fixture::new();
+        let scratch = tempfile::tempdir().unwrap();
+        let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+        install_lock(&f, pid, &stamp);
+        let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[("PADDOCK_DEV_DOWNLOAD", "0".to_string())]);
+        assert_eq!(code, 0, "pid {pid}: {err}");
+        assert!(err.contains("taking it over"), "{err}");
+        assert!(std::fs::read_to_string(log).unwrap().contains("toolchain install"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn after_a_failed_install_earlier_in_the_job_no_second_install_is_tried() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (_, log) = rustup_without_toolchain(&f, "exit 1");
+    let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[("PADDOCK_TOOLCHAIN_FAILED", "1".to_string())]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("an earlier step of this job failed to"), "{err}");
+    assert!(!log.exists(), "rustup was not run at all");
 }

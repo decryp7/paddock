@@ -350,3 +350,41 @@ test('on a CI host with rustup the pinned toolchain is ensured before the first 
     c.done();
   }
 });
+
+test('a rustup shim that cannot run is not rustc: the shell kit is chosen (run 8034 review)', () => {
+  const c = checkout();
+  try {
+    exe(join(c.root, 'bin', 'rustc'), 'echo "error: toolchain is not installed" >&2; exit 1');
+    const r = c.run(['which']);
+    assert.equal(r.stdout.trim(), 'shell');
+    assert.match(r.stderr, /rustc does not run in this checkout/);
+    exe(join(c.root, 'bin', 'rustc'), 'exit 0');
+    assert.equal(c.run(['which']).stdout.trim(), 'dev', 'a rustc that runs keeps the Rust kit');
+  } finally {
+    c.done();
+  }
+});
+
+test('after a failed toolchain install the job is marked, later steps neither retry nor use ./dev, and cleanup still runs in shell', () => {
+  const c = checkout();
+  try {
+    const env = join(c.root, 'github-env');
+    writeFileSync(env, '');
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    exe(join(c.root, 'bin', 'rustc'), 'exit 1');
+    exe(join(c.root, 'dev'), `echo "dev $*" >> "${join(c.root, 'log')}"; case "$1" in --ensure-toolchain) exit 2 ;; esac`);
+    let r = c.run(['build-jobs'], { GITHUB_ENV: env, GITHUB_TOKEN: 't' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(env, 'utf8'), 'PADDOCK_TOOLCHAIN_FAILED=1\nPADDOCK_CI_KIT=shell\n');
+    assert.match(r.log, /^dev --ensure-toolchain/m);
+    assert.match(r.log, /^build-jobs\.sh /m, 'the step itself ran in shell');
+    // The next steps of the job see the variables the runner took from GITHUB_ENV.
+    const later = { PADDOCK_TOOLCHAIN_FAILED: '1', PADDOCK_CI_KIT: 'shell', GITHUB_ENV: env };
+    for (const args of [['build-jobs'], ['isolation', 'release'], ['host', 'sccache-stats'], ['host', 'host-cleanup', '--id', 'x']]) {
+      r = c.run(args, later);
+      assert.doesNotMatch(r.log, /ensure-toolchain|^dev/m, `${args}: no second install attempt, no ./dev: ${r.log}`);
+    }
+  } finally {
+    c.done();
+  }
+});
