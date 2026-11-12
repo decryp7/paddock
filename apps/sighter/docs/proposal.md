@@ -24,6 +24,7 @@ Refinements:
 - AI-assisted recovery through Pitwall: diagnose-only by default, recover opt-in, reported as "passed with recovery" (7.10).
 - Works alongside any UI test framework (FlaUI, pywinauto, Appium, Robot) as an add-on (7.11); multi-application tests (7.12); pure-vision legacy apps from C# (7.13).
 - Desktop automation through an MCP server and an agent mode over Pitwall's chat API (7.14); a `Target` interface with Local and RDP in v1, controller PC model, IP-KVM Later (7.15).
+- **Amendment 2026-11-12 (user, cut review of 2026-11-12): ONNX Runtime is Microsoft's official build with telemetry switched off, plus an egress test; Sighter does not build its own ORT.** This replaces the earlier decision (2026-10-29, `sighter/sw5-ort`) to build ONNX Runtime ourselves with `--no_telemetry` and to use no Microsoft or pyke prebuilts, and the rule "DirectML is bundled only if an ETW session shows no events". Sighter links the pinned, checksummed official `ort` binaries, calls `DisableTelemetryEvents()` at start-up (Microsoft's documented switch for the Windows TraceLogging provider, ORT `docs/Privacy.md`), and a release **egress test** (the backup the user had already approved) fails the release if the process opens a connection to a non-loopback address during inference. Saves the ORT build pipeline and a rebuild at every ORT update (review: about 3 to 5 days). Risk accepted: trust in Microsoft's documented switch, checked by the egress test. Earlier text below is history.
 - **Agent mode is in v1** (user, 2026-10-23): `sighter do "<goal>"` with Pitwall as the local planner ships in v1, not Later (7.14). Pitwall stays optional: without it agent mode shows a clear "needs Pitwall (or an MCP host that brings its own model)" state, and scripted runs and the MCP server work with no LLM.
 
 ## 1. Pitch
@@ -744,7 +745,7 @@ runner has no GPU/Pitwall, or icons have no text.
 
 ### Other building blocks
 - **OCR**: PaddleOCR det+rec ONNX through `ort` (accuracy leader, multilingual); `ocrs` as small pure-Rust fallback; no Tesseract in v1.
-- **Inference**: `ort` (ONNX Runtime MIT; DirectML/CoreML/CUDA/OpenVINO providers; pin and vendor by checksum, CUDA/TensorRT carry NVIDIA licences), `tract` pure-Rust CPU fallback. Pre/post-processing pure Rust.
+- **Inference**: `ort` (ONNX Runtime MIT, Microsoft's official build with telemetry off and an egress test, no own build of ORT: see the Decisions amendment of 2026-11-12; DirectML/CoreML/CUDA/OpenVINO providers; pin and vendor by checksum, CUDA/TensorRT carry NVIDIA licences), `tract` pure-Rust CPU fallback. Pre/post-processing pure Rust.
 - **Prior art and datasets**: OmniParser (same detect + OCR + caption idea, AGPL detector), Apple Screen Recognition (CHI 2021), Ferret-UI/CogAgent/SeeClick (licences, verify), ScreenAI (unreleased). Datasets Rico, VINS, WebUI, ScreenSpot (eval only), OS-Atlas data (verify per subset), GroundUI (verify): v1 trains only on the user's own recordings. Neighbours and their features: section 13.
 
 ### `LabelSource` trait

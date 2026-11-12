@@ -512,6 +512,12 @@ sits under ADR 0042's hold.)
 WP-C3 with Pitcrew's tour, because Pitcrew moves onto the shell in 1.1 and runs long jobs. WP-C4 joins the
 release gate of the first release after ADR 0037's WP-7 lands.
 
+*Amendment 2026-11-12 (user, cut review of 2026-11-12; the paragraph above is history):* the Pitcrew 1.1 gate is **Pitcrew's
+`features.toml` rows, report-only** (WP-A4's part, about 0.5 day). WP-A1 to WP-A3, WP-B1 to WP-B3, WP-B5 and WP-C3 (C83, C84,
+C86, C89, `Outcome` in `paddock-jobs`) are no longer before the Pitcrew 1.1 tag; the review put the saving at 14 to 16 days.
+They stay in this ADR as later work with no tag attached. WP-C1b and WP-B4b are not changed by this amendment. See
+[apps/pitcrew/docs/plans/pitcrew-1-1.md](../../apps/pitcrew/docs/plans/pitcrew-1-1.md).
+
 **Rollback.** Each check is its own module with its own baseline, and can be reverted alone. WP-B1 is the one breaking
 change; it lands with its adoption in every app in one change (rules 39, 43), so there is no half state.
 

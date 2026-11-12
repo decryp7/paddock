@@ -1,5 +1,7 @@
 # Amendment to ADR 0087 (2026-11-11): pointer to the line-ends control change
 
+> 2026-11-12 (user, cut review): ADR 0087 is withdrawn, see [0087-withdrawn-2026-11-12.md](0087-withdrawn-2026-11-12.md). The text below is history.
+
 - Status: Accepted 2026-11-11 (user), with the amendment it points to. ADR 0087 (accepted 2026-11-10) is on
   `origin/docs/adr-windows-gate-ratchets` (`db7782e01`) only. This file only points; the text and the decision are in
   [0021-lf-checkouts-2026-11-11.md](0021-lf-checkouts-2026-11-11.md) item 4, and its register row is

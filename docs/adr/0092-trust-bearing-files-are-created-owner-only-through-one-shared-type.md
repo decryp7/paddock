@@ -11,6 +11,11 @@
   4 P1s and 8 P2s; "Review answers (revision 2)" at the end). Nothing here is built yet. ER-23 does not apply (no
   drawings).
 - Trimmed 2026-11-11 (user, comparable-practice review): TRIM beyond WP-1 and the Pitwall minimum: keep WP-0, WP-1 (built), WP-4 (shared adopters), WP-6 Dyno data root, WP-7 (Debrief elevated bootstrap and Pitcrew socket folder; the W-rows that block Pitcrew 1.1 stay, the user decided Pitcrew's SYSTEM-service fix is in Pitcrew 1.1), WP-8, WP-9 and the Clippy `disallowed-methods` entries of WP-3; dropped C106 and its register (rest of WP-3), WP-2 (extended ACLs), WP-10, Dyno's other adopters.
+- Amendment 2026-11-12 (user, cut review of 2026-11-12): the adopt-tree amendment (`0092-adopt-tree-2026-11-11`, D1 (a) full adoption of an
+  older version's folder tree, 13.5 days) is **withdrawn**. An upgrade does not adopt an old tree: a runner or helper folder
+  that is not owner-only or admin-only is blocked with a "re-register this runner" message. See
+  [amendments/0092-adopt-tree-withdrawn-2026-11-12.md](amendments/0092-adopt-tree-withdrawn-2026-11-12.md). The rest of this ADR is
+  unchanged. Earlier text is history.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40; rule 53 (reusable OS names) and ADR 0033 (identity by handle); rule 55 and ADR 0034/0075
   (copies register); ADR 0073 (no test doubles in a shipped build: the `test-support` feature); ADR 0077 (tests never
