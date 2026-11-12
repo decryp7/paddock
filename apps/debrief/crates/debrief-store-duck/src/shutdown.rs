@@ -205,7 +205,13 @@ fn threads_at_exit() -> Option<std::sync::MutexGuard<'static, Vec<Registered>>> 
     None
 }
 
+/// Tests: how often the exit drain looked at the list of threads.
+#[cfg(test)]
+pub(crate) static LOOKS: AtomicUsize = AtomicUsize::new(0);
+
 fn threads_running() -> bool {
+    #[cfg(test)]
+    LOOKS.fetch_add(1, Ordering::SeqCst);
     threads_at_exit().is_none_or(|all| !all.is_empty())
 }
 
@@ -445,9 +451,12 @@ mod tests {
                 unsafe {
                     libc::write(1, line.as_ptr().cast(), line.len());
                 }
-                // The thread takes its time to leave: only a drain that really waits for the list sees "left" first.
+                // The thread leaves only after the drain looked at the list several times: only a drain that really
+                // waits for the list sees "left" before the other handlers.
                 std::thread::spawn(|| {
-                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    paddock_testkit::wait_until("the exit drain to look at the list again", || {
+                        super::LOOKS.load(std::sync::atomic::Ordering::SeqCst) >= 3
+                    });
                     let line = b"store thread left\n";
                     // SAFETY: writes a static buffer to the standard output descriptor.
                     unsafe {
