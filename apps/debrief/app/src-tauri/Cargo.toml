@@ -92,6 +92,8 @@ tokio = { workspace = true, features = ["sync", "time"] }
 ctrlc = { workspace = true, features = ["termination"] }
 # The fake DevTools browser for the research browser's tests (never a real browser).
 chromium-driver = { path = "../../crates/chromium-driver", features = ["test-support"] }
+# The real-browser tests wait for the browser until it is ready or ends, and set the driver's test form from the kit (ADR 0071).
+paddock-testkit = { path = "../../../../crates/paddock-testkit", features = ["start"] }
 # The store in process for the shell's tests (the real adapter on a temp folder).
 debrief-store-duck = { path = "../../crates/debrief-store-duck" }
 # The profile importers as a library, for the profiling store's tests (in Debrief they run in the profiling plugin's process).

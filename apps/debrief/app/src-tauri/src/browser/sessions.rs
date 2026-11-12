@@ -343,6 +343,9 @@ struct Inner {
     /// Reasons already told (each is told once, until the profile is cleared).
     told: Mutex<std::collections::HashSet<String>>,
     profile_listeners: RwLock<Vec<ProfileListener>>,
+    /// How the browsers' answers are waited for: the product's bounds, or the test form of ADR 0071 (judged until a hang
+    /// guard), which a test sets with [`Renderers::set_answers`].
+    answers: RwLock<chromium_driver::Answers>,
 }
 
 impl Inner {
@@ -418,6 +421,13 @@ impl Renderers {
     #[cfg(test)]
     pub fn set_sources(&self, s: Sources) {
         *crate::sync::write(&self.inner.sources) = s;
+    }
+
+    /// The test form of the browsers' answers (ADR 0071): every answer and page load waited for while the browser is there,
+    /// until the hang guard of `paddock_testkit::start`.
+    #[cfg(test)]
+    pub fn set_answers(&self, a: chromium_driver::Answers) {
+        *crate::sync::write(&self.inner.answers) = a;
     }
 
     pub fn set_configured(&self, p: Option<PathBuf>) {
@@ -686,6 +696,7 @@ impl Renderers {
             profile,
             accent: Some(ACCENT),
             window: placer.and_then(|p| p(owner)),
+            answers: *crate::sync::read(&self.inner.answers),
             ..LaunchOptions::default()
         };
         let chromium = match Chromium::launch(&exe, &opts) {

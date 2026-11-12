@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import C79, { ADOPTING, binPaths, callsFirst, guardedMains, lockGraph, mainState, reaches } from '../src/checks/C79-orphan-guard-hooks.mjs';
+import C79, { ADOPTING, binPaths, callsFirst, devOnly, guardedMains, lockGraph, mainState, reaches } from '../src/checks/C79-orphan-guard-hooks.mjs';
 
 const LOCK = `version = 4
 
@@ -127,4 +127,72 @@ test('C79 refuses an async or attribute-wrapped main with its own message', () =
   assert.equal(f.length, 1);
   assert.equal(f[0].severity, 'error');
   assert.match(f[0].message, /async or wrapped by an attribute/);
+});
+
+// A binary links its normal dependencies, never its dev-dependencies: paddock-bench reached paddock-proc only through its
+// dev-dependency on paddock-testkit (whose `start` feature adds paddock-proc), and its main cannot start supervised children.
+test('C79: a package that reaches paddock-proc only through a dev-dependency has no main to guard', () => {
+  const lock = `${LOCK}
+[[package]]
+name = "bench"
+version = "0.1.0"
+dependencies = [
+ "kit",
+ "plain",
+]
+
+[[package]]
+name = "kit"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+]
+`;
+  const devManifest = '[package]\nname = "bench"\n\n[dependencies]\nplain = "0.1"\n\n[dev-dependencies]\nkit = { workspace = true }\n';
+  assert.deepEqual([...devOnly(devManifest)], ['kit']);
+  assert.deepEqual(guardedMains(['Cargo.lock', 'b/Cargo.toml', 'b/src/main.rs'], (p) => ({ 'Cargo.lock': lock, 'b/Cargo.toml': devManifest, 'b/src/main.rs': BARE })[p] ?? null), []);
+  // The same crate as a normal dependency (also when it is a dev-dependency too, or a target-specific one) still counts.
+  for (const normal of ['[dependencies]\nkit = "0.1"\n\n[dev-dependencies]\nkit = { workspace = true }\n', "[target.'cfg(unix)'.dependencies]\nkit.workspace = true\n"]) {
+    const m = `[package]\nname = "bench"\n\n${normal}`;
+    assert.deepEqual(devOnly(m).size, 0, normal);
+    assert.equal(guardedMains(['Cargo.lock', 'b/Cargo.toml', 'b/src/main.rs'], (p) => ({ 'Cargo.lock': lock, 'b/Cargo.toml': m, 'b/src/main.rs': BARE })[p] ?? null).length, 1, normal);
+  }
+  // A target-specific dev-dependency is dev-only as well.
+  assert.deepEqual([...devOnly("[package]\nname = \"bench\"\n[target.'cfg(unix)'.dev-dependencies]\nkit = \"0.1\"\n")], ['kit']);
+});
+
+// The lock lists a workspace member's dev-dependencies with its normal ones, so a member the binary does depend on can reach
+// paddock-proc through its own dev-dependency: that path is not linked either.
+test('C79: a dependency that reaches paddock-proc only through its own dev-dependency does not make a main reach it', () => {
+  const lock = `${LOCK}
+[[package]]
+name = "bench"
+version = "0.1.0"
+dependencies = [
+ "lib",
+]
+
+[[package]]
+name = "lib"
+version = "0.1.0"
+dependencies = [
+ "kit",
+]
+
+[[package]]
+name = "kit"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+]
+`;
+  const files = {
+    'Cargo.lock': lock,
+    'bench/Cargo.toml': '[package]\nname = "bench"\n[dependencies]\nlib = { path = "../lib" }\n',
+    'bench/src/main.rs': BARE,
+    'lib/Cargo.toml': '[package]\nname = "lib"\n[dev-dependencies]\nkit = { path = "../kit" }\n',
+  };
+  assert.deepEqual(guardedMains(Object.keys(files), (p) => files[p] ?? null), []);
+  files['lib/Cargo.toml'] = '[package]\nname = "lib"\n[dependencies]\nkit = { path = "../kit" }\n';
+  assert.equal(guardedMains(Object.keys(files), (p) => files[p] ?? null).length, 1, 'a normal dependency still counts');
 });

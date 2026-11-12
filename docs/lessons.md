@@ -1888,3 +1888,12 @@ and `paddock_testkit::guarded` for a slow job judged on units finished (the live
 of ADR 0071 section 1 is NOT built yet: `paddock_proc::StartWatch` is the judge it is to drive, and a second wait beside it
 would be a copy (rule 55). Still open: ADR 0071 row 13 (the 20-40 s receives and deadlines in the real-browser tests of
 paddock-chromium, Spotter and Debrief's chromium-driver; only the first-run warm-up is done) and rows 1, 5-12 and 14-15.
+
+Update 2026-11-12 (`fix/debrief-train5-waits`): `paddock_testkit::start::wait_ready_or_exit` is built (feature `start`, on
+`StartWatch`), after Debrief's renderer real-browser tests failed with `navigate: Timeout` on the CI Mac (run 7963): the driver
+copy still had the fixed 5 s and 10 s command deadlines that `paddock-chromium` had replaced in `8d8424805`. Debrief's
+chromium-driver now judges the start's answers like the canonical, and its tests set `Answers::Judged` (every answer and page
+load waited for while the browser is there, until the kit's hang guard); the renderer's real-browser tests take turns with the
+driver's. A registered copy that falls behind its canonical's fix fails the same way later: port the fix to the copies or say
+why not (rule 55), and a copy's `Copies-waived` reason "adopts the canonical later" does not cover a failure that is already
+there. Row 13 of ADR 0071 is done for Debrief; paddock-chromium's and Spotter's real-browser tests still count polls.

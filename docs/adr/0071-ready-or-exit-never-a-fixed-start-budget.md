@@ -10,6 +10,10 @@
   (progress guard) serves the live scans of paddock-dev. Not built: section 1's `wait_ready_or_exit` in `paddock-testkit::start`.
   **Row 13 is still open**: the 20-40 s receives and deadlines in the real-browser tests of paddock-chromium, Spotter and Debrief's
   chromium-driver are unchanged. The product's 15 s connect window is unchanged (D4).
+- Progress 2026-11-12 (`fix/debrief-train5-waits`, from `origin/fix/debrief-train5-rust-tests` `0e162bcdd`): WP-1 built
+  (`paddock_testkit::start`, sync only; the async form waits for a user). Row 13 done for Debrief (chromium-driver and the
+  renderer's real-browser tests: `Answers::Judged`, `wait_ready_or_exit`, `wait_exit`); paddock-chromium's and Spotter's
+  real-browser tests are still open.
 - Related: ER-11 / rule 5 (failing test first), ER-12 (no raised timeouts or sleeps; flaky is red), ER-20 / rule 51
   (parallelism and cost), ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42-43 (share first,
   shared behaviour tested once), ER-27 (logs explain every failure), ER-28 (a cause is confirmed by a run without it),

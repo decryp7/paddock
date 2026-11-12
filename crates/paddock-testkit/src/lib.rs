@@ -17,6 +17,8 @@
 //! - [`guarded`], [`Progress`], [`StallGuard`]: a slow job (a whole-repository scan) judged on progress, not total time: it fails
 //!   only when no unit is finished for the stall limit (ADR 0071).
 //!
+//! - [`start`] (feature `start`): `wait_ready_or_exit` / `wait_exit` for a program the test started, ready or ended and never a
+//!   fixed budget, and `warm_first_start` for a fresh binary's first run (ADR 0071).
 //! - [`boot_volume`]: [`boot_volume::boot_volume_temp`], the folder for programs a test starts as their own responsible
 //!   process (disclaimed or by launchd): never on an external volume, where macOS prompts (TCC, Removable Volumes).
 //!
@@ -31,6 +33,8 @@ pub mod limits;
 pub mod net;
 pub mod runner;
 pub mod scratch;
+#[cfg(feature = "start")]
+pub mod start;
 pub mod wait;
 
 pub use env::{EnvLock, env_lock};

@@ -737,7 +737,9 @@ impl Chromium {
         } else if self.conn.is_closed() {
             Some(Gone::Disconnected)
         } else {
-            page.is_closed().then_some(Gone::PageClosed)
+            // The page's own end, read without the connection: a connection that closes after the check above is a
+            // `Disconnected` at the next look, never a page the user closed (a race: 3 of 19 runs of the suite on Linux failed this way).
+            page.detached().then_some(Gone::PageClosed)
         }
     }
 

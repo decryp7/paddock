@@ -636,55 +636,65 @@ mod tests {
         assert_eq!(status.tuning, tuning);
     }
 
+    /// The sampler and the call run on their own threads, so the first progress the caller sees may be the control's start
+    /// (`Matching 0/0`) or the call's first step: the product promises the changes, not their order (CI 7967 failed
+    /// `sent[0] == Evaluating 40/100` on a loaded Mac when the call thread ran after the first sample). The call here forces
+    /// that order (it reports only after the caller has seen the start) and returns only once the caller has seen its step:
+    /// conditions, never a sleep of a few sampling periods.
     #[test]
     fn a_long_call_streams_its_changed_progress_and_a_panic_is_an_engine_error() {
         use debrief_core::ql::{QueryProgress, QueryStage};
+        let step = QueryProgress {
+            stage: QueryStage::Evaluating,
+            done: 40,
+            total: 100,
+        };
         let control = QueryControl::new();
-        let mut sent: Vec<QueryProgress> = Vec::new();
-        let c = control.clone();
+        let sent: Arc<Mutex<Vec<QueryProgress>>> = Arc::default();
+        let (seen, c) = (sent.clone(), control.clone());
         let reply = with_progress(
             &control,
             &mut |bytes| {
-                sent.push(debrief_ipc::wire::decode(&bytes).unwrap());
+                sent.lock().unwrap().push(debrief_ipc::wire::decode(&bytes).unwrap());
                 true
             },
             move || {
+                paddock_testkit::wait_until("the caller to see the call's start", || !seen.lock().unwrap().is_empty());
                 c.begin(QueryStage::Evaluating, 100);
                 c.advance(40);
-                std::thread::sleep(protocol::PROGRESS_EVERY * 3);
+                paddock_testkit::wait_until("the caller to see the call's step", || seen.lock().unwrap().contains(&step));
                 Ok(7)
             },
         )
         .unwrap();
         assert_eq!(reply, 7);
-        assert!(!sent.is_empty(), "progress reached the caller while the call ran");
-        assert_eq!(
-            sent[0],
-            QueryProgress {
-                stage: QueryStage::Evaluating,
-                done: 40,
-                total: 100
-            }
-        );
-        assert!(sent.windows(2).all(|w| w[0] != w[1]), "only changes are sent");
+        let sent = sent.lock().unwrap().clone();
+        assert_ne!(sent[0], step, "the start was sent first, as forced");
+        assert_eq!(sent.last(), Some(&step), "the call's step reached the caller while the call ran");
+        assert!(sent.windows(2).all(|w| w[0] != w[1]), "only changes are sent: {sent:?}");
 
         // The caller refusing an item (it is gone) stops the sending, not the call.
         let control = QueryControl::new();
-        let c = control.clone();
-        let mut refused = 0;
+        let refused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (asked, c) = (refused.clone(), control.clone());
         let reply = with_progress(
             &control,
             &mut |_| {
-                refused += 1;
+                refused.fetch_add(1, Ordering::SeqCst);
                 false
             },
             move || {
                 c.advance(1);
-                std::thread::sleep(protocol::PROGRESS_EVERY * 3);
+                paddock_testkit::wait_until("the caller to be offered an item", || asked.load(Ordering::SeqCst) > 0);
+                c.advance(1);
                 Ok(1)
             },
         );
-        assert_eq!((reply.unwrap(), refused), (1, 1));
+        assert_eq!(
+            (reply.unwrap(), refused.load(Ordering::SeqCst)),
+            (1, 1),
+            "nothing is offered after a refusal"
+        );
 
         // A panic inside the call is an engine error of that call; the worker lives on.
         let control = QueryControl::new();

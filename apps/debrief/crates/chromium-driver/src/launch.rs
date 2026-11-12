@@ -1,6 +1,7 @@
 //! Starting a browser: the command line, the profile (throwaway or persistent) with an accent theme, and the
 //! supervised process. The real user agent and the automation banner are kept on purpose: no stealth.
 
+use crate::answer::{Answering, Answers};
 use crate::cdp::Connection;
 use crate::discover::{Browser, Flavor};
 use crate::page::Page;
@@ -10,7 +11,7 @@ use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StallReport, S
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long [`Chromium::start_page`] waits for the page the browser opens with.
@@ -50,6 +51,9 @@ pub struct LaunchOptions {
     /// How the start is judged (ADR 0031): a start that is slow but alive is waited for; only a browser that exits,
     /// spins without becoming ready or does nothing at all fails it. Elapsed time alone never does.
     pub patience: Patience,
+    /// How the browser's answers are waited for: judged while it starts and bounded afterwards (the product), or judged
+    /// until a hang guard (tests, [`Answers::Judged`] from `paddock_testkit::start`).
+    pub answers: Answers,
     /// Where its window opens; the browser's own choice when `None`.
     pub window: Option<WindowBounds>,
     /// A limit for the browser's disk cache (for a kept profile, so it does not grow without bound).
@@ -64,6 +68,7 @@ impl Default for LaunchOptions {
             accent: None,
             max_lifetime: Duration::from_secs(30 * 60),
             patience: Patience::default(),
+            answers: Answers::Bounded,
             window: None,
             disk_cache_bytes: None,
         }
@@ -218,11 +223,16 @@ pub enum Gone {
     PageClosed,
 }
 
+/// After the start, how long `Target.getTargets` may take ([`Chromium::page_count`], a later [`Chromium::start_page`]).
+pub const LATER_LIST: Duration = Duration::from_secs(5);
+
 /// A running browser. Dropping it ends the process and removes a throwaway profile.
 pub struct Chromium {
     // Field order matters: the connection closes before the process is killed and the profile removed.
+    answering: Arc<Answering>,
     conn: Arc<Connection>,
-    process: Supervised,
+    /// Shared with the waits for its answers ([`crate::answer`]), which read whether it runs from the held child.
+    process: Arc<Mutex<Supervised>>,
     dir: PathBuf,
     throwaway: bool,
     alive: Arc<AtomicBool>,
@@ -287,14 +297,27 @@ impl Chromium {
         let id = process.id().and_then(ProcessId::of);
         watchdog(alive.clone(), timed_out.clone(), id, opts.max_lifetime);
         match connect(&dir, &mut process, id, opts, &timed_out) {
-            Ok(conn) => Ok(Chromium {
-                conn: Arc::new(conn),
-                process,
-                dir,
-                throwaway,
-                alive,
-                exe: exe.clone(),
-            }),
+            Ok(conn) => {
+                let conn = Arc::new(conn);
+                let process = Arc::new(Mutex::new(process));
+                Ok(Chromium {
+                    answering: Arc::new(Answering::new(
+                        conn.clone(),
+                        process.clone(),
+                        id,
+                        timed_out,
+                        opts.max_lifetime,
+                        opts.patience,
+                        opts.answers,
+                    )),
+                    conn,
+                    process,
+                    dir,
+                    throwaway,
+                    alive,
+                    exe: exe.clone(),
+                })
+            }
             Err(e) => {
                 alive.store(false, Ordering::Release);
                 process.kill();
@@ -305,22 +328,29 @@ impl Chromium {
     }
 
     pub fn pid(&self) -> Option<u32> {
-        self.process.id()
+        self.proc().id()
+    }
+
+    /// The browser's process (a poisoned lock still gives it: the process handle is never left half-changed).
+    fn proc(&self) -> std::sync::MutexGuard<'_, Supervised> {
+        self.process.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn is_running(&mut self) -> bool {
-        self.process.is_running() && !self.conn.is_closed()
+        self.proc().is_running() && !self.conn.is_closed()
     }
 
     /// Why the browser and its `page` can no longer be used, if so. No round trip to the browser (see
     /// [`Page::exists`] for one).
     pub fn gone(&mut self, page: &Page) -> Option<Gone> {
-        if !self.process.is_running() {
+        if !self.proc().is_running() {
             Some(Gone::Exited)
         } else if self.conn.is_closed() {
             Some(Gone::Disconnected)
         } else {
-            page.is_closed().then_some(Gone::PageClosed)
+            // The page's own end, read without the connection: a connection that closes after the check above is a
+            // `Disconnected` at the next look, never a page the user closed (a race: 3 of 19 runs of the suite on Linux failed this way).
+            page.detached().then_some(Gone::PageClosed)
         }
     }
 
@@ -328,9 +358,12 @@ impl Chromium {
         &self.dir
     }
 
-    /// Opens another page (tab) to drive, beside the ones the browser has.
+    /// Opens another page (tab) to drive, beside the ones the browser has. As the browser's first page, its answers are
+    /// waited for while it is alive and working ([`crate::answer`]); later, each within its bound.
     pub fn new_page(&self) -> Result<Page> {
-        Page::attach(self.conn.clone())
+        let page = Page::attach(self.answering.clone(), "opening a page")?;
+        self.answering.opened();
+        Ok(page)
     }
 
     /// The page the browser opened with (the `about:blank` of its command line), to drive instead of opening a second
@@ -340,7 +373,9 @@ impl Chromium {
         let end = Instant::now() + START_PAGE_WAIT;
         loop {
             if let Some(target) = self.first_page_target()? {
-                return Page::adopt(self.conn.clone(), target);
+                let page = Page::adopt(self.answering.clone(), target, "opening the start page")?;
+                self.answering.opened();
+                return Ok(page);
             }
             if Instant::now() >= end {
                 log::warn!("The browser showed no start page within {START_PAGE_WAIT:?}; a new one is opened");
@@ -351,7 +386,9 @@ impl Chromium {
     }
 
     fn first_page_target(&self) -> Result<Option<String>> {
-        let r = self.conn.call(None, "Target.getTargets", json!({}), Duration::from_secs(5))?;
+        let r = self
+            .answering
+            .ask(None, "Target.getTargets", json!({}), "listing the pages", LATER_LIST)?;
         let pages: Vec<&Value> = r
             .get("targetInfos")
             .and_then(Value::as_array)
@@ -366,7 +403,9 @@ impl Chromium {
 
     /// The number of open pages (tabs and windows) of the browser; a page the user opened shows up here.
     pub fn page_count(&self) -> Result<usize> {
-        let r = self.conn.call(None, "Target.getTargets", json!({}), Duration::from_secs(5))?;
+        let r = self
+            .answering
+            .ask(None, "Target.getTargets", json!({}), "counting the pages", LATER_LIST)?;
         Ok(r.get("targetInfos").and_then(Value::as_array).map_or(0, |t| {
             t.iter().filter(|i| i.get("type").and_then(Value::as_str) == Some("page")).count()
         }))
@@ -378,13 +417,13 @@ impl Chromium {
         self.alive.store(false, Ordering::Release);
         let _ = self.conn.call(None, "Browser.close", json!({}), grace.min(Duration::from_secs(2)));
         let end = Instant::now() + grace;
-        let mut exited = !self.process.is_running();
+        let mut exited = !self.proc().is_running();
         while !exited && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(25));
-            exited = !self.process.is_running();
+            exited = !self.proc().is_running();
         }
         // Whatever is left of the process tree (helpers, or the browser itself when it ignored the request) ends now.
-        self.process.kill();
+        self.proc().kill();
         cleanup(&self.dir, self.throwaway);
         exited
     }
@@ -392,7 +431,7 @@ impl Chromium {
     /// Ends the browser at once.
     pub fn kill(&mut self) {
         self.alive.store(false, Ordering::Release);
-        self.process.kill();
+        self.proc().kill();
     }
 }
 
@@ -1006,14 +1045,176 @@ mod tests {
 
     #[cfg(unix)]
     fn launch_fake(mode: crate::fake::Mode, tabs: usize) -> (tempfile::TempDir, crate::fake::FakeBrowser, Chromium) {
+        launch_fake_with(mode, tabs, Answers::Bounded)
+    }
+
+    #[cfg(unix)]
+    fn launch_fake_with(mode: crate::fake::Mode, tabs: usize, answers: Answers) -> (tempfile::TempDir, crate::fake::FakeBrowser, Chromium) {
         let d = tempfile::tempdir().unwrap();
         let fake = crate::fake::FakeBrowser::install(d.path(), "launch::tests::fake_browser_process", mode, tabs).unwrap();
         let exe = Browser {
             flavor: crate::Flavor::Chromium,
             path: fake.exe.clone(),
         };
-        let b = Chromium::launch(&exe, &opts_in(d.path())).expect("the fake starts");
+        let opts = LaunchOptions {
+            answers,
+            ..opts_in(d.path())
+        };
+        let b = Chromium::launch(&exe, &opts).expect("the fake starts");
         (d, fake, b)
+    }
+
+    /// The test form of the answers with a guard of `guard`: the judge never calls the browser stuck, only the guard ends.
+    #[cfg(unix)]
+    fn judged(guard: Duration) -> Answers {
+        Answers::Judged {
+            patience: Patience {
+                spin: Duration::MAX,
+                idle: Duration::MAX,
+                hang_guard: Duration::MAX,
+                ..Patience::default()
+            },
+            guard,
+        }
+    }
+
+    /// The bound of a wait that should still be running: the browser is alive and only late.
+    #[cfg(unix)]
+    const STILL_WAITING: Duration = Duration::from_secs(40);
+
+    /// Runs `op` on another thread while the fake holds the answer to `held` (after `hold`), and checks that `op` is still
+    /// waiting `past` after the fake received the command; then releases the answer and returns `op`'s result. A fixed
+    /// deadline shorter than `past` ends `op` before (Debrief CI 7963, `navigate: Timeout`; paddock-chromium train runs
+    /// 7771, 7796 and 7810).
+    #[cfg(unix)]
+    fn answered_late<T: Send>(
+        fake: &crate::fake::FakeBrowser,
+        hold: crate::fake::UserAction,
+        held: &str,
+        past: Duration,
+        op: impl FnOnce() -> Result<T> + Send,
+    ) -> Result<T> {
+        fake.act(hold).unwrap();
+        std::thread::scope(|s| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            s.spawn(move || {
+                let _ = tx.send(op());
+            });
+            let marker = format!("held {held}");
+            let end = Instant::now() + STILL_WAITING;
+            while !fake.calls().contains(&marker) {
+                assert!(Instant::now() < end, "the fake never held {held}: {:?}", fake.calls());
+                std::thread::yield_now();
+            }
+            // The condition is "no result yet": a wait that ends early with a result is the failure under test, and the
+            // bound is the old fixed deadline plus a margin (the browser is alive and its answer is merely late).
+            let early = rx.recv_timeout(past);
+            assert!(
+                early.is_err(),
+                "the wait ended while the browser was alive and its answer to {held} was late: {:?}",
+                early.map(|r| r.map(|_| ()))
+            );
+            fake.act(crate::fake::UserAction::ReleaseAnswers).unwrap();
+            rx.recv_timeout(STILL_WAITING).expect("the wait ends once the browser answers")
+        })
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_slow_to_list_its_pages_after_the_start_is_waited_for_while_it_is_alive() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 1);
+        let page = answered_late(
+            &fake,
+            crate::fake::UserAction::HoldPageList,
+            "Target.getTargets",
+            Duration::from_millis(5_500),
+            || b.start_page(),
+        )
+        .expect("the start page opens");
+        assert!(!page.is_closed());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_browser_slow_to_attach_its_start_page_is_waited_for_while_it_is_alive() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 1);
+        let page = answered_late(
+            &fake,
+            crate::fake::UserAction::HoldAttach,
+            "Target.attachToTarget",
+            Duration::from_millis(10_500),
+            || b.start_page(),
+        )
+        .expect("the start page opens");
+        assert!(!page.is_closed());
+    }
+
+    /// The test form (ADR 0071): a page command after the start is waited for while the browser is there, not for the
+    /// product's 10 s.
+    #[cfg(unix)]
+    #[test]
+    fn in_the_test_form_a_page_command_answered_late_is_waited_for() {
+        let (_d, fake, b) = launch_fake_with(crate::fake::Mode::Obey, 1, judged(STILL_WAITING * 2));
+        let p = b.start_page().unwrap();
+        let v = answered_late(
+            &fake,
+            crate::fake::UserAction::HoldEvaluate,
+            "Runtime.evaluate",
+            Duration::from_millis(10_500),
+            || p.evaluate("document.readyState"),
+        )
+        .expect("the page answers");
+        assert_eq!(v, serde_json::json!("complete"));
+    }
+
+    /// The test form's only bound is its hang guard, and the error says so, naming the command (ER-27).
+    #[cfg(unix)]
+    #[test]
+    fn in_the_test_form_an_answer_that_never_comes_ends_as_a_hang_naming_the_command() {
+        let (_d, fake, b) = launch_fake_with(crate::fake::Mode::Obey, 1, judged(Duration::from_millis(300)));
+        let p = b.start_page().unwrap();
+        fake.act(crate::fake::UserAction::HoldEvaluate).unwrap();
+        let e = p.evaluate("1").expect_err("no answer").to_string();
+        assert!(
+            e.contains("Runtime.evaluate") && e.contains("hang guard") && e.contains("a hang"),
+            "{e}"
+        );
+        fake.act(crate::fake::UserAction::ReleaseAnswers).unwrap();
+    }
+
+    /// The test form fails at once when the browser ends while an answer is owed: no guard is waited out.
+    #[cfg(unix)]
+    #[test]
+    fn in_the_test_form_a_browser_that_ends_while_an_answer_is_owed_fails_at_once() {
+        let (_d, fake, b) = launch_fake_with(crate::fake::Mode::Obey, 1, judged(STILL_WAITING * 2));
+        let p = b.start_page().unwrap();
+        fake.act(crate::fake::UserAction::HoldEvaluate).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let asked = std::thread::spawn(move || {
+            let _ = tx.send(p.evaluate("1"));
+        });
+        let end = Instant::now() + STILL_WAITING;
+        while !fake.calls().iter().any(|c| c == "held Runtime.evaluate") {
+            assert!(Instant::now() < end, "the fake never held the command");
+            std::thread::yield_now();
+        }
+        fake.act(crate::fake::UserAction::Quit).unwrap();
+        let r = rx.recv_timeout(STILL_WAITING).expect("the end is seen long before the guard");
+        assert!(matches!(r, Err(Error::Closed)), "{r:?}");
+        asked.join().unwrap();
+    }
+
+    /// The product form keeps a later command's bound, and its error names the command and the bound (ER-27; CI 7963 only
+    /// said `Timeout`).
+    #[cfg(unix)]
+    #[test]
+    fn a_later_command_past_its_bound_names_the_command_and_the_bound() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 1);
+        let _p = b.start_page().unwrap();
+        fake.act(crate::fake::UserAction::HoldPageList).unwrap();
+        let e = b.page_count().expect_err("held past its bound").to_string();
+        assert!(e.contains("Target.getTargets") && e.contains("5s"), "{e}");
+        fake.act(crate::fake::UserAction::ReleaseAnswers).unwrap();
     }
 
     #[cfg(unix)]

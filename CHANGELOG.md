@@ -4,6 +4,18 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-testkit`: `start`, the wait for a started program (ADR 0071 WP-1)
+- New `paddock_testkit::start` (feature `start`, which adds `paddock-proc`): `wait_ready_or_exit(child, what, probe)` returns
+  `StartOutcome::Ready(value)` as soon as the probe gives one or `StartOutcome::Exited(ExitInfo)` as soon as the program ended,
+  judged by `paddock_proc::StartWatch` (one "ready or exit" in the family) with `PATIENCE`, under which only the wall-clock
+  `HANG_GUARD` ends a wait; that end panics as a hang, naming the pid and whether the process is alive, stopped or gone. Also
+  `try_wait_ready_or_exit` (returns `HangGuardExpired`), `wait_exit`, the `Started` trait (`std::process::Child`, a
+  `ProcessId`, `Logged`: a child whose error output goes to a file and comes back in the `ExitInfo`), `warm_first_start` and
+  `warm_first_starts` (over `paddock_proc::warm_up`), and a note on stderr every 10 s of a long wait. Not built: the async form
+  (no user yet).
+- New `Progress::follow(look)`: ticks whenever a level that work shows (rows committed, bytes read) changes, until `look` says
+  it is done; inside `guarded`, a slow job that keeps changing a counter passes, one that stands still is a stall.
+
 ### `paddock-secrets`: `write_owner_only`, the secret-file writer for any trust-bearing file (ADR 0092 WP-0)
 - New `paddock_secrets::write_owner_only(path, bytes)`: the mechanism of `SecretFile::write` for a file that is not a secret
   value (Pitwall's `apps.json`, the access list). The folder is made private or refused, then a unique temporary file is
