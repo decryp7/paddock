@@ -699,6 +699,25 @@ fn drop_of_a_free_worktree_still_refuses_unpushed_and_uncommitted_work() {
     assert!(path.join("new.txt").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn drop_of_a_free_worktree_refuses_while_a_process_works_in_it() {
+    let fx = Fixture::new();
+    let path = pushed_branch(&fx, "w1", "agent-A");
+    assert_eq!(fx.dev(&["worktree", "release", p(&path), "--agent", "agent-A"]).code, 0);
+    // An agent's shell, a build or an editor: any process whose current folder is at or below the worktree.
+    let mut sleeper = paddock_proc::command("sleep");
+    sleeper.arg("60").current_dir(&path);
+    let mut child = sleeper.spawn().unwrap();
+    let refused = fx.dev(&["worktree", "drop", p(&path)]);
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert_eq!(refused.code, 4, "pushed and clean is not unused: {} {}", refused.json, refused.err);
+    assert!(refused.err.contains("current folder"), "{}", refused.err);
+    assert!(path.exists());
+    assert_eq!(fx.dev(&["worktree", "drop", p(&path)]).code, 0, "dropped once nothing runs in it");
+}
+
 #[test]
 fn drop_refuses_a_locked_unowned_worktree_even_for_the_coordinator() {
     let fx = Fixture::new();
