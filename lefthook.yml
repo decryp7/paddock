@@ -79,11 +79,13 @@ commit-msg:
       run: node conformance/bin/paddock-conformance.mjs commit-lint --file {1}
 
 # One command, so the hook cannot drift from CI (ADR 0038, docs/plans/ci-in-rust.md WP-2): `./dev check --pre-push` runs ER-9's fast
-# gates for what the push changes (fmt, host and Windows Clippy, Linux Clippy in the CI image, conformance with ci.yml's own list,
-# commit-lint, lockfiles, Pitwall's script tests and deny, C102). It reads the planner; a gate that cannot run is "not measured".
+# gates for what the push changes (fmt, host and Windows Clippy of the workspaces with a changed file, conformance with ci.yml's own
+# list, commit-lint, lockfiles, Pitwall's script tests and deny, C102; the Linux Clippy with --linux). It reads the planner; a gate
+# that cannot run, or runs out of the 15-minute budget, is "not measured" and blocks the push.
 pre-push:
   commands:
     pre-push:
-      # git's pre-push lines on standard input: the gate checks exactly the commits being pushed (a dirty tree is only noted).
+      # git's pre-push lines on standard input: the gate checks out the commit being pushed in a throw-away worktree and checks that,
+      # so a dirty tree cannot change the answer (several refs in one push: one is checked, the others are "not measured").
       use_stdin: true
       run: ./dev check --pre-push --refs-from-stdin

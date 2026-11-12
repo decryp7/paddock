@@ -93,6 +93,9 @@ pub struct Facts {
     pub pitwall_tests: Vec<String>,
     /// This program, for the checks `./dev` runs itself.
     pub dev_exe: String,
+    /// Run the Linux Clippy in the CI image too (`--linux`): off by default, CI covers it (ER-9's overlap model) and in the
+    /// measured run it did not fit the budget.
+    pub linux: bool,
     /// The caller's `CARGO_TARGET_DIR`: the Windows lint gets `<it>/xwin` (ADR 0021 §3).
     pub target_dir: Option<String>,
 }
@@ -135,20 +138,29 @@ pub fn workspaces(plan: &Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The workspaces that hold a changed file themselves (the longest workspace folder that is a prefix of the file): the ones whose
+/// own Clippy and format the change can break. The others that the plan reaches are dependents, which CI lints.
+pub fn own_workspaces(plan: &Value, files: &[String]) -> std::collections::BTreeSet<String> {
+    let all = workspaces(plan);
+    files
+        .iter()
+        .filter_map(|f| {
+            all.iter()
+                .filter(|w| f.starts_with(&format!("{w}/")))
+                .max_by_key(|w| w.len())
+                .cloned()
+        })
+        .collect()
+}
+
 /// The gates `change` reaches under `plan`, in table order. Each is CI's own command (the one source is named in `next` or the
 /// doc of the check that reads it).
 pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> {
     let mut out = Vec::new();
+    let own = own_workspaces(plan, &change.files);
+    let mut dependents = Vec::new();
     for ws in workspaces(plan) {
         let all_features = ws == "crates";
-        out.push(Planned::Run(gate(
-            format!("fmt {ws}"),
-            &ws,
-            "cargo",
-            &["fmt", "--all", "--check"],
-            0,
-            "format your own files (`rustfmt --edition 2024 <file>`; never `cargo fmt --all` while others edit), then re-run `./dev check --pre-push`".to_string(),
-        )));
         out.push(Planned::Run(gate(
             format!("lockfile {ws}"),
             &ws,
@@ -156,6 +168,18 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             &["metadata", "--locked", "--format-version", "1"],
             1,
             format!("Cargo.lock in {ws} is out of date: run `cargo metadata` there without --locked, review the lock change and commit it"),
+        )));
+        if !own.contains(&ws) {
+            dependents.push(ws);
+            continue;
+        }
+        out.push(Planned::Run(gate(
+            format!("fmt {ws}"),
+            &ws,
+            "cargo",
+            &["fmt", "--all", "--check"],
+            0,
+            "format your own files (`rustfmt --edition 2024 <file>`; never `cargo fmt --all` while others edit), then re-run `./dev check --pre-push`".to_string(),
         )));
         let mut clippy: Vec<&str> = vec!["clippy", "--workspace", "--all-targets"];
         if all_features {
@@ -211,6 +235,16 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         out.push(Planned::Skip {
             id: "fmt, clippy, lockfiles".into(),
             reason: "the change reaches no Cargo workspace".into(),
+        });
+    }
+    if !dependents.is_empty() {
+        out.push(Planned::Skip {
+            id: "clippy dependents".into(),
+            reason: format!(
+                "{} workspace(s) reached through dependencies, none with a changed file of its own ({}): CI covers their Clippy (ER-9 overlap)",
+                dependents.len(),
+                dependents.join(", ")
+            ),
         });
     }
     out.push(linux_clippy(change, facts));
@@ -276,6 +310,12 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
 
 fn linux_clippy(change: &Change, facts: &Facts) -> Planned {
     let id = "clippy-linux crates".to_string();
+    if !facts.linux {
+        return Planned::Skip {
+            id,
+            reason: "CI covers it (ER-9 overlap); `--linux` runs it here, in the CI image".into(),
+        };
+    }
     let reaches = |f: &String| (f.starts_with("crates/") || f.starts_with(".cargo/")) && !docs_only(f);
     if !change.files.iter().any(reaches) {
         return Planned::Skip {

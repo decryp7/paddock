@@ -51,7 +51,7 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
         "run   lockfile crates",
         "run   clippy crates",
         "run   clippy-windows crates",
-        "run   clippy-linux crates",
+        "skip  clippy-linux crates",
         "skip  commit-lint",
         "skip  conformance",
         "run   ipc-endpoints",

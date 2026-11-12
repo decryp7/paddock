@@ -31,6 +31,7 @@ fn facts() -> Facts {
             .to_vec())),
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         image: Some(Ok("registry/paddock-ci:v7".into())),
+        linux: true,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
         target_dir: Some("/t/".into()),
@@ -57,7 +58,11 @@ fn ids(planned: &[Planned]) -> Vec<String> {
 
 #[test]
 fn a_crates_change_reaches_every_gate_of_ci_er_9() {
-    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
+    let planned = plan_gates(
+        &plan(),
+        &change(&["crates/paddock-proc/src/lib.rs", "apps/dyno/src/a.rs", "apps/pitwall/src/a.rs"]),
+        &facts(),
+    );
     let got = ids(&planned);
     for want in [
         "fmt crates",
@@ -356,7 +361,10 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
     let rows = run_all(&crates_gates(), &fake, 2);
     let v = verdicts(&rows);
     assert!(matches!(&v["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("crashed")));
-    assert!(matches!(&v["fmt apps/dyno"], Verdict::Passed { .. }), "the other gates still ran");
+    assert!(
+        matches!(&v["lockfile apps/dyno"], Verdict::Passed { .. }),
+        "the other gates still ran"
+    );
     // With a budget of nothing nothing starts: every gate that would run is not measured, none passes.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -500,12 +508,17 @@ fn a_named_not_measured_gate_may_pass_and_the_use_is_logged() {
     );
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
     // A name that is not the gate's accepts nothing.
-    accept_not_measured(&mut rows, &["clippy".into()], state.path());
-    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
     accept_not_measured(&mut rows, &["clippy-linux".into()], state.path());
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+    accept_not_measured(&mut rows, &["clippy-linux crates".into()], state.path());
     let report = render("h", &rows);
     assert_eq!(report.exit, Exit::Ok);
     assert!(report.text.contains("ACCEPTED      clippy-linux crates") && report.text.contains("logged"));
+    assert!(
+        report.text.contains("Pushed with 1 accepted not-measured row(s)") && !report.text.contains("Safe to push"),
+        "{}",
+        report.text
+    );
     let log = std::fs::read_to_string(state.path().join("overrides.log")).unwrap();
     assert!(log.contains("gate=clippy-linux crates") && log.contains("Docker"), "{log}");
 }
@@ -530,5 +543,119 @@ fn several_pushed_ranges_are_linted_each() {
     assert!(
         got.contains(&"commit-lint m1..a".to_string()) && got.contains(&"commit-lint m2..b".to_string()),
         "{got:?}"
+    );
+}
+
+#[test]
+fn only_workspaces_with_a_changed_file_of_their_own_are_linted_and_the_linux_clippy_is_opt_in() {
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &facts());
+    let got = ids(&planned);
+    for want in [
+        "fmt crates",
+        "clippy crates",
+        "clippy-windows crates",
+        "lockfile apps/dyno",
+        "lockfile apps/pitwall",
+    ] {
+        assert!(got.contains(&want.to_string()), "{want}: {got:?}");
+    }
+    for not in [
+        "fmt apps/dyno",
+        "clippy apps/dyno",
+        "clippy-windows apps/dyno",
+        "clippy apps/pitwall",
+    ] {
+        assert!(!got.contains(&not.to_string()), "{not} is a dependent's: CI covers it: {got:?}");
+    }
+    let skip = planned
+        .iter()
+        .find_map(|p| {
+            if let Planned::Skip { id, reason } = p {
+                (id == "clippy dependents").then_some(reason.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert!(skip.contains("apps/dyno") && skip.contains("CI covers"), "{skip}");
+    // The longest workspace folder owns a file: a fuzz or sub-workspace file is not its parent's.
+    let own = super::gates::own_workspaces(
+        &plan(),
+        &[
+            "apps/debrief/src/a.rs".to_string(),
+            "apps/dyno/notes.txt".to_string(),
+            "docs/x.md".to_string(),
+        ],
+    );
+    assert_eq!(own.into_iter().collect::<Vec<_>>(), ["apps/debrief", "apps/dyno"]);
+    // Off by default: the Linux Clippy is a skipped row that says why, never a pass.
+    let mut f = facts();
+    f.linux = false;
+    let planned = plan_gates(&plan(), &change(&["crates/paddock-proc/src/lib.rs"]), &f);
+    assert!(!ids(&planned).contains(&"clippy-linux crates".to_string()));
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, reason } if id == "clippy-linux crates" && reason.contains("CI covers it")))
+    );
+}
+
+#[test]
+fn the_override_names_full_row_ids_and_is_announced() {
+    let state = tempfile::tempdir().unwrap();
+    let mut rows = run_all(
+        &crates_gates(),
+        &Fake {
+            no_docker: true,
+            no_tools: vec!["cargo-xwin".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    // A first word (`clippy-windows`) or another row's id accepts nothing: only the exact row.
+    accept_not_measured(
+        &mut rows,
+        &["clippy-windows".into(), "clippy-windows apps/dyno".into()],
+        state.path(),
+    );
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+    let ids = super::accepted_ids(
+        &["a b".into()],
+        &std::collections::HashMap::from([("PADDOCK_ACCEPT_NOT_MEASURED".to_string(), " x , y,,".to_string())]),
+    );
+    assert_eq!(ids, ["a b", "x", "y"]);
+}
+
+/// A pushed commit is checked out on its own and removed after: a dirty main tree cannot change what is checked.
+#[test]
+fn a_pushed_commit_is_checked_out_in_a_throw_away_worktree_that_is_removed() {
+    use crate::plan_repo::git_text;
+    let d = tempfile::tempdir().unwrap();
+    let main = d.path().join("main");
+    std::fs::create_dir(&main).unwrap();
+    let git = |args: &[&str]| git_text(&main, args).unwrap_or_else(|| panic!("git {args:?}"));
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@t"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(main.join("a.txt"), "pushed\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&["commit", "-q", "-m", "one"]);
+    let sha = git(&["rev-parse", "HEAD"]).trim().to_string();
+    std::fs::write(main.join("a.txt"), "dirty\n").unwrap();
+    let path;
+    {
+        let c = super::Detached::new(&main, &d.path().join("wts"), &sha).unwrap();
+        path = c.path.clone();
+        assert_eq!(
+            std::fs::read_to_string(path.join("a.txt")).unwrap(),
+            "pushed\n",
+            "the commit, not the dirty tree"
+        );
+    }
+    assert!(!path.exists(), "removed after the run");
+    assert_eq!(
+        std::fs::read_to_string(main.join("a.txt")).unwrap(),
+        "dirty\n",
+        "the main tree was not touched"
     );
 }
