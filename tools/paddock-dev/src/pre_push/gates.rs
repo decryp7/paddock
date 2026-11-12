@@ -439,8 +439,13 @@ pub const NOT_RUN: &[(&str, &str)] = &[
         "per-project commands live in YAML until WP-3's contracts",
     ),
     (
-        "Linux Clippy of the apps' workspaces",
-        "only the shared crates run in the CI image here; the apps' Linux legs are CI's",
+        "Linux Clippy of the shared crates in the CI image",
+        "CI covers it; `./dev check --pre-push --linux` runs it here (ER-9 overlap, 2026-11-12)",
+    ),
+    ("Linux Clippy of the apps' workspaces", "the apps' Linux legs are CI's"),
+    (
+        "Clippy and the Windows lint of workspaces reached only through dependencies",
+        "CI covers them (ER-9 overlap); only workspaces with a changed file of their own are linted here",
     ),
     (
         "tests (nextest, vitest, Playwright)",

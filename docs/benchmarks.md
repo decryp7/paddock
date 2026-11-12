@@ -1069,3 +1069,26 @@ loaded machine does not fit in 15 minutes when the gates run one at a time; the 
 the host Clippy of each app is the cost. Not measured: the same run on a quiet machine (three gates at a time), the Windows Clippy and
 the Linux Clippy times (neither ran), and the cost of a change that reaches one workspace. Test durations of paddock-dev under
 `cargo nextest run`: 863 tests in 115 s at a load of 18 to 25 (the same tests took over 23 minutes in one `cargo test` run that hung).
+
+### Second measurement, after the review round (2026-11-12, feat/ci-in-rust-wp2)
+
+The same branch tree as a pre-push hook run: `./dev check --pre-push --refs-from-stdin --base origin/main` with the pushed commit
+checked out in a throw-away worktree (an untracked file in the main tree forced it), three gates at a time, `heavy.sh` on PATH,
+`CARGO_BUILD_JOBS=2`, the shared Mac mini at a 1-minute load of 11 (falling to 8), warm build folders. The change reaches 13
+workspaces (it changes the shared crate `paddock-proc` and paddock-dev); only the ones with a changed file of their own are
+linted (`crates`, `tools/paddock-dev`); the nine dependents are listed as CI's. One run.
+
+| Gate | Seconds |
+| --- | ---: |
+| host Clippy `crates` | 91.3 |
+| Windows Clippy `crates` (xwin) | 94.0 |
+| host Clippy `tools/paddock-dev` | 96.5 |
+| fmt `crates`, `tools/paddock-dev` | 1.4, 1.8 |
+| lockfile `cargo metadata --locked`, 11 workspaces | 0.1 to 0.3 each |
+| conformance, commit-lint, Pitwall scripts, Pitwall deny, C102 | 7.3, 0.1, 0.5, 1.4, 3.1 |
+
+Result: 21 gates passed, 0 not measured, exit 0, in about 100 s of wall time (the three Clippy runs overlapped). The first measurement
+above (every app linted, one gate at a time at a load of 25) took over 14 minutes and left 12 gates unmeasured: restricting the hook
+to workspaces with their own changes is what makes a shared-crate push fit the 15 minute budget. Not measured: the same run at a
+load of 25 or more (the load was 11 at the start; with one gate at a time the three Clippy runs would add up to about 5 minutes
+at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).

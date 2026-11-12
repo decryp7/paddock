@@ -490,6 +490,8 @@ fn the_table_names_what_ci_runs_that_this_gate_does_not() {
         "wiki lint",
         "TypeScript",
         "Linux Clippy of the apps",
+        "Linux Clippy of the shared crates",
+        "reached only through dependencies",
     ] {
         assert!(report.text.contains(what), "{what} missing:\n{}", report.text);
     }
