@@ -28,6 +28,7 @@ import { diskSpaceStep, unixAdapter } from './disk-space-row.mjs';
 import { discoveryStep, unixDiscoveryPrims } from './discovery-row.mjs';
 import { firstBrokenPrecondition, onlyRequired, parseOnly, staleJobsReadError } from './only-rows.mjs';
 import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } from './release-rows.mjs';
+import { recordScratch } from './disk-record.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -58,6 +59,7 @@ async function main(argv) {
   const out = resolve(o.out ?? process.env.PADDOCK_VM_SMOKE_OUT ?? join(REPO, 'vm-smoke-results'));
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-linux-'));
+  recordScratch(scratch, REPO); // owner record (`./dev disk record`); bounded, warns, never fails the run
   const vm = `paddock-vmsmoke-linux-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${process.pid}`;
   let cloned = false, run = null;
   const cleanup = () => {

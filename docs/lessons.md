@@ -1824,6 +1824,13 @@ over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone
 per connection. Rule 77 (ER-38): privileged services authorise changing requests by the caller's OS identity, and a
 request that changes what runs elevated needs an administrator caller; user-chosen elevation needs only a risk warning.
 
+## The user had to ask "any redesign?" three times in one morning (2026-11-12)
+
+Every agent report carried a `Recurring:` line, yet the coordinator relayed reports and kept proposals for a later batch, so
+classes seen twice reached the user only when they asked. Cause: relaying reports and batching proposals for later. Fix: rule
+40 (ER-21) now asks for the proposal in the same reply that relays the report (a question, or a start under an earlier
+approval); a Stop hook, `.claude/hooks/recurring-guard.sh`, is planned on `fix/scratch-root-guard-and-runner-busy`.
+
 ## A downloaded engine needed the VC++ runtime and no installer check could see it (Pitwall, 2026-11-11)
 
 On a clean Windows PC the llama.cpp `llama-server.exe` Pitwall downloads (pin b11669) exits with `0xC0000135`
@@ -1904,3 +1911,14 @@ list shows it to every user of the machine, while the app's `beforeBuildCommand`
 Debrief Windows tag still reused a branch-written `node_modules`. Hand a secret over by `export` and `exec`, never as an
 argument; check what a tool starts on its own (a build hook) before calling a step "the one command"; and list every kept
 input a tag reads, not only the one that was found.
+## Process rules grew faster than the product: cap cost, retire what is not kept up (2026-11-12)
+
+A cut review of all apps and the family rules found the same pattern as the elevated-helper design of 2026-11-11: each
+rule and each review round was right alone, and nothing bounded the total. Debrief 1.2 had grown to about 656 raw days,
+Pitcrew's 1-2 day caller check was in its 8th review round, and the wiki rule (ER-30) had a writer, a fact-check and a lint
+for pages last ingested on 2026-11-09. **Lesson (class: process growth without a cost bound; first instance 2026-11-11):**
+rule 76 (ER-37) now needs the user's yes above 1 agent-day beyond common practice, a budget line per release plan with
+growth over 20% going back to the user, and one cut review per release. Rules 14, 15 and 51 merged into 13, rule 71 into
+ER-33, ER-30 retired, rules 22 and 55 and 54 narrowed, and hooks that judge an agent's text only warn. The review's
+proposed cap on review rounds was not adopted: security code keeps its rounds. Mechanism: text rules and the reviewer
+line, no tool.

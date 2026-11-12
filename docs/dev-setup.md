@@ -113,6 +113,16 @@ another database number. sccache's keys include the compiler and target, so one 
   it when you set it for a Windows build. `node conformance/release/windows-crt-imports.mjs <exe-or-folder>` checks a
   build; cargo-xwin cross-builds pick the setting up as well.
 
+## Folders tools make (owner records)
+
+A folder a tool creates for an agent (a cargo or cargo-xwin target folder, a test scratch folder, a VM run folder) gets an
+owner record, `./dev disk record <dir> --kind <build|scratch|...> --link <worktree>` (on branch `feat/dev-disk` until it
+lands), so a cleanup knows whose it is. Callers: engineering-rules `scripts/heavy.sh` records `CARGO_TARGET_DIR` (so every
+`cargo`, `cargo xwin` and `llvm-cov` run through it is covered; the xwin target folder is whatever `CARGO_TARGET_DIR` names,
+no script here makes one), and `scripts/vm-smoke/run*.mjs` record their scratch folder through `scripts/disk-record.sh`,
+which skips quietly where `./dev disk` does not exist. The scratch folder an agent's brief names is made by the brief's
+author or by `./dev brief` (not on main yet): that call belongs there. The Rust `heavy` tool (`tools/heavy`) makes no folder.
+
 ## Tests
 
 - **Rust:** `cargo nextest run` (each app's `.config/nextest.toml`: one test per core but one, slow-test warnings after
