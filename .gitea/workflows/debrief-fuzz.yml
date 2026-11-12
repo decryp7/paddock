@@ -18,8 +18,9 @@ env:
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
   FUZZ_SECONDS: ${{ github.event.inputs.seconds || '300' }}
-  # cargo-fuzz needs nightly (-Zsanitizer); see the toolchain step.
-  FUZZ_TOOLCHAIN: nightly-2026-10-01
+  # cargo-fuzz needs nightly (-Zsanitizer); see the toolchain step. RUSTUP_TOOLCHAIN is the variable rustup reads: it outranks
+  # rust-toolchain.toml (the family's pin), for every step, `./dev` building itself included.
+  RUSTUP_TOOLCHAIN: nightly-2026-10-01
 
 # Every step runs in the app's folder (ADR 0014: Debrief lives in apps/debrief) unless its job says otherwise.
 defaults:
@@ -86,13 +87,11 @@ jobs:
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
-      # A dated nightly (FUZZ_TOOLCHAIN) instead of the moving one: the build, and the cache keyed on it, change
+      # A dated nightly (RUSTUP_TOOLCHAIN) instead of the moving one: the build, and the cache keyed on it, change
       # only when the pin does, and a broken nightly cannot fail the run. Move it forward now and then.
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
-      # rust-toolchain.toml (the family's pin) outranks the action's `rustup default`; the environment variable outranks the file.
-      - run: echo "RUSTUP_TOOLCHAIN=$FUZZ_TOOLCHAIN" >> "$GITHUB_ENV"
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
 
       # One key per shard: each shard builds the same targets, so its fuzz/target is all it needs.
       - uses: actions/cache@v4
@@ -102,8 +101,8 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin/cargo-fuzz
             apps/debrief/fuzz/target
-          key: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-${{ hashFiles('apps/debrief/fuzz/Cargo.lock', 'apps/debrief/Cargo.lock') }}
-          restore-keys: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-
+          key: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-${{ hashFiles('apps/debrief/fuzz/Cargo.lock', 'apps/debrief/Cargo.lock') }}
+          restore-keys: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ env.RUSTUP_TOOLCHAIN }}-
 
       - name: Install cargo-fuzz
         run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
