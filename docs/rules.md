@@ -203,8 +203,9 @@ changes here, every app's copy is updated in the same change.
     "rerun failed jobs" on the same commit (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{run}/rerun-failed-jobs`) only to
     retry a suspected flake, never to turn red green (ER-12). When every round is green, run the full affected plan against
     main once on the final tree (ER-8); that run catches anything a fix broke elsewhere. Then land. Nothing lands without that
-    full green run. The planner is getting a mode for this (`./dev plan --since-run <id>` lists the failed jobs and tests of
-    a run, a train-3 item); until it exists, the coordinator builds that list by hand.
+    full green run. `ci.yml` and `debrief.yml` take this as the dispatch input `since_run` = the failed run's number (`./dev
+    plan --since-run <id>` shows the plan; a full `debrief.yml` run's failures also need `bundles: true`); the full run before
+    landing (ER-10) is a plain dispatch without `since_run`.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
 
 ## Performance analysis (user, 2026-10-29)

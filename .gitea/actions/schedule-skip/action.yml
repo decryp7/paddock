@@ -1,0 +1,42 @@
+name: schedule-skip
+description: "A scheduled run ends early while a train is in CI: skip is 'true' when a workflow_dispatch run on a train/* branch is queued or running (./dev ci schedule-skip, ADR 0093 amendment 2026-11-12). Never skips twice in a row nor past max-gap-hours since the workflow's last measured scheduled run. Prints one ::notice:: and a summary line; fails open (skip 'false', with a warning) when the Actions API cannot be read or ./dev cannot run. Not a scheduled run: skip 'false', nothing is read. Needs a checkout; use it in a Linux job and gate the run's jobs on the output; a skipped run is never marked green."
+inputs:
+  workflow:
+    description: "This workflow's file (nightly.yml): its own scheduled runs bound the skip (never twice in a row, never past max-gap-hours since its last measured run)."
+    required: true
+  max-gap-hours:
+    description: "Never skip when the last measured scheduled run is older than this: 36 for a nightly, a week and a day (192) for a weekly workflow."
+    default: "36"
+  token:
+    description: Token that reads the repository's Actions runs (the job token can).
+    default: ${{ github.token }}
+  dev-token:
+    description: "Read token of the private package store for ./dev's prebuilt download (ADR 0022 R0b); empty: ./dev builds the tool. Pass BUILD_INPUTS_TOKEN."
+    default: ""
+outputs:
+  skip:
+    description: "'true' (end the run early) or 'false'."
+    value: ${{ steps.check.outputs.skip }}
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+        PLAN_TOKEN: ${{ inputs.token }}
+        PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
+        PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+        WORKFLOW: ${{ inputs.workflow }}
+        MAX_GAP: ${{ inputs.max-gap-hours }}
+      run: |
+        if [ "$EVENT" != schedule ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
+        out=$(mktemp)
+        if GITHUB_OUTPUT="$out" bash "${{ github.action_path }}/../../../dev" ci schedule-skip --workflow "$WORKFLOW" --max-gap-hours "$MAX_GAP"; then
+          skip=$(sed -n 's/^skip=//p' "$out")
+        else
+          echo "::warning::schedule skip: ./dev ci schedule-skip did not run; this scheduled run proceeds (fail open)."
+          echo "Schedule skip not checked: ./dev did not run; the scheduled run proceeds (fail open)." >> "$GITHUB_STEP_SUMMARY"
+          skip=false
+        fi
+        echo "skip=${skip:-false}" >> "$GITHUB_OUTPUT"

@@ -13,11 +13,12 @@ import { appendFileSync } from 'node:fs';
 import { isMain } from '../src/util/is-main.mjs';
 
 /**
- * @param {{app:string, event:string, ref?:string, planRun?:string, releaseResult?:string, gatesResult?:string, failedGates?:string[]}} i planRun and releaseResult are the
- *   `needs.*` values ('true'/'false'; 'success'/'skipped'/'failure'/'cancelled'; empty when the job did not exist).
+ * @param {{app:string, event:string, ref?:string, planRun?:string, skipReason?:string, releaseResult?:string, gatesResult?:string, failedGates?:string[]}} i planRun and releaseResult are the
+ *   `needs.*` values ('true'/'false'; 'success'/'skipped'/'failure'/'cancelled'; empty when the job did not exist). skipReason
+ *   'train': the gate ended a scheduled run early because a train was in CI (./dev ci schedule-skip).
  * @returns {{ok:boolean, level:'notice'|'warning'|'error', line:string}}
  */
-export function verdict({ app, event, ref = '', planRun = '', releaseResult = '', gatesResult = '', failedGates = [] }) {
+export function verdict({ app, event, ref = '', planRun = '', skipReason = '', releaseResult = '', gatesResult = '', failedGates = [] }) {
   const isTag = ref.startsWith('refs/tags/');
   const asked = event === 'schedule' || event === 'workflow_dispatch' || isTag;
   if (releaseResult === 'success') return { ok: true, level: 'notice', line: `installers: built (${app}, every platform's bundle job passed)` };
@@ -28,6 +29,8 @@ export function verdict({ app, event, ref = '', planRun = '', releaseResult = ''
     const names = failedGates.length ? `: ${failedGates.join(', ')}` : '';
     return { ok: false, level: 'error', line: `installers: not built (${app}): the gates were ${gatesResult}${names}, so the tag was not released` };
   }
+  // A nightly ended early because a train was in CI: nothing was measured, which a warning says (it is not a green night).
+  if (planRun === 'false' && event === 'schedule' && skipReason === 'train') return { ok: true, level: 'warning', line: `installers: not built (${app}): a train was in CI, so this night measured nothing (not measured, not green); the next scheduled night builds them` };
   // A nightly whose gate found main and the toolchain image unchanged since the last nightly that built the installers (rule 50).
   if (planRun === 'false' && event === 'schedule') return { ok: true, level: 'notice', line: `installers: not built (${app}): main and the toolchain image are unchanged since the last nightly that built them` };
   if (planRun === 'false' && !asked) return { ok: true, level: 'notice', line: `installers: not built (${app}): the change does not reach ${app}; nothing was asked for` };
@@ -55,7 +58,7 @@ if (isMain(import.meta.url)) {
   const gatesResult = e.GATES_RESULT ?? '';
   const failedGates = gatesResult === 'failure' && (e.REF ?? '').startsWith('refs/tags/')
     ? await failedJobNames({ SERVER_URL: e.SERVER_URL, REPOSITORY: e.REPOSITORY, RUN_ID: e.RUN_ID, TOKEN: e.TOKEN }) : [];
-  const v = verdict({ app: e.APP ?? 'app', event: e.EVENT ?? '', ref: e.REF ?? '', planRun: e.PLAN_RUN ?? '', releaseResult: e.RELEASE_RESULT ?? '', gatesResult, failedGates });
+  const v = verdict({ app: e.APP ?? 'app', event: e.EVENT ?? '', ref: e.REF ?? '', planRun: e.PLAN_RUN ?? '', skipReason: e.SKIP_REASON ?? '', releaseResult: e.RELEASE_RESULT ?? '', gatesResult, failedGates });
   console.log(`::${v.level}::${v.line}`);
   if (e.GITHUB_STEP_SUMMARY) appendFileSync(e.GITHUB_STEP_SUMMARY, `**${v.line}**\n\n`);
   process.exit(v.ok ? 0 : 1);
