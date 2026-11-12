@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parseToml } from '../src/checks/lib/mini-toml.mjs';
@@ -237,18 +237,18 @@ test('owed_until: a date is a real date, in the future, and at most 60 days afte
   assert.equal(owedRun('2026-11-15', { since: old }).length, 0);
 });
 
-test('an expired or reached owed entry is an error in a release run and a warning otherwise', () => {
+test('an expired or reached owed entry is a warning in a release run too: C85 is report-only and never blocks a tag (ADR 0052, user 2026-11-12)', () => {
   const warn = owedRun('demo-v1.0.3');
   assert.deepEqual(warn.map((f) => f.severity), ['warn']);
-  const err = owedRun('demo-v1.0.3', { release: true });
-  assert.deepEqual(err.map((f) => f.severity), ['error']);
-  assert.equal(err[0].unwaivable, undefined);
-  // only the owed findings escalate: another gap in the register stays a warning in a release run
+  const rel = owedRun('demo-v1.0.3', { release: true });
+  assert.deepEqual(rel.map((f) => f.severity), ['warn']);
+  assert.equal(rel[0].unwaivable, undefined);
+  // and another gap in the register stays a warning in a release run
   const other = judge({ app: 'demo', appDir: 'app', read: (f) => (f === 'features.toml' ? GOOD.replace('title = "Load a model"\n', '') : APP_FILES[f] ?? null), now, vmManifest: null, tags: TAGS, release: true });
   assert.deepEqual(other.map((f) => f.severity), ['warn']);
 });
 
-test('the CLI reads the tags and the commit date from git: an owed entry is a warning (exit 0) in a branch run and an error (exit 1) with --version', async () => {
+test('the CLI reads the tags and the commit date from git: an owed entry is a warning (exit 0) in a branch run and with --version too', async () => {
   const git = (root, ...a) => execFileSync('git', ['-C', root, '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'commit.gpgsign=false', ...a], { encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' } });
   const root = build({}, owedRow('demo-v1.0.3'));
   git(root, 'init', '-q');
@@ -258,13 +258,13 @@ test('the CLI reads the tags and the commit date from git: an owed entry is a wa
   const r = (...more) => main(['--app', 'demo', '--root', root, '--only', 'C85', '--paddock', root, ...more], quiet);
   assert.equal(await r(), 0, 'report-only: the finding is a warning');
   assert.equal(await r('--strict', 'C85'), 1);
-  assert.equal(await r('--version', 'demo-v1.0.3'), 1, 'a release run: the owed finding is an error');
+  assert.equal(await r('--version', 'demo-v1.0.3'), 0, 'a release run: the owed finding is reported, the tag is not blocked');
   // an entry owed for the next line is fine in both, and a date more than 60 days after its commit is not (the commit is today)
   writeFileSync(join(root, 'features.toml'), owedRow('demo-v1.1.0'));
   assert.equal(await r('--version', 'demo-v1.0.3'), 0);
   writeFileSync(join(root, 'features.toml'), owedRow('2099-01-01'));
   git(root, 'commit', '-q', '-am', 'far date');
-  assert.equal(await r('--version', 'demo-v1.0.3'), 1);
+  assert.equal(await r('--version', 'demo-v1.0.3'), 0);
 });
 
 test('C85 reads the app\'s tags and the entry\'s commit date through its options (pure inputs), and writes the owed summary', async () => {
@@ -272,7 +272,7 @@ test('C85 reads the app\'s tags and the entry\'s commit date through its options
   assert.match(msgs(f)[0], /is not past the latest tag/);
   assert.equal(f[0].severity, 'warn');
   const rel = await findingsOf('C85', build({}, owedRow('demo-v1.0.3')), { options: { now, paddock: '/nonexistent', tags: TAGS, version: 'demo-v1.1.0' } });
-  assert.equal(rel[0].severity, 'error');
+  assert.equal(rel[0].severity, 'warn');
 });
 
 test('the job summary line says how many tests are owed and the nearest expiry', async () => {
@@ -373,13 +373,28 @@ test('a finding carries the line of the thing it is about', async () => {
   assert.equal(gone.line, GOOD.split('\n').findIndex((l) => l.includes('route:/gone') || l.includes('surfaces =')) + 1);
 });
 
-test('na = ["tauri"] never hides the real-engine test: a warning in a branch run, an error in a release run', () => {
+test('na = ["tauri"] never hides the real-engine test: a warning in a branch run and in a release run', () => {
   const T = 'app/e2e-tauri/models.e2e.ts#loads a model and reads it back';
   const text = GOOD.replace(/^tests = .*$/m, `tests = { outcome = "${T}", layout = "${T}" }`) + 'na = ["tauri"]\nna_why = "no UI"\n';
   const run = (release) => judge({ app: 'demo', appDir: 'app', read: (f) => (f === 'features.toml' ? text : APP_FILES[f] ?? null), now, vmManifest: null, tags: TAGS, release });
   const branch = run(false).filter((f) => /na "tauri"/.test(f.message));
   assert.deepEqual(branch.map((f) => f.severity), ['warn']);
-  assert.deepEqual(run(true).filter((f) => /na "tauri"/.test(f.message)).map((f) => f.severity), ['error']);
+  assert.deepEqual(run(true).filter((f) => /na "tauri"/.test(f.message)).map((f) => f.severity), ['warn']);
   // and tauri is still missing: neither a test nor owed
   assert.ok(run(false).some((f) => /has no tests\.tauri: neither a test nor/.test(f.message)), 'na does not stand in for tauri');
+});
+
+test('pitwall-release.yml runs C85 without swallowing its exit code: only the owed warnings are report-only (ADR 0089)', () => {
+  const yml = readFileSync(new URL('../../.gitea/workflows/pitwall-release.yml', import.meta.url), 'utf8');
+  const step = yml.split('\n').filter((l) => /paddock-conformance\.mjs .*--only C85/.test(l));
+  assert.equal(step.length, 1, 'one C85 line');
+  assert.doesNotMatch(step[0], /\|\||;\s*true|\|\s*true/, 'a failure of C85 (not measured, broken, usage) fails the plan');
+  assert.doesNotMatch(yml, /::warning::C85/, 'the owed findings are C85\'s own warnings, not a shell fallback');
+});
+
+test('a release run of C85 on a source it cannot read fails (the workflow lets that exit code through)', async () => {
+  const root = build({}, owedRow('demo-v1.0.3'));
+  const r = (...more) => main(['--app', 'demo', '--root', root, '--only', 'C85', '--paddock', root, ...more], quiet);
+  rmSync(join(root, 'app/src/app/shell/nav.ts'));
+  assert.notEqual(await r('--version', 'demo-v1.1.0'), 0, 'a source it cannot read is not a pass');
 });

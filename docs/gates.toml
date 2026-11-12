@@ -168,7 +168,7 @@ approved = "coordinator"
 [[not_gated]]
 id = "C85"
 apps = ["debrief", "dyno", "pacenotes", "pitcrew", "pitwall", "shell-demo", "sighter", "spotter", "workbench-demo"]
-reason = "report-only first (ADR 0052 WP-A4, enforced before Pitcrew 1.1): no workflow line runs it for the apps yet. Pitwall's paddock.ci.json conformance line runs it for the one register that exists (apps/pitwall/features.toml); Dyno's and Spotter's registers are not written yet. Release-time gate (owner: ADR 0052 WP-A4): the plan job of pitwall-release.yml runs C85 with --version on a pitwall-v* tag, which makes the owed findings (an owed_until tag that exists or is past, an expired date, one past the next release line) errors and fails the plan, so no gate or release job runs. NOT measured by C85: panes, tray popovers and widget kinds (their surfaces are checked for spelling only; no reader enumerates them), so a pane with no feature is not seen until ADR 0052 WP-A1's wire.toml names them (the summary line says so too). Gap (owner: ADR 0052 WP-A4): a date-form `owed_until` can be renewed by editing the date, since the `Wiring-date: <entry> <old> -> <new> approved:` trailer of ADR 0052 §1.1 is not built; C85 counts the 60 days from the commit that last wrote the line, so a rewrite restarts the clock"
+reason = "report-only first (ADR 0052 WP-A4, enforced before Pitcrew 1.1): no workflow line runs it for the apps yet. Pitwall's paddock.ci.json conformance line runs it for the one register that exists (apps/pitwall/features.toml); Dyno's and Spotter's registers are not written yet. Release-time report (ADR 0052 amendment 2026-11-12, user: report-only, never blocks a tag): the plan job of pitwall-release.yml runs C85 with --version on a pitwall-v* tag and reports the owed findings (an owed_until tag that exists or is past, an expired date, one past the next release line) as warnings; the step does not fail the plan. NOT measured by C85: panes, tray popovers and widget kinds (their surfaces are checked for spelling only; no reader enumerates them), so a pane with no feature is not seen until ADR 0052 WP-A1's wire.toml names them (the summary line says so too). Gap (owner: ADR 0052 WP-A4): a date-form `owed_until` can be renewed by editing the date, since the `Wiring-date: <entry> <old> -> <new> approved:` trailer of ADR 0052 §1.1 is not built; C85 counts the 60 days from the commit that last wrote the line, so a rewrite restarts the clock"
 owner = "ADR 0052 WP-A4"
 since = 2026-11-11
 review_by = 2027-01-10
@@ -1092,6 +1092,9 @@ approved = "coordinator"
 # added yet), and `./dev gates ratchet --release-tag` refuses a debrief-v1.2.0 tag (or a later one) while either list is not
 # empty. Both lists only shrink. The whole cleanup (both clippy paths and all 46 members) stays in Debrief 1.2.
 # approved: user 2026-11-08 (target debrief-v1.2.0, not v1.3.0); scope decided again by the user 2026-11-09.
+# 2026-11-12 (user, Debrief 1.2 Tier A): C13 is limited to the temp_dir and reqwest bans and there is no crate-by-crate ratchet before
+# debrief-v1.2.0, so `blocks_tag = "report-only"`: `./dev gates ratchet --release-tag` reports the open lists and never refuses the tag.
+# The move is recorded by the `Gates-date: C13 debrief blocks_tag blocking -> report-only; approved: user` trailer of the commit that touches this line.
 [[ratchet]]
 id = "C13"
 app = "debrief"
@@ -1099,4 +1102,5 @@ not_yet = ["app/src-tauri", "crates/cargo-debrief-plugin", "crates/chromium-driv
 clippy_not_yet = ["keyring::Entry", "keyring_core::Entry"]
 owner = "Debrief 1.2 DBR-LINT (docs/plans/debrief-1-2.md)"
 target = "debrief-v1.2.0"
+blocks_tag = "report-only"
 approved = "user"
