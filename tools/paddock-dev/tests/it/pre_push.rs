@@ -22,8 +22,13 @@ fn fake_bin(dir: &Path, script: &str) -> String {
     format!("{}:/usr/bin:/bin", dir.display())
 }
 
-#[allow(clippy::disallowed_methods)]
+/// The fake cargo runs without the machine-wide slot: `PADDOCK_HEAVY=off`, as a machine only its user uses would set it.
 fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
+    dev_heavy(path, args, Some("off"))
+}
+
+#[allow(clippy::disallowed_methods)]
+fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>) -> (i32, String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["check", "--pre-push", "--base", "HEAD", "--files", CHANGE])
@@ -31,6 +36,7 @@ fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
         .current_dir(root)
         .env("PATH", path)
         .env_remove("PADDOCK_HEAVY")
+        .envs(heavy.map(|h| ("PADDOCK_HEAVY", h)))
         .output()
         .unwrap();
     (
@@ -105,4 +111,17 @@ fn everything_that_runs_green_is_exit_0() {
         out.contains("ok            fmt crates") && out.contains("ok            clippy crates"),
         "{out}"
     );
+}
+
+#[test]
+fn without_a_heavy_slot_the_compiles_are_not_measured_exit_6_never_a_pass() {
+    let d = tempfile::tempdir().unwrap();
+    let path = fake_bin(d.path(), "exit 0");
+    let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None);
+    assert_eq!(code, 6, "{err}{out}");
+    assert!(
+        out.contains("NOT MEASURED  clippy crates") && out.contains("no heavy slot tool"),
+        "{out}"
+    );
+    assert!(!out.contains("ok            clippy"), "{out}");
 }

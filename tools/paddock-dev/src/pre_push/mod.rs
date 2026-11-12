@@ -345,7 +345,11 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let load = uptime_load(&real);
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
     if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
-        notes.push("PADDOCK_HEAVY is not set and no heavy.sh or heavy is on PATH: compiles run without the machine-wide slot (CARGO_BUILD_JOBS=2 still applies)".into());
+        if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
+            notes.push("PADDOCK_HEAVY=off: compiles run without the machine-wide slot (CARGO_BUILD_JOBS=2 still applies)".into());
+        } else {
+            notes.push("no heavy.sh or heavy on PATH and PADDOCK_HEAVY is not set: the compiles (clippy, xwin, Linux) are not measured, because they would run beside every other push's (ER-24); install tools/heavy or set PADDOCK_HEAVY=off".into());
+        }
     }
     let head = format!(
         "pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",

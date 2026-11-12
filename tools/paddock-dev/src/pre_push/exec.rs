@@ -40,6 +40,11 @@ pub trait Exec: Sync {
     fn docker_up(&self) -> bool;
     /// Runs the gate for at most `left`. `Err`: it could not be started (the program is missing).
     fn run(&self, gate: &Gate, left: Duration) -> Result<Done, String>;
+    /// Whether a heavy gate has no machine-wide slot to go through (no `heavy` tool found and no explicit `PADDOCK_HEAVY=off`):
+    /// it would then compete with every other push (ER-24), so it is not measured instead.
+    fn heavy_missing(&self) -> bool {
+        false
+    }
 }
 
 /// The outcome of one table row.
@@ -110,6 +115,12 @@ pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration) -> Verdict {
             };
         }
         _ => {}
+    }
+    if gate.heavy && exec.heavy_missing() {
+        return Verdict::NotMeasured {
+            reason: "no heavy slot tool: heavy.sh or heavy is not on PATH and PADDOCK_HEAVY is not set, so a compile would run beside every other push's".into(),
+            next: "install it (`cargo install --path tools/heavy --locked`), or set PADDOCK_HEAVY=off to run without the slot on a machine only you use; an agent reports this (ER-24, ER-33)".into(),
+        };
     }
     let started = Instant::now();
     match exec.run(gate, left) {
@@ -278,6 +289,9 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
 /// on PATH. Empty when there is none (the caller says so).
 pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
     if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
+        if h.trim() == "off" {
+            return Vec::new();
+        }
         return h.split_whitespace().map(str::to_string).collect();
     }
     if has("heavy.sh") {
@@ -287,6 +301,17 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -
         return ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
     }
     Vec::new()
+}
+
+/// Whether the output of a gate run through `heavy` shows that it never got the slot: it printed who holds the lock
+/// ("the lock is held by <name> (pid <n>) ...") and never "<name> holds the lock". Returns the phrase for the verdict.
+pub fn slot_wait(log: &str) -> Option<String> {
+    if log.lines().any(|l| l.contains(" holds the lock (pid ")) {
+        return None;
+    }
+    let held = log.lines().rev().find_map(|l| l.split("the lock is held by ").nth(1))?;
+    let who = held.split(" for ").next().unwrap_or(held).trim();
+    Some(format!("waiting for the heavy slot, held by {who}"))
 }
 
 /// The real machine: processes through [`ToolCall`] (bounded, environment listed, output in a file per gate).
@@ -410,11 +435,22 @@ impl Exec for RealExec {
         docker_answers(&self.env)
     }
 
+    fn heavy_missing(&self) -> bool {
+        heavy_prefix(&self.env, &|p| self.has_tool(p)).is_empty() && self.env.get("PADDOCK_HEAVY").map(|v| v.trim()) != Some("off")
+    }
+
     fn run(&self, gate: &Gate, left: Duration) -> Result<Done, String> {
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", slug(&gate.id)));
         let label = (gate.need == Need::Docker).then(run_token);
-        let ran = self.call(gate, left, &log, label.as_deref()).run(&self.env, &mut std::io::sink())?;
+        let mut ran = self.call(gate, left, &log, label.as_deref()).run(&self.env, &mut std::io::sink())?;
+        // Cut short while queued for the heavy slot: say so, the gate itself never ran (ER-33: not measured, with that reason).
+        if gate.heavy && !ran.success && ran.how.starts_with("timed out") {
+            let text = std::fs::read_to_string(&log).unwrap_or_default();
+            if let Some(w) = slot_wait(&text) {
+                ran.how = format!("{}: {w}", ran.how);
+            }
+        }
         if let Some(l) = &label
             && !ran.success
             && matches!(ran.how.as_str(), h if h == "cancelled" || h.starts_with("timed out"))
@@ -499,6 +535,126 @@ mod tests {
         assert_eq!(heavy_prefix(&env, &|p| p == "heavy"), ["heavy", "run", "pre-push", "--"]);
         let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
         assert_eq!(heavy_prefix(&set, &|_| true), ["my-heavy", "--x"]);
+    }
+
+    #[test]
+    fn a_log_that_only_waited_names_the_holder() {
+        let waited =
+            "heavy: the lock is held by Bob (pid 12) for 3m, running: cargo clippy\nheavy: the lock is held by Bob (pid 12) for 4m\n";
+        assert_eq!(
+            slot_wait(waited).as_deref(),
+            Some("waiting for the heavy slot, held by Bob (pid 12)")
+        );
+        let ran = format!("{waited}heavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 5s\n");
+        assert_eq!(slot_wait(&ran), None);
+        assert_eq!(slot_wait("error: boom\n"), None);
+    }
+
+    #[test]
+    fn heavy_off_runs_without_the_slot_and_is_the_only_way_to() {
+        let off = HashMap::from([("PADDOCK_HEAVY".to_string(), "off".to_string())]);
+        assert!(heavy_prefix(&off, &|_| true).is_empty());
+    }
+
+    /// A stand-in for `heavy`: a directory is the lock (`mkdir`), a waiter prints who holds it as heavy does, the holder runs
+    /// its command with the lock held. Fake commands only (ER-14): no real build runs.
+    #[cfg(unix)]
+    mod slot {
+        use super::*;
+        use crate::pre_push::gates::Gate;
+
+        const FAKE_HEAVY: &str = r#"
+lock="$1"; shift
+while ! mkdir "$lock" 2>/dev/null; do
+  echo "heavy: the lock is held by $(cat "$lock/owner" 2>/dev/null || echo other) (pid 1) for 0m" >&2
+  sleep 0.1
+done
+echo "pre-push holds the lock (pid $$) at now, waited 0s" >&2
+echo "$$" > "$lock/owner"
+"$@"; rc=$?
+rm -rf "$lock"
+exit $rc
+"#;
+
+        fn real(dir: &Path, lock: &Path) -> RealExec {
+            let script = dir.join("fake-heavy.sh");
+            std::fs::write(&script, FAKE_HEAVY).unwrap();
+            RealExec {
+                root: dir.to_path_buf(),
+                env: HashMap::from([
+                    ("PADDOCK_HEAVY".to_string(), format!("sh {} {}", script.display(), lock.display())),
+                    ("PATH".to_string(), std::env::var("PATH").unwrap_or_default()),
+                ]),
+                logs: dir.join("logs"),
+                stop: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        fn gate(id: &str, command: &str) -> Gate {
+            Gate {
+                id: id.into(),
+                cwd: String::new(),
+                program: "sh".into(),
+                args: vec!["-c".into(), command.into()],
+                env: Vec::new(),
+                heavy: true,
+                need: Need::Nothing,
+                rank: 2,
+                next: "fix it".into(),
+            }
+        }
+
+        #[test]
+        fn two_pushes_at_once_take_the_slot_in_turn() {
+            let d = tempfile::tempdir().unwrap();
+            let lock = d.path().join("slot.lock");
+            let ex = real(d.path(), &lock);
+            let trace = d.path().join("trace");
+            let cmd = |n: &str| format!("echo start-{n} >> {t}; sleep 1; echo end-{n} >> {t}", t = trace.display());
+            std::thread::scope(|s| {
+                for n in ["a", "b"] {
+                    let (ex, g) = (&ex, gate(&format!("clippy {n}"), &cmd(n)));
+                    s.spawn(move || assert!(matches!(decide(&g, ex, Duration::from_secs(60)), Verdict::Passed { .. })));
+                }
+            });
+            let lines: Vec<String> = std::fs::read_to_string(&trace).unwrap().lines().map(String::from).collect();
+            assert_eq!(lines.len(), 4, "{lines:?}");
+            // Never two starts in a row: the second waited for the first to end.
+            assert!(lines[0].starts_with("start-") && lines[1].starts_with("end-"), "{lines:?}");
+            assert_eq!(
+                lines[0].trim_start_matches("start-"),
+                lines[1].trim_start_matches("end-"),
+                "{lines:?}"
+            );
+        }
+
+        #[test]
+        fn a_slot_held_past_the_budget_is_not_measured_and_says_who_holds_it() {
+            let d = tempfile::tempdir().unwrap();
+            let lock = d.path().join("slot.lock");
+            std::fs::create_dir(&lock).unwrap();
+            std::fs::write(lock.join("owner"), "Bob").unwrap();
+            let ex = real(d.path(), &lock);
+            let g = gate("clippy a", "echo never runs");
+            match decide(&g, &ex, Duration::from_secs(2)) {
+                Verdict::NotMeasured { reason, .. } => {
+                    assert!(reason.contains("waiting for the heavy slot, held by Bob"), "{reason}");
+                }
+                v => panic!("a slot that was never taken is not a pass or a failure: {v:?}"),
+            }
+        }
+
+        #[test]
+        fn without_a_slot_tool_a_heavy_gate_is_not_measured_unless_switched_off() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.env.remove("PADDOCK_HEAVY");
+            ex.env.insert("PATH".into(), "/usr/bin:/bin".into());
+            let g = gate("clippy a", "true");
+            assert!(matches!(decide(&g, &ex, Duration::from_secs(5)), Verdict::NotMeasured { .. }));
+            ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
+            assert!(matches!(decide(&g, &ex, Duration::from_secs(5)), Verdict::Passed { .. }));
+        }
     }
 
     #[cfg(unix)]
