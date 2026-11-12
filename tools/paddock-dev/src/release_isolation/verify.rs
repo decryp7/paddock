@@ -227,7 +227,7 @@ impl Ctx<'_> {
         if e.mode == Mode::Off.name() {
             return None;
         }
-        winpath::real(Path::new(&e.path)).ok()
+        winpath::real_verbatim(Path::new(&e.path)).ok()
     }
 }
 
@@ -384,7 +384,7 @@ fn dev_tool_name(ctx: &mut Ctx, e: &super::ledger::Entry) {
 /// built into the dev-tool folder before `setup` runs. A birth time never changes for an object, so it is also compared for
 /// equality with the recorded one. A file system that reports no birth time makes the check broken.
 fn identity_probe(ctx: &mut Ctx) {
-    let root = winpath::real(&ctx.ledger.job_root).unwrap_or_else(|_| ctx.ledger.job_root.clone());
+    let root = winpath::real_verbatim(&ctx.ledger.job_root).unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let started = ctx.ledger.started_ns;
     for e in ctx.ledger.entries.clone() {
         let (Some(mode), Some(recorded)) = (Mode::parse(&e.mode), e.id) else {
@@ -393,7 +393,7 @@ fn identity_probe(ctx: &mut Ctx) {
         if mode == Mode::Off {
             continue;
         }
-        let canonical = match winpath::real(Path::new(&e.path)) {
+        let canonical = match winpath::real_verbatim(Path::new(&e.path)) {
             Ok(p) => p,
             Err(err) => {
                 ctx.add(
@@ -473,12 +473,12 @@ fn identity_probe(ctx: &mut Ctx) {
 }
 
 fn same(a: &str, b: &Path) -> bool {
-    winpath::real(Path::new(a)).map(|p| p == b).unwrap_or(false)
+    winpath::real_verbatim(Path::new(a)).map(|p| p == b).unwrap_or(false)
 }
 
 fn pointers_probe(ctx: &mut Ctx) {
     let env = ctx.env;
-    let root = winpath::real(&ctx.ledger.job_root).unwrap_or_else(|_| ctx.ledger.job_root.clone());
+    let root = winpath::real_verbatim(&ctx.ledger.job_root).unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let expected = |k: Kind| ctx.opts.expect.contains(&k) || ctx.ledger.get(k).is_some();
     if expected(Kind::CargoHome) {
         match (env.get("CARGO_HOME"), ctx.folder(Kind::CargoHome)) {
@@ -527,7 +527,7 @@ fn pointers_probe(ctx: &mut Ctx) {
         }
     }
     if let Some(v) = env.get("SCCACHE_DIR") {
-        let inside = winpath::real(Path::new(v)).map(|p| p.starts_with(&root)).unwrap_or(false);
+        let inside = winpath::real_verbatim(Path::new(v)).map(|p| p.starts_with(&root)).unwrap_or(false);
         if !inside {
             ctx.add(
                 Probe::Pointers,

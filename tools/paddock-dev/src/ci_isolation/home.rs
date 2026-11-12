@@ -34,11 +34,10 @@ pub fn from_git_bash(p: &str, windows: bool) -> String {
     p.to_string()
 }
 
-/// `p` as one string with `/` separators and no `\\?\` prefix (what `cygpath -m` gives; the same on Unix). Programs on every
-/// OS take it, and so do Git bash's.
+/// `p` as one string with `/` separators (what `cygpath -m` gives; the same on Unix). Programs on every OS take it, and so do Git
+/// bash's. A path from the file system goes through `winpath::real_for_tools` first: this does not repair a `\\?\` prefix.
 pub fn mixed(p: &Path) -> String {
     let s = p.to_string_lossy();
-    let s = s.strip_prefix(r"\\?\").unwrap_or(&s);
     if cfg!(windows) { s.replace('\\', "/") } else { s.to_string() }
 }
 
@@ -95,8 +94,8 @@ pub fn ci_home(ctx: &Ctx) -> R<String> {
         std::fs::create_dir_all(&d).map_err(|e| Stop::die(format!("cannot create {}: {e}", d.display())))?;
         d
     };
-    let real = winpath::real(&dir).map_err(|e| Stop::die(format!("cannot resolve {}: {e}", dir.display())))?;
-    Ok(mixed(&real).trim_end_matches('/').to_string())
+    let real = winpath::real_for_tools(&dir).map_err(|e| Stop::die(format!("cannot resolve {}: {e}", dir.display())))?;
+    Ok(real.trim_end_matches('/').to_string())
 }
 
 /// The first ten hex digits of the SHA-256 of the canonical source root: the `{src}` of a layout (amendment §1). The root is
@@ -104,13 +103,13 @@ pub fn ci_home(ctx: &Ctx) -> R<String> {
 /// without a trailing newline.
 pub fn source_key(dir: &Path, windows: bool) -> R<String> {
     // `/c/x`, `C:\x` and `c:/x` are one folder: Git bash callers may pass either.
-    let real = winpath::real(dir).map_err(|e| {
+    let real = winpath::real_for_tools(dir).map_err(|e| {
         Stop::die(format!(
             "--source {} cannot be resolved: {e}. Pass the workspace folder.",
             dir.display()
         ))
     })?;
-    Ok(source_key_of(&mixed(&real), windows))
+    Ok(source_key_of(&real, windows))
 }
 
 /// A path text as the key is made from it: Git-bash spelling made a drive path (`windows`), `\` as `/`, a `\\?\` prefix dropped, no
@@ -315,7 +314,7 @@ mod tests {
         let (cb, pb, _) = go(&c, &["path", "target", "x", "--source", b.to_str().unwrap()]);
         assert_eq!((ca, cb), (0, 0));
         assert_ne!(pa, pb, "two roots, two folders");
-        let real = mixed(&winpath::real(&ci).unwrap());
+        let real = winpath::real_for_tools(&ci).unwrap();
         let ka = source_key(&a, false).unwrap();
         assert_eq!(pa.trim(), format!("{real}/target-x-{ka}-s1"));
         assert!(Path::new(pa.trim()).is_dir());

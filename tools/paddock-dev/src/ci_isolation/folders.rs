@@ -149,9 +149,9 @@ pub fn cmd_owns(ctx: &Ctx, args: &[String]) -> R<()> {
     let home = ci_home(ctx)?;
     let path = Path::new(&dir);
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let real_parent = winpath::real(parent).map_err(|_| refuse())?;
+    let real_parent = winpath::real_for_tools(parent).map_err(|_| refuse())?;
     let name = path.file_name().ok_or_else(refuse)?;
-    let real = super::home::mixed(&real_parent.join(name));
+    let real = format!("{}/{}", real_parent.trim_end_matches('/'), name.to_string_lossy());
     let rel = rel_under_home(&home, &real, ctx.windows).ok_or_else(refuse)?;
     if owns_rel(&ctx.kept()?, &rel, &s, only) {
         Ok(())

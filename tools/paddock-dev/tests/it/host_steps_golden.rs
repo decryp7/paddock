@@ -95,7 +95,7 @@ fn build_folder_in_a_container_builds_in_target_and_a_config_without_the_include
     let r = dev(&root, &["build-folder", &wsarg, "spotter-rust"], &[("RUNNER_OS", "Linux".into())]);
     assert_eq!(r.code, 0, "{}", r.stdout);
     assert!(!ws.join(".cargo/ci.toml").exists(), "an old ci.toml is removed in a container");
-    let canon = forward(&paddock_env::winpath::real(&ws).unwrap()).replace("//?/", "");
+    let canon = paddock_env::winpath::real_for_tools(&ws).unwrap();
     assert_eq!(r.github_env, format!("PADDOCK_BUILD_FOLDER={canon}/target\n"));
     assert_eq!(r.stdout, format!("build folder: {canon}/target\n"));
     std::fs::write(ws.join(".cargo/config.toml"), "[alias]\n").unwrap();

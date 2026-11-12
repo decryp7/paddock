@@ -25,7 +25,7 @@ path = "src/main.rs"
 # Process identity (pid + OS start time, rule 53 / ADR 0033), kill_tree, lower_priority: shared, not copied (ER-22).
 paddock-proc = { version = "0.1", path = "../../crates/paddock-proc", registry = "decryp7" }
 # winpath: a canonical path without the Windows verbatim prefix (the home guard compares it with plain paths).
-paddock-env = { path = "../../crates/paddock-env" }
+paddock-env = { version = "0.1", path = "../../crates/paddock-env", registry = "decryp7" }
 sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 serde_json = "1"
 
