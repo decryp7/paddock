@@ -1000,7 +1000,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
-      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+      # No secret at all in this job (the queue's contract): ./dev is built from the checkout, never downloaded, so it needs no
+      # download credential either (conformance/test/ci-action-env.test.mjs exempts a job whose download is "0").
+      PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
         with:

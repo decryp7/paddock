@@ -12,6 +12,7 @@
 //! - `start`: everything measured and inside the limits.
 //!
 //! The verdict is a pure function ([`verdict`]); the readers ([`read_load`], [`free_bytes`], [`ci_queue`]) are thin.
+// ci-runs-reader: counts queued and running runs for the load verdict; it never judges a run's result
 
 use crate::ci_runs::client::{Client, RunInfo};
 use crate::wait::CurlHttp;
