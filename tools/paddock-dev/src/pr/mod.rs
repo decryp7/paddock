@@ -8,7 +8,11 @@
 //! - `pr plan-status [--write]`: plan rows whose State cell disagrees with the ledger ([`plan_status`]).
 //!
 //! The token is read from `GITEA_TOKEN`, travels in a header only ([`crate::wait::CurlHttp`]) and is printed nowhere. Opening a
-//! pull request starts no CI run: the workflows have no `pull_request` trigger (rule 50).
+//! pull request starts no CI run: no workflow has a `pull_request` trigger (docs/plans/merge-queue.md; the contract test
+//! `no_workflow_runs_on_a_pull_request` keeps it so).
+//!
+//! A pull request whose head reached main by a fast-forward push counts as landed from git (its head is on main), whether or
+//! not the server's "autodetect manual merge" marked it merged; `pr sync` warns while that setting is off.
 
 #[cfg(test)]
 mod fake;
@@ -190,6 +194,23 @@ impl ledger::Git for RepoGit {
             .collect())
     }
 
+    fn fetch(&self, branches: &[&str]) -> Result<(), String> {
+        let specs: Vec<String> = branches
+            .iter()
+            .map(|b| format!("+refs/heads/{b}:refs/remotes/origin/{b}"))
+            .collect();
+        let mut args = vec!["fetch", "--quiet", "--no-tags", "origin"];
+        args.extend(specs.iter().map(String::as_str));
+        let (ok, _) = self.run(&args)?;
+        if !ok {
+            return Err(format!(
+                "git fetch origin {} failed; check the remote and that the branch is pushed",
+                branches.join(" ")
+            ));
+        }
+        Ok(())
+    }
+
     fn on_base(&self, commit: &str, base: &str) -> Result<Option<bool>, String> {
         if commit.starts_with('-') {
             return Ok(None);
@@ -302,6 +323,9 @@ pub fn command(c: PrCommand) -> Result<Report, CliError> {
                     .unwrap_or_default()
             };
             let verb = if dry_run { "would create" } else { "created" };
+            if let Some(w) = v["warning"].as_str() {
+                eprintln!("warning: {w}");
+            }
             let text = format!(
                 "{verb}: {}\n{}: {}\nunchanged: {}\non the server but not in .gitea/labels.toml (kept): {}\n",
                 list("created"),

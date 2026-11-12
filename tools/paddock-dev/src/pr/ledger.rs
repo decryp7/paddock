@@ -13,7 +13,14 @@ pub trait Git {
     fn commits(&self, base: &str, branch: &str) -> Result<Vec<(String, String)>, String>;
     /// Whether `commit` is on `origin/<base>`; `None` when the commit is not in this clone.
     fn on_base(&self, commit: &str, base: &str) -> Result<Option<bool>, String>;
+    /// Fetches these branches from origin into `refs/remotes/origin/`, so the commits read next are the server's.
+    fn fetch(&self, branches: &[&str]) -> Result<(), String>;
 }
+
+/// What `pr sync` says when the repository does not mark fast-forwarded pull requests as merged.
+pub const AUTODETECT_OFF: &str = "the repository's \"autodetect manual merge\" is off: a pull request whose head reaches main by a \
+    fast-forward push stays open on the server. The ledger still sees it as landed (plan-status checks the head against main), \
+    but turn the setting on (repository settings, pull requests) so the server agrees.";
 
 /// The longest commit list a pull request body carries.
 const MAX_BODY_COMMITS: usize = 200;
@@ -37,7 +44,8 @@ pub fn check_branch(branch: &str) -> Result<(), String> {
 pub fn body(branch: &str, base: &str, commits: &[(String, String)]) -> String {
     let mut s = format!(
         "Branch `{branch}` against `{base}`, {} commit(s). Opened by `./dev pr open`: this pull request is the branch's \
-         ledger entry (its labels, from .gitea/labels.toml, say where it is). Opening it starts no CI run (rule 50).\n\n",
+         ledger entry (its labels, from .gitea/labels.toml, say where it is; docs/plans/merge-queue.md). Opening it starts no CI \
+         run: no workflow listens on pull requests (the contract test no_workflow_runs_on_a_pull_request).\n\n",
         commits.len()
     );
     for (id, subject) in commits.iter().take(MAX_BODY_COMMITS) {
@@ -81,6 +89,7 @@ fn open_pull(api: &mut Api, branch: &str) -> Result<Option<Pull>, String> {
 pub fn open(api: &mut Api, git: &dyn Git, known: &[LabelSpec], branch: &str, base: &str, extra: &[String]) -> Result<Value, String> {
     check_branch(branch)?;
     check_branch(base)?;
+    git.fetch(&[base, branch])?;
     let head = git
         .remote_head(branch)?
         .ok_or_else(|| format!("origin/{branch} is not known here; push the branch (git push -u origin {branch}) and fetch"))?;
@@ -202,6 +211,12 @@ pub fn list_text(rows: &[Value]) -> String {
 /// `pr sync`: creates the labels the server lacks and updates a changed colour, description or exclusivity. Never deletes;
 /// labels the file does not list are reported as `extra`.
 pub fn sync(api: &mut Api, known: &[LabelSpec], dry_run: bool) -> Result<Value, String> {
+    let autodetect = api.autodetects_manual_merge()?;
+    let warning = match autodetect {
+        Some(true) => None,
+        Some(false) => Some(AUTODETECT_OFF.to_string()),
+        None => Some("the server did not say whether \"autodetect manual merge\" is on (not measured)".to_string()),
+    };
     let server = api.labels()?;
     let (mut created, mut updated) = (Vec::new(), Vec::new());
     for k in known {
@@ -227,7 +242,7 @@ pub fn sync(api: &mut Api, known: &[LabelSpec], dry_run: bool) -> Result<Value, 
         .map(|s| s.name.clone())
         .collect();
     Ok(
-        json!({"dry_run": dry_run, "created": created, "updated": updated, "extra": extra, "unchanged": known.len() - created.len() - updated.len()}),
+        json!({"dry_run": dry_run, "created": created, "updated": updated, "extra": extra, "unchanged": known.len() - created.len() - updated.len(), "autodetect_manual_merge": autodetect, "warning": warning}),
     )
 }
 
@@ -240,6 +255,7 @@ mod tests {
     struct FakeGit {
         heads: HashMap<String, String>,
         commits: Vec<(String, String)>,
+        fetched: std::cell::RefCell<Vec<String>>,
     }
 
     impl Git for FakeGit {
@@ -251,6 +267,10 @@ mod tests {
         }
         fn on_base(&self, _commit: &str, _base: &str) -> Result<Option<bool>, String> {
             Ok(None)
+        }
+        fn fetch(&self, branches: &[&str]) -> Result<(), String> {
+            self.fetched.borrow_mut().extend(branches.iter().map(|b| b.to_string()));
+            Ok(())
         }
     }
 
@@ -270,6 +290,7 @@ mod tests {
         FakeGit {
             heads: HashMap::from([("feat/x".to_string(), "abc1234def".to_string())]),
             commits: vec![("abc1234".into(), "feat: one".into()), ("def5678".into(), "fix: two".into())],
+            fetched: Default::default(),
         }
     }
 
@@ -321,7 +342,7 @@ mod tests {
         assert!(req["title"].as_str().unwrap().starts_with("WIP: "), "Gitea's draft prefix");
         let body = req["body"].as_str().unwrap();
         assert!(
-            body.contains("- abc1234 feat: one\n- def5678 fix: two\n") && body.contains("rule 50"),
+            body.contains("- abc1234 feat: one\n- def5678 fix: two\n") && body.contains("no_workflow_runs_on_a_pull_request"),
             "{body}"
         );
     }
@@ -442,5 +463,43 @@ mod tests {
         let mut api = Api::new(&mut f, FakeGitea::SERVER, FakeGitea::REPO, "secret");
         assert_eq!(list(&mut api, None, false).unwrap().len(), 120);
         assert!(f.requests.iter().any(|r| r.ends_with("pulls?state=open&limit=50&page=3")));
+    }
+
+    #[test]
+    fn sync_warns_when_the_server_does_not_detect_fast_forward_merges() {
+        for (setting, warns) in [(Some(true), false), (Some(false), true), (None, true)] {
+            let mut f = FakeGitea {
+                autodetect: setting,
+                ..Default::default()
+            };
+            let mut api = Api::new(&mut f, FakeGitea::SERVER, FakeGitea::REPO, "secret");
+            let v = sync(&mut api, &known(), true).unwrap();
+            assert_eq!(v["warning"].is_string(), warns, "{setting:?}: {v}");
+            assert_eq!(v["autodetect_manual_merge"], json!(setting));
+        }
+    }
+
+    #[test]
+    fn open_fetches_the_base_and_the_branch_before_reading_them() {
+        let mut f = synced();
+        let g = git();
+        let mut api = Api::new(&mut f, FakeGitea::SERVER, FakeGitea::REPO, "secret");
+        open(&mut api, &g, &known(), "feat/x", "main", &[]).unwrap();
+        assert_eq!(*g.fetched.borrow(), ["main", "feat/x"]);
+    }
+
+    #[test]
+    fn a_server_with_a_smaller_page_size_is_read_to_the_empty_page() {
+        let mut f = synced();
+        f.max_page = Some(30);
+        for n in 1..=70 {
+            f.pull(n, &format!("feat/{n}"), "ab", "open", None, &[]);
+        }
+        let mut api = Api::new(&mut f, FakeGitea::SERVER, FakeGitea::REPO, "secret");
+        assert_eq!(
+            list(&mut api, None, false).unwrap().len(),
+            70,
+            "a page shorter than asked is not the last one"
+        );
     }
 }

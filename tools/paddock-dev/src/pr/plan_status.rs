@@ -170,6 +170,11 @@ pub fn ledger_of(r: &Ref, pulls: &[Pull], git: &dyn Git, base: &str) -> Result<L
                 if p.merged || p.labels.iter().any(|l| l == "state/landed") {
                     return Ok(Ledger::Landed(p.merge_commit.clone().unwrap_or_else(|| p.head.clone())));
                 }
+                // The queue lands by a fast-forward push; the server marks the pull request merged only with "autodetect
+                // manual merge" on. Its head on main is the landing either way.
+                if !p.head.is_empty() && git.on_base(&p.head, base)? == Some(true) {
+                    return Ok(Ledger::Landed(p.head.clone()));
+                }
                 if p.state == "closed" {
                     return Ok(Ledger::Open(format!("#{} closed without merging", p.number)));
                 }
@@ -203,9 +208,24 @@ pub fn ledger_of_row(each: &[Ledger]) -> Ledger {
     each.last().cloned().unwrap_or(Ledger::Unknown("no reference".into()))
 }
 
-/// The State text `--write` puts in a landed row.
-pub fn done_text(commit: &str) -> String {
-    format!("done (`{}`)", &commit[..commit.len().min(10)])
+/// The State text `--write` puts in a landed row: the commit, then the State cell's other references, so the row still
+/// names its branch (``done (`1234567890`), was `feat/x` ``).
+pub fn done_text(commit: &str, old_state: &str) -> String {
+    let short = &commit[..commit.len().min(10)];
+    let was: Vec<String> = refs_in(old_state)
+        .into_iter()
+        .filter_map(|r| match r {
+            Ref::Branch(b) => Some(b),
+            Ref::Commit(c) if !commit.starts_with(&c) && !c.starts_with(short) => Some(c),
+            Ref::Commit(_) => None,
+        })
+        .map(|r| format!("`{r}`"))
+        .collect();
+    if was.is_empty() {
+        format!("done (`{short}`)")
+    } else {
+        format!("done (`{short}`), was {}", was.join(", "))
+    }
 }
 
 /// Replaces cell `col` of a table line with ` text `, keeping the other cells byte for byte.
@@ -261,7 +281,7 @@ pub fn check_file(text: &str, pulls: &[Pull], git: &dyn Git, base: &str, write: 
         }
         let mut written = false;
         if let (true, Ledger::Landed(c)) = (write, &ledger)
-            && let Some(new) = replace_cell(&lines[row.line - 1], row.state_col, &done_text(c))
+            && let Some(new) = replace_cell(&lines[row.line - 1], row.state_col, &done_text(c, &row.state))
         {
             lines[row.line - 1] = new;
             written = true;
@@ -318,9 +338,16 @@ mod tests {
         fn on_base(&self, commit: &str, _: &str) -> Result<Option<bool>, String> {
             Ok(self.on_main.get(commit).copied())
         }
+        fn fetch(&self, _: &[&str]) -> Result<(), String> {
+            Ok(())
+        }
     }
 
     fn pull(number: u64, branch: &str, state: &str, merged: Option<&str>, labels: &[&str]) -> Pull {
+        pull_with_head(number, branch, "feedfacecafe", state, merged, labels)
+    }
+
+    fn pull_with_head(number: u64, branch: &str, head: &str, state: &str, merged: Option<&str>, labels: &[&str]) -> Pull {
         Pull {
             number,
             title: String::new(),
@@ -329,7 +356,7 @@ mod tests {
             merged: merged.is_some(),
             merge_commit: merged.map(str::to_string),
             branch: branch.into(),
-            head: "feedfacecafe".into(),
+            head: head.into(),
             base: "main".into(),
             labels: labels.iter().map(|s| s.to_string()).collect(),
             url: String::new(),
@@ -346,6 +373,11 @@ mod tests {
             pull(3, "feat/landed-label", "open", None, &["state/landed"]),
             pull(4, "feat/dropped", "closed", None, &["state/fixes"]),
             pull(5, "feat/done-ok", "closed", Some("abcdef1234567"), &[]),
+            // The newest pull request decides: an older merged one, then a newer open one of the same branch.
+            pull(6, "feat/reopened", "closed", Some("9999999aaa"), &[]),
+            pull(7, "feat/reopened", "open", None, &["state/approved"]),
+            // Fast-forwarded to main, still open on a server without "autodetect manual merge".
+            pull_with_head(8, "feat/ff-landed", "c0ffee1", "open", None, &["state/in-train"]),
         ];
         let git = FakeGit {
             on_main: HashMap::from(
@@ -355,10 +387,11 @@ mod tests {
                     ("c0ffee0", true),
                     ("1234567890", true),
                     ("feedfaceca", true),
+                    ("c0ffee1", true),
                 ]
                 .map(|(c, on)| (c.to_string(), on)),
             ),
-            heads: HashMap::from([("fix/no-pr".to_string(), "c0ffee0".to_string())]),
+            heads: HashMap::from([("fix/no-pr", "c0ffee0"), ("fix/not-landed", "bbbbbbb")].map(|(b, h)| (b.to_string(), h.to_string()))),
         };
         (pulls, git)
     }
@@ -410,17 +443,20 @@ mod tests {
                 (13, "landed"),
                 (14, "unknown"),
                 (15, "open"),
-                (21, "landed")
+                (18, "unknown"),
+                (19, "unknown"),
+                (23, "landed"),
+                (27, "landed")
             ],
             "{findings:#?}"
         );
         let (findings, text) = check_file(PLAN, &pulls, &git, "main", true).unwrap();
         assert_eq!(text.as_deref(), Some(WRITTEN));
-        assert_eq!(findings.iter().filter(|f| f.written).count(), 4);
+        assert_eq!(findings.iter().filter(|f| f.written).count(), 5);
         // After the write only the rows a person must judge remain.
         let (left, none) = check_file(WRITTEN, &pulls, &git, "main", true).unwrap();
         assert!(none.is_none());
-        assert_eq!(left.iter().map(|f| f.row.line).collect::<Vec<_>>(), [10, 11, 14, 15]);
+        assert_eq!(left.iter().map(|f| f.row.line).collect::<Vec<_>>(), [10, 11, 14, 15, 18, 19]);
     }
 
     #[test]

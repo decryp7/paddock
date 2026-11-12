@@ -99,9 +99,10 @@ pub struct Api<'a> {
     token: String,
 }
 
-/// Pages are 50 long; 40 pages bound a runaway listing (2000 pull requests or labels).
+/// Pages ask for 50; the server may give fewer (its own maximum page size), so a listing ends at the first empty page.
+/// 80 pages bound a runaway listing.
 const PAGE: usize = 50;
-const MAX_PAGES: u32 = 40;
+const MAX_PAGES: u32 = 80;
 
 impl<'a> Api<'a> {
     /// `server` like `https://dev.decryptology.net`, `repo` like `decryp7/paddock`.
@@ -120,16 +121,19 @@ impl<'a> Api<'a> {
             let url = format!("{}{path}{sep}limit={PAGE}&page={page}", self.root);
             let body = self.http.get_json(&url, &self.token)?;
             let batch = body.as_array().cloned().unwrap_or_default();
-            let n = batch.len();
-            all.extend(batch);
-            if n < PAGE {
+            if batch.is_empty() {
                 return Ok(all);
             }
+            all.extend(batch);
         }
-        Err(format!(
-            "more than {} entries under {path}; the listing was stopped",
-            PAGE * MAX_PAGES as usize
-        ))
+        Err(format!("more than {MAX_PAGES} pages under {path}; the listing was stopped"))
+    }
+
+    /// Whether the repository marks a pull request merged when its head reaches the base outside Gitea (a fast-forward
+    /// push): the setting `autodetect_manual_merge`. `None` when the server does not say.
+    pub fn autodetects_manual_merge(&mut self) -> Result<Option<bool>, String> {
+        let v = self.http.get_json(&self.root, &self.token)?;
+        Ok(v["autodetect_manual_merge"].as_bool())
     }
 
     /// Every label of the repository.

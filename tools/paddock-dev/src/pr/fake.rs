@@ -17,6 +17,10 @@ pub struct FakeGitea {
     pub requests: Vec<String>,
     /// The bodies of every write, in order.
     pub bodies: Vec<Value>,
+    /// The repository's `autodetect_manual_merge` (absent when `None`).
+    pub autodetect: Option<bool>,
+    /// The server's own maximum page size (Gitea's `MAX_RESPONSE_ITEMS`), below what the client asks for.
+    pub max_page: Option<usize>,
 }
 
 const ROOT: &str = "https://gitea.invalid/api/v1/repos/o/r";
@@ -59,13 +63,14 @@ impl FakeGitea {
         }));
     }
 
-    fn page(items: Vec<Value>, url: &str) -> Value {
+    fn page(&self, items: Vec<Value>, url: &str) -> Value {
         let q = |k: &str| {
             url.split(['?', '&'])
                 .find_map(|p| p.strip_prefix(&format!("{k}=")))
                 .and_then(|v| v.parse::<usize>().ok())
         };
         let (limit, page) = (q("limit").unwrap_or(50), q("page").unwrap_or(1));
+        let limit = self.max_page.map_or(limit, |m| limit.min(m));
         Value::Array(items.into_iter().skip((page - 1) * limit).take(limit).collect())
     }
 }
@@ -75,8 +80,15 @@ impl Http for FakeGitea {
         assert!(!token.is_empty(), "the client must send its token");
         self.requests.push(format!("GET {url}"));
         let path = url.strip_prefix(ROOT).ok_or_else(|| not_found(url))?;
+        if path.is_empty() {
+            let mut repo = json!({"default_branch": "main"});
+            if let Some(a) = self.autodetect {
+                repo["autodetect_manual_merge"] = json!(a);
+            }
+            return Ok(repo);
+        }
         if path.starts_with("/labels?") {
-            return Ok(FakeGitea::page(self.labels.clone(), url));
+            return Ok(self.page(self.labels.clone(), url));
         }
         if let Some(rest) = path.strip_prefix("/pulls?state=") {
             let state = rest.split('&').next().unwrap_or("");
@@ -86,7 +98,7 @@ impl Http for FakeGitea {
                 .filter(|p| state == "all" || p["state"] == state)
                 .cloned()
                 .collect();
-            return Ok(FakeGitea::page(items, url));
+            return Ok(self.page(items, url));
         }
         if let Some(rest) = path.strip_prefix("/actions/runs?head_sha=") {
             let sha = rest.split('&').next().unwrap_or("");

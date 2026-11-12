@@ -23,6 +23,7 @@ fn route(s: &mut State, method: &str, path: &str, body: &Value) -> (u16, Value) 
     let page = query.split('&').find_map(|q| q.strip_prefix("page=")).unwrap_or("1");
     let first = |v: &Vec<Value>| if page == "1" { Value::Array(v.clone()) } else { json!([]) };
     match (method, p) {
+        ("GET", "") => (200, json!({"default_branch": "main", "autodetect_manual_merge": false})),
         ("GET", "/labels") => (200, first(&s.labels)),
         ("POST", "/labels") => {
             let mut l = body.clone();
@@ -137,10 +138,14 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
-/// A repository with `.gitea/labels.toml`, app dyno, main and a pushed-looking `feat/x` two commits ahead.
+/// `<tmp>/work`: a repository with `.gitea/labels.toml`, app dyno, main and `feat/x` two commits ahead, both pushed to the
+/// bare `<tmp>/origin.git`; its `origin/feat/x` is then made stale, so only a fetch shows the branch's commits.
 fn repo() -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
-    let r = d.path();
+    let origin = d.path().join("origin.git");
+    std::fs::create_dir_all(&origin).unwrap();
+    git(&origin, &["init", "-q", "--bare"]);
+    let r = &d.path().join("work");
     std::fs::create_dir_all(r.join(".gitea")).unwrap();
     std::fs::create_dir_all(r.join("apps/dyno")).unwrap();
     std::fs::write(r.join("apps/dyno/paddock.ci.json"), "{}").unwrap();
@@ -151,12 +156,13 @@ fn repo() -> tempfile::TempDir {
     git(r, &["init", "-q", "-b", "main"]);
     git(r, &["add", "-A"]);
     git(r, &["commit", "-q", "-m", "chore: base"]);
-    git(r, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
     git(r, &["checkout", "-q", "-b", "feat/x"]);
     for s in ["feat: one", "fix: two \"quoted\""] {
         git(r, &["commit", "-q", "--allow-empty", "-m", s]);
     }
-    git(r, &["update-ref", "refs/remotes/origin/feat/x", "HEAD"]);
+    git(r, &["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(r, &["push", "-q", "origin", "main", "feat/x"]);
+    git(r, &["update-ref", "refs/remotes/origin/feat/x", "main"]);
     d
 }
 
@@ -169,6 +175,9 @@ fn dev(root: &Path, server: &str, args: &[&str]) -> (i32, String, String) {
         .arg(root)
         .args(&args[at..])
         .env("GITEA_TOKEN", TOKEN)
+        // The fake server is on 127.0.0.1: never through a proxy of the machine running the test.
+        .env("NO_PROXY", "*")
+        .env("no_proxy", "*")
         .output()
         .unwrap();
     let (o, e) = (
@@ -183,10 +192,14 @@ fn dev(root: &Path, server: &str, args: &[&str]) -> (i32, String, String) {
 fn sync_open_label_and_list_against_a_local_fake_gitea() {
     let (server, state) = serve();
     let d = repo();
-    let root = d.path();
+    let root = &d.path().join("work");
 
     let (code, out, err) = dev(root, &server, &["--json", "pr", "sync"]);
     assert_eq!(code, 0, "{out}{err}");
+    assert!(
+        err.contains("autodetect manual merge"),
+        "sync warns while the setting is off: {err}"
+    );
     let v: Value = serde_json::from_str(out.trim()).unwrap();
     assert!(v["created"].as_array().unwrap().iter().any(|l| l == "app/dyno"), "{v}");
     {

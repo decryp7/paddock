@@ -250,6 +250,11 @@ fn parse_matrix(n: &Node) -> Matrix {
     m
 }
 
+/// The events a workflow file listens on (`on:`), read by the same parser as the model.
+pub fn workflow_events(path: &str, text: &str) -> Result<BTreeSet<String>, String> {
+    parse_workflow(path, text).map(|w| w.events)
+}
+
 fn parse_workflow(path: &str, text: &str) -> Result<Workflow, String> {
     let doc = yaml::parse(text)?;
     let on = doc.get("on").or_else(|| doc.get("true"));
@@ -1152,8 +1157,8 @@ fn base_scope_clone<'a>(s: &Scope<'a>) -> Scope<'a> {
     }
 }
 
-/// The workflows that a branch or a train runs by dispatch. No workflow runs on a pull request (rule 50: pull requests are the
-/// branch ledger, docs/plans/merge-queue.md), so a branch run of these is a dispatch on the branch's ref, and ADR 0060 §2.4
+/// The workflows that a branch or a train runs by dispatch. No workflow runs on a pull request (pull requests are the branch
+/// ledger, docs/plans/merge-queue.md; the contract test `no_workflow_runs_on_a_pull_request`), so a branch run of these is a dispatch on the branch's ref, and ADR 0060 §2.4
 /// counts it at the `branch` level ("pull requests and branch runs"). Every other dispatch stays `manual`. These are the
 /// workflows that had the `pull_request` trigger until the ledger; a test checks each one has `workflow_dispatch`.
 pub const BRANCH_DISPATCH: &[&str] = &[

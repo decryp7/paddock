@@ -2,8 +2,9 @@
 # npm graphs plus the frontendDist and config-path edges), then only those run: the shared UI package and its entry points,
 # the reference apps, the Rust crates, the conformance, tools and ESLint packages, and one matrix leg per affected app
 # (apps/<app>/paddock.ci.json, through .gitea/actions/app-gates). The base of the diff: the last green push run of main for a
-# push to main, the `base` input of a manual run; tags and manual runs without a base run everything. No pull_request trigger
-# (rule 50): pull requests are the branch ledger (`./dev pr`), and opening one starts no run; branches and trains run by dispatch.
+# push to main, the `base` input of a manual run; tags and manual runs without a base run everything. No pull_request trigger:
+# pull requests are the branch ledger (`./dev pr`, docs/plans/merge-queue.md) and opening one starts no run (the contract test
+# no_workflow_runs_on_a_pull_request); branches and trains run by dispatch.
 # nightly.yml runs everything, Chromium and WebKit, every night (the safety net for a wrong filter).
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.

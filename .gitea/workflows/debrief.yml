@@ -3,8 +3,8 @@
 # input, or a global one); Debrief is not a leg of ci.yml because its gates span three OS, real-app smoke tests and the
 # installers.
 #
-# Branch runs (a manual dispatch; there is no pull_request trigger, rule 50: pull requests are the branch ledger and start no
-# run) are the checks: Rust (Linux and macOS), plugin SDK, licences, frontend and the end-to-end tests in Chromium. A full run adds the real-app smoke tests on three OS, the installers and the end-to-end tests in WebKit
+# Branch runs (a manual dispatch; there is no pull_request trigger: pull requests are the branch ledger, docs/plans/
+# merge-queue.md, and start no run) are the checks: Rust (Linux and macOS), plugin SDK, licences, frontend and the end-to-end tests in Chromium. A full run adds the real-app smoke tests on three OS, the installers and the end-to-end tests in WebKit
 # (Paddock rule 3: WebKit and the slow legs run on the combined result). Full runs are pushes to main, debrief-v* tags
 # (which also publish the Gitea release and the moving debrief-latest release the app's updater reads), the nightly run and
 # a manual run with `bundles: true` (the plan job's `full` output).

@@ -1,6 +1,7 @@
 # Mutation testing of the engine with cargo-mutants: how many deliberately injected bugs the tests catch.
 # Weekly over all of debrief-core; a manual run with a `base` tests only the mutants in the lines changed since it (--in-diff).
-# No pull_request trigger (rule 50: pull requests are the branch ledger and start no run).
+# No pull_request trigger: pull requests are the branch ledger (docs/plans/merge-queue.md) and start no run (the contract test
+# no_workflow_runs_on_a_pull_request).
 # Surviving mutants are listed in mutants.out (uploaded); they point at untested behaviour.
 
 name: debrief-mutants
@@ -11,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       base:
-        description: "Only the mutants in the lines of debrief-core changed since this commit (empty: all of debrief-core)"
+        description: "A commit or origin/<branch> (for example origin/main): only the mutants in the lines of debrief-core changed since it (empty: all of debrief-core)"
         required: false
         default: ""
 

@@ -15,6 +15,12 @@ A table with a State column (`./dev pr plan-status` tests; invented rows).
 | 9 | commit not on main, row says landed | landed `bbbbbbb` |
 | 10 | no reference | open, no reference |
 | 11 | a path is not a branch | open `docs/plans/x.md` |
+| 12 | commit missing from the clone, row says done | done (`eeeeeee`) |
+| 13 | one reference unknown, one landed | done (`fffffff`, `aaaaaaa`) |
+| 14 | branch without a PR, head not on main | open `fix/not-landed` |
+| 15 | the newest PR decides | open `feat/reopened` |
+| 16 | "on main" counts as done | on main since `aaaaaaa` |
+| 17 | open PR whose head reached main by a fast-forward | in train `feat/ff-landed` |
 
 | Branch | State |
 |---|---|

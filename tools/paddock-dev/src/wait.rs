@@ -501,6 +501,8 @@ impl CurlHttp {
         let (max_bytes, seconds) = (max_bytes.to_string(), seconds.to_string());
         let mut child = paddock_proc::command("curl")
             .args([
+                // First: no ~/.curlrc, so only this config shapes the request.
+                "-q",
                 "-sS",
                 "--fail-with-body",
                 "--max-time",
