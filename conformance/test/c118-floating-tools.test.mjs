@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { floatingOn, floatingTools } from '../src/checks/C118-floating-tools.mjs';
+import { floatingOn, floatingTools, lockfileBins } from '../src/checks/C118-floating-tools.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const kinds = (line) => floatingOn(line).map((f) => f.kind);
@@ -16,7 +16,7 @@ test('C118 bad: moving Rust channels in every spelling', () => {
 });
 
 test('C118 good: pinned Rust toolchains', () => {
-  for (const l of ['toolchain: 1.99.1', 'toolchain: nightly-2026-11-01', 'rustup toolchain install 1.99.1 --profile minimal', 'rustup toolchain install nightly-2026-11-01', 'uses: dtolnay/rust-toolchain@1.99.1', 'rustup target add x86_64-pc-windows-msvc', '# toolchain: stable']) {
+  for (const l of ['toolchain: 1.99.1', 'toolchain: nightly-2026-11-01', 'rustup toolchain install 1.99.1 --profile minimal', 'rustup toolchain install nightly-2026-11-01', 'rustup target add x86_64-pc-windows-msvc', '# toolchain: stable']) {
     assert.deepEqual(kinds(l), [], l);
   }
 });
@@ -83,4 +83,32 @@ test('C118 through the runner: warns in workflows and actions, skips waived and 
 test('C118 passes a tree with only pinned tools', async () => {
   const root = makeApp({ '.gitea/workflows/a.yml': 'steps:\n  - run: rustup toolchain install 1.99.1\n' });
   assert.deepEqual(await findingsOf('C118', root), []);
+});
+
+const LOCK = JSON.stringify({ packages: { '': {}, 'node_modules/@playwright/test': { bin: { playwright: 'cli.js' } }, 'node_modules/@angular/cli': { bin: { ng: 'b.js' } }, 'node_modules/typescript': { bin: { tsc: 'a', tsserver: 'b' } }, 'node_modules/a/node_modules/nested': { bin: { nested: 'x' } } } });
+
+test('C118 npx: a bin of a top-level lockfile package is pinned; any other name, with or without -y, is not', () => {
+  const bins = lockfileBins(LOCK);
+  const on = (l) => floatingOn(l, bins).map((f) => f.kind);
+  for (const l of ['npx playwright test', 'npx ng build', 'npx tsc -p .', 'npx --yes tsc --noEmit', 'npx typescript']) assert.deepEqual(on(l), [], l);
+  assert.deepEqual(on('npx --yes @cyclonedx/cyclonedx-npm --omit dev'), ['npx']);
+  assert.deepEqual(on('npx -y serve'), ['npx']);
+  assert.deepEqual(on('npx nested'), ['npx'], 'a nested package is not on the root .bin path');
+  assert.deepEqual(on('npx tauri build'), ['npx'], 'a bin the lockfile does not list');
+  assert.deepEqual(floatingOn('npx playwright test'), ['npx'].map((kind) => ({ kind, what: floatingOn('npx playwright test')[0].what })), 'no lockfile: reported');
+});
+
+test('C118 install-action: a tool without @x.y.z is floating', () => {
+  assert.deepEqual(kinds('          tool: cargo-hakari'), ['tool']);
+  assert.deepEqual(kinds('          tool: cargo-hakari@0.9.30,cargo-deny'), ['tool']);
+  assert.deepEqual(kinds('          tool: cargo-about@0.9.2'), []);
+  assert.deepEqual(kinds('          tool: cargo-hakari@0.9.30,cargo-deny@0.18.0'), []);
+});
+
+test('C118 tool-downloading actions need a commit digest', () => {
+  assert.deepEqual(kinds('      - uses: taiki-e/install-action@v2'), ['action']);
+  assert.deepEqual(kinds('      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2'), []);
+  assert.deepEqual(kinds('      - uses: dtolnay/rust-toolchain@1.99.1'), ['action']);
+  assert.deepEqual(kinds('      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable'), []);
+  assert.deepEqual(kinds('      - uses: actions/checkout@v4'), []);
 });
