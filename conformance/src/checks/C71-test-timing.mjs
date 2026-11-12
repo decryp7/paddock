@@ -49,7 +49,7 @@ const FAKE_SEAM = /\b(?:FakeClock|ManualPace|TestSeams)\b/;
 const TS_CLOCK = /\b(?:useTestClock|frozenClock)\s*\(/;
 const TS_TEST = /(?:\.(?:spec|test)\.(?:ts|mts|cts|js|mjs|cjs)$|(?:^|\/)(?:e2e|selftest)\/.+\.(?:ts|mjs|js)$)/;
 const SKIP_PATH = /^conformance\/test\/|(?:^|\/)(?:node_modules|dist|target|fixtures)\/|^apps\/[^/]+\/vendor\/|(?:^|\/)crates\/paddock-testkit\//;
-const RUST_TEST_FILE = /(?:^|\/)(?:tests|benches)\/.+\.rs$|(?:^|\/)tests\.rs$|_tests?\.rs$/;
+export const RUST_TEST_FILE = /(?:^|\/)(?:tests|benches)\/.+\.rs$|(?:^|\/)tests\.rs$|_tests?\.rs$/;
 const SLEEP_FN = /\b(?:std::)?thread::sleep\s*\(|\b(?:tokio::)?time::sleep\s*\(/;
 
 /** Hash of a line's text with whitespace collapsed, so a site is known by what it says and survives moving. */
@@ -219,7 +219,7 @@ export function tsTimingSites(source) {
 }
 
 /** Character ranges of the `#[cfg(test)]` items of masked Rust source: [start, end) from the attribute to the item's closing brace. */
-function rustTestRanges(masked) {
+export function rustTestRanges(masked) {
   const ranges = [];
   for (const m of masked.matchAll(/#\[cfg\(test\)\]/g)) {
     let k = m.index + m[0].length;
