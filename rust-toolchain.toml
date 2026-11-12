@@ -1,0 +1,10 @@
+# The one Rust version of the family (ADR 0090 D5(b), rule 55): the version in the Paddock CI image (`paddock-ci`,
+# /etc/paddock-ci-release). rustup picks this file up from any folder below the root, so every Cargo workspace (crates/,
+# apps/*, tools/*) builds, formats and lints with the same rustc, rustfmt and clippy as CI. setup-rust reads `channel` from
+# here. Targets are not listed: CI jobs and xwin ask for the ones they need (setup-rust `targets`), and the image has none.
+# Upgrading Rust is one change: bump `channel` here, rebuild the CI image, re-capture the Rust-tool rows (ADR 0090) and
+# reformat with the new rustfmt.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

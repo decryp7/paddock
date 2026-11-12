@@ -179,6 +179,11 @@ A text fixture may also carry a first-line note (the RT-8 convention); C104 does
   image only.** On the macOS and Windows runners `setup-rust` installs whatever `stable` is that day, so no row can name
   their version. Rows of Rust tools are therefore scoped to the Linux image's mode; readers that need the other runners'
   output (none today) wait for D5 (b).
+  **Implementation status (2026-11-13):** the pin of D5 (b) is in place early, on its own: the root `rust-toolchain.toml`
+  names the CI image's exact version (1.99.1) and `setup-rust` reads it when a job names no toolchain, so the macOS and
+  Windows runners and every developer machine use the image's version too. Reason: the Mac's `stable` moved to 1.100.0
+  and its rustfmt reformats files the image's rustfmt accepts. Upgrading Rust is one change: bump the file, rebuild the
+  CI image, re-capture the Rust-tool rows and reformat.
 - **What a nextest bump costs.** The Linux image takes nextest from the garage image, so a pin bump means a garage and
   `paddock-ci` rebuild and a `ci-image/VERSION` bump. That bump makes every Rust-tool row stale as well (clippy, cargo
   metadata, rustc), and they are re-captured in the same change. With `./dev capture` that is one command per reader,

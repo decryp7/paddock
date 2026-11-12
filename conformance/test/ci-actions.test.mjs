@@ -198,7 +198,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   const dir = mkdtempSync(join(tmpdir(), 'paddock-rustup-'));
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const at = text.indexOf('- name: Rust toolchain\n');
-  const block = text.slice(at, text.indexOf('- name: Install sccache', at));
+  const block = text.slice(at, text.indexOf('    # Every Rust job gets', at));
   const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(dir, 'bin'));
   const calls = join(dir, 'calls');
@@ -227,6 +227,24 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   });
   return { status: r.status, out: r.stdout + r.stderr, calls: existsSync(calls) ? read(calls) : '' };
 }
+
+// ADR 0090 D5(b): the version lives once, in the root rust-toolchain.toml; the step reads it when the job names no toolchain.
+test('setup-rust takes its toolchain from rust-toolchain.toml unless the job names one, and the repo pins one', () => {
+  const pin = read(join(PADDOCK, 'rust-toolchain.toml'));
+  const channel = /^channel\s*=\s*"(\d+\.\d+\.\d+)"/m.exec(pin)?.[1];
+  assert.ok(channel, 'rust-toolchain.toml pins an exact version, not a moving channel');
+  assert.match(pin, /components\s*=\s*\[[^\]]*"rustfmt"[^\]]*"clippy"|components\s*=\s*\[[^\]]*"clippy"[^\]]*"rustfmt"/);
+  const ws = mkdtempSync(join(tmpdir(), 'paddock-pin-'));
+  writeFileSync(join(ws, 'rust-toolchain.toml'), pin);
+  const fromFile = runToolchainStep({ TOOLCHAIN: '', GITHUB_WORKSPACE: ws, RUNNER_OS: 'Linux' });
+  assert.equal(fromFile.status, 0, fromFile.out);
+  assert.match(fromFile.calls, new RegExp(`toolchain install ${channel.replace(/\./g, '\\.')} `));
+  assert.match(fromFile.calls, new RegExp(`default ${channel.replace(/\./g, '\\.')}`));
+  const named = runToolchainStep({ TOOLCHAIN: 'nightly', GITHUB_WORKSPACE: ws, RUNNER_OS: 'Linux' });
+  assert.match(named.calls, /toolchain install nightly /, 'a job that names a toolchain keeps it');
+  const none = runToolchainStep({ TOOLCHAIN: '', GITHUB_WORKSPACE: mkdtempSync(join(tmpdir(), 'paddock-nopin-')), RUNNER_OS: 'Linux' });
+  assert.match(none.calls, /toolchain install stable /, 'no file: stable, as before');
+});
 
 test('a failed toolchain install fails the step with a message that names the cause, never a bare exit code', () => {
   const crashed = runToolchainStep({}, { installRc: 127 });

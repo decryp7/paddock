@@ -2,8 +2,8 @@ name: setup-rust
 description: "The Rust toolchain with components and targets (here, before ./dev), CARGO_BUILD_JOBS for the runner (`./dev ci build-jobs`) when no earlier step set it, then `./dev ci setup-rust`: sccache (installed, checksum-verified, when the runner has none) on the local disk or the shared Redis backend, and the Tauri Linux libraries on request. A release, rule 54 or tag run keeps the shell steps until the release-path lane (docs/plans/ci-in-rust.md)."
 inputs:
   toolchain:
-    description: Toolchain channel or version.
-    default: stable
+    description: "Toolchain channel or version. Empty (the default) means the `channel` of the root rust-toolchain.toml, the family's one Rust version (stable when the checkout has no such file)."
+    default: ""
   components:
     description: Space-separated rustup components, e.g. "clippy rustfmt".
     default: ""
@@ -34,9 +34,17 @@ runs:
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
-        # In the Paddock CI image (it writes /etc/paddock-ci-release) the stable toolchain and its components are already
-        # there: skip the network round trip unless this job asks for extra targets or a component the image lacks.
-        if [ -f /etc/paddock-ci-release ] && [ "$TOOLCHAIN" = stable ] && [ -z "$TARGETS" ]; then
+        # One source for the version: the root rust-toolchain.toml (rule 55). A job that names a toolchain (the fuzz jobs' nightly) keeps it.
+        if [ -z "$TOOLCHAIN" ]; then
+          pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+          if [ -f "$pin" ]; then TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1); fi
+          TOOLCHAIN=${TOOLCHAIN:-stable}
+          echo "Rust toolchain $TOOLCHAIN (from rust-toolchain.toml)"
+        fi
+        # In the Paddock CI image (it writes /etc/paddock-ci-release) the toolchain and its components are already there when
+        # its rustc is the one asked for: skip the network round trip unless this job asks for extra targets or a component
+        # the image lacks. An image whose version differs from the pin installs the pinned one (and says so).
+        if [ -f /etc/paddock-ci-release ] && { [ "$TOOLCHAIN" = stable ] || [ "$(rustc --version 2>/dev/null | awk '{print $2}')" = "$TOOLCHAIN" ]; } && [ -z "$TARGETS" ]; then
           installed=$(rustup component list --installed 2>/dev/null || true)
           missing=0
           for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
