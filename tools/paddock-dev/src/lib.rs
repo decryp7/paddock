@@ -26,6 +26,7 @@
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
 //! - `disk check|report|scan|clean|adopt|record`: free-space check, usage tracking (owner records and a SQLite index) and clean-up
 //!   of merged and stale-pushed folders ([`disk`]).
+//! - `load`: start, hold or stop for new agents, from the load, the free disk and the CI queue ([`load`], ER-24).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
 
@@ -44,6 +45,7 @@ pub mod gates;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
+pub mod load;
 pub mod log_text;
 pub mod merge_check;
 pub mod nextest_log;
