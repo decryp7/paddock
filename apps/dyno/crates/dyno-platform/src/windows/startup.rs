@@ -153,7 +153,7 @@ struct RawValue {
 }
 
 /// The values of an open key, at most `MAX_RUN_VALUES` of them, with how many more the key holds. One `RegEnumValueW` call per value,
-/// into a data buffer of `max_data` bytes: a value that does not fit comes back as `ERROR_MORE_DATA` and is not read (`data: None`).
+/// into a data buffer of `max_data` bytes: a value that does not fit comes back as `ERROR_MORE_DATA` and is not read (`data: None`); its name is then read again without a data buffer.
 #[allow(unsafe_code)]
 fn raw_values(key: HKEY, max_data: usize) -> Result<(Vec<RawValue>, u32), String> {
     let mut count = 0u32;
@@ -187,7 +187,32 @@ fn raw_values(key: HKEY, max_data: usize) -> Result<(Vec<RawValue>, u32), String
         }
         let data = match rc {
             ERROR_SUCCESS => Some(buf[..(got as usize).min(max_data)].to_vec()),
-            ERROR_MORE_DATA => None,
+            ERROR_MORE_DATA => {
+                // Microsoft documents that on ERROR_MORE_DATA the outputs are not guaranteed to be filled, so the name and type of this
+                // value are asked again without a data buffer: with `lpData` NULL the call succeeds and reports name, type and size.
+                name_len = MAX_NAME_CHARS as u32;
+                kind = 0;
+                let mut needed = 0u32;
+                // SAFETY: `name` is valid for `name_len` characters; the data pointer is absent, so only the size is written.
+                let again = unsafe {
+                    RegEnumValueW(
+                        key,
+                        index,
+                        Some(PWSTR(name.as_mut_ptr())),
+                        &mut name_len,
+                        None,
+                        Some(&mut kind),
+                        None,
+                        Some(&mut needed),
+                    )
+                };
+                if again != ERROR_SUCCESS {
+                    log::warn!(target: "dyno::startup", "Registry value name re-read failed: Index={index} Reason={}", why(again));
+                    return Err(why(again));
+                }
+                log::debug!(target: "dyno::startup", "Registry value past the bound: Index={index} Bytes={needed} Bound={max_data} Path=more-data-reread");
+                None
+            }
             other => return Err(why(other)),
         };
         out.push(RawValue {
