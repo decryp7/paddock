@@ -1,23 +1,8 @@
 {
  "_comment": "Jobs that predate test/ci-action-env.test.mjs and lack the env its table asks for. May only shrink: fix the job, then delete its entry.",
  "jobs": [
-  "app-fuzz.yml:fuzz:PADDOCK_DEV_DOWNLOAD",
   "app-fuzz.yml:fuzz:PADDOCK_DEV_TOKEN",
-  "ci.yml:wiki:PADDOCK_DEV_DOWNLOAD",
-  "ci.yml:wiki:PADDOCK_DEV_TOKEN",
-  "ci.yml:heavy:PADDOCK_DEV_DOWNLOAD",
-  "ci.yml:heavy:PADDOCK_DEV_TOKEN",
-  "ci.yml:crates:PADDOCK_DEV_DOWNLOAD",
-  "ci.yml:crates:PADDOCK_DEV_TOKEN",
   "debrief.yml:plan:PADDOCK_DEV_TOKEN",
-  "debrief.yml:rust-lint:PADDOCK_DEV_DOWNLOAD",
-  "debrief.yml:rust-lint:PADDOCK_DEV_TOKEN",
-  "debrief.yml:rust-test:PADDOCK_DEV_DOWNLOAD",
-  "debrief.yml:rust-test:PADDOCK_DEV_TOKEN",
-  "debrief.yml:plugin-sdk:PADDOCK_DEV_DOWNLOAD",
-  "debrief.yml:plugin-sdk:PADDOCK_DEV_TOKEN",
-  "dev-tool.yml:publish:PADDOCK_DEV_DOWNLOAD",
-  "dev-tool.yml:publish-macos:PADDOCK_DEV_DOWNLOAD",
   "nightly.yml:c100:PADDOCK_DEV_TOKEN"
  ]
 }
