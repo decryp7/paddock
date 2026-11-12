@@ -74,14 +74,22 @@ export function evaluate(runs, budgets) {
 export const EXIT_NOT_MEASURED = 6;
 export const DEFAULT_MAX_LOAD = 12;
 
-/** The 1-minute load average, or null where the OS has none (Windows reports 0 always). */
+/**
+ * The 1-minute load average, or null where the OS has none (Windows reports 0 always). On Windows the comparable signal
+ * would be the counter `\System\Processor Queue Length`; not read yet, so a Windows run is "load not verified".
+ * Note the 1-minute average lags: a load spike that began seconds ago is not in it yet, so it under-reports a start that
+ * just got busy; the check before and after each start narrows that, it does not remove it.
+ */
 export function readLoad(platform = process.platform, avg = loadavg) {
   return platform === 'win32' ? null : avg()[0];
 }
 
-/** Is a sample's load acceptable? Both readings must be <= max; null (unavailable) cannot be judged and passes. Pure. */
-export function loadOk(before, after, max) {
-  return [before, after].every((l) => l === null || l === undefined || l <= max);
+/**
+ * Is a sample's load acceptable? Both readings must be <= max. A null (unavailable) reading is "not verified" (ER-33) and
+ * is not acceptable, unless `allowUnknown` (a report-only run). An unread `after` (undefined) is skipped. Pure.
+ */
+export function loadOk(before, after, max, allowUnknown = false) {
+  return [before, after].every((l) => (l === undefined ? true : l === null ? allowUnknown : l <= max));
 }
 
 /**
@@ -89,42 +97,55 @@ export function loadOk(before, after, max) {
  * start; `load()` reads the load; `sleep(ms)` and `now()` are injected. Bounded by `maxAttempts` and `capMs`. Returns
  * { samples, discarded, attempts, peakLoad, measured }. Never throws for load; a failing `measure()` propagates.
  */
-export async function collectSamples({ want, max, maxAttempts, waitMs, capMs, measure, load, sleep, now, log = () => {} }) {
+export async function collectSamples({ want, max, maxAttempts, waitMs, capMs, measure, load, sleep, now, allowUnknown = false, log = () => {} }) {
   const samples = [];
   const discarded = [];
   let peakLoad = null;
+  let unverified = false;
   const seen = (l) => {
     if (typeof l === 'number') peakLoad = peakLoad === null ? l : Math.max(peakLoad, l);
   };
   const t0 = now();
   let attempts = 0;
-  while (samples.length < want && attempts < maxAttempts && now() - t0 < capMs) {
+  const left = () => capMs - (now() - t0);
+  while (samples.length < want && attempts < maxAttempts && left() > 0) {
     attempts++;
     const before = load();
     seen(before);
-    if (!loadOk(before, null, max)) {
+    if (before === null && !allowUnknown) {
+      unverified = true;
+      log('host load is unavailable: the load precondition cannot be verified');
+      break;
+    }
+    if (!loadOk(before, undefined, max, allowUnknown)) {
       discarded.push({ attempt: attempts, before, after: null, started: false });
       log(`attempt ${attempts}: load ${before} before the start is over ${max}, waiting ${waitMs / 1000} s`);
+      if (left() <= waitMs) break;
       await sleep(waitMs);
       continue;
     }
+    if (left() <= 0) break;
     const run = await measure();
     const after = load();
     seen(after);
-    if (!loadOk(before, after, max)) {
+    if (!loadOk(before, after, max, allowUnknown)) {
       discarded.push({ attempt: attempts, before, after, started: true });
       log(`attempt ${attempts}: load ${before} -> ${after} over ${max}, start not counted`);
+      if (left() <= waitMs) break;
       await sleep(waitMs);
       continue;
     }
     samples.push({ ...run, loadBefore: before, loadAfter: after });
   }
-  return { samples, discarded, attempts, peakLoad, measured: samples.length >= want };
+  return { samples, discarded, attempts, peakLoad, unverified, measured: samples.length >= want };
 }
 
 /** The one ::error:: line for a NOT MEASURED result. Pure. */
-export function notMeasuredMessage({ samples, discarded, attempts, peakLoad }, want, max) {
+export function notMeasuredMessage({ samples, discarded, attempts, peakLoad, unverified }, want, max) {
   const load = peakLoad === null ? 'unavailable' : peakLoad.toFixed(1);
+  if (unverified) {
+    return `::error::start-up benchmark NOT MEASURED: the host load is unavailable on this OS, so the load precondition (<= ${max}) was not verified. Not a pass. Next step: run it on macOS or Linux, or pass --report-only to only print the numbers.`;
+  }
   return (
     `::error::start-up benchmark NOT MEASURED: ${samples.length} of ${want} starts ran with host load <= ${max} ` +
     `(${discarded.length} discarded in ${attempts} attempts, peak 1-minute load ${load}). Not a pass. ` +
@@ -187,7 +208,14 @@ async function main() {
   const exe = executable(exePath);
   const results = [];
   const data = mkdtempSync(join(tmpdir(), 'debrief-startup-bench-'));
-  const maxLoad = Number(opt('--max-load', process.env.DEBRIEF_BENCH_MAX_LOAD ?? DEFAULT_MAX_LOAD));
+  const flagLoad = opt('--max-load', undefined);
+  const envLoad = process.env.DEBRIEF_BENCH_MAX_LOAD;
+  const maxLoad = Number(flagLoad ?? envLoad ?? DEFAULT_MAX_LOAD);
+  if (!Number.isFinite(maxLoad)) {
+    console.error(`usage: --max-load / DEBRIEF_BENCH_MAX_LOAD must be a number, got "${flagLoad ?? envLoad}"`);
+    process.exit(2);
+  }
+  console.log(`load precondition: 1-min load <= ${maxLoad} (source: ${flagLoad !== undefined ? 'flag' : envLoad !== undefined ? 'env' : 'default'})`);
   const waitMs = Number(opt('--wait-s', '30')) * 1000;
   const maxAttempts = Number(opt('--max-attempts', String(runs * 3)));
   const capMs = Number(opt('--cap-s', '900')) * 1000;
@@ -205,6 +233,7 @@ async function main() {
       maxAttempts,
       waitMs,
       capMs,
+      allowUnknown: args.includes('--report-only'),
       measure: () => runOnce(exe, data, 60_000),
       load: () => readLoad(),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
@@ -217,8 +246,12 @@ async function main() {
   }
   results.push(...collected.samples);
   const { medians, over } = evaluate(results, budgets?.marks);
-  console.log(`median of ${runs} starts (${os}):`);
-  for (const [m] of MARKS) console.log(`  ${m.padEnd(17)} ${String(medians[m]).padStart(6)} ms   budget ${budgets?.marks?.[m] ?? '-'}`);
+  if (collected.measured) {
+    console.log(`median of ${results.length} starts (${os}):`);
+    for (const [m] of MARKS) console.log(`  ${m.padEnd(17)} ${String(medians[m]).padStart(6)} ms   budget ${budgets?.marks?.[m] ?? '-'}`);
+  } else {
+    console.log(`no medians: ${results.length} of ${runs} starts met the load precondition`);
+  }
   const out = opt('--out', null);
   if (out) writeFileSync(out, JSON.stringify({ os, firstRun: first, runs: results, medians, budgets, load: { max: maxLoad, peak: collected.peakLoad, discarded: collected.discarded, attempts: collected.attempts, measured: collected.measured } }, null, 2));
   if (!collected.measured) {

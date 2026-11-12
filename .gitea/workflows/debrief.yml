@@ -814,6 +814,7 @@ jobs:
       # ER-33 / ADR 0089: a start counts only at host load <= 12 (DEBRIEF_BENCH_MAX_LOAD) before and after; too few quiet
       # starts is NOT MEASURED, exit 6, a red step with an ::error:: (never a pass); over budget still exits 1.
       - name: Start-up benchmark (macOS)
+        timeout-minutes: 20
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
