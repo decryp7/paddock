@@ -1,3 +1,4 @@
+// ci-runs-reader: ci timings: durations of runs and jobs
 //! `ci timings`: real CI timings of the Paddock family from the Gitea Actions API (read-only), the port of
 //! `scripts/ci-timings.mjs` with the same Markdown output (its oracle: the script's output on the same recorded replies).
 //!

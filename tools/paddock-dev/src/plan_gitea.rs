@@ -33,6 +33,7 @@ pub const CI_JOBS: &[(&str, &[&str])] = &[
     ("crates", &["crates"]),
     ("crate", &["crates"]),
     ("commits", &["tools"]),
+    ("train-gates", &["tools"]),
     ("app", &["apps"]),
     ("paddock-dev", &["paddock-dev"]),
 ];

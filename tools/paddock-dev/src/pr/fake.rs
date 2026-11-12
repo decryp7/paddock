@@ -1,3 +1,4 @@
+// ci-runs-reader: the fake Gitea of the ledger tests
 //! An in-memory Gitea for the unit tests: labels, pull requests and runs by commit, with every request recorded. It answers
 //! the calls of [`super::gitea::Api`] only; anything else is a 404.
 
@@ -17,6 +18,10 @@ pub struct FakeGitea {
     pub requests: Vec<String>,
     /// The bodies of every write, in order.
     pub bodies: Vec<Value>,
+    /// `(pull request number, review object)`: the reviews of a pull request, as the API returns them.
+    pub reviews: Vec<(u64, Value)>,
+    /// `(pull request number, text)` of every comment, in order.
+    pub comments: Vec<(u64, String)>,
     /// The repository's `autodetect_manual_merge` (absent when `None`).
     pub autodetect: Option<bool>,
     /// The server's own maximum page size (Gitea's `MAX_RESPONSE_ITEMS`), below what the client asks for.
@@ -58,7 +63,7 @@ impl FakeGitea {
         self.pulls.push(json!({
             "number": number, "title": format!("WIP: {branch}"), "state": state, "draft": true,
             "merged": merged.is_some(), "merge_commit_sha": merged,
-            "head": {"ref": branch, "sha": head}, "base": {"ref": "main"}, "labels": labels,
+            "head": {"ref": branch, "sha": head}, "base": {"ref": "main"}, "labels": labels, "user": {"login": "author"},
             "html_url": format!("https://gitea.invalid/o/r/pulls/{number}"),
         }));
     }
@@ -89,6 +94,33 @@ impl Http for FakeGitea {
         }
         if path.starts_with("/labels?") {
             return Ok(self.page(self.labels.clone(), url));
+        }
+        if let Some(rest) = path.strip_prefix("/issues/") {
+            let n: u64 = rest.parse().map_err(|_| not_found(url))?;
+            return self.pulls.iter().find(|p| p["number"] == n).cloned().ok_or_else(|| not_found(url));
+        }
+        if let Some(rest) = path.strip_prefix("/issues?") {
+            let q = |k: &str| rest.split('&').find_map(|p| p.strip_prefix(&format!("{k}=")));
+            let (state, label) = (q("state").unwrap_or("open"), q("labels").unwrap_or("").replace("%2F", "/"));
+            let items = self
+                .pulls
+                .iter()
+                .filter(|p| p["state"] == state)
+                .filter(|p| {
+                    p["labels"]
+                        .as_array()
+                        .is_some_and(|l| l.iter().any(|x| x["name"] == label.as_str()))
+                })
+                .cloned()
+                .collect();
+            return Ok(self.page(items, url));
+        }
+        if let Some(rest) = path.strip_prefix("/pulls/") {
+            let n: u64 = rest.split('/').next().and_then(|n| n.parse().ok()).ok_or_else(|| not_found(url))?;
+            if rest[n.to_string().len()..].starts_with("/reviews") {
+                let items = self.reviews.iter().filter(|(p, _)| *p == n).map(|(_, r)| r.clone()).collect();
+                return Ok(self.page(items, url));
+            }
         }
         if let Some(rest) = path.strip_prefix("/pulls?state=") {
             let state = rest.split('&').next().unwrap_or("");
@@ -145,6 +177,13 @@ impl Http for FakeGitea {
                 let p = self.pulls.last_mut().ok_or_else(|| not_found(url))?;
                 p["title"] = body["title"].clone();
                 Ok(p.clone())
+            }
+            ("POST", p) if p.starts_with("/issues/") && p.ends_with("/comments") => {
+                let n: u64 = p["/issues/".len()..p.len() - "/comments".len()]
+                    .parse()
+                    .map_err(|_| not_found(url))?;
+                self.comments.push((n, body["body"].as_str().unwrap_or("").to_string()));
+                Ok(json!({}))
             }
             ("PUT", p) if p.starts_with("/issues/") && p.ends_with("/labels") => {
                 let n: u64 = p["/issues/".len()..p.len() - "/labels".len()].parse().map_err(|_| not_found(url))?;

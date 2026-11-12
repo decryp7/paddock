@@ -1,3 +1,4 @@
+// ci-runs-reader: pr list: the newest run per workflow of a pull request head, shown in the table, no verdict
 //! The Gitea API calls of the ledger: labels, pull requests and the CI runs of a commit. The token travels in a header only
 //! (the [`Http`] contract) and is in no message.
 
@@ -53,6 +54,8 @@ pub struct Pull {
     pub head: String,
     /// The base branch.
     pub base: String,
+    /// The login of the account that opened it (its own reviews never approve it).
+    pub author: String,
     /// Its labels' names.
     pub labels: Vec<String>,
     /// Its web page.
@@ -72,6 +75,7 @@ impl Pull {
             branch: s(&v["head"]["ref"]),
             head: s(&v["head"]["sha"]),
             base: s(&v["base"]["ref"]),
+            author: s(&v["user"]["login"]),
             labels: v["labels"]
                 .as_array()
                 .map(|a| a.iter().filter_map(|l| l["name"].as_str().map(str::to_string)).collect())
@@ -79,6 +83,45 @@ impl Pull {
             url: s(&v["html_url"]),
         }
     }
+}
+
+/// One review of a pull request, as far as the queue reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Review {
+    /// The review's id (reviews are ordered by it, whatever order the server lists them in).
+    pub id: u64,
+    /// The reviewer's login.
+    pub reviewer: String,
+    /// `APPROVED`, `REQUEST_CHANGES`, `COMMENT`, `PENDING`.
+    pub state: String,
+    /// The commit the review was made on.
+    pub commit_id: String,
+    /// Whether it was dismissed.
+    pub dismissed: bool,
+    /// Whether the server counts it (Gitea: the reviewer may review here, a write-access account listed as a reviewer); a
+    /// review from anyone else is advice, never an approval.
+    pub official: bool,
+}
+
+/// Whether the reviews approve exactly `head`: some account in `allowed` (the queue accepts review-bot's alone: reviewer agents post
+/// their approval through it after a passing review round) has an official, undismissed approving review on `head` as its last
+/// decisive review, and NO official reviewer at all (the user, a maintainer) has a last decisive review that requests changes on
+/// `head`: a human's change request blocks even when the bot approved. Reviews are read in id order.
+pub fn approved_at(reviews: &[Review], head: &str, allowed: &[&str]) -> bool {
+    let mut sorted: Vec<&Review> = reviews
+        .iter()
+        .filter(|r| r.official && !r.dismissed && matches!(r.state.as_str(), "APPROVED" | "REQUEST_CHANGES"))
+        .collect();
+    sorted.sort_by_key(|r| r.id);
+    let mut last: std::collections::BTreeMap<&str, &Review> = std::collections::BTreeMap::new();
+    for r in sorted {
+        last.insert(r.reviewer.as_str(), r);
+    }
+    let blocked = last.values().any(|r| r.state == "REQUEST_CHANGES" && r.commit_id == head);
+    let approved = last
+        .values()
+        .any(|r| r.state == "APPROVED" && r.commit_id == head && allowed.contains(&r.reviewer.as_str()));
+    !head.is_empty() && approved && !blocked
 }
 
 /// One CI run of a commit: workflow file, run id, and its result (`success`, `failure`, `cancelled`, or the status while it runs).
@@ -179,6 +222,50 @@ impl<'a> Api<'a> {
         Ok(v.as_array()
             .map(|a| a.iter().filter_map(|l| l["name"].as_str().map(str::to_string)).collect())
             .unwrap_or_default())
+    }
+
+    /// The reviews of pull request `number`, oldest first.
+    pub fn reviews(&mut self, number: u64) -> Result<Vec<Review>, String> {
+        Ok(self
+            .pages(&format!("/pulls/{number}/reviews"))?
+            .iter()
+            .map(|v| Review {
+                id: v["id"].as_u64().unwrap_or(0),
+                official: v["official"].as_bool().unwrap_or(false),
+                reviewer: v["user"]["login"].as_str().unwrap_or("").to_string(),
+                state: v["state"].as_str().unwrap_or("").to_string(),
+                commit_id: v["commit_id"].as_str().unwrap_or("").to_string(),
+                dismissed: v["dismissed"].as_bool().unwrap_or(false),
+            })
+            .collect())
+    }
+
+    /// The names of the labels of issue (or pull request, open or closed) `number`.
+    pub fn issue_labels(&mut self, number: u64) -> Result<Vec<String>, String> {
+        let url = format!("{}/issues/{number}", self.root);
+        let v = self.http.get_json(&url, &self.token)?;
+        Ok(v["labels"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|l| l["name"].as_str().map(str::to_string)).collect())
+            .unwrap_or_default())
+    }
+
+    /// The numbers of closed pull requests that carry `label`.
+    pub fn closed_with_label(&mut self, label: &str) -> Result<Vec<u64>, String> {
+        let enc = label.replace('/', "%2F");
+        Ok(self
+            .pages(&format!("/issues?state=closed&type=pulls&labels={enc}"))?
+            .iter()
+            .filter_map(|v| v["number"].as_u64())
+            .collect())
+    }
+
+    /// Adds a comment to pull request (issue) `number`.
+    pub fn comment(&mut self, number: u64, body: &str) -> Result<(), String> {
+        let url = format!("{}/issues/{number}/comments", self.root);
+        self.http
+            .send_json("POST", &url, &self.token, Some(&json!({"body": body})))
+            .map(|_| ())
     }
 
     /// The newest run of each workflow for commit `sha` (first page of 50, newest first), in the server's order.

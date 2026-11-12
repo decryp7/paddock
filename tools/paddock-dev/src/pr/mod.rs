@@ -15,7 +15,7 @@
 //! not the server's "autodetect manual merge" marked it merged; `pr sync` warns while that setting is off.
 
 #[cfg(test)]
-mod fake;
+pub(crate) mod fake;
 pub mod gitea;
 pub mod labels;
 pub mod ledger;
@@ -121,7 +121,7 @@ fn token() -> Result<String, CliError> {
     })
 }
 
-fn root_of(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
+pub(crate) fn root_of(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
     if let Some(r) = given {
         return Ok(r.clone());
     }
@@ -145,7 +145,7 @@ fn apps(root: &Path) -> Vec<String> {
     out
 }
 
-fn known(root: &Path) -> Result<Vec<labels::LabelSpec>, CliError> {
+pub(crate) fn known(root: &Path) -> Result<Vec<labels::LabelSpec>, CliError> {
     let path = root.join(".gitea/labels.toml");
     let text = std::fs::read_to_string(&path).map_err(|e| {
         CliError::failure(format!("cannot read {}: {e}", path.display())).with_hint("Run from a checkout that has .gitea/.")

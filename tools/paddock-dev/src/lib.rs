@@ -39,6 +39,7 @@
 
 pub mod brief_check;
 pub mod check;
+pub mod child_env;
 pub mod ci_build_jobs;
 pub mod ci_isolation;
 pub mod ci_runs;
@@ -64,6 +65,7 @@ pub mod plan_gitea;
 pub mod plan_repo;
 pub mod plan_since;
 pub mod pr;
+pub mod queue;
 pub mod release_isolation;
 pub mod safe_remove;
 pub mod slots;

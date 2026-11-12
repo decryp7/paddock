@@ -37,7 +37,7 @@
 mod backwards;
 mod diff;
 mod generated;
-mod git;
+pub(crate) mod git;
 mod hakari;
 mod hunks;
 mod lost_tests;

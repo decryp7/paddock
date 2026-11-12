@@ -1,3 +1,4 @@
+// ci-runs-reader: the shared Gitea client that ./dev ci verdict, flakes, timings and schedule-skip use
 //! The run listing of `ci flakes` and `ci timings`: Gitea's run list, a run's jobs with their times (every attempt), and job
 //! logs (through the planner's [`GiteaRuns`]); the run list is the part `plan_since` does not have.
 

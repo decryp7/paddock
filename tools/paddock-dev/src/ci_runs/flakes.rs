@@ -1,3 +1,4 @@
+// ci-runs-reader: ci flakes: flaky tests over a window of runs
 //! `ci flakes`: the tests CI marked flaky or saw fail, over a window of runs (ADR 0082 D6).
 //!
 //! What counts, per test and per run (a run counts once however many jobs, attempts or retries show the test):

@@ -358,6 +358,7 @@ mod tests {
             branch: branch.into(),
             head: head.into(),
             base: "main".into(),
+            author: "author".into(),
             labels: labels.iter().map(|s| s.to_string()).collect(),
             url: String::new(),
         }

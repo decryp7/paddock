@@ -1,3 +1,4 @@
+// ci-runs-reader: ci dispatch: lists unfinished runs on a shared runner class before dispatching; no verdict
 //! `ci dispatch <workflow> --ref <ref>`: start a workflow only when no run on the same single-runner class is going.
 //!
 //! The Mac (and Windows) runner is one machine: two runs on it at once make each other's timing-sensitive tests time out (CI runs

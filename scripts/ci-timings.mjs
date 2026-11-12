@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// ci-runs-reader: the script ci timings was ported from
 // Measures real CI timings for the Paddock family from the Gitea Actions API (read-only, no dependencies).
 //
 //   node scripts/ci-timings.mjs [--repos debrief,paddock,pitcrew,pitwall,spotter,dyno] [--limit 30]

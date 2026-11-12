@@ -1,3 +1,4 @@
+// ci-runs-reader: reads a run only to name the commit of an installer under test
 // Finishing a run for every runner: the Markdown result, a JSON sidecar next to it (what release-verdict.mjs reads), and the exit code from the
 // derived verdict (verdict.mjs). The result folder is stable: <out>/<ci run id>/ when the installer came from a CI run, so the files of one release
 // check sit together and `release-verdict.mjs <folder>` can tell what is missing.

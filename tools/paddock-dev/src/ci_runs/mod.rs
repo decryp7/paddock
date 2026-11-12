@@ -1,3 +1,4 @@
+// ci-runs-reader: the commands over the client: flakes, timings, schedule-skip, verdict
 //! `ci flakes` and `ci timings`: what CI runs say over time, read from the Gitea Actions API (read-only).
 //!
 //! - `ci flakes --app <app> [--days 30]`: the tests nextest and Playwright marked flaky, vitest's failed specs, and tests that

@@ -123,35 +123,49 @@ test('the marker check sees a missing, early or unguarded marker (positive contr
 
 // ---- no second reader ---------------------------------------------------------------------------------------------------------
 /** What reads the Actions runs: the API paths, the run list's JSON key, and the Rust client types. */
-export const READER = /actions\/(?:runs|jobs)\b|workflow_runs|GiteaRuns|ci_runs::client|\.runs_page|\/runs\?|\/runs\/\$\{/;
+export const READER = /actions\/(?:runs|jobs)\b|\bworkflow_runs\b|GiteaRuns|ci_runs::client|\.runs_page|\/runs\?|\/runs\/\$\{/;
 
-/** Files that read the runs API for a purpose that is not "is there a full green run on this commit", each with the reason. */
-export const ALLOWED = {
-  'tools/paddock-dev/src/ci_runs/client.rs': 'the shared Gitea client that ./dev ci verdict, flakes, timings and schedule-skip use',
-  'tools/paddock-dev/src/ci_runs/verdict.rs': 'the verdict reader itself',
-  'tools/paddock-dev/src/ci_runs/flakes.rs': 'ci flakes: flaky tests over a window of runs',
-  'tools/paddock-dev/src/ci_runs/timings.rs': 'ci timings: durations of runs and jobs',
-  'tools/paddock-dev/src/ci_runs/schedule_skip.rs': 'ci schedule-skip: is a train in CI (queued or running dispatch runs)',
-  'tools/paddock-dev/src/ci_runs/testutil.rs': 'the fake Gitea of the tests',
-  'tools/paddock-dev/src/ci_runs/mod.rs': 'the commands over the client: flakes, timings, schedule-skip, verdict',
-  'tools/paddock-dev/src/wait.rs': 'wait --ci-run: waits for one run to finish; no pass/fail on a commit',
-  'tools/paddock-dev/src/plan_since.rs': 'plan --since-run: the failed jobs and tests of one run, and the marker reader',
-  'tools/paddock-dev/src/plan_cmd.rs': 'plan: the base of a diff is the last green push run of main (what to test, not whether to release)',
-  'scripts/affected.mjs': 'the node fallback of the planner: the same last-green base as plan_cmd.rs, deleted with the script (ADR 0022 R4)',
-  'scripts/ci-timings.mjs': 'the script ci timings was ported from',
-  'conformance/ci/release-verdict.mjs': 'reads the current run\'s own jobs to say whether installers were built, not a verdict on a commit',
-  'scripts/vm-smoke/run.mjs': 'downloads a run\'s artifacts',
-  'scripts/vm-smoke/run-linux.mjs': 'downloads a run\'s artifacts',
-  'scripts/vm-smoke/run-win.mjs': 'downloads a run\'s artifacts',
-  'scripts/vm-smoke/report.mjs': 'reads a run only to name the commit of an installer under test',
-};
+/**
+ * A file that reads the runs API for a purpose that is not "is there a full green run on this commit" says so itself, on a line of
+ * its own: `// ci-runs-reader: <reason>` (`#` in YAML and shell), the reason at least 10 characters. A marker lives with the code
+ * it excuses, so a merge of two branches that each add one never conflicts (the central allow-list this replaces went red on
+ * three merges).
+ */
+export const MARKER = /^\s*(?:\/\/|#)\s*ci-runs-reader:\s*(\S.{9,})$/m;
 
 const SKIP_DIR = new Set(['node_modules', 'target', '.git', 'tests', 'fixtures', 'dist']);
 const SOURCE = /\.(?:mjs|js|sh|rs|py|ts|yml|yaml)$/;
 const TEST_FILE = /\.test\.(?:mjs|js|ts|sh)$/;
 
+/** Every source file under `dirs` of `root`: [relative path, text]. */
+function sources(root, dirs) {
+  const out = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) {
+        if (!SKIP_DIR.has(name)) walk(p);
+      } else if (SOURCE.test(name) && !TEST_FILE.test(name)) {
+        out.push([relative(root, p).split('\\').join('/'), readFileSync(p, 'utf8')]);
+      }
+    }
+  };
+  for (const d of dirs) if (existsSync(join(root, d))) walk(join(root, d));
+  return out;
+}
+
+const DIRS = ['conformance/ci', 'conformance/src', 'scripts', 'tools', '.gitea'];
+
+/** Files that carry a `ci-runs-reader:` marker but no longer read the runs API: the excuse outlived the reason. */
+export function staleMarkers(root, dirs = DIRS) {
+  return sources(root, dirs)
+    .filter(([, text]) => MARKER.test(text) && !READER.test(text))
+    .map(([rel]) => rel)
+    .sort();
+}
+
 /** The source files under `dirs` of `root` whose text reads the runs API and are not in `allowed`. */
-export function secondReaders(root, dirs = ['conformance/ci', 'conformance/src', 'scripts', 'tools', '.gitea'], allowed = ALLOWED) {
+export function secondReaders(root, dirs = ['conformance/ci', 'conformance/src', 'scripts', 'tools', '.gitea']) {
   const found = [];
   const walk = (dir) => {
     for (const name of readdirSync(dir)) {
@@ -160,7 +174,8 @@ export function secondReaders(root, dirs = ['conformance/ci', 'conformance/src',
         if (!SKIP_DIR.has(name)) walk(p);
       } else if (SOURCE.test(name) && !TEST_FILE.test(name)) {
         const rel = relative(root, p).split('\\').join('/');
-        if (READER.test(readFileSync(p, 'utf8')) && !(rel in allowed)) found.push(rel);
+        const text = readFileSync(p, 'utf8');
+        if (READER.test(text) && !MARKER.test(text)) found.push(rel);
       }
     }
   };
@@ -168,21 +183,12 @@ export function secondReaders(root, dirs = ['conformance/ci', 'conformance/src',
   return found.sort();
 }
 
-test('no script or tool reads the Actions runs API for a pass/fail verdict except ./dev ci verdict (allow-list with reasons)', () => {
+test('no script or tool reads the Actions runs API for a pass/fail verdict except ./dev ci verdict (a `ci-runs-reader:` marker with a reason)', () => {
   assert.deepEqual(
     secondReaders(PADDOCK),
     [],
-    'a second reader of the runs: ask `./dev ci verdict --workflow <file> --sha <sha>` instead (exit 0 full green, 5 red or partial, 6 not measured); if it reads runs for another purpose, add it to ALLOWED in conformance/test/ci-verdict-reader.test.mjs with the reason',
+    'a second reader of the runs: ask `./dev ci verdict --workflow <file> --sha <sha>` instead (exit 0 full green, 5 red or partial, 6 not measured); if it reads runs for another purpose, put a `// ci-runs-reader: <reason>` line (`#` in YAML) in the file',
   );
-});
-
-test('the allow-list holds no stale entry: every file exists and still reads the runs', () => {
-  for (const [rel, why] of Object.entries(ALLOWED)) {
-    assert.ok(why.length > 10, `${rel}: say why`);
-    const f = join(PADDOCK, rel);
-    assert.ok(existsSync(f), `${rel} no longer exists: remove it from ALLOWED`);
-    assert.match(readFileSync(f, 'utf8'), READER, `${rel} no longer reads the runs API: remove it from ALLOWED`);
-  }
 });
 
 test('the scan sees a second reader (positive control)', async () => {
@@ -192,7 +198,25 @@ test('the scan sees a second reader (positive control)', async () => {
     'scripts/rust-bad.rs': 'use crate::ci_runs::client::Client;\n',
     'scripts/good.mjs': 'console.log("nothing");\n',
     'scripts/bad.test.mjs': 'actions/runs\n',
-    'scripts/allowed.mjs': 'actions/runs\n',
+    'scripts/marked.mjs': '// ci-runs-reader: downloads the artifacts of one run\nactions/runs\n',
+    'scripts/marked.yml': '# ci-runs-reader: names the runs API in a comment\nactions/runs\n',
+    'scripts/short.mjs': '// ci-runs-reader: x\nactions/runs\n',
+    'scripts/inline.mjs': 'const x = 1; // ci-runs-reader: not on its own line\nactions/runs\n',
+    'scripts/ident.rs': 'let commit_workflow_runs = 1;\n',
   });
-  assert.deepEqual(secondReaders(root, ['scripts'], { 'scripts/allowed.mjs': 'a reason that is long enough' }), ['scripts/bad.mjs', 'scripts/rust-bad.rs']);
+  assert.deepEqual(secondReaders(root, ['scripts']), ['scripts/bad.mjs', 'scripts/inline.mjs', 'scripts/rust-bad.rs', 'scripts/short.mjs']);
+});
+
+test('no marker outlives the read it excuses (a marker in a file that no longer reads the runs is an error)', () => {
+  assert.deepEqual(staleMarkers(PADDOCK), [], 'remove the `ci-runs-reader:` line from these files: they no longer read the Actions runs API');
+});
+
+test('the stale-marker scan sees a marker without a read (positive control)', async () => {
+  const { makeApp } = await import('./helpers.mjs');
+  const root = makeApp({
+    'scripts/stale.mjs': '// ci-runs-reader: used to download the artifacts of a run\nconsole.log(1);\n',
+    'scripts/live.mjs': '// ci-runs-reader: downloads the artifacts of one run\nactions/runs\n',
+    'scripts/none.mjs': 'console.log(2);\n',
+  });
+  assert.deepEqual(staleMarkers(root, ['scripts']), ['scripts/stale.mjs']);
 });

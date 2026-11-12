@@ -1,3 +1,4 @@
+// ci-runs-reader: the fake Gitea of the tests
 //! A scripted [`Http`] for the tests: replies by URL, records every request.
 
 use crate::wait::Http;

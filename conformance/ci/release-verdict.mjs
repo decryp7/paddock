@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// ci-runs-reader: reads the current run's own jobs to say whether installers were built, not a verdict on a commit
 // What a release workflow run proves about the installers (rule 54, "green that proves something"). A run whose `installers +
 // release` job was skipped is green but built nothing; before this, nothing said so (125 of 133 green release runs built no
 // installer, issues research 2026-10-30, X4). The verdict job of every release workflow and of the nightly runs this and

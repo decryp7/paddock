@@ -1,3 +1,4 @@
+// ci-runs-reader: the verdict reader itself
 //! `ci verdict`: is there a full green run of workflow W on commit S? The one reader of the Actions runs for a pass/fail answer
 //! about a commit (the tag workflow asks it; `conformance/test/ci-verdict-reader.test.mjs` keeps it the only one).
 //!

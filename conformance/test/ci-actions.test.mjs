@@ -324,7 +324,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['conformance', 'wiki', 'heavy', 'crates', 'crate', 'app', 'paddock-dev']; // conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['conformance', 'wiki', 'heavy', 'crates', 'crate', 'train-gates', 'app', 'paddock-dev']; // conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
