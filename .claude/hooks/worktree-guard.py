@@ -90,7 +90,7 @@ def decide(data):
                     pending_commit = False
         if c.term in (";", "\n", "&"):
             chain_has_commit = False
-        if c.is_cd and not c.cond:
+        if c.is_cd and not c.cond and not c.nested:
             tgt = c.cd_target
             if c.term in (";", "\n") and not c.set_e and shellscan.next_cmd(cmds, c) is not None:
                 return ("Blocked: `cd %s` is followed by `%s` and more commands (unguarded cd): if the cd fails, the rest "

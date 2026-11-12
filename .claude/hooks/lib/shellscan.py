@@ -19,7 +19,7 @@ class TooBig(Exception):
 
 class Cmd:
     __slots__ = ("words", "argv", "redirs", "term", "cwd", "depth", "cond", "is_cd", "cd_target", "after_cd_chain",
-                 "opens", "set_e", "idx", "env", "xargs")
+                 "opens", "set_e", "idx", "env", "xargs", "subs", "tainted", "heredocs", "nested")
 
     def __init__(self):
         self.words = []
@@ -35,7 +35,11 @@ class Cmd:
         self.opens = 0        # leading `{` count
         self.set_e = False    # `set -e` was seen before it
         self.idx = 0
-        self.xargs = False    # fed by xargs
+        self.xargs = False    # fed by xargs, parallel or find -exec
+        self.subs = []        # the commands inside its `$( )` / backticks
+        self.tainted = []     # words that hold a substituted value: `$( )`, or a variable set by `for x in $( )` or `read x`
+        self.heredocs = []    # bodies of heredocs and here-strings fed to it
+        self.nested = False   # came from a string rescanned inside bash -c, eval, a heredoc fed to a shell or find -exec
         self.env = []         # NAME=value words that set the command's environment (prefix or `env X=1`)
 
 
@@ -150,7 +154,7 @@ def _lex(s, i, closer, level):
             flush()
             toks.append(("op", "\n"))
             i += 1
-            for delim, dash in pend:
+            for delim, dash, holder in pend:
                 while i < n:
                     j = s.find("\n", i)
                     line = s[i:(n if j < 0 else j)]
@@ -158,6 +162,7 @@ def _lex(s, i, closer, level):
                     line = line.rstrip("\r")
                     if (line.lstrip("\t") if dash else line) == delim:
                         break
+                    holder.append(line + "\n")
             pend = []
             continue
         if c == "#" and not inword:
@@ -248,8 +253,9 @@ def _lex(s, i, closer, level):
                 while i < n and s[i] in _SPACE:
                     i += 1
                 d, i = _heredoc_word(s, i)
-                pend.append((d, op == "<<-"))
-                toks.append(("redir", op, d))
+                holder = []
+                pend.append((d, op == "<<-", holder))
+                toks.append(("redir", op, d, holder))
             else:
                 toks.append(("redir", op))
             continue
@@ -307,6 +313,10 @@ class _State:
         self.home = home
         self.vars = {}
         self.exported = []
+        self.subst_vars = set()
+        self.pending = []
+        self.prev = None
+        self.nest = 0
         self.cmds = []
         self.set_e = False
         self.chain_cd = False
@@ -350,6 +360,17 @@ def _strip(argv, env, flags=None):
                     env.append(argv[0])
                 skip = 2 if argv[0] in _ENV_ARG or (a == "nice" and argv[0] == "-n") else 1
                 argv = argv[skip:]
+        elif a == "timeout":
+            argv = argv[1:]
+            while argv and argv[0].startswith("-"):
+                argv = argv[2 if argv[0] in ("-k", "-s", "--kill-after", "--signal") else 1:]
+            argv = argv[1:]   # the duration
+        elif a == "parallel":
+            if flags is not None:
+                flags.add("xargs")
+            argv = argv[1:]
+            while argv and argv[0].startswith("-"):
+                argv = argv[2 if argv[0] in ("-j", "-n", "-a", "-I", "-S", "--jobs", "--arg-file") else 1:]
         elif a == "xargs":
             if flags is not None:
                 flags.add("xargs")
@@ -364,10 +385,37 @@ def _strip(argv, env, flags=None):
     return argv
 
 
-def _finish(st, words, redirs, term, depth):
+def _tainted(x, st):
+    if "$(..)" in x or "`..`" in x:
+        return True
+    return any((m.group(1) or m.group(2)) in st.subst_vars for m in _VAR.finditer(x)) if st.subst_vars else False
+
+
+_SHELLS = {"bash", "sh", "zsh", "dash", "ksh", "ash"}
+
+
+def _inject_text(st, text, depth):
+    """Scan a string that a shell will run (bash -c, eval, a heredoc fed to a shell) as commands of this scan."""
+    if st.nest >= MAX_NEST or not text.strip():
+        return
+    st.nest += 1
+    saved = (st.cwd, st.maybe_wrong, st.chain_cd, st.chain_cond, st.at_chain_start)
+    a = len(st.cmds)
+    toks, _ = _lex(text, 0, None, st.nest)
+    _parse(toks, st, depth + 1)
+    for c in st.cmds[a:]:
+        c.nested = True
+    st.cwd, st.maybe_wrong, st.chain_cd, st.chain_cond, st.at_chain_start = saved
+    st.nest -= 1
+
+
+def _finish(st, words, redirs, term, depth, heredoc_refs=()):
+    subs = [c for a, b in st.pending for c in st.cmds[a:b]]
+    st.pending = []
     if not words and not redirs:
         return None
     cmd = Cmd()
+    cmd.subs = subs
     lead = 0
     w = [expand(x, st.vars) for x in words]
     while w and w[0] in _LEAD:
@@ -409,7 +457,47 @@ def _finish(st, words, redirs, term, depth):
     argv = _strip(w[k:] if k < len(w) else [], env, flags)
     cmd.argv = argv
     cmd.xargs = "xargs" in flags
+    cmd.tainted = [x for x in argv if _tainted(x, st)]
+    cmd.heredocs = ["".join(h) for h in heredoc_refs] + [t for op, t in redirs if op == "<<<"]
     cmd.env = env + [e for e in st.exported if not (argv and argv[0] == "export")]
+    if argv and argv[0] == "for" and len(argv) > 3 and argv[2] == "in" and any(_tainted(x, st) for x in argv[3:]):
+        st.subst_vars.add(argv[1])
+    if argv and argv[0] == "read":
+        st.subst_vars.update(x for x in argv[1:] if not x.startswith("-"))
+    if argv and st.nest < MAX_NEST:
+        base = os.path.basename(argv[0])
+        texts = []
+        if base in _SHELLS:
+            for k, a in enumerate(argv[1:], 1):
+                if a.startswith("-") and not a.startswith("--") and "c" in a[1:] and k + 1 < len(argv):
+                    texts.append(argv[k + 1])
+                    break
+            else:
+                texts += cmd.heredocs
+                if st.prev is not None and st.prev.term == "|":
+                    texts += st.prev.heredocs
+        elif base == "eval":
+            texts.append(" ".join(argv[1:]))
+        elif base == "watch":
+            rest = argv[1:]
+            while rest and rest[0].startswith("-"):
+                rest = rest[2 if rest[0] in ("-n", "--interval") else 1:]
+            texts.append(" ".join(rest))
+        for t in texts:
+            _inject_text(st, t, depth)
+        if base == "find":
+            for k, a in enumerate(argv):
+                if a in ("-exec", "-execdir", "-ok", "-okdir"):
+                    j = k + 1
+                    while j < len(argv) and argv[j] not in (";", "+"):
+                        j += 1
+                    inner = argv[k + 1:j]
+                    if inner:
+                        n0 = len(st.cmds)
+                        _finish(st, inner, [], ";", depth)
+                        for c in st.cmds[n0:]:
+                            c.nested = True
+                            c.xargs = True
     if argv and argv[0] == "set" and any(a.startswith("-") and not a.startswith("--") and "e" in a for a in argv[1:]):
         st.set_e = True
     if argv and argv[0] == "cd":
@@ -422,6 +510,7 @@ def _finish(st, words, redirs, term, depth):
     elif argv and argv[0] in ("pushd", "popd"):
         st.cwd = None
     st.cmds.append(cmd)
+    st.prev = cmd
     if term in (";", "\n", ";;"):
         if st.chain_cd and not st.set_e and not st.chain_cond:
             st.maybe_wrong = True
@@ -437,12 +526,13 @@ def _finish(st, words, redirs, term, depth):
 
 def _parse(toks, st, depth):
     words, redirs, pending = [], [], None
+    refs = []
     stack = []
 
     def end(term):
-        nonlocal words, redirs, pending
-        _finish(st, words, redirs, term, depth + len(stack))
-        words, redirs, pending = [], [], None
+        nonlocal words, redirs, pending, refs
+        _finish(st, words, redirs, term, depth + len(stack), refs)
+        words, redirs, pending, refs = [], [], None, []
 
     for t in toks:
         k = t[0]
@@ -453,13 +543,17 @@ def _parse(toks, st, depth):
             else:
                 words.append(t[1])
         elif k == "redir":
-            if len(t) == 3:
+            if len(t) >= 3:
                 redirs.append((t[1], t[2]))
+                if len(t) == 4:
+                    refs.append(t[3])
             else:
                 pending = t[1]
         elif k == "sub":
             saved = (st.cwd, st.maybe_wrong, st.chain_cd, st.chain_cond, st.at_chain_start)
+            a = len(st.cmds)
             _parse(t[1], st, depth + len(stack) + 1)
+            st.pending.append((a, len(st.cmds)))
             st.cwd, st.maybe_wrong, st.chain_cd, st.chain_cond, st.at_chain_start = saved
         else:
             op = t[1]
