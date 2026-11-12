@@ -3344,6 +3344,7 @@ dependencies = [
 name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",

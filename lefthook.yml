@@ -90,3 +90,9 @@ pre-push:
     # connection endings is well formed. The release path's tag check calls `./dev check ipc-endpoints --tag <tag>`.
     ipc-endpoints:
       run: ./dev check ipc-endpoints
+    # Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when protocol.rs or a wire type changed; a
+    # stale one fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh).
+    dyno-wire-fixtures:
+      root: "apps/dyno/crates/dyno-core/"
+      glob: "src/**/*.rs"
+      run: sh ../../scripts/regen-wire-fixtures.sh

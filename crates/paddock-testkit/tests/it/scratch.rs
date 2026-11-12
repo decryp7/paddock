@@ -134,3 +134,54 @@ fn errors_read_as_sentences_and_path_panics_on_a_mistake() {
     let from_io: ScratchError = std::io::Error::other("boom").into();
     assert!(matches!(from_io, ScratchError::Io(_)));
 }
+
+/// A group other than `egid` the caller may give a folder to: a supplementary group, or any other id for root. `None` when the
+/// caller has no other group (then the condition below cannot be made and the test only checks the plain case).
+#[cfg(unix)]
+fn another_group(egid: u32) -> Option<u32> {
+    // SAFETY: getgroups with a null list returns the count; the second call fills a list of that size.
+    let n = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+    let mut groups = vec![0 as libc::gid_t; n.max(0) as usize];
+    let n = unsafe { libc::getgroups(n, groups.as_mut_ptr()) };
+    groups.truncate(n.max(0) as usize);
+    groups
+        .into_iter()
+        .find(|g| *g != egid)
+        .or_else(|| (unsafe { libc::geteuid() } == 0).then_some(egid + 1))
+}
+
+#[cfg(unix)]
+#[test]
+fn folders_are_in_the_callers_group_even_when_the_parent_is_in_another() {
+    use std::os::unix::fs::{MetadataExt, chown};
+    // On macOS a new folder takes its parent's group: a temp folder on a disk whose folders are group `admin` made Dyno's
+    // "folder is in a shared group" check fail in tests that passed elsewhere (twice).
+    let egid = unsafe { libc::getegid() };
+    let parent = tempfile::tempdir().unwrap();
+    if let Some(other) = another_group(egid) {
+        chown(parent.path(), None, Some(other)).unwrap();
+        assert_eq!(
+            fs::metadata(parent.path()).unwrap().gid(),
+            other,
+            "the parent is in the other group"
+        );
+    }
+    let s = Scratch::try_new_in(parent.path()).unwrap();
+    for dir in [
+        s.work(),
+        s.home(),
+        s.tmp(),
+        s.work().parent().unwrap().to_path_buf(),
+    ] {
+        assert_eq!(
+            fs::metadata(&dir).unwrap().gid(),
+            egid,
+            "{} is in the caller's group",
+            dir.display()
+        );
+    }
+    // A file written into it takes the folder's group too.
+    let file = s.write("a/b.txt", "x").unwrap();
+    assert_eq!(fs::metadata(&file).unwrap().gid(), egid);
+    assert_eq!(fs::metadata(file.parent().unwrap()).unwrap().gid(), egid);
+}
