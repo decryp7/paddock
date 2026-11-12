@@ -384,6 +384,26 @@ jobs:
       - name: Affected rules and repo contracts
         run: node --test scripts/affected.test.mjs
 
+      # ER-40: a committed SVG is generated from its .drawio and never hand-edited. The check re-exports every diagram with the pinned
+      # draw.io (ci-image/Dockerfile: DRAWIO_VERSION) and fails on a difference that is not the host's fonts (scripts/svg-drift.mjs).
+      # A diagram or SVG change marks this job through the declared inputs in scripts/affected.mjs (DOC_INPUTS).
+      - name: draw.io for the SVG drift check
+        run: |
+          # The image from v3 on has it (system packages belong to the image, not to a job). Until then: the same pinned package, checked
+          # by SHA-256 (the Dockerfile's ARGs are the one source) and unpacked beside the job, not installed; its libraries are the image's.
+          if command -v drawio >/dev/null 2>&1; then exit 0; fi
+          v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile)
+          sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile)
+          echo "::notice::the CI image has no draw.io yet (it comes with the next image rebuild, ci-image/README.md); unpacking the pinned $v"
+          bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb" \
+            || { echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."; exit 1; }
+          dpkg-deb -x "$RUNNER_TEMP/drawio.deb" "$RUNNER_TEMP/drawio" \
+            || { echo "::error::unpacking draw.io $v failed. Fix: run dpkg-deb -x on the same file in the paddock-ci image to see why."; exit 1; }
+          echo "DRAWIO=$RUNNER_TEMP/drawio/opt/drawio/drawio" >> "$GITHUB_ENV"
+
+      - name: SVG drift (ER-40)
+        run: node scripts/svg-drift.mjs
+
   # The Windows test VM tooling (scripts/vm-lock.sh, vm-win.sh, vm-win/) is a macOS tool: its lock and guard-rail tests have seven cases that
   # need sysctl, BSD stat, the keychain and Fusion's lease file, which the Linux `ui` job skips ("not measured on this OS", ER-33). They run
   # here, on the Mac host, against fakes only (no VM, no Fusion). Gated on the `tools` output, which every scripts/ change turns on.

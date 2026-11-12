@@ -275,6 +275,7 @@ export const DOC_INPUTS = [
   { re: /^crates\/paddock-service\/tests\/fixtures\/launchctl-print-running\.txt$/, projects: ['crates', 'app:pitcrew'], why: "Pitcrew's service_repair.rs tests parse the canonical real launchctl capture (include_str!)" },
   { re: /^apps\/debrief\/docs\/ai\/sql-views\.md$/, why: 'debrief-ai tests/sql_tool.rs (from the import)' },
   { re: /^apps\/debrief\/docs\/testing\/quarantine\.md$/, why: 'scripts/ci/check-quarantine (from the import)' },
+  { re: /^(docs|diagrams|apps\/[^/]+\/docs|apps\/[^/]+\/diagrams)\/(.+\/)?([^/]+\.drawio|svg\/[^/]+\.svg)$|^docs\/images\/[^/]+\.svg$/, projects: ['tools'], why: 'scripts/svg-drift.mjs re-exports every .drawio and compares it with the committed SVG (ER-40; the tools job runs it)' },
   { re: /^apps\/[^/]+\/vendor\/.*\.md$/, why: "a vendored crate's own markdown (its lib.rs include_str!s it; vendor/PATCHES.md)" },
 ];
 

@@ -204,6 +204,17 @@ describe('the graph of this tree', () => {
     assert.ok(!run('docs/adr/0014-monorepo-under-paddock.md').tools);
   });
 
+  test('a diagram or its committed SVG runs the tools job, where the SVG drift check runs (ER-40); an app image does not', () => {
+    for (const f of ['apps/debrief/docs/diagrams/uml-seq-moment.drawio', 'apps/debrief/docs/diagrams/svg/uml-seq-moment.svg', 'apps/dyno/diagrams/svg/c4-1-context.svg', 'docs/images/src/drawio/paddock-handoffs.drawio', 'docs/images/paddock-handoffs.svg']) {
+      const r = run(f);
+      assert.deepEqual([r.tools, r.docs, r.all, r.apps], [true, false, false, []], f);
+    }
+    const png = run('apps/debrief/docs/diagrams/png/uml-seq-moment.png');
+    assert.equal(png.tools, false);
+    const asset = run('apps/dyno/app/src/assets/svg/logo.svg');
+    assert.deepEqual([asset.tools, asset.apps], [false, ['dyno']]);
+  });
+
   test('global inputs mark everything; an app release workflow marks one app', () => {
     for (const f of ['rust-toolchain.toml', 'package.json', '.npmrc', 'tsconfig/base.json']) {
       const r = run(f);

@@ -252,6 +252,10 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         ),
         (re(r"^apps/debrief/docs/ai/sql-views\.md$"), Marks::Owner),
         (re(r"^apps/debrief/docs/testing/quarantine\.md$"), Marks::Owner),
+        (
+            re(r"^(docs|diagrams|apps/[^/]+/docs|apps/[^/]+/diagrams)/(.+/)?([^/]+\.drawio|svg/[^/]+\.svg)$|^docs/images/[^/]+\.svg$"),
+            Marks::Projects(&["tools"]),
+        ),
         (re(r"^apps/[^/]+/vendor/.*\.md$"), Marks::Owner),
     ]
 });
@@ -1066,6 +1070,23 @@ mod tests {
                 "{f}"
             );
         }
+        // a diagram or its committed SVG is re-exported and compared by scripts/svg-drift.mjs in the tools job (ER-40)
+        for f in [
+            "apps/debrief/docs/diagrams/uml-seq-moment.drawio",
+            "apps/debrief/docs/diagrams/svg/uml-seq-moment.svg",
+            "apps/dyno/diagrams/svg/c4-1-context.svg",
+            "docs/images/src/drawio/paddock-handoffs.drawio",
+            "docs/images/paddock-handoffs.svg",
+        ] {
+            let p = plan(&[f]);
+            assert_eq!(
+                (&p["tools"], &p["docs"], &p["all"], &p["apps"]),
+                (&json!(true), &json!(false), &json!(false), &json!([])),
+                "{f}"
+            );
+        }
+        let asset = plan(&["apps/dyno/app/src/assets/svg/logo.svg"]);
+        assert_eq!((&asset["tools"], &asset["apps"]), (&json!(false), &json!(["dyno"])));
         assert_eq!(plan(&["apps/dyno/CHANGELOG.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["apps/dyno/REVIEWED.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["icons/REVIEWED.md"])["conformance"], true);

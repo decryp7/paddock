@@ -20,6 +20,10 @@ The shared way to draw Debrief, Pitcrew, Pitwall, Dyno and Spotter diagrams. The
 2. Open it in draw.io and edit. Keep the 8 px grid on, the labels beside the lines and the canvas inside the size limit.
 3. Export: `scripts/export-diagrams.sh` (copy it from `diagrams/scripts/` once into the app's `scripts/`).
 4. Look at the PNG and a dark render before you commit.
+5. Never edit an exported SVG by hand (ER-40). CI re-exports every `.drawio` with the pinned draw.io (`ci-image/Dockerfile`,
+   `DRAWIO_VERSION`) and fails on a difference: `node scripts/svg-drift.mjs` runs the same check where draw.io is installed
+   (`DRAWIO=<path>` to point at it). It ignores what depends on the host's fonts (the fallback text lines, a few pixels of canvas
+   size) and nothing else; `scripts/svg-drift.mjs` lists exactly what it normalises. A SVG is expected at `<dir>/svg/<name>.svg`.
 
 ## Load the shape library
 

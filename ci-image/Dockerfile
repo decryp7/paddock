@@ -46,6 +46,13 @@ ARG PLAYWRIGHT_VERSION=1.64.1
 ARG CHROME_VERSION=156.0.8078.47
 ARG CHROME_SHA256_AMD64=e6c94490f0b6b337225aeb2d2a5034858516b7017356980ba94f5176d8774a50
 
+# draw.io desktop (the CLI export of the SVG drift check, scripts/svg-drift.mjs). Source: GitHub release jgraph/drawio-desktop
+# v32.6.10 (2026-11-04), drawio-amd64-32.6.10.deb; the SHA-256 is the release's own digest and was recomputed on 2026-11-12.
+# The version is the one that exported the committed diagrams (the kit writes mxfile version 32.5.5; the export script is unchanged).
+# renovate: datasource=github-releases depName=jgraph/drawio-desktop
+ARG DRAWIO_VERSION=32.6.10
+ARG DRAWIO_SHA256_AMD64=fc96faafe68cb4e06c0b7116779891592b20fce2cde7907adec504f23c5af83c
+
 COPY fetch-verified.sh /usr/local/bin/fetch-verified
 RUN set -eu; \
     case "${TARGETARCH:-amd64}" in \
@@ -88,6 +95,14 @@ RUN set -eu; \
     else \
       echo "no Chrome for Testing for linux/${A}: Playwright's own Chromium is used" > /out/chrome-for-testing/README; \
     fi; \
+    # draw.io desktop (amd64 only; installed with apt in the final stage)
+    mkdir -p /out/drawio; \
+    if [ "$A" = amd64 ]; then \
+      fetch-verified "https://github.com/jgraph/drawio-desktop/releases/download/v${DRAWIO_VERSION}/drawio-amd64-${DRAWIO_VERSION}.deb" \
+        "$DRAWIO_SHA256_AMD64" /out/drawio/drawio.deb; \
+    else \
+      echo "no draw.io package installed for linux/${A}" > /out/drawio/README; \
+    fi; \
     rm -rf /tmp/dl
 
 # ---- Stage 2: the image. -------------------------------------------------------------------------------------------------------
@@ -99,11 +114,17 @@ ARG CHROME_VERSION=156.0.8078.47
 ARG DUCKDB_VERSION=1.5.6
 ARG SCCACHE_VERSION=0.19.0
 ARG SHELLCHECK_VERSION=0.11.0
+ARG DRAWIO_VERSION=32.6.10
 
 # sccache at the exact pin replaces whatever the base carries; the cargo tools sit beside the base's.
 COPY --from=fetch /out/bin/ /usr/local/bin/
 COPY --from=fetch /out/libduckdb /opt/libduckdb
 COPY --from=fetch /out/chrome-for-testing /opt/chrome-for-testing
+COPY --from=fetch /out/drawio /tmp/drawio
+
+# draw.io desktop for scripts/svg-drift.mjs (it runs headless under xvfb-run with --no-sandbox; the check passes both).
+RUN if [ -f /tmp/drawio/drawio.deb ]; then apt-get update && apt-get install -y --no-install-recommends /tmp/drawio/drawio.deb; fi \
+ && rm -rf /tmp/drawio /var/lib/apt/lists/*
 
 # Playwright's browsers at the version the apps pin: a no-op when the base already has them (its pin is checked below).
 RUN npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium webkit \
@@ -126,7 +147,7 @@ COPY verify.sh /usr/local/bin/paddock-ci-verify
 # The build fails here when the image is not what the jobs expect; on success the manifest is /etc/paddock-ci-release.
 # (Chrome is checked on amd64 only: Google publishes no Linux arm64 build.)
 RUN EXPECT_NODE_MAJOR="${NODE_MAJOR}" EXPECT_SCCACHE="${SCCACHE_VERSION}" EXPECT_PLAYWRIGHT="${PLAYWRIGHT_VERSION}" \
-    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_SHELLCHECK="${SHELLCHECK_VERSION}" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
+    EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_SHELLCHECK="${SHELLCHECK_VERSION}" EXPECT_DRAWIO="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${DRAWIO_VERSION}")" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
     paddock-ci-verify
 
 LABEL org.opencontainers.image.title="paddock-ci" \
