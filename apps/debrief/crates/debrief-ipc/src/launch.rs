@@ -164,6 +164,13 @@ impl Connection for Child {
     fn kill(&self) {
         self.stop();
     }
+
+    fn kill_after_failure(&self) {
+        if let Process::Spawned(p) = &self.process {
+            p.note_published_exit();
+        }
+        self.stop();
+    }
 }
 
 impl Drop for Child {

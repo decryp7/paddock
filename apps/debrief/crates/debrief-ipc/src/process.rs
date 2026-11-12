@@ -290,7 +290,31 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Reads a child's standard error into its log until end of output, then records how it exited (unless
 /// Debrief is already stopping it, which records that itself).
-fn capture_stderr(stderr: impl Read + Send + 'static, log: Arc<ChildLog>, child: Arc<Mutex<Option<OsChild>>>, note: Arc<ExitNote>) {
+/// Test seam: the stderr readers of children logged under these names read their output but never record their exit, so a
+/// test can stop a child whose exit nobody has noted yet (the order in which Debrief's stop and the reader race).
+#[cfg(any(test, feature = "test-support"))]
+static HELD_READERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Holds the exit-recording half of the stderr reader of every child logged under `name` started from now on (tests).
+#[cfg(any(test, feature = "test-support"))]
+pub fn hold_exit_reader(name: &str) {
+    lock(&HELD_READERS).push(child_log::log_name(name));
+}
+
+fn reader_held(_name: &str) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    return lock(&HELD_READERS).iter().any(|n| n == _name);
+    #[cfg(not(any(test, feature = "test-support")))]
+    false
+}
+
+fn capture_stderr(
+    stderr: impl Read + Send + 'static,
+    log: Arc<ChildLog>,
+    child: Arc<Mutex<Option<OsChild>>>,
+    note: Arc<ExitNote>,
+    held: bool,
+) {
     let spawned = std::thread::Builder::new().name("debrief-child-stderr".into()).spawn(move || {
         let mut r = std::io::BufReader::new(stderr);
         let mut line = Vec::new();
@@ -300,6 +324,9 @@ fn capture_stderr(stderr: impl Read + Send + 'static, log: Arc<ChildLog>, child:
                 Ok(0) | Err(_) => break,
                 Ok(_) => log.output(&String::from_utf8_lossy(&line)),
             }
+        }
+        if held {
+            return;
         }
         let deadline = std::time::Instant::now() + EXIT_WAIT;
         while std::time::Instant::now() < deadline {
@@ -442,7 +469,7 @@ impl ChildProcess {
                 stopping: AtomicBool::new(false),
             });
             if let Some(err) = stderr {
-                capture_stderr(err, log, child.clone(), note.clone());
+                capture_stderr(err, log, child.clone(), note.clone(), reader_held(&l.name));
             }
             note
         });
@@ -576,6 +603,22 @@ impl ChildProcess {
     /// A child that already ended on its own is recorded as such (crash or normal), before Debrief stops it.
     fn note_own_exit(&self) {
         if let Some(s) = self.try_exit() {
+            self.note_exit(Some(s));
+        }
+    }
+
+    /// Stops a child whose connection broke (a call failed as a process failure): it has most likely ended on its own, so the
+    /// OS is given a moment to publish its exit, which is recorded as its own (a crash), before Debrief stops it.
+    pub fn kill_after_failure(&self) {
+        self.note_published_exit();
+        self.kill();
+    }
+
+    /// Records the child's own exit, waiting up to 200 ms for the OS to publish it ([`ChildProcess::exit_soon`]): a child
+    /// whose connection just broke has usually exited, but its status can lag the broken pipe. One still running is left to
+    /// the stop that follows.
+    pub(crate) fn note_published_exit(&self) {
+        if let Some(s) = self.exit_soon() {
             self.note_exit(Some(s));
         }
     }
