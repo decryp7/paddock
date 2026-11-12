@@ -15,17 +15,25 @@ ER-37, ADR [0080](../adr/0080-ci-at-the-speed-of-the-critical-path.md) and [docs
    landing step.
 5. Release tags `*-v*` are protected and pushed by a release bot account; the queue's tag step uses the bot's token. The
    user creates the bot account.
+6. Q1 (a): the fast-forward of main is automatic, with a hold switch. Q2 (a): batches of up to 6. Q3 (a): several suspects
+   are all dropped and the rest retried (no bisection). The landed and decided state comes from one place, the ledger.
 
 ## The ledger (slice 0, on `feat/dev-pr-ledger`)
 
 - Every branch gets a draft pull request against main (`./dev pr open <branch>`): `WIP:` title (Gitea's draft prefix), the
   body lists the commits, label `state/built`. Opening it starts no CI run: ci.yml, debrief.yml and debrief-mutants.yml lost
-  their `pull_request` trigger (rule 50: runs only on dispatch, a train, main, tags and schedules).
+  their `pull_request` trigger, and the contract test `no_workflow_runs_on_a_pull_request` keeps any workflow from getting
+  one back.
 - State labels are one exclusive scope: `state/built` -> `state/in-review` -> `state/fixes` | `state/approved` ->
   `state/in-train` -> `state/landed`. Debts: `owes/windows-tests`, `owes/vm-rows`, `owes/rule54-bundle`. Also `security`,
   `app/<app>` (one per app folder), `review-round/1|2` (exclusive).
 - `./dev pr label <branch> +x -y`, `./dev pr list [--state approved]` (branch, head, labels, newest CI run per workflow),
   `./dev pr sync` (labels from the TOML; never deletes), `./dev pr plan-status [--write]`.
+- **Prerequisite: "autodetect manual merge".** The queue lands by a fast-forward push, so Gitea marks a pull request merged
+  only when the repository setting `autodetect_manual_merge` is on. On dev.decryptology.net it is **off** (read-only GET of
+  `/api/v1/repos/decryp7/paddock`, 2026-11-12: `autodetect_manual_merge: false`, `allow_manual_merge: false`). The ledger does
+  not depend on it: `plan-status` counts a pull request as landed when its head is on main, and `pr sync` warns while the
+  setting is off. Turning it on (repository settings, pull requests) makes the server's view agree; the user decides.
 
 ## How the queue works
 
@@ -33,7 +41,7 @@ One queue for the repository, one train at a time. Runners are the scarce resour
 full train run, lessons:1751), so the queue does not run GitLab's or Zuul's parallel speculative pipelines; it runs one
 batch, and only what failed is rerun.
 
-1. **Take.** The `state/approved` pull requests, oldest approval first, up to the batch size (decision Q2). A PR that is
+1. **Take.** The `state/approved` pull requests, oldest approval first, up to 6 (Q2, decided). A PR that is
    not mergeable with main, is a draft of another base, or has no green review round is skipped with a comment. Each taken
    PR moves to `state/in-train`.
 2. **Build the train.** A fresh branch `train/<date>-<n>` from origin/main, in the integrator's locked worktree. Each PR is
@@ -44,12 +52,15 @@ batch, and only what failed is rerun.
    `./dev gates check`, commit-lint over `origin/main..train`. A failure here is mapped to its PR (step 5) and dropped
    before any runner is used.
 4. **Dispatch (rule 50h, ER-10).** `ci.yml` (and each app workflow the plan reaches) by `workflow_dispatch` with `base` =
-   origin/main: the affected plan of the whole train. The Windows leg runs every crate and app that an `owes/windows-tests`
+   origin/main: the affected plan of the whole train. Two things pull requests used to start must be dispatched or run here:
+   debrief.yml's pull-request commit lint is gone (ci.yml's `commits` job lints the train's range on a dispatch, and step 3
+   runs commit-lint locally), and debrief-mutants' changed-lines run is a dispatch of `debrief-mutants.yml` with
+   `base: origin/main` when the train touches `apps/debrief/crates/debrief-core`. The Windows leg runs every crate and app that an `owes/windows-tests`
    PR touches, in one leg (needs a new dispatch input, slice 2). Slower local checks (Linux container, tests under load)
    run beside it; a local failure cancels the run.
 5. **On red: find the culprit.** `./dev plan --since-run <run>` lists the failed jobs and tests. Each failed test belongs
    to a project (crate, app, tool); the suspects are the train's PRs whose affected set (`./dev plan origin/main <pr-head>`)
-   contains that project. One suspect: it is dropped. Several: decision Q3 (bisect the suspects, or drop them all). A failure
+   contains that project. One suspect: it is dropped. Several: all are dropped (Q3, decided). A failure
    that also fails on main (the triage of tools-research candidate 2) is not blamed on any PR; the train stops and the
    coordinator decides. A dropped PR gets `state/fixes` and a comment naming the failed tests, the run and the job logs.
 6. **Retry the rest.** The train is rebuilt without the dropped PRs and only what failed is rerun (`since_run`, ER-10 fix
@@ -60,8 +71,8 @@ batch, and only what failed is rerun.
    dispatches `<app>-release.yml` with gates on and the installers built, on the final head, before landing (rule 54(c):
    gates skipped only where a green ci.yml run on the same commit covered them).
 9. **Land.** `git push origin <train-head>:main` as a fast-forward only (never a force, never a rebase), then check that
-   origin/main equals the train head. Decision Q1: automatic, or after the coordinator's approval. Gitea marks each PR merged
-   when its head reaches main; the queue sets `state/landed`, clears `owes/windows-tests` for the PRs the Windows leg covered,
+   origin/main equals the train head. Automatic (decision 6), unless the queue is on hold. Gitea marks each PR merged only
+   with "autodetect manual merge" on (see the prerequisite above); the queue sets `state/landed` either way, clears `owes/windows-tests` for the PRs the Windows leg covered,
    and runs `./dev pr plan-status --write` on main's plan files (a docs-only commit, rule 50d) so no plan row says "open"
    for landed work.
 10. **Releases (ER-31).** The queue never tags as part of a landing. `./dev queue release <app>` (slice 5) tags the app's
@@ -69,10 +80,11 @@ batch, and only what failed is rerun.
     its release branch's tested commit when the failures are in code it does not ship, and that branch then goes through the
     queue like any other.
 
-**One train's CI at a time per shared runner class.** Before any dispatch (step 4, a fix round, the final run, a rule 54
-run) the queue lists the in-progress and queued paddock runs and the runner classes their jobs use; while another run holds a
-class this dispatch needs (the macOS runner `d7-mac-mini` above all, which is one host), it waits for that run with
-`./dev wait --ci-run <id> --max <duration>` instead of dispatching beside it. This removes a recurring class (ER-21),
+**One train's CI at a time per shared runner class.** Every dispatch of the queue (step 4, a fix round, the final run, a
+rule 54 run) goes through `./dev ci dispatch`, which already waits while another paddock run holds a runner class the
+dispatch needs (the macOS runner `d7-mac-mini` above all, which is one host) and gives up at `--max` without dispatching
+(`tools/paddock-dev/src/ci_runs/dispatch.rs`, from `fix/scratch-root-guard-and-runner-busy`, carried on `fix/hooks-shellscan`
+`ab3d98f0b`). The queue reuses it and builds no second guard. This removes a recurring class (ER-21),
 **overlapping CI runs on one shared runner**: runs 7960 and 7961, and 7969 to 7971 with 7967, overlapped on d7-mac-mini, and
 heavy Debrief tests then hit their fixed 90 s budgets. Hand dispatches made that overlap possible; the queue is the one
 dispatcher of train runs, so it can hold the rule (coordinator, 2026-11-12).
@@ -105,31 +117,41 @@ affected plan, which none of the five can do, so most failures need no bisection
 |---|---|---|
 | 0 | Ledger: labels, `./dev pr open/label/list/sync/plan-status`, no `pull_request` triggers | 1.5 (this branch) |
 | 1 | `./dev queue build`: take approved PRs, build the train branch with merge check and hakari diff, fast gates, labels | 1.5 |
-| 2 | `./dev queue run`: dispatch with `base` and `since_run`, a Windows-leg dispatch input for owing crates and apps, wait with `./dev wait --ci-run`, the one-run-per-runner-class guard, the backup-window guard | 2 |
-| 3 | Culprit and retry: failed tests to projects to suspect PRs, drop with `state/fixes` and a comment, rebuild, failed-only rerun, the final full run | 1.5 (+1 for bisection, Q3) |
+| 2 | `./dev queue run`: dispatch through `./dev ci dispatch` (its runner-busy wait) with `base` and `since_run`, a Windows-leg dispatch input for owing crates and apps, the debrief-mutants dispatch, wait with `./dev wait --ci-run`, the backup-window guard | 1.5 |
+| 3 | Culprit and retry: failed tests to projects to suspect PRs, drop all suspects with `state/fixes` and a comment (Q3), rebuild, failed-only rerun, the final full run | 1.5 |
 | 4 | Landing: rule 54 dispatch, fast-forward with the remote-head check, `state/landed`, `plan-status --write` commit | 1 |
 | 5 | Release step: `./dev queue release <app>` with the bot token on protected tags (after the user creates the bot) | 0.5 |
 
-Full queue: 7.5 to 8.5 agent-days after slice 0. Cheaper options, always on offer:
+Full queue: **6 agent-days** after slice 0 (slices 1 to 5).
 
-- **Thin `./dev train`** (tools research D3a, 2 d): slices 1 and 4 only; the integrator still reads failures and drops PRs
-  by hand with `./dev pr label`. Keeps most of the speed-up of the ledger.
+**Cost against common practice, plainly.** On GitHub or GitLab a merge queue is a setting: 0 build days, the platform runs
+it. Gitea has none, so here it is built. The research recommended the **thin `./dev train` first** (tools research D3a,
+2 d; the full queue only if trains still take more than 12 h after the triage tool). The full queue is about 4 days beyond
+that, so under the ER-37 amendment (more than 1 day beyond common practice needs the user's yes) its cost needs the user's
+explicit yes: the 2026-11-12 decision for a full queue was made before this cost was on the table. Options, always on offer:
+
+- **Thin `./dev train`** (tools research D3a, 2 d, recommended there as the first step): slices 1 and 4 only; the
+  integrator still reads failures and drops PRs by hand with `./dev pr label`. Keeps most of the speed-up of the ledger.
 - **Scripted checklist** (0.5 d): the integrator's steps as a script that prints the next command; no automation of drops.
 - **Gitea's "merge when checks succeed"** (0 d to try): merges one PR when its own checks pass, but tests no combination,
   so it gives up what trains are for; not recommended.
 
-## Decisions for the user
+## Decisions
 
-- **Q1. Fast-forward of main.** (a) Automatic after the final full run, the merge check and rule 54 are green
-  (recommended: what all five systems do; the gates, not a person, decide; the coordinator can hold the queue with a
-  `queue/hold` label or `./dev queue hold`). (b) The coordinator approves each fast-forward (one round trip per train, as
-  today).
-- **Q2. Batch size.** (a) Up to 6 PRs per train (recommended: the five trains so far took 5 to 24 run-hours each, tools
-  research appendix; a small batch keeps a culprit search short). (b) Up to 10. (c) 1 (no batching: every PR its own run; most runner time).
-- **Q3. Several suspects for one failure.** (a) Drop all suspects and retry the rest; each dropped author gets the failed
-  tests (recommended: cheapest in runner time, and the affected plan usually leaves one suspect). (b) Bisect the suspects
-  with failed-only reruns, as bors and Mergify do (+1 d to build, one more run per halving).
+Decided by the user (2026-11-12):
+
+- **Q1. Fast-forward of main: automatic**, after the final full run, the merge check and rule 54 are green, with a hold
+  switch (a `queue/hold` label or `./dev queue hold`).
+- **Q2. Batch size: up to 6** PRs per train.
+- **Q3. Several suspects for one failure: drop them all** and retry the rest; each dropped author gets the failed tests.
+  No bisection.
+
+Open for the user:
+
+- **Cost (ER-37 amendment).** (a) The full queue, 6 agent-days after slice 0. (b) The thin `./dev train` first, 2 d, and the
+  rest only if trains still take more than 12 h (the research's recommendation). (c) The scripted checklist, 0.5 d.
+- **"Autodetect manual merge".** Turn it on for decryp7/paddock (recommended; the ledger works either way), or leave it off.
 - **Q4. Owed Windows tests during the backup window.** (a) Hold the train until 04:00 (recommended when anything owes
   Windows tests). (b) Run Linux and macOS now and land only the PRs that owe nothing.
-- **Decided (user, 2026-11-12):** protected `*-v*` tags with a release bot account; the queue's tag step uses the bot's
+- Also decided (user, 2026-11-12): protected `*-v*` tags with a release bot account; the queue's tag step uses the bot's
   token; the user creates the bot account.
