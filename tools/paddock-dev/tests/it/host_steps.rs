@@ -130,6 +130,11 @@ fn tree(fx: &Fx) -> Vec<String> {
             if matches!(rel.as_str(), "bin" | "calls" | "github-env" | "github-path") || rel.starts_with("bin/") {
                 continue;
             }
+            // The owner record `./dev disk` reads (feat/dev-disk): the Rust kit's slot paths write it, the shell fallback does not.
+            // It is not part of what a step does, so the parity of the two compares everything else.
+            if e.file_name() == ".paddock-owner.toml" {
+                continue;
+            }
             let t = e.file_type().unwrap();
             if t.is_symlink() {
                 let target = std::fs::read_link(&p)
