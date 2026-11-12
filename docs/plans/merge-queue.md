@@ -17,6 +17,11 @@ ER-37, ADR [0080](../adr/0080-ci-at-the-speed-of-the-critical-path.md) and [docs
    user creates the bot account.
 6. Q1 (a): the fast-forward of main is automatic, with a hold switch. Q2 (a): batches of up to 6. Q3 (a): several suspects
    are all dropped and the rest retried (no bisection). The landed and decided state comes from one place, the ledger.
+7. The queue runs as a scheduled Gitea Actions job, not from an agent session (see "Where the queue runs").
+8. A landing that changes an app's version source tags that app through tag.yml; release-bot pushes the tag (see "Auto-tag
+   on a version bump").
+9. Development stays AI-only until the code is stable, so the automatic AI review of PRs is not built now; its design is
+   kept under "Later: when people contribute".
 
 ## The ledger (slice 0, on `feat/dev-pr-ledger`)
 
@@ -75,10 +80,10 @@ batch, and only what failed is rerun.
    with "autodetect manual merge" on (see the prerequisite above); the queue sets `state/landed` either way, clears `owes/windows-tests` for the PRs the Windows leg covered,
    and runs `./dev pr plan-status --write` on main's plan files (a docs-only commit, rule 50d) so no plan row says "open"
    for landed work.
-10. **Releases (ER-31).** The queue never tags as part of a landing. `./dev queue release <app>` (slice 5) tags the app's
-    tested commit, using the release bot's token on protected `*-v*` tags (decision 5); ER-31(a) still lets an app tag on
-    its release branch's tested commit when the failures are in code it does not ship, and that branch then goes through the
-    queue like any other.
+10. **Tags (ER-31, decision 8).** After the fast-forward, the landing step looks for apps whose version source changed in
+    the landed range and requests each tag through tag.yml (see "Auto-tag on a version bump"). Nothing else tags. ER-31(a)
+    still lets an app tag on its release branch's tested commit when the failures are in code it does not ship; that request
+    goes to tag.yml by hand, and the branch then goes through the queue like any other.
 
 **One train's CI at a time per shared runner class.** Every dispatch of the queue (step 4, a fix round, the final run, a
 rule 54 run) goes through `./dev ci dispatch`, which already waits while another paddock run holds a runner class the
@@ -93,6 +98,54 @@ dispatcher of train runs, so it can hold the rule (coordinator, 2026-11-12).
 in, or is likely to run into, 00:00-04:00 local (docs/ci-schedules.md). In that window it either holds the train, or runs
 the Linux and macOS legs and keeps `owes/windows-tests` on the PRs, which then cannot land until a later Windows leg runs
 (decision Q4).
+
+## Where the queue runs (decision 7)
+
+`.gitea/workflows/queue.yml` runs `./dev queue tick` (take, build, dispatch, judge, land: one step forward per tick, with the
+state in the PR labels and the train branch, so a tick can stop anywhere and the next one carries on).
+
+- **Triggers.** `schedule` every 5 minutes (`*/5 * * * *`; Gitea runs schedules from the default branch), plus label
+  changes. Gitea Actions matches label changes as `pull_request` with `types: [labeled, unlabeled]` (the label hook is routed
+  to the pull-request matcher and mapped to those activity types: `modules/actions/workflows.go` in go-gitea/gitea, read
+  2026-11-12; without `types:` only opened, reopened and synchronize start a run, Gitea FAQ, docs.gitea.com/usage/actions/faq).
+  The trigger is **`pull_request_target`**, so the workflow file comes from main, never from the PR's branch; the FAQ lists
+  `pull_request_target` with the same types rule, but the matcher source above does not show how it is matched, so slice 6
+  first proves on the server that a label change starts it. If it does not, the 5-minute schedule alone is the trigger.
+  The contract test `no_workflow_runs_on_a_pull_request` then allows exactly this form: `pull_request_target` with `types`
+  only `labeled`/`unlabeled`, in queue.yml, and still fails on any other pull-request trigger (a label change
+  starts a queue tick or a review, never a build of the branch).
+- **One queue run at a time.** `concurrency: {group: merge-queue, cancel-in-progress: false}`: a tick that starts while one
+  runs waits instead of cancelling it (a cancel mid-push could leave a half-landed train). Concurrency groups already work on
+  this server (ci.yml and debrief.yml use them; tools research: one run in 14 days outlived a newer push). Whether Gitea 28.3
+  queues rather than drops a waiting run is checked in slice 6; the fallback is a lock the tick takes first (the train
+  branch's lease, compare-and-swap on its ref) and a tick that finds it held exits at once.
+- **Runner: Linux** (`ubuntu-latest`, the paddock-ci image). The tick merges, runs the Linux fast gates (fmt, clippy, xwin
+  clippy, conformance, `./dev gates check`, commit-lint), dispatches and waits; it never takes the macOS or Windows runner,
+  which the dispatched runs need. Merging and gates run with no token in their environment (PR code runs there); the token
+  is set only on the steps that push, label, comment and dispatch.
+- **Token: a new `queue-bot` account**, secret `QUEUE_BOT_TOKEN`, scopes: repository write (branches and main), issues and
+  pull requests write, actions dispatch. Not release-bot: release-bot's token is the only one that can push protected `*-v*`
+  tags (tag.yml on `ci/release-bot-tag-workflow`), and the queue job runs PR code (the fast gates), so a token in that job
+  must not be able to tag. A separate bot also makes the history say who did what. Its push to main starts the push-to-main
+  runs, which the job's own token would not (Gitea ignores events whose doer is the Actions user, as tag.yml notes). The
+  user creates queue-bot, as with release-bot.
+- **Hold.** The backup-window hold stays: a tick between 00:00 and 04:00 local dispatches nothing with a Windows leg (Q4),
+  and a `queue/hold` label on any PR, or `./dev queue hold`, stops every tick after its read step.
+
+## Auto-tag on a version bump (decision 8)
+
+- **Trigger: the queue's landing step** (step 10), not a push-to-main path filter, so landing and tagging stay in one
+  place: the step that knows what it just landed also knows which apps' version sources changed
+  (`git diff --name-only <old main>..<new main>` against each app's version source from `paddock.ci.json` and the
+  tag checker's table). A path filter on main would also fire for a commit landed by hand and would need its own copy of that
+  table.
+- **What runs.** For each such app the step dispatches tag.yml (`POST .../actions/workflows/tag.yml/dispatches`, ref main,
+  inputs `tag = <app>-v<version>`, `sha = <new main head>`) with queue-bot's token. tag.yml runs its same checks (the
+  version source says that version, the newest full run of the app's gate workflow on exactly that sha is green, the tag
+  gates) and release-bot's token pushes the tag in tag.yml's own `push` job. The queue holds no release token.
+- **Timing.** The full run on the landed sha is the push-to-main run that the fast-forward starts, so the request waits for
+  it (`./dev wait --ci-run`, bounded); a red run means no tag and a comment on the PRs that bumped the version.
+- Depends on `ci/release-bot-tag-workflow` (`52e060a3a`) landing and on tag protection being on.
 
 ## Common practice (ER-37)
 
@@ -120,15 +173,17 @@ affected plan, which none of the five can do, so most failures need no bisection
 | 2 | `./dev queue run`: dispatch through `./dev ci dispatch` (its runner-busy wait) with `base` and `since_run`, a Windows-leg dispatch input for owing crates and apps, the debrief-mutants dispatch, wait with `./dev wait --ci-run`, the backup-window guard | 1.5 |
 | 3 | Culprit and retry: failed tests to projects to suspect PRs, drop all suspects with `state/fixes` and a comment (Q3), rebuild, failed-only rerun, the final full run | 1.5 |
 | 4 | Landing: rule 54 dispatch, fast-forward with the remote-head check, `state/landed`, `plan-status --write` commit | 1 |
-| 5 | Release step: `./dev queue release <app>` with the bot token on protected tags (after the user creates the bot) | 0.5 |
+| 5 | Auto-tag: version-source diff per app in the landing step, tag.yml dispatch, wait for the full run (after tag.yml lands) | 0.5 |
+| 6 | queue.yml: schedule plus `pull_request_target` labeled, concurrency, Linux runner, queue-bot token scoped to its steps, the hold, the contract-test exception, proving the trigger and the queueing on the server | 1 |
 
-Full queue: **6 agent-days** after slice 0 (slices 1 to 5).
+Full queue with the scheduled job and auto-tag: **7 agent-days** after slice 0 (slices 1 to 6).
 
 **Cost against common practice, plainly.** On GitHub or GitLab a merge queue is a setting: 0 build days, the platform runs
 it. Gitea has none, so here it is built. The research recommended the **thin `./dev train` first** (tools research D3a,
-2 d; the full queue only if trains still take more than 12 h after the triage tool). The full queue is about 4 days beyond
+2 d; the full queue only if trains still take more than 12 h after the triage tool). The full queue is about 5 days beyond
 that, so under the ER-37 amendment (more than 1 day beyond common practice needs the user's yes) its cost needs the user's
-explicit yes: the 2026-11-12 decision for a full queue was made before this cost was on the table. Options, always on offer:
+explicit yes: the 2026-11-12 decision for a full queue was made before this cost was on the table. Options, always on
+offer:
 
 - **Thin `./dev train`** (tools research D3a, 2 d, recommended there as the first step): slices 1 and 4 only; the
   integrator still reads failures and drops PRs by hand with `./dev pr label`. Keeps most of the speed-up of the ledger.
@@ -148,10 +203,48 @@ Decided by the user (2026-11-12):
 
 Open for the user:
 
-- **Cost (ER-37 amendment).** (a) The full queue, 6 agent-days after slice 0. (b) The thin `./dev train` first, 2 d, and the
-  rest only if trains still take more than 12 h (the research's recommendation). (c) The scripted checklist, 0.5 d.
+- **Cost (ER-37 amendment).** (a) The full queue as a scheduled job with auto-tag, 7 agent-days after slice 0. (b) The thin
+  `./dev train` first, 2 d, and the rest only if trains still take more than 12 h (the research's recommendation).
+  (c) The scripted checklist, 0.5 d.
+- **Bot account.** The user creates queue-bot (`QUEUE_BOT_TOKEN`).
 - **"Autodetect manual merge".** Turn it on for decryp7/paddock (recommended; the ledger works either way), or leave it off.
 - **Q4. Owed Windows tests during the backup window.** (a) Hold the train until 04:00 (recommended when anything owes
   Windows tests). (b) Run Linux and macOS now and land only the PRs that owe nothing.
 - Also decided (user, 2026-11-12): protected `*-v*` tags with a release bot account; the queue's tag step uses the bot's
   token; the user creates the bot account.
+
+## Later: when people contribute
+
+Development stays AI-only until the code is stable (user, 2026-11-12), so nothing below is built now.
+
+### Auto AI review of PRs marked ready
+
+Not built now (decision 9). When it is, it is one slice of about 1.5 agent-days: ai-review.yml and its script, the SDK
+call, the diff fetched as data, the size cap, one comment, a test against a stubbed API, and token measurement on 20 past
+diffs. It also adds `ai-review.yml` to the contract test's label-trigger exception.
+
+- **Trigger.** `.gitea/workflows/ai-review.yml` on `pull_request_target` with `types: [labeled]`, running only when the
+  added label is `state/in-review` (the ready label). It posts one PR comment with P1 and P2 findings and changes no label:
+  the human or agent review round still decides, and `state/approved` is still required to queue.
+- **Call.** A small script with the official SDK (`@anthropic-ai/sdk`, the root npm workspace): model `claude-opus-5-5`,
+  adaptive thinking (`thinking: {type: "adaptive"}`), `output_config.effort: "high"`, streamed with `.finalMessage()`,
+  `max_tokens` 64000, and server-side refusal fallbacks (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`).
+  The system prompt (the reviewer role, `AGENTS.md`, `docs/rules.md`, the P1/P2 format) is stable and cached
+  (`cache_control`, 1 h); the diff goes after it. No tools are declared: the model can only return text.
+- **Secrets.** One secret, `ANTHROPIC_API_KEY`, which the user provides. The job is a single Linux job that references no
+  other secret; the reviewer step gets only the API key, and a separate later step posts the comment with the job's own
+  token (issues write). Because the trigger is `pull_request_target`, the workflow file and the script come from main, so a
+  PR cannot edit them to read other secrets; the PR's diff is fetched through the API as data (`.diff` of the pull request)
+  and nothing from the PR branch is checked out or run.
+- **Prompt injection.** PR content (diff, commit messages, file text) is untrusted. It goes into a user message inside clear
+  delimiters, and the system prompt says it is data to review, never instructions. The worst a hostile diff can do is bend
+  the comment's text: the model has no tools, the job has no write access beyond one comment, the comment is posted
+  verbatim as the bot's review, marked "automated, advisory", and no label or merge depends on it.
+- **Cost (billed per review, estimates, measure before trusting them).** Claude Opus 5.5 is $4 per million input tokens and
+  $20 per million output tokens. An average branch diff here is about 20-40k tokens (to be measured with `count_tokens` on
+  the last 20 landed branches before the job is switched on); the stable prompt about 15k, cached after the first review of
+  the hour (cache reads $0.20 per million). Output with thinking is about 5-15k tokens. That is about $0.25-$0.50 per
+  review (40k input $0.16, 10k output $0.20, plus the first cache write), and about $1-$2 for a large train-sized diff of
+  150k tokens. A cap: diffs over 200k tokens are not sent; the job comments "too large for the automated review".
+- Common practice for the cost (ER-37): GitHub and GitLab offer review bots as installable apps (0 build days); here it
+  would be 1.5 d plus the per-review bill, so it needs the user's yes when it is picked up.
