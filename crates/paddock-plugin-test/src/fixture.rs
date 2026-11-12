@@ -532,10 +532,7 @@ pub fn locate_misbehaving() -> Result<PathBuf, String> {
 
 fn locate_bin(name: &str) -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let mut dir = exe.parent().map(PathBuf::from).unwrap_or_default();
-    if dir.file_name().is_some_and(|n| n == "deps") {
-        dir.pop();
-    }
+    let dir = paddock_testkit::cargo_layout::profile_dir_for(&exe)?;
     find_or_build(&dir, name, || crate::process::build_with_cargo(name))
 }
 

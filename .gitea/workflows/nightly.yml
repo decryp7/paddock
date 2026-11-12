@@ -29,7 +29,7 @@ jobs:
     name: gate (main changed since the last green nightly?)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     outputs:
       run: ${{ steps.plan.outputs.run }}
       # Whether the night ends early because a train is in CI: installers-gate reuses it instead of asking again.
@@ -77,7 +77,7 @@ jobs:
     if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
@@ -106,7 +106,7 @@ jobs:
     if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: ui
@@ -148,7 +148,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     defaults:
       run:
         shell: bash
@@ -227,7 +227,7 @@ jobs:
     needs: [gate]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     outputs:
       run: ${{ steps.decide.outputs.run }}
     steps:
@@ -290,7 +290,7 @@ jobs:
       windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app dyno
       windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/dyno/app/src-tauri/tauri.conf.json --dir
       setup-node: false
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -322,7 +322,7 @@ jobs:
       # Spotter bundles no sidecar (no bundle.externalBin), so the macOS verify has none to start; the seal, the hardened-runtime
       # and TeamIdentifier checks on the .app and the DMG still run. A sidecar added later is read from tauri.conf.json.
       setup-node: false
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -352,7 +352,7 @@ jobs:
       # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
       sidecars: pitcrew-service:--version
       setup-node: false
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -393,7 +393,7 @@ jobs:
       windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app pitwall && node apps/pitwall/scripts/ci/stage-vc-redist.mjs
       windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/pitwall/app/src-tauri/tauri.conf.json --must-contain vc_redist.x64.exe --dir
       setup-node: false
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -407,7 +407,7 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/release-verdict
@@ -441,7 +441,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' && success() && needs.installers-gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
       - run: mkdir -p .nightly-installers && echo "${{ github.sha }}" > .nightly-installers/sha
@@ -524,7 +524,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' && success() && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/nightly-mark

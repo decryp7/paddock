@@ -51,7 +51,7 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: .
@@ -78,7 +78,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     defaults:
       run:
         shell: bash

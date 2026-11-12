@@ -169,13 +169,11 @@ pub(crate) fn end_pinned_group(group: u32, keeper: ProcessId) -> bool {
 /// (group and state together, no sysinfo); an unreadable `/proc` leaves the signal's answer.
 #[cfg(unix)]
 pub(crate) fn group_exists(group: u32) -> bool {
-    if !crate::sys::signal_group(group, 0) {
-        return false;
-    }
+    let signalled = crate::sys::signal_group(group, 0);
     #[cfg(target_os = "linux")]
-    return group_runs_in_proc(std::path::Path::new("/proc"), group).unwrap_or(true);
+    return signalled && group_runs_in_proc(std::path::Path::new("/proc"), group).unwrap_or(true);
     #[cfg(not(target_os = "linux"))]
-    true
+    signalled
 }
 
 /// What `/proc/<pid>/stat` says of a process: its group (field 5), whether it runs, and whether it is a zombie that still

@@ -82,7 +82,8 @@ name_type!(
         && s.contains('.')
         && !s.starts_with('.')
         && !s.ends_with('.')
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-_".contains(c))
 );
 
 name_type!(

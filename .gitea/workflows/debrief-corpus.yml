@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # The paddock-ci image: ./dev (the schedule-skip step) runs there.
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     outputs:
       run: ${{ steps.plan.outputs.run }}
     defaults:

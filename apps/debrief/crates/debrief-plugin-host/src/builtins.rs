@@ -32,7 +32,7 @@ pub fn binary_name() -> &'static str {
 /// Where the bundled plugins binary lives: next to the application executable (Tauri puts `externalBin`
 /// sidecars there). `DEBRIEF_PLUGINS` overrides it in a debug build only: a release build ignores it (and logs its name
 /// once), because the environment must not decide which program runs, possibly elevated. A test binary (in cargo's
-/// `deps` folder) finds the one cargo built next to that folder.
+/// `deps` folder, or `build/<package>/<hash>/out` since cargo 1.100) finds the one cargo built in the profile folder.
 pub fn default_binary() -> PathBuf {
     default_binary_with(cfg!(debug_assertions), std::env::var_os(PLUGINS_VAR))
 }
@@ -54,8 +54,10 @@ fn default_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf 
 
 fn binary_in(dir: &Path) -> PathBuf {
     let here = dir.join(binary_name());
-    match dir.parent() {
-        Some(up) if !here.exists() && dir.file_name().is_some_and(|n| n == "deps") => up.join(binary_name()),
+    // A test program runs from cargo's `deps` folder, or from `build/<package>/<hash>/out` since cargo 1.100: the plugins
+    // cargo built are in the profile folder above either.
+    match paddock_env::cargo_layout::profile_dir_of_dir(dir) {
+        Some(profile) if !here.exists() => profile.join(binary_name()),
         _ => here,
     }
 }
@@ -240,6 +242,17 @@ mod tests {
         std::fs::write(deps.join(binary_name()), b"").unwrap();
         assert_eq!(binary_in(&deps), deps.join(binary_name()));
         assert_eq!(binary_in(t.path()), t.path().join(binary_name()));
+    }
+
+    #[test]
+    fn a_test_binary_in_cargo_1_100_s_build_folder_finds_the_one_cargo_built_beside_the_profile() {
+        let t = tempfile::tempdir().unwrap();
+        let out = t.path().join("build").join("debrief-app").join("2cb3f58e32e5ee48").join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        // Not built: the profile folder's name for it, never a file inside `out`.
+        assert_eq!(binary_in(&out), t.path().join(binary_name()));
+        std::fs::write(out.join(binary_name()), b"").unwrap();
+        assert_eq!(binary_in(&out), out.join(binary_name()));
     }
 
     #[test]

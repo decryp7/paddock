@@ -39,7 +39,7 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     outputs:
       run: ${{ steps.plan.outputs.run }}
     env:
@@ -105,7 +105,7 @@ jobs:
       # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
       sidecars: pitcrew-service:--version
       setup-node: false
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -137,7 +137,7 @@ jobs:
       # --version: Pitcrew's service has no --self-test; its --version loads every library and exits 0.
       sidecars: pitcrew-service:--version
       setup-node: false
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     secrets:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.PADDOCK_TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -153,7 +153,7 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
       - uses: ./.gitea/actions/release-verdict

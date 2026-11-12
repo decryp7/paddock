@@ -21,11 +21,14 @@
 //!   `paddock-proc`'s start judge, and `paddock-proc`'s own tests use this kit, so the kit cannot depend on it.
 //! - [`boot_volume`]: [`boot_volume::boot_volume_temp`], the folder for programs a test starts as their own responsible
 //!   process (disclaimed or by launchd): never on an external volume, where macOS prompts (TCC, Removable Volumes).
+//! - [`cargo_layout`]: `profile_dir()`, `sibling_bin` and `example_bin`, the programs cargo built for this test, found in both
+//!   build-folder layouts (before cargo 1.100 and after) and refusing any other shape.
 //!
 //! Nothing here touches the user's folders or starts a process, except [`boot_volume`], which runs the shared rule
 //! (`conformance/ci/boot-volume.sh`) once per process on macOS; the only real time is [`wait`]'s poll interval.
 
 pub mod boot_volume;
+pub mod cargo_layout;
 pub mod env;
 pub mod golden;
 pub mod hostile;

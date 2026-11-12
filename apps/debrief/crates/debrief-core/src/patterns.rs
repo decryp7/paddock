@@ -603,7 +603,7 @@ fn is_variable(c: &str) -> bool {
     }
     // Paths and URLs.
     let seps = b.iter().filter(|&&x| x == b'/' || x == b'\\').count();
-    if (b[0] == b'/' && b.len() > 1)
+    (b[0] == b'/' && b.len() > 1)
         || c.starts_with("./")
         || c.starts_with("../")
         || c.starts_with("~/")
@@ -611,10 +611,6 @@ fn is_variable(c: &str) -> bool {
         || c.contains("://")
         || (b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'))
         || seps >= 2
-    {
-        return true;
-    }
-    false
 }
 
 // ---------------------------------------------------------------------------

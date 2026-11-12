@@ -36,9 +36,10 @@ pub fn hide_external_bin(current: Option<&str>) -> String {
     patch.to_string()
 }
 
-/// `target/<profile>`, from Cargo's `OUT_DIR` (`target/<profile>/build/<package>-<hash>/out`). `None` for a shorter path.
+/// `target/<profile>`, from Cargo's `OUT_DIR` (`target/<profile>/build/<package>-<hash>/out`, and since cargo 1.100
+/// `target/<profile>/build/<package>/<hash>/out`). `None` for any other shape.
 pub fn profile_dir(out_dir: &Path) -> Option<PathBuf> {
-    out_dir.ancestors().nth(3).map(Path::to_path_buf)
+    paddock_env::cargo_layout::profile_dir_of_dir(out_dir)
 }
 
 /// The files tauri-build writes for the sidecars: `<profile_dir>/<name><ext>`.

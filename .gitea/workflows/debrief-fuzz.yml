@@ -32,7 +32,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: .

@@ -72,7 +72,7 @@ jobs:
     name: plan (affected projects)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     outputs:
       crates: ${{ steps.plan.outputs.crates }}
       ui: ${{ steps.plan.outputs.ui }}
@@ -155,7 +155,7 @@ jobs:
     if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["ipc-endpoints"]'), 'ipc-endpoints') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
@@ -173,7 +173,7 @@ jobs:
     name: ui (tokens, contrast, components, entry points, publish dry run)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: ui
@@ -233,7 +233,7 @@ jobs:
     if: ${{ needs.plan.outputs.ui == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     strategy:
       fail-fast: false
       matrix:
@@ -330,7 +330,7 @@ jobs:
     if: ${{ needs.plan.outputs.conformance == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["conformance"]'), 'conformance') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: conformance
@@ -386,7 +386,7 @@ jobs:
     if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["gitleaks"]'), 'gitleaks') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -405,7 +405,7 @@ jobs:
     if: ${{ needs.plan.outputs.c99 == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["c99"]'), 'c99') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -421,7 +421,7 @@ jobs:
     if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tools"]'), 'tools') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -498,7 +498,7 @@ jobs:
     if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["wiki"]'), 'wiki') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: tools/wiki
@@ -625,7 +625,7 @@ jobs:
     if: ${{ needs.plan.outputs.tools == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["heavy"]'), 'heavy') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: tools/heavy
@@ -678,7 +678,7 @@ jobs:
     if: ${{ needs.plan.outputs.icons == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["icons"]'), 'icons') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -703,7 +703,7 @@ jobs:
     if: ${{ needs.plan.outputs.eslint == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["eslint-preset"]'), 'eslint-preset') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: eslint
@@ -728,7 +728,7 @@ jobs:
     if: ${{ needs.plan.outputs.crates == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["crates"]'), 'crates') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: crates
@@ -803,7 +803,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     # Linux runs in the paddock-ci image (Rust, Tauri's libraries, Node, Playwright, Chrome for Testing, cargo-nextest baked in); Windows and
     # macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     defaults:
       run:
         working-directory: crates
@@ -983,7 +983,7 @@ jobs:
     if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["commits"]'), 'commits') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       # Full history so the range from the base can be read.
       - uses: actions/checkout@v4
@@ -1021,7 +1021,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base != '' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["train-gates"]'), 'train-gates') }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # No secret at all in this job (the queue's contract): ./dev is built from the checkout, never downloaded, so it needs no
       # download credential either (conformance/test/ci-action-env.test.mjs exempts a job whose download is "0").
@@ -1077,7 +1077,7 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.any_app == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["app"]'), 'app') }}
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1252,7 +1252,7 @@ jobs:
         # Every OS; a rerun of a run's failures (since_run) only the failed legs, each with the filter of its failed tests.
         include: ${{ fromJSON(needs.plan.outputs.paddock_dev_legs) }}
     runs-on: ${{ matrix.os }}
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     defaults:
       run:
         working-directory: tools/paddock-dev

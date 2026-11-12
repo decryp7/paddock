@@ -30,14 +30,8 @@ fn fake_runner() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
         .get_or_init(|| {
-            let deps = std::env::current_exe().unwrap();
-            let path = deps
-                .parent()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("examples")
-                .join(format!("fake_runner{EXE}"));
+            // Both build-folder layouts (cargo before 1.100 and after), or a loud refusal (CI run 8027).
+            let path = paddock_testkit::cargo_layout::example_bin("fake_runner");
             // `cargo test` and `cargo nextest run` build examples, `cargo test --test supervision` does not. Build it only
             // when it is missing: nextest runs every test in a process of its own, and one `cargo build` per test queued
             // on cargo's build lock until the tests ran out of time (and missed a build folder set by `--config`).
