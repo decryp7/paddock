@@ -48,7 +48,7 @@ jobs:
   macos-vm:
     name: update smoke in a macOS VM
     needs: [gate]
-    if: always() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false'
+    if: !cancelled() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false'
     runs-on: macos-latest
     timeout-minutes: 120
     env:

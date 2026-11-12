@@ -47,7 +47,7 @@ jobs:
   app:
     name: canary (${{ matrix.app }})
     needs: [gate]
-    if: always() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false'
+    if: !cancelled() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false'
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
