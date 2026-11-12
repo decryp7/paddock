@@ -19,7 +19,7 @@ class TooBig(Exception):
 
 class Cmd:
     __slots__ = ("words", "argv", "redirs", "term", "cwd", "depth", "cond", "is_cd", "cd_target", "after_cd_chain",
-                 "opens", "set_e", "idx", "env")
+                 "opens", "set_e", "idx", "env", "xargs")
 
     def __init__(self):
         self.words = []
@@ -35,6 +35,7 @@ class Cmd:
         self.opens = 0        # leading `{` count
         self.set_e = False    # `set -e` was seen before it
         self.idx = 0
+        self.xargs = False    # fed by xargs
         self.env = []         # NAME=value words that set the command's environment (prefix or `env X=1`)
 
 
@@ -335,7 +336,7 @@ def resolve(cur, target, home):
     return os.path.normpath(os.path.join(cur, target))
 
 
-def _strip(argv, env):
+def _strip(argv, env, flags=None):
     """Remove wrappers (env, sudo, xargs, ...) from the front of a command; NAME=value words go to `env`."""
     argv = list(argv)
     while argv:
@@ -350,6 +351,8 @@ def _strip(argv, env):
                 skip = 2 if argv[0] in _ENV_ARG or (a == "nice" and argv[0] == "-n") else 1
                 argv = argv[skip:]
         elif a == "xargs":
+            if flags is not None:
+                flags.add("xargs")
             argv = argv[1:]
             while argv and argv[0].startswith("-"):
                 argv = argv[2 if argv[0] in _XARGS_ARG else 1:]
@@ -402,8 +405,10 @@ def _finish(st, words, redirs, term, depth):
             elif w[0] == "export" and a in st.vars:
                 st.exported.append("%s=%s" % (a, st.vars[a]))
     env = list(w[:k]) if k < len(w) else []
-    argv = _strip(w[k:] if k < len(w) else [], env)
+    flags = set()
+    argv = _strip(w[k:] if k < len(w) else [], env, flags)
     cmd.argv = argv
+    cmd.xargs = "xargs" in flags
     cmd.env = env + [e for e in st.exported if not (argv and argv[0] == "export")]
     if argv and argv[0] == "set" and any(a.startswith("-") and not a.startswith("--") and "e" in a for a in argv[1:]):
         st.set_e = True
