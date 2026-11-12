@@ -53,7 +53,8 @@ fn the_dry_run_lists_the_gates_ci_runs_for_a_crates_change_and_why_others_are_le
         "run   clippy-windows crates",
         "skip  clippy-linux crates",
         "skip  commit-lint",
-        "skip  conformance",
+        // Conformance is in every plan (fix/lint-no-fixed-test-waits, b013e1142).
+        "run   conformance",
         "run   ipc-endpoints",
     ] {
         assert!(out.contains(want), "{want} missing:\n{out}");
