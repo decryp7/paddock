@@ -352,7 +352,14 @@ mod tests {
         use crate::gates::register::date_history;
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let init = ["-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"];
+        let init = [
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ];
         let git_c = |args: &[&str]| git(root, &[&init[..], args].concat());
         let write = |text: String| {
             std::fs::create_dir_all(root.join("docs")).unwrap();
@@ -376,7 +383,12 @@ mod tests {
             "Gates-date: X 2026-12-06 -> 2026-12-20; approved: coordinator",
         ]);
         let h = register_history(root, "main").unwrap();
-        assert!(date_history(&h).is_empty(), "{:?} in {:?}", date_history(&h), h.last().map(|v| &v.message));
+        assert!(
+            date_history(&h).is_empty(),
+            "{:?} in {:?}",
+            date_history(&h),
+            h.last().map(|v| &v.message)
+        );
     }
 
     #[test]
