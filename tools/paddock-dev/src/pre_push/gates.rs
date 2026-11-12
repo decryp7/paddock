@@ -96,6 +96,9 @@ pub struct Facts {
     /// Run the Linux Clippy in the CI image too (`--linux`): off by default, CI covers it (ER-9's overlap model) and in the
     /// measured run it did not fit the budget.
     pub linux: bool,
+    /// A kept build folder per workspace (`<it>/<workspace>`), used when the caller sets no `CARGO_TARGET_DIR`: the throw-away
+    /// worktree of a pushed commit must not hold the builds (they would start cold every run).
+    pub kept_targets: Option<String>,
     /// The caller's `CARGO_TARGET_DIR`: the Windows lint gets `<it>/xwin` (ADR 0021 §3).
     pub target_dir: Option<String>,
 }
@@ -124,6 +127,11 @@ fn gate(id: String, cwd: &str, program: &str, args: &[&str], rank: u8, next: Str
         rank,
         next,
     }
+}
+
+/// A workspace folder as one folder name: `apps/dyno` is `apps-dyno`.
+fn slug(ws: &str) -> String {
+    ws.replace('/', "-")
 }
 
 fn strs(v: &[&str]) -> Vec<String> {
@@ -195,6 +203,10 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             "fix the lints it printed (a Clippy that needs `--fix` runs on your own files only)".into(),
         );
         g.heavy = true;
+        if let (None, Some(k)) = (&facts.target_dir, &facts.kept_targets) {
+            g.env
+                .push(("CARGO_TARGET_DIR".into(), format!("{}/{}", k.trim_end_matches('/'), slug(&ws))));
+        }
         out.push(Planned::Run(g));
         if all_features || facts.windows_clippy.contains(&ws) {
             let mut args: Vec<&str> = vec![
@@ -219,9 +231,14 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             );
             g.heavy = true;
             g.need = Need::Tool("cargo-xwin".into());
-            if let Some(dir) = &facts.target_dir {
-                g.env
-                    .push(("CARGO_TARGET_DIR".into(), format!("{}/xwin", dir.trim_end_matches('/'))));
+            match (&facts.target_dir, &facts.kept_targets) {
+                (Some(dir), _) => g
+                    .env
+                    .push(("CARGO_TARGET_DIR".into(), format!("{}/xwin", dir.trim_end_matches('/')))),
+                (None, Some(k)) => g
+                    .env
+                    .push(("CARGO_TARGET_DIR".into(), format!("{}/{}/xwin", k.trim_end_matches('/'), slug(&ws)))),
+                (None, None) => {}
             }
             out.push(Planned::Run(g));
         } else {

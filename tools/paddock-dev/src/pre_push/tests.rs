@@ -32,6 +32,7 @@ fn facts() -> Facts {
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         image: Some(Ok("registry/paddock-ci:v7".into())),
         linux: true,
+        kept_targets: None,
         pitwall_tests: vec!["scripts/ci/a.test.mjs".into()],
         dev_exe: "/x/dev".into(),
         target_dir: Some("/t/".into()),
@@ -660,4 +661,92 @@ fn a_pushed_commit_is_checked_out_in_a_throw_away_worktree_that_is_removed() {
         "dirty\n",
         "the main tree was not touched"
     );
+}
+
+#[test]
+fn a_kept_build_folder_per_workspace_is_used_when_the_caller_sets_none() {
+    let mut f = facts();
+    f.target_dir = None;
+    f.kept_targets = Some("/work/pre-push/targets/".into());
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs", "apps/dyno/src/a.rs"]), &f);
+    let env = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).unwrap().env.clone();
+    let var = |v: &str| vec![("CARGO_TARGET_DIR".to_string(), v.to_string())];
+    assert_eq!(env("clippy crates"), var("/work/pre-push/targets/crates"));
+    assert_eq!(env("clippy apps/dyno"), var("/work/pre-push/targets/apps-dyno"));
+    assert_eq!(env("clippy-windows apps/dyno"), var("/work/pre-push/targets/apps-dyno/xwin"));
+    // The caller's own CARGO_TARGET_DIR wins (the host Clippy inherits it; the Windows one gets its xwin folder).
+    f.target_dir = Some("/mine".into());
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy crates").unwrap().clone();
+    assert!(g.env.is_empty());
+}
+
+#[test]
+fn worktree_folders_name_their_run_by_pid_and_start_time_and_only_ended_runs_are_swept() {
+    use super::{parse_tree_name, stale_trees, tree_name};
+    let name = tree_name(4242, 1_700_000_000_123, "0123456789abcdef");
+    assert_eq!(name, "pp-4242-1700000000123-0123456789ab");
+    assert_eq!(parse_tree_name(&name), Some((4242, 1_700_000_000_123)));
+    assert_eq!(parse_tree_name("not-ours"), None);
+    let names = vec![name.clone(), tree_name(7, 99, "aaa"), "other".to_string()];
+    // A pid that is alive with another start time is a different process: the leftover is stale.
+    let alive = |pid: u32, start: u64| pid == 4242 && start == 1_700_000_000_123;
+    assert_eq!(stale_trees(&names, &alive), [tree_name(7, 99, "aaa")]);
+}
+
+#[test]
+fn the_pre_push_folder_is_never_in_the_home_folder() {
+    use super::refuse_home;
+    use std::path::Path;
+    assert!(refuse_home(Path::new("/Users/me/work/pre-push"), Some("/Users/me")).is_err());
+    assert!(refuse_home(Path::new("/Users/me"), Some("/Users/me")).is_err());
+    assert!(refuse_home(Path::new("/Volumes/d7/wt/pre-push"), Some("/Users/me")).is_ok());
+    assert!(refuse_home(Path::new("/anywhere"), None).is_ok());
+}
+
+/// A crashed run's locked worktree is found and removed by the next run, a live one is left alone.
+#[test]
+fn a_leftover_locked_worktree_of_an_ended_run_is_swept_and_a_live_ones_is_kept() {
+    use crate::plan_repo::git_text;
+    let d = tempfile::tempdir().unwrap();
+    let main = d.path().join("main");
+    std::fs::create_dir(&main).unwrap();
+    let git = |args: &[&str]| git_text(&main, args).unwrap_or_else(|| panic!("git {args:?}"));
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@t"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(main.join("a.txt"), "x\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&["commit", "-q", "-m", "one"]);
+    let sha = git(&["rev-parse", "HEAD"]).trim().to_string();
+    let trees = d.path().join("trees");
+    let crashed = super::Detached::new(&main, &trees, &sha).unwrap();
+    let path = crashed.path.clone();
+    std::mem::forget(crashed); // the process died: no Drop ran
+    assert!(
+        git(&["worktree", "list", "--porcelain"]).contains("locked"),
+        "it is locked while its run lives"
+    );
+    assert_eq!(
+        super::sweep_stale(&main, &trees, &|_, _| true),
+        0,
+        "a run that may be alive keeps its folder"
+    );
+    assert!(path.exists());
+    assert_eq!(super::sweep_stale(&main, &trees, &|_, _| false), 1);
+    assert!(!path.exists());
+    assert!(!git(&["worktree", "list", "--porcelain"]).contains("pp-"));
+}
+
+#[test]
+fn extra_pushed_refs_are_not_measured_rows_and_never_passes() {
+    use super::exec::Verdict;
+    let rows = super::extra_ref_rows(&["aaaaaaaaaaaaaaaa".to_string(), "bbb".to_string()]);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].0, "pushed commit aaaaaaaaaaaa");
+    assert!(
+        rows.iter()
+            .all(|(_, v)| matches!(v, Verdict::NotMeasured { next, .. } if next.contains("one at a time")))
+    );
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
 }

@@ -6,6 +6,8 @@
 //! - [`exec`]: running them, with a fake for tests.
 //!
 //! What is checked. With `--refs-from-stdin` (the hook) exactly the commit being pushed: it is checked out in a throw-away worktree
+//! (locked, named by the run's pid and start time, under `PADDOCK_PREPUSH_WORKTREES` or the project's worktree root, never under the
+//! home folder; leftovers of ended runs are swept at the next start; builds go to a kept folder per workspace beside it)
 //! and every gate runs there, so a dirty tree or another checked-out commit cannot change the answer. Without it, the working tree
 //! as it is (a person's run). Only workspaces that hold a changed file themselves get Clippy and format; the ones reached through
 //! dependencies are CI's (ER-9 overlap), and the Linux Clippy in the CI image is opt-in (`--linux`).
@@ -69,19 +71,97 @@ pub struct PrePushArgs {
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// A pushed commit checked out in a folder of its own, removed when this value is dropped.
+/// A pushed commit checked out in a folder of its own: locked while this run lives, unlocked and removed when it is dropped.
 struct Detached {
     main: PathBuf,
     path: PathBuf,
 }
 
+/// Folder name of a run's worktree: `pp-<pid>-<start of that process in microseconds>-<sha>`. Pid plus start time is the identity
+/// of the run (rule 53): a later process that gets the same pid has another start time, so its leftovers are never mistaken for live.
+fn tree_name(pid: u32, start_micros: u64, sha: &str) -> String {
+    format!("pp-{pid}-{start_micros}-{}", &sha[..sha.len().min(12)])
+}
+
+/// `(pid, start)` out of a [`tree_name`], or `None` for a folder that is not ours.
+fn parse_tree_name(name: &str) -> Option<(u32, u64)> {
+    let rest = name.strip_prefix("pp-")?;
+    let mut parts = rest.splitn(3, '-');
+    Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+}
+
+/// The names under `trees` whose run has ended: `alive(pid, start)` says whether that process still runs (it errs towards "yes").
+fn stale_trees(names: &[String], alive: &dyn Fn(u32, u64) -> bool) -> Vec<String> {
+    names
+        .iter()
+        .filter(|n| parse_tree_name(n).is_some_and(|(pid, start)| !alive(pid, start)))
+        .cloned()
+        .collect()
+}
+
+/// Whether the run that made a worktree may still be running: its pid is alive with a start time near the recorded one. A start time
+/// that could not be read (0) or a process table that cannot be read counts as running: the folder is kept (rule 53).
+fn run_may_be_alive(pid: u32, start_micros: u64) -> bool {
+    start_micros == 0 || paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(start_micros)).may_be_alive()
+}
+
+/// Removes the throw-away worktrees of runs that were killed (a second Ctrl+C, a crash, a power cut): unlock, then
+/// `git worktree remove --force`, and a prune for the ones whose folder is already gone.
+fn sweep_stale(main: &Path, trees: &Path, alive: &dyn Fn(u32, u64) -> bool) -> usize {
+    let names: Vec<String> = std::fs::read_dir(trees)
+        .map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect())
+        .unwrap_or_default();
+    let stale = stale_trees(&names, alive);
+    for name in &stale {
+        let p = trees.join(name).to_string_lossy().to_string();
+        let _ = git_text(main, &["worktree", "unlock", &p]);
+        let _ = git_text(main, &["worktree", "remove", "--force", &p]);
+    }
+    let _ = git_text(main, &["worktree", "prune"]);
+    stale.len()
+}
+
+/// The folder pre-push worktrees and kept build folders go under: `PADDOCK_PREPUSH_WORKTREES`, else a `pre-push` folder in the
+/// project's worktree root (the one `./dev worktree` uses: git config `paddock.worktreeRoot`, then `PADDOCK_WORKTREE_ROOT`). Never
+/// under the home folder (ER-14, as heavy.sh refuses a build folder there).
+fn work_base(main: &Path, env: &HashMap<String, String>) -> Result<PathBuf, CliError> {
+    let base = if let Some(v) = env.get("PADDOCK_PREPUSH_WORKTREES").filter(|v| !v.is_empty()) {
+        PathBuf::from(v)
+    } else if let Some(v) = git_text(main, &["config", "--get", "paddock.worktreeRoot"])
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        PathBuf::from(v).join("pre-push")
+    } else if let Some(v) = env.get("PADDOCK_WORKTREE_ROOT").filter(|v| !v.is_empty()) {
+        PathBuf::from(v).join("pre-push")
+    } else {
+        return Err(CliError::failure("There is no folder for the pre-push worktrees.").with_hint(
+            "Set PADDOCK_PREPUSH_WORKTREES, or `git config paddock.worktreeRoot <folder>` once (the root `./dev worktree` uses).",
+        ));
+    };
+    refuse_home(&base, env.get("HOME").map(String::as_str))?;
+    Ok(base)
+}
+
+/// A folder inside the home folder is refused: builds and checkouts do not go on the internal disk (ER-14).
+fn refuse_home(path: &Path, home: Option<&str>) -> Result<(), CliError> {
+    match home.filter(|h| !h.is_empty() && *h != "/") {
+        Some(h) if path.starts_with(h) => Err(CliError::refused(format!("{} is inside the home folder {h}.", path.display()))
+            .with_hint("Use a work disk: set PADDOCK_PREPUSH_WORKTREES (or paddock.worktreeRoot) to a folder outside your home.")),
+        _ => Ok(()),
+    }
+}
+
 impl Detached {
-    /// `git worktree add --detach` of `sha` under `base`, with the main checkout's `node_modules` linked in (conformance needs it).
-    fn new(main: &Path, base: &Path, sha: &str) -> Result<Detached, CliError> {
-        let path = base.join(format!("pp-{}-{}", std::process::id(), &sha[..sha.len().min(12)]));
-        std::fs::create_dir_all(base).map_err(|e| CliError::failure(format!("{} cannot be created: {e}.", base.display())))?;
+    /// `git worktree add --detach --lock` of `sha` under `trees`, with the main checkout's `node_modules` linked in (conformance needs it).
+    fn new(main: &Path, trees: &Path, sha: &str) -> Result<Detached, CliError> {
+        let pid = std::process::id();
+        let start = paddock_proc::ProcessId::of(pid).map_or(0, |p| p.started().as_micros());
+        let path = trees.join(tree_name(pid, start, sha));
+        std::fs::create_dir_all(trees).map_err(|e| CliError::failure(format!("{} cannot be created: {e}.", trees.display())))?;
         let p = path.to_string_lossy().to_string();
-        git_text(main, &["worktree", "add", "--detach", &p, sha]).ok_or_else(|| {
+        let reason = format!("pre-push {pid}");
+        git_text(main, &["worktree", "add", "--detach", "--lock", "--reason", &reason, &p, sha]).ok_or_else(|| {
             CliError::failure(format!("The pushed commit {sha} could not be checked out in {p}."))
                 .with_hint("Run `git worktree add --detach <folder> <sha>` by hand to see why.")
         })?;
@@ -103,6 +183,7 @@ impl Detached {
 impl Drop for Detached {
     fn drop(&mut self) {
         let p = self.path.to_string_lossy().to_string();
+        let _ = git_text(&self.main, &["worktree", "unlock", &p]);
         let _ = git_text(&self.main, &["worktree", "remove", "--force", &p]);
     }
 }
@@ -147,6 +228,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let head_sha = git_text(&root, &["rev-parse", "HEAD"]).map(|t| t.trim().to_string());
     let clean = git_text(&root, &["status", "--porcelain"]).is_some_and(|t| t.trim().is_empty());
     let _checkout;
+    let mut kept_targets = None;
     let work = match pushed.first() {
         Some(sha) if head_sha.as_deref() == Some(sha.as_str()) && clean => {
             notes.push(format!(
@@ -156,13 +238,20 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
             root.clone()
         }
         Some(sha) => {
-            let base = std::env::var("PADDOCK_PREPUSH_WORKTREES").map_or_else(|_| state.join("worktrees"), PathBuf::from);
-            let c = Detached::new(&root, &base, sha)?;
+            let base = work_base(&root, &env)?;
+            let trees = base.join("trees");
+            let swept = sweep_stale(&root, &trees, &run_may_be_alive);
+            if swept > 0 {
+                notes.push(format!("removed {swept} leftover pre-push worktree(s) of runs that ended"));
+            }
+            let c = Detached::new(&root, &trees, sha)?;
             notes.push(format!(
-                "checking the pushed commit {} in a throw-away worktree ({}), removed afterwards",
+                "checking the pushed commit {} in a throw-away worktree ({}), removed afterwards; builds go to {}",
                 &sha[..sha.len().min(12)],
-                c.path.display()
+                c.path.display(),
+                base.join("targets").display()
             ));
+            kept_targets = Some(base.join("targets").to_string_lossy().to_string());
             let p = c.path.clone();
             _checkout = c;
             p
@@ -193,6 +282,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     })?;
     let mut facts = read_facts(&work, &plan, &env);
     facts.linux = args.linux;
+    facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
     if !args.only.is_empty() {
         planned.retain(|p| {
@@ -230,21 +320,29 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
             stop: &stop,
         },
     );
-    for sha in &extra {
-        rows.push((
-            format!("pushed commit {}", &sha[..sha.len().min(12)]),
-            Verdict::NotMeasured {
-                reason: "a run checks one pushed commit and this push has more than one ref".into(),
-                next: "push the refs one at a time (`git push origin <ref>`), so each is checked".into(),
-            },
-        ));
-    }
+    rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
     let mut report = render(head.trim_end(), &rows);
     if stop.load(Ordering::SeqCst) {
         report = report.with_exit(Exit::Interrupted);
     }
     Ok(report)
+}
+
+/// One not-measured row per pushed commit beyond the first: a run checks a single commit, so the others are never passed.
+fn extra_ref_rows(extra: &[String]) -> Vec<(String, Verdict)> {
+    extra
+        .iter()
+        .map(|sha| {
+            (
+                format!("pushed commit {}", &sha[..sha.len().min(12)]),
+                Verdict::NotMeasured {
+                    reason: "a run checks one pushed commit and this push has more than one ref".into(),
+                    next: "push the refs one at a time (`git push origin <ref>`), so each is checked".into(),
+                },
+            )
+        })
+        .collect()
 }
 
 /// The override's ids: the option and the environment variable, comma separated, trimmed.
@@ -563,6 +661,7 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         windows_clippy: windows,
         image: Some(image),
         linux: false,
+        kept_targets: None,
         pitwall_tests: tests,
         dev_exe: std::env::current_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
