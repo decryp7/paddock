@@ -34,6 +34,8 @@ paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata"] }
 paddock-slots = { path = "../../crates/paddock-slots" }
 yaml-rust2 = "0.13"
+# disk: the usage index, as cargo's own global cache tracker is SQLite too (cargo clean gc). Bundled: no system library needed; MIT, SQLite is public domain.
+rusqlite = { version = "0.41", features = ["bundled"] }
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 
 [target.'cfg(unix)'.dependencies]

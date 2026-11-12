@@ -220,11 +220,23 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         .text(&["rev-parse", "HEAD"])
         .map(|s| s.trim().to_string())
         .unwrap_or(base_sha);
+    // The owner record `./dev disk` reads (kind, owner, branch, head, created, last used). A failure is told, never fatal.
+    let mut record_note = String::new();
+    let mut rec = crate::disk::record::Record::new(
+        crate::disk::record::Kind::Worktree,
+        &caller.agent.as_ref().map_or_else(|| req.owner.to_string(), |a| a.id.clone()),
+    );
+    rec.branch = req.branch.unwrap_or("").to_string();
+    rec.head.clone_from(&head);
+    rec.repo = repo.common_dir.display().to_string();
+    if let Err(e) = crate::disk::record::exclude_in_repo(&repo.common_dir).and_then(|()| crate::disk::record::write(Path::new(&k), &rec)) {
+        record_note = format!("\nNo disk owner record written: {e}. `./dev disk adopt` can write it.");
+    }
     Ok(Report::new(
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
                "claimed_by": caller.agent.as_ref().map(|a| a.id.clone())}),
         format!(
-            "Made {k} ({}), locked: {note}",
+            "Made {k} ({}), locked: {note}{record_note}",
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}"))
         ),
     ))
@@ -307,10 +319,13 @@ pub fn claim(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, CliErr
         })
         .map_err(owner_failure)??;
     match outcome {
-        Claim::Granted | Claim::Already => Ok(Report::new(
-            json!({"path": k, "agent_id": agent.id, "already": outcome == Claim::Already}),
-            format!("{k} is claimed by {}.", agent.id),
-        )),
+        Claim::Granted | Claim::Already => {
+            crate::disk::record::touch(Path::new(&k)); // last use for `./dev disk`
+            Ok(Report::new(
+                json!({"path": k, "agent_id": agent.id, "already": outcome == Claim::Already}),
+                format!("{k} is claimed by {}.", agent.id),
+            ))
+        }
         Claim::Held(e) => Err(CliError::refused(format!("{k} is claimed by {}.", e.agent_id))
             .with_hint(format!("The coordinator reassigns it with `./dev worktree reassign {k}`."))),
     }

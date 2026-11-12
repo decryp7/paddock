@@ -104,6 +104,13 @@ pub fn parse_df(text: &str) -> Result<u64, String> {
 #[cfg(windows)]
 #[allow(unsafe_code)] // one Win32 call on a wide string this function owns
 fn windows_free_gb(folder: &str) -> Result<u64, String> {
+    windows_free_bytes(folder).map(|b| b / (1024 * 1024 * 1024))
+}
+
+/// The bytes available to the caller on the disk holding `folder` (also what `dev disk check` reads on Windows).
+#[cfg(windows)]
+#[allow(unsafe_code)] // one Win32 call on a wide string this function owns
+pub(crate) fn windows_free_bytes(folder: &str) -> Result<u64, String> {
     use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     let wide: Vec<u16> = folder.replace('/', "\\").encode_utf16().chain(std::iter::once(0)).collect();
     let mut available = 0u64;
@@ -112,7 +119,7 @@ fn windows_free_gb(folder: &str) -> Result<u64, String> {
     if ok == 0 {
         return Err(format!("GetDiskFreeSpaceExW failed: {}", std::io::Error::last_os_error()));
     }
-    Ok(available / (1024 * 1024 * 1024))
+    Ok(available)
 }
 
 fn owner_field(home: &str, slot: &str, key: &str) -> Option<String> {
@@ -358,6 +365,32 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
             );
             return Err(Stop::silent(1));
         }
+    }
+    // `./dev disk check`: one warning under 200 GiB and a refusal under 50 GiB, on the CI home's
+    // disk and the job's workspace disk; the floor above already freed what idle slots held.
+    let mut paths = vec![PathBuf::from(&home)];
+    paths.extend(ctx.get("GITHUB_WORKSPACE").map(PathBuf::from));
+    let check = crate::disk::check::CheckArgs {
+        paths,
+        common: crate::disk::config::CommonArgs::default(),
+    };
+    let mut note = Vec::new();
+    let code = crate::disk::check::run(&check, &|k| ctx.get(k).map(str::to_string), &mut note, io.err);
+    for l in String::from_utf8_lossy(&note).lines() {
+        io.say(l);
+    }
+    if code != 0 {
+        // Give the slot back: this job will not run.
+        let mut again = Ctx::new(ctx_env_with(ctx, &slot, &token), ctx.tables.clone(), ctx.exe.clone());
+        again.windows = ctx.windows;
+        let _ = release(
+            &again,
+            &mut Sinks {
+                out: &mut std::io::sink(),
+                err: io.err,
+            },
+        );
+        return Err(Stop::silent(1));
     }
     Ok(())
 }

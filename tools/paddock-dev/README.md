@@ -50,6 +50,37 @@ cleanup removes a locked one. Run it from any checkout of the repository (or pas
 - Tests: `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh`
   adds the oracle comparison with `worktree.sh` (otherwise those tests print `not measured`).
 
+## `disk`: free space, usage tracking and clean-up
+
+Trigger: on 2026-11-12 the work disk fell to 158 GiB free unnoticed, and the clean-up that followed had to guess the owner of
+about 200 build folders and 60 worktrees from names and times. Common practice: GitHub's runner images check free space at job
+start, and cargo tracks the last use of its caches in SQLite (`cargo clean gc`, since 1.78).
+
+- `./dev disk check [--path <p>]...` reads the free space of each path's disk (default the current folder). Under 200 GiB it
+  prints one `::warning::` and the ten largest folders the index knows; under 50 GiB one `::error::` with the next step, and
+  exit 1. `--warn-gib` / `--refuse-gib` or `PADDOCK_DISK_WARN_GIB` / `PADDOCK_DISK_REFUSE_GIB` set the levels. A disk whose free
+  space cannot be read is "not measured" (a warning), never fine and never a refusal. `job-isolation acquire` runs it for the CI
+  home and the workspace, so every host-runner job gets it; the shell script and the Rust port both do.
+- Every folder the tooling makes gets `.paddock-owner.toml` (kind, owner, branch, head, created, last used, and the repository or
+  worktree it belongs to). It is the source of truth and travels with the folder. `worktree add` writes it (and `worktree claim`
+  touches it), the CI kit writes it for a slot's kept folders, and `./dev disk record <dir> --kind build --link <worktree>` writes or
+  touches it for a build folder. In a worktree it is ignored through `<git-common-dir>/info/exclude`.
+- The usage index (default `/Volumes/d8sst7/dev-targets/.paddock-disk.sqlite`, `--index` or `PADDOCK_DISK_INDEX`; WAL,
+  15 s busy timeout) is a cache of the folders and a history of their sizes (90 days). A missing or corrupt index is set aside
+  (`.corrupt-<time>`) and rebuilt from the records; nothing fails because of it.
+- `./dev disk scan` refreshes states and sizes (sizes younger than 6 hours are kept; `--force` measures all). Sizes are measured on
+  up to 4 threads (an SSD's worth, `--jobs`), each folder limited to 60 s (a limited size is shown with `+`).
+- `./dev disk report` lists per disk every tracked folder with size, state, kind, last use, owner and branch, the totals by state
+  and the folders that grew most in the last 7 days. States: live (locked, claimed, a train, a process inside, or used in the last
+  48 hours), merged (HEAD is in `origin/main` or a train), stale-pushed (clean, every commit on a remote), unsaved (dirty,
+  unpushed, or not established), orphan (no record).
+- `./dev disk clean` is a dry run; `--apply` removes only merged and stale-pushed folders that are not live, worktrees through
+  `git worktree remove` (no force), re-checking each one right before removing it, and logs every path and size. Never touched: unsaved,
+  orphan and live folders, CI slots (the CI kit sweeps those), and anything without a record (runners, sccache, VMs, Docker, user folders).
+- `./dev disk adopt` writes records for existing worktrees (`git worktree list`) and for build folders named after one (the
+  longest matching worktree name); everything else stays an orphan.
+- The nightly (`nightly.yml`, job `disk-summary`) writes `./dev disk report --summary` to the job summary; it follows the night's skip.
+
 ## Not ported yet (R0b gaps, listed on purpose)
 
 `dev plan` is the port of `scripts/affected.mjs` (`--ci`, `--app`, the matrix legs and the commit range; its recorded cases are in

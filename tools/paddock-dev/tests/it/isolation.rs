@@ -59,7 +59,10 @@ impl Job {
             .env("PADDOCK_DEV", env!("CARGO_BIN_EXE_paddock-dev"))
             .env("PADDOCK_CI_SLOTS", "3")
             .env("PADDOCK_CI_KEEP_SLOTS", "1")
-            .env("PADDOCK_CI_MIN_FREE_GB", "0");
+            .env("PADDOCK_CI_MIN_FREE_GB", "0")
+            // ER-14: `dev disk check` must not depend on the real disk of the machine running the tests.
+            .env("PADDOCK_DISK_WARN_GIB", "0")
+            .env("PADDOCK_DISK_REFUSE_GIB", "0");
         if later {
             cmd.envs(self.exported());
         }

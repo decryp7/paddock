@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots, wait,
-    worktree,
+    check, ci_isolation, ci_runs, disk, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots,
+    wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -48,6 +48,11 @@ enum Command {
     Worktree {
         #[command(subcommand)]
         command: worktree::WorktreeCommand,
+    },
+    /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
+    Disk {
+        #[command(subcommand)]
+        command: disk::DiskCommand,
     },
     /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
     /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
@@ -338,6 +343,13 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         // The script's contract: plain values on standard output, `::error::` lines on standard error, no `error:` prefix.
         return ci_isolation::run(a, out, err);
     }
+    if let Command::Disk {
+        command: disk::DiskCommand::Check(a),
+    } = &cli.command
+    {
+        // CI annotations (`::warning::`, `::error::`) on standard error and the exit code: like `ci isolation`, no report.
+        return disk::check::run(a, &|k| std::env::var(k).ok(), out, err);
+    }
     if matches!(cli.command, Command::Hook { .. }) {
         // The hook's answer is its own JSON on standard output, not a report, and its exit code is always 0.
         return hook::pre_tool_use(&mut std::io::stdin(), out, err);
@@ -440,6 +452,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::Primary(a),
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
+        Command::Disk { command } => disk::command(command),
         Command::Merge {
             command: MergeCommand::Check(a),
         } => merge_check::command(&merge_check::Request {

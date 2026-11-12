@@ -20,6 +20,8 @@
 //!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
+//! - `disk check|report|scan|clean|adopt|record`: free-space check, usage tracking (owner records and a SQLite index) and clean-up
+//!   of merged and stale-pushed folders ([`disk`]).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
 
@@ -29,6 +31,7 @@ pub mod check;
 pub mod ci_isolation;
 pub mod ci_runs;
 mod cli;
+pub mod disk;
 mod fds;
 pub mod gates;
 pub mod hook;

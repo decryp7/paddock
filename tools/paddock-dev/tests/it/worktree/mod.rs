@@ -6,6 +6,7 @@
 #![cfg(unix)]
 
 mod concurrent;
+mod disk;
 mod list_clean;
 mod ops;
 mod oracle;
