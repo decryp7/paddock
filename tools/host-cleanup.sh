@@ -96,6 +96,7 @@ done
 tmpdir="${PADDOCK_JOB_TEMP:-}"
 if [ -n "$tmpdir" ] && [ -d "$tmpdir" ]; then
   for d in "$tmpdir/$prefix"*; do
+    # conformance: scoped-cleanup — $d comes from the glob "$tmpdir/$prefix"*: an owned prefix below this job's temp folder, and it is checked not to be a symlink
     [ -e "$d" ] && [ ! -L "$d" ] && rm -rf "$d" 2>/dev/null
   done
 else

@@ -1,0 +1,125 @@
+{
+ "_comment": "Known sites of C115 (a cleanup touches only its own items): `rm -r` on a bare variable in scripts that clean up their own folders, by file and hash of the normalised line (line is for reading only). May only shrink; scope the cleanup (an owned prefix, \"${VAR:?}\", mktemp) and delete its entry.",
+ "sites": [
+  {
+   "file": "conformance/ci/host/stable-workspace.sh",
+   "line": 79,
+   "hash": "308947ff5a9ca5e9"
+  },
+  {
+   "file": "conformance/ci/host/stable-workspace.sh",
+   "line": 86,
+   "hash": "20ccf0f0320a68b1"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh",
+   "line": 44,
+   "hash": "9298b38440afa974"
+  },
+  {
+   "file": "apps/debrief/scripts/ci/windows-node-modules.sh",
+   "line": 46,
+   "hash": "00d48c995f4ef0ae"
+  },
+  {
+   "file": "apps/debrief/scripts/ci/windows-node-modules.sh",
+   "line": 50,
+   "hash": "d2bcbb7c4667b303"
+  },
+  {
+   "file": "apps/debrief/scripts/perf/perf-import.sh",
+   "line": 16,
+   "hash": "77b9eed00fd77360"
+  },
+  {
+   "file": "conformance/ci/job-isolation.sh",
+   "line": 178,
+   "hash": "3a4eb424992eaddb"
+  },
+  {
+   "file": "conformance/ci/job-tmpdir.sh",
+   "line": 147,
+   "hash": "88828da3160ea13d"
+  },
+  {
+   "file": "conformance/ci/job-tmpdir.sh",
+   "line": 157,
+   "hash": "9cb843ea621be30d"
+  },
+  {
+   "file": "conformance/ci/kept-clone.sh",
+   "line": 157,
+   "hash": "b6d2bf1036689037"
+  },
+  {
+   "file": "conformance/ci/kept-clone.sh",
+   "line": 193,
+   "hash": "e735085710370809"
+  },
+  {
+   "file": "conformance/ci/kept-clone.sh",
+   "line": 234,
+   "hash": "ad7e2474736d18ec"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-dyno-e2e.ps1",
+   "line": 22,
+   "hash": "eeaa3714e3701b2f"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-dyno-e2e.ps1",
+   "line": 75,
+   "hash": "fb25348ac55df69a"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 145,
+   "hash": "f27635d2d4750ec3"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 164,
+   "hash": "f27635d2d4750ec3"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 165,
+   "hash": "eddc6caa54619ae2"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 281,
+   "hash": "3d7508abd178750a"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 305,
+   "hash": "4cd41770280c6d94"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 311,
+   "hash": "4cd41770280c6d94"
+  },
+  {
+   "file": "dev",
+   "line": 334,
+   "hash": "59ad56995bb513bd"
+  },
+  {
+   "file": "scripts/shell-demo/build-linux-arm64.sh",
+   "line": 37,
+   "hash": "bde95ebb929a6a61"
+  },
+  {
+   "file": "scripts/vm-lock.sh",
+   "line": 91,
+   "hash": "32c58f509cf0fffe"
+  },
+  {
+   "file": "tools/prune-build-folders.sh",
+   "line": 37,
+   "hash": "1621e509e581b8ec"
+  }
+ ]
+}
