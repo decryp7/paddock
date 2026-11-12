@@ -24,6 +24,19 @@ def in_main(d):
     return d == m or d.startswith(m + os.sep)
 
 
+def short_n(args):
+    """`-n` among a commit's short flags (`-n`, `-nm`, `-anm`); letters after one that takes a value (-m, -F, -C, -c, -t) are
+    that value, not flags."""
+    for a in args:
+        if a.startswith("-") and not a.startswith("--") and len(a) > 1:
+            for ch in a[1:]:
+                if ch == "n":
+                    return True
+                if ch in "mFCctSu":
+                    break
+    return False
+
+
 def is_write(sub, args):
     if sub in WRITES:
         return True
@@ -93,7 +106,7 @@ def decide(data):
         eff, sub, args = g
         if is_agent and sub in ("commit", "push", "merge", "cherry-pick", "rebase", "am"):
             bypass = [e for e in c.env if e.split("=", 1)[0] in ("LEFTHOOK_EXCLUDE",) or e in ("LEFTHOOK=0", "LEFTHOOK=false")]
-            if bypass or (sub in ("commit", "push") and "--no-verify" in args):
+            if bypass or (sub in ("commit", "push") and "--no-verify" in args) or (sub == "commit" and short_n(args)):
                 return ("Blocked: git hooks are bypassed (%s). Hooks must pass: cherry-pick the hook fix or stop and report "
                         "(no bypass)." % (bypass[0] if bypass else "--no-verify"))
         if not is_write(sub, args):

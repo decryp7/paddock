@@ -305,6 +305,7 @@ class _State:
         self.cwd = cwd
         self.home = home
         self.vars = {}
+        self.exported = []
         self.cmds = []
         self.set_e = False
         self.chain_cd = False
@@ -396,10 +397,14 @@ def _finish(st, words, redirs, term, depth):
             if _ASSIGN.match(a):
                 name, _, val = a.partition("=")
                 st.vars[name] = val
+                if w[0] == "export":
+                    st.exported.append(a)
+            elif w[0] == "export" and a in st.vars:
+                st.exported.append("%s=%s" % (a, st.vars[a]))
     env = list(w[:k]) if k < len(w) else []
     argv = _strip(w[k:] if k < len(w) else [], env)
     cmd.argv = argv
-    cmd.env = env
+    cmd.env = env + [e for e in st.exported if not (argv and argv[0] == "export")]
     if argv and argv[0] == "set" and any(a.startswith("-") and not a.startswith("--") and "e" in a for a in argv[1:]):
         st.set_e = True
     if argv and argv[0] == "cd":

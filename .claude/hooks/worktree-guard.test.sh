@@ -149,4 +149,17 @@ expect "coordinator LEFTHOOK=0 git commit is allowed" allow coord "$WT" "LEFTHOO
 expect "coordinator --no-verify is allowed" allow coord "$WT" "git commit --no-verify -m x"
 expect "agent mentions --no-verify in a message" allow agent "$WT" "git commit -m 'never use --no-verify'"
 out=$(run agent "$WT" "git commit --no-verify -m x"); case "$out" in *"Hooks must pass: cherry-pick the hook fix or stop and report (no bypass)"*) echo "ok: bypass message" ;; *) echo "FAIL: bypass message"; fail=1 ;; esac
+
+# ---- more bypass forms: commit -n, combined short flags, an exported variable earlier in the command
+expect "agent git commit -n" deny agent "$WT" "git commit -n -m x"
+expect "agent git commit -nm" deny agent "$WT" "git commit -nm 'x'"
+expect "agent git commit -anm" deny agent "$WT" "git commit -anm 'x'"
+expect "agent git commit -mn... is a message, not -n" allow agent "$WT" "git commit -m'fix: nothing' -a"
+expect "agent git commit -m message with an n" allow agent "$WT" "git commit -m 'run now'"
+expect "agent git push -n is a dry run, not a bypass" allow agent "$WT" "git push -n origin b"
+expect "agent export LEFTHOOK=0 then commit" deny agent "$WT" "export LEFTHOOK=0 && git commit -m x"
+expect "agent export LEFTHOOK_EXCLUDE then push on a later line" deny agent "$WT" $'export LEFTHOOK_EXCLUDE=commit-msg\ngit push origin b'
+expect "agent LEFTHOOK=0 then export LEFTHOOK then commit" deny agent "$WT" "LEFTHOOK=0; export LEFTHOOK; git commit -m x"
+expect "agent export LEFTHOOK=1 then commit" allow agent "$WT" "export LEFTHOOK=1; git commit -m x"
+expect "coordinator export LEFTHOOK=0 then commit" allow coord "$WT" "export LEFTHOOK=0; git commit -m x"
 exit $fail
