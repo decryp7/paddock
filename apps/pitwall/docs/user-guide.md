@@ -654,6 +654,8 @@ recommended, and models that will not fit this machine are left out. Up to 500 m
 | `models/<owner>/<repo>/` | Downloaded models |
 | `engines/` | Installed engine builds (one folder per build id) |
 | `partial/` | Unfinished downloads (resumed later) |
+| `packs/` | Your model catalog packs |
+| `logs/` | Service logs (no prompts or responses) |
 
 **The admin key is plain text in `admin.key`.** Pitwall keeps no other copy and does not use the macOS Keychain, Windows
 Credential Manager or the Secret Service for it (the Keychain cannot be read silently by an app that is not signed by an
@@ -662,8 +664,6 @@ open on macOS and Linux, an access list that grants only you on Windows. Other u
 program that runs as you can read it without asking, the same as `~/.netrc` or `~/.docker/config.json`; a backup or a
 copy of your home folder contains it in plain text, and FileVault or BitLocker protects it only while the disk is
 encrypted. If you think the key was read, delete `admin.key` and restart Pitwall: the server writes a new one.
-| `packs/` | Your model catalog packs |
-| `logs/` | Service logs (no prompts or responses) |
 
 ## Troubleshooting
 

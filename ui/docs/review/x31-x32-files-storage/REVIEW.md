@@ -211,7 +211,7 @@ table and the Files list are clean at 320, this is approved without another full
 | P3-4 contact-sheet mono | **Fixed** | Labels in the suite mono stack. |
 | P3-5 "Clear the list" | **Fixed** | Now aligned with the name column. |
 | P3-6 "25 %" | **Fixed** | `25%`, `62.5%`. |
-| P3-7 mono for real names | **Done** through `groupMono`. The note says it was dropped, but the pixels show mono group names. See P3-R3 for a side effect. |
+| P3-7 mono for real names | **Done** through `groupMono`. The note says it was dropped, but the pixels show mono group names. See P3-R3 for a side effect. | |
 | P3-8 Files demo buttons | **Fixed** | One primary, and a labelled "Demo controls" row. |
 | P3-9 Settings as an OS window | **Out of scope (agreed)** | |
 | Tooltip shot | **Deviation accepted** | A native `title` cannot be screenshotted; the unit tests that assert `title` = the full path are enough. |

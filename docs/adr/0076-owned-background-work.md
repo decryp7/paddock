@@ -86,7 +86,7 @@ The handle's fate is an enum, not a string, in revision 2:
 
 | Disposition | Meaning | Class |
 | --- | --- | --- |
-| `Discarded` | `spawn(..);`, `let _ = ..`, `.map(drop)`, `.map(|_| ())`, `.ok().map(|h| h.thread().id())` (the handle only looked at), `if let Err(e) = spawn(..)` | fire-and-forget |
+| `Discarded` | `spawn(..);`, `let _ = ..`, `.map(drop)`, `.map(\|_\| ())`, `.ok().map(\|h\| h.thread().id())` (the handle only looked at), `if let Err(e) = spawn(..)` | fire-and-forget |
 | `HeldUnused` | `let _x = spawn(..)`, `_x` never used | fire-and-forget |
 | `BoundNotJoined` | bound to a name that is only inspected (`if let Err(e) = x`) or `drop(x)`ped, never joined or stored, in the statements after the binding up to a `let` that shadows it | fire-and-forget |
 | `JoinedAtOnce` | `.join()`, `.await`, `.wait()` on the spawn itself | owned and joined |

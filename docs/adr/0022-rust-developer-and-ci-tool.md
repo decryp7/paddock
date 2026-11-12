@@ -783,14 +783,14 @@ The R-packages keep their numbers. New generic packages are **G0 to G12**. "Stat
 | G0b | `heavy` (replaces `heavy.sh`, plock) | Generic, standalone | in progress (`tools/heavy`) | +0.5 to adopt G1 |
 | G1 | `paddock-tool` runtime: common flags, log set-up, phases, spawned-command logging, NTSTATUS decoding in `paddock-proc`, CI error/summary/mask, correlation id, `ToolCommand` registry, external subcommand discovery, `devkit.toml`, packs via `paddock-packs`, `CONTRACT.md` and its two-plugin test | Generic | new | 2.5 |
 | G2 | `devkit` skeleton: workspace, own leg in the planner, `help`, tag release to the registry, the "no Paddock path" check (G.8) | Generic | new | 1.5 |
-| G3 | `devkit run` (class wrapper) and `devkit ci error|step|skip|summary` (from `ci-log.sh`, `ci-log.mjs`, `run-native.mjs` on their branches) | Generic | branches | 1.5 |
+| G3 | `devkit run` (class wrapper) and `devkit ci error\|step\|skip\|summary` (from `ci-log.sh`, `ci-log.mjs`, `run-native.mjs` on their branches) | Generic | branches | 1.5 |
 | G4 | `devkit commit-lint` (three copies; types and forbidden trailers from flags or `devkit.toml`) | Generic | – | 0.75 |
 | G5 | `devkit bisect-flaky`, `devkit find-polluter` (rules 57, 58) | Generic | `docs/rca-rules` | 1 |
 | G6 | `devkit temp-leaks` (prefixes from a pack) and `devkit hermetic -- <cmd>` (C14's dynamic part) | Generic | – | 1 |
 | G7 | `devkit coverage gate` (lcov; Angular's guard is the same gate) | Generic | – | 0.5 |
 | G8 | `devkit secrets strip` (two copies) | Generic | – | 0.5 |
 | G9 | `devkit ci timings` (Gitea and GitHub; Paddock's repo list as config) | Generic | – | 1 |
-| G10 | `devkit worktree add|list|clean|disk` and `devkit prune` (moves the prune command from `tools/dev-host-prune`) | Generic | prune on branch | 1.5 |
+| G10 | `devkit worktree add\|list\|clean\|disk` and `devkit prune` (moves the prune command from `tools/dev-host-prune`) | Generic | prune on branch | 1.5 |
 | G11 | `devkit gitea release` (three publish copies) | Generic | – | 1 |
 | G12 | `devkit macos verify-bundle`, `devkit win crt-imports` (with R2) | Generic | – | 1.5 |
 | R0 | skeleton, graph, slots, input hash | Paddock | merged | done |

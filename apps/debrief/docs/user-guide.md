@@ -195,7 +195,7 @@ are detected by magic bytes and expanded (with size caps against zip bombs).
 | Serilog CLEF, Serilog `JsonFormatter`, JSON lines, whole-file JSON arrays (NLog, ECS, pino, ...) | `.clef`, `.json`, `.log` | `debrief-core` JSON importer | Keys are configurable in a parser's `[format.json]` (Settings ▸ Parsers); nested objects are flattened |
 | Serilog text and console output | `.log`, `.txt` | `debrief-core` text importer | Described by the same `outputTemplate` you use in `appsettings.json` |
 | log4net / NLog pattern layouts and any text via regex | `.log`, `.txt` | `debrief-core` text importer | Named groups in a parser's `[format] regexes`; multi-line messages and stack traces attach to their event |
-| CSV / TSV / `;` / `|` delimited | `.csv`, `.tsv` | `debrief-core` CSV importer | Delimiter and columns auto-detected |
+| CSV / TSV / `;` / `\|` delimited | `.csv`, `.tsv` | `debrief-core` CSV importer | Delimiter and columns auto-detected |
 | Windows Event Logs | `.evtx` | `debrief-plugin-windows` | Binary importer; message is `Provider EventId: key=value, ...` (offline, no message DLLs) |
 | System information | `.nfo` (msinfo32) | `debrief-plugin-windows` | One record per row with `Category`, `Item`, `Value` |
 | Performance Monitor logs | `.csv`/`.tsv` (PDH), `.blg` | `debrief-plugin-windows` | `.blg` is converted with `relog` (Windows only) |
