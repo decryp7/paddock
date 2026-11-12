@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseSteps } from '../src/util/workflows.mjs';
+import { expr, job, loadWorkflow, stepsOf } from './lib/workflow.mjs';
 
 const WORKFLOWS = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.gitea', 'workflows');
 const SECRET = /secrets\.(?:PADDOCK_)?TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)?\b/;
@@ -90,24 +91,31 @@ test('Debrief\'s Build installers: the key leaves the environment before any npm
 });
 
 test('the bundle jobs read no kept npm or Angular cache and no kept node_modules on a tag', () => {
-  for (const [file, job] of [['app-release.yml', 'bundle'], ['debrief.yml', 'bundle']]) {
+  for (const [file, job_] of [['app-release.yml', 'bundle'], ['debrief.yml', 'bundle']]) {
     const text = read(file);
-    const { steps } = stepOf(text, job, 'Fresh npm cache and no kept Angular cache on a tag');
+    const { steps } = stepOf(text, job_, 'Fresh npm cache and no kept Angular cache on a tag');
     const caches = steps.filter((s) => /\.\/\.gitea\/actions\/node-caches/.test(s.uses ?? ''));
     assert.ok(caches.length >= 1, `${file}: node-caches`);
-    for (const c of caches) assert.match(c.text, /if: \$\{\{ (?:runner\.os != 'Windows' && )?!startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/, `${file}: node-caches is skipped on a tag`);
+    const parsed = stepsOf(job(loadWorkflow(file), job_));
+    const ifOf = (name, uses) => expr(parsed.find((s) => (name ? s.name === name : true) && (uses ? (s.uses ?? '').includes(uses) : true))?.if);
+    const parsedCaches = parsed.filter((s) => (s.uses ?? '').includes('./.gitea/actions/node-caches'));
+    assert.equal(parsedCaches.length, caches.length, `${file}: the parsed workflow sees the same node-caches steps`);
+    for (const c of parsedCaches) assert.match(expr(c.if), /^(?:runner\.os != 'Windows' && )?!startsWith\(github\.ref, 'refs\/tags\/'\)$/, `${file}: node-caches is skipped on a tag`);
     const fresh = steps.find((s) => s.name === 'Fresh npm cache and no kept Angular cache on a tag');
-    assert.match(fresh.text, /if: \$\{\{ startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/);
+    assert.equal(ifOf(fresh.name), "startsWith(github.ref, 'refs/tags/')");
     assert.match(fresh.run, /bash conformance\/ci\/tag-node-caches\.sh /);
   }
   const { steps } = stepOf(read('debrief.yml'), 'bundle', 'Build installers');
   const reuse = steps.find((s) => s.name === 'Reuse node_modules for this lockfile (Windows)');
-  assert.match(reuse.text, /if: \$\{\{ runner\.os == 'Windows' && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/, 'no kept node_modules on a tag');
+  const debriefSteps = stepsOf(job(loadWorkflow('debrief.yml'), 'bundle'));
+  const ifNamed = (name) => expr(debriefSteps.find((s) => s.name === name)?.if);
+  assert.ok(reuse);
+  assert.equal(ifNamed(reuse.name), "runner.os == 'Windows' && !startsWith(github.ref, 'refs/tags/')", 'no kept node_modules on a tag');
   const unlink = steps.find((s) => s.name === 'No kept node_modules on a tag (Windows)');
-  assert.match(unlink.text, /if: \$\{\{ runner\.os == 'Windows' && startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/);
+  assert.equal(ifNamed(unlink.name), "runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/')");
   assert.match(unlink.run, /windows-node-modules\.sh unlink$/);
   const npmWin = steps.find((s) => s.name === 'npm cache (Windows)');
-  assert.match(npmWin.text, /if: \$\{\{ runner\.os == 'Windows' && !startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/);
+  assert.equal(ifNamed(npmWin.name), "runner.os == 'Windows' && !startsWith(github.ref, 'refs/tags/')");
   // The release tag names the expected updater key for the per-machine installer gate.
   const gate = stepOf(read('app-release.yml'), 'bundle', 'The per-machine installer check').step;
   assert.match(gate.env.PADDOCK_EXPECT_UPDATE_KEY, /^\$\{\{ startsWith\(github\.ref, format\('refs\/tags\/\{0\}v', inputs\.tag-prefix\)\) && secrets\.TAURI_UPDATER_PUBKEY \|\| '' \}\}$/);

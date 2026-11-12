@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { checkNotSkipCi, checkVerdict, checkVersion, gateWorkflow, parseTag, runChecks, summary } from '../ci/request-tag.mjs';
 import { PADDOCK } from './helpers.mjs';
+import { job as jobOf, loadWorkflow, needsOf } from './lib/workflow.mjs';
 
 const SHA = 'a'.repeat(40);
 const files = (o) => (p) => o[p] ?? null;
@@ -167,7 +168,7 @@ test('P1-2: both jobs run only from main, the checker comes from main in its own
 });
 
 test('P1-2: the push job has no checkout, needs check, fetches the sha, hooks off on every git command, token off argv', () => {
-  assert.match(push, /needs: \[check\]/);
+  assert.deepEqual(needsOf(jobOf(loadWorkflow('tag.yml'), 'push')), ['check']);
   const r = runBlocks(push);
   assert.match(r, /git init -q "\$dir"/);
   assert.match(r, /fetch -q --no-tags "\$url" "\$SHA"/);
