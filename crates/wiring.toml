@@ -37,6 +37,7 @@ modules = [
   "paddock-proc/src/supervised.rs",
   "paddock-proc/src/sys.rs",
   "paddock-proc/src/tree.rs",
+  "paddock-proc/src/waited.rs",
   "paddock-proc/src/watch.rs",
   # paddock-ipc: the pipe and socket endpoints, the launch and the peer's I/O.
   "paddock-ipc/src/child.rs",
