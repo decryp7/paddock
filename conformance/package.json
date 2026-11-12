@@ -28,6 +28,6 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node test/require-full-tree.mjs && node --test test/*.test.mjs"
   }
 }

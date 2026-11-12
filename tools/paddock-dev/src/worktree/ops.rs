@@ -446,9 +446,35 @@ fn need_agent(caller: &Caller, what: &str) -> Result<Agent, CliError> {
     })
 }
 
+/// A bare folder name (no separator) stands for the worktree of that name; anything else is the path as given. A name that is
+/// also a folder of the current directory is taken as that path, so a path never changes meaning.
+fn by_name(repo: &Repo, path: &Path) -> Result<std::path::PathBuf, CliError> {
+    let text = path.to_string_lossy();
+    if text.is_empty() || text.contains(['/', '\\']) || path.exists() {
+        return Ok(path.to_path_buf());
+    }
+    let list = worktrees(repo).map_err(git_failure)?;
+    let hits: Vec<&WorktreeInfo> = list
+        .iter()
+        .skip(1)
+        .filter(|w| {
+            Path::new(&w.path.replace('\\', "/"))
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy() == text)
+        })
+        .collect();
+    match hits.as_slice() {
+        [one] => Ok(one.path.clone().into()),
+        [] => Ok(path.to_path_buf()),
+        many => Err(CliError::usage(format!("`{text}` names {} worktrees.", many.len()))
+            .with_hint("Pass the full path (`./dev worktree list` shows them).")),
+    }
+}
+
 /// `claim`: binds the locked worktree to the calling agent.
 pub fn claim(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, CliError> {
     let agent = need_agent(caller, "worktree claim")?;
+    let path = &by_name(repo, path)?;
     let store = OwnerStore::open(&repo.common_dir);
     let (k, outcome) = store
         .update(|map| -> Result<(String, Claim), CliError> {

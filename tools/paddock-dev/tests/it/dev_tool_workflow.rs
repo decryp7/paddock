@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 const LABELS: [&str; 3] = ["ubuntu-latest", "windows-latest", "macos-latest"];
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
+    crate::full_tree(Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap())
 }
 
 /// The runner labels a workflow names on `runs-on:` and `os:` lines (comments are skipped).
