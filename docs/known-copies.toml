@@ -1303,3 +1303,16 @@ adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
   note = "Drops the prefix, unifies separators and ignores case for a comparison; adopts winpath::same."
+
+[[mechanism]]
+id = "guarded-remove"
+title = "Removing a tool-made folder only after proving it is safe to remove (owner record, allowed root, no symlink, no live process, clean git)"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/safe_remove.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/ci_host/safe_remove.rs"]
+  owner = "paddock-dev"
+  delete_by = "v0.5.0"
+  note = "The CI host steps' own guarded remove (feat/ci-in-rust-wp4: no link followed, a link on the way refuses) beside feat/dev-disk's safe_remove; listed in tests/it/safe_remove_lint.rs as a follow-up. Unifying them is a train-8 item."
