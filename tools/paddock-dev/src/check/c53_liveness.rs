@@ -226,22 +226,19 @@ struct Entry {
     hash: String,
 }
 
-fn entries_of(raw: &str) -> Vec<Entry> {
-    let Ok(v) = serde_json::from_str::<Value>(raw) else {
-        return Vec::new();
-    };
-    v.get("sites")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .map(|e| Entry {
-                    file: e.get("file").and_then(Value::as_str).unwrap_or("").to_string(),
-                    line: e.get("line").and_then(Value::as_u64).map(|n| n as usize),
-                    hash: e.get("hash").and_then(Value::as_str).unwrap_or("").to_string(),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+/// The baseline's entries, or `None` when the text is not JSON with a `sites` list (the run then fails closed).
+fn entries_of(raw: &str) -> Option<Vec<Entry>> {
+    let v = serde_json::from_str::<Value>(raw).ok()?;
+    let list = v.get("sites")?.as_array()?;
+    Some(
+        list.iter()
+            .map(|e| Entry {
+                file: e.get("file").and_then(Value::as_str).unwrap_or("").to_string(),
+                line: e.get("line").and_then(Value::as_u64).map(|n| n as usize),
+                hash: e.get("hash").and_then(Value::as_str).unwrap_or("").to_string(),
+            })
+            .collect(),
+    )
 }
 
 type Key = (String, String);
@@ -303,7 +300,12 @@ fn growth(root: &Path, current: &[Entry]) -> Growth {
             };
         }
     };
-    let mut left = multiset(entries_of(&text).iter().map(|e| (e.file.as_str(), e.hash.as_str())));
+    let mut left = multiset(
+        entries_of(&text)
+            .unwrap_or_default()
+            .iter()
+            .map(|e| (e.file.as_str(), e.hash.as_str())),
+    );
     let mut added = 0;
     for e in current {
         match left.get_mut(&(e.file.clone(), e.hash.clone())) {
@@ -314,8 +316,18 @@ fn growth(root: &Path, current: &[Entry]) -> Growth {
     Growth::Added { base, added }
 }
 
+/// What the liveness half found and what it could not measure.
+pub struct LivenessRun {
+    /// The findings.
+    pub findings: Vec<Finding>,
+    /// The baseline was read as an input of this run (it is among the scoped files, or the run is whole): one more probe.
+    pub baseline_probe: bool,
+    /// A scoped run that has the baseline in scope cannot tell which of its entries are stale: not measured, never silence (ER-33).
+    pub stale_unmeasured: bool,
+}
+
 /// The liveness findings of the whole tree (appended after the kill findings, as the JavaScript does).
-pub fn liveness_findings(ctx: &Ctx, root: &Path) -> Vec<Finding> {
+pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
     let fix = "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`.";
     let mut out = Vec::new();
     let mut sites: Vec<Site> = Vec::new();
@@ -347,11 +359,26 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> Vec<Finding> {
             }
         }
     }
-    let entries = ctx
-        .read(LIVENESS_BASELINE)
-        .filter(|r| !r.is_empty())
-        .map(|r| entries_of(&r))
-        .unwrap_or_default();
+    let whole_run = ctx.files().len() == ctx.tree_files().len();
+    let baseline_in_scope = ctx.files().iter().any(|f| f == LIVENESS_BASELINE);
+    let raw = ctx.read(LIVENESS_BASELINE).filter(|r| !r.is_empty());
+    let invalid = raw.as_ref().is_some_and(|r| entries_of(r).is_none());
+    if invalid {
+        out.push(Finding::error(
+            "C53",
+            53,
+            LIVENESS_BASELINE,
+            1,
+            format!("{LIVENESS_BASELINE} is not JSON with a `sites` list: the liveness baseline cannot be read"),
+            "Restore the file from git (`git checkout origin/main -- conformance/baselines/C53.json`); never rewrite it by hand to add entries.",
+        ));
+        return LivenessRun {
+            findings: out,
+            baseline_probe: baseline_in_scope,
+            stale_unmeasured: false,
+        };
+    }
+    let entries = raw.map(|r| entries_of(&r).unwrap_or_default()).unwrap_or_default();
     let mut left = multiset(entries.iter().map(|e| (e.file.as_str(), e.hash.as_str())));
     for s in &sites {
         match left.get_mut(&(s.file.clone(), s.hash.clone())) {
@@ -366,9 +393,6 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> Vec<Finding> {
             )),
         }
     }
-    // A `--files` run scans only some files (the JavaScript host has no scoped runs): it cannot tell which entries are stale or whether
-    // the baseline grew, so it leaves both to the whole-tree run.
-    let whole_run = ctx.files().len() == ctx.tree_files().len();
     for e in &entries {
         if whole_run && left.get(&(e.file.clone(), e.hash.clone())).copied().unwrap_or(0) > 0 {
             out.push(Finding::warn(
@@ -384,7 +408,8 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> Vec<Finding> {
             ));
         }
     }
-    if whole_run && !entries.is_empty() {
+    // The growth check needs only git, so it runs in every whole run and whenever the baseline itself is in scope.
+    if (whole_run || baseline_in_scope) && !entries.is_empty() {
         match growth(root, &entries) {
             Growth::Reason(reason) => out.push(Finding::warn(
                 "C53",
@@ -409,5 +434,9 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> Vec<Finding> {
             Growth::Added { .. } => {}
         }
     }
-    out
+    LivenessRun {
+        findings: out,
+        baseline_probe: baseline_in_scope && !entries.is_empty(),
+        stale_unmeasured: baseline_in_scope && !whole_run && !entries.is_empty(),
+    }
 }

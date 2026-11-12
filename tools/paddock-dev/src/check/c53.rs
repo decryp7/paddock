@@ -243,15 +243,25 @@ impl Check for C53 {
                 }
             }
         }
-        findings.extend(super::c53_liveness::liveness_findings(ctx, ctx.root()));
+        let live = super::c53_liveness::liveness_findings(ctx, ctx.root());
+        findings.extend(live.findings);
+        let has_rs = ctx.tree_files().iter().any(|f| f.ends_with(".rs"));
+        let (met, detail) = if live.stale_unmeasured {
+            (
+                false,
+                format!(
+                    "{} is in a scoped run, which cannot tell which of its entries are stale: run the whole tree (no --files)",
+                    super::c53_liveness::LIVENESS_BASELINE
+                ),
+            )
+        } else {
+            (has_rs, "the tree has a .rs file".into())
+        };
         CheckOutput {
             findings,
-            probes,
+            probes: probes + usize::from(live.baseline_probe),
             completed,
-            precondition: Precondition {
-                met: ctx.tree_files().iter().any(|f| f.ends_with(".rs")),
-                detail: "the tree has a .rs file".into(),
-            },
+            precondition: Precondition { met, detail },
         }
     }
 }

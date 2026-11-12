@@ -101,7 +101,7 @@ static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(
 
 /// The JS conformance runner and what it reads: this tool's parity tests run it over fixtures and the live tree (C39, C53).
 /// Mirrors `PARITY_INPUT` in `scripts/affected.mjs`.
-static PARITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(src|bin|baselines)/"));
+static PARITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(src|bin|baselines)/.+\.(mjs|json)$"));
 
 /// What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app (scripts/affected.mjs
 /// `PER_MACHINE_INPUT`).

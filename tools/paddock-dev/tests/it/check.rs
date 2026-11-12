@@ -913,3 +913,131 @@ fn live_token_soup_findings_equal_the_js_host() {
         );
     }
 }
+
+const BASELINE: &str = "conformance/baselines/C53.json";
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test spawns node, git or the built binary; it ends them itself"
+)]
+fn git(root: &Path, args: &[&str]) {
+    let out = Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// The fixture tree as a git repository whose merge base holds a baseline with one entry fewer than the working tree's (the baseline
+/// GREW by one entry): `origin/main` is the first commit, `topic` the second.
+fn grown_baseline_repo() -> tempfile::TempDir {
+    let tree = materialize();
+    let root = tree.path();
+    let full = std::fs::read_to_string(root.join(BASELINE)).unwrap();
+    let mut doc: Value = serde_json::from_str(&full).unwrap();
+    let kept = doc["sites"].as_array().unwrap()[..1].to_vec();
+    doc["sites"] = Value::Array(kept);
+    std::fs::write(root.join(BASELINE), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-q", "-m", "base"]);
+    git(root, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    git(root, &["checkout", "-q", "-b", "topic"]);
+    std::fs::write(root.join(BASELINE), full).unwrap();
+    git(root, &["commit", "-q", "-a", "-m", "grow"]);
+    tree
+}
+
+fn baseline_findings(r: &paddock_dev::check::RunResult) -> Vec<String> {
+    r.findings
+        .iter()
+        .filter(|f| f.file == BASELINE)
+        .map(|f| f.message.clone())
+        .collect()
+}
+
+#[test]
+fn live_baseline_growth_equals_the_js_host_in_a_git_repository() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let tree = grown_baseline_repo();
+    let js: Value = serde_json::from_str(&node(
+        JS_RUN,
+        &[
+            ("RT5_ROOT", tree.path().display().to_string()),
+            ("RT5_APP", "fixture".into()),
+            ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
+        ],
+    ))
+    .unwrap();
+    let r = run_checks(&options(tree.path()), &registry()).unwrap();
+    assert_eq!(shared_part(&r.json()), shared_part(&js));
+    let grew = baseline_findings(&r);
+    assert_eq!(grew.len(), 1, "{grew:?}");
+    assert!(grew[0].contains("the baseline grew: 1 entry is"), "{grew:?}");
+}
+
+#[test]
+fn a_scoped_run_over_the_baseline_catches_growth_and_reports_stale_as_not_measured() {
+    let tree = grown_baseline_repo();
+    let mut o = options(tree.path());
+    o.files = Some(vec![BASELINE.into()]);
+    let r = run_checks(&o, &registry()).unwrap();
+    let c53 = r.runs.iter().find(|e| e.record.check == "C53").unwrap();
+    assert!(
+        baseline_findings(&r).iter().any(|m| m.contains("the baseline grew: 1 entry is")),
+        "growth is caught: {:?}",
+        r.findings
+    );
+    assert_eq!(
+        c53.record.status(true).name(),
+        "not measured",
+        "the stale-entry half cannot be judged from a scoped run"
+    );
+    assert!(
+        r.findings
+            .iter()
+            .any(|f| f.check == "C53" && f.message.contains("stale") && f.message.starts_with("not measured")),
+        "{:?}",
+        r.findings
+    );
+    // Not in scope: the baseline is left alone (as before): a scoped run on one Rust file says nothing about it.
+    let mut other = options(tree.path());
+    other.files = Some(vec!["crates/a/src/c53_good.rs".into()]);
+    let r = run_checks(&other, &registry()).unwrap();
+    assert!(baseline_findings(&r).is_empty());
+}
+
+#[test]
+fn an_invalid_baseline_fails_closed_with_one_error_on_both_hosts() {
+    let tree = materialize();
+    for bad in ["{ not json", "{\"sites\": 3}", "[]"] {
+        std::fs::write(tree.path().join(BASELINE), bad).unwrap();
+        let r = run_checks(&options(tree.path()), &registry()).unwrap();
+        let msgs = baseline_findings(&r);
+        assert_eq!(msgs.len(), 1, "{bad}: {msgs:?}");
+        assert!(msgs[0].contains("is not JSON with a `sites` list"), "{msgs:?}");
+        if has_node() {
+            let js: Value = serde_json::from_str(&node(
+                JS_RUN,
+                &[
+                    ("RT5_ROOT", tree.path().display().to_string()),
+                    ("RT5_APP", "fixture".into()),
+                    ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
+                ],
+            ))
+            .unwrap();
+            assert_eq!(shared_part(&r.json()), shared_part(&js), "{bad}");
+        }
+    }
+}

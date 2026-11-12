@@ -90,7 +90,7 @@ export const GLOBAL = [
 /** The planner and its tests: besides the scripts' owners, the `dev` tool's golden test runs them as its oracle. */
 export const PLANNER_FILES = /^scripts\/affected(\.test)?\.mjs$/;
 /** The JS conformance runner and what it reads: tools/paddock-dev's parity tests run it over fixtures and the live tree (C39, C53). */
-export const PARITY_INPUT = /^conformance\/(src|bin|baselines)\//;
+export const PARITY_INPUT = /^conformance\/(src|bin|baselines)\/.+\.(mjs|json)$/;
 
 /** Inputs of the Rust builds only (cargo registry and linker config, the shared clippy and workspace lint presets). */
 export const RUST_INPUTS = [/^\.cargo\//, /^lint\//];

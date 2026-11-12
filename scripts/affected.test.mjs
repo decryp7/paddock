@@ -234,6 +234,7 @@ describe('the graph of this tree', () => {
       assert.equal(run(f).paddockDev, true, f);
     }
     assert.equal(run('conformance/test/core.test.mjs').paddockDev, false, 'a conformance test does not');
+    assert.equal(run('conformance/src/util/paths.sh').paddockDev, false, 'a shell script there is not read by the runner');
   });
 
   test('scripts mark the tools and ui jobs (test:scripts), the image folder the image and ui jobs', () => {
