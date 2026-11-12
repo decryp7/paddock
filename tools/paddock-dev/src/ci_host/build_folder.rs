@@ -12,8 +12,8 @@
 
 use super::Step;
 use super::safe_remove;
-use crate::ci_isolation::home;
 use clap::Args as ClapArgs;
+use paddock_env::{Os, winpath};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -38,6 +38,18 @@ pub fn includes_ci_toml(config: &str) -> bool {
 
 /// The command over the real machine.
 pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut dyn Write) -> i32 {
+    run_with(env, windows, args, out, &|p| winpath::real_verbatim(p), Os::current())
+}
+
+/// The command over an explicit `canonicalize` and OS (tests fake a verbatim `\\?\C:\...` answer on any OS).
+pub fn run_with(
+    env: &HashMap<String, String>,
+    windows: bool,
+    args: &Args,
+    out: &mut dyn Write,
+    canon: &dyn Fn(&Path) -> std::io::Result<PathBuf>,
+    os_kind: Os,
+) -> i32 {
     let mut step = Step {
         env,
         out,
@@ -61,11 +73,25 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
     if step.var("GITHUB_ENV").is_none() {
         return step.fail("GITHUB_ENV is not set.", "run this step in a runner job.");
     }
-    let ws = match std::fs::canonicalize(&args.workspace) {
-        Ok(p) => PathBuf::from(home::mixed(&p)),
+    // The folders to read and write are the workspace as given, made absolute; the text that goes into ci.toml and $GITHUB_ENV is
+    // the canonical path for programs: plain, with `/` separators (paddock_env::winpath, never the verbatim `\\?\` form).
+    let ws = match std::path::absolute(&args.workspace) {
+        Ok(p) => p,
         Err(e) => {
             return step.fail(
                 format!("the Cargo workspace {} cannot be read: {e}", args.workspace.display()),
+                "pass the workspace folder.",
+            );
+        }
+    };
+    let ws_text = match canon(&args.workspace) {
+        Ok(c) => match winpath::for_tools(&c, os_kind) {
+            Ok(t) => t,
+            Err(e) => return step.fail(e.to_string(), "use a workspace folder with a plain path."),
+        },
+        Err(e) => {
+            return step.fail(
+                format!("the Cargo workspace {} cannot be resolved: {e}", args.workspace.display()),
                 "pass the workspace folder.",
             );
         }
@@ -87,7 +113,7 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
         if let Err(e) = safe_remove::remove_under(&ws.join(".cargo"), &ci_toml, home_dir.as_deref()) {
             return step.fail(format!("cannot remove the old {}: {e}", ci_toml.display()), "remove it by hand.");
         }
-        dir = ws.join("target").display().to_string();
+        dir = format!("{ws_text}/target");
     } else {
         let kept = match step.isolation(&["path", "target", &args.name]) {
             Ok(p) => p,
@@ -209,8 +235,8 @@ mod tests {
         let (code, out, env, ci) = go(d.path(), &ws, "Linux", "x", "");
         assert_eq!(code, 0, "{out}");
         assert_eq!(ci, None);
-        let canon = std::fs::canonicalize(&ws).unwrap();
-        assert_eq!(env, format!("PADDOCK_BUILD_FOLDER={}/target\n", canon.display()));
+        let canon = winpath::real_for_tools(&ws).unwrap();
+        assert_eq!(env, format!("PADDOCK_BUILD_FOLDER={canon}/target\n"));
     }
 
     #[test]
@@ -235,5 +261,61 @@ mod tests {
         assert!(includes_ci_toml("include = [{path=\"ci.toml\",optional=true}]"));
         assert!(!includes_ci_toml("# include = [{ path = \"ci.toml\", optional = true }]"));
         assert!(!includes_ci_toml("include = [{ path = \"other.toml\", optional = true }]"));
+    }
+
+    #[test]
+    fn a_verbatim_canonical_path_never_reaches_the_build_folder_text() {
+        // Windows' `canonicalize` answers `\\?\C:\...`; any OS fakes it (a container leg builds in `<workspace>/target`).
+        let (d, ws) = fixture(true);
+        let env: HashMap<String, String> = [
+            ("RUNNER_OS", "Linux".to_string()),
+            ("HOME", d.path().join("home").display().to_string()),
+            ("GITHUB_ENV", d.path().join("github-env").display().to_string()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        let mut out = Vec::new();
+        let args = Args {
+            workspace: ws,
+            name: "x".into(),
+        };
+        let code = run_with(&env, true, &args, &mut out, &|_| Ok(PathBuf::from(r"\\?\C:\ci\ws")), Os::Windows);
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(
+            std::fs::read_to_string(d.path().join("github-env")).unwrap(),
+            "PADDOCK_BUILD_FOLDER=C:/ci/ws/target\n"
+        );
+        assert_eq!(out, "build folder: C:/ci/ws/target\n");
+    }
+
+    #[test]
+    fn a_workspace_whose_canonical_path_has_no_plain_spelling_is_one_error_line() {
+        let (d, ws) = fixture(true);
+        let env: HashMap<String, String> = [
+            ("RUNNER_OS", "Linux".to_string()),
+            ("GITHUB_ENV", d.path().join("e").display().to_string()),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+        let mut out = Vec::new();
+        let args = Args {
+            workspace: ws,
+            name: "x".into(),
+        };
+        let code = run_with(
+            &env,
+            true,
+            &args,
+            &mut out,
+            &|_| Ok(PathBuf::from(r"\\?\Volume{1234}\ws")),
+            Os::Windows,
+        );
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(code, 1);
+        assert_eq!(out.lines().filter(|l| l.starts_with("::error::build-folder:")).count(), 1, "{out}");
+        assert!(out.contains("Next step:"), "{out}");
     }
 }
