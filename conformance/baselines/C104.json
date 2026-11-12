@@ -1,0 +1,25 @@
+{
+ "_comment": "Dead relative links that existed when C104 was added, by file and target. May only shrink: fix the link (or build the file) and delete the entry. A new entry needs the user's approval.",
+ "links": [
+  {
+   "file": "docs/adr/0022-rust-developer-and-ci-tool.md",
+   "target": "../research/2026-10-dev-tooling-features.md"
+  },
+  {
+   "file": "docs/adr/0022-rust-developer-and-ci-tool.md",
+   "target": "../research/2026-10-dev-tooling-features.md"
+  },
+  {
+   "file": "docs/adr/0022-rust-developer-and-ci-tool.md",
+   "target": "../research/2026-10-dev-tooling-features.md"
+  },
+  {
+   "file": "docs/benchmarks.md",
+   "target": "adr/0083-agents-cannot-write-outside-their-own-worktree.md"
+  },
+  {
+   "file": "docs/plans/shared-next.md",
+   "target": "../research/2026-10-embeddings-for-logs.md"
+  }
+ ]
+}
