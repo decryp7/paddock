@@ -128,7 +128,7 @@ mod tests {
     use super::*;
 
     fn fixture(include: bool) -> (tempfile::TempDir, PathBuf) {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let ws = d.path().join("ws");
         std::fs::create_dir_all(ws.join(".cargo")).unwrap();
         std::fs::write(

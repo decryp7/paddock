@@ -97,7 +97,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_symlink_is_made_on_unix() {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let target = d.path().join("t");
         std::fs::create_dir(&target).unwrap();
         let env = HashMap::new();

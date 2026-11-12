@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn the_statistics_are_printed_and_only_the_jobs_own_server_is_stopped() {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         sccache(d.path(), "echo 'Compile requests 10'");
         let (code, out, calls) = go(d.path(), &[("SCCACHE_SERVER_PORT", "4501")]);
         assert_eq!(code, 0);
@@ -96,7 +96,7 @@ mod tests {
             calls, "sccache --show-stats port=4501 token=\nsccache --stop-server port=4501 token=\n",
             "the token never reaches sccache"
         );
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         sccache(d.path(), "echo stats");
         let (_, _, calls) = go(d.path(), &[]);
         assert_eq!(
@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn an_unreachable_server_is_a_notice_and_a_missing_sccache_is_silence() {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         sccache(d.path(), "exit 2");
         let (code, out, _) = go(d.path(), &[]);
         assert_eq!(code, 0);
@@ -115,7 +115,7 @@ mod tests {
             out.contains("::notice::sccache statistics are unavailable (the cache server was not reachable)."),
             "{out}"
         );
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let (code, out, calls) = go(d.path(), &[]);
         assert_eq!((code, out.as_str(), calls.as_str()), (0, "", ""));
     }

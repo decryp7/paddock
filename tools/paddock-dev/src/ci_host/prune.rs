@@ -373,7 +373,7 @@ mod tests {
     }
 
     fn scratch() -> (tempfile::TempDir, PathBuf) {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let root = d.path().join("ci").join("build");
         std::fs::create_dir_all(&root).unwrap();
         (d, root)
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn a_folder_directly_under_the_home_or_the_drive_root_is_refused_rather_than_removed() {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let home = d.path().join("home");
         let dir = home.join("target-x");
         big(&dir, "debug/deps", 400);
@@ -496,7 +496,7 @@ mod tests {
     }
 
     fn ci() -> Ci {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let home = std::fs::canonicalize(d.path()).unwrap().join("home");
         std::fs::create_dir_all(home.join(".paddock-ci")).unwrap();
         Ci { d, home }
@@ -607,7 +607,7 @@ mod tests {
 
     #[test]
     fn agents_build_folders_are_found_listed_and_removed_except_the_kept_and_protected_ones() {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let home = d.path().join("u/home");
         let repo = d.path().join("repo");
         for p in [

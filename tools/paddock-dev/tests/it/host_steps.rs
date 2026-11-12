@@ -92,12 +92,9 @@ fn norm(text: &str, fx: &Fx) -> String {
     text.replace(&root, "<ROOT>")
         .lines()
         // The wrapper contract's lines, and the one line per pattern the Rust clean-up adds (ER-27).
-        // `ci isolation`'s own messages: the script printed them on standard error, the step prints them with its own lines.
+        // The shim's `kit:` lines name the implementation it chose; they are not the step's output.
         .filter(|l| {
-            !l.starts_with("run: ")
-                && !l.starts_with("ran: ")
-                && !l.starts_with("host-cleanup: pattern ")
-                && !l.starts_with("::error::job-isolation:")
+            !l.starts_with("run: ") && !l.starts_with("ran: ") && !l.starts_with("host-cleanup: pattern ") && !l.starts_with("kit: ")
         })
         .map(|l| {
             let l = dur.replace_all(l, " in N s").to_string();
@@ -189,12 +186,15 @@ fn base_env(fx: &Fx) -> Vec<(String, String)> {
 }
 
 fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
-    let mut cmd;
+    // Standard error joins standard output in the order written (`exec 2>&1`): `ci isolation`'s own messages go to standard error in
+    // the script, and the step prints them with its own lines, so the two are compared as the job log shows them.
+    let mut cmd = paddock_proc::command("sh");
+    cmd.args(["-c", "exec 2>&1; exec \"$@\"", "sh"]);
     if rust {
-        cmd = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"));
+        cmd.arg(env!("CARGO_BIN_EXE_paddock-dev"));
         cmd.arg("ci").args(step.rust.iter().map(|a| fill(a, fx)));
     } else {
-        cmd = paddock_proc::command("bash");
+        cmd.arg("bash");
         // The script's own path is the repository's; the arguments after it are the fixture's.
         let script = repo().join(step.shell[0]);
         cmd.args(["-e", "-o", "pipefail"])
@@ -716,6 +716,42 @@ fn host_cleanup_without_a_temp_folder_leaves_the_shared_temp_alone_and_refuses_b
         assert_eq!(same(&cleanup_fx, &cleanup(bad, env.clone())).code, 2);
     }
     assert_eq!(same(&cleanup_fx, &cleanup(vec!["--id", "x", "--temp-prefix", "job-"], env)).code, 0);
+}
+
+#[test]
+fn host_cleanup_names_a_process_that_survives_the_same_way_in_both() {
+    // The table is a shim that lists one process of this job, one of another slot and an unrelated one, with a pid no process has;
+    // the process is never real, so nothing is ended in either implementation (ER-14) and the leak check names the survivor.
+    let setup = |fx: &Fx| {
+        cleanup_fx(fx);
+        fx.script(
+            "bin/ps",
+            "printf '%s\\n' ' 3999999999 /ci/target-pitwall-app-s2/debug/pitwall-server --fake' ' 3999999998 /ci/target-pitwall-app-s3/debug/pitwall-server --fake' ' 3999999997 /usr/bin/other'",
+        );
+    };
+    let mut env = vec![("PADDOCK_BUILD_FOLDER", "/ci/target-pitwall-app-s2".to_string())];
+    pkill_env(&mut env);
+    let seen = same(
+        &setup,
+        &cleanup(
+            vec!["--id", "pitwall", "--process-pattern", "{build}[/\\\\]debug[/\\\\]pitwall-server"],
+            env,
+        ),
+    );
+    assert!(
+        seen.stdout
+            .contains("::warning::host-cleanup: processes of this job are still running after the clean-up"),
+        "{seen:?}"
+    );
+    assert!(
+        seen.stdout
+            .contains("3999999999 /ci/target-pitwall-app-s2/debug/pitwall-server --fake"),
+        "{seen:?}"
+    );
+    assert!(
+        !seen.stdout.contains("3999999998") && !seen.stdout.contains("3999999997"),
+        "only this job's processes: {seen:?}"
+    );
 }
 
 /// The Rust command really ends a process of the job (a child of this test whose command line names the job's temp folder), asks it

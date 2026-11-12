@@ -211,6 +211,21 @@ pub fn is_executable(p: &Path) -> bool {
     }
 }
 
+/// A scratch folder whose path is already canonical: on macOS the default temp folder is under `/var`, which is a link to
+/// `/private/var`, so a path the code canonicalizes would no longer equal the one a test built (the guard of [`safe_remove`] also
+/// refuses a link on the way). Folders of the tests of this module come from here.
+#[cfg(test)]
+pub(crate) fn canonical_tempdir() -> tempfile::TempDir {
+    let probe = tempfile::tempdir().expect("a temp folder");
+    let parent = probe
+        .path()
+        .parent()
+        .and_then(|p| p.canonicalize().ok())
+        .expect("a canonical parent");
+    drop(probe);
+    tempfile::Builder::new().tempdir_in(parent).expect("a temp folder")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,7 +245,7 @@ mod tests {
 
     #[test]
     fn lines_append_to_the_runners_files() {
-        let d = tempfile::tempdir().unwrap();
+        let d = canonical_tempdir();
         let f = d.path().join("env");
         append_line(&f, "A=1").unwrap();
         append_line(&f, "B=2").unwrap();

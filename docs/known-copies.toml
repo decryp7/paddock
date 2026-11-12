@@ -1107,7 +1107,7 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   symbols = ["text:kit.sh", "text:prune", "text:host-cleanup"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh `host <step>` picks the implementation by the rule of the other kit steps) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/host_steps.rs runs both on the same inputs, and conformance/test/ci-actions.test.mjs and tools/test/prune-and-cleanup.test.mjs keep the scripts' own cases. host-tools' pin is held equal by a unit test of ci_host/host_tools.rs."
+  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh `host <step>` picks the implementation by the rule of the other kit steps) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/host_steps.rs runs both on the same inputs, and conformance/test/ci-actions.test.mjs and tools/test/prune-and-cleanup.test.mjs keep the scripts' own cases. host-tools' pin is held equal by a unit test of ci_host/host_tools.rs. tools/prune-build-folders.ps1 was deleted with the port: a manual lister with no workflow, action, script or test caller, so no release-path run can need it; `./dev ci prune-agent-builds` replaces it on every OS."
 
 # =====================================================================================================================
 # CI run readers (RT-8)

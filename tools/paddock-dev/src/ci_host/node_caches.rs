@@ -155,7 +155,7 @@ mod tests {
     }
 
     fn setup() -> (tempfile::TempDir, HashMap<String, String>) {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         std::fs::create_dir_all(d.path().join("home")).unwrap();
         std::fs::create_dir_all(d.path().join("ws/ui/.angular/cache")).unwrap();
         std::fs::write(d.path().join("ws/ui/.angular/cache/stale"), "").unwrap();

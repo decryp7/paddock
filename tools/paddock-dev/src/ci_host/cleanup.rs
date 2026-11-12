@@ -17,19 +17,21 @@
 //!   `app/playwright-report` in the current folder.
 //! - Always exits 0 once the arguments are valid (a clean-up must not fail a job); 2 for a bad argument.
 //!
-//! Ending processes: the table is read fresh (`ps -axo pid=,command=` on Unix, PowerShell over `Win32_Process` on Windows, which
-//! Git bash's own `ps` cannot see), the command lines are matched here, and each match is ended through `paddock_proc` after the
-//! identity check (rule 53: the pid is never acted on from a stale reading): asked to stop, then ended after a grace of
-//! [`GRACE`]. The shell sent `pkill -f`'s SIGTERM only, so a process that ignored it stayed; now it goes. Afterwards the leak check
+//! Ending processes: the table is read fresh through `paddock_proc::processes_with_command_lines` (one reading that gives each
+//! process its identity, pid plus start time, on every OS), the command lines are matched here, and each match is ended through
+//! `paddock_proc::terminate` with that identity (rule 53): a match listed first and ended seconds later (each one may take up to
+//! [`GRACE`]) whose pid went to another process meanwhile is left alone, because the identity no longer matches. Asked to stop,
+//! then ended after a grace of [`GRACE`]. The shell sent `pkill -f`'s SIGTERM only, so a process that ignored it stayed; now it goes. Afterwards the leak check
 //! lists any process that still matches one of the job's patterns (a `::warning::` with its pid and command line). Drivers that
 //! live outside the job's folders (`tauri-driver` in `~/.cargo/bin`, `safaridriver`, `WebKitWebDriver`) cannot be scoped by a path
 //! and are never ended by name (another job may own one): the suite that starts one stops it, and a pattern can still find it
-//! through an argument that names the job's folder. `PADDOCK_PS` and `PADDOCK_POWERSHELL` replace those programs (tests).
+//! through an argument that names the job's folder. `PADDOCK_PS` replaces the table by a program's output (tests: those processes are never ended).
 
 use super::Step;
 use super::safe_remove;
 use crate::ci_tool::ToolCall;
 use clap::Args as ClapArgs;
+use paddock_proc::{ProcessId, StartTime};
 use regex::Regex;
 use std::collections::HashMap;
 use std::io::Write;
@@ -60,89 +62,92 @@ pub struct CleanupArgs {
 /// The short name the CLI uses.
 pub type Args = CleanupArgs;
 
-/// One process of the table: its pid, its command line, and the line as the table printed it.
+/// One process of the table: its identity (pid and start time, read while the table was listed), its command line, and the line
+/// as listed. There is no bare pid anywhere below this point: ending a process takes only its [`ProcessId`] (rule 53, ADR 0033).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Proc {
-    /// The pid.
-    pub pid: u32,
+    /// The process, by identity.
+    pub id: ProcessId,
     /// The command line.
     pub cmd: String,
-    /// `<pid> <command line>` as listed (Unix keeps the table's padding).
+    /// `<pid> <command line>` as listed (the `PADDOCK_PS` test hook keeps the table's padding).
     pub line: String,
 }
 
 /// The process table and the way to end a process.
 pub trait Procs {
-    /// Every process with a command line, from a fresh reading.
+    /// Every process with a command line, from a fresh reading, each with the identity taken in that reading.
     fn list(&self) -> Vec<Proc>;
-    /// Ends the process `pid` (identity checked right now, rule 53); whether it was ended.
-    fn end(&self, pid: u32) -> bool;
+    /// Ends the process `id` names: asked to stop, then ended after [`GRACE`], but only while its pid still belongs to it. A pid
+    /// handed on to another process since the listing is left alone. Whether this call ended it.
+    fn end(&self, id: ProcessId) -> bool;
 }
 
 /// The machine this process runs on.
 pub struct OsProcs<'a> {
     env: &'a HashMap<String, String>,
-    windows: bool,
 }
 
 impl Procs for OsProcs<'_> {
     fn list(&self) -> Vec<Proc> {
-        let call = if self.windows {
-            let ps = self
-                .env
-                .get("PADDOCK_POWERSHELL")
-                .filter(|v| !v.is_empty())
-                .map_or("powershell.exe", String::as_str);
-            ToolCall::new(ps).args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                r#"Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.ProcessId -ne $PID } | ForEach-Object { "{0} {1}" -f $_.ProcessId, $_.CommandLine }"#,
-            ])
-        } else {
-            let ps = self.env.get("PADDOCK_PS").filter(|v| !v.is_empty()).map_or("ps", String::as_str);
-            ToolCall::new(ps).args(["-axo", "pid=,command="])
-        };
-        let Ok(ran) = call.timeout(LIST_TIMEOUT).run(self.env, &mut std::io::sink()) else {
-            return Vec::new();
-        };
-        if !ran.success {
-            return Vec::new();
+        // A test hook: a program that prints `ps -axo pid=,command=` lines instead of the real table. Its processes get a start time
+        // no real process has, so ending one is always refused by the identity check and the real table is never touched (ER-14).
+        if let Some(ps) = self.env.get("PADDOCK_PS").filter(|v| !v.is_empty()) {
+            let call = ToolCall::new(ps).args(["-axo", "pid=,command="]).timeout(LIST_TIMEOUT);
+            let Ok(ran) = call.run(self.env, &mut std::io::sink()) else {
+                return Vec::new();
+            };
+            if !ran.success {
+                return Vec::new();
+            }
+            return parse_table(&ran.stdout)
+                .into_iter()
+                .map(|(pid, cmd, line)| Proc {
+                    id: ProcessId::new(pid, StartTime::from_micros(0)),
+                    cmd,
+                    line,
+                })
+                .collect();
         }
-        parse_table(&ran.stdout)
+        paddock_proc::processes_with_command_lines()
+            .into_iter()
+            .map(|(id, cmd)| Proc {
+                id,
+                line: format!("{} {cmd}", id.pid()),
+                cmd,
+            })
+            .collect()
     }
 
-    fn end(&self, pid: u32) -> bool {
-        // The identity is read right after the listing; a pid handed on since is skipped by `terminate`'s own checks.
-        paddock_proc::ProcessId::of(pid).is_some_and(|id| !matches!(paddock_proc::terminate(id, GRACE), paddock_proc::Terminated::Unknown))
+    fn end(&self, id: ProcessId) -> bool {
+        matches!(
+            paddock_proc::terminate(id, GRACE),
+            paddock_proc::Terminated::Gracefully | paddock_proc::Terminated::Killed
+        )
     }
 }
 
-/// The lines of a process listing as [`Proc`]s (blank and malformed lines are dropped, carriage returns removed).
-pub fn parse_table(text: &str) -> Vec<Proc> {
+/// The lines of a process listing as (pid, command line, line) (blank and malformed lines are dropped, carriage returns removed).
+pub fn parse_table(text: &str) -> Vec<(u32, String, String)> {
     text.lines()
         .filter_map(|raw| {
             let line = raw.trim_end_matches('\r');
             let t = line.trim_start();
             let (pid, cmd) = t.split_once(char::is_whitespace)?;
-            Some(Proc {
-                pid: pid.parse().ok()?,
-                cmd: cmd.trim_start().to_string(),
-                line: line.to_string(),
-            })
+            Some((pid.parse().ok()?, cmd.trim_start().to_string(), line.to_string()))
         })
         .collect()
 }
 
 /// The processes whose command line matches `re`, never this process.
 fn matching(table: Vec<Proc>, re: &Regex, own: u32) -> Vec<Proc> {
-    table.into_iter().filter(|p| p.pid != own && re.is_match(&p.cmd)).collect()
+    table.into_iter().filter(|p| p.id.pid() != own && re.is_match(&p.cmd)).collect()
 }
 
 /// The command over the real machine.
 pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_default();
-    run_with(env, windows, args, &OsProcs { env, windows }, &cwd, std::process::id(), out, err)
+    run_with(env, windows, args, &OsProcs { env }, &cwd, std::process::id(), out, err)
 }
 
 /// The command over an explicit process table and folder (tests).
@@ -187,7 +192,7 @@ pub fn run_with(
             Ok(scoped) => match Regex::new(&scoped) {
                 Ok(re) => {
                     let found = matching(procs.list(), &re, own_pid);
-                    let ended = found.iter().filter(|f| procs.end(f.pid)).count();
+                    let ended = found.iter().filter(|f| procs.end(f.id)).count();
                     step.say(format!(
                         "host-cleanup: pattern {scoped}: {} process(es) found, {ended} ended",
                         found.len()
@@ -208,7 +213,7 @@ pub fn run_with(
         let left = matching(procs.list(), re, own_pid);
         if !left.is_empty() {
             step.say(format!(
-                "::warning::host-cleanup: processes of this job are still running after the clean-up (pattern {})",
+                "::warning::host-cleanup: processes of this job are still running after the clean-up (pattern {}):",
                 re.as_str()
             ));
             for p in left {
@@ -271,31 +276,59 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    /// A scripted process table; ending a process removes it from the table unless it is `stubborn`.
+    /// A scripted process table. Each process has the start time it was listed with; `handed_on` are pids that another process
+    /// takes over right after the table was listed (the pid is the same, the start time is not). Ending a process whose identity no
+    /// longer matches the table is refused, as `paddock_proc::terminate` does. A `stubborn` process stays after being ended.
     struct Fake {
-        table: RefCell<Vec<Proc>>,
+        table: RefCell<Vec<(ProcessId, String, String)>>,
         ended: RefCell<Vec<u32>>,
         stubborn: Vec<u32>,
+        handed_on: Vec<u32>,
     }
 
     impl Fake {
         fn new(lines: &[&str]) -> Fake {
+            let table = parse_table(&lines.join("\n"))
+                .into_iter()
+                .map(|(pid, cmd, line)| (ProcessId::new(pid, StartTime::from_micros(100)), cmd, line))
+                .collect();
             Fake {
-                table: RefCell::new(parse_table(&lines.join("\n"))),
+                table: RefCell::new(table),
                 ended: RefCell::default(),
                 stubborn: Vec::new(),
+                handed_on: Vec::new(),
             }
         }
     }
 
     impl Procs for Fake {
         fn list(&self) -> Vec<Proc> {
-            self.table.borrow().clone()
+            let seen = self
+                .table
+                .borrow()
+                .iter()
+                .map(|(id, cmd, line)| Proc {
+                    id: *id,
+                    cmd: cmd.clone(),
+                    line: line.clone(),
+                })
+                .collect();
+            // The listing is taken; now the pids change hands.
+            for (id, _, _) in self.table.borrow_mut().iter_mut() {
+                if self.handed_on.contains(&id.pid()) {
+                    *id = ProcessId::new(id.pid(), StartTime::from_micros(200));
+                }
+            }
+            seen
         }
-        fn end(&self, pid: u32) -> bool {
-            self.ended.borrow_mut().push(pid);
-            if !self.stubborn.contains(&pid) {
-                self.table.borrow_mut().retain(|p| p.pid != pid);
+        fn end(&self, id: ProcessId) -> bool {
+            let now = self.table.borrow().iter().find(|(p, _, _)| p.pid() == id.pid()).map(|(p, _, _)| *p);
+            if now != Some(id) {
+                return false;
+            }
+            self.ended.borrow_mut().push(id.pid());
+            if !self.stubborn.contains(&id.pid()) {
+                self.table.borrow_mut().retain(|(p, _, _)| p.pid() != id.pid());
             }
             true
         }
@@ -309,7 +342,7 @@ mod tests {
     }
 
     fn scene() -> Scene {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         let root = std::fs::canonicalize(d.path()).unwrap();
         let tmp = root.join("jobtemp");
         let cwd = root.join("work");
@@ -486,8 +519,49 @@ mod tests {
     fn a_listing_is_parsed_with_the_tables_padding_and_windows_line_ends() {
         let t = parse_table("  41 /a/b --x\r\n 7 c d\n\nnot a pid\n  9\n");
         assert_eq!(t.len(), 2);
-        assert_eq!((t[0].pid, t[0].cmd.as_str()), (41, "/a/b --x"));
-        assert_eq!(t[0].line, "  41 /a/b --x");
-        assert_eq!(t[1].cmd, "c d");
+        assert_eq!((t[0].0, t[0].1.as_str()), (41, "/a/b --x"));
+        assert_eq!(t[0].2, "  41 /a/b --x");
+        assert_eq!(t[1].1, "c d");
+    }
+
+    #[test]
+    fn a_pid_handed_to_another_process_between_the_listing_and_the_end_is_left_alone() {
+        let sc = scene();
+        let mut fake = Fake::new(&[
+            "  41 /ci/target-pitwall-app-s2/debug/pitwall-server --x",
+            "  43 /ci/target-pitwall-app-s2/debug/pitwall-server --y",
+        ]);
+        fake.handed_on = vec![43];
+        let (code, out, _) = go(&sc, &args("pitwall", &["{build}[/\\\\]debug[/\\\\]pitwall-server"]), &fake);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(
+            *fake.ended.borrow(),
+            vec![41],
+            "the process that took pid 43 over is not this job's"
+        );
+        assert!(out.contains("2 process(es) found, 1 ended"), "{out}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_end_refuses_an_identity_whose_pid_now_belongs_to_a_later_process_and_ends_the_right_one() {
+        let sc = scene();
+        let marker = sc.tmp.join("marker-stale");
+        let mut child = paddock_proc::command("perl")
+            .arg("-e")
+            .arg("sleep 30")
+            .arg(&marker)
+            .spawn()
+            .unwrap();
+        let env = HashMap::new();
+        let procs = OsProcs { env: &env };
+        let id = ProcessId::of(child.id()).unwrap();
+        // The same pid with another start time: what a pid handed on to a later process looks like to the identity check.
+        let stale = ProcessId::new(id.pid(), StartTime::from_micros(id.started().as_micros() + 5_000_000));
+        assert!(!procs.end(stale), "a stale identity ends nothing");
+        assert!(child.try_wait().unwrap().is_none(), "the process that holds the pid runs on");
+        assert!(procs.end(id));
+        let status = child.wait().unwrap();
+        assert!(!status.success(), "ended by a signal: {status:?}");
     }
 }

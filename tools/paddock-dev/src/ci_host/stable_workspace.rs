@@ -524,7 +524,7 @@ mod tests {
     /// The runner's variables; the CI home is a scratch folder, so `ci isolation path` runs for real (and answers `/ci/...`
     /// paths through `home`? no: a real path under the scratch folder).
     fn scene(os: &str) -> Scene {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::ci_host::canonical_tempdir();
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).unwrap();
         let env: HashMap<String, String> = [

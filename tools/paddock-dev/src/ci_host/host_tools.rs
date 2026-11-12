@@ -311,7 +311,7 @@ mod tests {
     }
 
     fn scene(os: &str) -> Scene {
-        let d = tempfile::tempdir().unwrap();
+        let d = crate::ci_host::canonical_tempdir();
         std::fs::create_dir_all(d.path().join("home")).unwrap();
         let bin = d.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
