@@ -291,20 +291,6 @@ impl PrivateDir {
         self.open_file(name)?.read_to_vec(max_bytes)
     }
 
-    /// Creates the new file `name` in this folder, owner-only from its first byte (exclusive create, no link followed, mode 0600 on
-    /// Unix; on Windows an owner-only descriptor set in the creating call) and returns it open for writing. An existing name,
-    /// including a link planted there, is an error (`AlreadyExists`) and nothing is changed or followed. For a file another library
-    /// opens later by path (a database): create it here once, then hand the path over.
-    ///
-    /// # Errors
-    /// [`PrivateError::BadName`] or [`PrivateError::Io`] (`AlreadyExists` when the name is taken).
-    pub fn create_new_file(&self, name: &str) -> PrivateResult<PrivateFile> {
-        let os = plain(name)?;
-        let path = self.path.join(name);
-        let file = self.dir.create_file_at(os).map_err(at("create", &path))?;
-        Ok(PrivateFile { file, path })
-    }
-
     /// Removes the file `name`.
     ///
     /// # Errors
@@ -1232,40 +1218,6 @@ mod tests {
         assert!(status.success());
         assert!(made.open_file("g").is_ok());
     }
-
-    /// A new file is owner-only from creation (umask 002 cannot widen it), a taken name is refused and not followed, and the new file
-    /// passes the type's own read check.
-    #[test]
-    fn create_new_file_is_owner_only_exclusive_and_never_follows_a_link() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let held = PrivateDir::create_all(&tmp.path().join("d")).unwrap();
-        let made = held.create_new_file("db").unwrap();
-        assert_eq!(
-            made.as_file().metadata().unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        drop(made);
-        held.open_file("db").unwrap();
-        let again = held.create_new_file("db").unwrap_err();
-        assert!(
-            matches!(&again, PrivateError::Io { source, .. } if source.kind() == std::io::ErrorKind::AlreadyExists),
-            "{again}"
-        );
-        let target = tmp.path().join("victim");
-        std::fs::write(&target, "x").unwrap();
-        std::os::unix::fs::symlink(&target, tmp.path().join("d").join("lnk")).unwrap();
-        assert!(held.create_new_file("lnk").is_err());
-        assert_eq!(
-            std::fs::read_to_string(&target).unwrap(),
-            "x",
-            "nothing was written through the link"
-        );
-        assert!(matches!(
-            held.create_new_file("a/b"),
-            Err(PrivateError::BadName(_))
-        ));
-    }
 }
 
 #[cfg(all(test, windows))]
@@ -1574,22 +1526,5 @@ mod windows_tests {
         drop(file);
         assert_eq!(d.read("f", 10).unwrap(), b"new");
         assert!(!d.path().join(tmp).exists());
-    }
-    /// The file's owner-only rights come from the explicit descriptor, not from inheritance: the folder gets an inheritable Everyone
-    /// read entry after the type made it, and the new file still has no entry for anyone but the account and SYSTEM.
-    #[test]
-    fn create_new_file_on_windows_has_its_own_descriptor_and_is_exclusive() {
-        let t = temp();
-        let held = PrivateDir::create_all(&t.path().join("d")).unwrap();
-        icacls(held.path(), &["/grant", &format!("*{EVERYONE}:(OI)R")]);
-        drop(held.create_new_file("db").unwrap());
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .access_mode(0x0002_0000)
-            .open(held.path().join("db"))
-            .unwrap();
-        let (owner, aces) = sys::file_security(&file, &me()).unwrap();
-        allows_only_me_and_system(&owner, &aces);
-        assert!(held.create_new_file("db").is_err());
     }
 }

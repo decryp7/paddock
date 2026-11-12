@@ -538,9 +538,16 @@ impl Client {
     ) -> Result<Connection, IpcError> {
         let mut stream = Stream::connect(endpoint, HANDSHAKE_TIMEOUT)?;
         // Before the token leaves this process: the one answering must run as this account (rule 53: a discovery file only
-        // hints; a listener planted by another account must not receive the token). Windows relies on the pipe's access list.
+        // hints; a listener planted by another account must not receive the token). On Windows the server process's token says whose
+        // it is (`GetNamedPipeServerProcessId`), not the pipe's access list.
         #[cfg(unix)]
         check_same_account(stream.peer_uid(), paddock_env::current_uid())?;
+        #[cfg(windows)]
+        stream.check_server_is_me().map_err(|e| {
+            IpcError::Auth(format!(
+                "the pipe is not served by your account, so the token was not sent: {e}. Quit the program and start it again"
+            ))
+        })?;
         let hello = Frame::Hello {
             version: frame::VERSION,
             protocol,

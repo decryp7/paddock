@@ -179,6 +179,16 @@ impl Stream {
         }
     }
 
+    /// Windows: whether the process serving this pipe runs as this account, read from that process's token (ADR 0092 DF-3). Unix's
+    /// twin is the peer uid check in the handshake.
+    ///
+    /// # Errors
+    /// [`crate::trust::Untrusted`]: another account serves the pipe, or it could not be read.
+    #[cfg(windows)]
+    pub fn check_server_is_me(&self) -> Result<(), crate::trust::Untrusted> {
+        self.0.check_server_is_me()
+    }
+
     /// Another handle to the same connection.
     pub fn try_clone(&self) -> io::Result<Stream> {
         self.0.try_clone().map(Stream)

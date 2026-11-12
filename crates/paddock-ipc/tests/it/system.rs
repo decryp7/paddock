@@ -322,3 +322,16 @@ fn a_second_instance_of_a_running_pipe_is_refused_to_an_account_with_only_the_in
         Some(std::io::ErrorKind::PermissionDenied)
     );
 }
+
+/// ADR 0092 DF-3: the client reads the serving process's account from its token before it sends anything. Here the server is this
+/// process, so the accounts match and the connect passes. Owed to the Windows runner or VM (never run on the host).
+#[cfg(windows)]
+#[test]
+fn a_pipe_served_by_our_own_account_passes_the_server_check() {
+    let mut l = Listener::bind().unwrap();
+    let name = l.name().to_string();
+    let c = std::thread::spawn(move || Stream::connect(&name, T));
+    let (_server, _) = l.accept(T).unwrap();
+    let client = c.join().unwrap().unwrap();
+    client.check_server_is_me().unwrap();
+}
