@@ -12,7 +12,7 @@ use paddock_proc::{Limits, command, run_bounded};
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 use std::sync::LazyLock;
 use std::time::Duration;
@@ -241,14 +241,47 @@ fn entries_of(raw: &str) -> Option<Vec<Entry>> {
     )
 }
 
-type Key = (String, String);
+/// The result of [`reconcile`], as indexes: the sites with no entry and the entries with no site (a moved site is neither).
+struct Reconciled {
+    fresh: Vec<usize>,
+    stale: Vec<usize>,
+}
 
-fn multiset<'a>(it: impl Iterator<Item = (&'a str, &'a str)>) -> HashMap<Key, usize> {
-    let mut m = HashMap::new();
-    for (f, h) in it {
-        *m.entry((f.to_string(), h.to_string())).or_insert(0) += 1;
+/// Matches sites against baseline entries in two passes, as the JavaScript `reconcile` does: first by file and hash, then the
+/// leftovers by hash alone (a site whose text is in the baseline under another file only moved). Counts are per key, so two
+/// identical lines in two files never hide a real addition.
+fn reconcile(current: &[(&str, &str)], base: &[(&str, &str)]) -> Reconciled {
+    let mut buckets: HashMap<(&str, &str), VecDeque<usize>> = HashMap::new();
+    for (i, k) in base.iter().enumerate() {
+        buckets.entry(*k).or_default().push_back(i);
     }
-    m
+    let mut unmatched: BTreeSet<usize> = (0..base.len()).collect();
+    let mut rest = Vec::new();
+    for (n, k) in current.iter().enumerate() {
+        match buckets.get_mut(k).and_then(VecDeque::pop_front) {
+            Some(i) => {
+                unmatched.remove(&i);
+            }
+            None => rest.push(n),
+        }
+    }
+    let mut pool: HashMap<&str, VecDeque<usize>> = HashMap::new();
+    for &i in &unmatched {
+        pool.entry(base[i].1).or_default().push_back(i);
+    }
+    let mut fresh = Vec::new();
+    for n in rest {
+        match pool.get_mut(current[n].1).and_then(VecDeque::pop_front) {
+            Some(i) => {
+                unmatched.remove(&i);
+            }
+            None => fresh.push(n),
+        }
+    }
+    Reconciled {
+        fresh,
+        stale: unmatched.into_iter().collect(),
+    }
 }
 
 /// `git args` in `root`: standard output, or the error line the JavaScript reports (`Command failed: git ...`) and the standard error.
@@ -300,20 +333,13 @@ fn growth(root: &Path, current: &[Entry]) -> Growth {
             };
         }
     };
-    let mut left = multiset(
-        entries_of(&text)
-            .unwrap_or_default()
-            .iter()
-            .map(|e| (e.file.as_str(), e.hash.as_str())),
-    );
-    let mut added = 0;
-    for e in current {
-        match left.get_mut(&(e.file.clone(), e.hash.clone())) {
-            Some(n) if *n > 0 => *n -= 1,
-            _ => added += 1,
-        }
+    let old = entries_of(&text).unwrap_or_default();
+    let old: Vec<(&str, &str)> = old.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
+    let now: Vec<(&str, &str)> = current.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
+    Growth::Added {
+        base,
+        added: reconcile(&now, &old).fresh.len(),
     }
-    Growth::Added { base, added }
 }
 
 /// What the liveness half found and what it could not measure.
@@ -379,22 +405,22 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
         };
     }
     let entries = raw.map(|r| entries_of(&r).unwrap_or_default()).unwrap_or_default();
-    let mut left = multiset(entries.iter().map(|e| (e.file.as_str(), e.hash.as_str())));
-    for s in &sites {
-        match left.get_mut(&(s.file.clone(), s.hash.clone())) {
-            Some(n) if *n > 0 => *n -= 1,
-            _ => out.push(Finding::error(
-                "C53",
-                53,
-                &s.file,
-                s.line,
-                format!("{}: the pid may belong to another process by now", s.what),
-                fix,
-            )),
-        }
+    let old: Vec<(&str, &str)> = entries.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
+    let now: Vec<(&str, &str)> = sites.iter().map(|s| (s.file.as_str(), s.hash.as_str())).collect();
+    let matched = reconcile(&now, &old);
+    for &n in &matched.fresh {
+        let s = &sites[n];
+        out.push(Finding::error(
+            "C53",
+            53,
+            &s.file,
+            s.line,
+            format!("{}: the pid may belong to another process by now", s.what),
+            fix,
+        ));
     }
-    for e in &entries {
-        if whole_run && left.get(&(e.file.clone(), e.hash.clone())).copied().unwrap_or(0) > 0 {
+    for (i, e) in entries.iter().enumerate() {
+        if whole_run && matched.stale.contains(&i) {
             out.push(Finding::warn(
                 "C53",
                 53,
@@ -438,5 +464,33 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
         findings: out,
         baseline_probe: baseline_in_scope && !entries.is_empty(),
         stale_unmeasured: baseline_in_scope && !whole_run && !entries.is_empty(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reconcile;
+
+    #[test]
+    fn a_moved_site_is_neither_fresh_nor_stale() {
+        let r = reconcile(&[("b.rs", "h1")], &[("a.rs", "h1")]);
+        assert!(r.fresh.is_empty() && r.stale.is_empty());
+    }
+
+    #[test]
+    fn a_move_beside_a_new_site_leaves_the_new_one_fresh() {
+        let r = reconcile(&[("b.rs", "h1"), ("b.rs", "h2")], &[("a.rs", "h1")]);
+        assert_eq!(r.fresh, [1]);
+    }
+
+    #[test]
+    fn identical_lines_in_two_files_are_counted_per_hash() {
+        let base = [("a.rs", "h"), ("b.rs", "h")];
+        // one removed, one added elsewhere: a move
+        assert!(reconcile(&[("a.rs", "h"), ("c.rs", "h")], &base).fresh.is_empty());
+        // a third copy is a real addition
+        assert_eq!(reconcile(&[("a.rs", "h"), ("b.rs", "h"), ("c.rs", "h")], &base).fresh, [2]);
+        // a gone copy is stale, in baseline order
+        assert_eq!(reconcile(&[("a.rs", "h")], &base).stale, [1]);
     }
 }

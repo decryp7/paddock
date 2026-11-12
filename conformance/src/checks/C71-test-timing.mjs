@@ -36,7 +36,7 @@
 // performance.now, page.clock.install without pauseAt, vi.waitFor under fake timers, the live-status spread, C30's elapsed asserts,
 // vm-smoke `observe()`, the ESLint rule.
 import { createHash } from 'node:crypto';
-import { baselineGrowth as sharedGrowth } from '../util/baseline.mjs';
+import { baselineGrowth as sharedGrowth, reconcile } from '../util/baseline.mjs';
 import { error, warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
@@ -450,38 +450,28 @@ export function timingSites(files, read) {
   return out;
 }
 
-/** Splits `sites` against the baseline entries: { fresh, known, stale } (a hash is used once per entry, so a copy is fresh). */
-export function againstBaseline(sites, entries) {
-  const left = new Map();
-  for (const e of entries) left.set(`${e.file}\0${e.hash}`, (left.get(`${e.file}\0${e.hash}`) ?? 0) + 1);
-  const fresh = [];
-  for (const s of sites) {
-    const k = `${s.file}\0${s.hash}`;
-    if ((left.get(k) ?? 0) > 0) left.set(k, left.get(k) - 1);
-    else fresh.push(s);
-  }
-  const stale = entries.filter((e) => (left.get(`${e.file}\0${e.hash}`) ?? 0) > 0);
-  return { fresh, stale };
-}
-
+const hashOf = (e) => e.hash;
 const key = (e) => `${e.file}\0${e.hash}`;
 
-/** The baseline entries that still match a site, with the sites' current lines: the baseline after removing the stale ones, never adding. */
-export function shrinkBaseline(sites, entries) {
-  const left = new Map();
-  for (const e of entries) left.set(key(e), (left.get(key(e)) ?? 0) + 1);
-  const kept = [];
-  for (const s of sites) {
-    if ((left.get(key(s)) ?? 0) > 0) {
-      left.set(key(s), left.get(key(s)) - 1);
-      kept.push({ file: s.file, line: s.line, hash: s.hash });
-    }
-  }
-  return kept;
+/**
+ * Splits `sites` against the baseline entries: { fresh, stale, moved } (a hash is used once per entry, so a copy is fresh). A site
+ * whose text is in the baseline under another file is `moved` ([{ item: site, from: entry }]): the code was moved, not added.
+ */
+export function againstBaseline(sites, entries) {
+  return reconcile(sites, entries, key, hashOf);
 }
 
 /**
- * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash), or `{ reason }`
+ * The baseline entries that still match a site, with the sites' current files and lines (a moved site is rewritten to its new file):
+ * the baseline after removing the stale ones, never adding.
+ */
+export function shrinkBaseline(sites, entries) {
+  const { fresh } = againstBaseline(sites, entries);
+  return sites.filter((s) => !fresh.includes(s)).map((s) => ({ file: s.file, line: s.line, hash: s.hash }));
+}
+
+/**
+ * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash, then by hash alone: a moved site is `moved`, not added), or `{ reason }`
  * when it could not be measured. One shrink-only rule for every baseline file: conformance/src/util/baseline.mjs.
  */
 export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
@@ -490,6 +480,7 @@ export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
     path,
     current,
     keyOf: key,
+    looseKeyOf: hashOf,
     entriesOf: (json) => json.sites ?? [],
     ...(ctx.options.git ? { git: ctx.options.git } : {}),
     ...(ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF ? { baseRef: ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF } : {}),

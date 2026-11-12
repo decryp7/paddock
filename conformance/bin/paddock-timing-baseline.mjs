@@ -37,11 +37,15 @@ const write = (entries, what) => {
   writeFileSync(file, `${JSON.stringify(doc, null, 1)}\n`);
   console.log(`wrote ${entries.length} ${what} to ${PATH}`);
 };
+const reportMoved = () => {
+  for (const { item, from } of againstBaseline(sites, old.sites).moved) console.log(`moved: ${from.file} -> ${item.file}  (same text; the entry's file is rewritten, not counted as growth)`);
+};
 if (args.includes('--shrink')) {
   if (!old) {
     console.error('no baseline to shrink');
     process.exit(2);
   }
+  reportMoved();
   const fresh = againstBaseline(sites, old.sites).fresh;
   write(shrinkBaseline(sites, old.sites), `known sites (${old.sites.length - shrinkBaseline(sites, old.sites).length} removed; ${fresh.length} sites are not in the baseline and were not added)`);
   process.exit(0);

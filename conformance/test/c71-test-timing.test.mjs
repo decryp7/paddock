@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { againstBaseline, retriesWithoutFlakyFailure, lineHash, rustTimingSites, rustWaitSites, rustRaceSites, tsRaceSites, tsWaitSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
+import { againstBaseline, baselineGrowth, retriesWithoutFlakyFailure, lineHash, rustTimingSites, rustWaitSites, rustRaceSites, tsRaceSites, tsWaitSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const ts = (t) => tsTimingSites(t).map((s) => s.line);
@@ -58,7 +58,7 @@ test('C71 baseline: a known site passes by its text wherever it moves, a copy or
   const a = { file: 'f.ts', line: 3, hash: lineHash('await  sleep(5);') };
   assert.equal(a.hash, lineHash('await sleep(5);'), 'whitespace does not change the hash');
   const moved = { ...a, line: 40 };
-  assert.deepEqual(againstBaseline([moved], [a]), { fresh: [], stale: [] });
+  assert.deepEqual(againstBaseline([moved], [a]), { fresh: [], stale: [], moved: [] });
   assert.equal(againstBaseline([moved, { ...a, line: 50 }], [a]).fresh.length, 1, 'a second copy is new');
   assert.equal(againstBaseline([{ ...a, hash: lineHash('await sleep(6);') }], [a]).fresh.length, 1, 'an edited line is new');
   assert.equal(againstBaseline([], [a]).stale.length, 1);
@@ -161,6 +161,37 @@ test('C71 baseline is shrink-only against the merge base: an added entry is an e
   assert.match(noGit[0].message, /not (enforced|measured)/);
   const fresh = await run(both, null);
   assert.deepEqual(fresh, [], 'no baseline at the merge base: the first introduction');
+});
+
+test('C71 baseline: code moved to another file is moved, not new and not stale; shrinkBaseline rewrites its file', () => {
+  const site = (file, line, text) => ({ file, line, hash: lineHash(text) });
+  const old = site('a.rs', 3, 'run_waited(x);');
+  const now = site('b.rs', 9, 'run_waited(x);');
+  const r = againstBaseline([now], [old]);
+  assert.deepEqual([r.fresh, r.stale], [[], []]);
+  assert.deepEqual(r.moved, [{ item: now, from: old }]);
+  assert.deepEqual(shrinkBaseline([now], [old]), [{ file: 'b.rs', line: 9, hash: now.hash }]);
+  // moved plus one genuinely new line: the new one is fresh
+  const extra = site('b.rs', 20, 'kill(y);');
+  assert.deepEqual(againstBaseline([now, extra], [old]).fresh, [extra]);
+});
+
+const growthCtx = (base) => ({ root: '.', options: { git: (args) => (args[0] === 'rev-parse' ? 'def\n' : args[0] === 'merge-base' ? 'abc\n' : base) } });
+
+test('C71 baselineGrowth: a moved entry (same hash, another file) is not growth; moved + one new is 1; duplicates are counted per hash', () => {
+  const e = (file, text) => ({ file, line: 1, hash: lineHash(text) });
+  const at = (...entries) => JSON.stringify({ sites: entries });
+  const base = at(e('a.rs', 'x();'), e('c.rs', 'z();'));
+  const moved = baselineGrowth(growthCtx(base), [e('b.rs', 'x();'), e('c.rs', 'z();')]);
+  assert.deepEqual(moved.added, []);
+  assert.equal(moved.moved.length, 1);
+  assert.equal(baselineGrowth(growthCtx(base), [e('b.rs', 'x();'), e('c.rs', 'z();'), e('d.rs', 'n();')]).added.length, 1, 'moved + one new is growth of 1');
+  // the same line in two files: one removed, one added elsewhere is a move; a third copy is growth
+  const dup = at(e('a.rs', 'x();'), e('b.rs', 'x();'));
+  assert.equal(baselineGrowth(growthCtx(dup), [e('a.rs', 'x();'), e('c.rs', 'x();')]).added.length, 0);
+  assert.equal(baselineGrowth(growthCtx(dup), [e('a.rs', 'x();'), e('b.rs', 'x();'), e('c.rs', 'x();')]).added.length, 1);
+  // a file-only difference with a different text is still growth
+  assert.equal(baselineGrowth(growthCtx(base), [e('a.rs', 'x();'), e('c.rs', 'other();')]).added.length, 1);
 });
 
 test('C71 shrinkBaseline keeps the matching entries with their current lines and never adds one', () => {

@@ -940,11 +940,17 @@ fn git(root: &Path, args: &[&str]) {
 /// The fixture tree as a git repository whose merge base holds a baseline with one entry fewer than the working tree's (the baseline
 /// GREW by one entry): `origin/main` is the first commit, `topic` the second.
 fn grown_baseline_repo() -> tempfile::TempDir {
+    baseline_repo(|sites| sites.truncate(1))
+}
+
+/// Like [`grown_baseline_repo`], with the merge base's baseline entries edited by `edit` first.
+fn baseline_repo(edit: impl FnOnce(&mut Vec<Value>)) -> tempfile::TempDir {
     let tree = materialize();
     let root = tree.path();
     let full = std::fs::read_to_string(root.join(BASELINE)).unwrap();
     let mut doc: Value = serde_json::from_str(&full).unwrap();
-    let kept = doc["sites"].as_array().unwrap()[..1].to_vec();
+    let mut kept = doc["sites"].as_array().unwrap().clone();
+    edit(&mut kept);
     doc["sites"] = Value::Array(kept);
     std::fs::write(root.join(BASELINE), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
     git(root, &["init", "-q", "-b", "main"]);
@@ -985,6 +991,43 @@ fn live_baseline_growth_equals_the_js_host_in_a_git_repository() {
     let grew = baseline_findings(&r);
     assert_eq!(grew.len(), 1, "{grew:?}");
     assert!(grew[0].contains("the baseline grew: 1 entry is"), "{grew:?}");
+}
+
+/// The merge base lists the first site under another file (the code moved since): same hash, so not growth, on both hosts.
+#[test]
+fn a_moved_site_is_not_growth_on_either_host_but_a_new_one_beside_it_is() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let move_first = |sites: &mut Vec<Value>| sites[0]["file"] = json!("crates/a/src/old_home.rs");
+    for (name, tree, grew) in [
+        ("moved only", baseline_repo(move_first), 0),
+        (
+            "moved and one new",
+            baseline_repo(|sites| {
+                move_first(sites);
+                sites.truncate(1);
+            }),
+            1,
+        ),
+    ] {
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN,
+            &[
+                ("RT5_ROOT", tree.path().display().to_string()),
+                ("RT5_APP", "fixture".into()),
+                ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
+            ],
+        ))
+        .unwrap();
+        let r = run_checks(&options(tree.path()), &registry()).unwrap();
+        assert_eq!(shared_part(&r.json()), shared_part(&js), "{name}: the hosts agree");
+        let msgs = baseline_findings(&r);
+        assert_eq!(msgs.len(), grew, "{name}: {msgs:?}");
+        if grew == 1 {
+            assert!(msgs[0].contains("the baseline grew: 1 entry is"), "{name}: {msgs:?}");
+        }
+    }
 }
 
 #[test]
