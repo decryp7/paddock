@@ -14,6 +14,13 @@ pub enum SlotError {
     },
     /// A release did not take effect in time (the holder is still alive).
     ReleaseTimeout(String),
+    /// The holder took the slot's lock but could not mark the slot live: probes kept `sN.live` locked for the whole wait.
+    LiveBusy {
+        /// The slot (`s1`).
+        slot: String,
+        /// How long it tried, in milliseconds.
+        waited_ms: u64,
+    },
 }
 
 impl std::fmt::Display for SlotError {
@@ -30,6 +37,10 @@ impl std::fmt::Display for SlotError {
                     path.display()
                 )
             }
+            SlotError::LiveBusy { slot, waited_ms } => write!(
+                f,
+                "Slot {slot} could not be marked live after {waited_ms} ms: something kept probing it. Check for a loop of status calls, then try again."
+            ),
             SlotError::ReleaseTimeout(s) => {
                 write!(
                     f,
@@ -67,6 +78,15 @@ mod tests {
             SlotError::ReleaseTimeout("s2".into())
                 .to_string()
                 .contains("holder")
+        );
+        let busy = SlotError::LiveBusy {
+            slot: "s3".into(),
+            waited_ms: 5000,
+        };
+        assert!(
+            busy.to_string().contains("s3")
+                && busy.to_string().contains("5000 ms")
+                && busy.to_string().contains("try again")
         );
     }
 }

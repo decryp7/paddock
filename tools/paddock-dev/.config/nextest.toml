@@ -1,6 +1,8 @@
 # cargo-nextest settings for paddock-dev (its own workspace). Locally: `cargo nextest run`; CI: `--profile ci`, the same
 # profile as crates/.config/nextest.toml (one retry that still fails the run (ER-12); a time budget; a JUnit report).
 
+# Locally `cargo nextest run` is the way to run the tests (a plain `cargo test` has no per-test bound): a test that waits on
+# something that never comes is stopped after 120 s and fails, instead of hanging the run (the slots probe test hung 23 minutes).
 [profile.default]
 # Bounded: a test still running after two minutes (four periods) is stopped and fails (ER-21, conformance C114); a test
 # that needs longer is a named override with a `# waiver:` line, not a longer default.

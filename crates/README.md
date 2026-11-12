@@ -2076,9 +2076,9 @@ The shared layers under `tools/paddock-dev` (`./dev`), each with a pure core and
   `apps/pacenotes/`** (cargo reads the repository's `.cargo/config.toml`, which can name programs to run; ADR 0022 §6, and the
   a conformance check that fails on it is planned in ADR 0022 §3.7 and does not exist yet; until then review is the guard). Paddock's own rules (global inputs, doc inputs, owners) are `paddock-dev`'s `plan`
   module, not this crate's.
-- `paddock-slots`: `SlotId` (`s1`...), the `SlotLocks` port and `acquire_first`/`slot_states` (pure), `acquire_retry` (a few tries when every slot looked busy, because a status probe holds a lock for an instant), tokens (`fresh_token`; `release` presents the holder's token and a holder honours only its own, so a late release never frees the next job's slot), `FsLocks` over
+- `paddock-slots`: `SlotId` (`s1`...), the `SlotLocks` port and `acquire_first`/`slot_states` (pure), `acquire_within` (the first free slot, retried for a grace period; a status probe no longer competes: it looks at `sN.live`, which a holder keeps locked, never at `sN.lock`), tokens (`fresh_token`; `release` presents the holder's token and a holder honours only its own, so a late release never frees the next job's slot), `FsLocks` over
   `<root>/slots/sN.lock` (`File::try_lock`: `flock`, `LockFileEx`), and the holder protocol `hold` (take a slot, announce it
   on a writer, keep it until the owner folder is gone or `release` asks), `release`, `wait_free`. The lock file is never read
   or written (Windows locks block other handles); `sN.owner` and `sN.release` are information and a request. Reading
-  `slot_states` tries each lock for an instant, so a status call can make a concurrent acquirer skip a slot once.
+  `slot_states` takes a shared lock on `sN.live` for an instant and never touches `sN.lock`, so a status call cannot make an acquirer skip a slot.
   Used by `./dev ci slot acquire|release|status` (see `tools/paddock-dev/src/slots.rs` for the detached-holder design).

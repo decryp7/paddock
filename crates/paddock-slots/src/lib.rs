@@ -7,14 +7,15 @@
 //! - [`SlotId`]: the typed `sN` name.
 //! - [`SlotLocks`] (a port) and [`acquire_first`] (pure): take the first free slot; [`slot_states`] reads which are busy;
 //!   [`with_idle`] runs work on an idle slot while holding its lock (deleting its kept folders without a check-then-act race).
-//! - [`acquire_retry`]: [`acquire_first`] that tries a few times when everything looked busy (a status probe holds a lock for
-//!   an instant).
+//! - [`acquire_within`]: [`acquire_first`] repeated for a grace period when every slot looked busy (only a releaser's or an idle
+//!   sweep's instant of holding the lock is left to wait out: a status probe never takes it).
 //! - Tokens: a holder has a [`fresh_token`]; `release` presents it, and a holder honours only its own, so a slow release can
 //!   never free the next job's slot.
 //! - [`FsLocks`]: the adapter over lock files, plus the holder protocol [`hold`]: a long-lived process takes a slot,
 //!   announces it, and keeps it until its owner folder disappears or a release is requested ([`request_release`]).
 //!
-//! Reading a slot's state tries its lock, so a status call can make a concurrent acquirer skip that slot for a moment.
+//! Reading a slot's state does not touch the lock acquirers contend on: a holder also keeps `sN.live` locked, and a status call
+//! looks at that file only (a shared lock, taken and dropped at once), so a probe cannot make an acquirer skip a slot.
 //!
 //! # Processes that start children
 //!
@@ -33,9 +34,7 @@ mod slot;
 pub use error::SlotError;
 pub use fs::{FsGuard, FsLocks, OwnerInfo};
 pub use hold::{
-    ACQUIRE_ATTEMPTS, Announcement, HoldEnd, HoldProbe, ReleaseLocks, fresh_token, hold,
-    hold_until, release, wait_free,
+    ACQUIRE_GRACE, Announcement, HoldEnd, HoldProbe, ReleaseLocks, acquire_within, fresh_token,
+    hold, hold_until, hold_with, release, wait_free,
 };
-pub use slot::{
-    SlotId, SlotLocks, SlotState, acquire_first, acquire_retry, slot_states, with_idle,
-};
+pub use slot::{SlotId, SlotLocks, SlotState, acquire_first, slot_states, with_idle};

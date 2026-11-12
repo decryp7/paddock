@@ -39,6 +39,9 @@ fn acquire(root: &Path, owner: &Path, max: &str) -> (i32, Value, String) {
         // Whatever a failing test leaves behind ends by itself (tests leave no process on the machine).
         "--max-hold-secs",
         "120",
+        // A full house is refused after 50 ms, not the production 5 s.
+        "--acquire-grace-ms",
+        "50",
     ])
 }
 
@@ -383,6 +386,16 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
     assert!(is_free(&root, 1), "no holder was started");
 }
 
+/// Sets the flag when it goes out of scope, so a panic in the test body still stops the prober (a flag set only on the success path
+/// left the prober, and with it the test run, waiting forever).
+struct StopOnDrop<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl Drop for StopOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 #[test]
 fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     let d = tempfile::tempdir().unwrap();
@@ -392,16 +405,31 @@ fn acquire_is_never_refused_because_a_status_probe_looked_at_the_slot() {
     std::thread::scope(|s| {
         s.spawn(|| {
             let locks = FsLocks::new(&root);
-            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+            // Its own deadline as well: the probe ends even if nothing ever sets the flag.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) && std::time::Instant::now() < deadline {
                 let _ = paddock_slots::slot_states(&locks, 1);
             }
         });
+        let _stop = StopOnDrop(&stop);
         for _ in 0..8 {
             let (slot, token) = take(&root, &job, "1");
             assert_eq!(release(&root, &slot, &token).0, 0);
         }
-        stop.store(true, std::sync::atomic::Ordering::Relaxed);
     });
+}
+
+/// The refusal says how long the holder kept trying (ER-27); a probe in flight is covered in paddock-slots (fs.rs).
+#[test]
+fn a_refusal_says_how_long_the_holder_kept_trying() {
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (_, token) = take(&root, &job, "1");
+    let (code, v, err) = acquire(&root, &job, "1");
+    assert_eq!((code, v["kind"].clone()), (4, "refused".into()));
+    assert!(err.contains("kept trying for 0.1 s"), "{err}");
+    assert_eq!(release(&root, "s1", &token).0, 0);
 }
 
 #[test]
