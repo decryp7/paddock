@@ -97,6 +97,27 @@ that quotes a result links to the block instead of carrying the only copy.
 
 - **Notes:** the full checkout's slowest run (7.1 s) came while the load was high. An earlier run on a quieter machine gave 3.1 s and 1.9 s (two runs each, disk the same). Decision: a branch worktree is a full checkout (`--profile gates`), because conformance, `scripts/affected.mjs`, `./dev gates check` and `./dev plan` read most folders and a cone made them fail with ENOENT; agents added folders by hand at least four times on 2026-11-11. `--sparse` stays for `--detach` review copies. Not measured: build output, which is the same for both.
 
+### 2026-11-12, SVG drift check: font metrics (ci/svg-drift-check)
+
+- **Commit:** 8a3c3111a (the branch merged with origin/main 0b736ac0b, which has train 7's Pitwall re-export c8057ff13)
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; the fresh exports ran in `paddock-ci:v2` as `linux/amd64` (emulated), one container, `--rm --cpus 4 --memory 12g`
+- **Load:** 1-minute load 15 to 37 during the run (other agents' builds were running)
+- **Build:** draw.io desktop 32.6.10 (`drawio-amd64-32.6.10.deb`, SHA-256 fc96faaf...af83c) under `xvfb-run`, `--no-sandbox`; the committed SVGs were exported by the authors with draw.io desktop on macOS (the Mac's installed app is 32.6.10)
+- **Corpus:** 143 committed SVGs with a `.drawio` source (150 sources; 7 kit templates have no export on purpose), including Sighter's 8 under `docs/images/diagrams/svg/`
+- **Command:** `node scripts/svg-drift.mjs --keep <dir>` in the container, then a script that compares each fresh export with its committed file after `normalise()` and lists every differing number with its attribute
+- **Runs:** 1 run (an export is deterministic once the random root id is normalised)
+- **Numbers:**
+
+  | Measure | Result |
+  |---|---|
+  | identical after normalising (PNG label copies, random root id, fallback text wrapping) | 132 of 143 |
+  | differ only in root width and a sideways translation of every x coordinate | 10 (Debrief use-cases extend, investigate, operate, report; Dyno use-cases power; Pitcrew use-cases automatic, maintenance, runners; Pitwall state pairing, use-cases clients) |
+  | maximum root width difference | 12 px (Pitwall `uml-use-cases-clients`); the others 2, 2, 2, 3, 8, 8, 9, 9, 10 |
+  | maximum sideways translation | 9 px (Pitcrew maintenance, runners); every x coordinate moves by the same amount, no y, size, font size or path control point differs |
+  | stale committed SVG (the source changed, the SVG did not) | 1: `apps/debrief/docs/diagrams/svg/c4-3-research-browser.svg` (label "[paddock_proc::Supervised child]" in the source, "[Supervised child]" in the SVG) |
+
+- **Notes:** `ROOT_TOLERANCE` in `scripts/svg-drift.mjs` is 12, the measured maximum; everything else, font sizes included, is compared exactly. Cause: a label that overflows its box in the host's font changes the canvas extent. Only two hosts were compared (macOS committed, Linux amd64 fresh); a Windows export was not measured. The check takes about 5 minutes under emulation on this loaded machine; native amd64 CI is not measured.
+
 ## All benchmarks
 
 The CI column names the workflow and job. "No" means nobody runs it unless they choose to. Details, env vars and

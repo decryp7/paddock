@@ -5,7 +5,7 @@
 #   paddock-ci-verify [--manifest FILE]
 #
 # Expected values come from the environment the Dockerfile sets: EXPECT_NODE_MAJOR, EXPECT_SCCACHE, EXPECT_CHROME,
-# EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK. An expectation that is not set is not checked.
+# EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK, EXPECT_DRAWIO. An expectation that is not set is not checked.
 set -uo pipefail
 
 manifest=/etc/paddock-ci-release
@@ -74,6 +74,11 @@ if [ -n "${EXPECT_CHROME:-}" ]; then
     cv=$("$chrome" --version 2>&1 | head -1)
     case "$cv" in *"$EXPECT_CHROME"*) note "chrome for testing: $cv" ;; *) bad "Chrome for Testing is '$cv', the image pins $EXPECT_CHROME" ;; esac
   fi
+fi
+
+# draw.io desktop (amd64 only): it is an Electron app, so even `--version` needs a display (xvfb-run).
+if [ -n "${EXPECT_DRAWIO:-}" ]; then
+  if dv=$(xvfb-run -a drawio --version --no-sandbox 2>&1 | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | tail -1) && [ "$dv" = "$EXPECT_DRAWIO" ]; then note "draw.io: $dv"; else bad "draw.io is '${dv:-missing}', the image pins ${EXPECT_DRAWIO}"; fi
 fi
 
 duck=${DUCKDB_LIB_DIR:-}

@@ -279,6 +279,7 @@ export const DOC_INPUTS = [
   { re: /^crates\/paddock-service\/tests\/fixtures\/launchctl-print-running\.txt$/, projects: ['crates', 'app:pitcrew'], why: "Pitcrew's service_repair.rs tests parse the canonical real launchctl capture (include_str!)" },
   { re: /^apps\/debrief\/docs\/ai\/sql-views\.md$/, why: 'debrief-ai tests/sql_tool.rs (from the import)' },
   { re: /^apps\/debrief\/docs\/testing\/quarantine\.md$/, why: 'scripts/ci/check-quarantine (from the import)' },
+  { re: /^(docs|diagrams|apps\/[^/]+\/docs|apps\/[^/]+\/diagrams)\/(.+\/)?([^/]+\.drawio|svg\/[^/]+\.svg)$|^docs\/images\/[^/]+\.svg$/, projects: ['tools'], why: 'scripts/svg-drift.mjs re-exports every .drawio and compares it with the committed SVG (ER-40; the tools job runs it)' },
   { re: /^apps\/[^/]+\/vendor\/.*\.md$/, why: "a vendored crate's own markdown (its lib.rs include_str!s it; vendor/PATCHES.md)" },
 ];
 
@@ -357,7 +358,7 @@ const OWNERS = [
   // The scripts' tests run in the ui job (`npm run test:scripts`) and in the tools job.
   [/^scripts\//, ['tools', 'ui']],
   [/^icons\//, ['icons']],
-  [/^ci-image\//, ['ci-image', 'ui']], // scripts/ci-image.test.mjs checks the image against the lock
+  [/^ci-image\//, ['ci-image', 'ui', 'tools']], // scripts/ci-image.test.mjs checks the image against the lock; the tools job's SVG drift check runs the pinned draw.io
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
   [/^\.gitleaks\.toml$/, ['conformance']], // the secret scan's allow-list: the conformance job runs the scan
   [/^wiki-lint\.json$/, ['tools']], // the settings of tools/wiki, which lints docs/wiki (ER-30)

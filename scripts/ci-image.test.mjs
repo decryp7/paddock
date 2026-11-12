@@ -139,6 +139,12 @@ const sh = (script, args, { env = {}, cwd = scratch } = {}) => {
 };
 
 describe('fetch-verified.sh', () => {
+  test('the download is bounded and logged: connect timeout, total time, size cap, duration', () => {
+    const script = read('ci-image/fetch-verified.sh');
+    for (const flag of ['--connect-timeout', '--max-time', '--max-filesize']) assert.ok(script.includes(flag), flag);
+    assert.match(script, /downloaded .* bytes in .* s/);
+  });
+
   const dir = join(scratch, 'fetch');
   mkdirSync(dir, { recursive: true });
   const body = 'hello pinned world\n';

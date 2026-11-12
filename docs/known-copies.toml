@@ -898,6 +898,27 @@ status = "built"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
 
+  [[mechanism.copy]]
+  paths = ["scripts/svg-drift.mjs"]
+  symbols = ["text:EXPORT_ARGS"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The drift check re-exports with the same draw.io flags as the export script (EXPORT_ARGS); when the diagram tool moves into paddock-dev (ADR 0022 phase 5) both read one list."
+
+[[mechanism]]
+id = "drawio-install"
+title = "Installing the pinned draw.io desktop for the SVG drift check"
+canonical = "ci-image"
+paths = ["ci-image/Dockerfile"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = [".gitea/workflows/ci.yml"]
+  symbols = ["text:drawio"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The tools job unpacks the same pinned .deb itself until the CI image is rebuilt with draw.io (ci-image v3); delete the step 'draw.io for the SVG drift check' and this entry when ci.yml names ci-image v3."
+
 # =====================================================================================================================
 # Release notes and screens: raw-text rules
 # =====================================================================================================================
