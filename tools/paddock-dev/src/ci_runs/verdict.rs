@@ -469,6 +469,10 @@ mod tests {
         let runs = vec![main_push(4, "success"), dispatch(9, "success")];
         // No job list for the newer run (404): it might be the full one.
         assert_eq!(code(&ask(&mut server(runs.clone(), &[]))), 6);
+        // A server error on the job list is the same: not measured, never partial.
+        let mut f = server(runs.clone(), &[]);
+        f.error(&format!("{API}/runs/9/jobs?limit=50&page=1"), "curl exited with 22: error: 500");
+        assert_eq!(code(&ask(&mut f)), 6);
         // A job list without a plan job is partial: the older green main push decides.
         let mut f = server(runs.clone(), &[]);
         f.json(
