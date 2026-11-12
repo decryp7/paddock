@@ -328,6 +328,8 @@ pub struct RealExec {
     pub stop: Arc<AtomicBool>,
     /// The `heavy` built from tools/heavy when none is on PATH, built once per run (or the reason it could not be).
     pub built_heavy: std::sync::OnceLock<Result<PathBuf, String>>,
+    /// When the push gate's budget ends: the build of heavy is cut off there.
+    pub budget_end: Instant,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -352,6 +354,9 @@ const PASS: &[&str] = &[
     "npm_config_*",
 ];
 
+/// The variable that, with `PADDOCK_HEAVY=off`, lets a test run a heavy gate without the slot.
+pub const TEST_HEAVY_OFF: &str = "PADDOCK_TEST_HEAVY_OFF";
+
 /// The label that marks the container of one run, so only it is ever stopped (ER-14).
 const RUN_LABEL: &str = "paddock.run";
 
@@ -363,11 +368,23 @@ impl RealExec {
     /// The command that puts a heavy gate through the slot: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the `heavy`
     /// built from this tree ([`super::heavy_tool`]). Empty for `PADDOCK_HEAVY=off` (hermetic tests only); `Err` when the build failed.
     fn heavy_command(&self) -> Result<Vec<String>, String> {
+        if self.env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
+            // Only a test may run without the slot: anything else is an override that makes the gate not measured.
+            return if self.env.contains_key(TEST_HEAVY_OFF) {
+                Ok(Vec::new())
+            } else {
+                Err("PADDOCK_HEAVY=off is set without the test-only variable PADDOCK_TEST_HEAVY_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
+            };
+        }
         let found = heavy_prefix(&self.env, &|p| self.has_tool(p));
-        if !found.is_empty() || self.env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
+        if !found.is_empty() {
             return Ok(found);
         }
-        match self.built_heavy.get_or_init(|| super::heavy_tool::ensure(&self.root, &self.env)) {
+        let left = self.budget_end.saturating_duration_since(Instant::now());
+        match self
+            .built_heavy
+            .get_or_init(|| super::heavy_tool::ensure(&self.root, &self.env, left))
+        {
             Ok(bin) => Ok(vec![bin.display().to_string(), "run".into(), "pre-push".into(), "--".into()]),
             Err(e) => Err(e.clone()),
         }
@@ -605,6 +622,7 @@ exit $rc
                 logs: dir.join("logs"),
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
+                budget_end: Instant::now() + Duration::from_secs(60),
             }
         }
 
@@ -700,10 +718,12 @@ exit $rc
                     ("PATH".to_string(), path),
                     ("PADDOCK_DEV_HOME".to_string(), d.join("home").display().to_string()),
                     ("HOME".to_string(), d.display().to_string()),
+                    ("PADDOCK_DEV_TARGET_DIR".to_string(), d.join("tgt").display().to_string()),
                 ]),
                 logs: d.join("logs"),
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
+                budget_end: Instant::now() + Duration::from_secs(60),
             }
         }
 
@@ -721,10 +741,17 @@ exit $rc
                 cached.len() == 1 && cached[0].file_name().to_string_lossy().starts_with("heavy-"),
                 "{cached:?}"
             );
+            // The per-build folder is gone (not under the cache folder: the build folder is `PADDOCK_DEV_TARGET_DIR`).
+            let left: Vec<_> = std::fs::read_dir(d.path().join("tgt"))
+                .map(|r| r.flatten().collect())
+                .unwrap_or_default();
+            assert!(left.is_empty(), "the build folder was not removed: {left:?}");
+            assert!(!d.path().join("home").join("target-heavy-x").exists());
             // A second run finds it in the cache: cargo is not needed.
             std::fs::remove_file(d.path().join("fakebin/cargo")).unwrap();
             let ex2 = RealExec {
                 built_heavy: Default::default(),
+                budget_end: Instant::now() + Duration::from_secs(60),
                 env: ex.env.clone(),
                 root: ex.root.clone(),
                 logs: ex.logs.clone(),
@@ -750,10 +777,33 @@ exit $rc
         }
 
         #[test]
+        fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = real(d.path(), &d.path().join("l"));
+            ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
+            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
+                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("OVERRIDE SET"), "{reason}"),
+                v => panic!("{v:?}"),
+            }
+        }
+
+        #[test]
+        fn a_build_after_the_budget_is_not_started() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = repo_with_fake_cargo(d.path(), true);
+            ex.budget_end = Instant::now();
+            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
+                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("budget was spent"), "{reason}"),
+                v => panic!("{v:?}"),
+            }
+        }
+
+        #[test]
         fn heavy_off_still_runs_without_the_slot_for_hermetic_tests() {
             let d = tempfile::tempdir().unwrap();
             let mut ex = real(d.path(), &d.path().join("l"));
             ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
+            ex.env.insert(TEST_HEAVY_OFF.into(), "1".into());
             ex.env.insert("PATH".into(), "/usr/bin:/bin".into());
             assert!(matches!(
                 decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)),

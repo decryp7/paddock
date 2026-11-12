@@ -314,6 +314,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         logs: state.join("logs"),
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
+        budget_end: std::time::Instant::now() + BUDGET,
     };
     let history = GitHistory::new(&work, GIT_TIMEOUT);
     let req = Request {
@@ -346,15 +347,16 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     }
     let load = uptime_load(&real);
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
-    if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
-        if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
-            notes.push("PADDOCK_HEAVY=off: compiles run without the machine-wide slot (CARGO_BUILD_JOBS=2 still applies)".into());
-        } else {
-            notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
-        }
+    let mut overridden = String::new();
+    if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_HEAVY_OFF) {
+        overridden =
+            "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
+                .into();
+    } else if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
+        notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
+        "{overridden}pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
         change.files.len(),
         args.base,
         n,

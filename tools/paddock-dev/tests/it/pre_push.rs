@@ -24,11 +24,11 @@ fn fake_bin(dir: &Path, script: &str) -> String {
 
 /// The fake cargo runs without the machine-wide slot: `PADDOCK_HEAVY=off`, as a machine only its user uses would set it.
 fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
-    dev_heavy(path, args, Some("off"))
+    dev_heavy(path, args, Some("off"), true)
 }
 
 #[allow(clippy::disallowed_methods)]
-fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>) -> (i32, String, String) {
+fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> (i32, String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["check", "--pre-push", "--base", "HEAD", "--files", CHANGE])
@@ -37,6 +37,7 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>) -> (i32, String, St
         .env("PATH", path)
         .env_remove("PADDOCK_HEAVY")
         .envs(heavy.map(|h| ("PADDOCK_HEAVY", h)))
+        .envs(test_off.then_some(("PADDOCK_TEST_HEAVY_OFF", "1")))
         // An empty cache: the heavy tool is built (by the fake cargo, which builds nothing) and never taken from the user's.
         .env(
             "PADDOCK_DEV_HOME",
@@ -122,11 +123,21 @@ fn everything_that_runs_green_is_exit_0() {
 fn when_heavy_cannot_be_built_the_compiles_are_not_measured_exit_6_never_a_pass() {
     let d = tempfile::tempdir().unwrap();
     let path = fake_bin(d.path(), "exit 0");
-    let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None);
+    let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None, false);
     assert_eq!(code, 6, "{err}{out}");
     assert!(
         out.contains("NOT MEASURED  clippy crates") && out.contains("no heavy slot tool"),
         "{out}"
     );
     assert!(!out.contains("ok            clippy"), "{out}");
+}
+
+#[test]
+fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
+    let d = tempfile::tempdir().unwrap();
+    let path = fake_bin(d.path(), "exit 0");
+    let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], Some("off"), false);
+    assert_eq!(code, 6, "{err}{out}");
+    assert!(out.starts_with("OVERRIDE SET") || out.contains("\nOVERRIDE SET"), "{out}");
+    assert!(out.contains("NOT MEASURED  clippy crates"), "{out}");
 }
