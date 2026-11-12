@@ -1,0 +1,106 @@
+# Release tags are made here and nowhere else (ER-15, rule 9): an agent or a person requests a tag, this workflow checks the
+# commit and the release bot pushes it. Tag protection (tag pattern * allowing only release-bot) is switched on by the repository's
+# owner, so a tag pushed by hand is refused by the server.
+#
+# Checked, each failing with one ::error:: and the next step (conformance/ci/request-tag.mjs): the tag's name, the sha is on origin,
+# it is not a skip-ci commit (ER-16), the tag does not exist, the app's version source says the tag's version, the newest run of
+# the app's gate workflow on exactly that sha is green (ER-31 (c)); then, for an app tag, the tag gates the release workflows also
+# run (`./dev gates ratchet`, `./dev check ipc-endpoints --tag`). The ADR 0093 scheduled-CI gate (WP-5) is not built yet; it joins here when it is.
+#
+# The push uses RELEASE_BOT_TOKEN, a personal token of the user release-bot. A tag pushed with it starts the release workflow
+# (an <app>-v* push); one pushed with the job's own token would not (Gitea ignores events whose doer is the Actions user:
+# services/actions/notifier_helper.go, notify()). The token is used by the push step only and is masked.
+#
+#   ./dev release tag <tag> --sha <sha>   or   POST /api/v1/repos/decryp7/paddock/actions/workflows/tag.yml/dispatches
+#                                         with {"ref":"main","inputs":{"tag":"...","sha":"..."}}
+
+name: tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The tag to make: <app>-vX.Y.Z[-pre] or vX.Y.Z[-pre]"
+        type: string
+        required: true
+      sha:
+        description: "The full 40-hex commit id to tag (the commit CI tested)"
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tag-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: tag
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      TAG: ${{ inputs.tag }}
+      SHA: ${{ inputs.sha }}
+      PADDOCK_DEV_DOWNLOAD: "0"
+    steps:
+      # Inputs first, as plain text in the environment (never spliced into a script): a bad value fails before anything is fetched.
+      - name: Inputs
+        shell: bash
+        run: |
+          if ! [[ "$TAG" =~ ^[a-z0-9]+(-[a-z0-9]+)*-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ || "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::tag: the tag is not <app>-vX.Y.Z or vX.Y.Z. Run the workflow again with a tag like dyno-v1.2.0."
+            exit 1
+          fi
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::tag: the sha is not a full 40-hex commit id. Run the workflow again with the whole sha."
+            exit 1
+          fi
+
+      # The commit to tag, not the dispatch ref: every check and the tag gates read the tree that will be tagged.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checks
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ github.token }}
+        run: |
+          node conformance/ci/request-tag.mjs --tag "$TAG" --sha "$SHA" --root . \
+            --api "${{ github.server_url }}/api/v1" --repo "${{ github.repository }}"
+
+      - name: Tag gates (apps)
+        if: ${{ !startsWith(inputs.tag, 'v') }}
+        shell: bash
+        run: |
+          ./dev gates ratchet --release-tag "$TAG"
+          ./dev check ipc-endpoints --tag "$TAG"
+
+      # The only step that sees the bot's token. git sends it as a basic-auth header for this one command; it is masked first.
+      - name: Make the tag as release-bot and push it
+        shell: bash
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_BOT_TOKEN" ]; then
+            echo "::error::tag: the secret RELEASE_BOT_TOKEN is not set. Ask the repository owner to add the release-bot token as a secret."
+            exit 1
+          fi
+          echo "::add-mask::$RELEASE_BOT_TOKEN"
+          auth=$(printf 'release-bot:%s' "$RELEASE_BOT_TOKEN" | base64 | tr -d '\n')
+          echo "::add-mask::$auth"
+          git -c user.name=release-bot -c user.email=release-bot@users.noreply.dev.decryptology.net tag -a "$TAG" "$SHA" -m "Release $TAG"
+          if ! git -c "http.extraheader=Authorization: Basic $auth" push "${{ github.server_url }}/${{ github.repository }}.git" "refs/tags/$TAG" 2>push.err; then
+            sed -e "s/$RELEASE_BOT_TOKEN/***/g" push.err | tail -n 5
+            echo "::error::tag: the push of $TAG was refused. Check that release-bot has Write on the repository, is on the tag protection allow-list, and the token has write:repository."
+            exit 1
+          fi
+          {
+            echo "## Tag $TAG made"
+            echo "Pushed \`$TAG\` at \`$SHA\` as release-bot. The release workflow for the tag starts from this push."
+          } >> "$GITHUB_STEP_SUMMARY"

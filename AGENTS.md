@@ -108,7 +108,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). No Co-Authored-By or AI
   attribution.
 - Tags: `v*` for the shared packages (publish.yml), `<app>-vX.Y.Z` per app (its `<app>-release.yml`), never from a
-  workstation. ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
+  workstation and never pushed by an agent: request a tag with the `tag` workflow (`.gitea/workflows/tag.yml`), whose release bot
+  pushes it. ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
 
 <!-- The sections below are docs/blocks (the engineering rules common to every app), copied verbatim;
      scripts/affected.test.mjs fails when they drift. Change them in docs/blocks first. -->
