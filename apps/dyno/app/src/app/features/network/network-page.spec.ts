@@ -61,7 +61,7 @@ describe('NetworkPage', () => {
     const helper = await open('helper');
     expect(helper.el.querySelector('[data-testid=reading-source-helper]')?.textContent).toContain('Read by the administrator helper');
     TestBed.resetTestingModule();
-    const needs = await open({ needsHelper: { reason: 'Some sockets belong to other accounts. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } });
+    const needs = await open({ needsHelper: { reason: 'Some sockets belong to other accounts. Turn on administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } });
     expect(needs.el.querySelector('[data-testid=reading-source-needs]')?.textContent).toContain('belong to other accounts');
     expect(needs.el.querySelector('[data-testid=reading-source-turn-on]')).not.toBeNull();
     TestBed.resetTestingModule();
@@ -86,7 +86,7 @@ describe('NetworkPage', () => {
   it('per-program traffic: who read it, and other accounts as one total with no names', async () => {
     const real = MockBackend.prototype.network;
     const via: ReadVia = { needsHelper: { reason: 'Traffic per program needs administrator rights on Windows.', next: { openSettings: 'helper' } } };
-    const note = 'Traffic per program needs administrator rights on Windows. Turn on Administrator readings in Settings so the helper can read this.';
+    const note = 'Traffic per program needs administrator rights on Windows. Turn on administrator readings in Settings so the helper can read this.';
     const needs = await open((mock) => {
       vi.spyOn(mock, 'network').mockImplementation(async (q) => ({ ...(await real.call(mock, q)), traffic: [], trafficNote: note, trafficVia: via }));
     });

@@ -29,11 +29,16 @@ impl Default for ScanLimits {
     }
 }
 
-/// Folders not worth descending into: hidden ones, OS data and build output.
+/// Folders not worth descending into: hidden ones, OS data, build output and cloud-sync folders (OneDrive).
 fn skipped(name: &str) -> bool {
+    // OneDrive folders hold placeholders: listing one makes the cloud client fetch the directory listing (Windows "Files On-Demand");
+    // the file contents stay in the cloud. Only "OneDrive" and "OneDrive - <account>" are cloud folders, not "onedrive-cli".
+    let lower = name.to_ascii_lowercase();
     name.starts_with('.')
+        || lower == "onedrive"
+        || lower.starts_with("onedrive - ")
         || matches!(
-            name.to_ascii_lowercase().as_str(),
+            lower.as_str(),
             "appdata" | "library" | "node_modules" | "target" | "bin" | "obj" | "dist" | "build" | "applications" | "$recycle.bin"
         )
 }
@@ -85,6 +90,21 @@ pub fn scan(root: &Path, limits: ScanLimits) -> Vec<DevFolder> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cloud_sync_folders_are_not_walked() {
+        let dir = tempfile::tempdir().unwrap();
+        for rel in ["OneDrive/proj", "OneDrive - Contoso/proj", "onedrive/proj", "real/proj"] {
+            let p = dir.path().join(rel);
+            std::fs::create_dir_all(&p).unwrap();
+            std::fs::write(p.join("Cargo.toml"), "").unwrap();
+        }
+        let found = scan(dir.path(), ScanLimits::default());
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].path.replace('\\', "/").ends_with("/real/proj"));
+        assert!(skipped("OneDrive - Fabrikam") && !skipped("my-onedrive-notes"));
+        assert!(skipped("OneDrive") && skipped("ONEDRIVE") && !skipped("onedrive-cli") && !skipped("OneDriveSync"));
+    }
 
     #[test]
     fn finds_projects_within_limits() {

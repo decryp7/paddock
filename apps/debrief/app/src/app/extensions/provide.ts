@@ -1,11 +1,7 @@
 import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
 import { sanitizeViewLayout } from '../layout-plan/layout-plan';
+import { debriefContributionProviders, provideDebriefKinds } from './contributions';
 import {
-  DEBRIEF_ACTIVITY_ITEMS,
-  DEBRIEF_COMMANDS,
-  DEBRIEF_FIELD_FORMATTERS,
-  DEBRIEF_INSPECTOR_SECTIONS,
-  DEBRIEF_VIEWS,
   DebriefActivityItem,
   DebriefCommand,
   DebriefFieldFormatter,
@@ -32,7 +28,7 @@ export interface DebriefPlugin {
 }
 
 /**
- * Registers a UI plugin. One line in `app.config.ts`:
+ * Registers a UI plugin through the shell's contribution registry. One line in `app.config.ts`:
  *
  * ```ts
  * providers: [provideDebriefPlugin({ views: [MY_VIEW], commands: [MY_COMMAND] })]
@@ -42,17 +38,21 @@ export function provideDebriefPlugin(plugin: DebriefPlugin): EnvironmentProvider
   if ((plugin.apiVersion ?? 1) > UI_PLUGIN_API_VERSION) {
     throw new Error(`This plugin needs UI plugin API ${plugin.apiVersion}, but this Debrief provides ${UI_PLUGIN_API_VERSION}: update Debrief or use an older plugin.`);
   }
-  const providers = [];
   // A view's layout is parsed once here: bounded numbers, min <= pref, a known area; an unusable one falls back to its area's default.
   const views = plugin.views?.map((v) => {
     const { layout: raw, ...rest } = v;
     const layout = sanitizeViewLayout(raw);
     return layout ? { ...rest, layout } : (rest as DebriefView);
   });
-  if (views?.length) providers.push({ provide: DEBRIEF_VIEWS, multi: true, useValue: views });
-  if (plugin.commands?.length) providers.push({ provide: DEBRIEF_COMMANDS, multi: true, useValue: plugin.commands });
-  if (plugin.inspectorSections?.length) providers.push({ provide: DEBRIEF_INSPECTOR_SECTIONS, multi: true, useValue: plugin.inspectorSections });
-  if (plugin.fieldFormatters?.length) providers.push({ provide: DEBRIEF_FIELD_FORMATTERS, multi: true, useValue: plugin.fieldFormatters });
-  if (plugin.activityItems?.length) providers.push({ provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useValue: plugin.activityItems });
-  return makeEnvironmentProviders(providers);
+  // One registry for every contribution: the shell's (workbench.md §4.3 M1).
+  return makeEnvironmentProviders([
+    provideDebriefKinds(),
+    ...debriefContributionProviders({
+      views,
+      commands: plugin.commands,
+      inspectorSections: plugin.inspectorSections,
+      fieldFormatters: plugin.fieldFormatters,
+      activityItems: plugin.activityItems,
+    }),
+  ]);
 }

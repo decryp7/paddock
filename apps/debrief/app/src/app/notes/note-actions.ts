@@ -6,12 +6,10 @@ import { ConfirmDialog } from '../ui/confirm-dialog';
 import { DialogService } from '../ui/dialog.service';
 import { NoteImageStore } from './image/note-image.store';
 import { anchorText, firstLine } from './notes-model';
+import { NOTE_IMAGE_VIEW, NOTES_VIEW } from './notes.ids';
 import { NotesStore } from './notes.store';
 
-/** The Notes panel's view id. */
-export const NOTES_VIEW = 'notes';
-/** The image view's id (an image of the workspace with its marked regions). */
-export const NOTE_IMAGE_VIEW = 'note-image';
+export { NOTE_IMAGE_VIEW, NOTES_VIEW };
 
 /** Anchors for what the views offer notes on (the engine fills and checks them). */
 export const anchors = {

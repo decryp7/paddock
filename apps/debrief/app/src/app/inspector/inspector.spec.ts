@@ -1,7 +1,6 @@
 import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { RecordView } from '../core/api.types';
-import { DEBRIEF_INSPECTOR_SECTIONS } from '../extensions/tokens';
 import { all, buttonByText, el, provideTinyBackend, settle, text } from '../../testing/helpers';
 import { DebriefBackend } from '../core/backend';
 import { EMPTY_QUERY, WorkspaceStore } from '../core/workspace.store';
@@ -9,6 +8,7 @@ import { Inspector } from './inspector';
 import { SelectionStore } from '../core/workspace/selection.store';
 import { at } from '../../testing/must';
 import { LEVEL_CODES } from '../shared/colors';
+import { debriefContributionProviders } from '../extensions/contributions';
 
 @Component({ selector: 'debrief-test-section', template: '<span class="plugin-section">id {{ record().id }}</span>' })
 class TestSection {
@@ -20,7 +20,7 @@ describe('Inspector plugin sections', () => {
     TestBed.configureTestingModule({
       providers: [
         provideTinyBackend(),
-        { provide: DEBRIEF_INSPECTOR_SECTIONS, multi: true, useValue: [{ id: 'b', title: 'Second', order: 2, component: TestSection }, { id: 'a', title: 'First', order: 1, component: TestSection }, { id: 'no', title: 'Hidden', order: 3, component: TestSection, when: () => false }] },
+        ...debriefContributionProviders({ inspectorSections: [{ id: 'b', title: 'Second', order: 2, component: TestSection }, { id: 'a', title: 'First', order: 1, component: TestSection }, { id: 'no', title: 'Hidden', order: 3, component: TestSection, when: () => false }] }),
       ],
     });
     const fixture = TestBed.createComponent(Inspector);

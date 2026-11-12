@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { ContributionRegistry, type DialogDef } from '@decryp7/paddock-ui/shell';
+import { ContributionRegistry, type DialogDef } from '@decryp7/paddock-ui/shell/contributions';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import type { ConfirmInput } from '@decryp7/paddock-ui/shell/confirm';
 import { DemoPage, SECTION_STYLES } from './demo-page';

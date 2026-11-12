@@ -71,7 +71,7 @@ describe('dy-energy-tab', () => {
   });
 
   it('shows the helper reason and the button when the CPU energy cannot be measured', async () => {
-    const via: ReadVia = { needsHelper: { reason: 'CPU energy is read by the helper. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } };
+    const via: ReadVia = { needsHelper: { reason: 'CPU energy is read by the helper. Turn on administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } };
     const { el } = await render(measured({ cpuVia: via }));
     expect(el.querySelector('[data-testid="cpu-energy"]')).toBeNull();
     expect(el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('CPU energy is read by the helper');

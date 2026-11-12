@@ -9,8 +9,9 @@ import { DockService } from '../dock/dock.service';
 import { DialogService } from '../ui/dialog.service';
 import { Notice, NoticeAction } from './notifications.types';
 import { NoticeTarget, NotificationsStore } from './notifications.store';
+import { NOTIFICATIONS_VIEW } from './notifications.ids';
 
-export const NOTIFICATIONS_VIEW = 'notifications';
+export { NOTIFICATIONS_VIEW };
 
 /** The label of an action's button. */
 export function actionLabel(a: NoticeAction): string {

@@ -56,7 +56,7 @@ impl MachineProbe for Fake {
 
 fn setup() -> (Scratch, Arc<Mutex<Script>>, FakeClock, Fake) {
     let scratch = Scratch::new();
-    let mount = std::fs::canonicalize(scratch.work()).unwrap();
+    let mount = paddock_env::winpath::real(&scratch.work()).unwrap();
     let script = Arc::new(Mutex::new(Script {
         cpu: 250,
         used: 400,

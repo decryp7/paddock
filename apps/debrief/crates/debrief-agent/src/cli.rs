@@ -221,6 +221,22 @@ fn service_run(_config: PathBuf) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arguments_never_panic_on_hostile_text() {
+        paddock_testkit::assert_never_panics(
+            &[
+                b"run --config c.toml",
+                b"service install --name x --user y",
+                b"--schedule 5m",
+                b"--config",
+            ],
+            |bytes| {
+                let args: Vec<String> = String::from_utf8_lossy(bytes).split_whitespace().map(str::to_owned).collect();
+                parse(&args)
+            },
+        );
+    }
     use crate::config::AgentConfigFile;
 
     fn v(a: &[&str]) -> Vec<String> {

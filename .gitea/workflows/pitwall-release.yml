@@ -56,6 +56,17 @@ jobs:
           nightly-marker: "false"
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           release: "true"
+      # ADR 0052 §1.1, C85: a test that features.toml owes (`owed_until`) is due at its tag. In a branch run C85 only warns; with --version its
+      # owed findings (a tag that exists or is past, an expired date, an `owed_until` past the next release line) are errors, so an owed test
+      # never rides past the release it was owed for. Only the owed findings (not `--strict C85`, which makes every warning of the check block
+      # the tag). A failure here fails the plan job, so neither the gates nor the release run. The clone has the tags (fetch-depth 0).
+      - name: C85 owed tests are not past their tag
+        if: ${{ startsWith(github.ref, 'refs/tags/pitwall-v') }}
+        run: |
+          node conformance/bin/paddock-conformance.mjs --app pitwall --root apps/pitwall --only C85 --paddock . --version "${GITHUB_REF_NAME}" || {
+            echo "::error::C85: an owed test of apps/pitwall/features.toml is due, expired or past the next release line. Write the test (a due test is not moved) or fix the entry's owed_until; the findings are above."
+            exit 1
+          }
 
   # A tag is gated by exactly Pitwall's legs of ci.yml (all of them, both halves, on the tagged commit).
   gates:

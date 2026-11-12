@@ -1,25 +1,8 @@
-import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
-import { PROBLEMS_VIEW } from '../../problems/problems-model';
-import { KnownIssuesStore } from './known-issues.store';
-
-export function knownIssuesCommands(store: InstanceType<typeof KnownIssuesStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@known.issues.category:View`;
-  return [
-    {
-      id: 'knownIssues.check',
-      title: $localize`:@@known.issues.cmd.check:Problems: Check known issues`,
-      category,
-      view: PROBLEMS_VIEW,
-      run: (ctx) => {
-        ctx.showView(PROBLEMS_VIEW);
-        void store.load();
-      },
-    },
-  ];
-}
+import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
+import { KNOWN_ISSUES_COMMANDS_CONTRIBUTIONS } from './known-issues.contributions';
 
 /** One line in `app.config.ts`: the known-issues feature (ADR 0039): its palette command. The section lives in the Problems pane. */
 export function provideKnownIssues(): EnvironmentProviders {
-  return makeEnvironmentProviders([{ provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => knownIssuesCommands(inject(KnownIssuesStore)) }]);
+  // Stubs only: the command's code loads when the window is idle or it runs.
+  return makeEnvironmentProviders(KNOWN_ISSUES_COMMANDS_CONTRIBUTIONS);
 }

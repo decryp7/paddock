@@ -200,7 +200,10 @@ test('plan action: the tag pattern is the app\'s, and a tagged main commit is sk
         encoding: 'utf8',
       });
       assert.equal(r.status, 0, r.stdout + r.stderr);
-      return readFileSync(out, 'utf8').trim();
+      const lines = readFileSync(out, 'utf8').trim().split('\n');
+      // Not a scheduled run: never ended early for a train (./dev ci schedule-skip is not asked).
+      assert.ok(lines.includes('train-skip=false'), lines.join(' | '));
+      return lines.filter((l) => l.startsWith('run=')).join('\n');
     };
     assert.equal(run({ TAGGED: 'abc123\trefs/tags/pitcrew-v1.0.3' }), 'run=false');
     assert.match(readFileSync(join(dir, 'git.log'), 'utf8'), /ls-remote --tags origin refs\/tags\/pitcrew-v\*/, 'only the app\'s tags are asked for');

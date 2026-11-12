@@ -15,6 +15,7 @@ mod merge_check;
 mod pr;
 mod release_isolation;
 mod slots;
+mod sparse;
 mod tree;
 mod worktree;
 mod wrapper;

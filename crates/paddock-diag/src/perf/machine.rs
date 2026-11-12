@@ -87,12 +87,19 @@ pub struct Volume {
     pub free_bytes: u64,
 }
 
-/// The volume that holds `path`: the one with the longest mount point that is a prefix of it.
+/// The volume that holds `path`: the one with the longest mount point that is a prefix of it. Both sides are compared by
+/// components ([`paddock_env::winpath::starts_with`]: the `\\?\` prefix ignored, names compared ignoring case on Windows, no
+/// length limit), so a canonical path matches the volume list's plain mount points however long it is.
 pub fn volume_of<'a>(path: &Path, volumes: &'a [Volume]) -> Option<&'a Volume> {
+    volume_of_on(path, volumes, paddock_env::Os::current())
+}
+
+/// [`volume_of`] with the platform's path rules given, so every OS tests the Windows ones.
+fn volume_of_on<'a>(path: &Path, volumes: &'a [Volume], os: paddock_env::Os) -> Option<&'a Volume> {
     volumes
         .iter()
-        .filter(|v| path.starts_with(&v.mount))
-        .max_by_key(|v| v.mount.components().count())
+        .filter(|v| paddock_env::winpath::starts_with(path, &v.mount, os))
+        .max_by_key(|v| paddock_env::winpath::components(&v.mount, os).len())
 }
 
 /// The data disk of `path` among `volumes`.
@@ -108,25 +115,13 @@ pub fn data_disk(path: &Path, volumes: &[Volume]) -> Option<DataDisk> {
 fn resolved(path: &Path) -> PathBuf {
     let mut p = path;
     loop {
-        if let Ok(c) = p.canonicalize() {
-            return strip_verbatim(&c);
+        if let Ok(c) = paddock_env::winpath::real(p) {
+            return c;
         }
         match p.parent() {
             Some(parent) if !parent.as_os_str().is_empty() => p = parent,
             _ => return path.to_path_buf(),
         }
-    }
-}
-
-/// Windows lists `C:\` and canonicalises to `\\?\C:\`: the verbatim prefix is dropped so the two compare. Other paths stay.
-fn strip_verbatim(path: &Path) -> PathBuf {
-    let text = path.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        PathBuf::from(format!(r"\\{rest}"))
-    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
-        PathBuf::from(rest)
-    } else {
-        path.to_path_buf()
     }
 }
 
@@ -238,7 +233,7 @@ mod tests {
     fn a_folder_that_does_not_exist_yet_resolves_to_its_nearest_existing_parent() {
         let dir = tempfile::tempdir().unwrap();
         // The canonical spelling without Windows' verbatim prefix (`\\?\C:\...`), the form volumes are listed in.
-        let want = strip_verbatim(&dir.path().canonicalize().unwrap());
+        let want = paddock_env::winpath::real(dir.path()).unwrap();
         let got = resolved(&dir.path().join("not/yet/there"));
         assert!(
             !got.to_string_lossy().starts_with(r"\\?\"),
@@ -259,19 +254,26 @@ mod tests {
     }
 
     #[test]
-    fn the_verbatim_prefix_of_a_windows_path_is_dropped() {
+    fn a_verbatim_windows_path_finds_its_plain_volume_however_long_it_is() {
+        use paddock_env::Os;
+        let vols = [
+            vol(r"C:\", DiskKind::Ssd, 1),
+            vol(r"D:\", DiskKind::Hdd, 2),
+            vol(r"\\srv\share", DiskKind::Unknown, 3),
+        ];
+        let free =
+            |p: &str| volume_of_on(Path::new(p), &vols, Os::Windows).map(|v| v.free_bytes >> 20);
+        assert_eq!(free(r"\\?\C:\Users\x"), Some(1));
         assert_eq!(
-            strip_verbatim(Path::new(r"\\?\C:\Users\x")),
-            PathBuf::from(r"C:\Users\x")
+            free(r"\\?\d:\data"),
+            Some(2),
+            "drive letters compare ignoring case"
         );
-        assert_eq!(
-            strip_verbatim(Path::new(r"\\?\UNC\srv\share")),
-            PathBuf::from(r"\\srv\share")
-        );
-        assert_eq!(
-            strip_verbatim(Path::new("/data/x")),
-            PathBuf::from("/data/x")
-        );
+        assert_eq!(free(r"\\?\UNC\srv\share\x"), Some(3));
+        // Past the 259 units at which `plain` keeps the prefix.
+        let long = format!(r"\\?\D:\{}", vec!["a".repeat(50); 6].join(r"\"));
+        assert_eq!(free(&long), Some(2));
+        assert_eq!(free(r"E:\x"), None);
     }
 
     #[test]

@@ -8,10 +8,11 @@ import { CapturesStore } from '../captures.store';
 import { ProfileViewState } from '../profile-view-state.store';
 import { openDemoCaptures, provideProfilingTesting, setupProfiling } from '../testing/profiling-test-support';
 import { MOCK_CAPTURE_PATHS } from '../../core/mock/mock-profiling-data';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../../extensions/tokens';
+import { DebriefCommand } from '../../extensions/tokens';
 import { RecentService } from '../../core/recent/recent.service';
 import { MOCK_RECENT_KEY } from '../../core/recent/mock-recent-backend';
 import { CapturesView } from './captures-view';
+import { debriefContributionProviders } from '../../extensions/contributions';
 
 async function mount(opts: Parameters<typeof setupProfiling>[0] = {}, open = true) {
   const doubles = setupProfiling(opts);
@@ -207,7 +208,7 @@ describe('CapturesView', () => {
         { id: 'profiling.other', title: 'Not offered', run: () => void ran.push('other') },
         { id: 'profiling.off', title: 'Off', when: () => false, run: () => void ran.push('off') },
       ];
-      TestBed.configureTestingModule({ providers: [...providers, { provide: DEBRIEF_COMMANDS, multi: true, useValue: commands }] });
+      TestBed.configureTestingModule({ providers: [...providers, ...debriefContributionProviders({ commands: commands })] });
       const fixture = TestBed.createComponent(CapturesView);
       fixture.detectChanges();
       await settle(fixture, 4);

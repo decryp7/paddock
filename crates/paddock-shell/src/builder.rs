@@ -119,6 +119,7 @@ fn register_shared_limits() {
         paddock_limits::BUILTIN,
         paddock_diag::limits::REGISTRY,
         paddock_download::limits::REGISTRY,
+        paddock_ipc::limit_rows::REGISTRY,
         paddock_net::limits::REGISTRY,
         paddock_storage::limits::REGISTRY,
         paddock_updater::limits::REGISTRY,

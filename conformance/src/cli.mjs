@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { commitLintMain } from './commit-lint.mjs';
 import { checks } from './checks/index.mjs';
 import { runHermetic } from './hermetic.mjs';
+import { fullCheckoutProblem } from './util/full-checkout.mjs';
 import { formatText, writeOutputs } from './report.mjs';
 import { runChecks } from './runner.mjs';
 import { exitStatus } from './outcome.mjs';
@@ -13,7 +14,7 @@ import { windowWeightMain } from './window-weight/cli.mjs';
 
 const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
                            [--strict C30,C36] [--no-graph] [--scope apps/<app>] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
-                           [--preflight vX.Y.Z [--api url --repo owner/name]]
+                           [--preflight vX.Y.Z]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --file <path> | --range <rev-range>
        paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write]   # C28 baseline files and C23 doc blocks
@@ -66,6 +67,14 @@ export async function main(argv, { log = console.log, err = console.error, env =
       err(USAGE);
       return cmd ? 0 : 2;
     }
+    if (cmd === 'list' || cmd === 'commands') {
+      // `dev gates check` reads both from the current folder: a sparse checkout is named here, not by a later ENOENT.
+      const sparse = fullCheckoutProblem(resolve('.'), env);
+      if (sparse) {
+        err(sparse);
+        return 2;
+      }
+    }
     if (cmd === 'list') {
       if (rest.includes('--json')) log(JSON.stringify(listChecks()));
       else for (const c of checks) log(`${c.id}  rule ${c.rule}  ${c.title}`);
@@ -108,6 +117,11 @@ export async function main(argv, { log = console.log, err = console.error, env =
       return r.status !== 0 ? r.status : r.findings.length ? 1 : 0;
     }
     const o = parseArgs(argv);
+    const sparse = fullCheckoutProblem(resolve(o.root ?? '.'), env);
+    if (sparse) {
+      err(sparse);
+      return 2;
+    }
     const result = await runChecks({
       registry,
       root: resolve(o.root ?? '.'),

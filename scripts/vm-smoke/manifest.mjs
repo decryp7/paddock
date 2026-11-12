@@ -16,7 +16,7 @@ const QUIT_STOP = row('quit-stop', /^Rule 71: Quit and stop measuring/);
 const RULE71 = [MCP, QUIT_STOP];
 // Release rows collected for 1.1.0 (release-rows.mjs): a row nobody drives is a not-measured step with its reason, so the run is INCOMPLETE, never PASS.
 const hung = row('hung-page', /^Release row: a hung or paused visible page/);
-const ROWS_WIN = [row('win-reinstall', /^Release row: reinstall over a leftover/), hung, row('second-user', /^Release row: a second user/), row('kill-installer', /^Release row: killing the installer/), row('install-again', /^Release row: install again works/)];
+const ROWS_WIN = [row('win-reinstall', /^Release row: reinstall over a leftover/), hung, row('second-user', /^Release row: a second user/), row('second-install', /^Release row: a second install while one runs/), row('kill-installer', /^Release row: killing the installer/), row('install-again', /^Release row: install again works/)];
 const ROWS_MAC = [row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('mac-reopen', /^Release row: macOS Quit and stop measuring, then reopen/), row('mac-lifecycle-log', /^Release row: a standard user reads helper-lifecycle/), hung,
   ...(KEYCHAIN_ROW_REQUIRED ? [row('keychain-update', /^Release row: an update keeps the app openable with a key the earlier build made/)] : [])];
 const ROWS_LINUX = [row('linux-log-dir', /^Release row: Linux uninstall leaves/), hung];

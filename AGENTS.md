@@ -31,8 +31,12 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 
 ## Working in the monorepo
 
-- **Worktrees (rule 2).** Every agent works in its own worktree of `paddock`; for app work a sparse one:
-  `git sparse-checkout set --cone crates ui scripts docs tools apps/<app>`. Never work in the main checkout; never `git stash`.
+- **Worktrees (rule 2).** Every agent works in its own worktree of `paddock`; make it with
+  `./dev worktree add`: a full checkout (`--profile gates`, the default), because conformance, `scripts/affected.mjs` and
+  `./dev gates check` and `./dev plan` read most folders, and a sparse cone makes them stop with an `::error::` line naming the
+  missing folders (measurements: [benchmarks](docs/benchmarks.md#2026-11-12-full-against-sparse-worktree-checkout-fixworktree-gates-profile));
+  `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
+  Never work in the main checkout; never `git stash`.
 - **Build folders.** One `CARGO_TARGET_DIR` per app per worktree, kept between tasks for the same app (reusing it is
   what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1).
 - **Cargo.** There is no root Cargo workspace: `crates/` and each app are their own workspaces, so each app builds with
@@ -108,7 +112,9 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
 - Conventional Commits (`feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `ci:`, `chore:`). No Co-Authored-By or AI
   attribution.
 - Tags: `v*` for the shared packages (publish.yml), `<app>-vX.Y.Z` per app (its `<app>-release.yml`), never from a
-  workstation. ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
+  workstation and never pushed by an agent: request a tag with the `tag` workflow (`.gitea/workflows/tag.yml`), whose release bot
+  pushes it. It is a guard rail against mistakes, not a security boundary (any repo writer can dispatch from their own ref;
+  single-user setup). ADRs: family ones in `docs/adr/`, an app's in `apps/<app>/docs/adr/` (numbered per app).
 
 <!-- The sections below are docs/blocks (the engineering rules common to every app), copied verbatim;
      scripts/affected.test.mjs fails when they drift. Change them in docs/blocks first. -->

@@ -20,9 +20,10 @@ crate-type = ["rlib"]
 # Test doubles (the scripted server `server_client::fake`, the fixed admin key `StaticKeys`); enabled only through the
 # self dev-dependency below, never by a normal dependency (ADR 0073 / rule 73).
 test-support = []
-# The Playground's chat (ADR 0023), temporary until ADR 0049's switches: on for the internal proof-of-concept build
-# (`cargo tauri build --features chat`), off by default, so the release workflow builds without it.
+# The Playground's chat (ADR 0023), temporary until ADR 0049's switches. A default feature since 2026-11-12 (user decision, 2026-11-12: Pitwall 1.1 ships the chat on):
+# the release workflow builds with the defaults, so the release has the chat (tests/it/release_features.rs).
 chat = []
+default = ["chat"]
 
 [build-dependencies]
 paddock-build = { path = "../../../../crates/paddock-build", features = ["tauri-build"] }
@@ -112,6 +113,9 @@ webview2-com = "0.39"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
+# The microphone for speech input (ADR 0023 Decision 5, WP-7): CoreAudio through cpal (Apache-2.0), no default features (no
+# JACK). macOS only until the Windows and Linux adapters land (WP-7 slice 3, which also needs libasound2-dev in the Linux image).
+cpal = { version = "0.18.2", default-features = false }
 
 [lints]
 workspace = true
@@ -120,7 +124,7 @@ workspace = true
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
 socket2 = { version = "0.6", features = ["all"] }
 # The self dev-dependency that turns `test-support` on for this package's tests (ADR 0073 / rule 73).
-pitwall-app = { path = ".", features = ["test-support"] }
+pitwall-app = { path = ".", default-features = false, features = ["test-support"] }
 tempfile.workspace = true
 # Builds a PNG whose colour profile inflates to hundreds of megabytes (tests/picture_memory.rs).
 miniz_oxide = "0.8"

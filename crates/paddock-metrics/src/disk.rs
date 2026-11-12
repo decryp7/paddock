@@ -25,44 +25,23 @@ pub struct Space {
 
 /// The nearest existing ancestor of `path`, canonicalised (an output folder may not exist yet).
 pub fn existing_ancestor(path: &Path) -> Option<PathBuf> {
-    path.ancestors().find_map(|p| std::fs::canonicalize(p).ok())
+    path.ancestors()
+        .find_map(|p| paddock_env::winpath::real(p).ok())
 }
 
-/// `\\?\C:\x` as `C:\x` and `\\?\UNC\server\share\x` as `\\server\share\x` (what `canonicalize` returns on Windows
-/// against what the disk list reports); other paths unchanged.
-#[cfg(windows)]
-fn plain(path: &Path) -> PathBuf {
-    use std::path::{Component, Prefix};
-    let mut parts = path.components();
-    let Some(Component::Prefix(prefix)) = parts.next() else {
-        return path.to_path_buf();
-    };
-    let head = match prefix.kind() {
-        Prefix::VerbatimDisk(drive) => format!("{}:", drive as char),
-        Prefix::VerbatimUNC(server, share) => format!(
-            r"\\{}\{}",
-            server.to_string_lossy(),
-            share.to_string_lossy()
-        ),
-        _ => return path.to_path_buf(),
-    };
-    let mut out = PathBuf::from(head);
-    out.extend(parts);
-    out
-}
-
-#[cfg(not(windows))]
-fn plain(path: &Path) -> PathBuf {
-    path.to_path_buf()
-}
-
-/// The mount with the longest mount point that is a prefix of `path`.
+/// The mount with the longest mount point that is a prefix of `path`. Both sides are compared by components
+/// ([`paddock_env::winpath::starts_with`]: the `\\?\` prefix ignored, names compared ignoring case, no length limit), so a
+/// canonical path against the disk list's plain mount points matches however long the path is.
 pub fn volume_of<'a>(path: &Path, mounts: &'a [Mount]) -> Option<&'a Mount> {
-    let path = plain(path);
+    volume_of_on(path, mounts, paddock_env::Os::current())
+}
+
+/// [`volume_of`] with the platform's path rules given, so every OS tests the Windows ones.
+fn volume_of_on<'a>(path: &Path, mounts: &'a [Mount], os: paddock_env::Os) -> Option<&'a Mount> {
     mounts
         .iter()
-        .filter(|m| path.starts_with(plain(&m.path)))
-        .max_by_key(|m| m.path.components().count())
+        .filter(|m| paddock_env::winpath::starts_with(path, &m.path, os))
+        .max_by_key(|m| paddock_env::winpath::components(&m.path, os).len())
 }
 
 /// Free and total space of the volume holding `path`, from `mounts`.
@@ -78,4 +57,54 @@ pub fn volume_free(path: &Path, mounts: &[Mount]) -> Option<Space> {
 pub fn free_bytes(path: &Path) -> Option<Space> {
     let path = existing_ancestor(path)?;
     volume_free(&path, &crate::native::mounts())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use paddock_env::Os;
+
+    fn mount(path: &str) -> Mount {
+        Mount {
+            path: PathBuf::from(path),
+            free: 1,
+            total: 2,
+        }
+    }
+
+    /// `\\?\C:\` followed by folders of 50 `a`, 300 UTF-16 units in all: past `plain`'s limit, so it keeps its prefix.
+    fn long_verbatim() -> String {
+        let mut s = String::from(r"\\?\C:\");
+        while s.len() < 304 {
+            s.push_str(&"a".repeat(50));
+            s.push('\\');
+        }
+        s.truncate(304);
+        s
+    }
+
+    #[test]
+    fn a_verbatim_path_of_300_units_is_on_the_mount_with_the_plain_name() {
+        let path = long_verbatim();
+        assert!(path.encode_utf16().count() > 300);
+        let mounts = [
+            mount(r"C:\"),
+            mount(r"C:\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            mount(r"D:\"),
+        ];
+        let found = volume_of_on(Path::new(&path), &mounts, Os::Windows).expect("the mount of C:");
+        assert_eq!(
+            found.path,
+            Path::new(&mounts[1].path),
+            "the longest mount point wins"
+        );
+        let only_c = [mount(r"c:\"), mount(r"D:\")];
+        assert_eq!(
+            volume_of_on(Path::new(&path), &only_c, Os::Windows)
+                .unwrap()
+                .path,
+            Path::new(r"c:\")
+        );
+        assert!(volume_of_on(Path::new(&path), &[mount(r"D:\")], Os::Windows).is_none());
+    }
 }

@@ -17,7 +17,8 @@ import { all, provideFakeDock, provideTinyBackend, settle, tinyDataset } from '.
 import { AiBackend } from '../ai-backend';
 import { AI_IMAGE_VIEW, AiLauncher } from '../ai-launcher';
 import { AiStatusStore } from '../ai-status.store';
-import { aiCommands, aiViews } from '../provide-ai';
+import { aiCommands } from '../ai.commands';
+import { aiViews } from '../provide-ai';
 import { AiImageStore } from './ai-image.store';
 
 function setup(options: MockAiOptions = {}, pick: string | null = '/shots/dialog.png') {

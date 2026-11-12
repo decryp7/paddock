@@ -34,6 +34,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fullCheckoutProblem } from '../conformance/src/util/full-checkout.mjs';
 import { isMain } from '../conformance/src/util/is-main.mjs';
 
 /**
@@ -403,8 +404,8 @@ export function adoptsPerMachine(root, f) {
 /** The notices script and the shared cargo-about configuration (and the tool, conformance/src/notices/): inputs of every app with a `notices` block. */
 export const NOTICES_INPUTS = /^(scripts\/notices\.sh|templates\/repo\/about\.toml|conformance\/src\/notices\/.*)$/;
 
-/** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`). */
-export const GENERATED = /^ui\/.*\/generated\/[^/]+\.(ts|json)$/;
+/** Generated TypeScript and JSON of the shared crates, written by their tests (a `generated` folder under ui, `.ts` or `.json`), except the hand-written `public-api.ts` and `ng-package.json` that make `shell/generated` an entry. */
+export const GENERATED = /^ui\/.*\/generated\/(?!public-api\.ts$|ng-package\.json$)[^/]+\.(ts|json)$/;
 
 /** The crate folders whose Rust sources name the generated file `f` (`generated/<name>`), for the crates' own tests. */
 export function crateDirsNaming(f, cargo) {
@@ -1222,6 +1223,11 @@ if (isMain(import.meta.url)) {
       const r = commitLintRange({ event: e.EVENT, ref: e.REF, before: e.BEFORE, sha: e.SHA, base: e.PLAN_BASE, baseRef: e.BASE_REF, app: e.INPUT_APP, known: gitHas });
       console.log(process.argv[2] === '--commit-flags' ? (r?.flags ?? []).join(' ') : r === null ? 'skip' : r.range);
       process.exit(0);
+    }
+    const sparse = fullCheckoutProblem(ROOT);
+    if (sparse) {
+      console.error(sparse);
+      process.exit(1);
     }
     const { files, base, head, all, ci: isCi, app, explain } = parseArgs(process.argv.slice(2));
     if (isCi) await ci(process.env, { app });

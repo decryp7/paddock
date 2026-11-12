@@ -36,13 +36,25 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      # The paddock-ci image: ./dev (the schedule-skip step) runs there.
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
     outputs:
       run: ${{ steps.plan.outputs.run }}
     defaults:
       run:
         working-directory: .
     steps:
+      # A scheduled run ends early while a train is in CI (ADR 0093 amendment 2026-11-12); the action needs the checkout.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'schedule'
+      - id: train
+        if: github.event_name == 'schedule'
+        uses: ./.gitea/actions/schedule-skip
+        with:
+          workflow: debrief-mutants.yml
+          max-gap-hours: "192"
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+
       # Exact-key lookup only: nothing is downloaded. The marker is saved by the weekly-mark job after a fully green run.
       - uses: actions/cache/restore@v4
         id: green
@@ -60,11 +72,15 @@ jobs:
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
           GREEN: ${{ steps.green.outputs.cache-hit }}
+          TRAIN_SKIP: ${{ steps.train.outputs.skip }}
         run: |
           run=true
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
             run=false
             echo "::notice::main has not changed since the last green run ($SHA); skipping."
+          fi
+          if [ "$EVENT" = schedule ] && [ "$TRAIN_SKIP" = true ]; then
+            run=false
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
 
@@ -127,8 +143,8 @@ jobs:
   # Never runs when anything failed, so a red commit is retried every night.
   weekly-mark:
     name: weekly-mark
-    needs: [mutants]
-    if: github.event_name == 'schedule' && success()
+    needs: [plan, mutants]
+    if: github.event_name == 'schedule' && success() && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5

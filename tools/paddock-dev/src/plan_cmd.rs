@@ -13,6 +13,9 @@
 //!
 //! `--ci` with `PLAN_SINCE_RUN` set (ci.yml's `since_run` input) writes the outputs of such a rerun instead: only the failed
 //! jobs run, a narrowed one only its failed tests ([`crate::plan_since`]). The run is read with `PLAN_TOKEN` or `GITEA_TOKEN`.
+//! `--ci --app <app>` with `PLAN_SINCE_RUN` (the `since_run` input of an app's own workflow, `debrief.yml`) does the same for
+//! a run of that workflow: `true` on stdout and the rerun's outputs ([`SincePlan::app_outputs`]) in `GITHUB_OUTPUT`;
+//! `PLAN_FULL` (`true` for a full manual run) must be set when the earlier run was full and a full-run job reruns.
 //!
 //! Log lines of `--ci` go to standard error (the script printed them to standard output unless `--app` was given); the job log
 //! shows both streams.
@@ -23,7 +26,7 @@ use crate::plan_ci::{
     wants_webkit,
 };
 use crate::plan_repo::git_text;
-use crate::plan_since::{GiteaRuns, SincePlan, since_run};
+use crate::plan_since::{APP_WORKFLOWS, GiteaRuns, SincePlan, since_run};
 use crate::wait::{CurlHttp, Http};
 use paddock_cli::{CliError, Report};
 use paddock_repo_graph::GitHistory;
@@ -104,6 +107,12 @@ fn env_var(k: &str) -> Option<String> {
 pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let env = env_var;
+    // A sparse checkout makes the planner read a tree with folders missing and answer for it; say so first (local runs only).
+    if !matches!(args.first().map(String::as_str), Some("--commit-range" | "--commit-flags"))
+        && let Some(line) = crate::gates::edge::sparse_problem(&root)
+    {
+        return Err(CliError::failure(line));
+    }
     if let Some(mode) = args.first().filter(|a| *a == "--commit-range" || *a == "--commit-flags") {
         let lint = |name: &str| env(name).unwrap_or_default();
         let (event, reference, before, base, base_ref, app) = (
@@ -164,10 +173,11 @@ pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliErro
 /// CI: the plan for this event. Without `app`, the ci.yml job outputs and summary; with `app` (an app's own workflow),
 /// `true` or `false` on stdout for whether the change reaches that app.
 fn ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: Option<&str>) -> Result<Report, CliError> {
-    if app.is_none()
-        && let Some(run) = env("PLAN_SINCE_RUN").filter(|r| !r.trim().is_empty())
-    {
-        return since_ci(root, env, run.trim());
+    if let Some(run) = env("PLAN_SINCE_RUN").filter(|r| !r.trim().is_empty()) {
+        return match app {
+            None => since_ci(root, env, run.trim()),
+            Some(app) => since_app(root, env, app, run.trim()),
+        };
     }
     let log = |l: &str| eprintln!("{l}");
     let contains = |sha: &str| git_text(root, &["merge-base", "--is-ancestor", sha, "HEAD"]).is_some();
@@ -311,6 +321,74 @@ fn since_ci(root: &Path, env: &dyn Fn(&str) -> Option<String>, run: &str) -> Res
     since_ci_with(root, env, id, read_since_run(root, env, id))
 }
 
+/// The workflow file of an app's own workflow (`workflow` of `apps/<app>/paddock.ci.json`), `None` for a leg of ci.yml.
+fn app_workflow(root: &Path, app: &str) -> Result<Option<String>, CliError> {
+    let path = root.join("apps").join(app).join("paddock.ci.json");
+    let text = std::fs::read_to_string(&path).map_err(|e| fail(format!("{} cannot be read: {e}", path.display())))?;
+    let v: Value = serde_json::from_str(&text).map_err(|e| fail(format!("{} is not JSON: {e}", path.display())))?;
+    Ok(v["workflow"].as_str().map(str::to_string))
+}
+
+/// `--ci --app <app>` with `PLAN_SINCE_RUN`: a rerun of what failed in a run of the app's own workflow. `true` on stdout (the
+/// run is needed), the outputs and the summary to the files the workflow names; the log to standard error (standard output
+/// is the answer). Errors as [`since_ci`]: an unreadable or unfinished run, a run of another workflow, an app without its own
+/// workflow, or a full run's failure rerun in a run that is not full.
+fn since_app(root: &Path, env: &dyn Fn(&str) -> Option<String>, app: &str, run: &str) -> Result<Report, CliError> {
+    let id: u64 = run
+        .parse()
+        .ok()
+        .filter(|n| *n > 0)
+        .ok_or_else(|| fail(format!("PLAN_SINCE_RUN must be a run number, not {run:?}")))?;
+    let workflow = app_workflow(root, app)?.ok_or_else(|| {
+        fail(format!(
+            "{app} is a leg of ci.yml, not its own workflow: rerun ci.yml with since_run"
+        ))
+    })?;
+    since_app_with(env, app, &workflow, id, read_since_run(root, env, id))
+}
+
+fn since_app_with(
+    env: &dyn Fn(&str) -> Option<String>,
+    app: &str,
+    workflow: &str,
+    id: u64,
+    read: Result<SincePlan, String>,
+) -> Result<Report, CliError> {
+    let profile = APP_WORKFLOWS.iter().find(|a| a.file == workflow).ok_or_else(|| {
+        fail(format!(
+            "{workflow} ({app}) has no rerun of failures yet (plan_since::APP_WORKFLOWS)"
+        ))
+    })?;
+    let plan = read.map_err(|e| fail(format!("the rerun of run {id} cannot be planned: {e}")))?;
+    if plan.workflow != workflow {
+        return Err(fail(format!(
+            "run {id} is a run of {}; {workflow} reruns only its own runs (ci.yml takes its own since_run)",
+            plan.workflow
+        )));
+    }
+    if let Some(why) = &plan.everything {
+        eprintln!("::warning::dev plan --since-run {id}: {why}; this run tests everything");
+        write_ci(
+            env,
+            &[],
+            &format!("### Rerun of run {id} ({workflow})\n\nEverything runs: the rerun cannot be narrowed ({why}).\n"),
+        )?;
+        return Ok(Report::new(
+            serde_json::json!({ "sinceRun": id, "everything": why }),
+            "true".to_string(),
+        ));
+    }
+    if plan.needs_full() && env("PLAN_FULL").as_deref() != Some("true") {
+        return Err(fail(format!(
+            "run {id} was a full run and a job only a full run has, or one it changes, failed; dispatch the rerun with {}: true as well",
+            profile.full_input
+        )));
+    }
+    eprintln!("{}", serde_json::to_string_pretty(&plan.to_json()).unwrap_or_default());
+    write_ci(env, &plan.app_outputs(), &plan.summary())?;
+    Ok(Report::new(plan.to_json(), "true".to_string()))
+}
+
 fn since_ci_with(root: &Path, env: &dyn Fn(&str) -> Option<String>, id: u64, read: Result<SincePlan, String>) -> Result<Report, CliError> {
     let plan = read.map_err(|e| fail(format!("the rerun of run {id} cannot be planned: {e}")))?;
     if !matches!(plan.workflow.as_str(), "ci.yml" | "ci.yaml") {
@@ -410,6 +488,104 @@ mod tests {
             .err()
             .unwrap();
         assert!(e.text().contains("run 7 is running"), "{}", e.text());
+    }
+
+    fn debrief_plan(full_ran: bool, key: &str) -> SincePlan {
+        use crate::plan_since::{Leg, Rerun, Scope};
+        SincePlan {
+            run: 7961,
+            workflow: "debrief.yml".into(),
+            head: "h".into(),
+            reruns: vec![Rerun {
+                id: 1,
+                name: "x".into(),
+                key: Some(key.into()),
+                leg: Leg::default(),
+                scope: Scope::Tests {
+                    filter: "(binary_id(=a) & test(=b))".into(),
+                    tests: vec![],
+                },
+                vitest: vec![],
+            }],
+            not_rerun: 19,
+            everything: None,
+            full_ran,
+        }
+    }
+
+    #[test]
+    fn an_app_workflow_rerun_writes_its_outputs_and_answers_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("out");
+        let summary = dir.path().join("summary");
+        let (o, m) = (output.display().to_string(), summary.display().to_string());
+        let env = |k: &str| match k {
+            "GITHUB_OUTPUT" => Some(o.clone()),
+            "GITHUB_STEP_SUMMARY" => Some(m.clone()),
+            _ => None,
+        };
+        let r = since_app_with(&env, "debrief", "debrief.yml", 7961, Ok(debrief_plan(false, "rust-test-macos"))).unwrap();
+        assert_eq!(r.text, "true");
+        let out = std::fs::read_to_string(&output).unwrap();
+        assert!(out.contains("rerun_jobs=[\"rust-test-macos\"]\n"), "{out}");
+        assert!(out.contains("rust_test_macos_filter=(binary_id(=a) & test(=b))\n"), "{out}");
+        assert!(
+            std::fs::read_to_string(&summary)
+                .unwrap()
+                .contains("Rerun of run 7961 (debrief.yml)")
+        );
+    }
+
+    #[test]
+    fn an_app_workflow_rerun_refuses_another_workflows_run_and_a_full_runs_failure_in_a_run_that_is_not_full() {
+        let e = since_app_with(
+            &no_env,
+            "debrief",
+            "debrief.yml",
+            7,
+            Ok({
+                let mut p = debrief_plan(false, "crate");
+                p.workflow = "ci.yml".into();
+                p
+            }),
+        )
+        .err()
+        .unwrap();
+        assert!(e.text().contains("run 7 is a run of ci.yml"), "{}", e.text());
+        let e = since_app_with(&no_env, "debrief", "debrief.yml", 7, Ok(debrief_plan(true, "e2e")))
+            .err()
+            .unwrap();
+        assert!(e.text().contains("dispatch the rerun with bundles: true"), "{}", e.text());
+        let full = |k: &str| (k == "PLAN_FULL").then(|| "true".to_string());
+        assert!(since_app_with(&full, "debrief", "debrief.yml", 7, Ok(debrief_plan(true, "e2e"))).is_ok());
+        assert!(
+            since_app_with(&no_env, "debrief", "debrief.yml", 7, Ok(debrief_plan(true, "rust-test"))).is_ok(),
+            "a job a full run does not change reruns in any run"
+        );
+        let e = since_app_with(&no_env, "dyno", "dyno.yml", 7, Ok(debrief_plan(false, "x")))
+            .err()
+            .unwrap();
+        assert!(e.text().contains("has no rerun of failures yet"), "{}", e.text());
+        let e = since_app_with(&no_env, "debrief", "debrief.yml", 7, Err("run 7 is running".into()))
+            .err()
+            .unwrap();
+        assert!(e.text().contains("run 7 is running"), "{}", e.text());
+    }
+
+    #[test]
+    fn an_app_that_is_a_leg_of_ci_yml_is_told_to_rerun_ci_yml() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("apps/dyno")).unwrap();
+        std::fs::write(root.path().join("apps/dyno/paddock.ci.json"), r#"{"cargo": "."}"#).unwrap();
+        let e = since_app(root.path(), &no_env, "dyno", "7").err().unwrap();
+        assert!(e.text().contains("dyno is a leg of ci.yml"), "{}", e.text());
+        assert!(
+            since_app(root.path(), &no_env, "dyno", "x")
+                .err()
+                .unwrap()
+                .text()
+                .contains("must be a run number")
+        );
     }
 
     #[test]

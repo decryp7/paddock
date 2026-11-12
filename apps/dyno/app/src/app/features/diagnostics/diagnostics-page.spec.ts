@@ -1,5 +1,5 @@
 import { TestBed } from '@angular/core/testing';
-import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell/contributions';
 import { DiagnosticsPage } from './diagnostics-page';
 
 describe('dy-diagnostics-page', () => {

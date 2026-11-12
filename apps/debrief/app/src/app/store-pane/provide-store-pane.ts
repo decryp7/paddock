@@ -1,7 +1,8 @@
-import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS, DebriefCommand, DebriefView } from '../extensions/tokens';
+import { EnvironmentProviders, makeEnvironmentProviders } from '@angular/core';
+import { DebriefView } from '../extensions/tokens';
 import { STORE_VIEW } from './store-pane-model';
-import { StorePaneStore } from './store-pane.store';
+import { STORE_PANE_COMMANDS_CONTRIBUTIONS } from './store-pane.contributions';
+import { contributeFrom } from '../extensions/contributions';
 
 export function storePaneViews(): DebriefView[] {
   return [
@@ -16,34 +17,11 @@ export function storePaneViews(): DebriefView[] {
   ];
 }
 
-export function storePaneCommands(pane: InstanceType<typeof StorePaneStore>): DebriefCommand[] {
-  const category = $localize`:Command palette category@@store.category:View`;
-  return [
-    {
-      id: 'store.show',
-      title: $localize`:@@store.cmd.show:Open Store`,
-      category,
-      run: (ctx) => {
-        void pane.show(pane.tab() === 'sql' ? 'overview' : pane.tab());
-        ctx.showView(STORE_VIEW);
-      },
-    },
-    {
-      id: 'store.sql',
-      title: $localize`:@@store.cmd.sql:Open SQL console`,
-      category,
-      run: (ctx) => {
-        void pane.show('sql');
-        ctx.showView(STORE_VIEW);
-      },
-    },
-  ];
-}
-
 /** One line in `app.config.ts`: View ▸ Store (the Store pane and its SQL console) and its palette commands. */
 export function provideStorePane(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_VIEWS, multi: true, useFactory: storePaneViews },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => storePaneCommands(inject(StorePaneStore)) },
+    ...contributeFrom('views', storePaneViews),
+    // The commands' stubs; the pane's store loads when the window is idle or a command runs.
+    ...STORE_PANE_COMMANDS_CONTRIBUTIONS,
   ]);
 }

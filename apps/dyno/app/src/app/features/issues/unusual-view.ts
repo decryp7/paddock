@@ -1,4 +1,4 @@
-import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell/contributions';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import type { UnusualItem } from '../../core/api.types';

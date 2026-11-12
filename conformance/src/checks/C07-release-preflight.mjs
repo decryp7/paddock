@@ -1,9 +1,9 @@
 // C07: the release is consistent before a tag exists and checked once more at the tag. Static: the version agrees in
 // Cargo.toml, package.json, tauri.conf.json and the CHANGELOG head; the release job `needs` every gate. Preflight
-// (--preflight vX.Y.Z): tag commit is not [skip ci], the Gitea API reports a green run for exactly this commit, no
+// (--preflight vX.Y.Z): tag commit is not [skip ci], no
 // fix/* or release/* branch has commits missing from the tag. Catches B10, B11, B12.
 import { execFileSync } from 'node:child_process';
-import { error, warn } from '../finding.mjs';
+import { error } from '../finding.mjs';
 import { lineOf } from '../util/fs.mjs';
 import { versionSources } from '../util/version.mjs';
 
@@ -42,8 +42,9 @@ export function staticFindings(ctx) {
   return out;
 }
 
-/** The preflight: `git(args)` returns stdout, `fetchImpl` is fetch. Findings only; never throws for a failed check. */
-export async function preflight(ctx, { tag, git, fetchImpl = fetch, api, repo, token }) {
+/** The preflight: `git(args)` returns stdout. Findings only; never throws for a failed check. The CI result of the tagged commit is
+ * not read here: the tag workflow asks `./dev ci verdict` (the one reader of the runs). */
+export async function preflight(ctx, { tag, git }) {
   const out = [];
   const where = `tag ${tag}`;
   if (!/^v\d+\.\d+\.\d+(-[\w.]+)?$/.test(tag)) return [error('C07', 25, where, 1, `${tag} is not a vX.Y.Z tag`, 'Use a semver tag.')];
@@ -58,23 +59,6 @@ export async function preflight(ctx, { tag, git, fetchImpl = fetch, api, repo, t
 
   const version = tag.slice(1);
   for (const s of versionSources(ctx)) if (s.version !== version) out.push(error('C07', 25, s.file, 1, `${s.file} says ${s.version}, the tag says ${version}`, 'Bump the file in the release commit and retag.'));
-
-  if (!api || !repo) out.push(warn('C07', 25, where, 1, 'no --api/--repo: the CI result of the tagged commit was not checked', 'Pass --api https://host/api/v1 --repo owner/name and GITEA_TOKEN.'));
-  else {
-    try {
-      const res = await fetchImpl(`${api.replace(/\/+$/, '')}/repos/${repo}/actions/runs?head_sha=${sha}`, { headers: token ? { Authorization: `token ${token}` } : {} });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = await res.json();
-      const runs = (body.workflow_runs ?? body.runs ?? []).filter((r) => (r.head_sha ?? sha) === sha);
-      if (!runs.length) out.push(error('C07', 25, where, 1, `the Gitea API lists no run for commit ${sha.slice(0, 10)}`, 'Push the commit without [skip ci] and wait for CI.'));
-      for (const r of runs) {
-        const state = r.conclusion ?? r.status;
-        if (state !== 'success') out.push(error('C07', 25, where, 1, `run "${r.name ?? r.display_title ?? r.id}" for ${sha.slice(0, 10)} is ${state}`, 'Fix the failure and re-run; tag only a green commit.'));
-      }
-    } catch (e) {
-      out.push(error('C07', 25, where, 1, `cannot read the CI result from ${api}: ${e.message}`, 'Check the API URL and token; the preflight fails closed.'));
-    }
-  }
 
   let prev = '';
   try {
@@ -107,10 +91,6 @@ export default {
         ...(await preflight(ctx, {
           tag: ctx.options.preflight,
           git: ctx.options.git ?? defaultGit(ctx.root),
-          fetchImpl: ctx.options.fetch,
-          api: ctx.options.api,
-          repo: ctx.options.repo,
-          token: ctx.options.token,
         })),
       );
     }

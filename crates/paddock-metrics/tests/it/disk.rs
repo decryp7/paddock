@@ -65,7 +65,7 @@ fn a_folder_that_does_not_exist_yet_uses_its_nearest_ancestor() {
     let missing = scratch.work().join("a").join("b");
     assert_eq!(
         existing_ancestor(&missing),
-        Some(std::fs::canonicalize(scratch.work()).unwrap())
+        Some(paddock_env::winpath::real(&scratch.work()).unwrap())
     );
     assert_eq!(existing_ancestor(Path::new("")), None);
 }

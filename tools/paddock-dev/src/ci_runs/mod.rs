@@ -4,6 +4,10 @@
 //!   failed and then passed on a rerun of the same commit ([`flakes`], ADR 0082 D6; the log readers are [`logfind`]). A run whose
 //!   logs cannot be read is "not measured", never "no flakes" (ER-33).
 //! - `ci timings`: the port of `scripts/ci-timings.mjs` ([`timings`]).
+//! - `ci verdict --workflow <file> --sha <sha>`: is there a full green run of the workflow on the commit ([`verdict`]; exit 0, 5
+//!   red or partial only, 6 not measured). The one reader of the runs for a pass/fail answer; the tag workflow asks it.
+//! - `ci schedule-skip`: whether a scheduled run ends early because a train is in CI ([`schedule_skip`]; the job token in
+//!   `PLAN_TOKEN` or `GITEA_TOKEN`, and it never fails the run).
 //!
 //! The API client ([`client`]) reuses the planner's [`Http`](crate::wait::Http) and [`GiteaRuns`](crate::plan_since::GiteaRuns).
 //! The token is read from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
@@ -12,10 +16,12 @@ pub mod client;
 pub mod flakes;
 pub mod logfind;
 pub mod preconditions;
+pub mod schedule_skip;
 #[cfg(test)]
 mod testutil;
 pub mod time;
 pub mod timings;
+pub mod verdict;
 
 use crate::wait::CurlHttp;
 use clap::Args;
@@ -81,6 +87,90 @@ pub struct TimingsArgs {
     /// The API root of the owner's repositories.
     #[arg(long, default_value = "https://dev.decryptology.net/api/v1/repos/decryp7")]
     base: String,
+}
+
+/// Arguments of `ci verdict`.
+#[derive(Args)]
+pub struct VerdictArgs {
+    /// The workflow file whose runs are read (`ci.yml`, `debrief.yml`).
+    #[arg(long)]
+    workflow: String,
+    /// The full 40-hex commit id.
+    #[arg(long)]
+    sha: String,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// Arguments of `ci schedule-skip`. The event, server and repository default to the job's (`GITHUB_EVENT_NAME`,
+/// `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`).
+#[derive(Args)]
+pub struct ScheduleSkipArgs {
+    /// The event of the run (default: GITHUB_EVENT_NAME); only `schedule` is ever skipped.
+    #[arg(long)]
+    event: Option<String>,
+    /// The repository (default: GITHUB_REPOSITORY, then decryp7/paddock).
+    #[arg(long)]
+    repo: Option<String>,
+    /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
+    #[arg(long)]
+    server: Option<String>,
+    /// The workflow file being decided (`nightly.yml`): its own scheduled runs bound the skip.
+    #[arg(long)]
+    workflow: String,
+    /// Never skip when the workflow's last measured scheduled run is older than this (36 h: one nightly at most; a weekly
+    /// workflow passes a week and a day). Whatever the limit, a workflow is never skipped twice in a row.
+    #[arg(long, default_value_t = 36.0)]
+    max_gap_hours: f64,
+}
+
+/// `ci schedule-skip`: `skip=true|false` to `GITHUB_OUTPUT` (standard output without it), the annotation on standard output,
+/// the reason in the job summary. Exit 0 whatever the API says (a scheduled test run fails open).
+pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let event = a.event.clone().or_else(|| env("GITHUB_EVENT_NAME")).unwrap_or_default();
+    let server = a
+        .server
+        .clone()
+        .or_else(|| env("GITHUB_SERVER_URL"))
+        .unwrap_or_else(|| SERVER.into());
+    let repo = a
+        .repo
+        .clone()
+        .or_else(|| env("GITHUB_REPOSITORY"))
+        .unwrap_or_else(|| "decryp7/paddock".into());
+    let token = env("PLAN_TOKEN").or_else(|| env("GITEA_TOKEN")).unwrap_or_default();
+    let now_ms = time::now_secs() as f64 * 1000.0;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &server, &repo, &token);
+    let d = schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours);
+    let answer = format!("skip={}", d.skip());
+    let mut text: Vec<String> = d.annotation().into_iter().collect();
+    match env("GITHUB_OUTPUT") {
+        Some(path) => append(&path, &format!("{answer}\n"))?,
+        None => text.push(answer),
+    }
+    if let Some(path) = env("GITHUB_STEP_SUMMARY") {
+        append(&path, &d.summary())?;
+    }
+    Ok(Report::new(
+        serde_json::json!({ "skip": d.skip(), "summary": d.summary() }),
+        text.join("\n"),
+    ))
+}
+
+fn append(path: &str, text: &str) -> Result<(), CliError> {
+    use std::io::Write;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(text.as_bytes()))
+        .map_err(|e| CliError::failure(format!("{path} cannot be written: {e}.")))
 }
 
 fn token() -> Result<String, CliError> {
@@ -202,6 +292,28 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
         eprintln!("::error::{}", report.error_line());
     }
     Ok(Report::new(report.json(), report.text()).with_exit(exit))
+}
+
+/// `ci verdict`: is there a full green run of the workflow on the commit (exit 0), a red or only partial one (5), or is it not
+/// measured (6; also without a token)? The token is read from `GITEA_TOKEN`.
+pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
+    if a.sha.len() != 40 || !a.sha.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(CliError::usage(format!("--sha {:?} is not a full 40-hex commit id.", a.sha))
+            .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
+    }
+    let v = match token() {
+        Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+            verdict::verdict(&mut client, &a.workflow, &a.sha)
+        }
+    };
+    let r = verdict::report(&v, &a.workflow, &a.sha);
+    if r.exit != Exit::Ok {
+        eprintln!("::error::ci verdict: {}", r.text);
+    }
+    Ok(r)
 }
 
 /// `ci timings`.
@@ -333,6 +445,20 @@ mod tests {
         // Through the preconditions, unknown becomes a gap and not-found does not.
         assert!(preconditions::nextest("dyno", read.as_ref()).unwrap().contains("could not be read"));
         assert!(preconditions::playwright("dyno", read.as_ref()).is_none());
+    }
+
+    #[test]
+    fn verdict_needs_a_workflow_and_a_whole_sha_and_never_passes_without_a_token() {
+        let (code, _, err) = run(&["ci", "verdict"]);
+        assert_eq!(code, Exit::Usage.code(), "{err}");
+        let (code, _, err) = run(&["ci", "verdict", "--workflow", "ci.yml", "--sha", "abc1234"]);
+        assert_eq!(code, Exit::Usage.code(), "{err}");
+        assert!(err.contains("40-hex"), "{err}");
+        let (code, out, _) = run(&["ci", "verdict", "--help"]);
+        assert_eq!(code, 0);
+        for flag in ["--workflow", "--sha", "--repo", "--server"] {
+            assert!(out.contains(flag), "{flag} missing in {out}");
+        }
     }
 
     #[test]

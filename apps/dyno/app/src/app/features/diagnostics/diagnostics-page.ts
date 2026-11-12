@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
+import { SHELL_PORTS } from '@decryp7/paddock-ui/shell/contributions';
 import { MatButton } from '@angular/material/button';
 import { Icon } from '../../shared/icon';
 

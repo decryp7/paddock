@@ -89,6 +89,8 @@ pub struct HotModel {
     context_released: std::sync::atomic::AtomicBool,
     /// Vision input works.
     pub vision: bool,
+    /// Audio input works: the engine says so (`/props` `modalities.audio`); never assumed.
+    pub audio: bool,
     /// How long the load took.
     pub cold_start_ms: u64,
     /// The engine that serves it.
@@ -935,6 +937,7 @@ impl Serving {
         let pid = running.child.as_ref().and_then(tokio::process::Child::id).unwrap_or(0);
         let measured = if pid > 0 { system::memory(pid) } else { 0 };
         let vision = running.props.vision.unwrap_or(f.projector.is_some());
+        let audio = running.props.audio.unwrap_or(false);
         let h = Arc::new(HotModel {
             id: id.clone(),
             ram: accounted_ram(measured, need.ram),
@@ -949,6 +952,7 @@ impl Serving {
             clock: self.clock(),
             context_released: std::sync::atomic::AtomicBool::new(false),
             vision,
+            audio,
             engine: (engine.id(), engine.kind()),
             cold_start_ms: started.elapsed().as_millis() as u64,
             capabilities: library::capabilities(&f),

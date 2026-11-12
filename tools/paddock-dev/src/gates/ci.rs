@@ -221,6 +221,16 @@ fn parse_matrix(n: &Node) -> Matrix {
         match k.as_str() {
             "include" => match v.text() {
                 Some(t) if t.contains("fromJSON(needs.plan.outputs.apps)") => m.app_legs = true,
+                // A sharded job of an app workflow (debrief.yml's `include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}`, one of
+                // the outputs plan_since::app_output_names lists): every shard unless a rerun of failures names some, and each
+                // shard runs the same steps, so the model runs one.
+                Some(t)
+                    if crate::plan_since::app_output_names()
+                        .iter()
+                        .any(|o| o.ends_with("_shards") && t.contains(&format!("fromJSON(needs.plan.outputs.{o})"))) =>
+                {
+                    m.axes.push(("shard".to_string(), vec!["1".to_string()]));
+                }
                 // The crate and paddock-dev legs of ci.yml: every OS unless a rerun of the earlier run's failures narrows them (the
                 // plan step writes PLAN_OS_LEGS otherwise), so the model runs them on all three.
                 Some(t)
@@ -626,8 +636,15 @@ impl Lookup for Scope<'_> {
                         Val::Opaque(name.to_string())
                     }
                     // The jobs a manual rerun of an earlier run's failures names (`since_run`): empty on every other run, which is
-                    // what the model decides ("a branch run"); each job's `if` then reads its own name from the default list.
+                    // what the model decides ("a branch run"); each job's `if` then reads its own name from the default list. The
+                    // same for an app workflow's narrowing outputs of such a rerun (debrief.yml's `rust_test_filter`,
+                    // `frontend_include`; plan_since::SincePlan::app_outputs): empty, so every step runs whole.
                     (Some(_), Some("outputs"), Some("rerun_jobs")) => Val::Null,
+                    (Some(_), Some("outputs"), Some(out))
+                        if !out.ends_with("_shards") && crate::plan_since::app_output_names().iter().any(|o| o == out) =>
+                    {
+                        Val::Null
+                    }
                     (Some(job), Some("outputs"), Some(out)) => match self.planners.get(job).and_then(|o| o.get(out)) {
                         // An output computed from the event alone is evaluated; one read from a step is the planner's mark.
                         Some(e) if !e.contains("steps.") => expr::eval(e.trim().trim_start_matches("${{").trim_end_matches("}}"), self).0,
@@ -756,7 +773,14 @@ impl Walker<'_> {
         let planners: Planners = wf
             .jobs
             .iter()
-            .filter(|j| j.id == "plan" || j.steps.iter().any(|s| s.uses.as_deref() == Some("./.gitea/actions/plan")))
+            // The plan job, a job of the plan action, and a scheduled workflow's gate of the schedule-skip action (its `skip` is
+            // the planner's mark like `run`: a run decided before any test job starts).
+            .filter(|j| {
+                j.id == "plan"
+                    || j.steps
+                        .iter()
+                        .any(|s| matches!(s.uses.as_deref(), Some("./.gitea/actions/plan" | "./.gitea/actions/schedule-skip")))
+            })
             .map(|j| (j.id.clone(), j.outputs.iter().cloned().collect()))
             .collect();
         let env0: BTreeMap<String, String> = BTreeMap::new();
@@ -1584,6 +1608,17 @@ jobs:
         let m = build(&sources(&[(".gitea/workflows/ci.yml", wf)]));
         assert_eq!(find(&m, "all.mjs").len(), 3, "ubuntu, windows and macos");
         assert_eq!(only(&m, "win.mjs").os.as_deref(), Some("windows-latest"));
+    }
+
+    #[test]
+    fn an_app_workflows_rerun_outputs_read_as_a_normal_run_every_step_and_one_shard() {
+        let wf = "on:\n  pull_request:\njobs:\n  plan:\n    runs-on: ubuntu-latest\n    outputs:\n      rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}\n      rust_test_filter: ${{ steps.plan.outputs.rust_test_filter }}\n      frontend_include: ${{ steps.plan.outputs.frontend_include }}\n      e2e_shards: ${{ steps.plan.outputs.e2e_shards }}\n    steps:\n      - id: plan\n        run: node plan.mjs\n  f:\n    needs: [plan]\n    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '[\"f\"]'), 'f') }}\n    runs-on: ubuntu-latest\n    steps:\n      - if: needs.plan.outputs.frontend_include == ''\n        run: node lint.mjs\n      - if: ${{ !cancelled() && needs.plan.outputs.rust_test_filter == '' }}\n        run: node doc.mjs\n  e:\n    needs: [plan]\n    runs-on: ubuntu-latest\n    strategy:\n      matrix:\n        include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}\n    steps:\n      - run: node e2e.mjs\n      - if: needs.plan.outputs.other_filter == ''\n        run: node other.mjs\n";
+        let m = build(&sources(&[(".gitea/workflows/app.yml", wf)]));
+        assert_eq!(only(&m, "lint.mjs").levels[&Level::Branch], Status::Gated);
+        assert_eq!(only(&m, "doc.mjs").levels[&Level::Branch], Status::Gated);
+        assert_eq!(only(&m, "e2e.mjs").levels[&Level::Branch], Status::Gated);
+        // An output the planner never writes is not taken as empty.
+        assert_ne!(only(&m, "other.mjs").levels[&Level::Branch], Status::Gated);
     }
 
     #[test]

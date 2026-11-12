@@ -1,0 +1,23 @@
+2026-11-11T14:02:05.8260000Z runner-1(version:v5.4.1)
+2026-11-11T14:02:05.8260800Z ::group::Runner Information
+2026-11-11T14:02:05.8260960Z Runner labels: macos-latest, macos-arm64
+2026-11-11T14:02:05.8260970Z Task: 1
+2026-11-11T14:02:05.8260980Z Job: rust-test-macos
+2026-11-11T14:02:05.8260990Z Repository: ***/paddock
+2026-11-11T14:02:05.8261000Z Triggered by event: workflow_dispatch
+2026-11-11T14:02:05.8261010Z ::endgroup::
+2026-11-11T14:02:05.8261020Z ::group::Inputs
+2026-11-11T14:02:05.8261030Z bundles: false
+2026-11-11T14:02:05.8261040Z ::endgroup::
+2026-11-11T14:09:27.2207850Z ::group::Run cargo nextest run --workspace --profile ci
+2026-11-11T14:13:19.9103130Z [32;1m    Starting[0m [1m2210[0m tests across [1m64[0m binaries
+2026-11-11T14:13:19.9736590Z [32;1m        PASS[0m [   0.030s] (   1/2210) [35;1mdebrief-app[0m [36mbrowser::runtime::tests[0m[36m::[0m[34;1mthe_pinned_build_is_read_from_the_source[0m
+2026-11-11T14:14:19.9220920Z [31;1m        FAIL[0m [  31.061s] (1702/2210) [35;1mdebrief-app[0m [36mbrowser::launch::tests[0m[36m::[0m[34;1mthe_first_start_is_paid_before_the_guard[0m
+2026-11-11T14:14:49.1220920Z [31;1m        FAIL[0m [   2.104s] (1840/2210) [35;1mdebrief-store-duck::it[0m [36mworker[0m[36m::[0m[34;1mimports_and_queries_within_the_budgets[0m
+2026-11-11T14:15:19.3580590Z [31;1m     Summary[0m [ 119.437s] [1m2210[0m tests run: [1m2208[0m [32;1mpassed[0m, [1m2[0m [31;1mfailed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-11T14:15:19.3581430Z [31;1m        FAIL[0m [  31.061s] (1702/2210) [35;1mdebrief-app[0m [36mbrowser::launch::tests[0m[36m::[0m[34;1mthe_first_start_is_paid_before_the_guard[0m
+2026-11-11T14:15:19.3581530Z [31;1m        FAIL[0m [   2.104s] (1840/2210) [35;1mdebrief-store-duck::it[0m [36mworker[0m[36m::[0m[34;1mimports_and_queries_within_the_budgets[0m
+2026-11-11T14:15:19.6340100Z [31;1merror[0m: test run failed
+2026-11-11T14:15:19.6358900Z ##[error]Process completed with exit code 100.
+2026-11-11T14:15:19.6563550Z ::group::Run cargo test --workspace --doc
+2026-11-11T14:16:02.1000000Z test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.10s

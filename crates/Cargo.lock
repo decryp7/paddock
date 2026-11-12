@@ -3460,6 +3460,7 @@ version = "0.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
+ "log",
  "paddock-env",
  "paddock-jobs",
  "paddock-limits",
@@ -3915,6 +3916,7 @@ dependencies = [
  "paddock-env",
  "paddock-files",
  "paddock-health",
+ "paddock-ipc",
  "paddock-jobs",
  "paddock-limits",
  "paddock-log",
@@ -4016,6 +4018,7 @@ dependencies = [
 name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
  "paddock-jobs",
  "paddock-limits",
  "paddock-workspace-hack",

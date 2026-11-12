@@ -6,7 +6,6 @@ import { FILE_EXISTS_SUFFIX } from '../core/api.types';
 import { Logger } from '../core/logger';
 import { Platform } from '../core/platform';
 import { DialogService } from '../ui/dialog.service';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS } from '../extensions/tokens';
 import { MOCK_AGENT_PATH, MockSchedulesBackend, mockAgentSchema, mockStarter, mockValidate } from './mock/mock-schedules-backend';
 import { RunsStore } from './runs.store';
 import { RunsView } from './runs-view';
@@ -29,6 +28,7 @@ import { SchedulesView } from './schedules-view';
 import { SchemaField } from './schema-field';
 import { provideSchedules, SCHEDULES_COMMANDS, SCHEDULES_VIEWS } from './provide-schedules';
 import { at } from '../../testing/must';
+import { contributed } from '../../testing/contributions';
 
 const NOW = Date.UTC(2026, 9, 17, 12, 0, 0);
 
@@ -600,9 +600,9 @@ describe('RunsView', () => {
 describe('provideSchedules', () => {
   it('registers the two views and their commands', () => {
     TestBed.configureTestingModule({ providers: [provideSchedules()] });
-    const views = TestBed.inject(DEBRIEF_VIEWS).flat();
+    const views = contributed('views');
     expect(views.map((v) => v.id)).toEqual(['collection-schedules', 'collection-runs']);
-    expect(TestBed.inject(DEBRIEF_COMMANDS).flat()).toEqual(SCHEDULES_COMMANDS);
+    expect(contributed('commands').map((c) => [c.id, c.title, c.view])).toEqual(SCHEDULES_COMMANDS.map((c) => [c.id, c.title, c.view]));
     const shown: string[] = [];
     for (const c of SCHEDULES_COMMANDS) void c.run({ showView: (id: string) => shown.push(id) } as never);
     expect(shown).toEqual(['collection-schedules', 'collection-runs']);

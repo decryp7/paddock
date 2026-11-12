@@ -1,0 +1,337 @@
+{
+"total_count": 20,
+"jobs": [
+{
+"id": 41001,
+"name": "plan",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Decide",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41002,
+"name": "rust format + clippy",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Format",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Clippy (workspace)",
+"number": 2,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41003,
+"name": "rust tests",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Tests (workspace)",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Doc tests (workspace)",
+"number": 2,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Memory budget",
+"number": 3,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41004,
+"name": "rust tests (macOS)",
+"status": "completed",
+"conclusion": "failure",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Tests (workspace)",
+"number": 1,
+"status": "completed",
+"conclusion": "failure"
+},
+{
+"name": "Doc tests (workspace)",
+"number": 2,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "No temp folders left behind",
+"number": 3,
+"status": "completed",
+"conclusion": "failure"
+}
+]
+},
+{
+"id": 41005,
+"name": "plugin SDK templates",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "New projects of every kind build",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41006,
+"name": "licences, notices + commits",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Licences, advisories and sources",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41007,
+"name": "frontend build, lint + unit tests",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Lint",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Frontend unit tests",
+"number": 2,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41008,
+"name": "end-to-end (shard 1/4)",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Frontend end-to-end tests",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41009,
+"name": "end-to-end (shard 2/4)",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Frontend end-to-end tests",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41010,
+"name": "end-to-end (shard 3/4)",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Frontend end-to-end tests",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41011,
+"name": "end-to-end (shard 4/4)",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Frontend end-to-end tests",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41012,
+"name": "real-app smoke (ubuntu-latest)",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+},
+{
+"id": 41013,
+"name": "real-app smoke (windows-latest)",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+},
+{
+"id": 41014,
+"name": "real-app smoke (macos-latest)",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+},
+{
+"id": 41015,
+"name": "bundle (ubuntu-latest)",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+},
+{
+"id": 41016,
+"name": "bundle (windows-latest)",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+},
+{
+"id": 41017,
+"name": "bundle (macos-latest)",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+},
+{
+"id": 41018,
+"name": "C99 (no Keychain in a macOS build)",
+"status": "completed",
+"conclusion": "success",
+"steps": [
+{
+"name": "Run actions/checkout@v4",
+"number": 0,
+"status": "completed",
+"conclusion": "success"
+},
+{
+"name": "Run ./.gitea/actions/keychain",
+"number": 1,
+"status": "completed",
+"conclusion": "success"
+}
+]
+},
+{
+"id": 41019,
+"name": "release",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+},
+{
+"id": 41020,
+"name": "nightly-mark",
+"status": "completed",
+"conclusion": "skipped",
+"steps": []
+}
+]
+}

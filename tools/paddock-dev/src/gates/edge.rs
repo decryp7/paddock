@@ -77,10 +77,41 @@ impl Tree for GitTree {
     }
 }
 
-/// `paddock-conformance` output (`list --json`, `commands --json`) through node.
+/// `Some(::error:: line)` when `root` is a sparse checkout that lacks folders the gates read (local runs only: CI checks out sparse
+/// on purpose). One implementation, `conformance/src/util/full-checkout.mjs`, which also serves conformance and `affected.mjs`.
+pub fn sparse_problem(root: &Path) -> Option<String> {
+    let script = "conformance/src/util/full-checkout.mjs";
+    if !root.join(script).is_file() {
+        return sparse_checkout_on(root).then(|| MISSING_CONFORMANCE.to_string());
+    }
+    match Real.run("node", &[script, "."], root, None) {
+        Ok(_) => None,
+        Err(e) => error_line(&e.message),
+    }
+}
+
+const MISSING_CONFORMANCE: &str = "::error::conformance/ is not in this checkout (a sparse checkout without it), and the gates run it. Fix: run `git sparse-checkout disable` for a full checkout; new worktrees from `./dev worktree add` are full checkouts.";
+
+fn sparse_checkout_on(root: &Path) -> bool {
+    std::env::var("GITHUB_ACTIONS").map_or(true, |v| v != "true")
+        && Real
+            .run("git", &["config", "--get", "core.sparseCheckout"], root, None)
+            .is_ok_and(|v| v.trim() == "true")
+}
+
+/// The `::error::` line inside a failed run's message (tool name and exit text around it dropped), if there is one.
+pub fn error_line(message: &str) -> Option<String> {
+    message.find("::error::").map(|i| message[i..].trim().to_string())
+}
+
+/// `paddock-conformance` output (`list --json`, `commands --json`) through node. A failure that printed an `::error::` line returns
+/// just that line; the node hint is added only when node could not be started or printed nothing useful.
 pub fn conformance_json(root: &Path, sub: &str) -> Result<String, String> {
+    if !root.join("conformance/bin/paddock-conformance.mjs").is_file() {
+        return Err(MISSING_CONFORMANCE.to_string());
+    }
     Real.run("node", &["conformance/bin/paddock-conformance.mjs", sub, "--json"], root, None)
-        .map_err(|e| format!("{} (node must be on PATH)", e.message))
+        .map_err(|e| error_line(&e.message).unwrap_or_else(|| format!("{} (node must be on PATH)", e.message)))
 }
 
 /// The register at a revision, if the revision and the file exist.
@@ -250,6 +281,17 @@ mod tests {
         format!(
             "version = 1\n[[not_gated]]\nid = \"X\"\nreason = \"r\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = {review}\napproved = \"coordinator\"\n"
         )
+    }
+
+    #[test]
+    fn a_checkout_without_conformance_is_told_to_disable_the_sparse_checkout_not_given_a_node_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = conformance_json(dir.path(), "list").unwrap_err();
+        assert!(
+            e.contains("::error::") && e.contains("conformance/") && e.contains("git sparse-checkout disable"),
+            "{e}"
+        );
+        assert!(!e.contains("node must be on PATH"), "{e}");
     }
 
     #[test]

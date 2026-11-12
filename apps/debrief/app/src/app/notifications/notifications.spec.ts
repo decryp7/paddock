@@ -4,7 +4,6 @@ import { FakeContext } from '../analysis/test-setup';
 import { LifecycleBackend } from '../core/tools-backend';
 import { Logger } from '../core/logger';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
-import { DEBRIEF_COMMANDS, DEBRIEF_VIEWS } from '../extensions/tokens';
 import { JobViewer } from '../jobs/job-viewer';
 import { JobsBackend } from '../jobs/jobs-backend';
 import { JobsStore } from '../jobs/jobs.store';
@@ -25,7 +24,9 @@ import { MAX_TOASTS, NotificationsStore } from './notifications.store';
 import { EMPTY_NOTICES, Notice, NoticeAction, NoticesEvent, NoticesRecord, NoticesSnapshot, NOTICE_SOURCES } from './notifications.types';
 import { sourceLabel, titleWithCount } from './notifications-text';
 import { NotificationsPanel } from './notifications-panel';
-import { notificationsCommands, NotificationsPersistence, notificationsViews, provideNotifications, startNotifications } from './provide-notifications';
+import { notificationsCommands } from './notifications.commands';
+import { NotificationsPersistence, notificationsViews, provideNotifications, startNotifications } from './provide-notifications';
+import { contributed } from '../../testing/contributions';
 
 function notice(p: Partial<Notice> & { id: number }): Notice {
   return {
@@ -750,8 +751,8 @@ describe('provide-notifications', () => {
     TestBed.configureTestingModule({
       providers: [{ provide: NotificationsBackend, useValue: fake }, { provide: DockService, useValue: new FakeDock() }, { provide: COMMAND_CONTEXT, useValue: new FakeContext() }, { provide: NoticeActions, useValue: {} }, { provide: Logger, useFactory: () => new MemoryLogger() }, provideNotifications()],
     });
-    expect(TestBed.inject(DEBRIEF_VIEWS).flat().map((v) => v.id)).toContain('notifications');
-    expect(TestBed.inject(DEBRIEF_COMMANDS).flat().map((c) => c.id)).toEqual(expect.arrayContaining(['notifications.show', 'notifications.markAllRead']));
+    expect(contributed('views').map((v) => v.id)).toContain('notifications');
+    expect(contributed('commands').map((c) => c.id)).toEqual(expect.arrayContaining(['notifications.show', 'notifications.markAllRead']));
     expect(TestBed.inject(UI_STATE_CONTRIBUTIONS).flat().map((c) => c.key)).toContain('notifications');
     await settle();
     expect(fake.list).toHaveBeenCalled();

@@ -496,7 +496,7 @@ pub fn validate_destination(path: &Path) -> Result<PathBuf> {
     let parent = path
         .parent()
         .ok_or_else(|| bad("Choose a folder to save in."))?;
-    let parent = std::fs::canonicalize(parent)
+    let parent = paddock_env::winpath::real(parent)
         .map_err(io("find the folder", parent))
         .map_err(|_| bad("The folder does not exist. Choose another one."))?;
     if !parent.is_dir() {

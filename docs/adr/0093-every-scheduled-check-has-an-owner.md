@@ -10,6 +10,7 @@
   and one P2) is answered by revision 4 (see "Review answers (revision 4)"). The acceptance commit adds the review's three P2s on
   revision 4 and aligns §4 and §5 with ADR 0097 (proposed, `origin/docs/adr-user-approvals` `d21eddcbf`; see "At
   acceptance"). Nothing here is built yet. ER-23 does not apply (no drawings).
+- Amendment 2026-11-12 (user): a scheduled run ends early while a train's `workflow_dispatch` run on `train/*` is queued or in progress (`./dev ci schedule-skip`, the `schedule-skip` action; fails open when the Actions API cannot be read), says so in one `::notice::` line beginning `skipped: train`, writes no green marker, and counts as not measured, never green, for any reader of scheduled results (§2; the tag gate of §4 is cut); it never skips twice in a row nor when the workflow's last measured scheduled run is older than 36 h (a weekly one: 192 h). Readers of scheduled results reuse `read_past`'s rule (the skip notice in the gate's log), never a run's conclusion.
 - Date: 2026-11-10
 - Related: ER-12, ER-21 / rule 40, ER-31, ER-33 / rule 71, ER-36; ADR 0022 (developer tools are Rust in `./dev`); ADR
   0041 (its tag-checklist row, line 208: "the last ... starved nightly of the app's tests has no open failure, or each is

@@ -169,7 +169,7 @@ key that you issue there and can revoke. Once it is on, every reading tool is on
 the client, the tool, the choices it passed and how big the answer was, never the answer itself).
 
 The reading tools only read. They ask Dyno's agent the same questions the pages ask, so a reading Dyno cannot get comes back with
-its reason ("Turn on Administrator readings in Settings so the helper can read this", "Not on this operating system") and never as
+its reason ("Turn on administrator readings in Settings so the helper can read this", "Not on this operating system") and never as
 an empty answer.
 
 | Tool | What the client gets |

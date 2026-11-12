@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, untracked } from '@angular/core';
-import { ShellContextHost } from '@decryp7/paddock-ui/shell';
+import { ShellContextHost } from '@decryp7/paddock-ui/shell/contributions';
 import { PANEL_VISIBLE } from '@decryp7/paddock-ui/workbench/dock';
 import type { WorkbenchDemoContext } from '../context';
 import { PdPathText } from '@decryp7/paddock-ui';

@@ -19,6 +19,7 @@ download you start (engines from GitHub, models from Hugging Face)
 - [The `pitwall` command-line tool](#the-pitwall-command-line-tool)
 - [Choosing a model by capability, priority and provenance](#choosing-a-model-by-capability-priority-and-provenance)
 - [Model presets and aliases](#model-presets-and-aliases)
+- [Chat in the Playground](#chat-in-the-playground)
 - [Parallel slots per model](#parallel-slots-per-model)
 - [Caching](#caching)
 - [Model update notices](#model-update-notices)
@@ -427,6 +428,42 @@ engine apply when the model is loaded for the request; a model that is already l
 is released. In **Requests**, a request made through a preset shows "via <name>" and, in the details, the preset asked for and
 the model it resolved to. Presets are stored in `presets.json` in the data folder; a damaged file is restored from its backup.
 
+## Chat in the Playground
+
+The Playground has a Chat tab and a Compare tab. Compare sends one text question to two models and shows both answers. Chat
+is a full conversation with one model. The chat runs in Pitwall's own window and goes through the same queue as your apps, so
+it loads and releases models the same way.
+
+Chat is new in 1.1.
+
+**Pick a model.** The list shows chat models. A model that cannot use tools is marked, because tools need a chat template that
+supports them. Stop works at every step: while a model loads, while it writes and while Pitwall waits for you to allow a tool.
+
+**Attach files.** Paste, drop or pick files in the question box. You can attach up to 16 per question.
+- Text and code files must be UTF-8 and at most 256 KiB each. Pitwall checks each file again on its own side.
+- Pictures (PNG, JPEG, WebP or GIF, up to 25 MiB each) work only with a model that has a vision file. Pitwall checks the
+  picture by its content, turns it upright, shrinks it to what the model takes and removes its location and camera data.
+  For any other model the chat says so and keeps Send off until you choose a model that can read it.
+
+**Saved chats.** A chat is saved on this computer by default, in `chats/` in the data folder, one file per chat, with
+attachments beside them in `chats/attachments/`. They are not encrypted. Anything that can read your files can read them.
+Chats are never in Report a problem and never in a log.
+- Turn on "Don't save this chat" in the Chat bar and nothing of that chat is written to disk. It is gone when Pitwall closes.
+- Settings > Chats sets the default for new chats, shows what the saved chats take and deletes all of them.
+- Delete one chat from the chat list. The limits are 1,000 saved chats, 16 MiB for a chat and 2 GiB of attachments. At a
+  limit Pitwall refuses the new item and says what to delete. It never deletes anything itself.
+
+**Tools from other apps.** Settings > Connected apps lists the family apps whose tools the chat may use. Today that is Dyno.
+- Paste the key that app shows you. Pitwall never shows it again. On macOS it is an owner-only file in `secrets/` in the data
+  folder, so an update does not ask for your password. On Windows and Linux it is in the operating system's credential store.
+- Pitwall connects over the app's own local listener. Nothing leaves this computer.
+- A read-only tool asks the first time. "Allow once" runs it now. "Always allow" remembers it, until the tool changes.
+  An action, such as waking a device, asks on every call.
+- Every call shows in the chat with its arguments and its result. A result is cut at 16 KiB before the model sees it.
+- Pitwall offers the model every connected tool. A chooser for tools per chat is not built yet.
+
+Speech input is coming.
+
 ## Parallel slots per model
 
 ![Parallel slots and the fit table](screenshots/models-slots-light.png)
@@ -609,6 +646,9 @@ recommended, and models that will not fit this machine are left out. Up to 500 m
 | `engine-pins.json` (+ backup) | Engine build pins and the builds used before (for roll back) |
 | `cache.sqlite` | The disk store of the response and embeddings caches (see [Caching](#caching)); deleting it only empties the caches |
 | `slots/` | Saved model state for presets with Keep warm |
+| `chats/` | Saved Playground chats, one file each, and their attachments in `chats/attachments/`; not encrypted (see [Chat in the Playground](#chat-in-the-playground)) |
+| `secrets/` | macOS only: the keys you pasted for connected apps, owner-only files |
+| `tool-approvals.json` (+ backup) | Which connected-app tools you chose to always allow |
 | `admin.key` | The secret Pitwall's own window and the `pitwall` command use; owner-only. Do not share it |
 | `discovery.json` | Written while the server runs: pid, port, base URL |
 | `models/<owner>/<repo>/` | Downloaded models |

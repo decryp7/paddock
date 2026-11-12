@@ -1,0 +1,998 @@
+[
+ {
+  "id": "file",
+  "label": "File",
+  "items": [
+   {
+    "kind": "item",
+    "id": "project.new",
+    "label": "T project.new"
+   },
+   {
+    "kind": "item",
+    "id": "window.new",
+    "label": "T window.new"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "file.openFiles",
+    "label": "T file.openFiles"
+   },
+   {
+    "kind": "item",
+    "id": "file.openFolder",
+    "label": "T file.openFolder"
+   },
+   {
+    "kind": "item",
+    "id": "live.open",
+    "label": "T live.open"
+   },
+   {
+    "kind": "item",
+    "id": "profiling.open",
+    "label": "T profiling.open"
+   },
+   {
+    "kind": "item",
+    "id": "dumps.open",
+    "label": "T dumps.open"
+   },
+   {
+    "kind": "item",
+    "id": "dumps.openUmdh",
+    "label": "T dumps.openUmdh"
+   },
+   {
+    "kind": "item",
+    "id": "video.open",
+    "label": "T video.open"
+   },
+   {
+    "kind": "item",
+    "id": "project.open",
+    "label": "T project.open",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "submenu",
+    "id": "file.openRecent",
+    "label": "Open recent",
+    "items": [
+     {
+      "kind": "item",
+      "id": "recent:project:/p/a.debrief",
+      "label": "a"
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "recent:file:/logs/web01/app.log",
+      "label": "web01/app.log"
+     },
+     {
+      "kind": "item",
+      "id": "recent:file:/logs/web02/app.log",
+      "label": "web02/app.log"
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "menu.recentClear",
+      "label": "Clear recent"
+     }
+    ]
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "project.save",
+    "label": "T project.save",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "item",
+    "id": "project.saveAs",
+    "label": "T project.saveAs"
+   },
+   {
+    "kind": "item",
+    "id": "share.redactedCopy",
+    "label": "T share.redactedCopy"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "file.reimport",
+    "label": "T file.reimport"
+   },
+   {
+    "kind": "item",
+    "id": "folder.setupAnalysis",
+    "label": "T folder.setupAnalysis",
+    "keybinding": "Mod+20"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "file.export",
+    "label": "T file.export"
+   },
+   {
+    "kind": "item",
+    "id": "report.export",
+    "label": "T report.export"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "file.close",
+    "label": "T file.close"
+   },
+   {
+    "kind": "item",
+    "id": "window.close",
+    "label": "T window.close",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "app.quit",
+    "label": "T app.quit",
+    "keybinding": "Mod+8"
+   }
+  ]
+ },
+ {
+  "id": "edit",
+  "label": "Edit",
+  "items": [
+   {
+    "kind": "item",
+    "id": "edit.undo",
+    "label": "Undo level filter change"
+   },
+   {
+    "kind": "item",
+    "id": "edit.redo",
+    "label": "Redo (nothing to redo)"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "edit.copy",
+    "label": "T edit.copy"
+   },
+   {
+    "kind": "item",
+    "id": "edit.copyJson",
+    "label": "T edit.copyJson"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "edit.pasteLog",
+    "label": "T edit.pasteLog"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "edit.find",
+    "label": "T edit.find"
+   }
+  ]
+ },
+ {
+  "id": "view",
+  "label": "View",
+  "items": [
+   {
+    "kind": "item",
+    "id": "view.toggleSidebar",
+    "label": "Explorer",
+    "checked": true
+   },
+   {
+    "kind": "item",
+    "id": "menu.fields",
+    "label": "Fields"
+   },
+   {
+    "kind": "item",
+    "id": "view:inspector",
+    "label": "Inspector",
+    "checked": false
+   },
+   {
+    "kind": "item",
+    "id": "view:timeline",
+    "label": "Timeline",
+    "checked": true
+   },
+   {
+    "kind": "item",
+    "id": "view:events",
+    "label": "Events",
+    "checked": true
+   },
+   {
+    "kind": "item",
+    "id": "view:profile",
+    "label": "Profile editor",
+    "checked": false
+   },
+   {
+    "kind": "item",
+    "id": "view:extra-core",
+    "label": "Extra core",
+    "checked": false
+   },
+   {
+    "kind": "item",
+    "id": "timeline.new",
+    "label": "T timeline.new",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "submenu",
+    "id": "view.analysis",
+    "label": "Analysis",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view:moment",
+      "label": "Moment",
+      "checked": false
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "view:markers",
+      "label": "Markers",
+      "checked": true
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.live",
+    "label": "Live",
+    "items": [
+     {
+      "kind": "item",
+      "id": "live.toggle",
+      "label": "T live.toggle"
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "view:live-alerts",
+      "label": "Alerts",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.profiling",
+    "label": "Profiling",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view:profiling.captures",
+      "label": "Captures",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.tools",
+    "label": "Tools",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view:perfmon",
+      "label": "Performance Monitor",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.sharing",
+    "label": "Sharing",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view:report",
+      "label": "Report",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.diagnostics",
+    "label": "Diagnostics",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view:error-snapshots",
+      "label": "Error snapshots",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.plugins",
+    "label": "Plugins",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view:plugins",
+      "label": "Manage plugins",
+      "checked": false
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "group",
+      "label": "Windows events",
+      "items": [
+       {
+        "kind": "item",
+        "id": "view:evtx",
+        "label": "Event log",
+        "checked": false
+       }
+      ]
+     },
+     {
+      "kind": "group",
+      "label": "Windows registry",
+      "items": [
+       {
+        "kind": "item",
+        "id": "view:registry",
+        "label": "Registry",
+        "checked": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.ai",
+    "label": "AI",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view:ai-chat",
+      "label": "Chat",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "ai.setup",
+      "label": "Connect to Pitwall…",
+      "keybinding": "Mod+8"
+     }
+    ]
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "menu.otherWindows",
+    "label": "Other windows…"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "submenu",
+    "id": "view.theme",
+    "label": "Theme",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view.theme.system",
+      "label": "Follow system",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "view.theme.calm",
+      "label": "Calm",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "view.theme.console",
+      "label": "Console",
+      "checked": true
+     },
+     {
+      "kind": "item",
+      "id": "view.theme.precision",
+      "label": "Precision",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "view.theme.contrast",
+      "label": "High contrast",
+      "checked": false
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "view.scheme.system",
+      "label": "System",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "view.scheme.dark",
+      "label": "Dark",
+      "keybinding": "Mod+16",
+      "checked": true
+     },
+     {
+      "kind": "item",
+      "id": "view.scheme.light",
+      "label": "Light",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "kind": "submenu",
+    "id": "view.sourceColors",
+    "label": "Source colours",
+    "items": [
+     {
+      "kind": "item",
+      "id": "view.sourceColors.source",
+      "label": "By file",
+      "keybinding": "Mod+24",
+      "checked": true
+     },
+     {
+      "kind": "item",
+      "id": "view.sourceColors.instance",
+      "label": "By instance",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "view.sourceColors.off",
+      "label": "Off",
+      "checked": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "analyze",
+  "label": "Analyze",
+  "items": [
+   {
+    "kind": "item",
+    "id": "analyze.search",
+    "label": "T analyze.search"
+   },
+   {
+    "kind": "item",
+    "id": "query.focus",
+    "label": "Focus query bar"
+   },
+   {
+    "kind": "item",
+    "id": "markers.highlight",
+    "label": "T markers.highlight"
+   },
+   {
+    "kind": "item",
+    "id": "analyze.markedOnly",
+    "label": "Marked events only",
+    "checked": false
+   },
+   {
+    "kind": "item",
+    "id": "analyze.clearFilters",
+    "label": "T analyze.clearFilters",
+    "keybinding": "Mod+20"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "analyze.fit",
+    "label": "T analyze.fit"
+   },
+   {
+    "kind": "item",
+    "id": "analyze.back",
+    "label": "T analyze.back",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "item",
+    "id": "analyze.forward",
+    "label": "T analyze.forward"
+   },
+   {
+    "kind": "item",
+    "id": "nav.back",
+    "label": "T nav.back",
+    "keybinding": "Mod+8"
+   },
+   {
+    "kind": "item",
+    "id": "nav.forward",
+    "label": "T nav.forward"
+   },
+   {
+    "kind": "submenu",
+    "id": "analyze.timezone",
+    "label": "Time zone",
+    "items": [
+     {
+      "kind": "item",
+      "id": "analyze.utc",
+      "label": "UTC",
+      "checked": true
+     },
+     {
+      "kind": "item",
+      "id": "analyze.local",
+      "label": "Local",
+      "checked": false
+     }
+    ]
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "moment.analyse",
+    "label": "T moment.analyse"
+   },
+   {
+    "kind": "item",
+    "id": "moment.selected",
+    "label": "Analyse the selected range"
+   },
+   {
+    "kind": "submenu",
+    "id": "analyze.compare",
+    "label": "Compare time ranges",
+    "items": [
+     {
+      "kind": "item",
+      "id": "compare.previous",
+      "label": "Current range vs previous",
+      "keybinding": "Mod+16"
+     },
+     {
+      "kind": "item",
+      "id": "compare.beforeAfter",
+      "label": "Before / after selected time"
+     }
+    ]
+   },
+   {
+    "kind": "item",
+    "id": "fieldstats.show",
+    "label": "T fieldstats.show"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "submenu",
+    "id": "analyze.ai",
+    "label": "AI",
+    "items": [
+     {
+      "kind": "item",
+      "id": "ai.query",
+      "label": "Ask AI to write a query…",
+      "keybinding": "Mod+8"
+     },
+     {
+      "kind": "item",
+      "id": "ai.summarize",
+      "label": "Summarize this range",
+      "keybinding": "Mod+12"
+     },
+     {
+      "kind": "item",
+      "id": "ai.rootCauses",
+      "label": "Find likely root causes"
+     }
+    ]
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "live.resume",
+    "label": "T live.resume"
+   },
+   {
+    "kind": "item",
+    "id": "live.rules",
+    "label": "T live.rules"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "report.new",
+    "label": "T report.new"
+   },
+   {
+    "kind": "submenu",
+    "id": "analyze.report",
+    "label": "Add to report",
+    "items": [
+     {
+      "kind": "item",
+      "id": "incident.build",
+      "label": "Incident summary…"
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "report.addSelected",
+      "label": "Selected event"
+     },
+     {
+      "kind": "item",
+      "id": "report.addNotes",
+      "label": "Notes"
+     },
+     {
+      "kind": "item",
+      "id": "report.addTimeline",
+      "label": "Timeline"
+     },
+     {
+      "kind": "item",
+      "id": "report.addAnnotations",
+      "label": "Annotations"
+     },
+     {
+      "kind": "item",
+      "id": "report.addQueryTable",
+      "label": "Query result",
+      "keybinding": "Mod+20"
+     },
+     {
+      "kind": "item",
+      "id": "report.addFindings",
+      "label": "Health-check findings"
+     },
+     {
+      "kind": "item",
+      "id": "report.addAnomalies",
+      "label": "Anomalies as findings"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "tools",
+  "label": "Tools",
+  "items": [
+   {
+    "kind": "item",
+    "id": "tools.collect",
+    "label": "T tools.collect"
+   },
+   {
+    "kind": "item",
+    "id": "dumps.capture",
+    "label": "T dumps.capture"
+   },
+   {
+    "kind": "item",
+    "id": "diagnostics.capture",
+    "label": "T diagnostics.capture"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "parsers.manage",
+    "label": "T parsers.manage"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "app.restartElevated",
+    "label": "T app.restartElevated"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "settings.open",
+    "label": "Settings…"
+   }
+  ]
+ },
+ {
+  "id": "window",
+  "label": "Window",
+  "items": [
+   {
+    "kind": "submenu",
+    "id": "window.perspectives",
+    "label": "Perspectives",
+    "items": [
+     {
+      "kind": "item",
+      "id": "window.perspective.1",
+      "label": "T window.perspective.1",
+      "keybinding": "Mod+20",
+      "checked": true
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.2",
+      "label": "T window.perspective.2",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.3",
+      "label": "T window.perspective.3",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.4",
+      "label": "T window.perspective.4",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.5",
+      "label": "T window.perspective.5",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.6",
+      "label": "T window.perspective.6",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.7",
+      "label": "T window.perspective.7",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.8",
+      "label": "T window.perspective.8",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "item",
+      "id": "window.perspective.9",
+      "label": "T window.perspective.9",
+      "keybinding": "Mod+20",
+      "checked": false
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "window.layout.save",
+      "label": "T window.layout.save"
+     },
+     {
+      "kind": "separator"
+     },
+     {
+      "kind": "item",
+      "id": "window.layout.manage",
+      "label": "T window.layout.manage",
+      "keybinding": "Mod+20"
+     },
+     {
+      "kind": "item",
+      "id": "window.layout.reset",
+      "label": "T window.layout.reset"
+     }
+    ]
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "window.autoHideAll",
+    "label": "T window.autoHideAll"
+   },
+   {
+    "kind": "item",
+    "id": "window.pinAll",
+    "label": "T window.pinAll"
+   },
+   {
+    "kind": "item",
+    "id": "window.closeAllDocuments",
+    "label": "T window.closeAllDocuments",
+    "keybinding": "Mod+24"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "window.float",
+    "label": "T window.float",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "item",
+    "id": "window.popOut",
+    "label": "T window.popOut"
+   },
+   {
+    "kind": "item",
+    "id": "window.fullScreen",
+    "label": "T window.fullScreen"
+   }
+  ]
+ },
+ {
+  "id": "help",
+  "label": "Help",
+  "items": [
+   {
+    "kind": "item",
+    "id": "help.welcome",
+    "label": "Welcome",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "item",
+    "id": "help.demo",
+    "label": "T help.demo"
+   },
+   {
+    "kind": "item",
+    "id": "help.tour",
+    "label": "T help.tour"
+   },
+   {
+    "kind": "item",
+    "id": "help.shortcuts",
+    "label": "T help.shortcuts"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "help.whatsNew",
+    "label": "What's new"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "help.reportProblem",
+    "label": "T help.reportProblem"
+   },
+   {
+    "kind": "item",
+    "id": "help.activityLog",
+    "label": "T help.activityLog",
+    "keybinding": "Mod+16"
+   },
+   {
+    "kind": "item",
+    "id": "help.clearCache",
+    "label": "Clear cache…"
+   },
+   {
+    "kind": "item",
+    "id": "app.restartSafeMode",
+    "label": "T app.restartSafeMode"
+   },
+   {
+    "kind": "item",
+    "id": "app.restartNormally",
+    "label": "T app.restartNormally"
+   },
+   {
+    "kind": "separator"
+   },
+   {
+    "kind": "item",
+    "id": "help.checkForUpdates",
+    "label": "Check for updates…",
+    "keybinding": "Mod+20"
+   },
+   {
+    "kind": "item",
+    "id": "help.notices",
+    "label": "Third-party notices",
+    "keybinding": "Mod+12"
+   },
+   {
+    "kind": "item",
+    "id": "help.about",
+    "label": "About Debrief"
+   }
+  ]
+ }
+]

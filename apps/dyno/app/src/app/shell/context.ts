@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import type { AppContextFactory } from '@decryp7/paddock-ui/shell';
+import type { AppContextFactory } from '@decryp7/paddock-ui/shell/contributions';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { BACKEND } from '../core/backend';

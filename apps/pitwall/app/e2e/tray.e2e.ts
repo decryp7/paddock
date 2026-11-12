@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { pressTab } from '../../../../ui/projects/paddock-e2e/src/keyboard.ts';
 import { openApp, settingsDialog } from './app';
 
 /** The popover is 360 px wide inside a 6 px margin; the shell fits the window to it, up to the family's 520 px cap. */
@@ -152,7 +153,9 @@ test.describe('the tray popup', () => {
     // takes as the pointer leaving and hides it (seen on Linux CI, run 7824).
     await page.mouse.move(VIEWPORT.width - 1, VIEWPORT.height - 1);
     await open.focus();
-    await page.keyboard.press('Tab');
+    // pressTab, not Tab: WebKit on macOS (CI's e2e-webkit runner) skips buttons on a plain Tab unless full keyboard access is
+    // on, so the focus left the page instead of reaching ⋯; the shared helper presses Option+Tab there (keyboard.ts tabKey).
+    await pressTab(page);
     await expect(more).toBeFocused();
     await expect(page.locator('.mat-mdc-tooltip')).toBeVisible();
     await expect(page.locator('.mat-mdc-tooltip')).toHaveText('More actions');

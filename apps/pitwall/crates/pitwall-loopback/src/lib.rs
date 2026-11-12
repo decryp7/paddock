@@ -142,6 +142,19 @@ impl Client {
         self.send_inner(method, path, body, headers, Some(timeout)).await
     }
 
+    /// Sends `body` with `headers` and no deadline: the head is awaited for as long as the connection lives (work the user
+    /// waits for, ER-19); dropping the future closes the connection. A `content-type` among `headers` replaces the default
+    /// `application/json` (a multipart upload).
+    pub async fn send_no_deadline(
+        &self,
+        method: &str,
+        path: &str,
+        body: Vec<u8>,
+        headers: &[(&str, &str)],
+    ) -> Result<Response, LoopbackError> {
+        self.send_inner(method, path, Some(body), headers, None).await
+    }
+
     /// `timeout: None` waits for the head for as long as the connection lives (a long operation); a server that goes away
     /// closes the connection, which fails the request.
     async fn send_inner(
@@ -190,7 +203,7 @@ impl Client {
             req = req.header("authorization", format!("Bearer {b}"));
         }
         let has_body = body.is_some();
-        if has_body {
+        if has_body && !headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-type")) {
             req = req.header("content-type", "application/json");
         }
         let req = req
@@ -269,6 +282,26 @@ mod tests {
             String::from_utf8_lossy(&buf[..n]).into_owned()
         });
         (port, h)
+    }
+
+    #[tokio::test]
+    async fn a_body_without_a_deadline_keeps_the_callers_content_type() {
+        let (port, h) = serve("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok").await;
+        let c = Client::new(port, None);
+        let r = c
+            .send_no_deadline(
+                "POST",
+                "/inference",
+                b"--b--".to_vec(),
+                &[("content-type", "multipart/form-data; boundary=b")],
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status, 200);
+        assert_eq!(r.bytes(16).await.unwrap(), b"ok");
+        let seen = h.await.unwrap().to_ascii_lowercase();
+        assert!(seen.contains("content-type: multipart/form-data; boundary=b"), "{seen}");
+        assert_eq!(seen.matches("content-type").count(), 1, "the default is not added: {seen}");
     }
 
     #[tokio::test]

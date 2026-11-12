@@ -36,6 +36,7 @@ paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["ke
 [target.'cfg(windows)'.dependencies]
 wmi = { version = "0.18", default-features = false }
 windows = { version = "0.62", features = [
+    "Wdk_System_SystemServices",
     "Win32_Foundation",
     "Win32_Graphics_Dxgi",
     "Win32_NetworkManagement_IpHelper",

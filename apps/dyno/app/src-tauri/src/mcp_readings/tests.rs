@@ -572,24 +572,24 @@ fn disk_health_that_needs_the_helper_says_so_instead_of_staying_silent() {
     agent.lifespan.forecasts = vec![dyno_core::lifespan::unavailable(
         LifeSubject::Ssd,
         "Test SSD",
-        "Turn on Administrator readings in Settings so the helper can read this.",
+        "Turn on administrator readings in Settings so the helper can read this.",
     )];
     let r = rig_with(agent, Policy::read_only());
     let v = answer(&r, "disks", json!({}));
     assert_eq!(v["health"][0]["available"], json!(false));
-    assert!(v["health"][0]["reason"].as_str().unwrap().contains("Administrator readings"));
+    assert!(v["health"][0]["reason"].as_str().unwrap().contains("administrator readings"));
     // No forecasts at all: a reason, not an empty list; the administrator hint only when the helper state says so.
     let mut agent = FakeAgent::new();
     agent.lifespan.forecasts = vec![forecast("Battery", LifeSubject::Battery, 400.0)];
     let r = rig_with(agent, Policy::read_only());
     let v = answer(&r, "disks", json!({}));
     assert_eq!(v["health"]["available"], json!(false));
-    assert!(!v["health"]["reason"].as_str().unwrap().contains("Administrator readings"), "{v}");
+    assert!(!v["health"]["reason"].as_str().unwrap().contains("administrator readings"), "{v}");
     let mut agent = FakeAgent::new();
     agent.lifespan.forecasts = vec![forecast("Battery", LifeSubject::Battery, 400.0)];
     agent.live.as_mut().unwrap().via.processes = ReadVia::needs_admin("Needs the helper");
     let v = answer(&rig_with(agent, Policy::read_only()), "disks", json!({}));
-    assert!(v["health"]["reason"].as_str().unwrap().contains("Administrator readings"), "{v}");
+    assert!(v["health"]["reason"].as_str().unwrap().contains("administrator readings"), "{v}");
 }
 
 #[test]

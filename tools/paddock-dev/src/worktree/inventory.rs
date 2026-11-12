@@ -4,7 +4,7 @@
 //! with `git worktree remove` (never `rm`, never `--force`): git itself refuses a locked or modified worktree, so a
 //! mistake in these checks still cannot delete one. Locked ones are listed with their owner note and kept.
 
-use super::git::{Git, Repo, WorktreeInfo, worktrees};
+use super::git::{Git, Repo, WorkState, WorktreeInfo, worktrees};
 use super::note::{Note, format_utc, now_secs};
 use super::ops::{git_failure, owner_failure};
 use super::owners::{Entry, OwnerStore};
@@ -239,7 +239,20 @@ pub fn clean(repo: &Repo, base: &str, dry_run: bool) -> Result<Report, CliError>
     let mut text = String::new();
     for r in rows.iter().filter(|r| !r.primary) {
         let k = r.key();
-        if let Some(why) = keep_reason(r, base) {
+        let why = match keep_reason(r, base) {
+            Some(w) if w == "uncommitted changes" => Some(match WorkState::of(Path::new(&k)) {
+                Ok(s) if !s.uncommitted().is_empty() => format!("uncommitted changes ({})", s.uncommitted()),
+                _ => w,
+            }),
+            Some(w) => Some(w),
+            // Merged into the base is not pushed when the base is a local branch: a commit no remote has stays.
+            None => match WorkState::of(Path::new(&k)) {
+                Ok(s) if s.unpushed > 0 => Some(format!("{} commit(s) on no remote branch", s.unpushed)),
+                Ok(_) => None,
+                Err(e) => Some(format!("its state is unknown: {}", e.stderr.trim())),
+            },
+        };
+        if let Some(why) = why {
             text.push_str(&format!("keep {k} ({why})\n"));
             kept.push(json!({"path": k, "reason": why}));
             continue;

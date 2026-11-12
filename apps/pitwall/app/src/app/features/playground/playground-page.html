@@ -23,7 +23,7 @@
       </mat-tab>
     </mat-tab-group>
   } @else if (store.chatEnabled() === false) {
-    <!-- A build without the chat (the release, until ADR 0049's switches): the Playground as in 1.0, one model or two. -->
+    <!-- A build without the `chat` feature: the Playground as in 1.0, one model or two. -->
     <ng-container *ngTemplateOutlet="models" />
   }
 </div>

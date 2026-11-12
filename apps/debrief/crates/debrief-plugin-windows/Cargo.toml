@@ -25,6 +25,7 @@ windows = { workspace = true, features = ["Win32_System_EventLog"] }
 [dev-dependencies]
 # The shared scratch_dir for fixtures that hand out a path.
 debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Snapshot tests of the importers against /samples (tests/samples.rs, snapshots in tests/snapshots/).
 insta.workspace = true
 proptest.workspace = true

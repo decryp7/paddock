@@ -1,6 +1,6 @@
 import { EnvironmentProviders, inject, InjectionToken, makeEnvironmentProviders, provideEnvironmentInitializer } from '@angular/core';
 import { applyPaddockAppearance, type SuAccent } from '@decryp7/paddock-ui';
-import { contributionProviders, provideContributionKinds } from '../provide';
+import { contributionProviders, provideContributionKinds } from '@decryp7/paddock-ui/shell/contributions';
 import { AppearanceBackend, BrowserAppearanceBackend } from './appearance-backend';
 import { APPEARANCE_CONFIG, AppearanceStore } from './appearance.store';
 import { THEMES, type ThemeDef } from './theme';

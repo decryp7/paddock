@@ -1,10 +1,11 @@
 import { effect, EnvironmentProviders, inject, Injectable, makeEnvironmentProviders, provideEnvironmentInitializer, untracked } from '@angular/core';
 import { WorkspaceStore } from '../core/workspace.store';
-import { DEBRIEF_COMMANDS, DebriefCommand } from '../extensions/tokens';
+import { DebriefCommand } from '../extensions/tokens';
 import { UI_STATE_CONTRIBUTIONS, UiStateContribution } from '../lifecycle/ui-state';
 import { QueryUndo } from './query-undo';
 import { RangeUndo } from './range-undo';
 import { UndoStack } from './undo-stack';
+import { contributeFrom } from '../extensions/contributions';
 
 export const UNDO_COMMAND = 'edit.undo';
 export const REDO_COMMAND = 'edit.redo';
@@ -59,7 +60,7 @@ export function undoResetContribution(undo: UndoStack, query: QueryUndo, range: 
 /** One line in `app.config.ts`: the undo/redo commands, filter-change tracking and the reset on project switch. */
 export function provideUndo(): EnvironmentProviders {
   return makeEnvironmentProviders([
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(UndoCommands).commands },
+    ...contributeFrom('commands', () => inject(UndoCommands).commands),
     { provide: UI_STATE_CONTRIBUTIONS, multi: true, useFactory: () => [undoResetContribution(inject(UndoStack), inject(QueryUndo), inject(RangeUndo))] },
     provideEnvironmentInitializer(() => {
       inject(QueryUndo).start();

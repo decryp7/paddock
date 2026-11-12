@@ -48,6 +48,10 @@ pub struct FakeState {
     pub lockers: HashMap<PathBuf, Vec<Locker>>,
     /// Startup entries (`set_state` changes them).
     pub startup: Vec<StartupEntry>,
+    /// A startup reader that does not read publishers (the Windows one); default `false`, a reader that does.
+    pub startup_signer_unread: bool,
+    /// The coverage sentence the startup list gives (default: none).
+    pub startup_coverage: Option<String>,
     /// Facts (default: nothing known).
     pub facts: Option<SystemFacts>,
     /// Seconds since input.
@@ -313,6 +317,14 @@ impl StartupItems for Fake {
         let mut st = self.lock();
         st.failure(FakeOp::StartupList)?;
         Ok(st.startup.clone())
+    }
+
+    fn signer_read(&self) -> bool {
+        !self.lock().startup_signer_unread
+    }
+
+    fn coverage(&self) -> Option<String> {
+        self.lock().startup_coverage.clone()
     }
 }
 

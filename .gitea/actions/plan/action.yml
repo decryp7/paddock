@@ -1,5 +1,5 @@
 name: plan
-description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one, a push to main whose commit is tagged is covered by the tag run, and for an app's own workflow (`app`) the change must reach that app (`./dev plan --ci --app`; needs fetch-depth 0)."
+description: "Decides whether this run is needed: a nightly is skipped while main is unchanged since the last green one or while a train is in CI (./dev ci schedule-skip), a push to main whose commit is tagged is covered by the tag run, and for an app's own workflow (`app`) the change must reach that app (`./dev plan --ci --app`; needs fetch-depth 0)."
 inputs:
   main-ref:
     description: The default branch ref.
@@ -19,6 +19,9 @@ inputs:
   dev-token:
     description: "Read token of the private package store for ./dev's prebuilt download (ADR 0022 R0b); empty: ./dev builds the tool. Pass BUILD_INPUTS_TOKEN."
     default: ""
+  schedule-workflow:
+    description: "The calling workflow's file (nightly.yml): a scheduled run of it ends early while a train is in CI (./dev ci schedule-skip). Empty: no such check."
+    default: ""
   release:
     description: "'true' in a release workflow (a rule 54 dispatch counts as a release): ./dev never downloads its tool, whatever the ref (ADR 0022 section 3.3)."
     default: "false"
@@ -26,6 +29,9 @@ outputs:
   run:
     description: "'true' or 'false'; later jobs use if: needs.plan.outputs.run == 'true'."
     value: ${{ steps.decide.outputs.run }}
+  train-skip:
+    description: "'true' when a scheduled run ends early because a train is in CI (a job reuses this answer instead of asking again)."
+    value: ${{ steps.decide.outputs.train-skip }}
 runs:
   using: composite
   steps:
@@ -47,6 +53,7 @@ runs:
         MAIN_REF: ${{ inputs.main-ref }}
         GREEN: ${{ steps.green.outputs.cache-hit }}
         APP: ${{ inputs.app }}
+        SCHEDULE_WORKFLOW: ${{ inputs.schedule-workflow }}
         TAG_PATTERN: ${{ inputs.tag-pattern }}
         PLAN_TOKEN: ${{ inputs.token }}
         PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
@@ -60,7 +67,19 @@ runs:
         out=$(mktemp)
         GITHUB_OUTPUT="$out" node "${{ github.action_path }}/../../../conformance/ci/plan.mjs"
         run=$(sed -n 's/^run=//p' "$out")
+        # A scheduled run ends early while a train is in CI (./dev ci schedule-skip, the schedule-skip action's command;
+        # ADR 0093 amendment 2026-11-12); it fails open.
+        train_skip=false
+        if [ "$run" = true ] && [ "$EVENT" = schedule ] && [ -n "$SCHEDULE_WORKFLOW" ]; then
+          skip_out=$(mktemp)
+          if GITHUB_OUTPUT="$skip_out" bash "${{ github.action_path }}/../../../dev" ci schedule-skip --workflow "$SCHEDULE_WORKFLOW"; then
+            if [ "$(sed -n 's/^skip=//p' "$skip_out")" = true ]; then run=false; train_skip=true; fi
+          else
+            echo "::warning::schedule skip: ./dev ci schedule-skip did not run; this scheduled run proceeds (fail open)."
+          fi
+        fi
         if [ "$run" = true ] && [ -n "$APP" ]; then
           run=$(bash "${{ github.action_path }}/../../../dev" plan --ci --app "$APP")
         fi
         echo "run=$run" >> "$GITHUB_OUTPUT"
+        echo "train-skip=$train_skip" >> "$GITHUB_OUTPUT"

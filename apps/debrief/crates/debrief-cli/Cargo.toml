@@ -32,4 +32,5 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 debrief-store-duck = { path = "../debrief-store-duck" }

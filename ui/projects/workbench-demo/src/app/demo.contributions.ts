@@ -1,4 +1,4 @@
-import { defineCommand, defineKeybinding, defineMenuItem, defineStatusItem, msg } from '@decryp7/paddock-ui/shell';
+import { defineCommand, defineKeybinding, defineMenuItem, defineStatusItem, msg } from '@decryp7/paddock-ui/shell/contributions';
 import {
   defineActivityItem,
   defineAssistantContext,

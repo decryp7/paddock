@@ -307,6 +307,15 @@ fn summarise(name: &str, dir: &Path) -> RunSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_manifest_never_panics_on_hostile_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        paddock_testkit::assert_never_panics(&[br#"{"schema":1}"#, b"[]", b"{\"schema\":99999999999999999999}"], |bytes| {
+            std::fs::write(dir.path().join(MANIFEST), bytes).unwrap();
+            read_manifest(dir.path())
+        });
+    }
     use chrono::TimeZone;
 
     fn t(h: u32) -> DateTime<Utc> {

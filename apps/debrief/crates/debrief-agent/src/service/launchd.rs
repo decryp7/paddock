@@ -20,7 +20,8 @@ fn xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// The plist text: started at boot, restarted when it exits with an error.
+/// The plist text: started at boot, restarted when it exits with an error. It runs at launchd's Standard level, not
+/// Background (rule 52): a person may wait for a triggered capture, and a Background service gets the CPU and disk last.
 pub fn plist(o: &PlistOptions) -> Result<String, String> {
     let exe = xml(&single_line(&o.exe)?);
     let config = xml(&single_line(&o.config)?);
@@ -50,7 +51,7 @@ pub fn plist(o: &PlistOptions) -> Result<String, String> {
     <false/>
   </dict>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
   <key>ExitTimeOut</key>
   <integer>90</integer>
   <key>StandardOutPath</key>
@@ -98,7 +99,7 @@ mod tests {
     <false/>
   </dict>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Standard</string>
   <key>ExitTimeOut</key>
   <integer>90</integer>
   <key>StandardOutPath</key>

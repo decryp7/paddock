@@ -211,6 +211,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn never_panics_on_hostile_text() {
+        let seed = b"[package]\nname = \"kv\"\nversion = \"1.2.3\"\n\n[package.metadata.debrief-plugin]\nid = \"com.example.kv\"\npublisher = \"Me\"\n";
+        paddock_testkit::assert_never_panics(&[seed], |bytes| PluginMeta::parse(&String::from_utf8_lossy(bytes)));
+    }
+
+    #[test]
     fn cargo_metadata_is_read_and_checked() {
         let text = r#"
 [package]

@@ -6,7 +6,7 @@ import { WorkspaceStore } from '../core/workspace.store';
 import { UxBackend } from '../core/ux-backend';
 import { detailText, fileName, importStatusText, percent, progressLine } from './import-format';
 import { WelcomeService } from '../welcome/welcome';
-import { COMMAND_CONTEXT } from '../extensions/command-registry';
+import { WorkspaceCommandContext } from '../extensions/command-context';
 import { ImportProgressService, jobImportProgress, LONG_IMPORT_MS } from './import-progress.service';
 import { JobsStore } from '../jobs/jobs.store';
 import { JobInfo } from '../jobs/jobs.types';
@@ -206,7 +206,8 @@ describe('ImportProgressService and its widgets', () => {
     expect(bar.getAttribute('aria-valuenow')).toBe('30');
     expect(ux.importProgress).not.toHaveBeenCalled();
     // The status-bar text opens the import's job in Jobs.
-    const show = vi.spyOn(TestBed.inject(COMMAND_CONTEXT), 'showView');
+    // The context is read-only (shell part and Debrief's); its Debrief part answers `showView`.
+    const show = vi.spyOn(TestBed.inject(WorkspaceCommandContext), 'showView');
     (status.nativeElement.querySelector('[data-testid=import-status-open]') as HTMLButtonElement).click();
     expect(show).toHaveBeenCalledWith('jobs');
     toast.detectChanges();

@@ -1,0 +1,55 @@
+{
+  "btmVia": "local",
+  "coverage": "Lists Run entries.",
+  "entries": [
+    {
+      "command": "\"C:\\Tools\\a.exe\" --x",
+      "exe": "C:\\Tools\\a.exe",
+      "id": "reg:HKCU:runonce:64:a",
+      "impact": {
+        "cpuSecs": 0.0,
+        "diskBytes": 0,
+        "rating": "notMeasured"
+      },
+      "location": "userRunOnceKey",
+      "name": "a",
+      "publisher": null,
+      "state": "enabled"
+    },
+    {
+      "command": "\"C:\\Tools\\a.exe\" --x",
+      "exe": "C:\\Tools\\a.exe",
+      "id": "reg:HKLM:runonce:64:b",
+      "impact": {
+        "cpuSecs": 0.0,
+        "diskBytes": 0,
+        "rating": "notMeasured"
+      },
+      "location": "machineRunOnceKey",
+      "name": "b",
+      "publisher": null,
+      "state": "enabled"
+    },
+    {
+      "command": "\"C:\\Tools\\a.exe\" --x",
+      "exe": "C:\\Tools\\a.exe",
+      "id": "appx:Fam!Task",
+      "impact": {
+        "cpuSecs": 0.0,
+        "diskBytes": 0,
+        "rating": "notMeasured"
+      },
+      "location": "packagedApp",
+      "name": "c",
+      "publisher": null,
+      "state": "enabled"
+    }
+  ],
+  "osCount": 0,
+  "signedCount": 0,
+  "signerRead": false,
+  "total": 3,
+  "unavailable": [
+    "The all-users Run key (32-bit) could not be read: access denied (error 5)."
+  ]
+}

@@ -1,7 +1,6 @@
 //! The git side of `./dev worktree`: running git, finding the repository and reading `git worktree list --porcelain`.
 
 use paddock_proc::{Limits, command, run_bounded};
-use paddock_repo_graph::strip_verbatim;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -99,7 +98,7 @@ impl Repo {
     /// Finds the repository from `from` with `git rev-parse --git-common-dir`, whichever worktree `from` is in.
     pub fn discover(from: &Path) -> Result<Repo, GitError> {
         let out = Git::at(from).text(&["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
-        let common = canonical(Path::new(out.trim()));
+        let common = tool_dir(&canonical(Path::new(out.trim())), paddock_env::Os::current())?;
         let primary = common.parent().map(Path::to_path_buf).ok_or_else(|| GitError {
             args: "rev-parse --git-common-dir".into(),
             stderr: format!("{} has no parent folder", common.display()),
@@ -171,13 +170,13 @@ pub fn worktrees(repo: &Repo) -> Result<Vec<WorktreeInfo>, GitError> {
     Ok(parse_worktrees(&repo.git().text(&["worktree", "list", "--porcelain"])?))
 }
 
-/// The real path of `p`, or of its deepest existing folder with the rest appended (a worktree that is not made yet).
+/// The real path of `p` (on Windows in the verbatim form `canonicalize` gives: compare it through [`key`], hand it to git through
+/// [`tool_dir`]), or of its deepest existing folder with the rest appended (a worktree that is not made yet).
 pub fn canonical(p: &Path) -> PathBuf {
     let mut rest: Vec<std::ffi::OsString> = Vec::new();
     let mut cur = p.to_path_buf();
     loop {
-        if let Ok(real) = cur.canonicalize() {
-            let mut out = strip_verbatim(&real);
+        if let Ok(mut out) = paddock_env::winpath::real_verbatim(&cur) {
             for part in rest.iter().rev() {
                 out.push(part);
             }
@@ -206,9 +205,78 @@ pub fn is_under(child: &str, parent: &str) -> bool {
     c == p || c.starts_with(&format!("{p}/"))
 }
 
-/// The path as the owner map and `git worktree list` spell it: absolute, real, with `/` separators.
+/// What a worktree holds that no remote has: the work `drop` and `clean` must never remove.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct WorkState {
+    /// Files with a change in the index.
+    pub staged: u64,
+    /// Tracked files modified (or deleted) in the folder.
+    pub modified: u64,
+    /// Files git does not track and does not ignore.
+    pub untracked: u64,
+    /// Commits reachable from HEAD that no remote-tracking branch has.
+    pub unpushed: u64,
+}
+
+impl WorkState {
+    /// Reads the worktree at `dir` with two git calls; an error is an unknown state, which callers treat as not removable.
+    pub fn of(dir: &Path) -> Result<WorkState, GitError> {
+        let git = Git::at(dir);
+        let mut s = WorkState::default();
+        for line in git.text(&["status", "--porcelain"])?.lines() {
+            let b = line.as_bytes();
+            if b.len() < 2 {
+                continue;
+            }
+            if b[0] == b'?' {
+                s.untracked += 1;
+                continue;
+            }
+            s.staged += u64::from(b[0] != b' ');
+            s.modified += u64::from(b[1] != b' ');
+        }
+        s.unpushed = git
+            .text(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?
+            .trim()
+            .parse()
+            .unwrap_or(1);
+        Ok(s)
+    }
+
+    /// Nothing that only this folder has.
+    pub fn is_clean(&self) -> bool {
+        *self == WorkState::default()
+    }
+
+    /// The uncommitted part, for a message: `1 staged, 2 modified, 3 untracked`; empty when there is none.
+    pub fn uncommitted(&self) -> String {
+        let parts: Vec<String> = [(self.staged, "staged"), (self.modified, "modified"), (self.untracked, "untracked")]
+            .iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, w)| format!("{n} {w}"))
+            .collect();
+        parts.join(", ")
+    }
+}
+
+/// The path as the owner map and `git worktree list` spell it: absolute, real, with `/` separators and no `\\?\` prefix.
 pub fn key(p: &Path) -> String {
-    canonical(p).to_string_lossy().replace('\\', "/")
+    key_text(&canonical(p), paddock_env::Os::current())
+}
+
+/// [`key`] of an already resolved path, with the platform's rules given (lexical: the prefix goes whatever the length).
+fn key_text(resolved: &Path, os: paddock_env::Os) -> String {
+    paddock_env::winpath::lexical_text(resolved, os)
+}
+
+/// A resolved folder as a program may be given it (git runs in it): plain, or an error that names the cause and the next step.
+fn tool_dir(resolved: &Path, os: paddock_env::Os) -> Result<PathBuf, GitError> {
+    paddock_env::winpath::for_tools_native(resolved, os)
+        .map(PathBuf::from)
+        .map_err(|e| GitError {
+            args: "rev-parse --git-common-dir".into(),
+            stderr: e.to_string(),
+        })
 }
 
 #[cfg(test)]
@@ -237,7 +305,38 @@ mod tests {
     #[test]
     fn a_path_that_does_not_exist_yet_resolves_through_its_existing_parent() {
         let d = tempfile::tempdir().unwrap();
-        let real = paddock_repo_graph::real_path(d.path());
+        let real = paddock_env::winpath::real_verbatim(d.path()).unwrap();
         assert_eq!(canonical(&d.path().join("a").join("b")), real.join("a").join("b"));
+    }
+
+    /// 300 UTF-16 units: `\\?\C:\` and folders of 50 `a`.
+    fn long_verbatim() -> String {
+        let mut s = String::from(r"\\?\C:\");
+        for _ in 0..6 {
+            s.push_str(&"a".repeat(50));
+            s.push('\\');
+        }
+        s.pop();
+        s
+    }
+
+    #[test]
+    fn the_key_of_a_300_unit_verbatim_path_has_no_prefix_and_matches_gits_spelling() {
+        let long = long_verbatim();
+        assert!(long.encode_utf16().count() >= 300);
+        let k = key_text(Path::new(&long), paddock_env::Os::Windows);
+        assert!(k.starts_with("C:/aaaa") && !k.contains('?') && !k.contains('\\'), "{k}");
+        assert!(is_under(&k, &format!("C:/{}", "a".repeat(50))));
+        assert_eq!(key_text(Path::new(r"\\?\C:\w\x"), paddock_env::Os::Windows), "C:/w/x");
+    }
+
+    #[test]
+    fn a_resolved_folder_over_the_limit_is_not_handed_to_git_and_a_short_one_loses_its_prefix() {
+        let e = tool_dir(Path::new(&long_verbatim()), paddock_env::Os::Windows).unwrap_err();
+        assert!(e.stderr.contains("longer than Windows") && e.stderr.contains("shorter path"), "{e}");
+        assert_eq!(
+            tool_dir(Path::new(r"\\?\C:\w\.git"), paddock_env::Os::Windows).unwrap(),
+            Path::new(r"C:\w\.git")
+        );
     }
 }

@@ -1,9 +1,11 @@
 # The safety net of affected CI (ADR 0014 §6): every night, and on a manual run, ci.yml runs everything on main (every
 # project, every app leg, Chromium and WebKit), whatever the change. A wrong filter in scripts/affected.mjs can therefore
-# hide a failure for at most one night, and release workflows always run their app's full gates.
+# hide a failure for at most one night, or two when a train in CI skipped one (a skip never leaves main unmeasured for more
+# than 36 h and never happens twice in a row: ./dev ci schedule-skip), and release workflows always run their app's full gates.
 #
-# The night's run is skipped while main is unchanged since the last fully green nightly (the plan action's marker), and a
-# fully green run records that marker (nightly-mark). Imported apps add their own nightly jobs here (Debrief's bench,
+# The night's run is skipped while main is unchanged since the last fully green nightly (the plan action's marker) or while
+# a train's dispatch run is in CI (./dev ci schedule-skip; such a night is not measured, never green), and a fully green run
+# records that marker (nightly-mark). Imported apps add their own nightly jobs here (Debrief's bench,
 # corpus, fuzz and mutants, scoped to apps/debrief). The installers-<app> jobs build every released app's installers (no publish) and the
 # verdict job fails the night when one was not built.
 
@@ -26,12 +28,15 @@ jobs:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      # Whether the night ends early because a train is in CI: installers-gate reuses it instead of asking again.
+      train_skip: ${{ steps.plan.outputs.train-skip }}
     steps:
       - uses: actions/checkout@v4
       - id: plan
         uses: ./.gitea/actions/plan
         with:
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          schedule-workflow: nightly.yml
 
   # ADR 0060: C100 with a job of its own, so that deleting the conformance job's line does not also delete the check.
   c100:
@@ -187,6 +192,7 @@ jobs:
   # they drift apart. Debrief builds its installers in debrief.yml (its schedule has `full`), the demos have manual releases only.
   installers-gate:
     name: installers gate (main or the toolchain image changed since the last nightly build?)
+    needs: [gate]
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -205,8 +211,12 @@ jobs:
         shell: bash
         env:
           HIT: ${{ steps.built.outputs.cache-hit }}
+          # gate's answer (ADR 0093 amendment 2026-11-12). It is asked only after main changed since the last green night; a night
+          # skipped as unchanged may still build the installers while a train is in CI.
+          TRAIN_SKIP: ${{ needs.gate.outputs.train_skip }}
         run: |
           if [ "$HIT" = true ]; then echo "run=false" >> "$GITHUB_OUTPUT"; echo "::notice::main and the toolchain image are unchanged since the last nightly that built the installers; skipping."
+          elif [ "$TRAIN_SKIP" = true ]; then echo "run=false" >> "$GITHUB_OUTPUT"
           else echo "run=true" >> "$GITHUB_OUTPUT"; fi
 
   installers-dyno:
@@ -361,7 +371,7 @@ jobs:
 
   installers-verdict:
     name: installers verdict (the nightly built them, or it fails)
-    needs: [installers-gate, installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
+    needs: [gate, installers-gate, installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     container:
@@ -372,27 +382,31 @@ jobs:
         with:
           app: dyno
           plan-run: ${{ needs.installers-gate.outputs.run }}
+          skip-reason: ${{ needs.gate.outputs.train_skip == 'true' && 'train' || '' }}
           release-result: ${{ needs.installers-dyno.result }}
       - uses: ./.gitea/actions/release-verdict
         with:
           app: spotter
           plan-run: ${{ needs.installers-gate.outputs.run }}
+          skip-reason: ${{ needs.gate.outputs.train_skip == 'true' && 'train' || '' }}
           release-result: ${{ needs.installers-spotter.result }}
       - uses: ./.gitea/actions/release-verdict
         with:
           app: pitcrew
           plan-run: ${{ needs.installers-gate.outputs.run }}
+          skip-reason: ${{ needs.gate.outputs.train_skip == 'true' && 'train' || '' }}
           release-result: ${{ needs.installers-pitcrew.result }}
       - uses: ./.gitea/actions/release-verdict
         with:
           app: pitwall
           plan-run: ${{ needs.installers-gate.outputs.run }}
+          skip-reason: ${{ needs.gate.outputs.train_skip == 'true' && 'train' || '' }}
           release-result: ${{ needs.installers-pitwall.result }}
 
   installers-mark:
     name: mark the nightly that built every installer
-    needs: [installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
-    if: ${{ github.event_name == 'schedule' && success() }}
+    needs: [installers-gate, installers-dyno, installers-spotter, installers-pitcrew, installers-pitwall]
+    if: ${{ github.event_name == 'schedule' && success() && needs.installers-gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -471,10 +485,11 @@ jobs:
       seconds: "120"
       timeout-minutes: 45
 
+  # A night the gate skipped (main unchanged, or a train in CI) measured nothing and is never marked.
   mark:
     name: mark the green nightly
-    needs: [ci, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
-    if: ${{ github.event_name == 'schedule' && success() }}
+    needs: [gate, ci, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
+    if: ${{ github.event_name == 'schedule' && success() && needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2

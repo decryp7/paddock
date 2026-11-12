@@ -4,6 +4,16 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
+- New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the
+  registry, `ShellContext`, the command service, the keys, `msg` and the lazy parts. It imports neither `@decryp7/paddock-ui` nor
+  `@angular/material`, so a window that only declares contributions no longer pulls the root's `@angular/material/menu` into first paint
+  (Debrief M1: main window JS 1242.5 to 1189.4 kB, Material 56.4 to 14.5 kB). Use it where the registry is all you need.
+- New entry `@decryp7/paddock-ui/shell/generated`: the wire types of the shell core (`SHELL_COMMANDS`, dialog kinds and wire types), which
+  `shell/contributions` uses. `@decryp7/paddock-ui/shell` still exports everything it did, now by re-export, so no import breaks.
+- Added to the public API: `describeError` (was the internal `describe`), exported by `shell/contributions` and so by `shell`.
+- Dyno, Pitwall and the shell and workbench demos import the registry from `shell/contributions` where that is all a file uses. Measurements: docs/benchmarks.md.
+
 ### `paddock-secrets`: `write_owner_only`, the secret-file writer for any trust-bearing file (ADR 0092 WP-0)
 - New `paddock_secrets::write_owner_only(path, bytes)`: the mechanism of `SecretFile::write` for a file that is not a secret
   value (Pitwall's `apps.json`, the access list). The folder is made private or refused, then a unique temporary file is
@@ -81,6 +91,13 @@ Conventional Commits; one semver tag for the whole repo.
 - The JSON writes no number of 13 or more digits (RFC 3339 times, ages in seconds, sizes in MiB, durations capped at 12 digits): the text redactor masks a Luhn-valid run of 13 digits as a card number and broke the file about one time in ten.
 - The floor that turns away short operations counts only entries of the last 24 hours, so a day after a slow session short operations are recorded again.
 - Pitwall is the first app wired (startup phases, finished jobs by kind and outcome saved off the job thread, a flush at exit, the section). `paddock-diag` depends on `sysinfo` 0.40 (one version in every lockfile).
+
+### `paddock-files`: `open::reveal`, `open_default` and `open_at_line` return a `Result` (ADR 0021 amendment 2026-11-11)
+- They return `Result<Invocation, NotPlain>` instead of an `Invocation`, and `open_at_line` takes the `Os` first. A Windows
+  path that has no plain spelling (a volume without a drive letter, over 259 UTF-16 units, an unsafe name) is refused with its
+  cause and next step instead of being handed to Explorer or the editor with the `\\?\` prefix. `Files` maps the refusal to a
+  `CommandError` with a hint. Off Windows the path is passed through unchanged, so a name that is not text still opens.
+- `open::plain_path` is gone (it kept the prefix past 259 units); `paddock_env::winpath::for_tools_native` is the door.
 
 ### `paddock-proc`: `Supervised::exit_status`; Spotter's browser start ends on ready or exit (ADR 0071)
 - New `Supervised::exit_status`: the status of a child that has ended, without taking the child, so the tree is still ended

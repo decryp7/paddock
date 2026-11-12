@@ -185,6 +185,41 @@ fn clean_removes_only_unlocked_merged_clean_unused_worktrees_and_their_branch() 
 }
 
 #[test]
+fn clean_keeps_staged_untracked_and_unpushed_work_and_says_which() {
+    let fx = Fixture::new();
+    let staged = finished(&fx, "staged", true);
+    std::fs::write(staged.join("s.txt"), "s").unwrap();
+    fx.git(&staged, &["add", "s.txt"]);
+    let untracked = finished(&fx, "untracked", true);
+    std::fs::write(untracked.join("u.txt"), "u").unwrap();
+    // Merged into a base that is a local branch: the commit is "merged" but no remote has it.
+    let local = finished(&fx, "local", false);
+    let tip = fx.git(&local, &["rev-parse", "HEAD"]);
+    let ahead = fx.git(&fx.primary, &["commit-tree", "-p", &tip, "-m", "x", &format!("{tip}^{{tree}}")]);
+    fx.git(&fx.primary, &["branch", "localbase", &ahead]);
+    let r = fx.dev(&["worktree", "clean", "--base", "localbase"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    let reason = |path: &std::path::Path| {
+        r.json["kept"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["path"] == p(path))
+            .unwrap_or_else(|| panic!("{path:?} not kept: {}", r.json))["reason"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(reason(&staged).contains("1 staged"), "{}", reason(&staged));
+    assert!(reason(&untracked).contains("1 untracked"), "{}", reason(&untracked));
+    assert!(reason(&local).contains("1 commit(s) on no remote branch"), "{}", reason(&local));
+    for kept in [&staged, &untracked, &local] {
+        assert!(kept.exists(), "{kept:?} must stay");
+    }
+    assert!(staged.join("s.txt").exists() && untracked.join("u.txt").exists());
+}
+
+#[test]
 fn clean_names_the_owner_note_of_a_locked_worktree_it_keeps() {
     let fx = Fixture::new();
     let w = fx.add("w1");

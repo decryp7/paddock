@@ -2,14 +2,15 @@ import { computed, inject, Injectable } from '@angular/core';
 import { WorkspaceSummary } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
 import { withInjectedFaults } from '../core/activity/fault-injection';
-import { flattenContributions, DEBRIEF_VIEWS, DebriefView } from './tokens';
+import { contributedItems, DEBRIEF_KIND } from './contributions';
+import { DebriefView } from './tokens';
 
 /** Every registered view and which of them the current workspace offers. */
 @Injectable({ providedIn: 'root' })
 export class ViewRegistry {
   private readonly store = inject(WorkspaceStore);
   // `withInjectedFaults`: the error-capture test hook (browser builds only, see core/activity/fault-injection.ts).
-  readonly all: readonly DebriefView[] = withInjectedFaults(dedupe(flattenContributions<DebriefView>(inject(DEBRIEF_VIEWS, { optional: true }))));
+  readonly all: readonly DebriefView[] = withInjectedFaults(dedupe(contributedItems<DebriefView>(DEBRIEF_KIND.views)));
 
   /** Views whose `when` holds for the current workspace (views without `when` always). */
   readonly available = computed(() => {

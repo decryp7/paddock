@@ -7,6 +7,7 @@ import { LiveFollow } from '../live/live-follow.store';
 import { SettingsStore } from '../settings/settings.store';
 import { LiveTail } from '../workspace/live-tail';
 import { sharedQuery, sharedRange, sharedRecord, sharedUiState } from './shared-state';
+import { provideDebriefSharedState } from './shared-state.contributions';
 
 describe('shared UI state of a window group', () => {
   it('parses values from other windows', () => {
@@ -24,7 +25,7 @@ describe('shared UI state of a window group', () => {
   });
 
   it('reads and applies the query, selection, jumps, theme, settings, cursor, follow and host-only state', async () => {
-    TestBed.configureTestingModule({ providers: provideTinyBackend() });
+    TestBed.configureTestingModule({ providers: [...provideTinyBackend(), ...provideDebriefSharedState()] });
     const values = new Map(sharedUiState(TestBed.inject(Injector)).map((v) => [v.key, v]));
     const store = TestBed.inject(WorkspaceStore);
     await settle();
@@ -97,7 +98,7 @@ describe('shared UI state of a window group', () => {
   describe('a guest that shows less creates fewer stores (Paddock rules 32/34)', () => {
     /** The tokens `sharedUiState` asks the injector for, in order. */
     function asked(scope: 'full' | 'summary' | 'display'): { keys: string[]; tokens: unknown[] } {
-      TestBed.configureTestingModule({ providers: provideTinyBackend() });
+      TestBed.configureTestingModule({ providers: [...provideTinyBackend(), ...provideDebriefSharedState()] });
       const real = TestBed.inject(Injector);
       const tokens: unknown[] = [];
       const spy = { get: (t: unknown) => (tokens.push(t), real.get(t as never)) } as unknown as Injector;

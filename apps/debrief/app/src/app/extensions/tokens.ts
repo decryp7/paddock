@@ -1,6 +1,7 @@
-import { InjectionToken, InputSignal, Type } from '@angular/core';
+import { InputSignal, Type } from '@angular/core';
+import type { CommandContext } from './context';
 import type { ViewLayout } from '../layout-plan/layout-plan';
-import { FieldFilter, Query, RecordView, WorkspaceSummary } from '../core/api.types';
+import { RecordView, WorkspaceSummary } from '../core/api.types';
 
 /** Where a new view opens when the user has not placed it yet. */
 export type ViewPosition = 'center' | 'right' | 'bottom';
@@ -72,33 +73,8 @@ export interface DebriefView {
   instances?: boolean;
 }
 
-/** The only handle plugins get on the app; deliberately small (see `DebriefEvents` for reading state). */
-export interface CommandContext {
-  /** Opens files or folders in the workspace. */
-  openPaths(paths: string[]): Promise<void>;
-  /** Applies a partial query (search text, levels, range, ...). */
-  setQuery(patch: Partial<Query>): void;
-  /** Adds a field filter pill. */
-  addFilter(filter: FieldFilter): void;
-  /** Selects a record (shown in the inspector). */
-  selectRecord(record: RecordView | null): void;
-  /**
-   * Reveals a record by id: loads the grid page containing it, scrolls to the row and selects it.
-   * Resolves once the grid has done so or reported that the record is not in the current view.
-   */
-  jumpTo(id: number): Promise<void>;
-  /** Opens (if needed) and focuses a view by id. */
-  showView(id: string): void;
-  /**
-   * Offers the window arrangement for what the user just opened (`profiling` after a performance capture): switches
-   * to that perspective once per window, with an Undo in the notice. Unknown ids and repeats do nothing.
-   */
-  suggestPerspective?(id: string): void;
-  /** Reports a problem to the user. */
-  notifyError(message: string): void;
-  /** The current workspace summary (null before the first load). */
-  readonly summary: WorkspaceSummary | null;
-}
+/** What contributions receive: the shell's context and Debrief's part (see `context.ts`). */
+export type { CommandContext } from './context';
 
 /** An action in the command palette and menus, optionally bound to a key. */
 export interface DebriefCommand {
@@ -115,8 +91,17 @@ export interface DebriefCommand {
    * "Open <view>" (`view.open.<id>`) as well.
    */
   view?: string;
-  run: (ctx: CommandContext) => void | Promise<void>;
+  /**
+   * Whether a key may run the command now. A lazy stub whose code declares `when` answers false until the code is
+   * loaded (and starts loading it), so its key falls through instead of being swallowed. Defaults to true.
+   */
+  keysReady?: () => boolean;
+  /** Returns `COMMAND_NOT_AVAILABLE` when, once asked again (a lazy stub's loaded `when`), it did not run. */
+  run: (ctx: CommandContext, args?: unknown) => void | typeof COMMAND_NOT_AVAILABLE | Promise<void | typeof COMMAND_NOT_AVAILABLE>;
 }
+
+/** What a command's `run` returns when it found itself not available and did nothing (the registry answers false). */
+export const COMMAND_NOT_AVAILABLE: unique symbol = Symbol('command not available');
 
 /** Id prefix of the generated "Open <view>" commands, one per registered view. */
 export const VIEW_OPEN_PREFIX = 'view.open.';
@@ -188,17 +173,6 @@ export interface DebriefActivityItem {
   keybinding?: string;
   run: DebriefActivityTarget | { menu: () => readonly DebriefActivityMenuItem[] };
 }
-
-/**
- * Multi-provider tokens. Each provider supplies one batch (an array) of contributions, so
- * `provideDebriefPlugin` registers a whole plugin with one provider per kind. Readers flatten the
- * batches with `flattenContributions`.
- */
-export const DEBRIEF_VIEWS = new InjectionToken<readonly DebriefView[]>('DEBRIEF_VIEWS');
-export const DEBRIEF_COMMANDS = new InjectionToken<readonly DebriefCommand[]>('DEBRIEF_COMMANDS');
-export const DEBRIEF_INSPECTOR_SECTIONS = new InjectionToken<readonly DebriefInspectorSection[]>('DEBRIEF_INSPECTOR_SECTIONS');
-export const DEBRIEF_FIELD_FORMATTERS = new InjectionToken<readonly DebriefFieldFormatter[]>('DEBRIEF_FIELD_FORMATTERS');
-export const DEBRIEF_ACTIVITY_ITEMS = new InjectionToken<readonly DebriefActivityItem[]>('DEBRIEF_ACTIVITY_ITEMS');
 
 /** Flattens what a multi-provider token injects (batches, or single items) into one list. */
 export function flattenContributions<T>(injected: readonly (T | readonly T[])[] | null | undefined): T[] {

@@ -47,6 +47,8 @@ pub mod unix_proc;
 pub mod unsupported;
 pub mod volumes;
 pub mod wakes;
+pub mod win_facts_source;
+pub mod win_startup_source;
 pub mod windows_firewall;
 #[cfg(test)]
 mod wiring;

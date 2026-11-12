@@ -4,11 +4,12 @@ import { DebriefBackend } from '../core/backend';
 import { reportBackendFailures } from '../core/failure-reporter';
 import { Logger, withFailureLogging } from '../core/logger';
 import { isTauri } from '../core/platform';
-import { DEBRIEF_ACTIVITY_ITEMS, DEBRIEF_COMMANDS, DebriefView } from '../extensions/tokens';
+import { DebriefView } from '../extensions/tokens';
 import { provideDebriefPlugin } from '../extensions/provide';
 import { analysisActivityItems } from './analysis-activity';
-import { AnalysisCommands } from './analysis-commands';
+import { ANALYSIS_COMMANDS_CONTRIBUTIONS } from './analysis.contributions';
 import { browserMocks } from '../core/mock-registry';
+import { contributeFrom } from '../extensions/contributions';
 
 /** The analysis views; they open from the palette, menus and the Analyze activity. Queries are typed in the filter bar. */
 export const ANALYSIS_VIEWS: DebriefView[] = [
@@ -33,8 +34,9 @@ export function createAnalysisBackend(): AnalysisBackend {
 export function provideAnalysis(): EnvironmentProviders {
   return makeEnvironmentProviders([
     { provide: AnalysisBackend, useFactory: createAnalysisBackend },
-    { provide: DEBRIEF_COMMANDS, multi: true, useFactory: () => inject(AnalysisCommands).commands },
-    { provide: DEBRIEF_ACTIVITY_ITEMS, multi: true, useFactory: analysisActivityItems },
+    // The commands' stubs; `AnalysisCommands` loads when the window is idle or a command runs.
+    ...ANALYSIS_COMMANDS_CONTRIBUTIONS,
+    ...contributeFrom('activityItems', analysisActivityItems),
     provideDebriefPlugin({ views: ANALYSIS_VIEWS }),
   ]);
 }

@@ -21,6 +21,8 @@ pub struct RunInfo {
     pub conclusion: String,
     /// The commit it tested.
     pub head_sha: String,
+    /// The branch the run was made on (`main`); empty when the server did not say (a tag run).
+    pub head_branch: String,
     /// When it was created, as the API prints it.
     pub created_at: String,
     /// Which attempt the run is on: a rerun in Gitea is another attempt of the same run, so the run's `conclusion` is the
@@ -48,6 +50,7 @@ impl RunInfo {
             status: s("status"),
             conclusion: s("conclusion"),
             head_sha: s("head_sha"),
+            head_branch: s("head_branch"),
             created_at: s("created_at"),
             run_attempt: v["run_attempt"].as_u64().filter(|n| *n >= 1).unwrap_or(1),
         }
@@ -178,7 +181,13 @@ impl<'a> Client<'a> {
 
     /// Page `page` of the run list (50 a page), an empty page for a missing one.
     pub fn runs_page(&mut self, page: u32) -> Result<RunsPage, String> {
-        let url = format!("{}/runs?limit=50&page={page}", self.api());
+        self.runs_page_where(page, "")
+    }
+
+    /// Page `page` of the run list narrowed by the API's own filters (`event=workflow_dispatch`; empty: every run).
+    pub fn runs_page_where(&mut self, page: u32, query: &str) -> Result<RunsPage, String> {
+        let query = if query.is_empty() { String::new() } else { format!("{query}&") };
+        let url = format!("{}/runs?{query}limit=50&page={page}", self.api());
         let body = self.retry(|c| c.http.get_json(&url, &c.token))?.unwrap_or(Value::Null);
         Ok(RunsPage {
             runs: body["workflow_runs"]

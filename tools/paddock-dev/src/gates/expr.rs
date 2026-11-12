@@ -221,10 +221,11 @@ impl Eval<'_> {
     }
 
     fn compare(&self, a: &Val, b: &Val, negate: bool) -> Val {
-        // A plan output compared with 'true': "runs when the planner marks it" (only the positive form is modelled).
+        // A plan output compared with 'true', or found not 'false' (a gate whose `run` is empty when it did not run): "runs when
+        // the planner marks it". Other comparisons are not modelled.
         if let (Val::Planned(name), other) | (other, Val::Planned(name)) = (a, b) {
             return match (other.text().as_deref(), negate) {
-                (Some("true"), false) => {
+                (Some("true"), false) | (Some("false"), true) => {
                     self.planned.borrow_mut().insert(name.clone());
                     Val::Bool(true)
                 }
@@ -469,6 +470,14 @@ mod tests {
         let (t, planned) = condition(src, &ctx);
         assert_eq!(t, Tri::Yes);
         assert!(planned.contains("ui"));
+    }
+
+    #[test]
+    fn a_plan_output_found_not_false_is_planned_like_one_equal_to_true_and_other_negations_are_unknown() {
+        let (t, planned) = condition("always() && needs.plan.outputs.ui != 'false'", &ctx);
+        assert_eq!(t, Tri::Yes);
+        assert!(planned.contains("ui"));
+        assert_ne!(yes("needs.plan.outputs.ui != 'true'"), Tri::Yes);
     }
 
     #[test]

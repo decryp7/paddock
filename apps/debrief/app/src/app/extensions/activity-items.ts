@@ -2,7 +2,8 @@ import { computed, inject, Injectable } from '@angular/core';
 import { Logger } from '../core/logger';
 import { DockService } from '../dock/dock.service';
 import { COMMAND_CONTEXT, CommandRegistry } from './command-registry';
-import { CommandContext, flattenContributions, DEBRIEF_ACTIVITY_ITEMS, DebriefActivityItem, DebriefActivityMenuItem, DebriefActivityTarget, VIEW_OPEN_PREFIX, ViewCategory } from './tokens';
+import { contributedItems, DEBRIEF_KIND } from './contributions';
+import { CommandContext, DebriefActivityItem, DebriefActivityMenuItem, DebriefActivityTarget, VIEW_OPEN_PREFIX, ViewCategory } from './tokens';
 import { ViewRegistry } from './view-registry';
 import { WelcomeService } from '../welcome/welcome';
 
@@ -38,7 +39,7 @@ export function activityItemProblem(item: unknown): string | null {
 }
 
 /**
- * The activity bar's buttons, contributed through `DEBRIEF_ACTIVITY_ITEMS` (built-in features and plugins alike):
+ * The activity bar's buttons, contributed through the shell's registry (`DEBRIEF_KIND.activityItems`) (built-in features and plugins alike):
  * validated, de-duplicated by id (first wins) and sorted by `order`. Broken contributions are logged and left out,
  * and every contributed function is evaluated defensively, so one bad item never breaks the bar.
  */
@@ -54,7 +55,7 @@ export class ActivityItems {
   private readonly reported = new Set<string>();
 
   /** Every usable contribution, in order. */
-  readonly all: readonly DebriefActivityItem[] = this.collect(flattenContributions<DebriefActivityItem>(inject(DEBRIEF_ACTIVITY_ITEMS, { optional: true })));
+  readonly all: readonly DebriefActivityItem[] = this.collect(contributedItems<DebriefActivityItem>(DEBRIEF_KIND.activityItems));
 
   /** The items shown right now (their `when` holds, the view they show is offered, their fly-out is not empty). */
   readonly visible = computed(() => {

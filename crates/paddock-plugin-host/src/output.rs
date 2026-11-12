@@ -126,7 +126,7 @@ impl OutputSink {
     fn start(&self, name: &str) -> Result<Part, String> {
         std::fs::create_dir_all(&self.dir)
             .map_err(|e| format!("cannot create {}: {e}", self.dir.display()))?;
-        let dir = std::fs::canonicalize(&self.dir)
+        let dir = paddock_env::winpath::real_verbatim(&self.dir)
             .map_err(|e| format!("cannot use {}: {e}", self.dir.display()))?;
         let path = dir.join(name);
         if path.symlink_metadata().is_ok() {

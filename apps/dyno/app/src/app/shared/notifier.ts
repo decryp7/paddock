@@ -1,5 +1,5 @@
 import { Injectable, inject, signal, makeEnvironmentProviders, type EnvironmentProviders } from '@angular/core';
-import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
+import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell/contributions';
 import { NOTICE_ACTION_HANDLERS, type NoticeActionHandler } from '@decryp7/paddock-ui/shell/notify';
 import type { CommandError } from '../core/api.types';
 import type { Tone } from './labels';

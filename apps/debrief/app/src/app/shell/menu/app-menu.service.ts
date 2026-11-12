@@ -14,6 +14,8 @@ import { UndoStack } from '../../undo/undo-stack';
 import { WindowingService } from '../../windowing/windowing.service';
 import { RecentService } from '../../core/recent/recent.service';
 import { buildMenus, MENU_IDS, MenuCommand, TopMenu } from './menu-model';
+import type { DebriefMenuItemDef } from './menu.contributions';
+import { contributedItems } from '../../extensions/contributions';
 import { RecentOpener } from './recent-opener';
 
 /** Where the menus are shown: Debrief's own menu bar, or the macOS native menu bar (the in-app bar is then hidden). */
@@ -42,6 +44,8 @@ export class AppMenu {
   private readonly sections = inject(SidebarSections);
   private readonly recent = inject(RecentService);
   readonly mode = inject(MENU_MODE);
+  /** Where commands sit: the registry's `menus` contributions (Debrief's own when a window registers none). */
+  private readonly placements = contributedItems<DebriefMenuItemDef>('menus');
 
   readonly menus = computed<TopMenu[]>(() => {
     const open = this.dock.openIds();
@@ -64,6 +68,7 @@ export class AppMenu {
       popouts: [...popped].map((id) => ({ id, title: this.views.find(id)?.title ?? id })),
       recent: { projects: this.recent.projects(), files: this.recent.files().map((f) => f.path) },
       nativeAppMenu: this.mode === 'native',
+      ...(this.placements.length ? { items: this.placements } : {}),
     });
   });
 

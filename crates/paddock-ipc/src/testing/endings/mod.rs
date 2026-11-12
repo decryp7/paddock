@@ -122,6 +122,15 @@ pub enum Fault {
     Hang,
     /// The endpoint wrote no end line.
     NoEndLine,
+    /// The scenario's connections wrote more or fewer end lines than they ended (each must end exactly once).
+    EndLineCount {
+        /// The end lines expected: [`Expect::ends`].
+        expected: usize,
+        /// The end lines found.
+        got: usize,
+    },
+    /// Two end lines of the scenario carry the same `id=`: one connection ended twice (or two endpoints share a counter).
+    DuplicateEndId(String),
     /// The end line says a stream was dropped without a verdict.
     DroppedWithoutVerdict,
     /// The end line's drain outcome is not `eof`.
@@ -141,8 +150,22 @@ impl Fault {
             Fault::Unanswered => "unanswered",
             Fault::Hang => "hang",
             Fault::NoEndLine => "no-end-line",
+            Fault::EndLineCount { .. } => "end-line-count",
+            Fault::DuplicateEndId(_) => "duplicate-end-id",
             Fault::DroppedWithoutVerdict => "dropped-without-verdict",
             Fault::DrainNotEof(_) => "drain-not-eof",
+        }
+    }
+}
+
+impl Fault {
+    /// The ratchet's key for this fault: the kind, and for a drain that is not `eof` the outcome too (`drain-not-eof:none`),
+    /// so a drain that later ends in `timeCap` or `failed` is a new failure, not a silent match of the listed `none`.
+    pub fn key(&self) -> String {
+        match self {
+            Fault::DrainNotEof(v) if v.is_empty() => "drain-not-eof:missing".to_string(),
+            Fault::DrainNotEof(v) => format!("drain-not-eof:{v}"),
+            other => other.kind().to_string(),
         }
     }
 }
@@ -196,8 +219,11 @@ pub enum ReasonRule {
 pub struct Expect {
     /// The reason rule.
     pub reason: ReasonRule,
-    /// The endpoint is expected to log an end line with drain outcome `eof` (ADR 0072 §6).
+    /// The endpoint is expected to log an end line (ADR 0072 §6).
     pub end_line: bool,
+    /// How many end lines the scenario's connections make: one per connection the rig opened and that ended in the window
+    /// (default 1). More or fewer is [`Fault::EndLineCount`]: a connection must end exactly once.
+    pub ends: usize,
     /// The client sent bytes the endpoint never reads before it closes (a refusal before the hello is read, a client that
     /// keeps writing). Closing with unread input makes the OS send a reset, which may or may not reach the client before the
     /// reason does (a race: macOS delivers either), so a missing reason is then attributed to the reset and reported as
@@ -213,6 +239,7 @@ impl Expect {
         Expect {
             reason: ReasonRule::OneOf(codes.iter().map(|c| (*c).to_string()).collect()),
             end_line: true,
+            ends: 1,
             unread_input: false,
         }
     }
@@ -222,8 +249,21 @@ impl Expect {
         Expect {
             reason: ReasonRule::Optional,
             end_line: true,
+            ends: 1,
             unread_input: false,
         }
+    }
+
+    /// The scenario opens more connections that end in its window (a held client, a second client): `n` end lines.
+    pub fn with_ends(mut self, n: usize) -> Expect {
+        self.ends = n;
+        self
+    }
+
+    /// No end line is expected: a scenario with no connection to end (a client that was never accepted).
+    pub fn without_end_line(mut self) -> Expect {
+        self.end_line = false;
+        self
     }
 
     /// The same expectation for a client whose input the endpoint leaves unread (see [`Expect::unread_input`]).
@@ -282,17 +322,31 @@ pub fn judge(observed: &Observed, expect: &Expect) -> Vec<Fault> {
         }
     }
     if expect.end_line {
-        match log::find_end_line(&observed.log) {
-            None => faults.push(Fault::NoEndLine),
-            Some(line) => {
-                if line.contains("DroppedWithoutVerdict") {
-                    faults.push(Fault::DroppedWithoutVerdict);
-                }
-                match log::field(&line, "drain") {
-                    Some("eof") => {}
-                    Some(other) => faults.push(Fault::DrainNotEof(other.to_string())),
-                    None => faults.push(Fault::DrainNotEof(String::new())),
-                }
+        let lines = log::end_lines(&observed.log);
+        if lines.is_empty() {
+            faults.push(Fault::NoEndLine);
+        } else if lines.len() != expect.ends {
+            faults.push(Fault::EndLineCount {
+                expected: expect.ends,
+                got: lines.len(),
+            });
+        }
+        let mut ids: Vec<&str> = Vec::new();
+        for line in &lines {
+            let id = log::field(line, "id").unwrap_or("");
+            if ids.contains(&id) {
+                faults.push(Fault::DuplicateEndId(id.to_string()));
+            }
+            ids.push(id);
+        }
+        for line in lines {
+            if line.contains("DroppedWithoutVerdict") {
+                faults.push(Fault::DroppedWithoutVerdict);
+            }
+            match log::field(line, "drain") {
+                Some("eof") => {}
+                Some(other) => faults.push(Fault::DrainNotEof(other.to_string())),
+                None => faults.push(Fault::DrainNotEof(String::new())),
             }
         }
     }

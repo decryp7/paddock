@@ -1,5 +1,5 @@
 import { inject } from '@angular/core';
-import type { AppContextFactory } from '@decryp7/paddock-ui/shell';
+import type { AppContextFactory } from '@decryp7/paddock-ui/shell/contributions';
 import { LiveStore } from '../core/live.store';
 import { QuitFlow, type ForcedQuit } from '../features/quit/quit-flow';
 import { downloadActive } from '../shared/labels';

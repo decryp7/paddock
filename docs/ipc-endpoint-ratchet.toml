@@ -4,11 +4,12 @@
 # that no longer happens fails the run until its entry is removed. `./dev check ipc-endpoints` (C102) checks the file's shape;
 # `./dev check ipc-endpoints --tag <tag>` refuses a release tag that matches a `blocks_tag` pattern while an entry remains.
 #
-# instance    I1..I27 of the ADR, or WP-7 for the missing end line (a logging gap, which blocks no tag)
+# instance    I1..I27 of the ADR, WP-7 for the missing end line (a logging gap, which blocks no tag), or WP-2 for an end line that
+#             says `drain=none` (the ordered shutdown with a drain is deferred by the 2026-11-11 trim; blocks no tag)
 # endpoint    the id in docs/ipc-endpoints.toml
 # scenario    a scenario of the harness, or `*` for every scenario that ran
-# fault       the kind the harness reports
-# blocks_tag  the tag pattern a release of which is refused while the entry exists (`none` only for a logging gap)
+# fault       the kind the harness reports; for a drain that is not eof the kind and the outcome, `drain-not-eof:none`
+# blocks_tag  the tag pattern a release of which is refused while the entry exists (`none` only for a logging gap or the drain of WP-2)
 # os          only where the fault is not on every OS (linux, macos, windows)
 
 [[ratchet]]
@@ -52,14 +53,6 @@ blocks_tag = "dyno-v*"
 note = "A listener dropped with a connected client in its backlog: the client reads a bare end and never learns why."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "ipc-host"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I4"
 endpoint = "ipc-link-server"
 scenario = "silent-client"
@@ -76,14 +69,6 @@ blocks_tag = "dyno-v*"
 note = "LinkServer::stop closes every peer with no reason."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "ipc-link-server"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I14"
 endpoint = "ipc-launcher"
 scenario = "stop-with-open-connection"
@@ -92,28 +77,12 @@ blocks_tag = "dyno-v*"
 note = "launch.rs closes the child's peer with no reason."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "ipc-launcher"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I15"
 endpoint = "dyno-agent"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "dyno-v*"
 note = "The agent's stop closes every peer with no reason (server.rs, after the accept loop)."
-
-[[ratchet]]
-instance = "WP-7"
-endpoint = "dyno-agent"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line in the ADR's form yet (ADR 0072 §6, WP-7); the agent logs Client connected / disconnected."
 
 [[ratchet]]
 instance = "I16"
@@ -132,28 +101,12 @@ blocks_tag = "dyno-v*"
 note = "A frame the peer cannot decode fails the Peer (Peer::fail) with no reason frame."
 
 [[ratchet]]
-instance = "WP-7"
-endpoint = "dyno-helper"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "No end line yet (ADR 0072 §6, WP-7)."
-
-[[ratchet]]
 instance = "I22"
 endpoint = "mcp-loopback"
 scenario = "stop-with-open-connection"
 fault = "no-reason"
 blocks_tag = "dyno-v*"
 note = "Serving::shutdown(Both) after pairing: the bridge reads a bare end."
-
-[[ratchet]]
-instance = "WP-7"
-endpoint = "mcp-loopback"
-scenario = "*"
-fault = "no-end-line"
-blocks_tag = "none"
-note = "The listener logs 'ended after' lines but not the ADR's end line (code, flush, drain); WP-7."
 
 [[ratchet]]
 instance = "I24"
@@ -268,3 +221,228 @@ fault = "reset"
 blocks_tag = "pitcrew-v*"
 os = "linux"
 note = "The protocol-mismatch error is written, then the stream drops with the client's later bytes unread: a reset on Linux."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "dyno-agent"
+scenario = "client-keeps-writing"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "dyno-agent"
+scenario = "malformed-first-frame"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "dyno-agent"
+scenario = "stop-with-open-connection"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "dyno-agent"
+scenario = "wrong-token"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "dyno-agent"
+scenario = "wrong-version"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "dyno-helper"
+scenario = "busy"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "dyno-helper"
+scenario = "malformed-first-frame"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "busy"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "client-keeps-writing"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "malformed-first-frame"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "owner-close-while-peer-not-reading"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "owner-close-with-calls-in-flight"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "silent-client"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "stall"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "stop-with-open-connection"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "wrong-account"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+os = "linux,macos"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "wrong-token"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-host"
+scenario = "wrong-version"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-launcher"
+scenario = "stop-with-open-connection"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-link-server"
+scenario = "busy"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-link-server"
+scenario = "client-keeps-writing"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-link-server"
+scenario = "malformed-first-frame"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-link-server"
+scenario = "silent-client"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-link-server"
+scenario = "stop-with-open-connection"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-link-server"
+scenario = "wrong-token"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "ipc-link-server"
+scenario = "wrong-version"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "mcp-loopback"
+scenario = "stop-with-open-connection"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The end line says drain=none: this endpoint does not drain before it closes (ADR 0072 §2, deferred WP-2)."
+
+[[ratchet]]
+instance = "WP-2"
+endpoint = "mcp-loopback"
+scenario = "busy"
+fault = "drain-not-eof:none"
+blocks_tag = "none"
+note = "The held client's paired connection ends with drain=none (a paired close does not drain, deferred WP-2); the refused client's own end line says drain=eof, and a later timeCap or failed there is a new failure."
