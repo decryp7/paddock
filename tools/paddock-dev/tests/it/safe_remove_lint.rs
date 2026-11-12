@@ -38,6 +38,19 @@ const ALLOWED: &[(&str, &str)] = &[
         "tools/paddock-dev/src/ci_setup_rust.rs",
         "its own download folder in the job's temp folder, made and removed by the same step (ci setup-rust)",
     ),
+    (
+        "tools/paddock-dev/src/pre_push/mod.rs",
+        "the push gate's own throw-away worktree of the pushed commit (git worktree remove of the path it added)",
+    ),
+    ("tools/paddock-dev/src/pre_push/tests.rs", "a unit test's own temp folders"),
+    (
+        "tools/paddock-dev/src/hook/rules/no_unscoped_cleanup.rs",
+        "the guard rule matches the `worktree remove` words of a command; it deletes nothing",
+    ),
+    (
+        "tools/paddock-dev/src/ci_host/safe_remove.rs",
+        "FOLLOW-UP: the CI host steps' guarded remove (feat/ci-in-rust-wp4) and safe_remove become one mechanism",
+    ),
     ("tools/heavy/src/lock.rs", "heavy.sh's lock folders, not work folders"),
 ];
 
