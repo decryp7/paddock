@@ -1224,6 +1224,11 @@ pub(crate) mod tests {
                 c.fetch_add(1, Ordering::SeqCst);
             }
         });
+        // The ticker samples a running job's probe on its own thread, so its first sample can come before the job's
+        // first line has run (CI 7963, Linux: the message was still unset). The job here reports only after the test
+        // has seen the probe, the order that failed, and the test waits for each report instead of assuming an order.
+        let (report, report_rx) = mpsc::channel::<()>();
+        let report_rx = Mutex::new(report_rx);
         let (go, rx) = mpsc::channel::<()>();
         let rx = Mutex::new(rx);
         let h: JobHandle<(), String> = jobs
@@ -1233,6 +1238,7 @@ pub(crate) mod tests {
                     .link(JobLink::Path { path: "/logs".into() }),
                 Controls::default().with_probe(|| Some(JobProgress::counts(3, 4))),
                 move |ctx| {
+                    let _ = lock(&report_rx).recv();
                     ctx.message("reading app.log");
                     let _ = lock(&rx).recv();
                     Ok(Done::new(()).with_result(JobResult::workspace()))
@@ -1241,7 +1247,11 @@ pub(crate) mod tests {
             .unwrap();
         clock.advance(VISIBLE_AFTER_MS);
         wait_until("the probe", || jobs.info(h.id).and_then(|i| i.progress.done) == Some(3));
-        assert_eq!(jobs.info(h.id).unwrap().message.as_deref(), Some("reading app.log"));
+        assert_eq!(jobs.info(h.id).unwrap().message, None, "the job has not reported yet");
+        report.send(()).unwrap();
+        wait_until("the job's message", || {
+            jobs.info(h.id).and_then(|i| i.message).as_deref() == Some("reading app.log")
+        });
         let before = changes.load(Ordering::SeqCst);
         wait_until("ticks", || changes.load(Ordering::SeqCst) > before + 1);
         go.send(()).unwrap();
