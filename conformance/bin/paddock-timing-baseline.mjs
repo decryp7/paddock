@@ -38,7 +38,7 @@ const write = (entries, what) => {
   console.log(`wrote ${entries.length} ${what} to ${PATH}`);
 };
 const reportMoved = () => {
-  for (const { item, from } of againstBaseline(sites, old.sites).moved) console.log(`moved: ${from.file} -> ${item.file}  (same text; the entry's file is rewritten, not counted as growth)`);
+  for (const { item, from } of againstBaseline(sites, old.sites, () => true).moved) console.log(`moved: ${from.file} -> ${item.file}  (same text; the entry's file is rewritten, not counted as growth)`);
 };
 if (args.includes('--shrink')) {
   if (!old) {
@@ -46,7 +46,7 @@ if (args.includes('--shrink')) {
     process.exit(2);
   }
   reportMoved();
-  const fresh = againstBaseline(sites, old.sites).fresh;
+  const fresh = againstBaseline(sites, old.sites, () => true).fresh;
   write(shrinkBaseline(sites, old.sites), `known sites (${old.sites.length - shrinkBaseline(sites, old.sites).length} removed; ${fresh.length} sites are not in the baseline and were not added)`);
   process.exit(0);
 }
@@ -55,7 +55,7 @@ if (!args.includes('--write')) {
   console.log(`${sites.length} sites in ${Object.keys(summary).length} files`);
   process.exit(0);
 }
-if (old && !args.includes('--init') && againstBaseline(sites, old.sites).fresh.length) {
+if (old && !args.includes('--init') && againstBaseline(sites, old.sites, () => true).fresh.length) {
   console.error('refusing to grow the baseline: fix or waive the new sites (use --init only with the user\'s approval), or --shrink');
   process.exit(1);
 }

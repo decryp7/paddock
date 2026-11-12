@@ -36,12 +36,21 @@ use tree::Tree;
 pub struct Ctx<'a> {
     tree: &'a Tree,
     scoped: Rc<Vec<String>>,
+    base_ref: Option<String>,
 }
 
 impl Ctx<'_> {
     /// The files this run looks at (all of the tree, or the `--files` that the tree knows), sorted.
     pub fn files(&self) -> Rc<Vec<String>> {
         self.scoped.clone()
+    }
+
+    /// The ref a baseline's growth is measured against: the run's own, else `PADDOCK_BASE_REF`, else `origin/main`.
+    pub fn base_ref(&self) -> String {
+        self.base_ref
+            .clone()
+            .or_else(|| std::env::var("PADDOCK_BASE_REF").ok())
+            .unwrap_or_else(|| "origin/main".into())
     }
 
     /// The tree's root folder.
@@ -112,6 +121,8 @@ pub struct RunOptions {
     pub files: Option<Vec<String>>,
     /// Today, `YYYY-MM-DD` (UTC), for waiver expiry.
     pub today: String,
+    /// The ref baselines are compared with (tests pin it); `None` reads `PADDOCK_BASE_REF`, then `origin/main`.
+    pub base_ref: Option<String>,
 }
 
 /// The result of a run.
@@ -255,6 +266,7 @@ fn control_holds(check: &dyn Check) -> bool {
     let ctx = Ctx {
         tree: &tree,
         scoped: tree.files(),
+        base_ref: None,
     };
     let Ok(out) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx))) else {
         return false;
@@ -300,6 +312,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
     let ctx = Ctx {
         tree,
         scoped: scoped.clone(),
+        base_ref: opts.base_ref.clone(),
     };
 
     let mut findings: Vec<Finding> = unknown_files
@@ -459,6 +472,7 @@ pub fn command(args: Args) -> Result<Report, CliError> {
         only: args.only.map(|v| v.iter().map(|s| s.trim().to_uppercase()).collect()),
         files: args.files,
         today: today_utc(),
+        base_ref: None,
     };
     let result = run_checks(&opts, &registry()).map_err(|u| {
         let known: Vec<&str> = registry().iter().map(|c| c.id()).collect();
@@ -521,6 +535,7 @@ mod tests {
             only: None,
             files,
             today: "2026-11-10".into(),
+            base_ref: None,
         };
         run_checks_in(&tree, &opts, &[Box::new(Reader)]).unwrap()
     }

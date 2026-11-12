@@ -26,7 +26,7 @@
 // A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above.
 import { error, warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
-import { againstBaseline, baselineGrowth, lineHash } from './C71-test-timing.mjs';
+import { againstBaseline, baselineGrowth, growthMovedWarning, lineHash, movedWarning, sourceGone } from './C71-test-timing.mjs';
 
 export const LIVENESS_BASELINE = 'conformance/baselines/C53.json';
 const LIVENESS_WAIVER = /conformance:\s*pid-liveness\s*[—–-]+\s*(\S.{2,})/;
@@ -182,13 +182,15 @@ function livenessFindings(ctx) {
       return out;
     }
   }
-  const { fresh, stale } = againstBaseline(sites, entries);
+  const { fresh, stale, moved } = againstBaseline(sites, entries, sourceGone(ctx));
+  for (const m of moved) out.push(movedWarning('C53', 53, LIVENESS_BASELINE, m));
   for (const s of fresh) out.push(error('C53', 53, s.file, s.line, `${s.what}: the pid may belong to another process by now`, fix));
   for (const e of stale) out.push(warn('C53', 53, e.file, e.line ?? 1, `${LIVENESS_BASELINE} lists a liveness site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry.'));
   if (entries.length) {
     const g = baselineGrowth(ctx, entries, LIVENESS_BASELINE);
     if (g.reason) out.push(warn('C53', 53, LIVENESS_BASELINE, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
-    else if (g.added.length) out.push(error('C53', 53, LIVENESS_BASELINE, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user\'s approval.'));
+    else for (const m of g.moved) out.push(growthMovedWarning('C53', 53, LIVENESS_BASELINE, m));
+    if (!g.reason && g.added.length) out.push(error('C53', 53, LIVENESS_BASELINE, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user\'s approval.'));
   }
   return out;
 }

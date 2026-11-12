@@ -241,16 +241,18 @@ fn entries_of(raw: &str) -> Option<Vec<Entry>> {
     )
 }
 
-/// The result of [`reconcile`], as indexes: the sites with no entry and the entries with no site (a moved site is neither).
+/// The result of [`reconcile`], as indexes: the sites with no entry, the entries with no site, and the moved pairs (site, entry).
 struct Reconciled {
     fresh: Vec<usize>,
     stale: Vec<usize>,
+    moved: Vec<(usize, usize)>,
 }
 
-/// Matches sites against baseline entries in two passes, as the JavaScript `reconcile` does: first by file and hash, then the
-/// leftovers by hash alone (a site whose text is in the baseline under another file only moved). Counts are per key, so two
-/// identical lines in two files never hide a real addition.
-fn reconcile(current: &[(&str, &str)], base: &[(&str, &str)]) -> Reconciled {
+/// Matches sites against baseline entries as the JavaScript `reconcile` does: first by file and hash, then the leftovers by hash
+/// alone, but only where `can_move(site, entry)` allows (a site check lets only an entry whose file is gone move; the growth check
+/// lets any). A pairing it refuses leaves the site fresh. Counts are per key, so two identical lines in two files never hide a
+/// real addition.
+fn reconcile(current: &[(&str, &str)], base: &[(&str, &str)], can_move: impl Fn(usize, usize) -> bool) -> Reconciled {
     let mut buckets: HashMap<(&str, &str), VecDeque<usize>> = HashMap::new();
     for (i, k) in base.iter().enumerate() {
         buckets.entry(*k).or_default().push_back(i);
@@ -265,15 +267,20 @@ fn reconcile(current: &[(&str, &str)], base: &[(&str, &str)]) -> Reconciled {
             None => rest.push(n),
         }
     }
-    let mut pool: HashMap<&str, VecDeque<usize>> = HashMap::new();
+    let mut pool: HashMap<&str, Vec<usize>> = HashMap::new();
     for &i in &unmatched {
-        pool.entry(base[i].1).or_default().push_back(i);
+        pool.entry(base[i].1).or_default().push(i);
     }
-    let mut fresh = Vec::new();
+    let (mut fresh, mut moved) = (Vec::new(), Vec::new());
     for n in rest {
-        match pool.get_mut(current[n].1).and_then(VecDeque::pop_front) {
+        let hit = pool.get_mut(current[n].1).and_then(|list| {
+            let at = list.iter().position(|&i| can_move(n, i))?;
+            Some(list.remove(at))
+        });
+        match hit {
             Some(i) => {
                 unmatched.remove(&i);
+                moved.push((n, i));
             }
             None => fresh.push(n),
         }
@@ -281,6 +288,7 @@ fn reconcile(current: &[(&str, &str)], base: &[(&str, &str)]) -> Reconciled {
     Reconciled {
         fresh,
         stale: unmatched.into_iter().collect(),
+        moved,
     }
 }
 
@@ -298,15 +306,19 @@ fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
 
 /// The entries the baseline at the merge base lacks, or the reason it cannot be measured (`baselineGrowth`).
 enum Growth {
-    Added { base: String, added: usize },
+    Added {
+        base: String,
+        added: usize,
+        /// Entries the baseline rewrote to another file since the merge base: (hash, from file, to file).
+        moved: Vec<(String, String, String)>,
+    },
     Reason(String),
 }
 
-fn growth(root: &Path, current: &[Entry]) -> Growth {
-    let base_ref = std::env::var("PADDOCK_BASE_REF").unwrap_or_else(|_| "origin/main".into());
+fn growth(root: &Path, base_ref: &str, current: &[Entry]) -> Growth {
     let lookup = || -> Result<String, (String, String)> {
         let head = git(root, &["rev-parse", "HEAD"])?.trim_matches(is_js_space).to_string();
-        let mut base = git(root, &["merge-base", "HEAD", &base_ref])?.trim_matches(is_js_space).to_string();
+        let mut base = git(root, &["merge-base", "HEAD", base_ref])?.trim_matches(is_js_space).to_string();
         if base == head {
             base = git(root, &["rev-parse", "HEAD^1"])?.trim_matches(is_js_space).to_string();
         }
@@ -327,18 +339,29 @@ fn growth(root: &Path, current: &[Entry]) -> Growth {
                 .iter()
                 .any(|p| stderr.contains(p));
             return if missing {
-                Growth::Added { base, added: 0 }
+                Growth::Added {
+                    base,
+                    added: 0,
+                    moved: Vec::new(),
+                }
             } else {
                 Growth::Reason(format!("the baseline at {} cannot be read", &base[..base.len().min(9)]))
             };
         }
     };
-    let old = entries_of(&text).unwrap_or_default();
-    let old: Vec<(&str, &str)> = old.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
+    let entries_old = entries_of(&text).unwrap_or_default();
+    let old: Vec<(&str, &str)> = entries_old.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
     let now: Vec<(&str, &str)> = current.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
+    let r = reconcile(&now, &old, |_, _| true);
+    let moved = r
+        .moved
+        .iter()
+        .map(|&(n, i)| (current[n].hash.clone(), entries_old[i].file.clone(), current[n].file.clone()))
+        .collect();
     Growth::Added {
         base,
-        added: reconcile(&now, &old).fresh.len(),
+        added: r.fresh.len(),
+        moved,
     }
 }
 
@@ -407,7 +430,22 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
     let entries = raw.map(|r| entries_of(&r).unwrap_or_default()).unwrap_or_default();
     let old: Vec<(&str, &str)> = entries.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
     let now: Vec<(&str, &str)> = sites.iter().map(|s| (s.file.as_str(), s.hash.as_str())).collect();
-    let matched = reconcile(&now, &old);
+    // A moved site passes without a baseline edit only when its entry's file is gone from the tree (as the JavaScript `sourceGone`).
+    let matched = reconcile(&now, &old, |_, i| !root.join(old[i].0).exists());
+    for &(n, i) in &matched.moved {
+        let s = &sites[n];
+        out.push(Finding::warn(
+            "C53",
+            53,
+            &s.file,
+            s.line,
+            format!(
+                "{LIVENESS_BASELINE} lists this site under {}, which is gone: the code moved from {} to {}",
+                entries[i].file, entries[i].file, s.file
+            ),
+            "Run the baseline tool with --shrink to rewrite the entry's file.",
+        ));
+    }
     for &n in &matched.fresh {
         let s = &sites[n];
         out.push(Finding::error(
@@ -436,7 +474,7 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
     }
     // The growth check needs only git, so it runs in every whole run and whenever the baseline itself is in scope.
     if (whole_run || baseline_in_scope) && !entries.is_empty() {
-        match growth(root, &entries) {
+        match growth(root, &ctx.base_ref(), &entries) {
             Growth::Reason(reason) => out.push(Finding::warn(
                 "C53",
                 53,
@@ -445,19 +483,32 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
                 format!("the baseline's shrink-only rule is not enforced here: {reason}"),
                 "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.",
             )),
-            Growth::Added { base, added } if added > 0 => out.push(Finding::error(
-                "C53",
-                53,
-                LIVENESS_BASELINE,
-                1,
-                format!(
-                    "the baseline grew: {added} entr{} not in the baseline at the merge base {}; it may only shrink",
-                    if added == 1 { "y is" } else { "ies are" },
-                    &base[..base.len().min(9)]
-                ),
-                "Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user's approval.",
-            )),
-            Growth::Added { .. } => {}
+            Growth::Added { base, added, moved } => {
+                for (hash, from, to) in &moved {
+                    out.push(Finding::warn(
+                        "C53",
+                        53,
+                        LIVENESS_BASELINE,
+                        1,
+                        format!("moved: the baseline entry for hash {hash} went from {from} to {to} (not growth)"),
+                        "Nothing to do: the entry was rewritten to the file the code moved to.",
+                    ));
+                }
+                if added > 0 {
+                    out.push(Finding::error(
+                        "C53",
+                        53,
+                        LIVENESS_BASELINE,
+                        1,
+                        format!(
+                            "the baseline grew: {added} entr{} not in the baseline at the merge base {}; it may only shrink",
+                            if added == 1 { "y is" } else { "ies are" },
+                            &base[..base.len().min(9)]
+                        ),
+                        "Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user's approval.",
+                    ));
+                }
+            }
         }
     }
     LivenessRun {
@@ -473,13 +524,19 @@ mod tests {
 
     #[test]
     fn a_moved_site_is_neither_fresh_nor_stale() {
-        let r = reconcile(&[("b.rs", "h1")], &[("a.rs", "h1")]);
+        let r = reconcile(&[("b.rs", "h1")], &[("a.rs", "h1")], |_, _| true);
         assert!(r.fresh.is_empty() && r.stale.is_empty());
     }
 
     #[test]
+    fn a_refused_pairing_leaves_the_site_fresh() {
+        let r = reconcile(&[("b.rs", "h1")], &[("a.rs", "h1")], |_, _| false);
+        assert_eq!((r.fresh, r.stale), (vec![0], vec![0]));
+    }
+
+    #[test]
     fn a_move_beside_a_new_site_leaves_the_new_one_fresh() {
-        let r = reconcile(&[("b.rs", "h1"), ("b.rs", "h2")], &[("a.rs", "h1")]);
+        let r = reconcile(&[("b.rs", "h1"), ("b.rs", "h2")], &[("a.rs", "h1")], |_, _| true);
         assert_eq!(r.fresh, [1]);
     }
 
@@ -487,10 +544,13 @@ mod tests {
     fn identical_lines_in_two_files_are_counted_per_hash() {
         let base = [("a.rs", "h"), ("b.rs", "h")];
         // one removed, one added elsewhere: a move
-        assert!(reconcile(&[("a.rs", "h"), ("c.rs", "h")], &base).fresh.is_empty());
+        assert!(reconcile(&[("a.rs", "h"), ("c.rs", "h")], &base, |_, _| true).fresh.is_empty());
         // a third copy is a real addition
-        assert_eq!(reconcile(&[("a.rs", "h"), ("b.rs", "h"), ("c.rs", "h")], &base).fresh, [2]);
+        assert_eq!(
+            reconcile(&[("a.rs", "h"), ("b.rs", "h"), ("c.rs", "h")], &base, |_, _| true).fresh,
+            [2]
+        );
         // a gone copy is stale, in baseline order
-        assert_eq!(reconcile(&[("a.rs", "h")], &base).stale, [1]);
+        assert_eq!(reconcile(&[("a.rs", "h")], &base, |_, _| true).stale, [1]);
     }
 }

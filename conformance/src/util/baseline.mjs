@@ -8,9 +8,9 @@ import { execFileSync } from 'node:child_process';
  * Matches `current` against `base` entries in two passes: first by `exact` (the full key, for example file + hash), then the leftovers
  * by `loose` (for example the hash alone). A pass-two match is a MOVED entry (same text, another file): not new, not stale. Counts are
  * per key, so two identical lines in two files never hide a real addition. Returns { fresh, stale, moved: [{ item, from }] }; with no
- * `loose` nothing is moved.
+ * `loose` nothing is moved; `canMove(item, from)` can refuse a pairing (the site check lets only an entry whose file is gone move).
  */
-export function reconcile(current, base, exact, loose) {
+export function reconcile(current, base, exact, loose, canMove = () => true) {
   const push = (m, k, v) => (m.get(k) ?? m.set(k, []).get(k)).push(v);
   const buckets = new Map(); // exact key -> indexes into `base`, in order
   base.forEach((e, i) => push(buckets, exact(e), i));
@@ -26,9 +26,11 @@ export function reconcile(current, base, exact, loose) {
   const fresh = [];
   const moved = [];
   for (const c of rest) {
-    const i = loose ? pool.get(loose(c))?.shift() : undefined;
-    if (i === undefined) fresh.push(c);
+    const list = loose ? pool.get(loose(c)) : undefined;
+    const at = list ? list.findIndex((j) => canMove(c, base[j])) : -1;
+    if (at < 0) fresh.push(c);
     else {
+      const i = list.splice(at, 1)[0];
       unmatched.delete(i);
       moved.push({ item: c, from: base[i] });
     }
@@ -57,7 +59,7 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
   try {
     text = git(['show', `${base}:${path}`]);
   } catch (e) {
-    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [] };
+    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [], moved: [] };
     return { reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
   }
   let entries;

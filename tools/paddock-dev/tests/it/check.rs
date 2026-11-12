@@ -66,6 +66,7 @@ fn options(root: &Path) -> RunOptions {
         only: Some(vec!["C39".into(), "C53".into()]),
         files: None,
         today: "2026-11-10".into(),
+        base_ref: Some("origin/main".into()),
     }
 }
 
@@ -138,6 +139,8 @@ fn fixture_masks_equal_the_recorded_js_masks() {
 fn node(driver: &str, env: &[(&str, String)]) -> String {
     let mut c = Command::new("node");
     c.args(["--input-type=module", "-e", driver]).current_dir(repo_root());
+    // The parity runs measure growth against `origin/main` of their own repository, whatever the caller's environment says.
+    c.env_remove("PADDOCK_BASE_REF");
     for (k, v) in env {
         c.env(k, v);
     }
@@ -250,6 +253,7 @@ fn live_tree_findings_equal_the_js_host() {
             let opts = RunOptions {
                 app: "paddock".into(),
                 today: paddock_dev::check::today_utc(),
+                base_ref: None,
                 ..options(&root)
             };
             let tree = Tree::open(&root).with_progress(move || progress.tick());
@@ -1023,10 +1027,57 @@ fn a_moved_site_is_not_growth_on_either_host_but_a_new_one_beside_it_is() {
         let r = run_checks(&options(tree.path()), &registry()).unwrap();
         assert_eq!(shared_part(&r.json()), shared_part(&js), "{name}: the hosts agree");
         let msgs = baseline_findings(&r);
-        assert_eq!(msgs.len(), grew, "{name}: {msgs:?}");
+        let grown: Vec<_> = msgs.iter().filter(|m| m.contains("the baseline grew")).collect();
+        assert_eq!(grown.len(), grew, "{name}: {msgs:?}");
         if grew == 1 {
-            assert!(msgs[0].contains("the baseline grew: 1 entry is"), "{name}: {msgs:?}");
+            assert!(grown[0].contains("the baseline grew: 1 entry is"), "{name}: {msgs:?}");
         }
+        assert!(
+            msgs.iter().any(|m| m.starts_with("moved: ")),
+            "{name}: the move is reported as a warning: {msgs:?}"
+        );
+    }
+}
+
+/// The site check is exact: a baseline entry whose file still exists does not cover the same line in another file (a deleted line in
+/// one file, added in a new one, is an error); an entry whose file is gone does, as a warning that names both files. Both hosts agree.
+#[test]
+fn a_site_moved_from_a_live_file_is_an_error_and_from_a_gone_file_a_warning_on_both_hosts() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    for (name, from, errors) in [
+        ("old file still exists", "crates/a/src/c53_good.rs", true),
+        ("old file is gone", "crates/a/src/renamed_away.rs", false),
+    ] {
+        let tree = materialize();
+        let mut doc: Value = read_json(&tree.path().join(BASELINE));
+        doc["sites"][0]["file"] = json!(from);
+        std::fs::write(tree.path().join(BASELINE), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN,
+            &[
+                ("RT5_ROOT", tree.path().display().to_string()),
+                ("RT5_APP", "fixture".into()),
+                ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
+            ],
+        ))
+        .unwrap();
+        let r = run_checks(&options(tree.path()), &registry()).unwrap();
+        assert_eq!(shared_part(&r.json()), shared_part(&js), "{name}: the hosts agree");
+        let site = r
+            .findings
+            .iter()
+            .filter(|f| f.file == "crates/a/src/c53_liveness_bad.rs" && f.line == 5);
+        let (errs, warns): (Vec<_>, Vec<_>) = site.partition(|f| f.json()["severity"] == "error");
+        assert_eq!(!errs.is_empty(), errors, "{name}: {errs:?}");
+        assert_eq!(
+            warns.iter().any(|f| f
+                .message
+                .contains(&format!("moved from {from} to crates/a/src/c53_liveness_bad.rs"))),
+            !errors,
+            "{name}: {warns:?}"
+        );
     }
 }
 

@@ -163,17 +163,21 @@ test('C71 baseline is shrink-only against the merge base: an added entry is an e
   assert.deepEqual(fresh, [], 'no baseline at the merge base: the first introduction');
 });
 
-test('C71 baseline: code moved to another file is moved, not new and not stale; shrinkBaseline rewrites its file', () => {
+test('C71 baseline: the site check is exact; only an entry whose file is gone lets a same-hash site move; the tool rewrites the file', () => {
   const site = (file, line, text) => ({ file, line, hash: lineHash(text) });
   const old = site('a.rs', 3, 'run_waited(x);');
   const now = site('b.rs', 9, 'run_waited(x);');
-  const r = againstBaseline([now], [old]);
-  assert.deepEqual([r.fresh, r.stale], [[], []]);
-  assert.deepEqual(r.moved, [{ item: now, from: old }]);
+  // exact by default: a new line in another file never uses up the entry of a deleted one (the reviewer's probe)
+  const exact = againstBaseline([now], [old]);
+  assert.deepEqual([exact.fresh, exact.stale, exact.moved], [[now], [old], []]);
+  assert.deepEqual(againstBaseline([now], [old], () => false).fresh, [now], 'the old file still exists: an error');
+  const gone = againstBaseline([now], [old], (e) => e.file === 'a.rs');
+  assert.deepEqual([gone.fresh, gone.stale], [[], []]);
+  assert.deepEqual(gone.moved, [{ item: now, from: old }]);
+  // the tool (shrinkBaseline) rewrites the entry's file
   assert.deepEqual(shrinkBaseline([now], [old]), [{ file: 'b.rs', line: 9, hash: now.hash }]);
-  // moved plus one genuinely new line: the new one is fresh
   const extra = site('b.rs', 20, 'kill(y);');
-  assert.deepEqual(againstBaseline([now, extra], [old]).fresh, [extra]);
+  assert.deepEqual(againstBaseline([now, extra], [old], () => true).fresh, [extra]);
 });
 
 const growthCtx = (base) => ({ root: '.', options: { git: (args) => (args[0] === 'rev-parse' ? 'def\n' : args[0] === 'merge-base' ? 'abc\n' : base) } });
