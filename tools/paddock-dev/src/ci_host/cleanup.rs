@@ -343,7 +343,7 @@ mod tests {
 
     fn scene() -> Scene {
         let d = crate::ci_host::canonical_tempdir();
-        let root = std::fs::canonicalize(d.path()).unwrap();
+        let root = paddock_env::winpath::real(d.path()).unwrap();
         let tmp = root.join("jobtemp");
         let cwd = root.join("work");
         std::fs::create_dir_all(&tmp).unwrap();

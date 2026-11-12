@@ -2,6 +2,7 @@
 
 use super::ledger::Kind;
 use super::verify::{Ctx, Env, Probe};
+use paddock_env::winpath;
 use paddock_proc::{Limits, Outcome, command, run_bounded};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -156,10 +157,10 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             ),
         },
     }
-    let stop = ctx.opts.walk_stop.as_ref().and_then(|p| p.canonicalize().ok());
+    let stop = ctx.opts.walk_stop.as_ref().and_then(|p| winpath::real(p).ok());
     let mut starts: Vec<PathBuf> = Vec::new();
     for w in &ctx.opts.cargo_workspaces {
-        match clone.join(w).canonicalize() {
+        match winpath::real(&clone.join(w)) {
             Ok(p) => starts.push(p),
             Err(_) => ctx.add(
                 Probe::CargoConfig,
@@ -192,7 +193,7 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
         if !c.is_file() || !checked.insert(c.clone()) {
             continue;
         }
-        let canonical = c.canonicalize().unwrap_or_else(|_| c.clone());
+        let canonical = winpath::real(&c).unwrap_or_else(|_| c.clone());
         if !inside_tagged_tree(&canonical, &clone, &files) {
             ctx.add(
                 Probe::CargoConfig,
@@ -238,7 +239,7 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
                 } else if let (Some(dir), Some(target)) = (
                     build.and_then(|b| b.get("target-dir")).and_then(toml::Value::as_str),
                     ctx.folder(Kind::Target),
-                ) && Path::new(dir).canonicalize().map(|p| p != target).unwrap_or(true)
+                ) && winpath::real(Path::new(dir)).map(|p| p != target).unwrap_or(true)
                 {
                     ctx.add(
                         Probe::CargoConfig,
@@ -348,7 +349,7 @@ pub(crate) fn npm(ctx: &mut Ctx) {
     let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
     for (what, path) in candidates {
         if path.is_file() {
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
+            let canonical = winpath::real(&path).unwrap_or_else(|_| path.clone());
             if !seen.insert(canonical.clone()) {
                 continue;
             }
@@ -405,7 +406,7 @@ fn npm_prefix_candidates(env: &Env) -> Vec<PathBuf> {
     }
     let raw = which(env, "node");
     if let Some(raw) = raw {
-        for node_path in [Some(raw.clone()), raw.canonicalize().ok()].into_iter().flatten() {
+        for node_path in [Some(raw.clone()), winpath::real(&raw).ok()].into_iter().flatten() {
             if cfg!(windows) {
                 if let Some(dir) = node_path.parent() {
                     out.push(dir.join("etc").join("npmrc"));
@@ -436,7 +437,7 @@ pub(crate) fn angular(ctx: &mut Ctx) {
                 "Do not link the Angular cache in release mode; let the build write it inside the checkout.",
             ),
             Ok(_) => {
-                let inside = cache.canonicalize().map(|p| p.starts_with(&clone)).unwrap_or(false);
+                let inside = winpath::real(&cache).map(|p| p.starts_with(&clone)).unwrap_or(false);
                 if !inside {
                     ctx.add(
                         Probe::Angular,

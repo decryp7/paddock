@@ -220,7 +220,7 @@ pub(crate) fn canonical_tempdir() -> tempfile::TempDir {
     let parent = probe
         .path()
         .parent()
-        .and_then(|p| p.canonicalize().ok())
+        .and_then(|p| paddock_env::winpath::real(p).ok())
         .expect("a canonical parent");
     drop(probe);
     tempfile::Builder::new().tempdir_in(parent).expect("a temp folder")

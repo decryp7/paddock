@@ -209,7 +209,7 @@ mod tests {
         let (code, out, env, ci) = go(d.path(), &ws, "macOS", "spotter-rust", "s1");
         assert_eq!(code, 0, "{out}");
         let kept = format!("{}/.paddock-ci/target-spotter-rust-s1", d.path().join("home").display());
-        let canon = std::fs::canonicalize(d.path().join("home")).unwrap();
+        let canon = paddock_env::winpath::real(&d.path().join("home")).unwrap();
         let kept = if Path::new(&kept).exists() {
             kept
         } else {

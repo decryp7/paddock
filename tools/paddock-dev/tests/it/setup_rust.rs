@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
 /// The `run: |` body of a step of the action, unindented, with the action's path filled in.
@@ -58,7 +58,7 @@ impl Runner {
     /// `shim`: shell lines run by the fake sccache before it exits 0 (`None`: no sccache on PATH).
     fn new(shim: Option<&str>) -> Runner {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = paddock_env::winpath::real(dir.path()).unwrap();
         let bin = root.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         for d in ["home", "temp", "tools"] {

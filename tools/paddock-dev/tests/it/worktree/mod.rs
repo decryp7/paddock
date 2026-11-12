@@ -44,7 +44,7 @@ pub struct Run {
 impl Fixture {
     pub fn new() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().canonicalize().unwrap();
+        let root = paddock_env::winpath::real(dir.path()).unwrap();
         let gitconfig = root.join("gitconfig");
         std::fs::write(
             &gitconfig,

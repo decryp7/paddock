@@ -2,6 +2,7 @@
 
 use super::table::Layout;
 use super::{Ctx, R, Sinks, Stop};
+use paddock_env::winpath;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -94,7 +95,7 @@ pub fn ci_home(ctx: &Ctx) -> R<String> {
         std::fs::create_dir_all(&d).map_err(|e| Stop::die(format!("cannot create {}: {e}", d.display())))?;
         d
     };
-    let real = std::fs::canonicalize(&dir).map_err(|e| Stop::die(format!("cannot resolve {}: {e}", dir.display())))?;
+    let real = winpath::real(&dir).map_err(|e| Stop::die(format!("cannot resolve {}: {e}", dir.display())))?;
     Ok(mixed(&real).trim_end_matches('/').to_string())
 }
 
@@ -103,7 +104,7 @@ pub fn ci_home(ctx: &Ctx) -> R<String> {
 /// without a trailing newline.
 pub fn source_key(dir: &Path, windows: bool) -> R<String> {
     // `/c/x`, `C:\x` and `c:/x` are one folder: Git bash callers may pass either.
-    let real = std::fs::canonicalize(dir).map_err(|e| {
+    let real = winpath::real(dir).map_err(|e| {
         Stop::die(format!(
             "--source {} cannot be resolved: {e}. Pass the workspace folder.",
             dir.display()
@@ -314,7 +315,7 @@ mod tests {
         let (cb, pb, _) = go(&c, &["path", "target", "x", "--source", b.to_str().unwrap()]);
         assert_eq!((ca, cb), (0, 0));
         assert_ne!(pa, pb, "two roots, two folders");
-        let real = mixed(&std::fs::canonicalize(&ci).unwrap());
+        let real = mixed(&winpath::real(&ci).unwrap());
         let ka = source_key(&a, false).unwrap();
         assert_eq!(pa.trim(), format!("{real}/target-x-{ka}-s1"));
         assert!(Path::new(pa.trim()).is_dir());

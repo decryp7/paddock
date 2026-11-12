@@ -3,6 +3,7 @@
 use super::home::{ci_home, slot};
 use super::table::{Kept, expand_dirs, glob_match, glob_of};
 use super::{Ctx, R, Stop};
+use paddock_env::winpath;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -148,7 +149,7 @@ pub fn cmd_owns(ctx: &Ctx, args: &[String]) -> R<()> {
     let home = ci_home(ctx)?;
     let path = Path::new(&dir);
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let real_parent = std::fs::canonicalize(parent).map_err(|_| refuse())?;
+    let real_parent = winpath::real(parent).map_err(|_| refuse())?;
     let name = path.file_name().ok_or_else(refuse)?;
     let real = super::home::mixed(&real_parent.join(name));
     let rel = rel_under_home(&home, &real, ctx.windows).ok_or_else(refuse)?;

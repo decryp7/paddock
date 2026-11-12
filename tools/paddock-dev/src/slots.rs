@@ -28,6 +28,7 @@
 
 use clap::Args;
 use paddock_cli::{CliError, Report};
+use paddock_env::winpath;
 use paddock_slots::{Announcement, FsLocks, SlotError, SlotId, release as release_slot, slot_states, with_idle};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader};
@@ -220,7 +221,7 @@ fn canonical_even_if_missing(path: &Path) -> PathBuf {
     let mut missing = Vec::new();
     let mut at = path;
     loop {
-        if let Ok(real) = at.canonicalize() {
+        if let Ok(real) = winpath::real(at) {
             return missing.iter().rev().fold(real, |acc, part| acc.join(part));
         }
         match (at.parent(), at.file_name()) {
@@ -278,7 +279,7 @@ fn first_line(child: &mut std::process::Child, limit: Duration) -> Option<String
 /// `acquire` with the program that will hold the slot named (the running binary in production).
 pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
     check_max(a.max)?;
-    let owner = a.owner.canonicalize().map_err(|e| {
+    let owner = winpath::real(&a.owner).map_err(|e| {
         CliError::usage(format!("--owner {} does not exist: {e}.", a.owner.display()))
             .with_hint("Pass the job's own folder; it must exist.")
     })?;

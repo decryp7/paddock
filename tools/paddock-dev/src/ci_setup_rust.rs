@@ -808,7 +808,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         for os in ["macOS", "Windows"] {
             let dir = tempfile::tempdir().unwrap();
-            let root = dir.path().canonicalize().unwrap();
+            let root = paddock_env::winpath::real(dir.path()).unwrap();
             let exe = if os == "Windows" { "sccache.exe" } else { "sccache" };
             let name = format!("sccache-v{SCCACHE_VERSION}-test-target");
             let stage = root.join("stage").join(&name);

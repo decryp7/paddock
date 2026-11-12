@@ -91,7 +91,7 @@ impl Ops for RealOps {
         #[cfg(not(unix))]
         {
             // The drive (or share) of the physical path: the part before the first separator, lower-cased.
-            let c = std::fs::canonicalize(p).ok()?;
+            let c = paddock_env::winpath::real(p).ok()?;
             match c.components().next()? {
                 std::path::Component::Prefix(pre) => Some(pre.as_os_str().to_string_lossy().to_lowercase()),
                 _ => None,

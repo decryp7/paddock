@@ -8,6 +8,7 @@
 
 use super::ledger::{Kind, Mode};
 use super::verify::{Ctx, Probe};
+use paddock_env::winpath;
 use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 
@@ -31,7 +32,7 @@ fn walk(dir: &Path, allowed: &[PathBuf], out: &mut Walk) {
     for e in rd.flatten() {
         let p = e.path();
         if is_link(&e) {
-            match p.canonicalize() {
+            match winpath::real(&p) {
                 Ok(target) if allowed.iter().any(|a| target.starts_with(a)) => out.links_ok += 1,
                 Ok(target) => out.bad.push(format!("{} -> {}", p.display(), target.display())),
                 Err(_) => out.bad.push(format!("{} -> (a target that cannot be resolved)", p.display())),
@@ -43,13 +44,13 @@ fn walk(dir: &Path, allowed: &[PathBuf], out: &mut Walk) {
 }
 
 pub(crate) fn links_probe(ctx: &mut Ctx) {
-    let root = ctx.ledger.job_root.canonicalize().unwrap_or_else(|_| ctx.ledger.job_root.clone());
+    let root = winpath::real(&ctx.ledger.job_root).unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let mut roots: Vec<PathBuf> = ctx
         .ledger
         .entries
         .iter()
         .filter(|e| matches!(Mode::parse(&e.mode), Some(Mode::Job | Mode::Run)))
-        .filter_map(|e| Path::new(&e.path).canonicalize().ok())
+        .filter_map(|e| winpath::real(Path::new(&e.path)).ok())
         .filter(|p| p.is_dir())
         .collect();
     roots.sort();
@@ -87,7 +88,7 @@ pub(crate) fn links_probe(ctx: &mut Ctx) {
         let nm = clone.join("node_modules");
         if std::fs::symlink_metadata(&nm).is_ok_and(|m| m.file_type().is_symlink()) {
             let ledger_nm = ctx.folder(Kind::NodeModules);
-            let ok = nm.canonicalize().ok().is_some_and(|t| Some(&t) == ledger_nm.as_ref());
+            let ok = winpath::real(&nm).ok().is_some_and(|t| Some(&t) == ledger_nm.as_ref());
             if !ok {
                 ctx.add(
                     Probe::Links,

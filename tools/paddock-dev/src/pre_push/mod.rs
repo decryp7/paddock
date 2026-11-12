@@ -30,6 +30,7 @@ use clap::Args;
 use exec::{BUDGET, RealExec, RunOpts, Verdict, parse_load, run_all_with, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
+use paddock_env::winpath;
 use paddock_repo_graph::GitHistory;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -123,8 +124,8 @@ fn sweep_stale(main: &Path, trees: &Path, alive: &dyn Fn(u32, u64) -> bool) -> u
         let wt = PathBuf::from(gitdir.trim()).parent().map(Path::to_path_buf).unwrap_or_default();
         let ours = wt
             .parent()
-            .and_then(|p| p.canonicalize().ok())
-            .is_some_and(|p| Some(p) == trees.canonicalize().ok())
+            .and_then(|p| winpath::real(p).ok())
+            .is_some_and(|p| Some(p) == winpath::real(trees).ok())
             && wt
                 .file_name()
                 .is_some_and(|n| stale_trees(&[n.to_string_lossy().to_string()], alive).len() == 1);
@@ -179,12 +180,11 @@ fn refuse_home(path: &Path, home: Option<&str>) -> Result<(), CliError> {
     // anything is created, so a refused folder is never made.
     let ancestor = path.ancestors().find(|a| a.exists()).unwrap_or(path);
     let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-    let resolved = ancestor
-        .canonicalize()
+    let resolved = winpath::real(ancestor)
         .map_err(|e| CliError::failure(format!("{} cannot be resolved: {e}.", ancestor.display())))?
         .join(rest);
     if let Some(h) = home.filter(|h| !h.is_empty() && *h != "/") {
-        let home_resolved = Path::new(h).canonicalize().unwrap_or_else(|_| PathBuf::from(h));
+        let home_resolved = winpath::real(Path::new(h)).unwrap_or_else(|_| PathBuf::from(h));
         if resolved.starts_with(&home_resolved) {
             return Err(CliError::refused(format!(
                 "{} is inside the home folder {}.",
