@@ -44,6 +44,9 @@ static BORROWED: AtomicUsize = AtomicUsize::new(0);
 /// Weak: a closed connection's handle goes with it, and is pruned at the next registration.
 static INTERRUPTS: std::sync::Mutex<Vec<std::sync::Weak<duckdb::InterruptHandle>>> = std::sync::Mutex::new(Vec::new());
 
+/// How long a test's guard waits for store threads to leave.
+const STOP_BUDGET: Duration = Duration::from_secs(10);
+
 /// One background thread of a store (the catalogue builder, the full-text indexer), registered while it runs.
 struct Registered {
     id: u64,
@@ -70,10 +73,12 @@ pub(crate) fn register_thread(name: &'static str, stop: std::sync::Arc<dyn Fn() 
 
 impl Drop for StoreThread {
     fn drop(&mut self) {
-        // At exit another thread may hold the list: never wait for it there (the registration just stays).
-        if let Ok(mut all) = THREADS.lock() {
-            all.retain(|t| t.id != self.0);
-        }
+        // `lock` waits for the list: it is only held for an instant (to push, to list names or to clone the stops, never
+        // across a stop call), so the wait is short. A poisoned list is still emptied of this thread.
+        THREADS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|t| t.id != self.0);
     }
 }
 
@@ -116,17 +121,23 @@ fn stop_store_threads_since(first: u64, budget: Duration) -> Vec<&'static str> {
 /// process (nextest runs each test in its own); a `cargo test` binary that shares one process between parallel tests
 /// would stop its neighbours' stores.
 #[must_use = "bind the guard to a name: dropping it at once stops nothing"]
-pub struct StoreThreadsGuard(u64);
+pub struct StoreThreadsGuard(u64, Duration);
 
 impl StoreThreadsGuard {
     /// Marks now.
     pub fn new() -> StoreThreadsGuard {
-        StoreThreadsGuard(NEXT_THREAD.load(Ordering::SeqCst) as u64)
+        StoreThreadsGuard(NEXT_THREAD.load(Ordering::SeqCst) as u64, STOP_BUDGET)
+    }
+
+    /// A guard that waits `budget` for the threads (tests of the guard itself).
+    #[cfg(test)]
+    pub(crate) fn with_budget(budget: Duration) -> StoreThreadsGuard {
+        StoreThreadsGuard(NEXT_THREAD.load(Ordering::SeqCst) as u64, budget)
     }
 
     /// Stops and waits now; the names of those that stayed.
     pub fn stop(&self) -> Vec<&'static str> {
-        stop_store_threads_since(self.0, Duration::from_secs(10))
+        stop_store_threads_since(self.0, self.1)
     }
 }
 
@@ -146,14 +157,24 @@ impl Drop for StoreThreadsGuard {
 }
 
 /// Test helper: stops and waits for the store threads started from now on when the calling thread ends (the test thread
-/// of a libtest or nextest test; also after a panic). Call it once at the top of a fixture (the app's `test_app`); a
-/// second call on the same thread does nothing. A store thread that does not leave within ten seconds is named on stderr
-/// and the process aborts, as a crash at exit would have done, only visibly and with the thread's name.
+/// of a nextest test; also after a panic). Call it once at the top of a fixture (the app's `test_app`); a second call on
+/// the same thread does nothing. It acts only under nextest (the `NEXTEST` variable is set): there the process is the
+/// test's own, so every store thread in it is this test's. A `cargo test` process shares its threads between tests
+/// running side by side, and stopping "the threads since" would stop a neighbour's; there the exit drain is what ends
+/// them. A store thread that does not leave within ten seconds is named on stderr and the process aborts, as a crash at
+/// exit would have done, only visibly and with the thread's name.
 pub fn stop_store_threads_when_this_thread_ends() {
-    struct AtThreadEnd(StoreThreadsGuard);
+    if std::env::var_os("NEXTEST").is_some() {
+        stop_at_thread_end(STOP_BUDGET);
+    }
+}
+
+fn stop_at_thread_end(budget: Duration) {
+    /// The mark and the budget (not a [`StoreThreadsGuard`]: its own drop would panic inside this thread-local's drop).
+    struct AtThreadEnd(u64, Duration);
     impl Drop for AtThreadEnd {
         fn drop(&mut self) {
-            let left = self.0.stop();
+            let left = stop_store_threads_since(self.0, self.1);
             if !left.is_empty() {
                 eprintln!("store threads outlived their test: {left:?}");
                 std::process::abort();
@@ -166,13 +187,26 @@ pub fn stop_store_threads_when_this_thread_ends() {
     let _ = END.try_with(|e| {
         let mut e = e.borrow_mut();
         if e.is_none() {
-            *e = Some(AtThreadEnd(StoreThreadsGuard::new()));
+            *e = Some(AtThreadEnd(NEXT_THREAD.load(Ordering::SeqCst) as u64, budget));
         }
     });
 }
 
+/// The list of store threads at exit: tried for a few milliseconds (a thread holds it for an instant), never waited for
+/// without end. `None` when it stayed busy.
+fn threads_at_exit() -> Option<std::sync::MutexGuard<'static, Vec<Registered>>> {
+    for _ in 0..50 {
+        match THREADS.try_lock() {
+            Ok(all) => return Some(all),
+            Err(std::sync::TryLockError::Poisoned(p)) => return Some(p.into_inner()),
+            Err(std::sync::TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(1)),
+        }
+    }
+    None
+}
+
 fn threads_running() -> bool {
-    THREADS.try_lock().map_or(true, |all| !all.is_empty())
+    threads_at_exit().is_none_or(|all| !all.is_empty())
 }
 
 /// Whether the process is exiting: background steps stop before their next statement.
@@ -253,18 +287,31 @@ extern "C" fn at_exit() {
             handle.interrupt();
         }
     }
-    // The registered store threads stop too (try_lock: never wait for the list at exit), then everything is waited for.
-    if let Ok(all) = THREADS.try_lock() {
-        let stops: Vec<_> = all.iter().map(|t| t.stop.clone()).collect();
-        drop(all);
-        for stop in stops {
-            stop();
+    // The registered store threads stop too (the list is tried for a few milliseconds, never waited for without end),
+    // then everything is waited for.
+    match threads_at_exit() {
+        Some(all) => {
+            let stops: Vec<_> = all.iter().map(|t| t.stop.clone()).collect();
+            drop(all);
+            for stop in stops {
+                stop();
+            }
         }
+        None => log::warn!("exit drain: the list of store threads stayed busy; they were not asked to stop"),
     }
     let started = Instant::now();
     while (ACTIVE.load(Ordering::SeqCst) > 0 || threads_running()) && started.elapsed() < DRAIN {
         std::thread::yield_now();
         std::thread::sleep(Duration::from_millis(1));
+    }
+    // ER-27: a drain that gave up says what it gave up on.
+    let statements = ACTIVE.load(Ordering::SeqCst);
+    let threads: Vec<&'static str> = threads_at_exit().map_or_else(Vec::new, |all| all.iter().map(|t| t.name).collect());
+    if statements > 0 || !threads.is_empty() {
+        log::warn!(
+            "exit drain gave up after {:?}: {statements} statement(s) still running, store threads still running: {threads:?}",
+            started.elapsed()
+        );
     }
 }
 
@@ -398,7 +445,16 @@ mod tests {
                 unsafe {
                     libc::write(1, line.as_ptr().cast(), line.len());
                 }
-                crate::lock(&RUNNING).take();
+                // The thread takes its time to leave: only a drain that really waits for the list sees "left" first.
+                std::thread::spawn(|| {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    let line = b"store thread left\n";
+                    // SAFETY: writes a static buffer to the standard output descriptor.
+                    unsafe {
+                        libc::write(1, line.as_ptr().cast(), line.len());
+                    }
+                    crate::lock(&RUNNING).take();
+                });
             }),
         ));
     }
@@ -437,6 +493,11 @@ mod tests {
             stdout.contains("store thread asked to stop at exit"),
             "the exit drain did not ask the running store thread to stop:\n{stdout}"
         );
+        let at = |what: &str| stdout.find(what).unwrap_or_else(|| panic!("{what:?} missing from:\n{stdout}"));
+        assert!(
+            at("store thread asked to stop at exit") < at("store thread left") && at("store thread left") < at("late handler"),
+            "the drain did not wait for the store thread to leave before the other exit handlers ran:\n{stdout}"
+        );
         assert!(
             stdout.contains("late handler: drained first"),
             "an exit handler registered after the store opened ran before the drain:\n{stdout}"
@@ -470,5 +531,54 @@ mod tests {
         );
         drop(stubborn);
         std::mem::forget(guard); // its work is done: dropping it would wait on nothing, but keep the test's end simple
+    }
+
+    /// The guard fails the test, naming the thread, when a store thread does not leave (regression: a guard that only
+    /// stopped quietly would let the leak through).
+    #[test]
+    fn the_guard_panics_naming_a_thread_that_does_not_leave() {
+        let stubborn = super::register_thread("debrief-stubborn-guard", std::sync::Arc::new(|| {}));
+        let guard = super::StoreThreadsGuard::with_budget(std::time::Duration::from_millis(20));
+        // The thread registered before the guard is not its own; register another one after it.
+        let late = super::register_thread("debrief-stubborn-late", std::sync::Arc::new(|| {}));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(guard)));
+        let message = *caught.expect_err("the guard did not panic").downcast::<String>().unwrap();
+        assert!(
+            message.contains("debrief-stubborn-late") && !message.contains("debrief-stubborn-guard"),
+            "{message}"
+        );
+        drop((stubborn, late));
+    }
+
+    /// The thread-end hook aborts the process, naming the thread (runs in a child: an abort cannot be caught).
+    #[test]
+    fn the_thread_end_hook_aborts_naming_a_thread_that_does_not_leave() {
+        if std::env::var_os("DEBRIEF_THREAD_END_CHILD").is_some() {
+            std::thread::spawn(|| {
+                super::stop_at_thread_end(std::time::Duration::from_millis(20));
+                let _stubborn = super::register_thread("debrief-stubborn-end", std::sync::Arc::new(|| {}));
+                // The test thread ends here: the hook finds the thread still listed.
+                std::mem::forget(_stubborn);
+            })
+            .join()
+            .ok();
+            return;
+        }
+        let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "shutdown::tests::the_thread_end_hook_aborts_naming_a_thread_that_does_not_leave",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env("DEBRIEF_THREAD_END_CHILD", "1")
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success(), "the child did not abort: {:?}", out.status);
+        assert!(
+            stderr.contains("store threads outlived their test") && stderr.contains("debrief-stubborn-end"),
+            "{stderr}"
+        );
     }
 }
