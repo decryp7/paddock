@@ -33,7 +33,7 @@
 | `./dev ci flakes`, `./dev ci timings` (RT-8) | on `origin/main`; `scripts/ci-timings.mjs` (337 lines) still in the tree, no CI user | `tools/paddock-dev/src/ci_runs` |
 | `./dev check run` C39, C53 (RT-5) | on `origin/main`; the JS checks `C39-freed-port.mjs` and `C53-pid-kills.mjs` still run in the conformance job | `tools/paddock-dev/src/check` |
 | `./dev ci setup-rust` (WP-0) | approved on `origin/feat/ci-in-rust-setup-rust`; release, tag and rule 54 jobs keep the shell copy (§8) | `tools/paddock-dev/src/ci_setup_rust.rs`, `ci_tool.rs` |
-| `./dev ci run` (ADR 0038 WP-1), `./dev check --pre-push` (R17, ADR 0038 WP-2) | **not built**. lefthook's `pre-push` runs three entries (Pitwall script tests, Pitwall `cargo deny`, `./dev check ipc-endpoints`); two of Pitwall's paths are broken (fixed on `fix/lefthook-pre-push`, unmerged). `tools/linux-clippy-touched.sh` (72 lines) runs CI's Clippy in the pinned CI image | `lefthook.yml:81-92` |
+| `./dev ci run` (ADR 0038 WP-1), `./dev check --pre-push` (R17, ADR 0038 WP-2) | **built** on `feat/ci-in-rust-wp2` (`tools/paddock-dev/src/pre_push`; `--commits`, X-3, is its declared extension point, not built); before it: **not built**. lefthook's `pre-push` runs three entries (Pitwall script tests, Pitwall `cargo deny`, `./dev check ipc-endpoints`); two of Pitwall's paths are broken (fixed on `fix/lefthook-pre-push`, unmerged). `tools/linux-clippy-touched.sh` (72 lines) runs CI's Clippy in the pinned CI image | `lefthook.yml:81-92` |
 | `devkit`, `paddock-tool` runtime (G1, G2) | not built. `ci_tool.rs` (`ToolCall`) is the one wrapper until G1 lands | `ls tools/` |
 
 ## 2. Inventory (measured on `3ec1e195c`)

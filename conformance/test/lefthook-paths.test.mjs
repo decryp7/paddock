@@ -51,7 +51,7 @@ const tracked = () => spawnSync('git', ['ls-files'], { cwd: PADDOCK, encoding: '
 
 test('every path and glob a lefthook command names exists, and node --test is given files, not folders', () => {
   const cmds = commands(readFileSync(join(PADDOCK, 'lefthook.yml'), 'utf8'));
-  assert.ok(cmds.length >= 20, `commands found (${cmds.length})`);
+  assert.ok(cmds.length >= 15, `commands found (${cmds.length})`);
   const files = tracked();
   assert.deepEqual(cmds.flatMap((c) => problems(c, files)), []);
 });
@@ -63,4 +63,20 @@ test('the check sees the old Pitwall entry (a folder for node --test), a missing
   assert.deepEqual(problems({ ...old, run: 'node --test scripts/ci/*.test.mjs' }, files), []);
   assert.equal(problems({ name: 'x', root: 'crates/', run: 'bash scripts/nothing.sh' }, files).length, 1);
   assert.equal(problems({ name: 'x', root: 'crates/', run: 'node --test zz/*.test.mjs' }, files).length, 1);
+});
+
+// ADR 0038 section 5 and docs/plans/ci-in-rust.md WP-2: the push hook is one command, so what it runs is what `./dev` says CI runs.
+export function prePushCommands(text) {
+  const block = /^pre-push:\n((?: .*\n|\n)*)/m.exec(text);
+  return block ? commands(block[1].replace(/^ {2}commands:\n/m, '')) : [];
+}
+
+test('the pre-push hook is the one line `./dev check --pre-push`', () => {
+  const found = prePushCommands(readFileSync(join(PADDOCK, 'lefthook.yml'), 'utf8'));
+  assert.deepEqual(found.map((c) => c.run), ['./dev check --pre-push']);
+});
+
+test('the pre-push reader sees a second command', () => {
+  const text = 'pre-push:\n  commands:\n    a:\n      run: ./dev check --pre-push\n    b:\n      run: node x.mjs\n';
+  assert.equal(prePushCommands(text).length, 2);
 });

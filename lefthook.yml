@@ -78,15 +78,10 @@ commit-msg:
     conventional:
       run: node conformance/bin/paddock-conformance.mjs commit-lint --file {1}
 
+# One command, so the hook cannot drift from CI (ADR 0038, docs/plans/ci-in-rust.md WP-2): `./dev check --pre-push` runs ER-9's fast
+# gates for what the push changes (fmt, host and Windows Clippy, Linux Clippy in the CI image, conformance with ci.yml's own list,
+# commit-lint, lockfiles, Pitwall's script tests and deny, C102). It reads the planner; a gate that cannot run is "not measured".
 pre-push:
   commands:
-    pitwall-scripts:
-      root: "apps/pitwall/"
-      run: node --test scripts/ci/*.test.mjs
-    pitwall-deny:
-      root: "apps/pitwall/"
-      run: cargo deny --workspace check
-    # C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
-    # connection endings is well formed. The release path's tag check calls `./dev check ipc-endpoints --tag <tag>`.
-    ipc-endpoints:
-      run: ./dev check ipc-endpoints
+    pre-push:
+      run: ./dev check --pre-push
