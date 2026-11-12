@@ -196,11 +196,11 @@ Apply these deliberately. They are not decoration:
   dispatches `<app>-release.yml` with gates on and the bundle built, once per train or batch that touches the release path;
   passing tests alone is not enough.
 - One implementation per mechanism (rule 55): a mechanism listed in `docs/known-copies.toml` is fixed in its canonical
-  implementation and every copy in the same change, each with a failing test first, or names the copy it skipped, and why, in the commit body; a freeze does not stop such a fix; a new copy needs its entry and a delete-by tag, and an entry leaves
-  with its files; a reached delete-by tag is a warning, not a tag block (user, 2026-11-11); register check C58 (planned, ADR 0034 WP-1; not built yet, the steward checks the register by hand).
+  implementation and every copy in the same change, each with a failing test first, or names the copy it skipped, and why, in the commit body; a freeze does not stop such a fix; a new copy needs its entry and a delete-by tag, an entry leaves
+  with its files, and a date moves to a later release line only with the user's approval; a reached delete-by tag is a warning, not a tag block (user, 2026-11-11); register check C58 (planned, ADR 0034 WP-1; not built yet, the steward checks the register by hand).
 - Slow means two questions (rule 13, merged with 14, 15 and 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
-  thread counts default to "Auto" and become a Setting only when a measurement shows users need it; a long or bulk operation's design has a short "Parallelism and cost" note.
+  thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
 - Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
   start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
   `disallowed-methods` and C53 check it, ADR 0033). A discovery file that names a pid or port (Dyno's `agent.json`) is

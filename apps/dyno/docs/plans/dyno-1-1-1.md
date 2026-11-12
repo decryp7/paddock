@@ -76,7 +76,7 @@ Conventions for every package:
   `.gitea/` and other integration points by the integrating agent or by one declared line.
 - A change to Dyno's release path (installer, `paddock-setup`, bundling) builds Dyno's installers before it lands (rule 54).
 - Every screenshot or drawing gets an independent review (rule 22). A VM row counts only if its precondition was verified and
-  its probe showed it can see the thing (rule 71).
+  its probe showed it can see the thing (ER-33).
 
 Roles: **implementer** = Sonnet; **designer**, **reviewer**, **researcher** = Opus; **scout** = Haiku. Every package is reviewed
 by an agent that did not write it.

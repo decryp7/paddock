@@ -19,3 +19,5 @@ Before you commit a design document (ADR, plan, research note):
 Do not commit unless the brief says so, and do not spawn reviewers: an independent reviewer judges your work. Put any image meant for the user on a persistent path the brief names (never a temporary scratchpad). Never add Co-Authored-By or AI attribution. Finish with a short report: what you made, where the sheet is, the measurements, and any rule you had to bend with the reason.
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
+
+Is this more than comparable apps do? Name them and offer the common-practice option (ER-37).

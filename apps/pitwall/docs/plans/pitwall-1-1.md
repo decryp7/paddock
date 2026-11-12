@@ -76,11 +76,11 @@ install, the waivers and the VM round. This list replaces it.
 | B6 | **The install verb refuses an unprotected program: a security fix and a release gate.** `pitwall-server install` refuses a program that is not in a folder directly under Program Files (as Windows names it) or that another account can change (paddock-service's protected-chain rule and known folders, no copy), and refuses a registration of another copy with what to do (uninstall Pitwall, then install again; ADR 0053 §5, no migration); the hook shows its words. Tests over fake folders and a fake service manager. Defence in depth that stays after B6b. Holes (1) and (2) of section 0 | app | implementer | 1–1.5 | B0 |
 | B6b | **Full ADR 0053 adoption on Windows** (hole 3 of section 0): the shared include and `paddock-setup.exe` in the hooks (the stop list from the config, `check-dir`, the guard, stop-all, the installer lock), the updater's `InstallScope::PerMachine` with the elevated hand-off (install on quit goes), `UserRunEntry`, C91 green, the per-machine VM suite; ADR 0053's adoption row | app | implementer | 2–3 | B1, B6 |
 | B7 | The six waivers removed before 2026-12-31: C37 (integration tests into `tests/it`), C39 (three freed-port tests to a refusing connector or `HeldPort::reset`), C53 (two kills through `paddock_proc`) | app | implementer | 1.5–2.5 | B0 |
-| B8 | Copies register: the six `pitwall-v1.1.0` entries closed with `Copies-removed:` (`tray.rs` included: its registered items are gone, section 0; `tray_model.rs` keeps its registered `pitwall-v1.2.0`); `copies --check-register` and C58 green. Only if the check finds a registered item still present does the tray entry need a date move, which is a user decision (Q5) | app + register | implementer | 0.5–1.5 | B0 |
+| B8 | Copies register: the six `pitwall-v1.1.0` entries removed from the register with their files (`tray.rs` included: its registered items are gone, section 0; `tray_model.rs` keeps its registered `pitwall-v1.2.0`); `copies --check-register` and C58 green. Only if the check finds a registered item still present does the tray entry need a date move, which is a user decision (Q5) | app + register | implementer | 0.5–1.5 | B0 |
 | B9 | ADR 0052 checks: `features.toml` rows (wired, visible outcome, real layout) for every 1.1 feature, the chat's included | app | implementer | 1.5–2.5 | ADR 0023 WP-12 for the chat rows |
 | B10 | Independent UI review on the merged base (ER-23, rule 22): screenshots at 1440x900, both themes, every route and dialog, the chat included; P1 and P2 fixed | app | reviewer, designer for fixes | 1.5–2.5 | B3, WP-4b |
 | B11 | Release machinery: CHANGELOG and release notes (First launch, the 1.0.x reinstall by hand, ADR 0057's delete command), rule 25's pre-tag checks, the rule 54 dispatches, the tag | app | implementer | 1–2 | all |
-| B12 | **VM round** with the rule 71 rows of section 7, on macOS 26, Windows 11 and Ubuntu; Windows is its first real run | app | implementer, designer to judge | 5–8 | everything but B11 |
+| B12 | **VM round** with the ER-33 rows of section 7, on macOS 26, Windows 11 and Ubuntu; Windows is its first real run | app | implementer, designer to judge | 5–8 | everything but B11 |
 | | **Base total** | | | **26.75–44.5** | |
 
 **Known test flake (found 2026-11-08, not fixed): `dyno-agent` `term` tests exit 143 under load.** In a full `cargo nextest run --workspace` of
@@ -337,7 +337,7 @@ Holidays are not counted; the end of December will move these dates.
 - **Rule 22 / ER-23:** independent reviews of the screenshots and diagrams (B10), of the host's security (ADR 0023 WP-11),
   of ADR 0023 and this plan, and of each landing's code (ER-25).
 - **ER-15, ER-16:** the tag from CI, on a commit that is not `[skip ci]`; ER-31 if the tag is made on a release branch.
-- **The VM round (B12), rule 71 / ER-33.** Each row's precondition is verified before the probe runs, and the probe first
+- **The VM round (B12), ER-33.** Each row's precondition is verified before the probe runs, and the probe first
   passes its positive control on the same VM; a row without both reports `not measured` or `check broken`, and the release
   does not pass. The secrets row is ADR 0057 §6's (its WP-8), run for Pitwall's admin key and pasted key.
 
@@ -393,4 +393,4 @@ Open:
   - **D5** Spend half a day testing a free Apple Development certificate.
 - **Q5. Only if B8 finds the tray copy still present** (our reading says its registered items are gone): approve moving
   `tray`'s `apps/pitwall/app/src-tauri/src/tray.rs` from `pitwall-v1.1.0` to `pitwall-v1.2.0`, which rule 55 (d) allows only
-  with `Copies-date: tray apps/pitwall/app/src-tauri/src/tray.rs: pitwall-v1.1.0 -> pitwall-v1.2.0: approved: user: <reason>`.
+  with the user's approval, the reason in the commit body.

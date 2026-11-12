@@ -1,5 +1,7 @@
 # Paddock wiki
 
+**Retired 2026-11-12 (user, ER-30 retired): kept for history; no ingest, no lint, no `Wiki notes:` hand-offs.**
+
 A small, sourced summary of how things work **today**, so an agent can read a page instead of re-deriving the state from
 the lessons, the ADRs and the hand-off logs. It started on 2026-10-31 as a two-week pilot of the LLM Wiki pattern; the user
 concluded the pilot and made it official the same day (ER-30 and `skills/wiki` on engineering-rules `docs/er-30-wiki`, Paddock rule 59 on `docs/rule-wiki`).
@@ -55,8 +57,7 @@ Summary in three to five lines.
 
 ## Operations
 
-- **Ingest** (after a merged batch, an incident, a decision of the user): collect the "Wiki notes:" of the agents'
-  hand-offs and the sources; for each affected page change the claim, set its source, set `verified`; update `index.md`;
+- **Ingest** (after a merged batch, an incident, a decision of the user): collect the sources; for each affected page change the claim, set its source, set `verified`; update `index.md`;
   append a line to `log.md` (`wiki log ingest "page | subject"` writes `## [YYYY-MM-DD] ingest | page | subject` with the
   clock's date); run `wiki lint`; commit `docs(wiki): ...` as its own commit.
 - **Query**: read `index.md`, then the pages it points to, and answer with the sources of the page. If the answer was
@@ -69,8 +70,7 @@ Summary in three to five lines.
 
 ## One writer
 
-Only the coordinator or the merge steward edits `docs/wiki/`. Every other agent ends its hand-off with a `Wiki notes:`
-section (facts that changed, each with its source) and does not touch this folder. This keeps `index.md` and `log.md` free
+Only the coordinator or the merge steward edits `docs/wiki/`. This keeps `index.md` and `log.md` free
 of merge conflicts and the pages under one editor.
 
 ## Pages

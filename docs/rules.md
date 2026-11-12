@@ -44,14 +44,17 @@ changes here, every app's copy is updated in the same change.
     consistent (build new data, then swap).
 12. **The UI never times out a running job;** it shows "Still working".
 13. **Slow means two questions: more parallelism, or a cheaper operation** (merged 2026-11-12, user, with former rules 14,
-    15 and 51; ER-20). Measure both. (a) Parallel where it helps, bounded by the kind of work (CPU: cores−1 or the
-    Performance setting; SSD I/O 4-8; HDD 1-2; network a few per host; memory-heavy by RAM), at a lowered priority that
-    never starves (rule 52), with deterministic results. Multi-stage work is a pipeline (bounded queues, back-pressure,
-    cancel across stages, per-stage progress). (b) Cheaper: less work per item, no repeated work, a cheaper algorithm or
-    format, caching, batching, skipping. Hash while writing; never re-read a just-downloaded file. Thread counts default to
-    "Auto" and become a Setting only when a measurement shows users need it. A long or bulk operation's design has a short
-    "Parallelism and cost" note. IDs: number only new items in sorted canonical relative path order; existing IDs never
-    change; moved or renamed files are matched by path, then fingerprint. Results are recorded under rule 48.
+    15 and 51; ER-20). Measure both, in every design and every performance review. (a) Parallel where it helps, bounded by
+    the kind of work (CPU: cores−1 or the Performance setting; SSD I/O 4-8; HDD 1-2; network a few per host; memory-heavy
+    by RAM), at a lowered priority that never starves (rule 52), with deterministic results. Multi-stage work is a pipeline:
+    producers → bounded queue → workers, stage-specific thread counts, back-pressure, cancel across stages, per-stage
+    progress; determinism by commit-time ordering. IDs: number only new items in sorted canonical relative path order;
+    existing IDs never change; moved or renamed files are matched by path, then fingerprint. Hash while writing; never
+    re-read a just-downloaded file. Large downloads are segmented (Range) only where measured slow and the host supports
+    it, with per-host caps and 429 back-off. (b) Cheaper: less work per item, no repeated work, a cheaper algorithm or
+    format, caching, batching, skipping. Thread counts and similar tunables are Settings values with an "Auto" default,
+    validated in the engine, not constants. Every design or ADR with a long or bulk operation has a "Parallelism and cost"
+    section. Results are recorded under rule 48.
     *Why:* Debrief's import was bound by 2 Tantivy writer threads and a single-threaded catalogue, and regex was 38% of parse
     time; these were found by accident, and should be found by design.
 14. **Retired 2026-11-12 (user): merged into rule 13** (pipelines and ID ordering).
@@ -76,6 +79,7 @@ changes here, every app's copy is updated in the same change.
 22. **Every user-facing image (icons, store and README screenshots, product UI passes) gets an independent review;** an
     ADR or plan diagram is checked by its author (narrowed 2026-11-12, user; ER-23). Every Paddock image or status change
     also refreshes the profile repo.
+
 ## Platform and release
 23. **macOS bundles are ad-hoc sealed** (`signingIdentity: "-"`) and CI verifies them with `codesign --verify --deep
     --strict` on the .app and the DMG; release verification runs it on the published DMG. While ad-hoc, the hardened
@@ -110,8 +114,8 @@ changes here, every app's copy is updated in the same change.
     through it. Until v1, check every batch of bug reports for such patterns.
     The coordinator proposes the redesign in the same reply that relays the report (a question to the user, or a start under
     an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
-    Hooks that judge an agent's text (the recurring guard, the brief check) only warn; hooks that guard state (the cd guard,
-    safe-remove) still block (user, 2026-11-12).
+    Hooks that judge an agent's text (the recurring guard, `.claude/hooks/recurring-guard.sh`, planned, advisory) only warn; hooks that guard
+    state (the cd guard, safe-remove) still block (user, 2026-11-12).
 
 ## Throughput (user, 2026-10-24)
 41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the
@@ -218,6 +222,7 @@ changes here, every app's copy is updated in the same change.
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
+
 ## Thread priority (user, 2026-10-30)
 52. **Work a person waits for never runs at an OS's starvable background level.** Starvable levels: on macOS QoS
     `BACKGROUND`, process background (`PRIO_DARWIN_BG`, `taskpolicy -b`, `-c background` or `-c maintenance`) and
@@ -272,43 +277,47 @@ changes here, every app's copy is updated in the same change.
     ([lessons.md](lessons.md#a-discovery-file-is-a-hint-never-proof-2026-10-30-dyno)).
 
 ## Release path (user, 2026-10-30)
-54. **Every change that touches an app's release path builds that app's installers before it lands on main, once per train or batch that touches it (user, 2026-11-12), not once per branch.** The release
-    path is the release workflow, the shared app-release workflow, the bundle and prepare steps, the Tauri config and the
-    app's imports of shared packages.
+54. **Every change that touches an app's release path builds that app's installers before it lands on main, once per
+    train or batch that touches it (user, 2026-11-12), not once per branch.** The release path is the release workflow,
+    the shared app-release workflow, the bundle and prepare steps, the Tauri config and the app's imports of shared
+    packages.
     (a) The batch dispatches `<app>-release.yml` with gates on and the installers (bundle) built; passing tests alone is
     not enough.
     (b) Partly enforced: the ci-actions test (added on fix/dyno-bundle-ui) checks that every release workflow whose app
     imports `@decryp7/paddock-ui` builds the UI.
-    (c) Amendment of 2026-11-09 (ADR 0080 D13, accepted by the user): the release workflow dispatched for this rule skips its
-    gates only when a green `ci.yml` run on the same commit covered every gate it would run, compared job by job (the
-    affected plan and ADR 0080 D12 can leave legs out of `ci.yml`, and the release workflow then runs those legs, rule 71);
-    the installers are always built.
+    (c) Amendment of 2026-11-09 (ADR 0080 D13, accepted by the user): the release workflow dispatched for this rule
+    skips its gates only when a green `ci.yml` run on the same commit covered every gate it would run, compared job by
+    job (the affected plan and ADR 0080 D12 can leave legs out of `ci.yml`, and the release workflow then runs those
+    legs, rule 71); the installers are always built.
     *Why:* Dyno's release workflow had no `prepare: npm run build -w ui`. Tests passed, but every installer build failed
     on a clean runner; a leftover `ui/dist` had hidden it.
 
 ## Copies (user, 2026-10-31; ADR 0034, rule 40)
-55. **One implementation per mechanism; copies are registered and fixed together** (no trailers since 2026-11-12, user; the register is a to-do list). A mechanism that exists more
-    than once (a shared crate or package and an app's copy, or two apps' copies) is listed in `docs/known-copies.toml` with
-    its canonical implementation and, for each copy, the app that deletes it and the tag by which it is gone.
-    (a) A change that touches one member of a listed mechanism (its non-test source) makes the same change in every other
-    copy and in a built canonical, each with its own failing test first (rule 11), or names the copy it skipped, and why, in the commit body. Hand-written plugin wiring
-    (`kind = "wiring"`) is held to its delete-by tag only.
+55. **One implementation per mechanism; copies are registered and fixed together** (no trailers since 2026-11-12, user;
+    the register is a to-do list). A mechanism that exists more than once (a shared crate or package and an app's copy,
+    or two apps' copies) is listed in `docs/known-copies.toml` with its canonical implementation and, for each copy, the
+    app that deletes it and the tag by which it is gone.
+    (a) A change that touches one member of a listed mechanism (its non-test source) makes the same change in every
+    other copy and in a built canonical, each with its own failing test first (rule 11), or names the copy it skipped,
+    and why, in the commit body. Hand-written plugin wiring (`kind = "wiring"`) is held to its delete-by tag only.
     (b) A shared-code freeze (rule 1) does not freeze fixes to a listed mechanism: the fix lands in the canonical
     implementation and every copy in the same change. The shared API stays frozen.
     (c) A new copy is allowed only with its register entry, a delete-by tag and the reason, in the same change. An entry
     leaves the register with its copy's files.
     (d) A copy whose delete-by tag is reached is reported as a warning; it no longer blocks a tag (user, 2026-11-11: the
-    register is a to-do list). A delete-by date is changed in the register, with the reason in the commit body.
-    (e) Enforced by conformance check C58 (planned, ADR 0034 WP-1; not built yet). A register-only change is docs-only and
-    gets no CI run (rule 50), so the steward checks the register by hand before it lands. Once C58 exists, batches run
-    `copies --range <base>..HEAD` before pushing, and the steward runs `copies --tag <tag>` before creating a tag. Until
-    C58 exists, the reviewer and the steward check the register by hand.
-    *Why:* launchd's job report existed four times. The shared one already skipped nested blocks; Dyno's copy did not and
-    replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser driver
-    sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.
+    register is a to-do list). A delete-by date moves to a later release line (a higher major or minor version) only
+    with the user's approval, with the reason in the commit body.
+    (e) Enforced by conformance check C58 (planned, ADR 0034 WP-1; not built yet). A register-only change is docs-only
+    and gets no CI run (rule 50), so the steward checks the register by hand before it lands. Once C58 exists, batches
+    run `copies --range <base>..HEAD` before pushing, and the steward runs `copies --tag <tag>` before creating a tag.
+    Until C58 exists, the reviewer and the steward check the register by hand.
+    *Why:* launchd's job report existed four times. The shared one already skipped nested blocks; Dyno's copy did not
+    and replaced its healthy agent at every login (Dyno 1.0 blocker B4). The Windows network-sandbox fix of the browser
+    driver sat in the one copy no app used, and the EBADF fix had to be made in two IPC endpoints.
 
 ## Release checks (user, 2026-11-05; ER-33)
-71. **Retired 2026-11-12 (user): merged into ER-33** (a release check counts only if its precondition was verified and its probe has shown it can see the thing; otherwise `not measured`). A known-good peer run is needed only for VM release checks.
+71. **Retired 2026-11-12 (user): merged into ER-33** (a release check counts only if its precondition was verified and its probe has shown it can see the thing; otherwise `not measured`).
+
 ## Design decisions (user, 2026-11-11; ER-37)
 76. **Measure a design against common practice before paying for it.** Before an ADR or design is accepted, it states how
     comparable, well-known software handles the same problem (for example Visual Studio, VS Code, Chrome, Docker, Homebrew,

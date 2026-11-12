@@ -22,3 +22,5 @@ End with a clear verdict ("approve" / "not yet" or ship / fix / redo per item), 
 Check that the author ran the repository-wide gates, and run them yourself when the diff could affect them (without building in the author's worktree; use a scratch copy): `(cd conformance && npm test)`, the conformance line of `.gitea/workflows/ci.yml` (the `paddock-conformance.mjs --app paddock --root . --only ...` step) over the whole tree, `./dev gates check`, and for any change to a `Cargo.toml`, `cargo metadata --locked --format-version 1 >/dev/null` in that manifest's workspace and in each workspace whose Cargo.lock lists the changed crate (`grep -l`). A missing run is a P1.
 
 Wait with `./dev wait`; never `pgrep -f` on a string your own command contains.
+
+Is this more than comparable apps do? Name them and offer the common-practice option (ER-37).
