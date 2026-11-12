@@ -1,0 +1,1275 @@
+{
+ "_comment": "Known fixed budgets of ADR 0071 / C71 (a Duration or timeout under 40 s given to a wait or a start setting), by file and hash of the normalised line (line is for reading only). May only shrink; migrate a site to the condition wait (ready or exit) and delete its entry.",
+ "sites": [
+  {
+   "file": "apps/debrief/app/e2e/activity-errors.e2e.ts",
+   "line": 67,
+   "hash": "1109d7195985a884"
+  },
+  {
+   "file": "apps/debrief/app/e2e/dock.e2e.ts",
+   "line": 64,
+   "hash": "03071fc6ff9166f4"
+  },
+  {
+   "file": "apps/debrief/app/e2e/dock.e2e.ts",
+   "line": 146,
+   "hash": "20d7247e98e92904"
+  },
+  {
+   "file": "apps/debrief/app/e2e/jobs.e2e.ts",
+   "line": 131,
+   "hash": "360e99428f1b345c"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 49,
+   "hash": "0287c977a81d66ce"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 53,
+   "hash": "2c07f8c7289be69e"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 56,
+   "hash": "8f25609435c500ef"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 57,
+   "hash": "9adf9b75f96fc439"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 63,
+   "hash": "6847b4517d41a1b9"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 82,
+   "hash": "14eb6355a7e8486d"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 92,
+   "hash": "dfb5b5c1087ff797"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 95,
+   "hash": "3021d81d89bcc177"
+  },
+  {
+   "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
+   "line": 282,
+   "hash": "e5b2b78dd37bb966"
+  },
+  {
+   "file": "apps/debrief/app/e2e/profiling-navigation.e2e.ts",
+   "line": 51,
+   "hash": "0e64113e27e420ef"
+  },
+  {
+   "file": "apps/debrief/app/e2e/resilience-context-live.e2e.ts",
+   "line": 62,
+   "hash": "9bb20fd50066b734"
+  },
+  {
+   "file": "apps/debrief/app/e2e/resilience-context-live.e2e.ts",
+   "line": 84,
+   "hash": "bd82ca66ea067720"
+  },
+  {
+   "file": "apps/debrief/app/e2e/resilience-context-live.e2e.ts",
+   "line": 101,
+   "hash": "0287c977a81d66ce"
+  },
+  {
+   "file": "apps/debrief/app/e2e/resilience-panels.e2e.ts",
+   "line": 48,
+   "hash": "b8d0d0edf03269e0"
+  },
+  {
+   "file": "apps/debrief/app/e2e/store-pane.e2e.ts",
+   "line": 49,
+   "hash": "b8d0d0edf03269e0"
+  },
+  {
+   "file": "apps/debrief/app/e2e/timeline.e2e.ts",
+   "line": 110,
+   "hash": "b8d0d0edf03269e0"
+  },
+  {
+   "file": "apps/debrief/app/e2e/ux-home.e2e.ts",
+   "line": 116,
+   "hash": "ba05da472f00034f"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
+   "line": 112,
+   "hash": "206f8a6b3d8640a4"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
+   "line": 115,
+   "hash": "b7e1269d3179b163"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
+   "line": 124,
+   "hash": "09a139aee6ccf581"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
+   "line": 144,
+   "hash": "8c652b5267e94a90"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
+   "line": 148,
+   "hash": "09a139aee6ccf581"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 1087,
+   "hash": "95aab429f1af29ca"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/tests.rs",
+   "line": 44,
+   "hash": "4e176cc84d34e8bd"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lib.rs",
+   "line": 1266,
+   "hash": "5e357144c042ec53"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 988,
+   "hash": "639be9cfeebcec58"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/live.rs",
+   "line": 727,
+   "hash": "7013f0dc80f4f11f"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/snapshots.rs",
+   "line": 1245,
+   "hash": "e62bd42f05e82852"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/windows.rs",
+   "line": 417,
+   "hash": "b7e296d15cb35bea"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/windows.rs",
+   "line": 424,
+   "hash": "70d9b303400b6d6c"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/windows.rs",
+   "line": 547,
+   "hash": "497861cbbebd7662"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/workspace_commands.rs",
+   "line": 1033,
+   "hash": "d2b7853b092327a5"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/workspace_commands.rs",
+   "line": 1039,
+   "hash": "5d151640414272a4"
+  },
+  {
+   "file": "apps/debrief/app/src/app/ai/folder-setup/folder-setup.store.spec.ts",
+   "line": 117,
+   "hash": "cfe6a59bf8cad726"
+  },
+  {
+   "file": "apps/debrief/app/src/app/app.spec.ts",
+   "line": 25,
+   "hash": "1467e7e8f16a1b13"
+  },
+  {
+   "file": "apps/debrief/app/src/app/app.spec.ts",
+   "line": 45,
+   "hash": "728f5a8003bcda9d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/context/context.spec.ts",
+   "line": 23,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
+   "line": 736,
+   "hash": "e272f55e7ec51758"
+  },
+  {
+   "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
+   "line": 783,
+   "hash": "676993104842a43a"
+  },
+  {
+   "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
+   "line": 787,
+   "hash": "7cc1b1c6a5d6352d"
+  },
+  {
+   "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
+   "line": 813,
+   "hash": "7b94eae104c584c0"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/live-feed.spec.ts",
+   "line": 57,
+   "hash": "4a70e2e78f4a8ece"
+  },
+  {
+   "file": "apps/debrief/app/src/app/live/rules.spec.ts",
+   "line": 18,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/markers/marker-editor.spec.ts",
+   "line": 14,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/markers/marker-overrides.spec.ts",
+   "line": 15,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/markers/markers-manager.spec.ts",
+   "line": 15,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/plugins-panel/plugin-packages.spec.ts",
+   "line": 260,
+   "hash": "e891704f63bdac48"
+  },
+  {
+   "file": "apps/debrief/app/src/app/problems/problems.spec.ts",
+   "line": 326,
+   "hash": "c52ea8c0ecc3c491"
+  },
+  {
+   "file": "apps/debrief/app/src/app/problems/problems.spec.ts",
+   "line": 362,
+   "hash": "f57b3203c747cb46"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/pipeline-editor.spec.ts",
+   "line": 14,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/profile-edits.spec.ts",
+   "line": 30,
+   "hash": "1467e7e8f16a1b13"
+  },
+  {
+   "file": "apps/debrief/app/src/app/profile/profile.spec.ts",
+   "line": 22,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/settings/parsers/parsers-settings.spec.ts",
+   "line": 70,
+   "hash": "9253563be7dc7981"
+  },
+  {
+   "file": "apps/debrief/app/src/app/settings/parsers/parsers-settings.spec.ts",
+   "line": 114,
+   "hash": "59f860a82b144e05"
+  },
+  {
+   "file": "apps/debrief/app/src/app/share/dashboard/dashboard.spec.ts",
+   "line": 26,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/sources/encoding/encoding-dialog.spec.ts",
+   "line": 59,
+   "hash": "96a53200981b2680"
+  },
+  {
+   "file": "apps/debrief/app/src/app/undo/undo.spec.ts",
+   "line": 17,
+   "hash": "1976a64f6b3a590e"
+  },
+  {
+   "file": "apps/debrief/app/src/app/workspace/live-tail.spec.ts",
+   "line": 64,
+   "hash": "177c37586b8764aa"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/browser/gentle.rs",
+   "line": 197,
+   "hash": "62879e665560c54f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/browser/gentle.rs",
+   "line": 203,
+   "hash": "ecf4127389162870"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/browser/gentle.rs",
+   "line": 206,
+   "hash": "dc275f1c38fe5f1f"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/net.rs",
+   "line": 281,
+   "hash": "0048facccccd9480"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/net.rs",
+   "line": 295,
+   "hash": "020d7f8953e1a914"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/net_tls.rs",
+   "line": 59,
+   "hash": "0048facccccd9480"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/net_tls.rs",
+   "line": 101,
+   "hash": "0048facccccd9480"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/tests/it/net_tls.rs",
+   "line": 129,
+   "hash": "0048facccccd9480"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/regress_1_2.rs",
+   "line": 58,
+   "hash": "feadcee675d03840"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/child.rs",
+   "line": 506,
+   "hash": "5b0862aa0fa838e5"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/child.rs",
+   "line": 514,
+   "hash": "4760e036ba34a358"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/eventpipe/tests.rs",
+   "line": 209,
+   "hash": "4f243a81a6f9bf99"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
+   "line": 135,
+   "hash": "385c662ab7d8fcb8"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 622,
+   "hash": "84f1ca1714082916"
+  },
+  {
+   "file": "apps/dyno/app/e2e/dashboard-grid.spec.ts",
+   "line": 58,
+   "hash": "58911bdd7bc315a6"
+  },
+  {
+   "file": "apps/dyno/app/e2e/dashboard-grid.spec.ts",
+   "line": 69,
+   "hash": "2e679f752c2682e1"
+  },
+  {
+   "file": "apps/dyno/app/e2e/dashboard-grid.spec.ts",
+   "line": 71,
+   "hash": "25fd15dd987b41e6"
+  },
+  {
+   "file": "apps/dyno/app/e2e/dashboard-grid.spec.ts",
+   "line": 74,
+   "hash": "2e679f752c2682e1"
+  },
+  {
+   "file": "apps/dyno/app/e2e/dashboard-grid.spec.ts",
+   "line": 130,
+   "hash": "b49472a52bf92e53"
+  },
+  {
+   "file": "apps/dyno/app/e2e/dashboard-grid.spec.ts",
+   "line": 134,
+   "hash": "3bd02848450529fe"
+  },
+  {
+   "file": "apps/dyno/app/e2e/layout.spec.ts",
+   "line": 172,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/layout.spec.ts",
+   "line": 202,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/menu-bar-items-fit.spec.ts",
+   "line": 12,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/menu-bar-items-fit.spec.ts",
+   "line": 86,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/menu-bar-items-fit.spec.ts",
+   "line": 157,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-dialogs.spec.ts",
+   "line": 49,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-dialogs.spec.ts",
+   "line": 68,
+   "hash": "76d23ad58201a438"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-docs-dialogs.spec.ts",
+   "line": 54,
+   "hash": "44a26b5a19b1bed2"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-docs-dialogs.spec.ts",
+   "line": 77,
+   "hash": "76d23ad58201a438"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-helper.spec.ts",
+   "line": 20,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-helper.spec.ts",
+   "line": 32,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-helper.spec.ts",
+   "line": 44,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-network.spec.ts",
+   "line": 138,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 18,
+   "hash": "f10fd4a9764e1296"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 39,
+   "hash": "841ec89584288017"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
+   "line": 50,
+   "hash": "f10fd4a9764e1296"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-wake.spec.ts",
+   "line": 106,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots-wol.spec.ts",
+   "line": 136,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/screenshots.spec.ts",
+   "line": 436,
+   "hash": "8c7e829e49cbb1f1"
+  },
+  {
+   "file": "apps/dyno/app/e2e/tray-fit.spec.ts",
+   "line": 42,
+   "hash": "ae2ee7504b1f72b4"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-drag-ghost.spec.ts",
+   "line": 37,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 60,
+   "hash": "9d3206aa233abdaf"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 159,
+   "hash": "3008643950efa350"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 169,
+   "hash": "3f507fa9f10334d1"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 215,
+   "hash": "aae94af54e11573a"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 216,
+   "hash": "380d9174ecfe81df"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 224,
+   "hash": "71313b4ae7c07e25"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 226,
+   "hash": "380d9174ecfe81df"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 233,
+   "hash": "99b24e76107ec0d5"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 234,
+   "hash": "380d9174ecfe81df"
+  },
+  {
+   "file": "apps/dyno/app/e2e/widget-lists.spec.ts",
+   "line": 263,
+   "hash": "3f507fa9f10334d1"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 460,
+   "hash": "3b1612fbbdd37813"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 1160,
+   "hash": "3b1612fbbdd37813"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 932,
+   "hash": "639ad5f59fc6dc37"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 968,
+   "hash": "6c10e5ec03463c29"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 980,
+   "hash": "e002dc78fbb02d39"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 992,
+   "hash": "6c10e5ec03463c29"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 1017,
+   "hash": "6c10e5ec03463c29"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 1042,
+   "hash": "6c10e5ec03463c29"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 1091,
+   "hash": "d7f7492e0436472b"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 1756,
+   "hash": "9e7f282e8bebacb7"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 2015,
+   "hash": "3dadf225ff466825"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/login.rs",
+   "line": 2034,
+   "hash": "3dadf225ff466825"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/service_ops.rs",
+   "line": 169,
+   "hash": "e2113a7d44b08a83"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/service_ops.rs",
+   "line": 174,
+   "hash": "6c10e5ec03463c29"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/tests/shell.rs",
+   "line": 540,
+   "hash": "5d151640414272a4"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/tests/shell.rs",
+   "line": 547,
+   "hash": "b27201b7619c5bd4"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/tests/shell.rs",
+   "line": 624,
+   "hash": "94f4d2aafad68dfd"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/settings/tool-card.spec.ts",
+   "line": 49,
+   "hash": "18b31dc20a466455"
+  },
+  {
+   "file": "apps/dyno/app/src/app/state/tool.store.spec.ts",
+   "line": 43,
+   "hash": "b1580e7e06540a58"
+  },
+  {
+   "file": "apps/dyno/app/src/app/state/tool.store.spec.ts",
+   "line": 53,
+   "hash": "c372c324dd49df21"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/firewall.rs",
+   "line": 503,
+   "hash": "d5bbc66b7f026a50"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/inventory.rs",
+   "line": 149,
+   "hash": "0889d0f16f7743b7"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 180,
+   "hash": "f95181b3ea6d4da4"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 185,
+   "hash": "87084a1b9228bfcd"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 199,
+   "hash": "c4558484a46a9082"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 208,
+   "hash": "82a0d688c5380627"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 231,
+   "hash": "c4708bbbb19949cc"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 308,
+   "hash": "09a139aee6ccf581"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 463,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 1344,
+   "hash": "565b15ba4661f22f"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
+   "line": 1378,
+   "hash": "8385d6af9e19615f"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/helper_live_via.rs",
+   "line": 70,
+   "hash": "c76f077e0c8484f1"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/issues.rs",
+   "line": 434,
+   "hash": "fafe21247371fe1c"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 391,
+   "hash": "630ed60df996e2e8"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 544,
+   "hash": "67e828544fcb8bf7"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 579,
+   "hash": "741cfc3659de3f35"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 632,
+   "hash": "0835412eb3e823eb"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
+   "line": 637,
+   "hash": "484cb48df828d12f"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/lookups.rs",
+   "line": 75,
+   "hash": "84f1ca1714082916"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/wakes.rs",
+   "line": 201,
+   "hash": "5b38abddaf5e60a1"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/wakes.rs",
+   "line": 209,
+   "hash": "d0ff389a3a9ec7ec"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/wakes.rs",
+   "line": 246,
+   "hash": "9f3629c256b354cf"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/wakes.rs",
+   "line": 250,
+   "hash": "5b38abddaf5e60a1"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/wakes.rs",
+   "line": 256,
+   "hash": "dfe39c35f8a5692e"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/wakes.rs",
+   "line": 259,
+   "hash": "36115259d75c0aa5"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-bench/src/emit.rs",
+   "line": 210,
+   "hash": "09a139aee6ccf581"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-bench/src/emit.rs",
+   "line": 215,
+   "hash": "6de9b6c8828cf336"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-bench/src/emit.rs",
+   "line": 227,
+   "hash": "bd6ee2da17a0726f"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-helper/src/lifecycle.rs",
+   "line": 271,
+   "hash": "4433de47052fa234"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-plugin-host/tests/processes.rs",
+   "line": 28,
+   "hash": "f9c8bae2570133ac"
+  },
+  {
+   "file": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+   "line": 276,
+   "hash": "8a8a8dc3410fb4e4"
+  },
+  {
+   "file": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+   "line": 279,
+   "hash": "30fe8ee27b3cba2c"
+  },
+  {
+   "file": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+   "line": 290,
+   "hash": "cabfe09b5633a7c4"
+  },
+  {
+   "file": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+   "line": 306,
+   "hash": "3641e7547be99ab6"
+  },
+  {
+   "file": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+   "line": 318,
+   "hash": "cabfe09b5633a7c4"
+  },
+  {
+   "file": "apps/pitcrew/crates/notify-channels/src/tests.rs",
+   "line": 335,
+   "hash": "ef127326f9377269"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs",
+   "line": 203,
+   "hash": "082ea6dc96b24c63"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/app.ts",
+   "line": 62,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/layout.e2e.ts",
+   "line": 212,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/capture.shot.ts",
+   "line": 259,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/widgets.shot.ts",
+   "line": 67,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/widgets.shot.ts",
+   "line": 82,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/wp25.shot.ts",
+   "line": 79,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/pitwall/app/e2e/screenshots/wp25.shot.ts",
+   "line": 117,
+   "hash": "6774ec480674d94f"
+  },
+  {
+   "file": "apps/pitwall/app/src-tauri/src/chat_host/chats_tests.rs",
+   "line": 248,
+   "hash": "49cfc3a5832cf25e"
+  },
+  {
+   "file": "apps/pitwall/app/src-tauri/src/chat_host/chats_tests.rs",
+   "line": 380,
+   "hash": "49cfc3a5832cf25e"
+  },
+  {
+   "file": "apps/pitwall/app/src-tauri/src/chat_host/tests.rs",
+   "line": 73,
+   "hash": "5888d49e7b2fc471"
+  },
+  {
+   "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
+   "line": 248,
+   "hash": "f028ddd362ab470c"
+  },
+  {
+   "file": "apps/spotter/crates/spotter-render/src/launch.rs",
+   "line": 710,
+   "hash": "96b36236ccb611ba"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/it/support.rs",
+   "line": 150,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/it/support.rs",
+   "line": 172,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/tauri.rs",
+   "line": 105,
+   "hash": "5b38abddaf5e60a1"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/tauri.rs",
+   "line": 108,
+   "hash": "5b38abddaf5e60a1"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/tauri.rs",
+   "line": 271,
+   "hash": "4cd14be8fc99dbef"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/tauri.rs",
+   "line": 291,
+   "hash": "12eeb6d02feac1c2"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/tauri.rs",
+   "line": 322,
+   "hash": "5905f269301af4a4"
+  },
+  {
+   "file": "crates/paddock-assistant/tests/tauri.rs",
+   "line": 378,
+   "hash": "5905f269301af4a4"
+  },
+  {
+   "file": "crates/paddock-channels/src/tauri/tests.rs",
+   "line": 126,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-channels/tests/it/control.rs",
+   "line": 25,
+   "hash": "888e4c885dba1783"
+  },
+  {
+   "file": "crates/paddock-channels/tests/it/control.rs",
+   "line": 80,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-channels/tests/it/control.rs",
+   "line": 284,
+   "hash": "127cad54c03b645f"
+  },
+  {
+   "file": "crates/paddock-channels/tests/it/control.rs",
+   "line": 293,
+   "hash": "127cad54c03b645f"
+  },
+  {
+   "file": "crates/paddock-channels/tests/it/control.rs",
+   "line": 316,
+   "hash": "127cad54c03b645f"
+  },
+  {
+   "file": "crates/paddock-channels/tests/it/control.rs",
+   "line": 364,
+   "hash": "6ad4c1e0b93a3f5e"
+  },
+  {
+   "file": "crates/paddock-chromium/tests/it/real_browser.rs",
+   "line": 202,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-chromium/tests/it/real_browser.rs",
+   "line": 457,
+   "hash": "0564475c4ca2e4f6"
+  },
+  {
+   "file": "crates/paddock-diag/src/tauri/tests.rs",
+   "line": 94,
+   "hash": "c1204425d52a3934"
+  },
+  {
+   "file": "crates/paddock-diag/src/tauri/tests.rs",
+   "line": 169,
+   "hash": "09592fb8b436e69f"
+  },
+  {
+   "file": "crates/paddock-dialogs/src/tauri/tests.rs",
+   "line": 941,
+   "hash": "75d60138bf7d7e54"
+  },
+  {
+   "file": "crates/paddock-files/src/tauri/tests.rs",
+   "line": 167,
+   "hash": "fa5391faa3f5339e"
+  },
+  {
+   "file": "crates/paddock-files/src/tauri/tests.rs",
+   "line": 195,
+   "hash": "52496e9beafe84ce"
+  },
+  {
+   "file": "crates/paddock-files/src/tauri/tests.rs",
+   "line": 203,
+   "hash": "52496e9beafe84ce"
+  },
+  {
+   "file": "crates/paddock-files/src/tauri/tests.rs",
+   "line": 205,
+   "hash": "52496e9beafe84ce"
+  },
+  {
+   "file": "crates/paddock-files/src/tauri/tests.rs",
+   "line": 292,
+   "hash": "4f5608a3cc9f9efd"
+  },
+  {
+   "file": "crates/paddock-health/src/health.rs",
+   "line": 401,
+   "hash": "489545e1b508c172"
+  },
+  {
+   "file": "crates/paddock-health/src/notify/writer.rs",
+   "line": 228,
+   "hash": "389a4bfa2071523f"
+  },
+  {
+   "file": "crates/paddock-health/src/notify/writer.rs",
+   "line": 271,
+   "hash": "a56d7202da2e1d2e"
+  },
+  {
+   "file": "crates/paddock-health/src/notify/writer.rs",
+   "line": 286,
+   "hash": "41feeac8b7f6f18c"
+  },
+  {
+   "file": "crates/paddock-health/src/notify/writer.rs",
+   "line": 324,
+   "hash": "b1b5868fddc54b8a"
+  },
+  {
+   "file": "crates/paddock-health/src/tauri/os_tests.rs",
+   "line": 125,
+   "hash": "84f1ca1714082916"
+  },
+  {
+   "file": "crates/paddock-health/src/tauri/tests.rs",
+   "line": 208,
+   "hash": "84f1ca1714082916"
+  },
+  {
+   "file": "crates/paddock-ipc/src/child.rs",
+   "line": 356,
+   "hash": "4d5943159fc08c3b"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1271,
+   "hash": "896497588f0e6f25"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1330,
+   "hash": "5000346a5defa4ea"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1363,
+   "hash": "6d00eff513507941"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1369,
+   "hash": "ebe7c89b9658a76f"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1375,
+   "hash": "2f9f4afc4efe35d1"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1388,
+   "hash": "e5f58bf792ea9c86"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1436,
+   "hash": "728033546948769a"
+  },
+  {
+   "file": "crates/paddock-ipc/src/peer.rs",
+   "line": 1464,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-mcp/src/client/connect.rs",
+   "line": 490,
+   "hash": "da3383e59c82fb50"
+  },
+  {
+   "file": "crates/paddock-mcp/src/server.rs",
+   "line": 892,
+   "hash": "670d52a406429e43"
+  },
+  {
+   "file": "crates/paddock-mcp/tests/it/behaviour.rs",
+   "line": 291,
+   "hash": "670d52a406429e43"
+  },
+  {
+   "file": "crates/paddock-mcp/tests/it/client.rs",
+   "line": 325,
+   "hash": "4a159118df479ee8"
+  },
+  {
+   "file": "crates/paddock-mcp/tests/it/transports.rs",
+   "line": 263,
+   "hash": "0889d0f16f7743b7"
+  },
+  {
+   "file": "crates/paddock-net/tests/it/real.rs",
+   "line": 313,
+   "hash": "fe03d20b31715e04"
+  },
+  {
+   "file": "crates/paddock-net/tests/it/real.rs",
+   "line": 330,
+   "hash": "fe03d20b31715e04"
+  },
+  {
+   "file": "crates/paddock-packs/src/tauri/tests.rs",
+   "line": 163,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-power/src/event_thread.rs",
+   "line": 164,
+   "hash": "84f1ca1714082916"
+  },
+  {
+   "file": "crates/paddock-service/src/control.rs",
+   "line": 864,
+   "hash": "fc34e30a70258b71"
+  },
+  {
+   "file": "crates/paddock-service/src/privileged/install_tests.rs",
+   "line": 1031,
+   "hash": "4015399f51e141ad"
+  },
+  {
+   "file": "crates/paddock-service/src/service_main.rs",
+   "line": 910,
+   "hash": "d8c180557e89cdf5"
+  },
+  {
+   "file": "crates/paddock-service/src/service_main.rs",
+   "line": 918,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-service/src/tauri/tests.rs",
+   "line": 111,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-shell/src/builder/tests.rs",
+   "line": 186,
+   "hash": "c267bc15def1d004"
+  },
+  {
+   "file": "crates/paddock-shell/src/builder/tests.rs",
+   "line": 478,
+   "hash": "c267bc15def1d004"
+  },
+  {
+   "file": "crates/paddock-shell/tests/it/plugin.rs",
+   "line": 613,
+   "hash": "2d414349976d5340"
+  },
+  {
+   "file": "crates/paddock-startup/src/config.rs",
+   "line": 182,
+   "hash": "a03d09d2a5d4d589"
+  },
+  {
+   "file": "crates/paddock-startup/src/tauri/tests.rs",
+   "line": 364,
+   "hash": "e14f0fdf75a0d271"
+  },
+  {
+   "file": "crates/paddock-startup/src/tauri/tests.rs",
+   "line": 1064,
+   "hash": "fd4478a7cf46362f"
+  },
+  {
+   "file": "crates/paddock-storage/src/tauri/tests.rs",
+   "line": 67,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-storage/src/tauri/tests.rs",
+   "line": 157,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-storage/src/tauri/tests.rs",
+   "line": 252,
+   "hash": "37b2587c34f6c0aa"
+  },
+  {
+   "file": "crates/paddock-storage/src/tauri/tests.rs",
+   "line": 288,
+   "hash": "2069be913d71a9e8"
+  },
+  {
+   "file": "crates/paddock-storage/src/tauri/tests.rs",
+   "line": 304,
+   "hash": "62785406c4ace255"
+  },
+  {
+   "file": "crates/paddock-updater/src/tauri/tests.rs",
+   "line": 180,
+   "hash": "ff5452e74d887918"
+  },
+  {
+   "file": "crates/paddock-watch/tests/it/debounce.rs",
+   "line": 97,
+   "hash": "5d81b8a92e9a785c"
+  },
+  {
+   "file": "crates/paddock-watch/tests/it/native.rs",
+   "line": 28,
+   "hash": "7da214ff96c1146d"
+  },
+  {
+   "file": "crates/paddock-watch/tests/it/native.rs",
+   "line": 35,
+   "hash": "7da214ff96c1146d"
+  },
+  {
+   "file": "crates/paddock-window/src/tauri/tests.rs",
+   "line": 1512,
+   "hash": "7da214ff96c1146d"
+  },
+  {
+   "file": "tools/paddock-dev/tests/it/worktree/mod.rs",
+   "line": 172,
+   "hash": "5d151640414272a4"
+  }
+ ]
+}

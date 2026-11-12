@@ -44,7 +44,8 @@
    "C99 reads conformance/src/a.mjs"
   ],
   "conformance": [
-   "conformance/src/a.mjs"
+   "conformance/src/a.mjs",
+   "conformance always runs"
   ],
   "tools": [
    "scripts/a.mjs"

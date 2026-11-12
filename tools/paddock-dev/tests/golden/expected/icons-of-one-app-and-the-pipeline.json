@@ -3,7 +3,7 @@
  "crates": false,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "c99": false,
  "tools": false,
  "icons": true,
@@ -37,6 +37,9 @@
   ],
   "app:z": [
    "icons icons/tools/make.mjs"
+  ],
+  "conformance": [
+   "conformance always runs"
   ],
   "icons": [
    "icons/x/a.svg",

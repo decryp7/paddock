@@ -54,6 +54,8 @@ libc.workspace = true
 windows.workspace = true
 
 [dev-dependencies]
+# Condition waits in the tests (ADR 0041, 0071).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The app's allocator, so benches/engine.rs measures what ships.
 debrief-alloc = { path = "../debrief-alloc" }
 # Benchmarks (benches/engine.rs) with HTML reports under target/criterion.

@@ -10,7 +10,7 @@ use debrief_plugin_api::protocol::{PluginRequest, ToolFail, MAX_LOG_LINE};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const ID: &str = "test.fake";
 /// The log the host keeps of the fake plugin's elevated process.
@@ -82,16 +82,9 @@ fn pattern(n: usize) -> Vec<u8> {
     (0..n).map(|i| (i % 251) as u8).collect()
 }
 
-/// Waits up to 10 s for `cond`.
-fn eventually(mut cond: impl FnMut() -> bool) -> bool {
-    let t = Instant::now();
-    while t.elapsed() < Duration::from_secs(60) {
-        if cond() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    false
+/// Waits for `cond` (a hang guard bounds it, never a verdict).
+fn eventually(cond: impl FnMut() -> bool) -> bool {
+    paddock_testkit::poll_until_within(paddock_testkit::HANG_GUARD, cond)
 }
 
 #[test]

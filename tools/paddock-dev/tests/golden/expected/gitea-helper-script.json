@@ -44,7 +44,8 @@
    "C99 reads conformance/src/util/paths.sh"
   ],
   "conformance": [
-   "conformance/src/util/paths.sh"
+   "conformance/src/util/paths.sh",
+   "conformance always runs"
   ],
   "crates": [
    "conformance/src/util/paths.sh used by ci.yml, job crates"

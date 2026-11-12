@@ -1238,58 +1238,13 @@
   },
   {
    "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
-   "line": 138,
-   "hash": "cb140ea841063684"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
-   "line": 155,
-   "hash": "ad246e7f5236447e"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
    "line": 162,
    "hash": "fba74e5504c3f62f"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
-   "line": 205,
-   "hash": "ad246e7f5236447e"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
-   "line": 216,
-   "hash": "a837550434f7c685"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
-   "line": 226,
-   "hash": "ad246e7f5236447e"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/src/peer/tests.rs",
-   "line": 233,
-   "hash": "a837550434f7c685"
   },
   {
    "file": "apps/debrief/crates/debrief-ipc/src/supervisor.rs",
    "line": 400,
    "hash": "cb140ea841063684"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/tests/it/child_log.rs",
-   "line": 23,
-   "hash": "c0f7df0977a37afe"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/tests/it/launch.rs",
-   "line": 67,
-   "hash": "c0f7df0977a37afe"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ipc/tests/it/launch.rs",
-   "line": 481,
-   "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/debrief/crates/debrief-monitor/src/dotnet_win_tests.rs",
@@ -1425,11 +1380,6 @@
    "file": "apps/debrief/crates/debrief-plugin-dumps/src/capture.rs",
    "line": 320,
    "hash": "c67ca85d04e6c3ec"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-plugin-host/tests/it/elevated_output.rs",
-   "line": 92,
-   "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-native/src/captures.rs",
