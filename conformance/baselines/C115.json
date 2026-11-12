@@ -1,0 +1,305 @@
+{
+ "_comment": "Known sites of C115 (a cleanup touches only its own items): `rm -r` on a bare variable in scripts that remove their own mktemp folder, by file and hash of the normalised line (line is for reading only). May only shrink; scope the cleanup (an owned prefix) and delete its entry.",
+ "sites": [
+  {
+   "file": ".gitea/actions/host-tools/action.yml",
+   "line": 34,
+   "hash": "2122dea41bf6fafd"
+  },
+  {
+   "file": ".gitea/actions/node-caches/action.yml",
+   "line": 43,
+   "hash": "bcbcfc67de3406ea"
+  },
+  {
+   "file": ".gitea/actions/setup-rust/action.yml",
+   "line": 107,
+   "hash": "2122dea41bf6fafd"
+  },
+  {
+   "file": ".gitea/actions/stable-workspace/action.yml",
+   "line": 87,
+   "hash": "308947ff5a9ca5e9"
+  },
+  {
+   "file": ".gitea/actions/stable-workspace/action.yml",
+   "line": 94,
+   "hash": "20ccf0f0320a68b1"
+  },
+  {
+   "file": ".gitea/workflows/service-smoke.yml",
+   "line": 53,
+   "hash": "468d60eefde677ad"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh",
+   "line": 44,
+   "hash": "9298b38440afa974"
+  },
+  {
+   "file": "apps/debrief/scripts/ci/macos-smoke.sh",
+   "line": 27,
+   "hash": "63018c22ecc269ac"
+  },
+  {
+   "file": "apps/debrief/scripts/ci/windows-node-modules.sh",
+   "line": 41,
+   "hash": "a9479bb6039f973b"
+  },
+  {
+   "file": "apps/debrief/scripts/ci/windows-node-modules.sh",
+   "line": 46,
+   "hash": "00d48c995f4ef0ae"
+  },
+  {
+   "file": "apps/debrief/scripts/ci/windows-node-modules.sh",
+   "line": 50,
+   "hash": "d2bcbb7c4667b303"
+  },
+  {
+   "file": "apps/debrief/scripts/perf/perf-import.sh",
+   "line": 16,
+   "hash": "77b9eed00fd77360"
+  },
+  {
+   "file": "apps/dyno/scripts/check-bundle.sh",
+   "line": 65,
+   "hash": "dd1ceaaeff9af454"
+  },
+  {
+   "file": "apps/pitwall/scripts/macos-verify.sh",
+   "line": 77,
+   "hash": "3e47cae73b91c147"
+  },
+  {
+   "file": "conformance/ci/job-isolation.sh",
+   "line": 178,
+   "hash": "3a4eb424992eaddb"
+  },
+  {
+   "file": "conformance/ci/job-tmpdir.sh",
+   "line": 134,
+   "hash": "b5c383c8cafb12e3"
+  },
+  {
+   "file": "conformance/ci/job-tmpdir.sh",
+   "line": 146,
+   "hash": "88828da3160ea13d"
+  },
+  {
+   "file": "conformance/ci/job-tmpdir.sh",
+   "line": 156,
+   "hash": "9cb843ea621be30d"
+  },
+  {
+   "file": "conformance/ci/kept-clone.sh",
+   "line": 157,
+   "hash": "b6d2bf1036689037"
+  },
+  {
+   "file": "conformance/ci/kept-clone.sh",
+   "line": 193,
+   "hash": "e735085710370809"
+  },
+  {
+   "file": "conformance/ci/kept-clone.sh",
+   "line": 234,
+   "hash": "ad7e2474736d18ec"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-dyno-e2e.ps1",
+   "line": 22,
+   "hash": "eeaa3714e3701b2f"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-dyno-e2e.ps1",
+   "line": 75,
+   "hash": "fb25348ac55df69a"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 145,
+   "hash": "f27635d2d4750ec3"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 164,
+   "hash": "f27635d2d4750ec3"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 165,
+   "hash": "eddc6caa54619ae2"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 281,
+   "hash": "3d7508abd178750a"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 305,
+   "hash": "4cd41770280c6d94"
+  },
+  {
+   "file": "crates/paddock-setup/nsis/test/run-harness.ps1",
+   "line": 311,
+   "hash": "4cd41770280c6d94"
+  },
+  {
+   "file": "dev",
+   "line": 223,
+   "hash": "174cd70a75d4d26d"
+  },
+  {
+   "file": "dev",
+   "line": 228,
+   "hash": "174cd70a75d4d26d"
+  },
+  {
+   "file": "dev",
+   "line": 241,
+   "hash": "174cd70a75d4d26d"
+  },
+  {
+   "file": "dev",
+   "line": 247,
+   "hash": "174cd70a75d4d26d"
+  },
+  {
+   "file": "dev",
+   "line": 252,
+   "hash": "174cd70a75d4d26d"
+  },
+  {
+   "file": "dev",
+   "line": 255,
+   "hash": "174cd70a75d4d26d"
+  },
+  {
+   "file": "dev",
+   "line": 316,
+   "hash": "3a270006fc7376fa"
+  },
+  {
+   "file": "dev",
+   "line": 334,
+   "hash": "59ad56995bb513bd"
+  },
+  {
+   "file": "scripts/shell-demo/build-linux-arm64.sh",
+   "line": 37,
+   "hash": "bde95ebb929a6a61"
+  },
+  {
+   "file": "scripts/shell-demo/smoke-desktop-linux.sh",
+   "line": 56,
+   "hash": "41735691435f448c"
+  },
+  {
+   "file": "scripts/shell-demo/smoke-service-update-linux.sh",
+   "line": 46,
+   "hash": "3238373214fc7b5a"
+  },
+  {
+   "file": "scripts/shell-demo/smoke-service-update-linux.sh",
+   "line": 56,
+   "hash": "d9924a76eb5bc285"
+  },
+  {
+   "file": "scripts/shell-demo/smoke-service-update-linux.sh",
+   "line": 62,
+   "hash": "e6645769b3c5028e"
+  },
+  {
+   "file": "scripts/shell-demo/smoke-service-update.sh",
+   "line": 52,
+   "hash": "3238373214fc7b5a"
+  },
+  {
+   "file": "scripts/shell-demo/smoke-service-update.sh",
+   "line": 72,
+   "hash": "b895dba15d59ae12"
+  },
+  {
+   "file": "scripts/shell-demo/smoke-service-update.sh",
+   "line": 79,
+   "hash": "4bb72db0ec67e256"
+  },
+  {
+   "file": "scripts/vm-lock.sh",
+   "line": 91,
+   "hash": "32c58f509cf0fffe"
+  },
+  {
+   "file": "scripts/vm-smoke/checks.mjs",
+   "line": 204,
+   "hash": "d6c1c83bcb31a1f4"
+  },
+  {
+   "file": "scripts/vm-smoke/run-win.mjs",
+   "line": 160,
+   "hash": "14aba2302df497de"
+  },
+  {
+   "file": "scripts/vm-smoke/win-act.mjs",
+   "line": 18,
+   "hash": "7c0699aff0bfcd05"
+  },
+  {
+   "file": "scripts/vm-smoke/win-helper.mjs",
+   "line": 226,
+   "hash": "ee59f757e07f76a2"
+  },
+  {
+   "file": "scripts/vm-smoke/win-helper.mjs",
+   "line": 245,
+   "hash": "5f7c903a1d92bdab"
+  },
+  {
+   "file": "scripts/vm-smoke/win-helper.mjs",
+   "line": 251,
+   "hash": "7bdf04fb286bc579"
+  },
+  {
+   "file": "scripts/vm-smoke/win-helper.mjs",
+   "line": 282,
+   "hash": "144a8ad5fb375cb8"
+  },
+  {
+   "file": "scripts/vm-win/prepare.sh",
+   "line": 100,
+   "hash": "c61417826abc194b"
+  },
+  {
+   "file": "scripts/vm-win/prepare.sh",
+   "line": 127,
+   "hash": "c61417826abc194b"
+  },
+  {
+   "file": "scripts/vm-win/prepare.sh",
+   "line": 149,
+   "hash": "277956ae8b500ae1"
+  },
+  {
+   "file": "scripts/vm-win/prepare.sh",
+   "line": 154,
+   "hash": "77e63cdb0e9fe4cb"
+  },
+  {
+   "file": "tools/macos-vm-smoke.sh",
+   "line": 97,
+   "hash": "694403570e4770bf"
+  },
+  {
+   "file": "tools/macos-vm-smoke.sh",
+   "line": 99,
+   "hash": "1c2b134ab1837f61"
+  },
+  {
+   "file": "tools/prune-build-folders.sh",
+   "line": 37,
+   "hash": "1621e509e581b8ec"
+  }
+ ]
+}

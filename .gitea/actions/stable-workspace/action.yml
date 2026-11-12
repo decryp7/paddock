@@ -96,6 +96,7 @@ runs:
           git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD &&
             [ "$(git -C "$stable" rev-parse FETCH_HEAD)" = "$sha" ] &&
             git -C "$stable" checkout -q -f --detach "$sha" &&
+            # conformance: scoped-cleanup — $stable is this action's own kept clone, never a shared checkout
             git -C "$stable" clean -q -ffd
         }
         # An unusable move must never fail the job: it only costs the cache hits of the workspace crates (a hang does: it

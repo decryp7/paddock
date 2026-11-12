@@ -313,7 +313,7 @@ const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, encoding:
  * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash), or null with the
  * reason it could not be measured. A baseline that does not exist at the base is the first introduction: nothing was added.
  */
-export function baselineGrowth(ctx, current) {
+export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
   const git = ctx.options.git ?? defaultGit(ctx.root);
   let base;
   let text;
@@ -326,7 +326,7 @@ export function baselineGrowth(ctx, current) {
     return { reason: `no merge base (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
   }
   try {
-    text = git(['show', `${base}:${BASELINE_PATH}`]);
+    text = git(['show', `${base}:${path}`]);
   } catch (e) {
     if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [] };
     return { reason: `the baseline at ${base.slice(0, 9)} cannot be read` };

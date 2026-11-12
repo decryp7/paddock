@@ -191,7 +191,7 @@ fn no_force_push_decides_the_corpus_as_the_shell_hook_did() {
 #[test]
 fn the_rules_are_registered_in_this_order() {
     let ids: Vec<&str> = rules::all().iter().map(|r| r.id()).collect();
-    assert_eq!(ids, ["no-pgrep-wait", "no-force-push", "no-unbounded-wait"]);
+    assert_eq!(ids, ["no-pgrep-wait", "no-force-push", "no-unbounded-wait", "no-unscoped-cleanup"]);
 }
 
 #[test]
