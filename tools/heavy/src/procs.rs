@@ -60,13 +60,14 @@ impl Procs for OsProcs {
         if pid == 0 || i32::try_from(pid).is_err() {
             return Presence::Gone;
         }
-        let start = paddock_proc::ProcessId::of(pid).map(|p| p.started().as_micros());
+        let id = paddock_proc::ProcessId::of(pid);
+        let start = id.map(|p| p.started().as_micros());
         if !crate::probe::exists(pid) {
             return Presence::Gone;
         }
         // A zombie shows a start time but is not running (a container whose PID 1 never reaps would hold the lock forever).
-        // An unreadable process (pid 1 to a non-root macOS user) is unknown, not gone: `may_be_alive` counts unknown as alive.
-        if start.is_some() && !paddock_proc::may_be_alive(pid) {
+        // An unreadable process (pid 1 to a non-root macOS user) is unknown, not gone: `Presence::may_be_alive` counts unknown as alive.
+        if id.is_some_and(|p| !p.presence().may_be_alive()) {
             return Presence::Gone;
         }
         Presence::Present { start_micros: start }
