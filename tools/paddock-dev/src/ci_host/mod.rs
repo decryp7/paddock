@@ -186,16 +186,14 @@ pub fn tail_flat(text: &str, n: usize) -> String {
 /// Whether `program` is on `PATH` (`command -v`), by looking at the folders of the job's own `PATH`.
 pub fn on_path(env: &HashMap<String, String>, program: &str) -> bool {
     let Some(path) = env.get("PATH") else { return false };
-    std::env::split_paths(path).any(|d| {
-        let base = d.join(program);
-        if cfg!(windows) {
-            ["", ".exe", ".cmd", ".bat"]
-                .iter()
-                .any(|e| std::path::PathBuf::from(format!("{}{e}", base.display())).is_file())
-        } else {
-            is_executable(&base)
-        }
-    })
+    let pathext = env.get("PATHEXT").map(String::as_str);
+    crate::release_isolation::pathfind::find_program(
+        path,
+        program,
+        cfg!(windows),
+        &crate::release_isolation::pathfind::extensions(pathext),
+    )
+    .is_some()
 }
 
 /// A file with an execute bit (any file on Windows).

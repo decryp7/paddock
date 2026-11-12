@@ -234,7 +234,7 @@ mod tests {
         (d, a)
     }
 
-    // Windows cannot read other processes' folders, so it never judges a folder unused: see the test below.
+    // Reading other processes' folders is not implemented on Windows (ADR 0083 §1), so it never judges a folder unused: see the test below.
     #[cfg(not(windows))]
     #[test]
     fn the_default_is_a_dry_run_that_removes_nothing_and_names_what_it_would() {
@@ -247,7 +247,7 @@ mod tests {
         }
     }
 
-    // Windows cannot read other processes' folders, so it never judges a folder unused: see the test below.
+    // Reading other processes' folders is not implemented on Windows (ADR 0083 §1), so it never judges a folder unused: see the test below.
     #[cfg(not(windows))]
     #[test]
     fn apply_removes_only_the_stale_recorded_build_folder_and_logs_its_path_and_size() {
@@ -269,7 +269,7 @@ mod tests {
         assert_eq!(r.data["removed"].as_array().unwrap().len(), 1);
     }
 
-    // Windows cannot read other processes' folders, so it never judges a folder unused: see the test below.
+    // Reading other processes' folders is not implemented on Windows (ADR 0083 §1), so it never judges a folder unused: see the test below.
     #[cfg(not(windows))]
     #[test]
     fn a_folder_used_after_it_was_judged_removable_is_judged_again_and_kept() {
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(r.data["removed"].as_array().unwrap().len(), 0);
     }
 
-    /// Windows cannot read what other processes use, so a dry run would remove nothing and `--apply` is refused: no folder is ever
+    /// Reading what other processes use is not implemented on Windows (ADR 0083 §1), so a dry run would remove nothing and `--apply` is refused: no folder is ever
     /// removed on a guess (the cleaning tests above run where the process list can be read).
     #[cfg(windows)]
     #[test]
