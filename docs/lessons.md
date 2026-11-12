@@ -1897,3 +1897,25 @@ load waited for while the browser is there, until the kit's hang guard); the ren
 driver's. A registered copy that falls behind its canonical's fix fails the same way later: port the fix to the copies or say
 why not (rule 55), and a copy's `Copies-waived` reason "adopts the canonical later" does not cover a failure that is already
 there. Row 13 of ADR 0071 is done for Debrief; paddock-chromium's and Spotter's real-browser tests still count polls.
+
+## A toast's Show missed its click when the next live alert moved the stack (Debrief, 2026-11-12)
+
+WebKit `live-tail.e2e.ts:100` failed on main run 8004 (job 36718) with the Error level's `aria-pressed` still "false" after
+clicking an alert toast's Show, and `:121` failed twice on run 7941 (job 35690) with the Error spike toast still there after
+"Mute this kind for 15 min". Hypotheses: (a) live follow re-applies the levels after Show; (b) the 5 s expect is too short on
+a slow runner; (c) a WebKit-only event order. The failing traces refuted all three: `show()` never ran (no "Live alert
+evidence shown" log, and live refreshes kept saying `Grid: follow`, which Show would have paused), so (a) and (b) had nothing
+to act on. In all three failures a live alert was logged between "performing click action" and "click action done" (rule
+alerts at +314 ms, +78 ms and +0 ms of clicks lasting 369, 80 and 116 ms). The stack is anchored at the bottom and
+`visibleNotifications` puts a new or updated cause last, so the rule toast took the bottom slot under the pointer (run
+8004's screencast shows the stack reorder mid-click; on 7941 the new rule toast pushed the error spike up): mousedown hit one
+toast's button, mouseup another, and neither got a click. The spec installed Playwright's clock but let it run in real time,
+so alerts every 1 to 1.5 s kept coming during the axe scan and the click. Rate on the Mac: 0 of 100 for both tests on WebKit,
+also 0 of 100 with six CPU burners. Raised with a probe that holds Show down for 2 s of real time: clock running 20 of 20
+failed (10 WebKit, 10 Chromium, the CI symptom), clock paused 20 of 20 passed. So (c) is refuted too: the race is the same in
+both engines; WebKit's slower clicks only widen the window. Fix: the spec clicks toast buttons with the clock paused
+(`clickInToast`: `pauseAt`, click, `resume`), the pattern of `timeline-header-geometry.e2e.ts`. The product still moves a
+toast under the pointer when an alert arrives; holding the stack still while the pointer is on it is left as a decision.
+Why the logs did not show it: the app logs alerts and Show, but not the click's target; the trace's console and screencast
+were enough. **Class: a control that moves under the pointer during a click (second instance after the timeline header of
+2026-11-08, run 7697).**

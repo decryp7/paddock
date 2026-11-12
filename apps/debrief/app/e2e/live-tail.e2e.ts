@@ -1,4 +1,4 @@
-import { expect, Page, test } from '@playwright/test';
+import { expect, Locator, Page, test } from '@playwright/test';
 import { gridTotal, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
@@ -36,6 +36,19 @@ async function openView(page: Page, name: 'Alerts' | 'Tail status'): Promise<voi
 async function openOnClock(page: Page, search: string): Promise<void> {
   await page.clock.install();
   await openAppWith(page, search);
+}
+
+/**
+ * Clicks a toast's button with the page's clock paused, then lets time run again. While time runs, the next live alert
+ * can land between mousedown and mouseup: the stack moves that alert's toast to the bottom, under the pointer, so the
+ * mouseup lands on another toast and neither button gets the click (main run 8004 and 7941, WebKit; lessons.md). Paused,
+ * no tick or alert can move the stack during the click.
+ */
+async function clickInToast(page: Page, button: Locator): Promise<void> {
+  // Pause a little ahead (time keeps running until the pause lands, so leave room); due timers run once on the way.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
+  await button.click();
+  await page.clock.resume();
 }
 
 test.describe('live tail: follow now', () => {
@@ -108,7 +121,7 @@ test.describe('live tail: alerts', () => {
     await expect(toast).toContainText('Critical');
     await expect(toast).toContainText('Error spike');
     await expectNoSeriousViolations(page, testInfo, 'notification', 'debrief-notification-host');
-    await toast.getByRole('button', { name: 'Show' }).click();
+    await clickInToast(page, toast.getByRole('button', { name: 'Show' }));
     // The evidence: errors and fatals in the alert's time range (which pauses following).
     const level = (l: string) => page.getByRole('toolbar', { name: 'Levels' }).locator(`button[data-level=${l}]`);
     await expect(level('Error')).toHaveAttribute('aria-pressed', 'true');
@@ -129,7 +142,7 @@ test.describe('live tail: alerts', () => {
     await page.clock.runFor(1_500);
     const toast = page.getByTestId('notification').filter({ hasText: 'Error spike' }).first();
     await expect(toast).toBeVisible();
-    await toast.getByRole('button', { name: 'Mute this kind for 15 min' }).click();
+    await clickInToast(page, toast.getByRole('button', { name: 'Mute this kind for 15 min' }));
     await expect(page.getByTestId('notification').filter({ hasText: 'Error spike' })).toHaveCount(0);
     // The next alerts of other kinds still toast.
     await page.clock.runFor(1_000);
