@@ -374,7 +374,7 @@ jobs:
         run: node --test tools/test/*.test.mjs
 
       - name: new-app templates
-        run: node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs
+        run: node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs scripts/demo/*.test.mjs scripts/shell-demo/*.test.mjs
 
       # The VM start check's evidence parsers and judges (scripts/vm-smoke): a fake guest, no VM.
       - name: VM start check
