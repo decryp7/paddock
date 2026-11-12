@@ -154,3 +154,39 @@ test('commit-lint --first-parent also lints the merge commit itself (its Merge h
   assert.doesNotMatch(log.join('\n'), /wip: branch work/);
   assert.equal(commitLintMain(['--range', `${base}..HEAD`], dir, () => {}), 1, 'without the flag the wip commit and the merge fail');
 });
+
+const GUIDANCE = 'Shorten the subject to 100 characters or fewer; put the detail in the body. Nothing was committed; your staged files are unchanged. Do not amend an earlier commit.';
+
+test('a too long subject says what to do: shorten it, nothing was committed, do not amend', () => {
+  const problems = lint(`feat: ${'x'.repeat(100)}`);
+  assert.ok(problems.some((p) => p.includes(GUIDANCE)), problems.join('\n'));
+  assert.ok(!lint('feat: short').some((p) => p.includes('Shorten')), 'a good subject gets no advice');
+});
+
+test('commit-lint --subject checks a subject before committing: the same rules, the same guidance, no file needed', () => {
+  const out = [];
+  assert.equal(commitLintMain(['--subject', 'feat: short'], process.cwd(), (l) => out.push(l)), 0, out.join('\n'));
+  const bad = [];
+  assert.equal(commitLintMain(['--subject', `feat: ${'x'.repeat(100)}`], process.cwd(), (l) => bad.push(l)), 1);
+  assert.ok(bad.join('\n').includes(GUIDANCE), bad.join('\n'));
+  const shape = [];
+  assert.equal(commitLintMain(['--subject', 'Added a thing'], process.cwd(), (l) => shape.push(l)), 1);
+});
+
+test('a commit that already exists is told to be reworded, not that nothing was committed (CI range, C23)', async () => {
+  const long = lint(`feat: ${'x'.repeat(100)}`, { landed: true }).join('\n');
+  assert.match(long, /Reword the commit before it lands/);
+  assert.doesNotMatch(long, /Nothing was committed|staged files/);
+  const out = [];
+  const dir = repo(['feat: ok', `feat: ${'y'.repeat(100)}`]);
+  assert.equal(commitLintMain(['--range', 'HEAD~1..HEAD'], dir, (l) => out.push(l)), 1);
+  assert.match(out.join('\n'), /Reword the commit before it lands/);
+  assert.doesNotMatch(out.join('\n'), /Nothing was committed/);
+  const found = await findingsOf('C23', repo(['feat: ok', `feat: ${'z'.repeat(100)}`]));
+  assert.ok(found.every((f) => !/Nothing was committed/.test(f.message + (f.fix ?? ''))), JSON.stringify(found));
+});
+
+test('a wrong-shape subject gets a next step too: the form to use', () => {
+  assert.match(lint('Added a thing').join('\n'), /Start the subject with "<type>: "/);
+  assert.match(lint('Added a thing', { landed: true }).join('\n'), /Reword the commit before it lands/);
+});

@@ -16,7 +16,7 @@ const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C0
                            [--strict C30,C36] [--no-graph] [--scope apps/<app>] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
                            [--preflight vX.Y.Z]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
-       paddock-conformance commit-lint --file <path> | --range <rev-range>
+       paddock-conformance commit-lint --subject <text> | --file <path> | --range <rev-range>
        paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write]   # C28 baseline files and C23 doc blocks
        paddock-conformance window-weight [kind...] [--root <dir>] [--stats <file>] [--max <kB>] [--record]   # C29, rule 35
        paddock-conformance list [--json]       # --json: id, scope, mode, needs, file of every check (ADR 0060)
