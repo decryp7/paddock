@@ -217,16 +217,6 @@
    "hash": "6fcff80839eb5410"
   },
   {
-   "file": "crates/paddock-proc/src/waited.rs",
-   "line": 153,
-   "hash": "49f26750c4908ef7"
-  },
-  {
-   "file": "crates/paddock-proc/src/waited.rs",
-   "line": 178,
-   "hash": "49f26750c4908ef7"
-  },
-  {
    "file": "crates/paddock-proc/src/supervised.rs",
    "line": 619,
    "hash": "308d5ffe76f06a68"
