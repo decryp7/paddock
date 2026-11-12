@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import { added, maskCode, relativeLinks } from '../src/checks/C104-doc-links.mjs';
-import { findingsOf, makeApp } from './helpers.mjs';
+import { devCommands, maskCode, namedMechanisms, relativeLinks } from '../src/checks/C104-doc-links.mjs';
+import { findingsOf as run, makeApp } from './helpers.mjs';
+
+// Without a RULES.md beside the temp folder every run also reports it as not measured; tests that are not about that drop it.
+const findingsOf = async (...a) => (await run(...a)).filter((x) => !/RULES\.md: not measured/.test(x.message));
 
 const nogit = { git: () => { throw new Error('no git'); } };
 const base = { 'docs/rules.md': '# Rules\n', 'AGENTS.md': '# A\n' };
@@ -46,8 +52,7 @@ test('C104 baseline: a listed dead link passes, a fixed one is a warning, a grow
   const fixed = makeApp({ ...files, 'docs/x.md': 'fine\n' });
   const w = await findingsOf('C104', fixed, { options: { git: (a) => (a[0] === 'show' ? JSON.stringify({ links: [dead] }) : 'x') } });
   assert.deepEqual(w.map((x) => x.severity), ['warn']);
-  assert.deepEqual(added([dead, dead], [dead]), [dead]);
-  const intro = await findingsOf('C104', makeApp(files), { options: { git: (a) => { if (a[0] === 'show') throw new Error('absent'); return 'x'; } } });
+  const intro = await findingsOf('C104', makeApp(files), { options: { git: (a) => { if (a[0] === 'show') throw new Error('fatal: path does not exist in x'); return 'x'; } } });
   assert.deepEqual(intro, [], 'a baseline absent at the base is its introduction');
 });
 
@@ -68,4 +73,43 @@ test('C104 named mechanisms: baselined misses pass, an entry the merge base lack
   assert.deepEqual(await findingsOf('C104', makeApp(files), at({ mentions: [{ file: 'AGENTS.md', target: 'scripts/gone.sh' }] })), []);
   const grew = await findingsOf('C104', makeApp(files), at({ links: [] }));
   assert.match(grew[0].message, /baseline grew/);
+});
+
+test('C104 matches ./dev command names exactly (kebab-case variants, #[command(name)]), not by prefix', () => {
+  const cli = 'enum Command {\n    #[command(name = "self")]\n    SelfCmd {\n    },\n    Wait(x),\n    MergeCheck {\n    },\n}\n';
+  assert.deepEqual(devCommands(cli), ['self', 'wait', 'merge-check']);
+});
+
+test('C104 named mechanisms: a prefix of a command is a miss, and "planned" only counts in the mechanism\'s own clause', async () => {
+  const cli = 'enum Command {\n    Wait(x),\n}\n';
+  const files = { ...base, 'tools/paddock-dev/src/cli.rs': cli, 'AGENTS.md': 'Use `./dev wa` here; the `scripts/old.sh` is gone, but `./dev later` is planned (ADR 1).\nSomething is planned, and `scripts/other.sh` stays.\n' };
+  const f = await findingsOf('C104', makeApp(files), { options: nogit });
+  assert.deepEqual(f.map((x) => x.message.match(/`([^`]+)` is named/)?.[1]), ['./dev wa', 'scripts/old.sh', 'scripts/other.sh']);
+  assert.match(f[0].message, /in this tree/);
+  assert.deepEqual(namedMechanisms('The `./dev x` (planned, ADR 3) works.').map((m) => m.token), []);
+});
+
+test('C104 reports RULES.md as not measured when it was not read, and ignores its baseline entries', async () => {
+  const json = JSON.stringify({ mentions: [{ file: 'RULES.md', target: 'scripts/x.sh' }] });
+  const root = makeApp({ ...base, 'conformance/baselines/C104.json': json });
+  const f = await run('C104', root, { options: { ...nogit, rulesMd: join(root, 'absent', 'RULES.md') } });
+  assert.deepEqual(f.map((x) => [x.severity, /RULES\.md: not measured/.test(x.message)]), [['warn', true]]);
+});
+
+test('C104 shrink-only is judged against the merge base: main dropping an entry after the fork does not fail the branch', async () => {
+  const git = (root, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: root, encoding: 'utf8' });
+  const entry = (t) => ({ file: 'AGENTS.md', target: t });
+  const baselineOf = (...ts) => JSON.stringify({ mentions: ts.map(entry) });
+  const root = makeApp({ ...base, 'AGENTS.md': 'Use `scripts/a.sh` and `scripts/b.sh`.\n', 'conformance/baselines/C104.json': baselineOf('scripts/a.sh', 'scripts/b.sh') });
+  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'add', '.');
+  git(root, 'commit', '-qm', 'base');
+  git(root, 'switch', '-qc', 'work');
+  git(root, 'switch', '-q', 'main');
+  writeFileSync(join(root, 'conformance/baselines/C104.json'), baselineOf('scripts/a.sh'));
+  writeFileSync(join(root, 'AGENTS.md'), 'Use `scripts/a.sh`.\n');
+  git(root, 'commit', '-qam', 'main drops b');
+  git(root, 'switch', '-q', 'work');
+  const f = await findingsOf('C104', root, { options: { baseRef: 'main' } });
+  assert.deepEqual(f.filter((x) => x.severity === 'error'), []);
 });
