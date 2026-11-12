@@ -4,7 +4,7 @@
 # Tests that start real child processes and time how a crash, hang or restart is detected (fake workers, fake
 # plugins, the IPC fake child, the built-in plugins' processes) are sensitive to a busy machine. They run one at a time in
 # their own group. Locally they get two retries (nextest reports a test that only passed on a retry as FLAKY, so
-# flakiness stays visible); CI never retries (Paddock rule 5: a flaky test is fixed, not retried).
+# flakiness stays visible); CI retries once and fails the run when a test needed it (ER-12).
 # Everything else runs in parallel as usual.
 #
 # Each crate's integration tests are one binary, `it` (tests/it/main.rs, one module per former tests/<name>.rs), so a
@@ -55,10 +55,11 @@ test-group = 'real-browser'
 filter = 'package(debrief-app) & kind(lib)'
 test-group = 'app-plugin-processes'
 
-# CI (.gitea/workflows/debrief.yml (repo root)): every failure reported, no retries, a JUnit report.
+# CI (.gitea/workflows/debrief.yml (repo root)): every failure reported, one retry that still fails the run (ER-12), a JUnit report.
 [profile.ci]
 fail-fast = false
-retries = 0
+retries = 1
+flaky-result = "fail"
 failure-output = "immediate-final"
 # Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) build-jobs.sh
 # sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).
@@ -77,7 +78,7 @@ path = "junit.xml"
 # group and timeouts still apply).
 [[profile.ci.overrides]]
 filter = 'all()'
-retries = 0
+retries = 1
 
 # waiver: the DuckDB store answers every query and analysis of the sample workspaces like the reference engine, one profile
 # per test (47-81 s in CI 6381).
