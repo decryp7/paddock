@@ -105,18 +105,33 @@ pub fn app_output_names() -> Vec<String> {
     out
 }
 
-/// The mode a plan job's log states with the [`MODE_LINE`]: `None` when it has no such line, `Err` for a value other than
-/// `true` or `false`. The one reader of the marker (`read_full` and `ci verdict` both use it).
-pub fn read_marker(log: &str) -> Option<Result<bool, String>> {
+/// The line a plan job prints AFTER its decision (`plan verdict: complete=true`): true only when the plan ran its jobs
+/// (`run=true`), the run is not a rerun of failures (`since_run` empty) and the mode is full. [`MODE_LINE`] states the scope
+/// before the decision (a skipped or rerun run can log `full=true`); this line is the one `ci verdict` trusts.
+pub const COMPLETE_LINE: &str = "plan verdict: complete=";
+
+/// The boolean a plan job's log states after `prefix`: `None` when no line starts with it (after the colours and the
+/// timestamp), `Err` for a value other than `true` or `false`. Only the FIRST such line counts, and only at the start of a line.
+fn read_flag(log: &str, prefix: &str) -> Option<Result<bool, String>> {
     let v = log
         .lines()
         .map(plain)
-        .find_map(|l| l.trim().strip_prefix(MODE_LINE).map(|v| v.trim().to_string()))?;
+        .find_map(|l| l.trim().strip_prefix(prefix).map(|v| v.trim().to_string()))?;
     Some(match v.as_str() {
         "true" => Ok(true),
         "false" => Ok(false),
-        other => Err(format!("the plan job logged an unknown mode {other:?}")),
+        other => Err(format!("the plan job logged an unknown value {other:?} after {prefix:?}")),
     })
+}
+
+/// The mode a plan job's log states with the [`MODE_LINE`] (the scope of the run); see [`read_flag`].
+pub fn read_marker(log: &str) -> Option<Result<bool, String>> {
+    read_flag(log, MODE_LINE)
+}
+
+/// Whether the plan job's log says the run was complete ([`COMPLETE_LINE`]); see [`read_flag`].
+pub fn read_complete(log: &str) -> Option<Result<bool, String>> {
+    read_flag(log, COMPLETE_LINE)
 }
 
 /// Whether an app workflow's run was full, from its plan job's log: the [`MODE_LINE`] its Decide step prints; for a run from
@@ -1038,6 +1053,27 @@ pub fn since_run(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_markers_are_read_from_the_start_of_a_line_and_the_first_line_wins() {
+        assert_eq!(read_marker("2026-11-12T00:00:00Z plan mode: full=true\n"), Some(Ok(true)));
+        // A mention in the middle of a line is not the marker.
+        assert_eq!(read_marker("echo plan mode: full=true\n"), None);
+        assert_eq!(read_marker("x plan mode: full=true"), None);
+        // The first marker wins, whatever follows.
+        assert_eq!(read_marker("plan mode: full=false\nplan mode: full=true\n"), Some(Ok(false)));
+        assert_eq!(
+            read_complete("plan verdict: complete=true\nplan verdict: complete=false\n"),
+            Some(Ok(true))
+        );
+        assert_eq!(read_complete("the plan verdict: complete=true\n"), None);
+        assert!(matches!(read_complete("plan verdict: complete=maybe\n"), Some(Err(_))));
+        // A value that is neither true nor false is an error, not false.
+        assert!(matches!(read_marker("plan mode: full=maybe\n"), Some(Err(_))));
+        // The two markers do not read each other.
+        assert_eq!(read_complete("plan mode: full=true\n"), None);
+        assert_eq!(read_marker("plan verdict: complete=true\n"), None);
+    }
+
     use super::*;
 
     const CRATE_MACOS: &str = include_str!("../tests/since-run/crate-macos.log");
