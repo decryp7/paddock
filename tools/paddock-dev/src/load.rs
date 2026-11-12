@@ -394,9 +394,8 @@ pub fn report(i: &Inputs, s: &Settings) -> Report {
     Report::new(data, line(&v, i, s))
 }
 
-/// `load`, against the real machine.
-pub fn command(a: &LoadArgs) -> Result<Report, CliError> {
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+/// The settings the flags give, refused when they mean nothing.
+pub fn settings_of(a: &LoadArgs, cores: usize) -> Result<Settings, CliError> {
     let mut s = Settings::for_cores(cores);
     if let Some(x) = a.start_below {
         s.start_below = x;
@@ -404,14 +403,17 @@ pub fn command(a: &LoadArgs) -> Result<Report, CliError> {
     if let Some(x) = a.hold_above {
         s.hold_above = x;
     }
-    if s.start_below > s.hold_above {
-        return Err(
-            CliError::usage(format!("--start-below {} is above --hold-above {}.", s.start_below, s.hold_above))
-                .with_hint("Start below the stop threshold: for example 12 and 20."),
-        );
-    }
+    validate(s.start_below, s.hold_above)
+        .map_err(|e| CliError::usage(e).with_hint("Use finite numbers with start below stop: for example 12 and 20."))?;
     s.min_free = a.min_free_gib.saturating_mul(GIB);
     s.ci_hold = a.ci_hold;
+    Ok(s)
+}
+
+/// `load`, against the real machine.
+pub fn command(a: &LoadArgs) -> Result<Report, CliError> {
+    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    let s = settings_of(a, cores)?;
     let roots: Vec<String> = if a.disks.is_empty() {
         vec!["/Volumes/d7sst7".into(), "/Volumes/d8sst7".into()]
     } else {
@@ -581,6 +583,24 @@ mod tests {
             assert!(validate(a, b).is_err(), "{a} {b}");
         }
         assert!(validate(21.0, 20.0).is_err());
+    }
+
+    #[test]
+    fn the_flags_go_through_the_same_check() {
+        let args = |start: Option<f64>, hold: Option<f64>| LoadArgs {
+            start_below: start,
+            hold_above: hold,
+            disks: Vec::new(),
+            min_free_gib: 50,
+            ci_hold: 4,
+            no_ci: true,
+            repo: "example/paddock".into(),
+            server: "https://gitea.invalid".into(),
+        };
+        assert!(settings_of(&args(Some(f64::NAN), None), 14).is_err());
+        assert!(settings_of(&args(None, Some(-1.0)), 14).is_err());
+        assert!(settings_of(&args(Some(25.0), None), 14).is_err());
+        assert_eq!(settings_of(&args(Some(10.0), Some(18.0)), 14).unwrap().hold_above, 18.0);
     }
 
     #[test]
