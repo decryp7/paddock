@@ -425,6 +425,9 @@ jobs:
         working-directory: tools/wiki
         shell: bash
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       CARGO_TERM_COLOR: always
     steps:
       # The whole history: the lint reads the rules on origin/main and on the open rule branches (origin/docs/*).
@@ -547,6 +550,9 @@ jobs:
         working-directory: tools/heavy
         shell: bash
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
@@ -640,6 +646,9 @@ jobs:
       run:
         working-directory: crates
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       # The job runs as root in the container, where Chromium refuses to start with its sandbox (the real-browser test of
       # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
       PADDOCK_BROWSER_NO_SANDBOX: "1"

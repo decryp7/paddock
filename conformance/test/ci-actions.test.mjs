@@ -257,6 +257,24 @@ test('setup-rust uses ./dev only off the release path, and never a stored tool b
   assert.ok(text.indexOf('- name: Rust toolchain') < text.indexOf('- name: Compile cache and Tauri libraries'));
 });
 
+// Review of ci-in-rust step 1 (P1): ci.yml's wiki, heavy and crates jobs ran setup-rust's ./dev without the tag rule, so a rule 54
+// dispatch could take a stored tool binary. Every job that uses the action from this repository carries the rule in its env.
+test('every job that uses setup-rust sets the tag rule for ./dev (it runs ./dev ci setup-rust)', () => {
+  const missing = [];
+  let seen = 0;
+  for (const file of readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f))) {
+    for (const job of parseJobs(read(join(WORKFLOWS, file)))) {
+      if (!/uses: \.\/(?:\.paddock\/)?\.gitea\/actions\/setup-rust\b/.test(job.text)) continue;
+      seen++;
+      if (!TAG_RULE.test(job.text.split('\n    steps:')[0])) missing.push(`${file}:${job.id}`);
+    }
+  }
+  assert.ok(seen >= 15, `the jobs that use setup-rust are found (${seen})`);
+  assert.deepEqual(missing, [], 'these jobs run setup-rust without PADDOCK_DEV_DOWNLOAD set by the tag rule in the job env');
+  const kit = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  assert.match(kit, /tools\/paddock-dev\/Cargo\.toml" \]; then kit=shell; fi/, 'a checkout without the tool (another repository) keeps the shell steps');
+});
+
 test('setup-rust installs a pinned, checksum-verified sccache when the runner has none, for every supported OS and architecture', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const install = text.slice(text.indexOf('- name: Install sccache'), text.indexOf('- name: sccache\n'));
@@ -2051,7 +2069,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 7, 'the ci.yml jobs that read the prebuilt tool: the four that take a host slot, ipc-endpoints, conformance and tools-macos');
+  assert.equal(tagJobs, 10, 'the ci.yml jobs that read the prebuilt tool: the four that take a host slot, ipc-endpoints, conformance, tools-macos, and wiki, heavy and crates (setup-rust runs ./dev)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {

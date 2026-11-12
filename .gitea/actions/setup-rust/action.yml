@@ -80,6 +80,10 @@ runs:
         kit=dev
         case "${GITHUB_REF:-}" in refs/tags/*) kit=shell ;; esac
         if [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ]; then kit=shell; fi
+        # ./dev runs the tool of the job's own checkout: another repository using this action, or a sparse checkout without
+        # tools/, has none.
+        root=$(git rev-parse --show-toplevel 2>/dev/null || true)
+        if [ -z "$root" ] || [ ! -f "$root/tools/paddock-dev/Cargo.toml" ]; then kit=shell; fi
         echo "kit=$kit" >> "$GITHUB_OUTPUT"
         echo "setup-rust: compile cache through the $kit implementation"
     - name: Compile cache and Tauri libraries
