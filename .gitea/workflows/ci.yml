@@ -388,6 +388,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           # The history scan reads origin/main..HEAD.
           fetch-depth: 0
       - uses: ./.gitea/actions/gitleaks
