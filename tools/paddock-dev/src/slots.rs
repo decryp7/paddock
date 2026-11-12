@@ -11,6 +11,11 @@
 //!   ended, or when `release` asks it to (a marker file; no signals, so the same on every OS);
 //! - leads its own process group (Unix) or process group without a console (Windows), so a runner that kills the job's
 //!   group at the end of a step does not free the slot in the middle of the job;
+//! - carries no handle or descriptor of the step that started it ([`crate::fds`]): the Gitea runner ends every process of a
+//!   step's job object when the step's output pipe is still open 10 s after the step ended, and a holder that kept that pipe
+//!   died with the step (run 8019). A holder without it outlives the step: the step's job object does not kill on close. It
+//!   does not break away from the job object (the runner's job does not allow it); the runner ends it with the job, which is
+//!   when it would end anyway;
 //! - frees the slot at once if it is killed or crashes, because the kernel drops the lock.
 //!
 //! No stale lock can exist, so nothing is ever reclaimed and two jobs cannot hold one slot.
@@ -282,8 +287,15 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
     std::fs::create_dir_all(&a.root).map_err(|e| {
         CliError::failure(format!("{} cannot be created: {e}.", a.root.display())).with_hint("Pass a writable CI home with --root.")
     })?;
-    // The holder must not inherit the runner's pipes (Windows hands every inheritable handle to a child).
-    crate::fds::keep_standard_handles_from_children();
+    // The holder must not inherit the runner's pipes (Windows hands every inheritable handle to a child, not only the standard
+    // ones): a holder that keeps the step's pipe is ended with the step (run 8019; crate::fds). Fail closed: no holder at all
+    // rather than one that dies with the step and frees the slot in the middle of the job.
+    crate::fds::keep_handles_from_children().map_err(|e| {
+        CliError::failure(format!(
+            "The slot holder was not started: this process's handles could not be kept from it ({e}), so it would be ended with this step."
+        ))
+        .with_hint("Report it with the job's log; the slot was not taken, so no other job is affected.")
+    })?;
     let mut child = holder_command(exe, &holder_args(a, &owner), &a.root).spawn().map_err(|e| {
         CliError::failure(format!("The slot holder could not be started: {e}.")).with_hint("Check that the dev binary can run.")
     })?;

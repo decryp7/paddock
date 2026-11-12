@@ -343,6 +343,51 @@ fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on
     release(&root, "s1", &token);
 }
 
+/// The step's output pipe can reach `acquire` as an inherited handle that is not one of its standard handles: `./dev ci isolation
+/// acquire` starts `ci slot acquire` with the default handle inheritance, so `acquire` inherits the step's pipe from it as a plain
+/// handle. The Gitea runner waits 10 s for a step's pipe to close after the step ends, then ends every process of the step's job
+/// object (gitea/runner internal/pkg/process/treekill.go), which killed a holder that had inherited it (run 8019, jobs 37039 and
+/// 37040, where two jobs then shared slot s1). Here the test is `isolation acquire`: an inheritable pipe that `acquire` inherits as
+/// a plain handle must be closed once `acquire` has ended, while its holder lives on.
+#[cfg(windows)]
+#[test]
+#[allow(unsafe_code)] // one Win32 call that marks the test's own pipe handle inheritable
+fn the_holder_does_not_keep_a_pipe_that_acquire_inherited_as_a_plain_handle() {
+    use std::io::Read;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+    let d = tempfile::tempdir().unwrap();
+    let (root, job) = (d.path().join("ci"), d.path().join("job"));
+    std::fs::create_dir(&job).unwrap();
+    let (mut reader, writer) = std::io::pipe().unwrap();
+    // SAFETY: the handle is the test's own open pipe; only its inherit flag changes.
+    assert_ne!(
+        unsafe { SetHandleInformation(writer.as_raw_handle(), HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) },
+        0
+    );
+    let (code, v, err) = acquire(&root, &job, "1");
+    assert_eq!(code, 0, "{v} {err}");
+    // `acquire` has ended; only the holder could still have the write end.
+    drop(writer);
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut rest = Vec::new();
+        let _ = tx.send(reader.read_to_end(&mut rest).map(|_| ()));
+    });
+    // About 15 s, so the verdict and the release below run inside nextest's 60 s bound; acquire has already ended, so a closed pipe
+    // shows at once.
+    // conformance: expiry-under-test — the window is the runner's 10 s wait for a step's pipe (gitea/runner treekill.go), plus margin
+    let closed = rx.recv_timeout(Duration::from_secs(15));
+    assert!(!is_free(&root, 1), "the holder is still running");
+    // Release before the verdict, so a failure leaves no holder behind.
+    let token = v["token"].as_str().unwrap().to_string();
+    assert_eq!(release(&root, "s1", &token).0, 0);
+    assert!(
+        matches!(closed, Ok(Ok(()))),
+        "the pipe stayed open after acquire ended: the holder inherited it ({closed:?})"
+    );
+}
+
 #[test]
 fn a_release_with_the_wrong_token_leaves_the_slot_with_its_holder() {
     let d = tempfile::tempdir().unwrap();
