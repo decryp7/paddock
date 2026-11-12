@@ -193,16 +193,14 @@ Apply these deliberately. They are not decoration:
 - Spend CI only on what a change needs (rule 50): one run per branch head, none while review fixes are pending or for a
   branch already merged elsewhere, none for docs-only changes; branches run the affected plan, full gates once on main.
 - A change that touches an app's release path builds that app's installers before it lands on main (rule 54): the batch
-  dispatches `<app>-release.yml` with gates on and the bundle built; passing tests alone is not enough.
+  dispatches `<app>-release.yml` with gates on and the bundle built, once per train or batch that touches the release path;
+  passing tests alone is not enough.
 - One implementation per mechanism (rule 55): a mechanism listed in `docs/known-copies.toml` is fixed in its canonical
-  implementation and every copy in the same change, each with a failing test first, or a copy is waived with
-  `Copies-waived: <id> <path>: <reason>` in a commit that touches it (`*` only for a mechanism of at most two members
-  besides wiring); a freeze does not stop such a fix; a new copy needs its entry and a delete-by tag, an entry leaves
-  only with its files (or `Copies-removed:`), and a date moves only with `Copies-date: ... approved: <coordinator|user>`
-  (`user` for a later release line); a reached delete-by tag is a warning, not a tag block (user, 2026-11-11); register check C58 (planned, ADR 0034 WP-1; not built yet, the steward checks the register by hand).
-- Slow means two questions (rule 51): can more threads or workers run it (bounded by the kind of work), and can it be made
+  implementation and every copy in the same change, each with a failing test first, or names the copy it skipped, and why, in the commit body; a freeze does not stop such a fix; a new copy needs its entry and a delete-by tag, and an entry leaves
+  with its files; a reached delete-by tag is a warning, not a tag block (user, 2026-11-11); register check C58 (planned, ADR 0034 WP-1; not built yet, the steward checks the register by hand).
+- Slow means two questions (rule 13, merged with 14, 15 and 51): can more threads or workers run it (bounded by the kind of work), and can it be made
   cheaper (less work per item, no repeats, a cheaper algorithm or format, caching, batching, skipping)? Measure both;
-  thread counts are Settings with an "Auto" default; a long or bulk operation's design has a "Parallelism and cost" section.
+  thread counts default to "Auto" and become a Setting only when a measurement shows users need it; a long or bulk operation's design has a short "Parallelism and cost" note.
 - Never act on a reusable OS name read earlier (rule 53): hold it (handle, job, listener) or verify its identity (pid plus
   start time, `paddock_proc::ProcessId`) immediately before acting; kills go through `paddock_proc` (Clippy
   `disallowed-methods` and C53 check it, ADR 0033). A discovery file that names a pid or port (Dyno's `agent.json`) is

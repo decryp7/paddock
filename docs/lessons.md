@@ -1895,3 +1895,15 @@ and `paddock_testkit::guarded` for a slow job judged on units finished (the live
 of ADR 0071 section 1 is NOT built yet: `paddock_proc::StartWatch` is the judge it is to drive, and a second wait beside it
 would be a copy (rule 55). Still open: ADR 0071 row 13 (the 20-40 s receives and deadlines in the real-browser tests of
 paddock-chromium, Spotter and Debrief's chromium-driver; only the first-run warm-up is done) and rows 1, 5-12 and 14-15.
+
+## Process rules grew faster than the product: cap cost, retire what is not kept up (2026-11-12)
+
+A cut review of all apps and the family rules found the same pattern as the elevated-helper design of 2026-11-11: each
+rule and each review round was right alone, and nothing bounded the total. Debrief 1.2 had grown to about 656 raw days,
+Pitcrew's 1-2 day caller check was in its 8th review round, and the wiki rule (ER-30) had a writer, a fact-check and a lint
+for pages last ingested on 2026-11-09. **Lesson (class: process growth without a cost bound; first instance 2026-11-11):**
+rule 76 (ER-37) now needs the user's yes above 1 agent-day beyond common practice, a budget line per release plan with
+growth over 20% going back to the user, and one cut review per release. Rules 14, 15 and 51 merged into 13, rule 71 into
+ER-33, ER-30 retired, rules 22 and 55 and 54 narrowed, and hooks that judge an agent's text only warn. The review's
+proposed cap on review rounds was not adopted: security code keeps its rounds. Mechanism: text rules and the reviewer
+line, no tool.
