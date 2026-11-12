@@ -82,6 +82,32 @@ impl Pull {
     }
 }
 
+/// One review of a pull request, as far as the queue reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Review {
+    /// The reviewer's login.
+    pub reviewer: String,
+    /// `APPROVED`, `REQUEST_CHANGES`, `COMMENT`, `PENDING`.
+    pub state: String,
+    /// The commit the review was made on.
+    pub commit_id: String,
+    /// Whether it was dismissed.
+    pub dismissed: bool,
+}
+
+/// Whether the reviews approve exactly `head`: some reviewer's last decisive (approving or requesting changes, not dismissed)
+/// review is an approval made on `head`, and no reviewer's last decisive review requests changes. Reviews come oldest first.
+pub fn approved_at(reviews: &[Review], head: &str) -> bool {
+    let mut last: std::collections::BTreeMap<&str, &Review> = std::collections::BTreeMap::new();
+    for r in reviews
+        .iter()
+        .filter(|r| !r.dismissed && matches!(r.state.as_str(), "APPROVED" | "REQUEST_CHANGES"))
+    {
+        last.insert(r.reviewer.as_str(), r);
+    }
+    !head.is_empty() && last.values().all(|r| r.state == "APPROVED") && last.values().any(|r| r.commit_id == head)
+}
+
 /// One CI run of a commit: workflow file, run id, and its result (`success`, `failure`, `cancelled`, or the status while it runs).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommitRun {
@@ -180,6 +206,20 @@ impl<'a> Api<'a> {
         Ok(v.as_array()
             .map(|a| a.iter().filter_map(|l| l["name"].as_str().map(str::to_string)).collect())
             .unwrap_or_default())
+    }
+
+    /// The reviews of pull request `number`, oldest first.
+    pub fn reviews(&mut self, number: u64) -> Result<Vec<Review>, String> {
+        Ok(self
+            .pages(&format!("/pulls/{number}/reviews"))?
+            .iter()
+            .map(|v| Review {
+                reviewer: v["user"]["login"].as_str().unwrap_or("").to_string(),
+                state: v["state"].as_str().unwrap_or("").to_string(),
+                commit_id: v["commit_id"].as_str().unwrap_or("").to_string(),
+                dismissed: v["dismissed"].as_bool().unwrap_or(false),
+            })
+            .collect())
     }
 
     /// Adds a comment to pull request (issue) `number`.

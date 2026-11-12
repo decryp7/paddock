@@ -18,6 +18,8 @@ pub struct FakeGitea {
     pub requests: Vec<String>,
     /// The bodies of every write, in order.
     pub bodies: Vec<Value>,
+    /// `(pull request number, review object)`: the reviews of a pull request, as the API returns them.
+    pub reviews: Vec<(u64, Value)>,
     /// `(pull request number, text)` of every comment, in order.
     pub comments: Vec<(u64, String)>,
     /// The repository's `autodetect_manual_merge` (absent when `None`).
@@ -92,6 +94,13 @@ impl Http for FakeGitea {
         }
         if path.starts_with("/labels?") {
             return Ok(self.page(self.labels.clone(), url));
+        }
+        if let Some(rest) = path.strip_prefix("/pulls/") {
+            let n: u64 = rest.split('/').next().and_then(|n| n.parse().ok()).ok_or_else(|| not_found(url))?;
+            if rest[n.to_string().len()..].starts_with("/reviews") {
+                let items = self.reviews.iter().filter(|(p, _)| *p == n).map(|(_, r)| r.clone()).collect();
+                return Ok(self.page(items, url));
+            }
         }
         if let Some(rest) = path.strip_prefix("/pulls?state=") {
             let state = rest.split('&').next().unwrap_or("");

@@ -35,6 +35,8 @@ pub struct Marker {
     pub round: u32,
     /// The failed run whose failures this round reruns (`since_run`), when the round follows a drop.
     pub since_run: Option<u64>,
+    /// The workflow of that run (`ci.yml`, `debrief.yml`): only that workflow reruns with `since_run`.
+    pub since_workflow: Option<String>,
 }
 
 /// The result of building the train.
@@ -56,6 +58,9 @@ pub trait Ledger {
     fn relabel(&mut self, number: u64, changes: &[&str]) -> Result<(), String>;
     /// Adds a comment.
     fn comment(&mut self, number: u64, text: &str) -> Result<(), String>;
+    /// Whether an approving review of the pull request exists for exactly this head commit (a Gitea review in the APPROVED
+    /// state, not dismissed, whose `commit_id` is `head`). A label alone is not an approval: anyone with write access can set it.
+    fn approved_head(&mut self, number: u64, head: &str) -> Result<bool, String>;
 }
 
 /// The queue's working copy of the repository.
@@ -77,6 +82,11 @@ pub trait Train {
     fn pr_files(&mut self, main: &str, head: &str) -> Result<Vec<String>, String>;
     /// The projects a pull request reaches (the planner's answer for `main`..`head`), normalised.
     fn affected(&mut self, main: &str, head: &str) -> Result<BTreeSet<String>, String>;
+    /// The workflows the train's change reaches, `ci.yml` first, then each app workflow (`paddock.ci.json`'s `workflow`, read from
+    /// `main`, never from the train) of an app the plan reaches.
+    fn reached_workflows(&mut self, main: &str, head: &str) -> Result<Vec<String>, String>;
+    /// Checks out a commit (detached), to run the gates on it.
+    fn checkout(&mut self, rev: &str) -> Result<(), String>;
     /// Pushes the train branch; `old` is the head it is expected to replace (a lease, never a blind force).
     fn push_train(&mut self, head: &str, old: Option<&str>) -> Result<(), String>;
     /// Fast-forwards `origin/main` to `head` (never a force) and checks that `origin/main` is `head`.
@@ -166,12 +176,12 @@ pub enum Sent {
 
 /// CI: the train's runs.
 pub trait Ci {
-    /// The runs of `ci.yml` on `head`, newest first.
-    fn runs(&mut self, head: &str) -> Result<Vec<CiRun>, String>;
-    /// Whether there is a full green run on `head` (`./dev ci verdict`).
-    fn verdict(&mut self, head: &str) -> Verdict;
-    /// Dispatches `ci.yml` on the train branch with these inputs.
-    fn dispatch(&mut self, inputs: &[(String, String)]) -> Result<Sent, String>;
+    /// The runs of `workflow` on `head`, newest first.
+    fn runs(&mut self, workflow: &str, head: &str) -> Result<Vec<CiRun>, String>;
+    /// Whether there is a full green run of `workflow` on `head` (`./dev ci verdict`).
+    fn verdict(&mut self, workflow: &str, head: &str) -> Verdict;
+    /// Dispatches `workflow` on the train branch with these inputs.
+    fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String>;
     /// The failures of a finished run.
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String>;
 }

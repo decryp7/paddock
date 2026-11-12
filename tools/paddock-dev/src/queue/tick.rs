@@ -4,18 +4,24 @@
 //! The step, by what the ledger shows:
 //!
 //! - a `queue/hold` label anywhere: nothing ([`Tick::Held`]);
-//! - no `state/in-train` pull request: take up to [`MAX_BATCH`] `state/approved` ones, build the train, run the local gates,
-//!   drop a conflict, a merge-check finding or a gate culprit, push the train branch, label the rest `state/in-train`;
+//! - a pull request is taken only with an approving review of its CURRENT head (a label is not an approval), and never while it
+//!   carries an `owes/*` label (the Windows leg and the rule 54 build are not built yet); anything else goes back to review;
+//! - no `state/in-train` pull request: take up to [`MAX_BATCH`] approved ones and build the train in two steps: a tokenless
+//!   [`build_phase`] (merge, merge check, local gates, culprit mapping; its outcome is data, [`BuildOutcome`]) and a token step,
+//!   [`apply_build`] (comments, labels, the push). A gate failure that no pull request's files explain stops the queue with
+//!   `queue/hold` instead of dropping everyone;
 //! - a train whose branch is stale or does not match the labels (main moved, a head moved, a drop was interrupted): rebuild it;
-//! - a train with no run on its head: dispatch `ci.yml` (the affected plan against main; a rebuild after a drop reruns only
-//!   what failed, `since_run`), unless the backup window or a busy runner says wait;
+//! - a train with no run of a reached workflow on its head: dispatch it (`ci.yml`, and each app workflow the plan reaches; a rebuild
+//!   after a drop reruns only what failed, `since_run`), unless the backup window or a busy runner says wait;
 //! - a run going: wait;
 //! - a failed run: triage it, drop every pull request whose affected projects hold a failure that is new (Q3: all suspects, no
 //!   bisection) with a comment naming the failed tests, and rebuild the rest;
-//! - a green run that is not a full one: dispatch the full run (ER-8); a full green run per `ci verdict`: fast-forward main and
-//!   label the pull requests `state/landed`. A verdict that is not measured never lands.
+//! - a green run that is not a full one: dispatch the full run (ER-8); main is fast-forwarded only when EVERY reached workflow has
+//!   a full green run per `ci verdict`, outside the backup window, with no hold. A verdict that is not measured never lands.
 
-use super::ports::{Blame, Built, Ci, CiRun, Failure, GateOutcome, Gates, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, label};
+use super::ports::{
+    Blame, Built, Ci, CiRun, Failure, GateFailure, GateOutcome, Gates, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, label,
+};
 use crate::ci_runs::verdict::Verdict;
 use crate::pr::gitea::Pull;
 use std::collections::BTreeSet;
@@ -24,7 +30,8 @@ use std::collections::BTreeSet;
 pub const MAX_BATCH: usize = 6;
 /// Runs of `ci.yml` on one train head before the queue stops asking for more (the affected run, the full run, one spare).
 pub const MAX_RUNS_PER_HEAD: usize = 3;
-/// The Windows backup window, local hours: no dispatch from 00:00 up to 04:00 (docs/ci-schedules.md).
+/// The Windows backup window, Asia/Singapore hours: no dispatch and no landing (a fast-forward starts the push-to-main runs)
+/// from 00:00 up to 04:00 (docs/ci-schedules.md).
 pub const WINDOW: std::ops::Range<u32> = 0..4;
 
 /// What a tick did.
@@ -51,6 +58,8 @@ pub enum Tick {
     Dispatched {
         /// The head.
         head: String,
+        /// The workflow.
+        workflow: String,
         /// The inputs.
         inputs: Vec<(String, String)>,
     },
@@ -102,8 +111,8 @@ impl Tick {
                     )
                 }
             ),
-            Tick::Dispatched { head, inputs } => format!(
-                "queue: dispatched ci.yml on {} ({})",
+            Tick::Dispatched { head, workflow, inputs } => format!(
+                "queue: dispatched {workflow} on {} ({})",
                 short(head),
                 if inputs.is_empty() {
                     "full run".to_string()
@@ -131,8 +140,8 @@ fn short(sha: &str) -> &str {
 
 /// What the tick knows about its surroundings.
 pub struct Env {
-    /// The local hour (0-23), for the backup window.
-    pub hour: u32,
+    /// The Asia/Singapore hour (0-23) for the backup window; `None` when it could not be read: nothing is dispatched or landed.
+    pub hour: Option<u32>,
 }
 
 /// The four ports of a tick.
@@ -151,10 +160,61 @@ fn has(p: &Pull, l: &str) -> bool {
     p.labels.iter().any(|x| x == l)
 }
 
+fn owes(p: &Pull) -> Option<&String> {
+    p.labels.iter().find(|l| l.starts_with("owes/"))
+}
+
 fn numbers(prs: &[&Pull]) -> Vec<u64> {
     let mut v: Vec<u64> = prs.iter().map(|p| p.number).collect();
     v.sort_unstable();
     v
+}
+
+/// The window or the unread hour, when either forbids a dispatch or a landing.
+fn window_guard(env: &Env) -> Option<Tick> {
+    match env.hour {
+        None => Some(Tick::Stuck {
+            why: "the hour (Asia/Singapore) could not be read, so the backup window is not measured: nothing is dispatched or landed. Next step: fix `date` on the runner, the next tick asks again".into(),
+            measured: false,
+        }),
+        Some(h) if WINDOW.contains(&h) => Some(Tick::Window),
+        Some(_) => None,
+    }
+}
+
+/// Sends a pull request back to review with the reason; the author approves it again when it is ready.
+fn send_back(p: &mut Ports, number: u64, why: &str) -> Result<(), String> {
+    p.ledger.relabel(number, &["+state/built"])?;
+    p.ledger.comment(
+        number,
+        &format!("queue: not taken, {why} Approve it again (a review on the current head) when it is ready."),
+    )
+}
+
+/// Whether the queue may take this pull request now; when not, it goes back to review with a comment.
+fn admit(p: &mut Ports, pr: &Pull) -> Result<bool, String> {
+    if let Some(debt) = owes(pr) {
+        send_back(
+            p,
+            pr.number,
+            &format!(
+                "it carries `{debt}`: the queue has no Windows leg and no rule 54 build yet, so a pull request that owes either cannot land through it."
+            ),
+        )?;
+        return Ok(false);
+    }
+    if !p.ledger.approved_head(pr.number, &pr.head)? {
+        send_back(
+            p,
+            pr.number,
+            &format!(
+                "no approving review exists for its current head {}; a label alone is not an approval, and an approval does not follow a new commit.",
+                short(&pr.head)
+            ),
+        )?;
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 /// One tick. An `Err` is a failure to read or write (the network, git); a state the queue cannot leave is [`Tick::Stuck`].
@@ -163,21 +223,36 @@ pub fn tick(p: &mut Ports, env: &Env) -> Result<Tick, String> {
     if let Some(h) = pulls.iter().find(|x| has(x, label::HOLD)) {
         return Ok(Tick::Held(h.number));
     }
-    let mut in_train: Vec<&Pull> = pulls.iter().filter(|x| x.base == "main" && has(x, label::IN_TRAIN)).collect();
-    in_train.sort_by_key(|x| x.number);
+    let mut labelled: Vec<&Pull> = pulls.iter().filter(|x| x.base == "main" && has(x, label::IN_TRAIN)).collect();
+    labelled.sort_by_key(|x| x.number);
+    // A hand-set state/in-train is no approval: every pull request in the train is checked like one that is taken.
+    let mut in_train: Vec<&Pull> = Vec::new();
+    for pr in labelled {
+        if admit(p, pr)? {
+            in_train.push(pr);
+        }
+    }
     if in_train.is_empty() {
         let mut approved: Vec<&Pull> = pulls.iter().filter(|x| x.base == "main" && has(x, label::APPROVED)).collect();
         approved.sort_by_key(|x| x.number);
-        approved.truncate(MAX_BATCH);
-        if approved.is_empty() {
-            return Ok(Tick::Idle("no pull request is approved or in a train".into()));
+        let mut taken: Vec<&Pull> = Vec::new();
+        for pr in approved {
+            if taken.len() == MAX_BATCH {
+                break;
+            }
+            if admit(p, pr)? {
+                taken.push(pr);
+            }
+        }
+        if taken.is_empty() {
+            return Ok(Tick::Idle("no pull request is approved for its current head, or in a train".into()));
         }
         let mut branches = vec!["main".to_string(), TRAIN_BRANCH.to_string()];
-        branches.extend(approved.iter().map(|x| x.branch.clone()));
+        branches.extend(taken.iter().map(|x| x.branch.clone()));
         p.train.fetch(&branches)?;
         let old = p.train.train_head()?;
-        let prs: Vec<Pull> = approved.into_iter().cloned().collect();
-        return build_round(p, prs, 1, None, old);
+        let prs: Vec<Pull> = taken.into_iter().cloned().collect();
+        return build_round(p, prs, 1, None, None, old);
     }
     let mut branches = vec!["main".to_string(), TRAIN_BRANCH.to_string()];
     branches.extend(in_train.iter().map(|x| x.branch.clone()));
@@ -219,6 +294,7 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
             prs: want,
             round: 1,
             since_run: None,
+            since_workflow: None,
         }),
     );
     judge(p, env, in_train, &head, &marker, &main)
@@ -235,133 +311,310 @@ fn rebuild_stale(p: &mut Ports, in_train: &[&Pull], old: Option<String>, marker:
             _ => false,
         };
         if moved {
-            p.ledger.relabel(pr.number, &["+state/built"])?;
-            p.ledger.comment(
+            send_back(
+                p,
                 pr.number,
-                "queue: this branch's head changed after it entered the train, so it goes back to review (state/built). Approve it again when it is ready.",
+                "its head changed after it entered the train, so what was tested is not what is approved.",
             )?;
         } else {
             prs.push((*pr).clone());
         }
     }
-    let (mut round, mut since) = (1, None);
+    let (mut round, mut since, mut since_wf) = (1, None, None);
     if let (Some(h), Some(m)) = (&old, &marker)
         && prs.iter().all(|pr| m.prs.contains(&pr.number))
         && prs.len() < m.prs.len()
         && p.train.contains(main, h)?
     {
         round = m.round + 1;
-        since = newest_failed(p.ci.runs(h)?);
+        for wf in p.train.reached_workflows(main, h)? {
+            if let Some(id) = newest_failed(p.ci.runs(&wf, h)?) {
+                since = Some(id);
+                since_wf = Some(wf);
+                break;
+            }
+        }
     }
     if prs.is_empty() {
         return Ok(Tick::Idle("the train was stale and no pull request is left in it".into()));
     }
-    build_round(p, prs, round, since, old)
+    build_round(p, prs, round, since, since_wf, old)
 }
 
 fn newest_failed(runs: Vec<CiRun>) -> Option<u64> {
     runs.into_iter().find(|r| matches!(r.state, RunState::Failed(_))).map(|r| r.id)
 }
 
-/// Builds the train, runs the gates, drops what they name and pushes; at most one rebuild per pull request.
-fn build_round(p: &mut Ports, mut prs: Vec<Pull>, round: u32, since: Option<u64>, old: Option<String>) -> Result<Tick, String> {
-    let mut dropped_all: Vec<(u64, String)> = Vec::new();
+/// The outcome of the tokenless half of a build: plain data, so the step that holds the token only applies it. A pull request
+/// number appears in at most one of `merged` and `dropped`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuildOutcome {
+    /// The pull requests the train was built from.
+    pub batch: Vec<u64>,
+    /// The round (1 for a fresh train).
+    pub round: u32,
+    /// The failed run this round reruns, with its workflow.
+    pub since: Option<(u64, String)>,
+    /// The head of the train branch this build replaces.
+    pub old: Option<String>,
+    /// The new train head; `None` when nothing merged or the build stopped.
+    pub head: Option<String>,
+    /// The pull requests in it.
+    pub merged: Vec<u64>,
+    /// Dropped, with the reason for the comment.
+    pub dropped: Vec<(u64, String)>,
+    /// Why the queue must stop, and whether something could not be measured.
+    pub stuck: Option<(String, bool)>,
+}
+
+impl BuildOutcome {
+    /// The outcome as JSON (what the tokenless step writes and the token step reads).
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "batch": self.batch, "round": self.round, "since": self.since.as_ref().map(|(r, w)| serde_json::json!({"run": r, "workflow": w})),
+            "old": self.old, "head": self.head, "merged": self.merged,
+            "dropped": self.dropped.iter().map(|(n, w)| serde_json::json!({"number": n, "why": w})).collect::<Vec<_>>(),
+            "stuck": self.stuck.as_ref().map(|(w, m)| serde_json::json!({"why": w, "measured": m})),
+        })
+    }
+
+    /// Reads [`BuildOutcome::to_json`] back; `None` for anything that is not one.
+    pub fn from_json(v: &serde_json::Value) -> Option<BuildOutcome> {
+        let nums = |k: &str| -> Option<Vec<u64>> { v[k].as_array()?.iter().map(|x| x.as_u64()).collect() };
+        Some(BuildOutcome {
+            batch: nums("batch")?,
+            round: u32::try_from(v["round"].as_u64()?).ok()?,
+            since: match &v["since"] {
+                serde_json::Value::Null => None,
+                s => Some((s["run"].as_u64()?, s["workflow"].as_str()?.to_string())),
+            },
+            old: v["old"].as_str().map(str::to_string),
+            head: v["head"].as_str().map(str::to_string),
+            merged: nums("merged")?,
+            dropped: v["dropped"]
+                .as_array()?
+                .iter()
+                .map(|d| Some((d["number"].as_u64()?, d["why"].as_str()?.to_string())))
+                .collect::<Option<_>>()?,
+            stuck: match &v["stuck"] {
+                serde_json::Value::Null => None,
+                s => Some((s["why"].as_str()?.to_string(), s["measured"].as_bool()?)),
+            },
+        })
+    }
+}
+
+/// Builds the train and runs the local gates. No token is needed, none is used, and nothing outside the working copy changes: no
+/// label, no comment, no push. The gates run PR code, so this is the half that runs without the queue's credentials.
+pub fn build_phase(
+    train: &mut dyn Train,
+    gates: &mut dyn Gates,
+    mut prs: Vec<Pull>,
+    round: u32,
+    since: Option<(u64, String)>,
+    old: Option<String>,
+) -> Result<BuildOutcome, String> {
+    let batch: Vec<u64> = prs.iter().map(|x| x.number).collect();
+    let mut out = BuildOutcome {
+        batch,
+        round,
+        since: since.clone(),
+        old,
+        head: None,
+        merged: Vec::new(),
+        dropped: Vec::new(),
+        stuck: None,
+    };
+    let stop = |mut out: BuildOutcome, why: String, measured: bool| {
+        out.stuck = Some((why, measured));
+        Ok(out)
+    };
     for _ in 0..=prs.len() + 1 {
-        let main = p.train.main_head()?;
+        let main = train.main_head()?;
         let marker = Marker {
             prs: Vec::new(),
             round,
-            since_run: since,
+            since_run: since.as_ref().map(|(r, _)| *r),
+            since_workflow: since.as_ref().map(|(_, w)| w.clone()),
         };
-        let Built { head, merged, dropped } = p.train.build(&main, &prs, &marker)?;
+        let Built { head, merged, dropped } = train.build(&main, &prs, &marker)?;
         for (n, why) in &dropped {
-            drop_pr(p, *n, &format!("it could not join the train: {why}"))?;
+            out.dropped.push((*n, format!("it could not join the train: {why}")));
         }
-        dropped_all.extend(dropped.iter().cloned());
         prs.retain(|x| !dropped.iter().any(|(n, _)| *n == x.number));
         if merged.is_empty() {
-            return Ok(Tick::Dropped {
-                dropped: dropped_all.iter().map(|(n, _)| *n).collect(),
-                rebuilt: None,
-            });
+            return Ok(out);
         }
-        match p.gates.run(&main, &head) {
+        match gates.run(&main, &head) {
             GateOutcome::Green => {
-                p.train.push_train(&head, old.as_deref())?;
-                for n in &merged {
-                    p.ledger.relabel(*n, &["+state/in-train"])?;
-                }
-                return Ok(Tick::Built {
-                    head,
-                    prs: merged,
-                    dropped: dropped_all,
-                });
+                out.head = Some(head);
+                out.merged = merged;
+                return Ok(out);
             }
             GateOutcome::NotMeasured(why) => {
-                return Ok(Tick::Stuck {
-                    why: format!(
-                        "a local gate did not look ({why}); a train that was not measured is not a train that passed. Next step: fix the gate, the next tick builds again"
+                return stop(
+                    out,
+                    format!(
+                        "a local gate did not look ({why}); a train that was not measured is not a train that passed. Next step: fix the gate, then `./dev queue unhold`"
                     ),
-                    measured: false,
-                });
+                    false,
+                );
             }
             GateOutcome::Red(fails) => {
-                let suspects = gate_suspects(p, &main, &prs, &merged, &fails)?;
-                let text = fails
+                // Main first: what fails on main itself is nobody's in this batch.
+                train.checkout(&main)?;
+                let on_main: Vec<String> = match gates.run(&main, &main) {
+                    GateOutcome::Green => Vec::new(),
+                    GateOutcome::Red(m) => m.into_iter().map(|f| f.name).collect(),
+                    GateOutcome::NotMeasured(why) => {
+                        return stop(
+                            out,
+                            format!(
+                                "the gates could not be run on main to tell main's own failures apart ({why}). Next step: fix the gate, then `./dev queue unhold`"
+                            ),
+                            false,
+                        );
+                    }
+                };
+                let ours: Vec<&GateFailure> = fails.iter().filter(|f| !on_main.contains(&f.name)).collect();
+                if ours.is_empty() {
+                    return stop(
+                        out,
+                        format!(
+                            "every failing gate ({}) also fails on main itself; no pull request is to blame. Next step: fix main, then `./dev queue unhold`",
+                            gate_names(&fails)
+                        ),
+                        true,
+                    );
+                }
+                let mut suspects: BTreeSet<u64> = BTreeSet::new();
+                for f in &ours {
+                    let named: BTreeSet<&str> = f.files.iter().map(String::as_str).collect();
+                    let mut mine = Vec::new();
+                    for pr in prs.iter().filter(|x| merged.contains(&x.number)) {
+                        if train.pr_files(&main, &pr.head)?.iter().any(|x| named.contains(x.as_str())) {
+                            mine.push(pr.number);
+                        }
+                    }
+                    if mine.is_empty() {
+                        return stop(
+                            out,
+                            format!(
+                                "the gate `{}` failed on the train and names no file of any pull request in it ({}); the queue blames nobody it cannot prove. Next step: read the gate's output, then `./dev queue unhold`",
+                                f.name,
+                                f.detail.lines().last().unwrap_or("")
+                            ),
+                            true,
+                        );
+                    }
+                    suspects.extend(mine);
+                }
+                let text = ours
                     .iter()
                     .map(|f| format!("- {}: {}", f.name, f.detail))
                     .collect::<Vec<_>>()
                     .join("\n");
                 for n in &suspects {
-                    drop_pr(p, *n, &format!("a local gate failed on the train before any CI run:\n{text}"))?;
-                    dropped_all.push((*n, text.clone()));
+                    out.dropped.push((
+                        *n,
+                        format!("a local gate failed on the train before any CI run, on files this branch changes:\n{text}"),
+                    ));
                 }
                 prs.retain(|x| !suspects.contains(&x.number));
                 if prs.is_empty() {
-                    return Ok(Tick::Dropped {
-                        dropped: dropped_all.iter().map(|(n, _)| *n).collect(),
-                        rebuilt: None,
-                    });
+                    return Ok(out);
                 }
             }
         }
     }
-    Ok(Tick::Stuck {
-        why: "the train kept failing its local gates; a person must look".into(),
-        measured: true,
-    })
+    stop(out, "the train kept failing its local gates; a person must look".into(), true)
 }
 
-/// The merged pull requests a gate failure belongs to: those that change a file it names; all of them when it names none.
-fn gate_suspects(p: &mut Ports, main: &str, prs: &[Pull], merged: &[u64], fails: &[super::ports::GateFailure]) -> Result<Vec<u64>, String> {
-    let named: BTreeSet<&str> = fails.iter().flat_map(|f| f.files.iter().map(String::as_str)).collect();
-    if named.is_empty() {
-        return Ok(merged.to_vec());
+fn gate_names(f: &[GateFailure]) -> String {
+    f.iter().map(|x| x.name.clone()).collect::<Vec<_>>().join(", ")
+}
+
+/// Applies a [`BuildOutcome`]: the comments and labels of what was dropped, the push of the train branch and the `state/in-train`
+/// labels. This is the half that needs the queue's token.
+pub fn apply_build(p: &mut Ports, o: &BuildOutcome) -> Result<Tick, String> {
+    for (n, why) in &o.dropped {
+        drop_pr(p, *n, why)?;
     }
-    let mut out = Vec::new();
-    for pr in prs.iter().filter(|x| merged.contains(&x.number)) {
-        if p.train.pr_files(main, &pr.head)?.iter().any(|f| named.contains(f.as_str())) {
-            out.push(pr.number);
+    let dropped: Vec<u64> = o.dropped.iter().map(|(n, _)| *n).collect();
+    if let Some((why, measured)) = &o.stuck {
+        if let Some(first) = o.batch.iter().copied().filter(|n| !dropped.contains(n)).min() {
+            p.ledger.relabel(first, &["+queue/hold"])?;
+            p.ledger.comment(first, &format!("queue: stopped, {why}\n\n`queue/hold` is on this pull request; the queue does nothing until it is removed (`./dev queue unhold`)."))?;
         }
+        return Ok(Tick::Stuck {
+            why: why.clone(),
+            measured: *measured,
+        });
     }
-    Ok(if out.is_empty() { merged.to_vec() } else { out })
+    match &o.head {
+        Some(head) => {
+            p.train.push_train(head, o.old.as_deref())?;
+            for n in &o.merged {
+                p.ledger.relabel(*n, &["+state/in-train"])?;
+            }
+            Ok(Tick::Built {
+                head: head.clone(),
+                prs: o.merged.clone(),
+                dropped: o.dropped.clone(),
+            })
+        }
+        None => Ok(Tick::Dropped { dropped, rebuilt: None }),
+    }
+}
+
+/// Builds the train, runs the gates, applies the outcome.
+fn build_round(
+    p: &mut Ports,
+    prs: Vec<Pull>,
+    round: u32,
+    since_run: Option<u64>,
+    since_wf: Option<String>,
+    old: Option<String>,
+) -> Result<Tick, String> {
+    let since = since_run.zip(since_wf);
+    let o = build_phase(p.train, p.gates, prs, round, since, old)?;
+    apply_build(p, &o)
 }
 
 fn drop_pr(p: &mut Ports, number: u64, why: &str) -> Result<(), String> {
     p.ledger.relabel(number, &["+state/fixes"])?;
     p.ledger.comment(
         number,
-        &format!("queue: dropped from the train, {why}\n\nFix it and approve the branch again (state/approved) to queue it."),
+        &format!("queue: dropped from the train, {why}\n\nFix it and approve the branch again (a review on the new head) to queue it."),
     )
 }
 
-fn dispatch(p: &mut Ports, env: &Env, head: &str, inputs: Vec<(String, String)>) -> Result<Tick, String> {
-    if WINDOW.contains(&env.hour) {
-        return Ok(Tick::Window);
+/// The inputs of a dispatch of `workflow`: the affected run against main, or the full run (ER-8); a rerun of failures adds
+/// `since_run` when the failed run was of this workflow. ci.yml takes `base`; an app workflow plans against main itself and takes
+/// `bundles` for its full run.
+pub fn inputs_for(workflow: &str, full: bool, since: Option<u64>) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = Vec::new();
+    if workflow == "ci.yml" {
+        if !full {
+            v.push(("base".into(), "origin/main".into()));
+            v.extend(since.map(|r| ("since_run".to_string(), r.to_string())));
+        }
+    } else if full {
+        v.push(("bundles".into(), "true".into()));
+    } else {
+        v.extend(since.map(|r| ("since_run".to_string(), r.to_string())));
     }
-    match p.ci.dispatch(&inputs)? {
+    v
+}
+
+fn dispatch(p: &mut Ports, env: &Env, head: &str, workflow: &str, inputs: Vec<(String, String)>) -> Result<Tick, String> {
+    if let Some(t) = window_guard(env) {
+        return Ok(t);
+    }
+    match p.ci.dispatch(workflow, &inputs)? {
         Sent::Yes => Ok(Tick::Dispatched {
             head: head.to_string(),
+            workflow: workflow.to_string(),
             inputs,
         }),
         Sent::Busy(who) => Ok(Tick::RunnerBusy(who)),
@@ -369,55 +622,73 @@ fn dispatch(p: &mut Ports, env: &Env, head: &str, inputs: Vec<(String, String)>)
 }
 
 fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Marker, main: &str) -> Result<Tick, String> {
-    let runs = p.ci.runs(head)?;
-    let Some(newest) = runs.first() else {
-        let mut inputs = vec![("base".to_string(), "origin/main".to_string())];
-        if let Some(since) = marker.since_run {
-            inputs.push(("since_run".to_string(), since.to_string()));
-        }
-        return dispatch(p, env, head, inputs);
-    };
-    match &newest.state {
-        RunState::Running => Ok(Tick::Waiting(newest.id)),
-        RunState::Success => match p.ci.verdict(head) {
-            Verdict::Green { .. } => {
-                p.train.land(head)?;
-                finish_landing(p, head, in_train)
-            }
-            Verdict::NotMeasured(why) => Ok(Tick::Stuck {
-                why: format!(
-                    "the verdict on {} is not measured ({why}); nothing lands on a verdict that was not measured. Next step: fix what is named, the next tick asks again",
-                    short(head)
-                ),
-                measured: false,
-            }),
-            Verdict::Red { reason, .. } => {
-                if runs.len() >= MAX_RUNS_PER_HEAD {
+    for wf in p.train.reached_workflows(main, head)? {
+        let runs = p.ci.runs(&wf, head)?;
+        let since = marker.since_workflow.as_deref().filter(|w| *w == wf).and(marker.since_run);
+        let Some(newest) = runs.first() else {
+            return dispatch(p, env, head, &wf, inputs_for(&wf, false, since));
+        };
+        match &newest.state {
+            RunState::Running => return Ok(Tick::Waiting(newest.id)),
+            RunState::Success => match p.ci.verdict(&wf, head) {
+                Verdict::Green { .. } => {}
+                Verdict::NotMeasured(why) => {
                     return Ok(Tick::Stuck {
                         why: format!(
-                            "{} runs on {} and still no full green run ({reason}). Next step: a person decides",
-                            runs.len(),
+                            "the verdict of {wf} on {} is not measured ({why}); nothing lands on a verdict that was not measured. Next step: fix what is named, the next tick asks again",
                             short(head)
                         ),
-                        measured: true,
+                        measured: false,
                     });
                 }
-                dispatch(p, env, head, Vec::new())
+                Verdict::Red { reason, .. } => {
+                    if runs.len() >= MAX_RUNS_PER_HEAD {
+                        return Ok(Tick::Stuck {
+                            why: format!(
+                                "{} runs of {wf} on {} and still no full green run ({reason}). Next step: a person decides",
+                                runs.len(),
+                                short(head)
+                            ),
+                            measured: true,
+                        });
+                    }
+                    return dispatch(p, env, head, &wf, inputs_for(&wf, true, None));
+                }
+            },
+            RunState::Failed(how) => {
+                let (id, how) = (newest.id, how.clone());
+                return failed_run(p, in_train, head, marker, main, &wf, id, &how);
             }
-        },
-        RunState::Failed(how) => {
-            let id = newest.id;
-            let how = how.clone();
-            failed_run(p, in_train, head, marker, main, id, &how)
         }
     }
+    // Every reached workflow is full green. A fast-forward starts the push-to-main runs, so the backup window holds it back too.
+    if let Some(t) = window_guard(env) {
+        return Ok(t);
+    }
+    // Labels are read again: a hold set while the runs went must stop the landing.
+    let fresh = p.ledger.open_pulls()?;
+    if let Some(h) = fresh.iter().find(|x| has(x, label::HOLD)) {
+        return Ok(Tick::Held(h.number));
+    }
+    p.train.land(head)?;
+    finish_landing(p, head, in_train)
 }
 
-fn failed_run(p: &mut Ports, in_train: &[&Pull], head: &str, marker: &Marker, main: &str, run: u64, how: &str) -> Result<Tick, String> {
+#[allow(clippy::too_many_arguments)]
+fn failed_run(
+    p: &mut Ports,
+    in_train: &[&Pull],
+    head: &str,
+    marker: &Marker,
+    main: &str,
+    workflow: &str,
+    run: u64,
+    how: &str,
+) -> Result<Tick, String> {
     if how == "cancelled" {
         return Ok(Tick::Stuck {
             why: format!(
-                "run {run} on {} was cancelled; the queue does not guess. Next step: dispatch it again or cancel the train (remove state/in-train)",
+                "run {run} of {workflow} on {} was cancelled; the queue does not guess. Next step: dispatch it again or cancel the train (remove state/in-train)",
                 short(head)
             ),
             measured: true,
@@ -427,7 +698,7 @@ fn failed_run(p: &mut Ports, in_train: &[&Pull], head: &str, marker: &Marker, ma
     if failures.is_empty() || failures.iter().any(|f| f.blame == Blame::Unknown) {
         return Ok(Tick::Stuck {
             why: format!(
-                "run {run} failed and its failures could not all be named ({} rows); the queue blames nobody it cannot prove. Next step: `./dev ci triage {run}`",
+                "run {run} of {workflow} failed and its failures could not all be named ({} rows); the queue blames nobody it cannot prove. Next step: `./dev ci triage {run}`",
                 failures.len()
             ),
             measured: false,
@@ -442,33 +713,44 @@ fn failed_run(p: &mut Ports, in_train: &[&Pull], head: &str, marker: &Marker, ma
             measured: true,
         });
     }
-    let mut suspects: Vec<(&Pull, Vec<&Failure>)> = Vec::new();
+    // A pull request whose plan runs everything (`*`) cannot be told apart from the others: it is a suspect only for lack of a
+    // precise one, and then the queue stops instead of guessing.
+    let (mut precise, mut wild): (Vec<(&Pull, Vec<&Failure>)>, Vec<&Pull>) = (Vec::new(), Vec::new());
     for pr in in_train {
         let reach = p.train.affected(main, &pr.head)?;
+        if reach.contains("*") {
+            wild.push(pr);
+            continue;
+        }
         let hit: Vec<&Failure> = blamed
             .iter()
             .copied()
-            .filter(|f| f.projects.iter().any(|x| reach.contains(x) || reach.contains("*")))
+            .filter(|f| f.projects.iter().any(|x| reach.contains(x)))
             .collect();
         if !hit.is_empty() {
-            suspects.push((pr, hit));
+            precise.push((pr, hit));
         }
     }
-    if suspects.is_empty() {
-        return Ok(Tick::Stuck {
-            why: format!(
+    if precise.is_empty() {
+        let why = if wild.is_empty() {
+            format!(
                 "run {run} failed in {} but no pull request of the train reaches those projects. Next step: `./dev ci triage {run}`",
                 names(&blamed)
-            ),
-            measured: true,
-        });
+            )
+        } else {
+            format!(
+                "run {run} failed in {} and only pull requests whose plan runs everything (`*`) could be the cause; the queue cannot tell them apart. Next step: `./dev ci triage {run}`",
+                names(&blamed)
+            )
+        };
+        return Ok(Tick::Stuck { why, measured: true });
     }
-    for (pr, hit) in &suspects {
+    for (pr, hit) in &precise {
         let tests = hit.iter().map(|f| format!("- {}", f.what)).collect::<Vec<_>>().join("\n");
-        let also = if suspects.len() > 1 {
+        let also = if precise.len() > 1 {
             format!(
                 "\n\n{} pull requests reach these projects; all of them are dropped and the rest retried (no bisection).",
-                suspects.len()
+                precise.len()
             )
         } else {
             String::new()
@@ -477,12 +759,12 @@ fn failed_run(p: &mut Ports, in_train: &[&Pull], head: &str, marker: &Marker, ma
             p,
             pr.number,
             &format!(
-                "run {run} on train {} failed in projects this branch reaches:\n{tests}{also}",
+                "run {run} of {workflow} on train {} failed in projects this branch reaches:\n{tests}{also}",
                 short(head)
             ),
         )?;
     }
-    let gone: Vec<u64> = suspects.iter().map(|(pr, _)| pr.number).collect();
+    let gone: Vec<u64> = precise.iter().map(|(pr, _)| pr.number).collect();
     let rest: Vec<Pull> = in_train
         .iter()
         .filter(|pr| !gone.contains(&pr.number))
@@ -494,7 +776,14 @@ fn failed_run(p: &mut Ports, in_train: &[&Pull], head: &str, marker: &Marker, ma
             rebuilt: None,
         });
     }
-    match build_round(p, rest, marker.round + 1, Some(run), Some(head.to_string()))? {
+    match build_round(
+        p,
+        rest,
+        marker.round + 1,
+        Some(run),
+        Some(workflow.to_string()),
+        Some(head.to_string()),
+    )? {
         Tick::Built { head, .. } => Ok(Tick::Dropped {
             dropped: gone,
             rebuilt: Some(head),
@@ -507,15 +796,27 @@ fn names(f: &[&Failure]) -> String {
     f.iter().map(|x| x.what.clone()).collect::<Vec<_>>().join(", ")
 }
 
+/// Labels what landed. A pull request whose head moved after the run (its fresh head is not in the landed commit) is not marked
+/// landed: its new commits did not land, so it goes back to review.
 fn finish_landing(p: &mut Ports, head: &str, in_train: &[&Pull]) -> Result<Tick, String> {
+    let fresh = p.ledger.open_pulls()?;
     let mut prs = Vec::new();
     for pr in in_train {
-        p.ledger.relabel(pr.number, &["+state/landed"])?;
-        p.ledger.comment(
-            pr.number,
-            &format!("queue: landed on main as {} (fast-forward of the tested train).", short(head)),
-        )?;
-        prs.push(pr.number);
+        let now = fresh
+            .iter()
+            .find(|x| x.number == pr.number)
+            .map_or(pr.head.as_str(), |x| x.head.as_str());
+        if p.train.contains(now, head)? {
+            p.ledger.relabel(pr.number, &["+state/landed"])?;
+            p.ledger.comment(
+                pr.number,
+                &format!("queue: landed on main as {} (fast-forward of the tested train).", short(head)),
+            )?;
+            prs.push(pr.number);
+        } else {
+            p.ledger.relabel(pr.number, &["+state/built"])?;
+            p.ledger.comment(pr.number, &format!("queue: the tested commit of this branch landed on main as {}, but the branch has new commits since, which did not. It is not marked landed; approve its new head to queue it again.", short(head)))?;
+        }
     }
     Ok(Tick::Landed {
         head: head.to_string(),

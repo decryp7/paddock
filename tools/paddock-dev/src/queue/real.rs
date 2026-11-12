@@ -10,9 +10,10 @@ use crate::ci_runs::client::Client;
 use crate::ci_runs::triage::{self, Status, Test};
 use crate::ci_runs::verdict::{self, Verdict};
 use crate::ci_runs::{dispatch, time};
-use crate::pr::gitea::{Api, Pull};
+use crate::pr::gitea::{Api, Pull, approved_at};
 use crate::pr::labels::{self, LabelSpec};
-use crate::wait::{CurlHttp, Http};
+use crate::wait::Http;
+use paddock_cli::{CliError, Report};
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -114,22 +115,69 @@ impl Ledger for GiteaLedger<'_> {
     fn comment(&mut self, number: u64, text: &str) -> Result<(), String> {
         self.api.comment(number, text)
     }
+
+    fn approved_head(&mut self, number: u64, head: &str) -> Result<bool, String> {
+        Ok(approved_at(&self.api.reviews(number)?, head))
+    }
+}
+
+/// How triage's answer for a failed test counts for blame: flaky is still red (ER-12), so it is blamed, unless the same test also
+/// failed on the baseline run (then it is main's).
+pub fn blame_of(status: &Status) -> Blame {
+    match status {
+        Status::New => Blame::New,
+        Status::Flaky {
+            also_on_baseline: true, ..
+        }
+        | Status::OnBaseline => Blame::OnMain,
+        Status::Flaky { .. } => Blame::Flaky,
+        Status::Unknown(_) => Blame::Unknown,
+    }
 }
 
 /// git in the queue's working copy, as queue-bot.
 pub struct GitTrain {
     /// The checkout.
     pub root: PathBuf,
+    /// The token for the calls that talk to the server (fetch, push), passed to git in the environment (`GIT_CONFIG_*`, never an
+    /// argument). `None` in the tokenless half, which needs the branches already fetched.
+    pub token: Option<String>,
+    /// The merge check; [`crate::merge_check::command`] outside the tests.
+    pub merge_check: MergeCheckFn,
+}
+
+/// The merge check as the train builder calls it.
+pub type MergeCheckFn = fn(&crate::merge_check::Request) -> Result<Report, CliError>;
+
+impl GitTrain {
+    /// The real one.
+    pub fn new(root: PathBuf, token: Option<String>) -> GitTrain {
+        GitTrain {
+            root,
+            token,
+            merge_check: crate::merge_check::command,
+        }
+    }
 }
 
 const IDENT: [&str; 4] = ["-c", "user.name=queue-bot", "-c", "user.email=queue-bot@dev.decryptology.net"];
 
 impl GitTrain {
-    fn git(&self, args: &[&str]) -> Result<(bool, String), String> {
-        let out = paddock_proc::command("git")
-            .arg("-C")
-            .arg(&self.root)
-            .args(IDENT)
+    fn command(&self, authed: bool) -> std::process::Command {
+        let mut c = paddock_proc::command("git");
+        c.arg("-C").arg(&self.root).args(IDENT);
+        if let (true, Some(t)) = (authed, &self.token) {
+            c.env("GIT_CONFIG_COUNT", "1")
+                .env("GIT_CONFIG_KEY_0", "http.extraheader")
+                .env("GIT_CONFIG_VALUE_0", format!("Authorization: token {t}"))
+                .env("GIT_TERMINAL_PROMPT", "0");
+        }
+        c
+    }
+
+    fn run(&self, authed: bool, args: &[&str]) -> Result<(bool, String), String> {
+        let out = self
+            .command(authed)
             .args(args)
             .output()
             .map_err(|e| format!("cannot start git: {e}"))?;
@@ -140,6 +188,10 @@ impl GitTrain {
         Ok((out.status.success(), text))
     }
 
+    fn git(&self, args: &[&str]) -> Result<(bool, String), String> {
+        self.run(false, args)
+    }
+
     fn ok(&self, args: &[&str]) -> Result<String, String> {
         let (ok, out) = self.git(args)?;
         if ok {
@@ -148,13 +200,26 @@ impl GitTrain {
             Err(format!("git {} failed: {}", args.join(" "), out.trim()))
         }
     }
+
+    fn ok_authed(&self, args: &[&str]) -> Result<String, String> {
+        let (ok, out) = self.run(true, args)?;
+        if ok {
+            Ok(out)
+        } else {
+            Err(format!(
+                "git {} failed: {}",
+                args.first().unwrap_or(&""),
+                out.replace(self.token.as_deref().unwrap_or("\u{0}"), "***").trim()
+            ))
+        }
+    }
 }
 
 fn marker_text(m: &Marker) -> String {
     let prs = m.prs.iter().map(u64::to_string).collect::<Vec<_>>().join(",");
     let mut s = format!("Queue-Prs: {prs}\nQueue-Round: {}\n", m.round);
-    if let Some(r) = m.since_run {
-        s.push_str(&format!("Queue-Since-Run: {r}\n"));
+    if let (Some(r), Some(w)) = (m.since_run, &m.since_workflow) {
+        s.push_str(&format!("Queue-Since-Run: {r}\nQueue-Since-Workflow: {w}\n"));
     }
     s
 }
@@ -173,13 +238,14 @@ pub fn parse_marker(message: &str) -> Option<Marker> {
         prs: nums,
         round: field("Queue-Round:")?.parse().ok()?,
         since_run: field("Queue-Since-Run:").and_then(|v| v.parse().ok()),
+        since_workflow: field("Queue-Since-Workflow:"),
     })
 }
 
 impl Train for GitTrain {
     fn fetch(&mut self, branches: &[String]) -> Result<(), String> {
         for b in branches.iter().filter(|b| b.as_str() != TRAIN_BRANCH) {
-            self.ok(&[
+            self.ok_authed(&[
                 "fetch",
                 "--quiet",
                 "--no-tags",
@@ -188,7 +254,7 @@ impl Train for GitTrain {
             ])?;
         }
         let spec = format!("+refs/heads/{TRAIN_BRANCH}:refs/remotes/origin/{TRAIN_BRANCH}");
-        if !self.git(&["fetch", "--quiet", "--no-tags", "origin", &spec])?.0 {
+        if !self.run(true, &["fetch", "--quiet", "--no-tags", "origin", &spec])?.0 {
             // No train branch on the server (or it was deleted): forget our copy.
             let _ = self.git(&["update-ref", "-d", &format!("refs/remotes/origin/{TRAIN_BRANCH}")])?;
         }
@@ -258,7 +324,7 @@ impl Train for GitTrain {
                 branch: None,
                 target: None,
             };
-            match crate::merge_check::command(&req) {
+            match (self.merge_check)(&req) {
                 Ok(_) => merged.push(pr.number),
                 Err(e) if e.exit == paddock_cli::Exit::Findings => {
                     self.ok(&["reset", "--quiet", "--hard", &before])?;
@@ -291,16 +357,42 @@ impl Train for GitTrain {
         Ok(projects_of_plan(&r.data))
     }
 
+    fn reached_workflows(&mut self, main: &str, head: &str) -> Result<Vec<String>, String> {
+        let args = [main.to_string(), head.to_string()];
+        let plan = crate::plan_cmd::command(&args, Some(self.root.clone())).map_err(|e| e.message)?;
+        let reached = projects_of_plan(&plan.data);
+        let mut out = vec!["ci.yml".to_string()];
+        // The apps and their workflows are read from main: a pull request cannot take its own app out of the gates.
+        for line in self.ok(&["ls-tree", "--name-only", main, "apps/"])?.lines() {
+            let Some(app) = line.strip_prefix("apps/") else { continue };
+            let (ok, text) = self.git(&["show", &format!("{main}:apps/{app}/paddock.ci.json")])?;
+            let wf = ok
+                .then(|| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .flatten()
+                .and_then(|v| v["workflow"].as_str().map(str::to_string));
+            if let Some(wf) = wf.filter(|w| !w.is_empty() && !out.contains(w))
+                && (reached.contains("*") || reached.contains(&norm(app)))
+            {
+                out.push(wf);
+            }
+        }
+        Ok(out)
+    }
+
+    fn checkout(&mut self, rev: &str) -> Result<(), String> {
+        self.ok(&["checkout", "--quiet", "--force", "--detach", rev]).map(|_| ())
+    }
+
     fn push_train(&mut self, head: &str, old: Option<&str>) -> Result<(), String> {
         let lease = format!("--force-with-lease=refs/heads/{TRAIN_BRANCH}:{}", old.unwrap_or(""));
-        self.ok(&["push", "--quiet", &lease, "origin", &format!("{head}:refs/heads/{TRAIN_BRANCH}")])
+        self.ok_authed(&["push", "--quiet", &lease, "origin", &format!("{head}:refs/heads/{TRAIN_BRANCH}")])
             .map(|_| ())
     }
 
     fn land(&mut self, head: &str) -> Result<(), String> {
         // A plain push: the server refuses anything that is not a fast-forward.
-        self.ok(&["push", "--quiet", "origin", &format!("{head}:refs/heads/main")])?;
-        self.ok(&[
+        self.ok_authed(&["push", "--quiet", "origin", &format!("{head}:refs/heads/main")])?;
+        self.ok_authed(&[
             "fetch",
             "--quiet",
             "--no-tags",
@@ -316,19 +408,50 @@ impl Train for GitTrain {
     }
 }
 
-/// The local fast gates: the gate register, the conformance line of ci.yml and the commit lint of the train's range. Formatting
-/// and clippy run in the queue's Linux job (slice 6).
+/// The local fast gates: the gate register, the conformance line of ci.yml (read from `origin/main`, never from the train: a
+/// pull request must not choose its own gate) and the commit lint of the train's range, the workspace-hack diff and the publish
+/// dry run. They run PR code, so every gate subprocess runs without the queue's credentials ([`scrub`]). Formatting and clippy
+/// run in the queue's Linux job (slice 6).
 pub struct LocalGates {
     /// The checkout, at the train head.
     pub root: PathBuf,
 }
 
-fn conformance_line(root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(root.join(".gitea/workflows/ci.yml")).ok()?;
-    text.lines()
-        .filter_map(|l| l.trim().strip_prefix("run: "))
-        .find(|l| l.starts_with("node conformance/bin/paddock-conformance.mjs --app paddock") && l.contains("--only"))
-        .map(str::to_string)
+/// The variables and configuration a gate subprocess must not see: the queue's tokens, git credentials, and any other variable
+/// whose name says it is a secret. `parent` is the environment names of this process.
+pub fn scrub(cmd: &mut std::process::Command, parent: &[String]) {
+    const NAMED: [&str; 10] = [
+        "GITEA_TOKEN",
+        "QUEUE_BOT_TOKEN",
+        "PLAN_TOKEN",
+        "GITHUB_TOKEN",
+        "GIT_ASKPASS",
+        "SSH_ASKPASS",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_CONFIG_COUNT",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    ];
+    const WORDS: [&str; 6] = ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH", "PRIVATE_KEY"];
+    for name in parent {
+        let up = name.to_ascii_uppercase();
+        if NAMED.contains(&up.as_str())
+            || up.starts_with("GIT_CONFIG_KEY_")
+            || up.starts_with("GIT_CONFIG_VALUE_")
+            || WORDS.iter().any(|w| up.contains(w))
+        {
+            cmd.env_remove(name);
+        }
+    }
+    for n in NAMED {
+        cmd.env_remove(n);
+    }
+    // No credential helper or extra header from any git configuration the job brought.
+    let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
+    cmd.env("GIT_CONFIG_GLOBAL", null)
+        .env("GIT_CONFIG_SYSTEM", null)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0");
 }
 
 /// One local gate: its name, program, arguments and the folder it runs in (relative to the checkout).
@@ -378,14 +501,77 @@ pub fn gate_commands(me: &str, conformance: &str, range: &str) -> Vec<GateCmd> {
     ]
 }
 
+/// The repository files a gate's output names (`crates/x/src/lib.rs:12`, `ui/a.ts`), in order of first mention, at most 50.
+pub fn files_named(text: &str) -> Vec<String> {
+    static PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        #[allow(clippy::expect_used)]
+        regex::Regex::new(r"(?:^|[\s'\x22`(\[=:])((?:[A-Za-z0-9_.@-]+/)+[A-Za-z0-9_.@-]+\.[A-Za-z0-9]{1,6})").expect("a valid pattern")
+    });
+    let mut out: Vec<String> = Vec::new();
+    for m in PATH.captures_iter(text) {
+        let f = m[1].trim_start_matches("./").to_string();
+        if !out.contains(&f) {
+            out.push(f);
+        }
+        if out.len() == 50 {
+            break;
+        }
+    }
+    out
+}
+
+pub(crate) fn conformance_line(root: &Path) -> Option<String> {
+    let out = paddock_proc::command("git")
+        .arg("-C")
+        .arg(root)
+        .args(["show", "origin/main:.gitea/workflows/ci.yml"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| l.trim().trim_start_matches("- ").strip_prefix("run: "))
+        .find(|l| l.starts_with("node conformance/bin/paddock-conformance.mjs --app paddock") && l.contains("--only"))
+        .map(str::to_string)
+}
+
 impl LocalGates {
+    fn command(&self, g: &GateCmd) -> std::process::Command {
+        let mut c = paddock_proc::command(&g.program);
+        c.args(&g.args).current_dir(self.root.join(g.dir));
+        let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
+        scrub(&mut c, &parent);
+        c
+    }
+
+    /// Removes the credentials a checkout persisted in its own git configuration (an extra header, a credential helper), so PR
+    /// code reading `.git/config` finds none. The push step brings its own through the environment.
+    fn scrub_local_config(&self) {
+        let list = paddock_proc::command("git")
+            .arg("-C")
+            .arg(&self.root)
+            .args([
+                "config",
+                "--local",
+                "--name-only",
+                "--get-regexp",
+                r"^(http\..*extraheader|credential\..*)$",
+            ])
+            .output();
+        if let Ok(o) = list {
+            for key in String::from_utf8_lossy(&o.stdout).lines() {
+                let _ = paddock_proc::command("git")
+                    .arg("-C")
+                    .arg(&self.root)
+                    .args(["config", "--local", "--unset-all", key])
+                    .output();
+            }
+        }
+    }
+
     /// `Ok(None)` passed, `Ok(Some(f))` failed, `Err` could not start (not measured).
     pub(crate) fn run_one(&self, g: &GateCmd) -> Result<Option<GateFailure>, String> {
-        let out = paddock_proc::command(&g.program)
-            .args(&g.args)
-            .current_dir(self.root.join(g.dir))
-            .output();
-        match out {
+        match self.command(g).output() {
             Ok(o) if o.status.success() => Ok(None),
             Ok(o) => {
                 let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
@@ -394,7 +580,7 @@ impl LocalGates {
                 Ok(Some(GateFailure {
                     name: g.name.into(),
                     detail,
-                    files: Vec::new(),
+                    files: files_named(&text),
                 }))
             }
             Err(e) => Err(format!("{}: could not start {}: {e}", g.name, g.program)),
@@ -405,8 +591,9 @@ impl LocalGates {
 impl Gates for LocalGates {
     fn run(&mut self, main: &str, head: &str) -> GateOutcome {
         let Some(line) = conformance_line(&self.root) else {
-            return GateOutcome::NotMeasured("ci.yml has no conformance line to run".into());
+            return GateOutcome::NotMeasured("origin/main's ci.yml has no conformance line to run".into());
         };
+        self.scrub_local_config();
         let me = std::env::current_exe()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "./dev".into());
@@ -442,28 +629,14 @@ pub struct GiteaCi<'a> {
     pub http: &'a mut dyn Http,
 }
 
-impl GiteaCi<'static> {
-    /// The real one.
-    pub fn curl(server: &str, repo: &str, token: &str, root: &Path, http: &'static mut CurlHttp) -> GiteaCi<'static> {
-        GiteaCi {
-            server: server.into(),
-            repo: repo.into(),
-            token: token.into(),
-            root: root.into(),
-            max_wait: Duration::from_secs(240),
-            http,
-        }
-    }
-}
-
 impl Ci for GiteaCi<'_> {
-    fn runs(&mut self, head: &str) -> Result<Vec<CiRun>, String> {
+    fn runs(&mut self, workflow: &str, head: &str) -> Result<Vec<CiRun>, String> {
         let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
         let page = c.runs_page_where(1, &format!("head_sha={head}"))?;
         let mut runs: Vec<_> = page
             .runs
             .into_iter()
-            .filter(|r| r.workflow() == "ci.yml" && r.head_sha == head)
+            .filter(|r| r.workflow() == workflow && r.head_sha == head)
             .collect();
         runs.sort_by_key(|r| std::cmp::Reverse(r.id));
         Ok(runs
@@ -485,14 +658,14 @@ impl Ci for GiteaCi<'_> {
             .collect())
     }
 
-    fn verdict(&mut self, head: &str) -> Verdict {
+    fn verdict(&mut self, workflow: &str, head: &str) -> Verdict {
         let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
-        verdict::verdict(&mut c, "ci.yml", head)
+        verdict::verdict(&mut c, workflow, head)
     }
 
-    fn dispatch(&mut self, inputs: &[(String, String)]) -> Result<Sent, String> {
+    fn dispatch(&mut self, workflow: &str, inputs: &[(String, String)]) -> Result<Sent, String> {
         let kv: Vec<String> = inputs.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        let req = dispatch::parse_request("ci.yml", TRAIN_BRANCH, &kv, &format!("{}s", self.max_wait.as_secs().max(1)), None)?;
+        let req = dispatch::parse_request(workflow, TRAIN_BRANCH, &kv, &format!("{}s", self.max_wait.as_secs().max(1)), None)?;
         let root = self.root.clone();
         let read = move |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
         let mut clock = dispatch::system_clock();
@@ -533,12 +706,7 @@ impl Ci for GiteaCi<'_> {
                     }
                 ),
                 projects: projects_of_row(&r.job, &r.test),
-                blame: match &r.status {
-                    Status::New => Blame::New,
-                    Status::Flaky { .. } => Blame::Flaky,
-                    Status::OnBaseline => Blame::OnMain,
-                    Status::Unknown(_) => Blame::Unknown,
-                },
+                blame: blame_of(&r.status),
             })
             .collect())
     }
