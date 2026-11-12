@@ -424,7 +424,7 @@ impl Renderers {
     }
 
     /// The test form of the browsers' answers (ADR 0071): every answer and page load waited for while the browser is there,
-    /// until the hang guard of `paddock_testkit::start`.
+    /// until the hang guard of `paddock_testkit_start`.
     #[cfg(test)]
     pub fn set_answers(&self, a: chromium_driver::Answers) {
         *crate::sync::write(&self.inner.answers) = a;

@@ -1,4 +1,4 @@
-//! Waiting for a program a test started (ADR 0071 section 1): until it is ready or has ended, never a fixed count of polls
+//! The test kit's wait for a program a test started (ADR 0071 section 1, `paddock_testkit_start`): until it is ready or has ended, never a fixed count of polls
 //! or a deadline that decides the verdict.
 //!
 //! - [`wait_ready_or_exit`]: returns [`StartOutcome::Ready`] as soon as the test's probe gives a value, or
@@ -11,23 +11,23 @@
 //! - [`wait_exit`]: waits for a program to end on its own.
 //! - [`warm_first_start`] / [`warm_first_starts`]: pay the OS's first-run check of a fresh binary once, before a step whose
 //!   bound the test cannot remove ([`paddock_proc::warm_up`], memoised per file identity). Never what makes a test correct.
-//! - [`PATIENCE`]: the start judge's patience for a test, under which only the wall guard ends a wait. A product driver that
-//!   takes a [`Patience`] and a guard (Debrief's `chromium_driver::Answers::Judged`) gets these two from here.
+//! - [`PATIENCE`] and [`HANG_GUARD`]: the start judge's patience for a test, under which only the wall guard ends a wait. A
+//!   product driver that takes a [`Patience`] and a guard (Debrief's `chromium_driver::Answers::Judged`) gets these two from
+//!   here.
 //!
 //! The judgement is the product's: [`paddock_proc::StartWatch`] over a probe of the test's (ADR 0031), so there is one
 //! "ready or exit" in the family (rule 55). Its tick counting cannot stretch the guard: the pace here ends the wait on the
 //! wall clock, so a paused host still ends a real hang before nextest's kill.
 //!
-//! `paddock-proc` has this crate as a dev-dependency; its own tests therefore never use this module (their `paddock-proc`
-//! types would not be this module's).
-//!
-//! This module owns real time for tests, as [`crate::wait`] does (conformance C71 skips it).
+//! This crate owns real time for tests, as `paddock_testkit::wait` does (conformance C71 skips both). It is its own crate
+//! because `paddock-proc`'s tests use `paddock-testkit`: the kit depending on `paddock-proc` made a publish cycle (ci.yml 7989).
 
-use crate::wait::{FIRST, HANG_GUARD, LAST};
 use paddock_proc::{
     ExitInfo, Liveness, Pace, Patience, Presence, ProcessId, RunState, StallCause, StartProbe,
     StartState, StartWatch, Watched,
 };
+pub use paddock_testkit::HANG_GUARD;
+use paddock_testkit::wait::{FIRST, LAST};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -330,7 +330,7 @@ impl<S: Started, P: FnMut() -> Option<T>, T> StartProbe for Look<S, P, T> {
     }
 }
 
-/// The kit's pace: the backoff of [`crate::wait`], a note every [`NOTE_EVERY`], and the end of the wait once the guard has
+/// The kit's pace: the backoff of `paddock_testkit::wait`, a note every [`NOTE_EVERY`], and the end of the wait once the guard has
 /// passed on the wall clock (the judge counts ticks, which a paused host would stretch).
 struct Deadline<'a> {
     clock: &'a dyn Clock,

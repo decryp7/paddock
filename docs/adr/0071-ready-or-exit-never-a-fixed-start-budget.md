@@ -11,7 +11,7 @@
   **Row 13 is still open**: the 20-40 s receives and deadlines in the real-browser tests of paddock-chromium, Spotter and Debrief's
   chromium-driver are unchanged. The product's 15 s connect window is unchanged (D4).
 - Progress 2026-11-12 (`fix/debrief-train5-waits`, from `origin/fix/debrief-train5-rust-tests` `0e162bcdd`): WP-1 built
-  (`paddock_testkit::start`, sync only; the async form waits for a user). Row 13 done for Debrief (chromium-driver and the
+  (`paddock_testkit_start`, sync only; the async form waits for a user). Row 13 done for Debrief (chromium-driver and the
   renderer's real-browser tests: `Answers::Judged`, `wait_ready_or_exit`, `wait_exit`); paddock-chromium's and Spotter's
   real-browser tests are still open.
 - Related: ER-11 / rule 5 (failing test first), ER-12 (no raised timeouts or sleeps; flaky is red), ER-20 / rule 51
@@ -198,7 +198,7 @@ or exit" (rule 55, ER-22):
   `assert_never_panics`). Cargo allows that dev-dependency cycle; within `paddock-proc`'s own tests the testkit's copy of
   `paddock-proc` is a different crate whose types do not unify with the crate under test. That is harmless while
   `paddock-proc`'s tests never pass its types to the testkit, so they test `StartWatch` directly and never use
-  `paddock_testkit::start`; a C71 fixture asserts that rule (a `use paddock_testkit::start` in `crates/paddock-proc/` is
+  `paddock_testkit_start`; a C71 fixture asserts that rule (a `use paddock_testkit_start` in `crates/paddock-proc/` is
   an error).
 - **Tests of the module** (rule 43: shared behaviour tested once here; apps test only their wiring): a scripted program
   (a test binary of the crate: `--ready-when <file>`, `--exit <code>`, `--never-ready`) proves (a) a child that becomes
@@ -413,7 +413,7 @@ migration is its own commit and reverts alone.
 
 - **D1. Build the test wait on the product's start judge** (`paddock-testkit`'s optional `start` feature depends on
   `paddock-proc`; a wall-clock `DeadlinePace`, the kit's own 10 s notes, an async loop over `StartJudge`, and
-  `paddock-proc`'s own tests kept off `paddock_testkit::start` because of the dev-dependency cycle). *Recommended: yes.*
+  `paddock-proc`'s own tests kept off `paddock_testkit_start` because of the dev-dependency cycle). *Recommended: yes.*
   Alternative: a small separate loop in the kit (no new dependency, but a second implementation of the judgement under
   rule 55).
 - **D2. The nextest setup-script warm-up.** *Recommended: no, not while it is experimental; revisit when stable, as an

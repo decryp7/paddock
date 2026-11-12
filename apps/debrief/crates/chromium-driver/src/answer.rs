@@ -8,7 +8,7 @@
 //! Once the first page is open, each later command has its fixed bound again, so a command late in a long-lived browser's
 //! life cannot wait for its whole time limit.
 //!
-//! Tests ([`Answers::Judged`], set from `paddock_testkit::start`): every answer and every page load is waited for until it
+//! Tests ([`Answers::Judged`], set from `paddock_testkit_start`): every answer and every page load is waited for until it
 //! comes, the browser ends or its connection closes, and only a wall-clock hang guard ends a wait that never does, as a
 //! hang. A loaded host then makes a test slower, never red (Debrief CI 7963: `navigate: Timeout` in the renderer's
 //! real-browser tests, behind fixed 5 s and 10 s command deadlines).
@@ -35,7 +35,7 @@ pub enum Answers {
     #[default]
     Bounded,
     /// For tests (ADR 0071): every answer and page load waited for while the browser is there, judged with `patience`
-    /// (`paddock_testkit::start::PATIENCE`: only the guard ends a wait), ended as a hang after `guard` of wall time
+    /// (`paddock_testkit_start::PATIENCE`: only the guard ends a wait), ended as a hang after `guard` of wall time
     /// (`paddock_testkit::HANG_GUARD`). A caller's own load timeout is then not used.
     Judged { patience: Patience, guard: Duration },
 }

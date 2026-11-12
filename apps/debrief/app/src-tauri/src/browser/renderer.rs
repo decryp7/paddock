@@ -969,11 +969,11 @@ mod tests {
     /// A real browser, when the machine has one (skipped otherwise): the pinned Chrome for Testing. These tests take turns with
     /// chromium-driver's in nextest's `real-browser` group (`.config/nextest.toml`), and wait for the browser the way ADR 0071
     /// says: every answer and page load while the browser is there ([`chromium_driver::Answers::Judged`]), and the page's
-    /// content until it appears or the browser ends ([`paddock_testkit::start::wait_ready_or_exit`]), never a fixed count or
+    /// content until it appears or the browser ends ([`paddock_testkit_start::wait_ready_or_exit`]), never a fixed count or
     /// deadline (CI 7963: `navigate: Timeout` behind the driver's fixed 5 s and 10 s command deadlines).
     mod real_browser {
         use super::*;
-        use paddock_testkit::start::{wait_exit, wait_ready_or_exit};
+        use paddock_testkit_start::{wait_exit, wait_ready_or_exit};
 
         fn serve() -> u16 {
             use std::io::{Read, Write};
@@ -1009,12 +1009,12 @@ mod tests {
             // The OS holds the first run of a browser bundle on macOS with no CPU and no output (ADR 0071): paid here, once
             // per process and file, before the launch's own judge looks. Not on Windows, where `--version` starts the browser.
             #[cfg(target_os = "macos")]
-            paddock_testkit::start::warm_first_start(&exe.path, &["--version"]);
+            paddock_testkit_start::warm_first_start(&exe.path, &["--version"]);
             drop(exe);
             let renderers = Arc::new(Renderers::default());
             // The test form of the answers: a loaded host makes the test slower, never red (ADR 0071).
             renderers.set_answers(chromium_driver::Answers::Judged {
-                patience: paddock_testkit::start::PATIENCE,
+                patience: paddock_testkit_start::PATIENCE,
                 guard: paddock_testkit::HANG_GUARD,
             });
             // Throwaway profiles go below the test's own folder, as they go below Debrief's local folder in the app: without

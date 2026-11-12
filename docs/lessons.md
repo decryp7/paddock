@@ -1889,7 +1889,7 @@ of ADR 0071 section 1 is NOT built yet: `paddock_proc::StartWatch` is the judge 
 would be a copy (rule 55). Still open: ADR 0071 row 13 (the 20-40 s receives and deadlines in the real-browser tests of
 paddock-chromium, Spotter and Debrief's chromium-driver; only the first-run warm-up is done) and rows 1, 5-12 and 14-15.
 
-Update 2026-11-12 (`fix/debrief-train5-waits`): `paddock_testkit::start::wait_ready_or_exit` is built (feature `start`, on
+Update 2026-11-12 (`fix/debrief-train5-waits`): `paddock_testkit_start::wait_ready_or_exit` is built (feature `start`, on
 `StartWatch`), after Debrief's renderer real-browser tests failed with `navigate: Timeout` on the CI Mac (run 7963): the driver
 copy still had the fixed 5 s and 10 s command deadlines that `paddock-chromium` had replaced in `8d8424805`. Debrief's
 chromium-driver now judges the start's answers like the canonical, and its tests set `Answers::Judged` (every answer and page

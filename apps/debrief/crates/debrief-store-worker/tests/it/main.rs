@@ -40,7 +40,7 @@ pub(crate) fn warm_binaries() {
         if plugins.is_file() {
             programs.push((plugins.as_path(), &[debrief_plugin_host::builtins::MANIFESTS_FLAG]));
         }
-        paddock_testkit::start::warm_first_starts(&programs);
+        paddock_testkit_start::warm_first_starts(&programs);
     }
 }
 
