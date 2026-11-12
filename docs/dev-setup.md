@@ -140,6 +140,14 @@ another database number. sccache's keys include the compiler and target, so one 
   browsers. Everything green locally before pushing to `main` or tagging; CI confirms, it does not find failures.
 - Linux-only failures: run the CI image locally, for example
   `docker run --rm -v "$PWD:/src" -w /src <ci-image> cargo nextest run --workspace` (only containers you created).
+- Before starting another agent, ask `./dev load` (the coordinator's speed check, ER-24). It prints one line that starts with
+  `start`, `hold` or `stop`, and why. The 1- and 5-minute load, the free space of `/Volumes/d7sst7` and `/Volumes/d8sst7`, and the
+  CI queue (queued plus running runs, read-only through `GITEA_TOKEN`) decide it: `start` while the 5-minute load is under 12
+  (on 14 cores, scaled to the core count), nothing is low on space and fewer than 4 runs are queued or running; `hold` between
+  12 and 20, on a 1-minute spike over 20, with a long CI queue, or when something could not be measured (never `start` on a
+  number that is missing); `stop` at a 5-minute load of 20 or more, or under 50 GiB free on a root. `--json` gives the numbers
+  for scripts. The limits are flags (`--start-below`, `--hold-above`, `--min-free-gib`, `--ci-hold`, `--disk <path>`, `--no-ci`).
+  It decides nothing by itself: it does not start or stop agents, and `heavy.sh` still caps the heavy steps.
 
 ## Things that cost time when forgotten
 
