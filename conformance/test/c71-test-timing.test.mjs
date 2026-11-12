@@ -45,10 +45,13 @@ test('C71 picks test files, skips the testkit and fixtures', () => {
     'crates/x/tests/it.rs': 'fn t() { thread::sleep(D); }\n',
     'crates/x/src/lib.rs': 'fn f() { thread::sleep(D); }\n',
     'crates/paddock-testkit/src/time.rs': '#[cfg(test)]\nfn f() { thread::sleep(D); }\n',
+    // The kit's wait for a started program is its own crate (ci.yml 7989); it owns real time too.
+    'crates/paddock-testkit-start/src/lib.rs': '#[cfg(test)]\nfn f() { thread::sleep(D); }\n',
+    'crates/paddock-testkit-starter/src/tests.rs': '#[cfg(test)]\nfn f() { thread::sleep(D); }\n',
     'ui/e2e/fixtures/b.spec.ts': 'await page.waitForTimeout(1);\n',
   };
   const sites = timingSites(Object.keys(files), (f) => files[f]);
-  assert.deepEqual(sites.map((s) => s.file), ['ui/e2e/a.spec.ts', 'crates/x/tests/it.rs']);
+  assert.deepEqual(sites.map((s) => s.file), ['ui/e2e/a.spec.ts', 'crates/x/tests/it.rs', 'crates/paddock-testkit-starter/src/tests.rs'], 'only the two kit crates, not a name that starts like them');
 });
 
 test('C71 baseline: a known site passes by its text wherever it moves, a copy or an edit is new, a gone site is stale', () => {

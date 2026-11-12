@@ -1007,6 +1007,13 @@ test('the real-browser tests of the crates and of Debrief take turns under nexte
       `${file}: ${pkg}'s real_browser tests are in the group`,
     );
   }
+  // Debrief's shell has real-browser tests of its own (the research browser): they take turns with chromium-driver's (CI 7963).
+  assert.ok(
+    read(join(PADDOCK, 'apps', 'debrief', '.config', 'nextest.toml')).includes(
+      "filter = 'package(debrief-app) & kind(lib) & test(/^browser::renderer::tests::real_browser::/)'\ntest-group = 'real-browser'",
+    ),
+    "Debrief's research-browser tests are in the real-browser group",
+  );
 });
 
 test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard, the webkit input and uploads the report from the stable workspace", () => {
@@ -1173,7 +1180,9 @@ test('Debrief\'s shell tests, which start plugin processes, run in a group of at
   assert.equal(mine.length, 1, 'one override puts tests in the group');
   assert.match(mine[0], /^filter = 'package\(debrief-app\) & kind\(lib\)'$/m, 'the whole lib binary, not a list of names');
   for (const o of overrides) {
-    if (/^test-group = /m.test(o) && !/app-plugin-processes/.test(o)) {
+    // The one exception: the shell's real-browser tests (one module) take turns with chromium-driver's in the real-browser group.
+    const realBrowser = /^test-group = 'real-browser'$/m.test(o) && /test\(\/\^browser::renderer::tests::real_browser::\/\)/.test(o);
+    if (/^test-group = /m.test(o) && !/app-plugin-processes/.test(o) && !realBrowser) {
       assert.doesNotMatch(o, /package\(debrief-app\)/, 'no other group takes the shell tests');
     }
   }

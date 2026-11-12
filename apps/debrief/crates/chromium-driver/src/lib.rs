@@ -5,6 +5,8 @@
 //!   with an accent theme, and a supervised child that is killed on drop ([`process`]).
 //! * [`cdp`] / [`page`]: a minimal synchronous DevTools-protocol client and a page handle (navigate, evaluate,
 //!   wait for readiness, show or hide the window, block heavy resources).
+//! * [`answer`]: how answers are waited for: judged on the browser's liveness while it starts, and always in tests
+//!   ([`Answers::Judged`], ADR 0071).
 //! * [`ready`] and [`challenge`]: pure rules for "the page can be read" and "this page needs the user".
 //! * [`cue`]: the text of the title that marks a window as AI-driven. Nothing is ever injected into a page.
 //! * [`install`]: verified install of a pinned Chromium archive.
@@ -13,6 +15,7 @@
 // are the browser (a GUI program) and `taskkill`, which is started without a console window. Each `Command::new` carries its
 // own `#[expect(clippy::disallowed_methods)]`, so the lint still sees every bare-pid kill (ADR 0033).
 
+pub mod answer;
 pub mod cdp;
 pub mod challenge;
 pub mod cue;
@@ -28,6 +31,7 @@ pub mod ready;
 /// start-up in every build, to refuse to start as a fake browser, and a normal (non-test) build has no `fake` module.
 pub const FAKE_CHILD_ENV: &str = "DEBRIEF_FAKE_BROWSER";
 
+pub use answer::Answers;
 pub use challenge::{detect as detect_challenge, Challenge};
 pub use discover::{find, find_for_tests, Browser as BrowserExe, Flavor};
 pub use launch::{Chromium, Gone, LaunchOptions, Profile, WindowBounds};
@@ -40,8 +44,10 @@ pub enum Error {
     NotFound,
     #[error("the browser could not be started: {0}")]
     Launch(String),
+    /// The command or wait that got no answer and its bound or reason ("Page.enable while opening the start page, no answer
+    /// within 10s").
     #[error("the browser did not answer in time ({0})")]
-    Timeout(&'static str),
+    Timeout(String),
     #[error("the browser connection failed: {0}")]
     Connection(String),
     #[error("the browser reported an error: {0}")]

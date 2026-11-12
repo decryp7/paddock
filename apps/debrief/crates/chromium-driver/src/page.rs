@@ -1,11 +1,14 @@
 //! One page (tab) of a running browser.
 
+use crate::answer::Answering;
 use crate::cdp::Connection;
 use crate::{Error, Result};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// How long a command on a page may take once the browser has started (the product; tests judge every answer instead,
+/// [`crate::Answers::Judged`]).
 const CALL: Duration = Duration::from_secs(10);
 /// URL patterns blocked by [`Page::block_heavy`].
 const HEAVY: &[&str] = &[
@@ -14,6 +17,7 @@ const HEAVY: &[&str] = &[
 ];
 
 pub struct Page {
+    pub(crate) answering: Arc<Answering>,
     pub(crate) conn: Arc<Connection>,
     pub(crate) session: String,
     pub(crate) target: String,
@@ -26,28 +30,49 @@ pub struct Info {
 }
 
 impl Page {
-    /// Opens a new page (a tab beside the others) and attaches to it.
-    pub(crate) fn attach(conn: Arc<Connection>) -> Result<Page> {
-        let t = conn.call(None, "Target.createTarget", json!({"url": "about:blank"}), CALL)?;
+    /// Opens a new page (a tab beside the others) and attaches to it. `phase` names the step in the log.
+    pub(crate) fn attach(answering: Arc<Answering>, phase: &str) -> Result<Page> {
+        let t = answering.ask(None, "Target.createTarget", json!({"url": "about:blank"}), phase, CALL)?;
         let target = str_of(&t, "targetId")?;
-        Page::adopt(conn, target)
+        Page::adopt(answering, target, phase)
     }
 
     /// Attaches to the existing page `target` (for example the one the browser opened with).
-    pub(crate) fn adopt(conn: Arc<Connection>, target: String) -> Result<Page> {
-        let s = conn.call(None, "Target.attachToTarget", json!({"targetId": target, "flatten": true}), CALL)?;
+    pub(crate) fn adopt(answering: Arc<Answering>, target: String, phase: &str) -> Result<Page> {
+        let s = answering.ask(
+            None,
+            "Target.attachToTarget",
+            json!({"targetId": target, "flatten": true}),
+            phase,
+            CALL,
+        )?;
         let session = str_of(&s, "sessionId")?;
+        let conn = answering.conn.clone();
         conn.watch(&session);
         conn.watch(&target);
-        let p = Page { conn, session, target };
-        p.call("Page.enable", json!({}))?;
-        p.call("Network.enable", json!({}))?;
+        let p = Page {
+            answering,
+            conn,
+            session,
+            target,
+        };
+        p.call_while("Page.enable", json!({}), phase)?;
+        p.call_while("Network.enable", json!({}), phase)?;
         // Downloads are never wanted from a page that is only read.
-        let _ = p.conn.call(None, "Browser.setDownloadBehavior", json!({"behavior": "deny"}), CALL);
+        let _ = p
+            .answering
+            .ask(None, "Browser.setDownloadBehavior", json!({"behavior": "deny"}), phase, CALL);
         Ok(p)
     }
 
     /// The page is gone: its window or tab was closed (by the user), it crashed, or the browser connection ended.
+    /// The browser reported this page's session or target gone (its window or tab was closed, it crashed); unlike
+    /// [`Page::is_closed`] it does not look at the connection, so a caller that has just checked the connection reads one
+    /// state, not two ([`crate::Chromium::gone`]).
+    pub(crate) fn detached(&self) -> bool {
+        self.conn.is_gone(&self.session) || self.conn.is_gone(&self.target)
+    }
+
     pub fn is_closed(&self) -> bool {
         self.conn.is_closed() || self.conn.is_gone(&self.session) || self.conn.is_gone(&self.target)
     }
@@ -58,7 +83,9 @@ impl Page {
         if self.is_closed() {
             return Ok(false);
         }
-        let r = self.conn.call(None, "Target.getTargets", json!({}), CALL)?;
+        let r = self
+            .answering
+            .ask(None, "Target.getTargets", json!({}), "asking whether the page exists", CALL)?;
         Ok(r.get("targetInfos")
             .and_then(Value::as_array)
             .is_some_and(|t| t.iter().any(|i| i.get("targetId").and_then(Value::as_str) == Some(&self.target))))
@@ -66,10 +93,15 @@ impl Page {
 
     /// A call on the page: [`Error::Closed`] once the page is gone, whatever the browser answers.
     fn call(&self, method: &str, params: Value) -> Result<Value> {
+        self.call_while(method, params, "driving the page")
+    }
+
+    /// [`Page::call`] with the step it belongs to, for the log.
+    fn call_while(&self, method: &str, params: Value, phase: &str) -> Result<Value> {
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        self.closed_wins(self.conn.call(Some(&self.session), method, params, CALL))
+        self.closed_wins(self.answering.ask(Some(&self.session), method, params, phase, CALL))
     }
 
     fn closed_wins<T>(&self, r: Result<T>) -> Result<T> {
@@ -79,16 +111,26 @@ impl Page {
         r
     }
 
-    /// Waits for the page's load event; a page closed meanwhile ends the wait at once.
+    /// Waits for the page's load event; a page closed meanwhile ends the wait at once. Within `timeout`, except in the test
+    /// form ([`crate::Answers::Judged`]), where the load is waited for while the browser is there.
     fn wait_load(&self, since: u64, timeout: Duration) -> Result<()> {
         let (s, t) = (self.session.clone(), self.target.clone());
-        let ev = self.conn.wait_event(since, timeout, |e| {
-            (e.method == "Page.loadEventFired" && e.session.as_deref() == Some(&s)) || ends(e, &s, &t)
-        });
+        let pred = |e: &crate::cdp::Event| (e.method == "Page.loadEventFired" && e.session.as_deref() == Some(&s)) || ends(e, &s, &t);
+        if self.answering.judges_loads() {
+            let loaded = self
+                .answering
+                .await_event(since, "the page load", "loading a page", pred)
+                .map(|_| ());
+            return self.closed_wins(loaded);
+        }
+        let ev = self.conn.wait_event(since, timeout, pred);
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        ev.map(|_| ()).ok_or(Error::Timeout("the page load"))
+        ev.map(|_| ()).ok_or_else(|| {
+            log::warn!("The page did not finish loading within {timeout:?}");
+            Error::Timeout(format!("the page load, not finished within {timeout:?}"))
+        })
     }
 
     /// Loads `url` and waits for the load event (or `timeout`).
@@ -136,7 +178,13 @@ impl Page {
     }
 
     pub fn info(&self) -> Result<Info> {
-        let r = self.closed_wins(self.conn.call(None, "Target.getTargetInfo", json!({"targetId": self.target}), CALL))?;
+        let r = self.closed_wins(self.answering.ask(
+            None,
+            "Target.getTargetInfo",
+            json!({"targetId": self.target}),
+            "reading the page's address and title",
+            CALL,
+        ))?;
         let g = |k: &str| {
             r.pointer(&format!("/targetInfo/{k}"))
                 .and_then(Value::as_str)

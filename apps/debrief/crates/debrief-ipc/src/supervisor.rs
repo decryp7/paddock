@@ -123,6 +123,11 @@ pub trait Connection: Send + Sync {
     fn pid(&self) -> Option<u32>;
     /// Stops the child immediately and reaps it.
     fn kill(&self);
+    /// Stops a child whose connection broke: how it ended on its own is recorded first where the connection can tell
+    /// (a crash stays a crash, not "stopped by Debrief"). [`Connection::kill`] where it cannot.
+    fn kill_after_failure(&self) {
+        self.kill();
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -293,7 +298,7 @@ impl<C: Connection> Supervisor<C> {
             }
         };
         if let Some((_, conn)) = dead {
-            conn.kill();
+            conn.kill_after_failure();
             self.ledger.count_restart();
             self.record(e);
         }
@@ -357,12 +362,19 @@ mod tests {
         killed: Arc<AtomicBool>,
     }
 
+    /// The connections a supervisor stopped because a call broke (rather than at a shutdown).
+    static AFTER_FAILURE: std::sync::Mutex<Vec<u32>> = std::sync::Mutex::new(Vec::new());
+
     impl Connection for Fake {
         fn pid(&self) -> Option<u32> {
             Some(self.pid)
         }
         fn kill(&self) {
             self.killed.store(true, Ordering::SeqCst);
+        }
+        fn kill_after_failure(&self) {
+            lock(&AFTER_FAILURE).push(self.pid);
+            self.kill();
         }
     }
 
@@ -430,6 +442,11 @@ mod tests {
             IpcError::Died("x".into())
         );
         assert!(killed.load(Ordering::SeqCst));
+        assert_eq!(
+            *lock(&AFTER_FAILURE),
+            [100],
+            "a broken child is stopped as one that failed, so its own end is kept"
+        );
         assert_eq!(sup.status().state, ChildState::Stopped);
         assert_eq!(sup.call(|c| Ok(c.pid())).unwrap(), Some(101));
         // Two calls seeing the same dead child count once.

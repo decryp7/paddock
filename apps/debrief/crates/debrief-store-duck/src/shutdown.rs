@@ -8,6 +8,15 @@
 //! first statement that needs them (and registers their destructors then): a handler registered once, before any
 //! statement, would run after those. So the handler is registered again whenever the number of borrowed connections
 //! reaches a power of two (about 20 times in a million statements); a repeat run finds nothing to wait for.
+//!
+//! That still left a window: a static DuckDB first builds after the last registration is destroyed before the drain
+//! (CI 7997: SIGBUS in `DistinctStatistics::UpdateSample`, whose two sample selections are function-local statics, while
+//! the catalogue thread's append still read one). So on macOS and Linux the drain runs first of all, from a destructor
+//! of a main-thread thread-local armed before `main`: `exit()` on the main thread runs that thread's thread-local
+//! destructors before any `atexit` handler or C++ static destructor (Apple's libc `exit`, `_tlv_exit` then
+//! `__cxa_finalize`; glibc's `__run_exit_handlers`, `__call_tls_dtors` first). A test process and the store worker both
+//! end that way, by returning from `main`. The `atexit` registrations stay for an exit from another thread
+//! (`std::process::exit` in a signal thread) and for Windows.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Once;
@@ -110,6 +119,47 @@ extern "C" fn at_exit() {
     }
 }
 
+/// The main thread's exit drain (macOS and Linux): see the module documentation.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod main_thread {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Drains when the main thread's thread-locals are destroyed: the first thing `exit()` does on the main thread.
+    struct MainThreadExit;
+
+    impl Drop for MainThreadExit {
+        fn drop(&mut self) {
+            super::at_exit();
+        }
+    }
+
+    thread_local! {
+        static MAIN_THREAD_EXIT: MainThreadExit = const { MainThreadExit };
+    }
+
+    /// Whether [`arm`] ran (before `main`, on the main thread).
+    static ARMED: AtomicBool = AtomicBool::new(false);
+
+    /// Touches the main thread's [`MAIN_THREAD_EXIT`], which registers its destructor; runs as a load-time initializer.
+    extern "C" fn arm() {
+        if MAIN_THREAD_EXIT.try_with(|_| ()).is_ok() {
+            ARMED.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// The initializer that arms the drain before `main` runs (the loader runs initializers on the main thread).
+    #[used]
+    #[cfg_attr(target_os = "macos", link_section = "__DATA,__mod_init_func")]
+    #[cfg_attr(target_os = "linux", link_section = ".init_array")]
+    pub(super) static ARM: extern "C" fn() = arm;
+
+    /// Whether the drain is armed (tests: the initializer was linked and ran).
+    #[cfg(test)]
+    pub(super) fn armed() -> bool {
+        ARMED.load(Ordering::SeqCst)
+    }
+}
+
 fn register() {
     // SAFETY: `at_exit` is a plain `extern "C" fn()` that only touches atomics and sleeps.
     unsafe {
@@ -119,5 +169,76 @@ fn register() {
 
 /// Registers the exit handler for the first time (call when the first database is opened).
 pub(crate) fn install() {
+    // Keeps the initializer's object in the link: an archive member nothing refers to is left out.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    std::hint::black_box(&main_thread::ARM);
     INSTALL.call_once(register);
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    const ORDER_CHILD: &str = "DEBRIEF_SHUTDOWN_ORDER_CHILD";
+
+    /// Writes what the late exit handler saw, with `write(2)`: Rust's stdout is not for use while the process exits.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    extern "C" fn late_handler() {
+        let line: &[u8] = if super::down() {
+            b"late handler: drained first\n"
+        } else {
+            b"late handler: ran before the drain\n"
+        };
+        // SAFETY: writes a static buffer to the standard output descriptor.
+        unsafe {
+            libc::write(1, line.as_ptr().cast(), line.len());
+        }
+    }
+
+    /// Runs in the child process only: arms the exit handler as opening a store does, then registers an exit handler
+    /// of its own afterwards, as DuckDB does for a function-local static it builds on the first statement that needs it
+    /// (the two sample selections of `DistinctStatistics::UpdateSample`, CI 7997). The process then exits normally,
+    /// through `main`'s return, as every nextest test process does.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn exit_order_child() {
+        if std::env::var_os(ORDER_CHILD).is_none() {
+            return;
+        }
+        super::install();
+        // SAFETY: registers a plain `extern "C"` function that only writes to a descriptor.
+        assert_eq!(unsafe { libc::atexit(late_handler) }, 0);
+    }
+
+    /// The drain of the main thread's exit is armed before `main` (the initializer was linked and ran).
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_main_thread_exit_drain_is_armed_before_main() {
+        super::install();
+        assert!(super::main_thread::armed(), "the load-time initializer did not run");
+    }
+
+    /// Regression (CI 7997, SIGBUS at exit in `DistinctStatistics::UpdateSample`): the drain runs before every exit
+    /// handler and C++ static destructor, also those registered after the store opened. `exit()` runs handlers
+    /// last-registered first, so DuckDB destroyed a static it had built lazily while the catalogue thread's statement
+    /// still read it, and the drain waited only afterwards.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_drain_runs_before_exit_handlers_registered_after_the_store_opened() {
+        let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+            .args(["--exact", "shutdown::tests::exit_order_child", "--test-threads=1", "--nocapture"])
+            .env(ORDER_CHILD, "1")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "child failed: {:?}\n{stdout}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            stdout.contains("late handler: drained first"),
+            "an exit handler registered after the store opened ran before the drain:\n{stdout}"
+        );
+    }
 }

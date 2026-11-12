@@ -221,6 +221,13 @@ describe('crateStepsMissing', () => {
     assert.deepEqual(crateStepsMissing(readFileSync(join(root, '.gitea/workflows/ci.yml'), 'utf8'), names), []);
     assert.deepEqual(crateProblems(workspaceCrates(metadata)), []);
   });
+  // ci.yml 7989: paddock-testkit's `start` feature (an optional dependency on paddock-proc) and paddock-proc's versioned
+  // dev-dependency on paddock-testkit made a cycle, and the publish dry run stopped. The real workspace must have an order.
+  test('the real workspace has a publish order: no cycle through optional or versioned dev-dependencies', () => {
+    const metadata = JSON.parse(execFileSync('cargo', ['metadata', '--format-version', '1', '--no-deps'], { cwd: join(root, 'crates'), encoding: 'utf8' }));
+    const order = publishOrder(workspaceCrates(metadata)).map((c) => c.name);
+    assert.ok(order.indexOf('paddock-testkit') < order.indexOf('paddock-proc'), 'the kit is published before the crates whose tests use it');
+  });
 });
 
 describe('planRows and formatTable', () => {

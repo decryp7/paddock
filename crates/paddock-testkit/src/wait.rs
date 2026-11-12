@@ -12,9 +12,10 @@ use std::time::{Duration, Instant};
 /// its own message instead of being killed first.
 pub const HANG_GUARD: Duration = Duration::from_secs(40);
 
-/// The first poll interval and the longest one: the interval doubles from the first to the last.
-const FIRST: Duration = Duration::from_micros(200);
-const LAST: Duration = Duration::from_millis(20);
+/// The first poll interval and the longest one: the interval doubles from the first to the last (also the pace of
+/// `paddock_testkit_start`'s waits).
+pub const FIRST: Duration = Duration::from_micros(200);
+pub const LAST: Duration = Duration::from_millis(20);
 
 /// Polls `f` until it returns `Some(value)`; `None` after `guard`. The last poll happens after the bound too, so a value that arrived
 /// while the thread slept is not lost.
@@ -104,6 +105,27 @@ impl Progress {
     /// Units done so far.
     pub fn get(&self) -> u64 {
         self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Follows work that shows its own progress as a level (rows committed, bytes read; any change counts, so a counter that
+    /// starts again in a new phase is progress too): asks `look` with the kit's backoff, ticks whenever the level it gives
+    /// changes, and returns once `look` says the work is done. It has no bound of its own: call it inside [`guarded`], whose
+    /// stall limit ends work whose level stops changing.
+    pub fn follow(&self, mut look: impl FnMut() -> (u64, bool)) {
+        let mut last = None;
+        let mut pause = FIRST;
+        loop {
+            let (level, done) = look();
+            if last != Some(level) {
+                last = Some(level);
+                self.tick();
+            }
+            if done {
+                return;
+            }
+            std::thread::sleep(pause);
+            pause = (pause * 2).min(LAST);
+        }
     }
 }
 
@@ -321,6 +343,40 @@ mod tests {
             move |_| {
                 let _ = held.recv();
             },
+        );
+    }
+
+    #[test]
+    fn following_a_level_ticks_for_every_change_and_ends_when_the_work_is_done() {
+        let p = Progress::new();
+        // Levels as a job shows them: a repeat is no progress, a counter that starts again in a new phase is.
+        let levels = [
+            (0, false),
+            (0, false),
+            (5, false),
+            (5, false),
+            (9, false),
+            (2, false),
+            (2, true),
+        ];
+        let mut at = 0;
+        p.follow(|| {
+            let l = levels[at];
+            at += 1;
+            l
+        });
+        assert_eq!(at, levels.len(), "asked until the work said it was done");
+        assert_eq!(p.get(), 4, "one tick per new level: 0, 5, 9, 2");
+    }
+
+    #[test]
+    #[should_panic(expected = "a job whose level stops changing is hung")]
+    fn a_followed_level_that_stops_changing_is_a_stall_of_the_guard() {
+        // conformance: hang-guard — the stall limit is the thing under test; the level never changes and the work never ends
+        let _: () = guarded(
+            "a job whose level stops changing",
+            Duration::from_millis(40),
+            |p| p.follow(|| (7, false)),
         );
     }
 

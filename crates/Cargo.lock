@@ -4028,6 +4028,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-testkit-start"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
+ "tempfile",
+]
+
+[[package]]
 name = "paddock-testplan"
 version = "0.1.0"
 dependencies = [

@@ -52,8 +52,12 @@ fn importing_the_samples_stays_within_the_memory_budget() {
     let before = rss() >> 20;
     let sampler = Sampler::start();
     let started = Instant::now();
+    // The phases on stderr (ER-27): a run stopped by nextest's limit shows whether the import had begun (CI 7967 showed
+    // nothing). The time is printed, never asserted: this test's budget is the memory, not the speed of the host.
+    eprintln!("importing {:.1} MB of samples (RSS before {before} MB)", bytes as f64 / 1e6);
     let (store, report) = common::store_with(&dir, Profile::default_profile(), &paths).unwrap();
     let elapsed = started.elapsed();
+    eprintln!("imported in {:.2} s", elapsed.as_secs_f64());
     let peak = sampler.take_peak_mb();
     let total = store.summary().unwrap().total;
     let rate = report.events as f64 / elapsed.as_secs_f64();

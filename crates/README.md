@@ -118,6 +118,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-storage` | what an app keeps on disk and clearing it safely: declared categories (cache the app can rebuild, the user's data), a bounded size walk (entries, time on an injected clock, depth, no links, one volume), a preview that is measured first, a re-check before every delete, confirmation for data, nothing outside the app's own folders, as jobs with progress and Cancel (plan X32; from Debrief `storage/`, Dyno `cleanup/{walk,guard}.rs`, Pitwall `leftovers.rs`, Pitcrew cache clean) | yes (all apps); built |
 | `paddock-live` | the live feed (plan X29): `Hub<S: LiveState>` holds the state and a sequence number, queues `Frame`s (snapshot, delta `from..=seq`, link) for bounded `Subscription`s (latest-wins merging, a slow consumer is given a snapshot), `run` keeps a `Source` connected with `Backoff` on the shared `Clock` and announces the `Link`; the `tauri` feature emits `paddock://live/<channel>` and answers `live_snapshot` | yes (Pitwall, Dyno, Pitcrew, Spotter, Debrief); built |
 | `paddock-metrics` | tiered metrics store and machine sampler (plan X30): generic `TieredStore<P: Series>` with a checked `Retention` (Pitwall's 4-tier table by default, Pitcrew's sparse table), `MachineSample` series (CPU, memory, free disk, own memory), `Sampler` on the shared `Clock`, free space of a path's volume, bounded `folder_size`, `StoreFile` persistence through paddock-env | yes (Pitcrew, Pitwall, Dyno, Debrief agent); built |
+| `paddock-testkit-start` | the test kit's wait for a program a test started (dev-dependency, ADR 0071): `wait_ready_or_exit` / `try_wait_ready_or_exit` / `wait_exit` (ready or ended, judged by `paddock-proc`'s start judge, a wall-clock hang guard), `Logged`, `warm_first_start(s)`, `PATIENCE` | Debrief (chromium-driver, the app's browser tests, the store worker's tests); built |
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-watch` | folder watching: `Debouncer` on the shared `Clock` (quiet time plus longest wait), the `ChangeSource` port with a `notify` adapter and a watcher thread, Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`) for files that are still being written (plan X23) | yes (Debrief, Spotter, Dyno, `paddock-packs`); built |
@@ -1914,6 +1915,25 @@ io), `String`/`&str` (`failed`) and the guard's `Refusal` (`denied`, `limit`). `
 `unavailable`, `timeout`). The TypeScript (`ui/projects/paddock-ui/ipc/generated/ipc.ts`, with the runtime `ERROR_CODES`) is generated
 by `PADDOCK_WRITE_TS=1 cargo test -p paddock-commands --lib generated` and checked on every run. Domain errors stay in their libraries
 and convert once at the command edge.
+
+## `paddock-testkit-start` (ADR 0071 section 1)
+
+A `[dev-dependencies]` crate; nothing in it ships. A test waits for a program it started until the program is ready or has
+ended, never for a fixed count of polls or a deadline that decides the verdict:
+
+```rust
+use paddock_testkit_start::{wait_ready_or_exit, wait_exit, Logged, StartOutcome};
+
+let mut child = Logged::spawn(&mut cmd, &scratch.tmp().join("stderr.txt"))?;
+let port = wait_ready_or_exit(&mut child, "the server", || read_port(&file)).expect_ready("the server");
+```
+
+It drives `paddock_proc::StartWatch` with `PATIENCE` (the judge never calls a start stuck) and ends a wait that neither
+answers nor ends after `HANG_GUARD` (re-exported from `paddock-testkit`) of wall time, as a hang. `try_wait_ready_or_exit`
+returns the hang instead of panicking; `Started` is implemented for `std::process::Child`, a `paddock_proc::ProcessId` and
+`Logged`; `warm_first_start(s)` wraps `paddock_proc::warm_up`. A product driver that takes a patience and a guard
+(Debrief's `chromium_driver::Answers::Judged`) gets `PATIENCE` and `HANG_GUARD` from here. Its own crate because
+`paddock-proc`'s tests use `paddock-testkit`: the kit must not depend on `paddock-proc` (a publish cycle, ci.yml 7989).
 
 ## `paddock-shell` set-up checklist (plan X19)
 

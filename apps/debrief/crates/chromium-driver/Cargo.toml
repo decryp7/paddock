@@ -28,6 +28,9 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 test-support = []
 
 [dev-dependencies]
+# The real-browser tests wait for the browser until it is ready or ends, and set the test form of the answers (ADR 0071).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

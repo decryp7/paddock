@@ -574,8 +574,8 @@ or its ADR.
 | X1 | Bundle P1 (`fix/debrief-report-privacy`) | 1.5 | - | no | active |
 | WP-SL1 | Store worker log file, read by the bundle | 2.75 | X1 | no | |
 | 0.5 | Shared API design, now also reading ADRs 0064, 0065 and 0067 | 2 | - | no (design) | |
-| 0.4 | Debrief consumes in-tree shared code | 1 | - | **yes** | |
-| X7 | Waiver sites, landed by 2026-12-19 (`wt/waiver-sweep`) | 5 | - | no | started |
+| 0.4 | Debrief consumes in-tree shared code | 1 | - | **yes** | done (train 6, `5d461a194`, `4c39bd39b`) |
+| X7 | Waiver sites, landed by 2026-12-19 (`wt/waiver-sweep`) | 5 | - | no | done (train 6, `aad61069a`: no Debrief waiver left besides the C99 keyring ones of 2027) |
 | 0.2, 0.3 rest | Failing UI tests (marked); the rest of the engine tests | 1.5, 0.5 | - | no | 0.3 in part |
 
 **Layer 1: the shared cores (T to about T+6)**
@@ -588,9 +588,9 @@ or its ADR.
 | IP1 | IPC hardening, lighter: items 1, 2, 3, 7, 8 only (no peer-uid check, no per-variant versions, no nightly all-crate fuzz) | 1.5 | 0.5 | **yes** |
 | 2.6c | Stall judge reduced to: no whole-call deadline on import calls, streamed items as the heartbeat, Cancel, a plain notice after N seconds of silence (absorbs 2.6d, LV1, LV2 and LV3) | 4 | 0.5 | **yes** |
 | PH1 | Platform crates, domain-free half | 3.5 | 0.4 | **yes** |
-| J1 | Idempotency key in `paddock-jobs` | 1.5 | - | **yes** |
+| J1 | Idempotency key in `paddock-jobs` (done: train 6, `24df51ce9`) | 1.5 | - | **yes** |
 | 1.2 rest, 1.3 | `expectDialogFits`; list identity | 1 + 3 | 0.5 | **yes** |
-| M1 | Contributions | 3 | 0.4 | **yes** |
+| M1 | Contributions (done: train 6, `f5fc6e6df`) | 3 | 0.4 | **yes** |
 | D-a rest | CI image, workflows, the `deny.toml` ignores | 1 | L-0 | **yes** |
 
 **Layer 2: app-only engine work, beside layer 1 (from now)**

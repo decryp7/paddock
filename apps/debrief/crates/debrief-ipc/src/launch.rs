@@ -132,7 +132,23 @@ impl Child {
 
     /// Closes the connection (a well-behaved child exits at once) and kills the process if it did not.
     pub fn stop(&self) {
+        self.stop_then(|| {});
+    }
+
+    /// [`Child::stop`] with `between` run after the connection is closed and before the process is reaped, so a test can
+    /// force the order in which a well-behaved child's exit and Debrief's kill are seen.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn stop_after(&self, between: impl FnOnce()) {
+        self.stop_then(between);
+    }
+
+    fn stop_then(&self, between: impl FnOnce()) {
+        // The stop is marked before the connection closes: the child may exit the moment it does.
+        if let Process::Spawned(p) = &self.process {
+            p.begin_stop();
+        }
         self.peer.close();
+        between();
         match &self.process {
             Process::Spawned(p) => p.kill(),
             Process::Elevated(p) => p.kill(),
@@ -146,6 +162,13 @@ impl Connection for Child {
     }
 
     fn kill(&self) {
+        self.stop();
+    }
+
+    fn kill_after_failure(&self) {
+        if let Process::Spawned(p) = &self.process {
+            p.note_published_exit();
+        }
         self.stop();
     }
 }
