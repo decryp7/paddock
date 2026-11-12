@@ -1,5 +1,5 @@
 {
- "_comment": "Dead relative links that existed when C104 was added, by file and target. May only shrink: fix the link (or build the file) and delete the entry. A new entry needs the user's approval.",
+ "_comment": "Dead relative links that existed when C104 was added, by file and target. May only shrink: fix the link (or build the file) and delete the entry. A new entry needs the user's approval. `mentions`: mechanisms named in RULES.md, docs/rules.md and AGENTS.md that did not exist on main and whose sentence did not say planned.",
  "links": [
   {
    "file": "docs/adr/0022-rust-developer-and-ci-tool.md",
@@ -20,6 +20,16 @@
   {
    "file": "docs/plans/shared-next.md",
    "target": "../research/2026-10-embeddings-for-logs.md"
+  }
+ ],
+ "mentions": [
+  {
+   "file": "docs/rules.md",
+   "target": "C58"
+  },
+  {
+   "file": "RULES.md",
+   "target": ".claude/hooks/no-pgrep-wait.sh"
   }
  ]
 }

@@ -50,3 +50,22 @@ test('C104 baseline: a listed dead link passes, a fixed one is a warning, a grow
   const intro = await findingsOf('C104', makeApp(files), { options: { git: (a) => { if (a[0] === 'show') throw new Error('absent'); return 'x'; } } });
   assert.deepEqual(intro, [], 'a baseline absent at the base is its introduction');
 });
+
+test('C104 named mechanisms: a missing ./dev command, hook, script or C-number is an error unless the sentence says planned', async () => {
+  const cli = 'enum Command {\n    Wait(x),\n    Gates {\n    },\n}\n';
+  const text = 'Run `./dev wait --max 5m` and `./dev disk record`. Use `scripts/gone.sh` and `.claude/hooks/gone.sh`; check C12 and C99.\nThe `./dev brief` is planned. See `scripts/here.sh`.\n';
+  const root = makeApp({ ...base, 'AGENTS.md': text, 'tools/paddock-dev/src/cli.rs': cli, 'scripts/here.sh': '#\n', 'conformance/src/checks/C99-x.mjs': '//\n' });
+  const f = await findingsOf('C104', root, { options: nogit });
+  assert.deepEqual(f.map((x) => x.message.match(/`([^`]+)` is named/)?.[1]), ['./dev disk', 'scripts/gone.sh', '.claude/hooks/gone.sh', 'C12']);
+  assert.ok(f.every((x) => x.file === 'AGENTS.md' && x.line === 1 && x.severity === 'error'));
+  const ok = makeApp({ ...base, 'AGENTS.md': 'The `./dev brief` is planned.\n' });
+  assert.deepEqual(await findingsOf('C104', ok, { options: nogit }), []);
+});
+
+test('C104 named mechanisms: baselined misses pass, an entry the merge base lacks is an error', async () => {
+  const files = { ...base, 'AGENTS.md': 'Use `scripts/gone.sh`.\n', 'conformance/baselines/C104.json': JSON.stringify({ mentions: [{ file: 'AGENTS.md', target: 'scripts/gone.sh' }] }) };
+  const at = (j) => ({ options: { git: (a) => (a[0] === 'show' ? JSON.stringify(j) : 'x') } });
+  assert.deepEqual(await findingsOf('C104', makeApp(files), at({ mentions: [{ file: 'AGENTS.md', target: 'scripts/gone.sh' }] })), []);
+  const grew = await findingsOf('C104', makeApp(files), at({ links: [] }));
+  assert.match(grew[0].message, /baseline grew/);
+});
