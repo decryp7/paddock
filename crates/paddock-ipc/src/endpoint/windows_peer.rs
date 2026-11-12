@@ -156,8 +156,8 @@ pub(super) fn raw_peer(pipe: HANDLE) -> Result<RawPeer, PeerError> {
     })
 }
 
-/// The owner SID of the kernel object `handle` (a pipe the client opened), checked to be SYSTEM.
-pub(super) fn check_owner_is_system(handle: HANDLE) -> Result<(), Untrusted> {
+/// The owner SID of the kernel object `handle`.
+fn owner_sid_of(handle: HANDLE) -> Result<String, Untrusted> {
     let mut owner: PSID = null_mut();
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
     // SAFETY: a valid handle; out pointers valid; the descriptor is freed below.
@@ -184,11 +184,15 @@ pub(super) fn check_owner_is_system(handle: HANDLE) -> Result<(), Untrusted> {
     unsafe {
         LocalFree(descriptor);
     }
-    let sid = sid.ok_or_else(|| Untrusted::Unreadable {
+    sid.ok_or_else(|| Untrusted::Unreadable {
         what: "ConvertSidToStringSid(owner)",
         cause: io::Error::last_os_error().to_string(),
-    })?;
-    crate::trust::check_pipe_owner(&sid)
+    })
+}
+
+/// The owner SID of the kernel object `handle` (a pipe the client opened), checked to be SYSTEM.
+pub(super) fn check_owner_is_system(handle: HANDLE) -> Result<(), Untrusted> {
+    crate::trust::check_pipe_owner(&owner_sid_of(handle)?)
 }
 
 /// The account SID of the process whose token is `token`.
@@ -231,7 +235,10 @@ pub(super) fn check_server_is_me(pipe: HANDLE) -> Result<(), Untrusted> {
     let server = process_user_sid(process.as_raw_handle(), "the server process")?;
     // SAFETY: always valid; the pseudo handle needs no closing.
     let own = process_user_sid(unsafe { GetCurrentProcess() }, "this process")?;
-    crate::trust::check_server_sid(&server, &own)
+    crate::trust::check_server_sid(&server, &own)?;
+    // The pipe object's owner too, closing the window in which the server's process id is reused by another account's process after
+    // it served the pipe: a pipe made by our own account is owned by it (or by Administrators when an elevated process made it).
+    crate::trust::check_pipe_owner_is(&owner_sid_of(pipe)?, &own)
 }
 
 /// The account SID of `process` (a handle with query rights).

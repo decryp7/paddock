@@ -432,6 +432,11 @@ fn agent_setup<R: Runtime>(
     pixels: Arc<dyn shell::TrayPixels<R>>,
     installed: bool,
 ) -> std::io::Result<()> {
+    // Defence in depth: `run` refuses a refused data folder before any of this is built, so this is never reached for one; a caller
+    // that builds the shell some other way still starts no link, reads no settings and writes nothing there.
+    if let Some(text) = data_folder_refusal(&dirs) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, text));
+    }
     logging::info(&format!(
         "Dyno {VERSION} starting (OS {}, {}; UptimeMs {})",
         dyno_agent::logging::os_version(),
@@ -584,6 +589,21 @@ pub fn run() {
             std::process::exit(code);
         }
     }
+    // Before anything is written, the log included (it goes to the app's logs folder, which portable mode or `<ID>_HOME` can move).
+    // The data folder must be usable before anything reads it: later `Dirs::current()` calls then cannot fail.
+    if let Err(e) = dyno_agent::paths::Dirs::try_current() {
+        log::error!(Why = dyno_agent::paths::why(&e); "Dyno cannot start: no usable data folder");
+        eprintln!("Dyno cannot start: {e}. {}", dyno_agent::paths::NEXT_STEP);
+        std::process::exit(78);
+    }
+    // A data folder the user named that other accounts can write is refused (ADR 0092, W8): the agent will not start in it either, so the
+    // app says why and what to do, and ends, instead of waiting for an agent that never comes.
+    // Decided here, before the shell, the link, the tray or any plugin is built: those read the settings, peek at and clear the quit
+    // marker, register the service, read `agent.json` and start the agent (on macOS the launcher writes a plist into the folder).
+    if let Some(text) = data_folder_refusal(&dyno_agent::paths::Dirs::current()) {
+        refuse_to_start(text);
+        return;
+    }
     // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
     // own lines stay in its agent-side log.
     let _log = paddock_shell::logging::install_with_commit(
@@ -599,15 +619,6 @@ pub fn run() {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)),
     );
-    // The data folder must be usable before anything reads it: later `Dirs::current()` calls then cannot fail.
-    if let Err(e) = dyno_agent::paths::Dirs::try_current() {
-        log::error!(Why = dyno_agent::paths::why(&e); "Dyno cannot start: no usable data folder");
-        eprintln!("Dyno cannot start: {e}. {}", dyno_agent::paths::NEXT_STEP);
-        std::process::exit(78);
-    }
-    // A data folder the user named that other accounts can write is refused (ADR 0092, W8): the agent will not start in it either, so the
-    // app says why and what to do, and ends, instead of waiting for an agent that never comes.
-    let refused = data_folder_refusal(&dyno_agent::paths::Dirs::current());
     let cwd = std::env::current_dir().ok();
     #[allow(unused_mut)]
     let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
@@ -623,29 +634,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
     // The icons start as the saved layout (read from the agent's settings file), not the defaults: a custom layout must not flash.
-    // (Not read from a refused folder.)
-    let items = shell::saved_items(&if refused.is_some() {
-        std::path::PathBuf::new()
-    } else {
-        dyno_agent::paths::Dirs::current().settings()
-    });
+    let items = shell::saved_items(&dyno_agent::paths::Dirs::current().settings());
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);
     // `Builder::run` is `build` then `run` with no callback; the callback is only for macOS's login-start decision.
-    match builder.build(tauri::generate_context!()) {
+    match builder.build(context()) {
         Ok(app) => app.run(move |_handle, _event| {
-            if let (Some(text), tauri::RunEvent::Ready) = (&refused, &_event) {
-                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-                let handle = _handle.clone();
-                _handle
-                    .dialog()
-                    .message(text.clone())
-                    .title("Dyno cannot use its data folder")
-                    .kind(MessageDialogKind::Error)
-                    .show(move |_| handle.exit(dyno_agent::cli::EXIT_DATA_FOLDER_REFUSED));
-            }
             // The end of a run (ER-27): why it ends and how long it ran; the last repeated lines are written before the process goes.
             match &_event {
                 // After the single-instance check (a second launch exits before Ready): say whether the last run died, leave a marker.
@@ -702,6 +698,36 @@ pub fn run() {
     }
 }
 
+/// The app's generated context (one expansion, used by the normal start and by the refusal's bare app).
+fn context() -> tauri::Context {
+    tauri::generate_context!()
+}
+
+/// Shows why the data folder is refused and ends with the refusal code, from a bare app that has only the dialog plugin: no shell,
+/// link, tray, MCP or updater plugin is built, so nothing reads or writes the refused folder.
+fn refuse_to_start(text: String) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+    let built = tauri::Builder::default().plugin(tauri_plugin_dialog::init()).build(context());
+    match built {
+        Ok(app) => app.run(move |handle, event| {
+            if let tauri::RunEvent::Ready = event {
+                let exit = handle.clone();
+                handle
+                    .dialog()
+                    .message(text.clone())
+                    .title("Dyno cannot use its data folder")
+                    .kind(MessageDialogKind::Error)
+                    .show(move |_| exit.exit(dyno_agent::cli::EXIT_DATA_FOLDER_REFUSED));
+            }
+        }),
+        Err(e) => {
+            log::error!(Error = e.to_string().as_str(); "Dyno could not show why its data folder is refused");
+            eprintln!("{text}");
+            std::process::exit(dyno_agent::cli::EXIT_DATA_FOLDER_REFUSED);
+        }
+    }
+}
+
 /// The text to show when the data folder is refused, `None` when it is usable. The log holds a fixed line (the text names the folder).
 fn data_folder_refusal(dirs: &dyno_agent::paths::Dirs) -> Option<String> {
     let text = dyno_agent::paths::check_root(dirs).err()?;
@@ -734,6 +760,37 @@ mod refusal_tests {
             "never tightened"
         );
         assert_eq!(data_folder_refusal(&dyno_agent::paths::Dirs::at(tmp.path().join("own"))), None);
+    }
+
+    /// Nothing of the shell is built for a refused folder: `agent_setup` (settings read, quit marker, registration, `agent.json`
+    /// read, agent launch) returns the refusal first, and the folder is left exactly as it was.
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_data_folder_starts_no_link_and_writes_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        std::fs::write(open.join("settings.json"), b"{}").unwrap();
+        let before = std::fs::read_dir(&open).unwrap().count();
+        let app = tauri::test::mock_app();
+        let hub = health::Hub::<tauri::test::MockRuntime>::default();
+        let e = agent_setup(
+            app.handle(),
+            &hub,
+            dyno_agent::paths::Dirs::at(&open),
+            Arc::new(shell::NoPixels),
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(e.to_string().contains("did not start"), "{e}");
+        assert_eq!(std::fs::read_dir(&open).unwrap().count(), before, "nothing was written");
+        assert!(
+            tauri::Manager::try_state::<service_ops::ServiceOps>(app.handle()).is_none(),
+            "no link or service state was managed"
+        );
     }
 }
 

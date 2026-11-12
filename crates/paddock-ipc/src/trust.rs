@@ -168,9 +168,34 @@ pub fn check_server_sid(server_sid: &str, own_sid: &str) -> Result<(), Untrusted
     }
 }
 
+/// The SID of the Administrators group: an elevated process's pipe is owned by it (Windows sets the default owner of an elevated
+/// token to the group).
+pub const ADMINISTRATORS_SID: &str = "S-1-5-32-544";
+
+/// Windows: a pipe's owner must be the client's own account or Administrators (compared as SID strings).
+pub fn check_pipe_owner_is(owner_sid: &str, own_sid: &str) -> Result<(), Untrusted> {
+    if owner_sid.eq_ignore_ascii_case(own_sid) || owner_sid.eq_ignore_ascii_case(ADMINISTRATORS_SID)
+    {
+        Ok(())
+    } else {
+        Err(Untrusted::PipeOwner {
+            owner: owner_sid.to_string(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pipe_owned_by_us_or_by_administrators_passes_and_another_owner_does_not() {
+        let me = "S-1-5-21-1-2-3-1001";
+        assert_eq!(check_pipe_owner_is(me, me), Ok(()));
+        assert_eq!(check_pipe_owner_is(ADMINISTRATORS_SID, me), Ok(()));
+        assert!(check_pipe_owner_is("S-1-5-21-1-2-3-1002", me).is_err());
+        assert!(check_pipe_owner_is("S-1-1-0", me).is_err());
+    }
 
     #[test]
     fn a_pipe_served_by_another_account_is_refused_and_one_served_by_ours_is_not() {

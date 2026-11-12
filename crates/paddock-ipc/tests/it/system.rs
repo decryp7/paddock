@@ -335,3 +335,25 @@ fn a_pipe_served_by_our_own_account_passes_the_server_check() {
     let client = c.join().unwrap().unwrap();
     client.check_server_is_me().unwrap();
 }
+
+/// The same check refuses a pipe served by another account. The local VM script starts a server under a second account, passes the
+/// pipe's name in `PADDOCK_OTHER_ACCOUNT_PIPE` and runs this test as the first account (never set in CI, so it returns at once there).
+/// Deleting the call in `Client::connect_on` makes it fail. Registered in docs/gates.toml.
+#[cfg(windows)]
+#[test]
+fn a_pipe_served_by_another_account_is_refused_before_the_token_is_sent() {
+    let Ok(name) = std::env::var("PADDOCK_OTHER_ACCOUNT_PIPE") else {
+        return;
+    };
+    let e = paddock_ipc::Client::connect(
+        &name,
+        &paddock_ipc::Token::random().unwrap(),
+        paddock_ipc::frame::FrameLimit::default(),
+        paddock_ipc::frame::ProtocolVersion::UNVERSIONED,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(e, paddock_ipc::IpcError::Auth(ref m) if m.contains("not served by your account")),
+        "{e:?}"
+    );
+}

@@ -15,6 +15,39 @@ fn start(dirs: Dirs) -> Result<Running, StartError> {
     Running::start(dirs, fake.platform(), Box::new(Fake::new()), Box::new(|_| Ok(())))
 }
 
+/// Runs `dyno-agent run` on `root`, waiting at most 60 s: a mutation that lets it start would run for ever, and must fail instead of
+/// hanging the suite. A watchdog thread ends the child through `paddock_proc` when the run is not over in time; the test then fails on the
+/// exit code.
+#[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "runs the dyno-agent binary under test itself, on a temporary data folder"
+)]
+fn run_bounded(root: &std::path::Path) -> std::process::Output {
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_dyno-agent"))
+        .arg("run")
+        .env("DYNO_DATA_DIR", root)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The child is ours and unreaped, so its pid is its own: the process id (pid and start time) is taken now, and ended through
+    // `paddock_proc` if the run is not over in time.
+    let id = paddock_proc::ProcessId::of(child.id());
+    let (done, finished) = std::sync::mpsc::channel::<()>();
+    let watchdog = std::thread::spawn(move || {
+        if finished.recv_timeout(std::time::Duration::from_secs(60)) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            if let Some(id) = id {
+                let _ = paddock_proc::end(id);
+            }
+        }
+    });
+    let out = child.wait_with_output().unwrap();
+    let _ = done.send(());
+    watchdog.join().unwrap();
+    out
+}
+
 #[cfg(unix)]
 mod unix {
     use super::*;
@@ -58,10 +91,6 @@ mod unix {
 
     /// The real start path (the binary, `run`) with links planted where the log, the lock and the markers go: none is followed.
     #[test]
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "runs the dyno-agent binary under test itself, on a temporary data folder, and nothing else"
-    )]
     fn the_real_run_with_planted_links_follows_none_and_exits_with_the_refusal_code() {
         let tmp = tempfile::tempdir().unwrap();
         let root = open_root(tmp.path());
@@ -79,11 +108,7 @@ mod unix {
             planted.push(target);
         }
         let victims_before = names(&victims);
-        let out = std::process::Command::new(env!("CARGO_BIN_EXE_dyno-agent"))
-            .arg("run")
-            .env("DYNO_DATA_DIR", &root)
-            .output()
-            .unwrap();
+        let out = run_bounded(&root);
         assert_eq!(out.status.code(), Some(dyno_agent::cli::EXIT_DATA_FOLDER_REFUSED), "{out:?}");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(

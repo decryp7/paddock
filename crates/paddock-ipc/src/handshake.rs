@@ -545,7 +545,7 @@ impl Client {
         #[cfg(windows)]
         stream.check_server_is_me().map_err(|e| {
             IpcError::Auth(format!(
-                "the pipe is not served by your account, so the token was not sent: {e}. Quit the program and start it again"
+                "the pipe is not served by your account, so the token was not sent: {e}. If the program serving it was started as another account (for example from another administrator's elevated prompt), quit it and start it again as your own account; otherwise close whatever else holds the pipe"
             ))
         })?;
         let hello = Frame::Hello {

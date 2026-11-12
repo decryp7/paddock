@@ -336,6 +336,10 @@ pub fn load_reader(dirs: &Dirs, now_secs: u64) -> GeoReader {
         let mut names: Vec<PathBuf> = newest_month(&cache).map(|(y, m)| cache.join(file_name(y, m))).into_iter().collect();
         names.push(cache.join("previous.mmdb"));
         names.into_iter().find_map(|p| {
+            // Bounded before it is read: a planted or damaged file larger than any database is not loaded into memory.
+            if std::fs::metadata(&p).ok()?.len() > MAX_INFLATED {
+                return None;
+            }
             let bytes = std::fs::read(&p).ok().filter(|b| b.len() as u64 <= MAX_INFLATED)?;
             open_checked(bytes, source.kind, now_secs, false).ok()
         })

@@ -28,12 +28,9 @@ pub use atomic::{write_atomic, write_atomic_created};
 pub use dirs::{AppDirs, MapVars, Os, PORTABLE_FLAG, ProcessVars, Source, Vars};
 pub use error::{EnvError, Result};
 pub use folder::{
-    FolderFacts, Links, Refusal, Tightened, check_data_folder, check_folder, check_folder_with,
-    check_own_folder, create_private_dir_all, current_uid, decide, is_private_group,
-    may_remove_group_write, others_among, read_folder,
+    FolderFacts, Links, Refusal, check_data_folder, check_folder, check_folder_with,
+    check_own_folder, create_private_dir_all, current_uid, decide, read_folder,
 };
-#[cfg(unix)]
-pub use folder::{group_has_other_members, tighten_group_write, tighten_group_write_with};
 pub use private::{
     PrivateDir, PrivateError, PrivateFile, check_temp_parent, private_fallback_dir,
     private_fallback_dir_as,

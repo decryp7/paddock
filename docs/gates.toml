@@ -1081,3 +1081,13 @@ clippy_not_yet = ["keyring::Entry", "keyring_core::Entry"]
 owner = "Debrief 1.2 DBR-LINT (docs/plans/debrief-1-2.md)"
 target = "debrief-v1.2.0"
 approved = "user"
+
+[[ignored]]
+path = "crates/paddock-ipc/tests/it/system.rs"
+tests = ["a_pipe_served_by_another_account_is_refused_before_the_token_is_sent"]
+gate = "not-gated"
+reason = "ignored or env-gated: needs a pipe served by a second Windows account; the local VM script sets PADDOCK_OTHER_ACCOUNT_PIPE (ADR 0092 DF-3, VM step in the ADR's test plan)"
+owner = "Dyno 1.1.1"
+since = 2026-11-12
+review_by = 2026-12-20
+approved = "coordinator"

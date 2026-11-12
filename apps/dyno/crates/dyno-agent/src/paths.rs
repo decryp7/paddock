@@ -16,7 +16,27 @@ use std::path::{Path, PathBuf};
 /// # Errors
 /// The text to show: the cause, the next step, and that nothing was started or changed.
 pub fn check_root(dirs: &Dirs) -> Result<(), String> {
-    check_root_with(dirs.root(), !dirs.is_users_own())
+    check_root_with(dirs.root(), !dirs.is_users_own())?;
+    check_app_folders(
+        &paddock_env::AppId::new(crate::logging::APP_ID, crate::logging::APP_NAME)
+            .and_then(|id| paddock_env::AppDirs::for_app(&id))
+            .ok(),
+    )
+}
+
+/// The folders of the app's own places that the user supplied (portable mode, `<ID>_HOME`): the logs, the crash marker and the run
+/// marker go there, and they are refused like a named data folder (the OS's own places are not checked).
+///
+/// # Errors
+/// As [`check_root`].
+fn check_app_folders(app_dirs: &Option<paddock_env::AppDirs>) -> Result<(), String> {
+    let Some(app_dirs) = app_dirs.as_ref().filter(|a| a.source() != paddock_env::Source::Os) else {
+        return Ok(());
+    };
+    for folder in [app_dirs.data(), app_dirs.logs()] {
+        check_root_with(folder, true)?;
+    }
+    Ok(())
 }
 
 /// [`check_root`] with the "supplied by the user" decision passed in (tests).
@@ -412,6 +432,33 @@ mod tests {
         assert!(out.status.success());
         assert!(check_root_with(&root, true).unwrap_err().contains("did not start"));
         check_root_with(&root, false).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_app_folders_the_user_supplied_are_refused_like_a_named_data_folder_and_the_os_own_are_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("home");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
+        let vars = paddock_env::MapVars::new().with("DYNO_HOME", root.clone().into_os_string());
+        let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
+        let e = check_app_folders(&supplied).unwrap_err();
+        assert!(
+            e.contains("did not start") && e.contains("chmod go-w"),
+            "logs, crash marker and run marker: {e}"
+        );
+        let os_own = paddock_env::AppDirs::resolve(
+            &id,
+            paddock_env::Os::current(),
+            &paddock_env::MapVars::new().with("HOME", root.into_os_string()),
+            None,
+            false,
+        )
+        .ok();
+        assert_eq!(check_app_folders(&os_own), Ok(()), "the OS's own places are not checked");
     }
 
     #[cfg(unix)]

@@ -107,7 +107,7 @@ existing one after reading its owner and DACL from a handle; rows 6, 8 and 13 do
 
 | # | Where | What it does | Gaps |
 |---|---|---|---|
-| 1 | `crates/paddock-env/src/folder.rs` (`create_private_dir_all`, `check_folder`, `tighten_group_write`) | the "one folder-trust check" (added by `d4cc7bcdd`, not in any tag) | **Windows check is links and folder-ness only**: `read_folder` returns `uid 0, mode 0o700` for any folder ("Windows folders under the user's profile are private by their default permissions", lines 102-103 and 149-161) |
+| 1 | `crates/paddock-env/src/folder.rs` (`create_private_dir_all`, `check_folder`; `tighten_group_write` and its helpers were removed 2026-11-12, DF-1) | the "one folder-trust check" (added by `d4cc7bcdd`, not in any tag) | **Windows check is links and folder-ness only**: `read_folder` returns `uid 0, mode 0o700` for any folder ("Windows folders under the user's profile are private by their default permissions", lines 102-103 and 149-161) |
 | 2 | `crates/paddock-env/src/private.rs` (`private_fallback_dir`) | `<temp>/<name>-<uid>` 0700, checked by handle | Unix only (fine: Windows is an error) |
 | 3 | `crates/paddock-env/src/atomic.rs` `create` | temp file 0600 when `private` | folder by `create_dir_all` (umask); Windows: "the per-user folder is already private" (line 109) |
 | 4 | `crates/paddock-env/src/dirs.rs` `create_private_dir` | `create_dir_all`, then `chmod 0700` by path, best effort | S1 window; chmods a folder the user may share |
@@ -204,9 +204,9 @@ Every chmod-after-create site is deleted from production code.
 A folder the type finds open to others is refused with a message naming the reason and the next step (`chmod go-w
 <folder>`, or on Windows "remove the entries for other users in the folder's Security tab, or point <APP>_DATA_DIR at a
 folder of your own"). Tightening is not a fix: it cannot evict what was planted while the folder was open. The one open
-question is D2: whether Paddock may still remove group write from the app's **default** data location (never an
-override, never a folder the user named) in the narrow case `tighten_group_write` proves (`b4e60e9c9`: owned by the
-account, group write only, a group named like the account with no other member). `paddock-secrets`' and `paddock-mcp`'s
+question was D2: whether Paddock may still remove group write from the app's **default** data location. **Decided 2026-11-12
+(user, DF-1): no.** The default folder is not tightened or refused, only created owner-only when missing (XDG: an existing
+folder's permissions are not changed), so `tighten_group_write` (`b4e60e9c9`) and its helpers are removed. `paddock-secrets`' and `paddock-mcp`'s
 "chmod an own folder to 0700" (rows 6, 9) and Dyno's `prepare_folder` (row 12) stop in every option.
 `make_folder_private` survives only under `cfg(any(test, feature = "test-support"))` (ADR 0073), used by
 `paddock_testkit::scratch` (ADR 0078) to make a test's folder private on a CI runner.
@@ -303,7 +303,7 @@ naming reasons without paths (ER-27, as `note_result` does now).
 - **D2 Tightening the default data location.** Decided (user, 2026-11-10): Paddock removes group write only from the
   app's **default** data location, only in the proven own-private-group case (Linux umask 002), and logs it; an override
   location (`<APP>_DATA_DIR`, portable mode, `<ID>_HOME`) open to others is always refused with the fix-it message.
-  **Amended 2026-11-12 (user, DF-1, for Dyno's WP-6):** the default location is not tightened or refused at all (XDG: "if the
+  **Superseded 2026-11-12 for the default folder (see the amendment):** nothing is removed from it any more. **Amended 2026-11-12 (user, DF-1, for Dyno's WP-6):** the default location is not tightened or refused at all (XDG: "if the
   destination directory exists already the permissions should not be changed"; the OS profile keeps other accounts out); only
   override locations are checked and refused. Read with the research note `data-folder-security-standard-2026-11-12.md`.
 - **D3 The Windows descriptor.** (Amended 2026-11-12, DF-2: an existing default folder owned by `BUILTIN\Administrators` is used, not refused.) (a) user SID only · (b) **user SID and SYSTEM, explicit SID, protected, `OICI`, and
@@ -381,6 +381,18 @@ waits for ADR 0088's engine and RT-5; WP-5 to WP-7 are independent of each other
   Windows tests on the CI runner; the NT-native create and rename are new.
 - Risk: a folder the user shares on purpose (a synced folder used as `DYNO_DATA_DIR`) is now refused on Windows where it
   passed before. That is the intent; the message names the override.
+
+### Test plan: Windows and VM steps owed for WP-6 (DF-1 to DF-4, 2026-11-12)
+
+Compiled on the host through `cargo xwin clippy`, run on the Windows runner or the test VM under its lock (ER-14, ADR 0087):
+
+1. Windows tests (`#[cfg(windows)]`): `paddock-env` private-type tests; `dyno-agent` `refused_root` twin, `paths::windows_a_named_folder_...`; `dyno-platform` battery folder; `dyno-app` AI access folder; `paddock-ipc` `a_pipe_served_by_our_own_account_passes_the_server_check`.
+2. Manual: an Administrators-owned `%LOCALAPPDATA%\Dyno` left by an elevated 1.1.0, opened by 1.1.1 unelevated, is used and does not hang.
+3. **Scripted VM step, cross-account pipe refusal (DF-3):** as account A start a server on a pipe (`paddock-ipc` test listener); as account B run `PADDOCK_OTHER_ACCOUNT_PIPE=<pipe name> cargo test -p paddock-ipc --test it a_pipe_served_by_another_account_is_refused_before_the_token_is_sent`; it must pass (the client refuses with "not served by your account" before the token is sent). Deleting the `check_server_is_me` call in `Client::connect_on` must make it fail: run it once that way before relying on it (ER-33). The test is registered in `docs/gates.toml` as env-gated.
+
+### Accepted risk: the TCP MCP discovery file in the default folder (2026-11-12)
+
+`mcp-listener.json` names a loopback port and the serving process; a same-user process, or another account that could write the folder, could publish a different port. Jupyter signs every message with an HMAC key from its connection file; Dyno's MCP link does not, and no HMAC is built now (the security review rated it P2). In the **default** per-user folder only the user and administrators can write, so the risk is accepted. It is closed for **named** folders (`DYNO_DATA_DIR`, portable mode, `<ID>_HOME`): the app, the agent and `dyno mcp` refuse such a folder when others can write it.
 
 ## Review answers (revision 2)
 

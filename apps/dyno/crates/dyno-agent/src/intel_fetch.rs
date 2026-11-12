@@ -182,7 +182,12 @@ pub(crate) fn map_download(e: DownloadError) -> FetchError {
 /// advance. Returns the bytes written.
 pub(crate) fn download_to(downloader: &Downloader, ctx: &JobContext, url: &str, dest: &Path, max_bytes: u64) -> Result<u64, FetchError> {
     if let Some(dir) = dest.parent() {
-        paddock_env::create_private_dir_all(dir).map_err(|e| FetchError::Save(e.kind().to_string()))?;
+        paddock_env::create_private_dir_all(dir).map_err(|e| {
+            FetchError::Save(format!(
+                "the list's cache folder could not be made ({}); next step: check that Dyno's data folder is writable",
+                e.kind()
+            ))
+        })?;
     }
     let request = Request::new(url, dest, Integrity::Unpinned)
         .map_err(|e| FetchError::Net(e.to_string()))?
