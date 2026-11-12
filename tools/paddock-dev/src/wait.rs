@@ -420,6 +420,11 @@ pub trait Http {
         let _ = (url, token);
         Err("this reader fetches JSON only".into())
     }
+    /// Posts `body` as JSON to `url`; the answer may be empty (`Null`, Gitea's 204). Errors are texts without the token.
+    fn post_json(&mut self, url: &str, token: &str, body: &Value) -> Result<Value, String> {
+        let _ = (url, token, body);
+        Err("this client reads only".into())
+    }
 }
 
 /// Waits for a Gitea Actions run to complete.
@@ -472,6 +477,11 @@ pub struct CurlHttp;
 impl CurlHttp {
     /// One GET through curl: the body, at most `max_bytes`, within `seconds`.
     fn get(url: &str, token: &str, accept: &str, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
+        CurlHttp::send(url, token, accept, None, max_bytes, seconds)
+    }
+
+    /// One request through curl: a GET, or a POST of `post` (JSON text) when given.
+    fn send(url: &str, token: &str, accept: &str, post: Option<&str>, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
         use std::process::Stdio;
         if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
             return Err("the URL or the token has a character that cannot be sent".into());
@@ -500,7 +510,15 @@ impl CurlHttp {
             } else {
                 format!("header = \"Authorization: token {token}\"\n")
             };
-            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n");
+            let data = match post {
+                // curl's config syntax: inside quotes only `\\` and `\"` need escaping, a newline is `\n`.
+                Some(json) => format!(
+                    "request = \"POST\"\nheader = \"Content-Type: application/json\"\ndata = \"{}\"\n",
+                    json.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
+                ),
+                None => String::new(),
+            };
+            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n{data}");
         }
         let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
         if !out.status.success() {
@@ -531,6 +549,14 @@ impl Http for CurlHttp {
         // A job log is a few MB; 64 MiB bounds a runaway one.
         let body = CurlHttp::get(url, token, "text/plain", 64 << 20, 120)?;
         Ok(String::from_utf8_lossy(&body).into_owned())
+    }
+
+    fn post_json(&mut self, url: &str, token: &str, body: &Value) -> Result<Value, String> {
+        let out = CurlHttp::send(url, token, "application/json", Some(&body.to_string()), 1 << 20, 30)?;
+        if out.iter().all(u8::is_ascii_whitespace) {
+            return Ok(Value::Null);
+        }
+        Ok(serde_json::from_slice(&out).unwrap_or(Value::Null))
     }
 }
 

@@ -48,3 +48,5 @@ node_modules
 /tools/heavy/target/
 /tools/wiki/target/
 /engineering-rules/
+/.claude/hooks/__pycache__/
+/.claude/hooks/lib/__pycache__/

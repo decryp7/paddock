@@ -193,6 +193,9 @@ enum CiCommand {
     /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
+    /// Dispatch a workflow once no other run is on its single-machine runner (macOS, Windows): waits like `wait --ci-run`, at
+    /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once.
+    Dispatch(ci_runs::DispatchArgs),
 }
 
 #[derive(Subcommand)]
@@ -448,6 +451,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Verdict(a),
         } => ci_runs::verdict(&a),
+        Command::Ci {
+            command: CiCommand::Dispatch(a),
+        } => ci_runs::dispatch(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),
