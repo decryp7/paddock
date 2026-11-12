@@ -60,9 +60,48 @@ pub fn remove_file(path: &Path) -> bool {
     }
 }
 
+/// Removes the folder at `path` as a best-effort clean-up and logs a failure (not "not there") at warn level with its cause,
+/// for a caller with nothing to do about a leftover but who must not hide it. A caller that can act uses [`remove_dir_all`].
+pub fn remove_dir_all_warn(path: &Path) {
+    if let Err(e) = std::fs::remove_dir_all(path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        log::warn!("clean-up left {} behind: {e}", path.display());
+    }
+}
+
+/// [`join`] for a caller with nothing to do about a panicked thread: the panic is logged at warn level, naming the thread.
+pub fn join_warn<T>(what: &str, thread: std::thread::JoinHandle<T>) {
+    if join(what, thread) {
+        log::warn!("{what} panicked before it was joined; its work may be unfinished");
+    }
+}
+
+/// [`remove_dir_all_warn`] for a file.
+pub fn remove_file_warn(path: &Path) {
+    if let Err(e) = std::fs::remove_file(path)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        log::warn!("clean-up left {} behind: {e}", path.display());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_leftover_is_logged_with_its_cause_and_a_missing_path_is_not_a_leftover() {
+        let d = tempfile::tempdir().unwrap();
+        // a file is not a folder: remove_dir_all fails with a cause, it is not "not there"
+        let f = d.path().join("f");
+        std::fs::write(&f, b"x").unwrap();
+        assert!(remove_dir_all(&f), "the failure flag is set");
+        assert!(!remove_dir_all(&d.path().join("missing")));
+        assert!(!remove_file(&d.path().join("missing")));
+        remove_file_warn(&f);
+        assert!(!f.exists());
+    }
 
     #[test]
     fn a_failed_step_is_reported_and_a_successful_one_is_not() {

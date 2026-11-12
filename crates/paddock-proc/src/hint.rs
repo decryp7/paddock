@@ -55,24 +55,14 @@ pub fn names_live(hint: &impl Hint, since_ms: i64, answers: impl FnOnce() -> boo
 /// ([`crate::instance`]), not this file, is what proves a process, and a lost hint is written again.
 pub fn remove_if_same<H: Hint>(path: &Path, seen: &H, read: impl Fn(&Path) -> Option<H>) {
     if read(path).is_some_and(|d| d.pid() == seen.pid() && d.started_ms() == seen.started_ms()) {
-        warn_if_left(crate::cleanup::remove_file(path), path);
-    }
-}
-
-/// Says in the log, at warn level, that a hint file could not be removed and is left behind.
-fn warn_if_left(left: bool, path: &Path) {
-    if left {
-        log::warn!(
-            "a stale hint file could not be removed and is left behind: {}",
-            path.display()
-        );
+        crate::cleanup::remove_file_warn(path);
     }
 }
 
 /// Removes the file if it still names this process.
 pub fn remove_if_mine<H: Hint>(path: &Path, read: impl Fn(&Path) -> Option<H>) {
     if read(path).is_some_and(|d| d.pid() == std::process::id()) {
-        warn_if_left(crate::cleanup::remove_file(path), path);
+        crate::cleanup::remove_file_warn(path);
     }
 }
 
@@ -104,7 +94,7 @@ pub fn write_private_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
         .and_then(|mut f| f.write_all(body))
         .and_then(|()| std::fs::rename(&tmp, path));
     if result.is_err() {
-        warn_if_left(crate::cleanup::remove_file(&tmp), &tmp);
+        crate::cleanup::remove_file_warn(&tmp);
     }
     result
 }

@@ -139,16 +139,6 @@ fn kind_of(t: std::fs::FileType) -> FileKind {
     }
 }
 
-/// Says in the log that a temporary program file could not be removed and is left behind.
-fn warn_if_left(left: bool, path: &Path) {
-    if left {
-        log::warn!(
-            "a temporary program file could not be removed and is left behind: {}",
-            path.display()
-        );
-    }
-}
-
 fn temp_name(to: &Path) -> PathBuf {
     let name = to
         .file_name()
@@ -300,7 +290,7 @@ impl ProtectedFiles for RealFiles {
 
     fn write_program(&mut self, bytes: &[u8], to: &Path, mode: u32) -> io::Result<String> {
         let tmp = temp_name(to);
-        warn_if_left(paddock_proc::cleanup::remove_file(&tmp), &tmp);
+        paddock_proc::cleanup::remove_file_warn(&tmp);
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -325,13 +315,13 @@ impl ProtectedFiles for RealFiles {
                     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
                 }
                 if let Err(e) = std::fs::rename(&tmp, to) {
-                    warn_if_left(paddock_proc::cleanup::remove_file(&tmp), &tmp);
+                    paddock_proc::cleanup::remove_file_warn(&tmp);
                     return Err(e);
                 }
                 Ok(hash)
             }
             Err(e) => {
-                warn_if_left(paddock_proc::cleanup::remove_file(&tmp), &tmp);
+                paddock_proc::cleanup::remove_file_warn(&tmp);
                 Err(e)
             }
         }
