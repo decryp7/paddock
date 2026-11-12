@@ -10,15 +10,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
+import { actionScript, loadAction, parseOutputs } from './lib/workflow.mjs';
 
 const ACTION = join(PADDOCK, '.gitea', 'actions', 'publish-release');
 
-/** The action's one `run: |` step with the expressions filled in, as the runner would. */
+/** The action's one run step with the expressions filled in, as the runner would. */
 function script(over = {}) {
-  const text = readFileSync(join(ACTION, 'action.yml'), 'utf8');
-  const body = text.slice(text.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   const values = { 'github.action_path': ACTION, 'github.ref_name': 'pitcrew-v1.0.3', 'github.ref': 'refs/tags/pitcrew-v1.0.3', 'github.server_url': 'http://gitea.invalid', 'github.repository': 'decryp7/paddock', ...over };
-  return body.replace(/\$\{\{ ([\w.]+) \}\}/g, (_, k) => values[k] ?? assert.fail(`unexpected expression ${k}`));
+  return actionScript(loadAction('publish-release').runs, 0, values);
 }
 
 /** A fake Gitea: releases by tag, assets by release; records every call. */
@@ -184,9 +183,7 @@ test('publish-release: a pre-release tag is published but never replaces pitcrew
 test('plan action: the tag pattern is the app\'s, and a tagged main commit is skipped; an untagged one runs', async () => {
   const { chmodSync } = await import('node:fs');
   const { spawnSync } = await import('node:child_process');
-  const text = readFileSync(join(PADDOCK, '.gitea', 'actions', 'plan', 'action.yml'), 'utf8');
-  const body = text.slice(text.lastIndexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n')
-    .replace(/\$\{\{ github\.action_path \}\}/g, join(PADDOCK, '.gitea', 'actions', 'plan'));
+  const body = actionScript(loadAction('plan').runs, -1, { 'github.action_path': join(PADDOCK, '.gitea', 'actions', 'plan') });
   const dir = mkdtempSync(join(tmpdir(), 'plan-action-'));
   try {
     mkdirSync(join(dir, 'bin'));
@@ -200,10 +197,10 @@ test('plan action: the tag pattern is the app\'s, and a tagged main commit is sk
         encoding: 'utf8',
       });
       assert.equal(r.status, 0, r.stdout + r.stderr);
-      const lines = readFileSync(out, 'utf8').trim().split('\n');
+      const outputs = parseOutputs(readFileSync(out, 'utf8'));
       // Not a scheduled run: never ended early for a train (./dev ci schedule-skip is not asked).
-      assert.ok(lines.includes('train-skip=false'), lines.join(' | '));
-      return lines.filter((l) => l.startsWith('run=')).join('\n');
+      assert.equal(outputs['train-skip'], 'false', JSON.stringify(outputs));
+      return `run=${outputs.run}`;
     };
     assert.equal(run({ TAGGED: 'abc123\trefs/tags/pitcrew-v1.0.3' }), 'run=false');
     assert.match(readFileSync(join(dir, 'git.log'), 'utf8'), /ls-remote --tags origin refs\/tags\/pitcrew-v\*/, 'only the app\'s tags are asked for');
