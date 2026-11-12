@@ -6,9 +6,8 @@ use paddock_ipc::Token;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// Logs, once per change and with the reason only, when the folder holding the discovery file at `path` is not this account's and
-/// closed to others (`paddock_env::check_data_folder`). The writer and every reader then use the same rule through the private-folder
-/// type (ADR 0092): [`Discovery::write`] and [`Discovery::read`] both open the folder with `PrivateDir` and act through its handle.
+/// The folder holding the discovery file at `path` must be this account's and closed to others, for the writer and every reader
+/// alike (one rule, `paddock_env::check_data_folder`).
 fn trusted_folder(path: &Path) -> Result<(), paddock_env::Refusal> {
     match path.parent().filter(|d| !d.as_os_str().is_empty()) {
         Some(dir) => paddock_env::check_data_folder(dir, "agent.json"),
@@ -44,33 +43,22 @@ impl Discovery {
         Token::from_hex(&self.token)
     }
 
-    /// Writes the file atomically and owner-only through the shared private-folder type (ADR 0092): the folder is made or checked from
-    /// its handle (a link to the user's own folder is followed), the temporary file is created exclusive and owner-only inside it
-    /// and renamed over the name; a folder others can change is refused and nothing is written.
+    /// Writes the file atomically with owner-only permissions.
     pub fn write(&self, path: &Path) -> std::io::Result<()> {
-        let (Some(dir), Some(name)) = (
-            path.parent().filter(|d| !d.as_os_str().is_empty()),
-            path.file_name().and_then(|n| n.to_str()),
-        ) else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "the discovery file needs a folder and a name",
-            ));
-        };
-        let dir = crate::paths::open_private_io(dir, "the discovery file's folder")?;
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            paddock_env::create_private_dir_all(dir)?;
+        }
+        trusted_folder(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
         let body = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-        dir.write_atomic(name, &body).map_err(|e| std::io::Error::other(e.to_string()))
+        paddock_proc::hint::write_private_atomic(path, &body)
     }
 
-    /// Reads the file through the private-folder type, by the same rule as [`Discovery::write`]; `None` when missing or damaged.
-    /// Also `None` when the folder holding it belongs to another user, others can change it or its parent, or the file is not this
-    /// account's and closed to others: a planted file is not even a hint (a folder refusal is logged once per change, with its
-    /// reason). A link to the user's own folder is followed.
+    /// Reads the file; `None` when missing or damaged.
+    /// Also `None` when the folder holding it belongs to another user or others can change it: a planted file is not even a hint
+    /// (the refusal is logged once per change, with its reason). A link to the user's own folder is followed.
     pub fn read(path: &Path) -> Option<Discovery> {
         trusted_folder(path).ok()?;
-        let (dir, name) = (path.parent().filter(|d| !d.as_os_str().is_empty())?, path.file_name()?.to_str()?);
-        let held = paddock_env::private::PrivateDir::open(dir, paddock_env::Links::Follow).ok()?;
-        serde_json::from_slice(&held.read(name, paddock_proc::hint::MAX_HINT_BYTES).ok()?).ok()
+        serde_json::from_slice(&paddock_proc::hint::read_bounded(path)?).ok()
     }
 
     /// Removes the file only if it is still the one that was read as `seen` (same process, same start): a newer agent
@@ -315,53 +303,5 @@ mod tests {
         }
         .token()
         .is_none());
-    }
-    #[cfg(unix)]
-    #[test]
-    fn a_discovery_file_under_a_parent_others_can_change_is_refused_and_not_written() {
-        let (_tmp, open) = crate::paths::tests::open_parent();
-        let e = sample().write(&open.join("data").join("agent.json")).unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
-        assert!(!open.join("data").join("agent.json").exists(), "nothing was written");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_discovery_file_is_owner_only_and_no_temporary_file_is_left() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("data").join("agent.json");
-        sample().write(&path).unwrap();
-        sample().write(&path).unwrap();
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-        let names: Vec<_> = std::fs::read_dir(path.parent().unwrap())
-            .unwrap()
-            .flatten()
-            .map(|e| e.file_name())
-            .collect();
-        assert_eq!(names, vec![std::ffi::OsString::from("agent.json")]);
-    }
-    #[cfg(windows)]
-    #[test]
-    fn windows_a_discovery_file_in_a_folder_everyone_can_write_is_refused_and_a_private_one_round_trips() {
-        let (tmp, open) = crate::paths::tests::everyone_folder();
-        let e = sample().write(&open.join("agent.json")).unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
-        assert!(!open.join("agent.json").exists());
-        let own = tmp.path().join("own").join("agent.json");
-        sample().write(&own).unwrap();
-        assert_eq!(Discovery::read(&own), Some(sample()));
-    }
-    #[cfg(unix)]
-    #[test]
-    fn a_file_the_account_does_not_hold_closed_is_not_read_even_in_a_safe_folder() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("agent.json");
-        sample().write(&path).unwrap();
-        assert_eq!(Discovery::read(&path), Some(sample()));
-        // The writer's rule applies to readers: a file open to others (planted, or widened) is not a hint.
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert_eq!(Discovery::read(&path), None);
     }
 }

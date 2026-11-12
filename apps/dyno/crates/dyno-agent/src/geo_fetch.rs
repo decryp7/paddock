@@ -305,10 +305,10 @@ fn hex(b: &[u8]) -> String {
 /// Writes the staging file, moves the older `current-*` files aside (the newest becomes `previous.mmdb`, the rest go) and puts the
 /// new file in place.
 fn swap_in(cache: &Path, y: i32, m: u32, raw: &[u8]) -> std::io::Result<()> {
-    let held = crate::paths::open_private_io(cache, "the geo cache folder")?;
+    paddock_env::create_private_dir_all(cache)?;
     let staging = cache.join(".staging");
-    held.write_atomic(".staging", raw)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    // A unique temporary file created exclusive and owner-only (0600 from creation, no chmod), then renamed over `.staging`.
+    paddock_env::write_atomic(&staging, raw, true).map_err(std::io::Error::other)?;
     let mut older: Vec<PathBuf> = std::fs::read_dir(cache)?
         .flatten()
         .map(|e| e.path())
@@ -333,13 +333,10 @@ fn swap_in(cache: &Path, y: i32, m: u32, raw: &[u8]) -> std::io::Result<()> {
 pub fn load_reader(dirs: &Dirs, now_secs: u64) -> GeoReader {
     let open = |source: Source| {
         let cache = dirs.intel_cache(source.id);
-        // The reader follows the writer's rule (ADR 0092): the folder is opened through the private-folder type and the files are
-        // read through its handle, so a cache folder others can change, or a file others can write, is not read.
-        let held = paddock_env::private::PrivateDir::open(&cache, paddock_env::Links::Follow).ok()?;
-        let mut names: Vec<String> = newest_month(&cache).map(|(y, m)| file_name(y, m)).into_iter().collect();
-        names.push("previous.mmdb".to_owned());
-        names.into_iter().find_map(|name| {
-            let bytes = held.read(&name, MAX_INFLATED).ok()?;
+        let mut names: Vec<PathBuf> = newest_month(&cache).map(|(y, m)| cache.join(file_name(y, m))).into_iter().collect();
+        names.push(cache.join("previous.mmdb"));
+        names.into_iter().find_map(|p| {
+            let bytes = std::fs::read(&p).ok().filter(|b| b.len() as u64 <= MAX_INFLATED)?;
             open_checked(bytes, source.kind, now_secs, false).ok()
         })
     };
@@ -524,55 +521,5 @@ mod tests {
         let last = Some(i64::try_from(day(2) * 1000).unwrap());
         assert!(!automatic_due(day(2) + 3600, last, Some((2026, 10))), "inside the floor");
         assert!(automatic_due(day(3), last, Some((2026, 10))), "daily until the file appears");
-    }
-    #[cfg(unix)]
-    #[test]
-    fn a_cache_folder_others_can_write_is_refused_and_left_as_it_was() {
-        use std::os::unix::fs::PermissionsExt;
-        let (_tmp, open) = crate::paths::tests::open_parent();
-        let e = swap_in(&open, 2026, 11, b"x").unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
-        assert_eq!(
-            std::fs::metadata(&open).unwrap().permissions().mode() & 0o777,
-            0o777,
-            "never tightened"
-        );
-        assert_eq!(std::fs::read_dir(&open).unwrap().count(), 0, "nothing was written");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_new_cache_folder_is_owner_only_and_the_staged_file_is_too() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let cache = tmp.path().join("cache");
-        swap_in(&cache, 2026, 11, b"x").unwrap();
-        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode(&cache), 0o700);
-        assert_eq!(mode(&cache.join(file_name(2026, 11))), 0o600);
-    }
-    #[cfg(windows)]
-    #[test]
-    fn windows_a_geo_cache_folder_everyone_can_write_is_refused() {
-        let (_tmp, open) = crate::paths::tests::everyone_folder();
-        let e = swap_in(&open, 2026, 11, b"x").unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
-    }
-    #[cfg(unix)]
-    #[test]
-    fn the_reader_follows_the_writers_rule_a_cache_folder_others_can_write_is_not_read() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let dirs = Dirs::at(tmp.path().join("d"));
-        let cache = dirs.intel_cache(COUNTRY.id);
-        swap_in(&cache, 2026, 11, &sample_country(NOW - 3600)).unwrap();
-        let g = load_reader(&dirs, NOW);
-        assert_eq!(g.lookup(&"192.0.2.9".parse().unwrap()).unwrap().country, "XA");
-        std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o777)).unwrap();
-        let g = load_reader(&dirs, NOW);
-        assert!(
-            g.lookup(&"192.0.2.9".parse().unwrap()).is_none(),
-            "a planted database is not opened"
-        );
     }
 }

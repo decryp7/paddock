@@ -52,11 +52,11 @@ pub fn prepare_password_folder(dirs: &crate::paths::Dirs) {
     }
 }
 
-/// Makes `folder` (and its parents) owner-only through the shared private-folder type (ADR 0092), or checks it when it exists and
-/// refuses one others can change (it is never tightened or widened), then sets the backup exclusion where the OS has one. The
-/// steps of [`prepare_password_folder`], without the macOS-only gate.
+/// Creates `folder` (and its parents) owner-only (0700 on Unix, whatever the umask) when it is missing, and sets the backup exclusion
+/// where the OS has one. An existing folder is used as it is: it is not changed (ADR 0092, revised 2026-11-12). The steps of
+/// [`prepare_password_folder`], without the macOS-only gate.
 pub fn prepare_folder(folder: &std::path::Path) -> std::io::Result<()> {
-    crate::paths::open_private_io(folder, "the password folder")?;
+    paddock_env::create_private_dir_all(folder)?;
     crate::cache::backup::exclude_from_backup(folder).map(|_| ())
 }
 

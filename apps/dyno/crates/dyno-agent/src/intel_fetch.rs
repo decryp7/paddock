@@ -177,20 +177,12 @@ pub(crate) fn map_download(e: DownloadError) -> FetchError {
     }
 }
 
-/// The folder a download is staged in: made owner-only or checked through the shared private-folder type (ADR 0092); a folder others
-/// can change is refused as it is (never tightened).
-fn prepare_dest_folder(dir: &Path) -> Result<(), FetchError> {
-    crate::paths::open_private_io(dir, "the intel cache folder")
-        .map(|_| ())
-        .map_err(|e| FetchError::Save(e.to_string()))
-}
-
 /// Downloads `url` to `dest` (a staging file in the cache folder) with `paddock-download`: job phases `connect`, `download` and
 /// `verify` on `ctx`, cancel in every phase, the size bound, and the digest computed while writing. No checksum is known in
 /// advance. Returns the bytes written.
 pub(crate) fn download_to(downloader: &Downloader, ctx: &JobContext, url: &str, dest: &Path, max_bytes: u64) -> Result<u64, FetchError> {
     if let Some(dir) = dest.parent() {
-        prepare_dest_folder(dir)?;
+        paddock_env::create_private_dir_all(dir).map_err(|e| FetchError::Save(e.kind().to_string()))?;
     }
     let request = Request::new(url, dest, Integrity::Unpinned)
         .map_err(|e| FetchError::Net(e.to_string()))?
@@ -548,29 +540,5 @@ pub(crate) mod tests {
     fn with_no_subscription_no_egress_exists() {
         // The agent builds a Fetcher only when a subscription is on; the policy alone constructs nothing.
         assert_eq!(policy().max_body, MAX_BYTES);
-    }
-    #[cfg(unix)]
-    #[test]
-    fn a_staging_folder_others_can_write_is_refused_and_left_as_it_was() {
-        use std::os::unix::fs::PermissionsExt;
-        let (_tmp, open) = crate::paths::tests::open_parent();
-        assert!(matches!(prepare_dest_folder(&open), Err(FetchError::Save(_))));
-        assert_eq!(
-            std::fs::metadata(&open).unwrap().permissions().mode() & 0o777,
-            0o777,
-            "never tightened"
-        );
-        let own = tempfile::tempdir().unwrap();
-        prepare_dest_folder(&own.path().join("new")).unwrap();
-        assert_eq!(
-            std::fs::metadata(own.path().join("new")).unwrap().permissions().mode() & 0o777,
-            0o700
-        );
-    }
-    #[cfg(windows)]
-    #[test]
-    fn windows_a_staging_folder_everyone_can_write_is_refused() {
-        let (_tmp, open) = crate::paths::tests::everyone_folder();
-        assert!(matches!(prepare_dest_folder(&open), Err(FetchError::Save(_))));
     }
 }

@@ -469,26 +469,21 @@ fn mode(p: &std::path::Path) -> u32 {
 
 #[cfg(unix)]
 #[test]
-fn the_password_folder_is_made_owner_only_and_a_folder_others_can_write_is_refused_untouched() {
+fn the_password_folder_is_made_owner_only_when_missing_and_an_existing_one_is_used_as_it_is() {
     use std::os::unix::fs::PermissionsExt;
     let t = tempfile::tempdir().unwrap();
     let nested = t.path().join("a").join("b");
     dyno_agent::wol::prepare_folder(&nested).unwrap();
-    assert_eq!(mode(&nested), 0o700, "a missing folder is created owner-only");
-    // An existing folder that passes the check is used as it is: it is neither widened nor re-chmodded.
-    let readable = t.path().join("readable");
-    std::fs::create_dir(&readable).unwrap();
-    std::fs::set_permissions(&readable, std::fs::Permissions::from_mode(0o750)).unwrap();
-    dyno_agent::wol::prepare_folder(&readable).unwrap();
-    assert_eq!(mode(&readable), 0o750);
-    // One others can write to is refused with the next step, and not tightened (that cannot evict what was planted).
-    let open = t.path().join("open");
-    std::fs::create_dir(&open).unwrap();
-    std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
-    let e = dyno_agent::wol::prepare_folder(&open).unwrap_err();
-    assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
-    assert!(e.to_string().contains("chmod go-w"), "{e}");
-    assert_eq!(mode(&open), 0o777);
+    assert_eq!(mode(&nested), 0o700, "a missing folder is created owner-only, whatever the umask");
+    let existing = t.path().join("existing");
+    std::fs::create_dir(&existing).unwrap();
+    std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dyno_agent::wol::prepare_folder(&existing).unwrap();
+    assert_eq!(
+        mode(&existing),
+        0o755,
+        "an existing folder is not changed (ADR 0092, revised 2026-11-12)"
+    );
 }
 
 #[cfg(target_os = "macos")]

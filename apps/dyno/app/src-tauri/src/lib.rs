@@ -605,6 +605,9 @@ pub fn run() {
         eprintln!("Dyno cannot start: {e}. {}", dyno_agent::paths::NEXT_STEP);
         std::process::exit(78);
     }
+    // A data folder the user named that other accounts can write is refused (ADR 0092, W8): the agent will not start in it either, so the
+    // app says why and what to do, and ends, instead of waiting for an agent that never comes.
+    let refused = data_folder_refusal(&dyno_agent::paths::Dirs::current());
     let cwd = std::env::current_dir().ok();
     #[allow(unused_mut)]
     let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
@@ -620,7 +623,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
     // The icons start as the saved layout (read from the agent's settings file), not the defaults: a custom layout must not flash.
-    let items = shell::saved_items(&dyno_agent::paths::Dirs::current().settings());
+    // (Not read from a refused folder.)
+    let items = shell::saved_items(&if refused.is_some() {
+        std::path::PathBuf::new()
+    } else {
+        dyno_agent::paths::Dirs::current().settings()
+    });
     let builder = app(builder, shell, launch, tray::DynoTray::new(items)).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -628,6 +636,16 @@ pub fn run() {
     // `Builder::run` is `build` then `run` with no callback; the callback is only for macOS's login-start decision.
     match builder.build(tauri::generate_context!()) {
         Ok(app) => app.run(move |_handle, _event| {
+            if let (Some(text), tauri::RunEvent::Ready) = (&refused, &_event) {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                let handle = _handle.clone();
+                _handle
+                    .dialog()
+                    .message(text.clone())
+                    .title("Dyno cannot use its data folder")
+                    .kind(MessageDialogKind::Error)
+                    .show(move |_| handle.exit(dyno_agent::cli::EXIT_DATA_FOLDER_REFUSED));
+            }
             // The end of a run (ER-27): why it ends and how long it ran; the last repeated lines are written before the process goes.
             match &_event {
                 // After the single-instance check (a second launch exits before Ready): say whether the last run died, leave a marker.
@@ -681,6 +699,41 @@ pub fn run() {
             eprintln!("Dyno could not start: {e}");
             std::process::exit(1);
         }
+    }
+}
+
+/// The text to show when the data folder is refused, `None` when it is usable. The log holds a fixed line (the text names the folder).
+fn data_folder_refusal(dirs: &dyno_agent::paths::Dirs) -> Option<String> {
+    let text = dyno_agent::paths::check_root(dirs).err()?;
+    log::error!("Dyno cannot use its data folder; the app shows why and exits");
+    Some(text)
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    #[cfg(unix)]
+    use super::*;
+
+    /// `Dirs::at` is a folder the user named, so it is checked; the default folder is not (`paths::check_root_with`).
+    #[cfg(unix)]
+    #[test]
+    fn a_named_data_folder_others_can_write_is_refused_with_the_cause_and_the_next_step_and_a_private_one_is_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let text = data_folder_refusal(&dyno_agent::paths::Dirs::at(&open)).expect("refused");
+        assert!(
+            text.contains("did not start") && text.contains("chmod go-w") && text.contains("DYNO_DATA_DIR"),
+            "{text}"
+        );
+        assert_eq!(
+            std::fs::metadata(&open).unwrap().permissions().mode() & 0o777,
+            0o777,
+            "never tightened"
+        );
+        assert_eq!(data_folder_refusal(&dyno_agent::paths::Dirs::at(tmp.path().join("own"))), None);
     }
 }
 
