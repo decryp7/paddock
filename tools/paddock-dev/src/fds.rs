@@ -94,7 +94,8 @@ const HANDLE_SCAN_LIMIT: usize = 1 << 20;
 
 /// Stops every handle of this process from being inherited by children it starts later (Windows), and says how many were
 /// inheritable. A child std starts afterwards still gets the stdio handles std makes for it at the spawn. `Err` when a handle
-/// could not be changed: the caller must not start a detached child then (it would keep that handle, a pipe the runner waits on).
+/// could not be changed, or not every handle was found below the scan limit ([`scan_handles`]): the caller must not start a
+/// detached child then (it would keep that handle, a pipe the runner waits on).
 #[cfg(windows)]
 #[allow(unsafe_code)] // Win32 calls on this process's own handle table
 pub fn keep_handles_from_children() -> std::io::Result<usize> {
@@ -105,24 +106,47 @@ pub fn keep_handles_from_children() -> std::io::Result<usize> {
     if unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut count) } == 0 {
         return Err(std::io::Error::last_os_error());
     }
-    let (mut seen, mut cleared) = (0u32, 0usize);
-    let mut value = 4usize;
-    while seen < count && value <= HANDLE_SCAN_LIMIT {
+    scan_handles(count, HANDLE_SCAN_LIMIT, |value| {
         let handle = value as HANDLE;
         let mut flags = 0u32;
         // SAFETY: GetHandleInformation only reads the entry; a value that names no handle fails and is skipped.
-        if unsafe { GetHandleInformation(handle, &mut flags) } != 0 {
-            seen += 1;
-            if flags & HANDLE_FLAG_INHERIT != 0 {
-                // SAFETY: the handle is this process's own; clearing its inherit flag changes nothing else.
-                if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) } == 0 {
-                    let e = std::io::Error::last_os_error();
-                    return Err(std::io::Error::new(e.kind(), format!("handle {value:#x} stays inheritable: {e}")));
-                }
-                cleared += 1;
+        if unsafe { GetHandleInformation(handle, &mut flags) } == 0 {
+            return Ok(None);
+        }
+        if flags & HANDLE_FLAG_INHERIT == 0 {
+            return Ok(Some(false));
+        }
+        // SAFETY: the handle is this process's own; clearing its inherit flag changes nothing else.
+        if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(Some(true))
+    })
+}
+
+/// The scan of [`keep_handles_from_children`] over handle values 4, 8, ... up to `limit`, until `count` handles were seen.
+/// `probe(value)` answers `None` for a value that names no handle, `Some(true)` for an inheritable handle it made non-inheritable,
+/// `Some(false)` for one that was not inheritable. Fails closed: an error when a handle could not be changed, and when the limit is
+/// reached before all `count` handles were seen (one of the missing ones may still be inheritable).
+#[cfg_attr(not(windows), allow(dead_code))] // the scan is Windows-only; its tests run everywhere
+fn scan_handles(count: u32, limit: usize, mut probe: impl FnMut(usize) -> std::io::Result<Option<bool>>) -> std::io::Result<usize> {
+    let (mut seen, mut cleared) = (0u32, 0usize);
+    let mut value = 4usize;
+    while seen < count && value <= limit {
+        match probe(value) {
+            Ok(None) => {}
+            Ok(Some(was_inheritable)) => {
+                seen += 1;
+                cleared += usize::from(was_inheritable);
             }
+            Err(e) => return Err(std::io::Error::new(e.kind(), format!("handle {value:#x} stays inheritable: {e}"))),
         }
         value += 4;
+    }
+    if seen < count {
+        return Err(std::io::Error::other(format!(
+            "only {seen} of this process's {count} handles were found up to {limit:#x}; one of the others may still be inheritable"
+        )));
     }
     Ok(cleared)
 }
@@ -197,12 +221,42 @@ mod tests {
         assert!(names.iter().any(|n| n == "0") && names.iter().any(|n| n == "2"));
     }
 
+    /// The scan stops once every handle was seen, counts the inheritable ones, and fails closed when the limit comes first or a
+    /// handle cannot be changed (the count is injected; no handle table is read).
+    #[test]
+    fn the_handle_scan_fails_closed_when_it_cannot_see_or_change_every_handle() {
+        // Handles at 8 (inheritable) and 16 (not); nothing else.
+        let table = |v: usize| -> std::io::Result<Option<bool>> {
+            Ok(match v {
+                8 => Some(true),
+                16 => Some(false),
+                _ => None,
+            })
+        };
+        assert_eq!(scan_handles(2, 64, table).unwrap(), 1);
+        let mut looked = Vec::new();
+        scan_handles(2, 64, |v| {
+            looked.push(v);
+            table(v)
+        })
+        .unwrap();
+        assert_eq!(looked.last(), Some(&16), "the scan ends once both handles were seen");
+        let short = scan_handles(3, 64, table).unwrap_err();
+        assert!(short.to_string().contains("only 2 of this process's 3 handles"), "{short}");
+        assert!(scan_handles(2, 12, table).is_err(), "the limit came before the second handle");
+        let stuck = scan_handles(2, 64, |v| if v == 8 { Err(std::io::Error::other("denied")) } else { table(v) }).unwrap_err();
+        assert!(stuck.to_string().contains("handle 0x8 stays inheritable: denied"), "{stuck}");
+    }
+
+    /// Changes the inherit flag of every handle of the test process: it needs nextest's one process per test (another test's
+    /// child started meanwhile would get no inherited handles).
     #[test]
     fn handles_can_be_marked_non_inheritable_at_any_time() {
         keep_handles_from_children().unwrap();
     }
 
-    /// An inheritable handle this process opened is no longer inheritable afterwards, and is counted.
+    /// An inheritable handle this process opened is no longer inheritable afterwards, and is counted. Changes every handle of the
+    /// test process: it needs nextest's one process per test.
     #[cfg(windows)]
     #[test]
     #[allow(unsafe_code)] // Win32 calls on the test's own pipe handle

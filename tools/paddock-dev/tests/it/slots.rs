@@ -374,7 +374,10 @@ fn the_holder_does_not_keep_a_pipe_that_acquire_inherited_as_a_plain_handle() {
         let mut rest = Vec::new();
         let _ = tx.send(reader.read_to_end(&mut rest).map(|_| ()));
     });
-    let closed = rx.recv_timeout(Duration::from_secs(60));
+    // About 15 s, so the verdict and the release below run inside nextest's 60 s bound; acquire has already ended, so a closed pipe
+    // shows at once.
+    // conformance: expiry-under-test — the window is the runner's 10 s wait for a step's pipe (gitea/runner treekill.go), plus margin
+    let closed = rx.recv_timeout(Duration::from_secs(15));
     assert!(!is_free(&root, 1), "the holder is still running");
     // Release before the verdict, so a failure leaves no holder behind.
     let token = v["token"].as_str().unwrap().to_string();
