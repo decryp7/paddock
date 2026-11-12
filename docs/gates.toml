@@ -955,10 +955,10 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
-path = "tools/paddock-dev/src/fds.rs"
+path = "crates/paddock-proc/src/detach.rs"
 tests = ["last_resort_child"]
 gate = "not-gated"
-reason = "a child probe: a parent test starts it with PADDOCK_DEV_FDS_CHILD set; it returns at once otherwise"
+reason = "a child probe: a parent test starts it with PADDOCK_PROC_DETACH_CHILD set; it returns at once otherwise"
 owner = "ADR 0060 WP-9"
 since = 2026-11-08
 review_by = 2026-12-20

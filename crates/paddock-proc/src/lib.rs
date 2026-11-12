@@ -35,6 +35,8 @@
 //! - [`warm_up`]: pays the first run of a program (`--version`) before the start that matters, memoised by file identity and
 //!   with its duration printed (ADR 0071); the start itself is waited for on ready or exit through [`StartWatch`].
 //!
+//! - [`spawn_detached`]: a child that outlives its starter (own process group, no console); [`spawn_detached_clearing_handles`]
+//!   (single-threaded callers) also keeps every inheritable handle from it on Windows, fail closed, and [`close_inherited`] for the child's first line on Unix; the one place (rule 55).
 //! - [`console`]: a GUI-subsystem program (no console window at login) that still prints when run from a terminal.
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
@@ -48,6 +50,7 @@
 pub mod cleanup;
 mod command;
 pub mod console;
+mod detach;
 pub mod guardian;
 pub mod hint;
 mod identity;
@@ -95,6 +98,10 @@ mod uid_tests {
 }
 
 pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
+pub use detach::{
+    DetachError, close_inherited, keep_handles_from_children, spawn_detached,
+    spawn_detached_clearing_handles,
+};
 pub use identity::{Ending, Holder, ProcessId, StartTime, holder};
 pub use instance::{
     Claim, HeldState, InstanceError, InstanceLock, held_state, is_held_now, is_held_settled,

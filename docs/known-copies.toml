@@ -1316,3 +1316,30 @@ status = "built"
   owner = "paddock-dev"
   delete_by = "v0.5.0"
   note = "The CI host steps' own guarded remove (feat/ci-in-rust-wp4: no link followed, a link on the way refuses) beside feat/dev-disk's safe_remove; listed in tests/it/safe_remove_lint.rs as a follow-up. Unifying them is a train-8 item."
+
+[[mechanism]]
+id = "spawn-detached"
+title = "Starting a child that must not carry its starter's handles (own process group, no console, no inherited handle but its stdio; a pipe the runner waits on ends the child with the step)"
+canonical = "paddock-proc"
+paths = ["crates/paddock-proc/src/detach.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/crates/pitcrew-service/src/launch.rs"]
+  symbols = ["item:spawn_std"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "A candidate, not a copy: a tool the service supervises and reads (stdout and stderr piped), not a detached child. On Windows it starts with CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP and inheritance on, so it also receives the service's inheritable handles. spawn_detached_clearing_handles is not for a multithreaded service; decide with Pitcrew 1.1 whether the tool gets the handle-list start (win_session.rs) instead."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/crates/pitcrew-service/src/platform/win_session.rs"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "CreateProcessAsUser into the user's session with PROC_THREAD_ATTRIBUTE_HANDLE_LIST: it leaks no handle. The documented form of what spawn_detached does with a process-wide clear; the canonical adopts a handle-list start when std stabilises spawn_with_attributes (rust-lang/rust 114854)."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-service/src/native.rs"]
+  symbols = ["text:CREATE_NEW_PROCESS_GROUP"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The same handle-list CreateProcessAsUser start in the shared service crate: it leaks no handle either; it stays beside win_session.rs until both move onto one handle-list start."
