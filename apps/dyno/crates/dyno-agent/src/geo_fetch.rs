@@ -21,7 +21,6 @@ use paddock_jobs::time::Clock;
 use paddock_jobs::{JobContext, Phase};
 use paddock_net::{Egress, Policy, Reach, SystemLookup};
 use sha2::{Digest, Sha256};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -306,23 +305,10 @@ fn hex(b: &[u8]) -> String {
 /// Writes the staging file, moves the older `current-*` files aside (the newest becomes `previous.mmdb`, the rest go) and puts the
 /// new file in place.
 fn swap_in(cache: &Path, y: i32, m: u32, raw: &[u8]) -> std::io::Result<()> {
-    std::fs::create_dir_all(cache)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(cache, std::fs::Permissions::from_mode(0o700))?;
-    }
+    paddock_env::create_private_dir_all(cache)?;
     let staging = cache.join(".staging");
-    {
-        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(&staging)?;
-        f.write_all(raw)?;
-        f.sync_all()?;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o600))?;
-    }
+    // A unique temporary file created exclusive and owner-only (0600 from creation, no chmod), then renamed over `.staging`.
+    paddock_env::write_atomic(&staging, raw, true).map_err(std::io::Error::other)?;
     let mut older: Vec<PathBuf> = std::fs::read_dir(cache)?
         .flatten()
         .map(|e| e.path())
@@ -350,6 +336,10 @@ pub fn load_reader(dirs: &Dirs, now_secs: u64) -> GeoReader {
         let mut names: Vec<PathBuf> = newest_month(&cache).map(|(y, m)| cache.join(file_name(y, m))).into_iter().collect();
         names.push(cache.join("previous.mmdb"));
         names.into_iter().find_map(|p| {
+            // Bounded before it is read: a planted or damaged file larger than any database is not loaded into memory.
+            if std::fs::metadata(&p).ok()?.len() > MAX_INFLATED {
+                return None;
+            }
             let bytes = std::fs::read(&p).ok().filter(|b| b.len() as u64 <= MAX_INFLATED)?;
             open_checked(bytes, source.kind, now_secs, false).ok()
         })
@@ -365,6 +355,7 @@ mod tests {
     use flate2::{write::GzEncoder, Compression};
     use paddock_jobs::time::FakeClock;
     use paddock_net::{FakeWire, Reply, StaticLookup};
+    use std::io::Write;
 
     // 2026-11-03 12:00 UTC.
     const NOW_MS: i64 = 1_793_707_200_000;

@@ -1464,6 +1464,7 @@ dependencies = [
  "libc",
  "log",
  "netstat2",
+ "paddock-env",
  "paddock-jobs",
  "paddock-power",
  "paddock-proc",

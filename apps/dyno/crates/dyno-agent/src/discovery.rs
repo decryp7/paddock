@@ -6,15 +6,6 @@ use paddock_ipc::Token;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// The folder holding the discovery file at `path` must be this account's and closed to others, for the writer and every reader
-/// alike (one rule, `paddock_env::check_data_folder`).
-fn trusted_folder(path: &Path) -> Result<(), paddock_env::Refusal> {
-    match path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        Some(dir) => paddock_env::check_data_folder(dir, "agent.json"),
-        None => Ok(()),
-    }
-}
-
 /// What the app needs to connect.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -48,16 +39,13 @@ impl Discovery {
         if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
             paddock_env::create_private_dir_all(dir)?;
         }
-        trusted_folder(path).map_err(|e| std::io::Error::new(std::io::ErrorKind::PermissionDenied, e))?;
         let body = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
         paddock_proc::hint::write_private_atomic(path, &body)
     }
 
-    /// Reads the file; `None` when missing or damaged.
-    /// Also `None` when the folder holding it belongs to another user or others can change it: a planted file is not even a hint
-    /// (the refusal is logged once per change, with its reason). A link to the user's own folder is followed.
+    /// Reads the file; `None` when missing or damaged. The folder is not checked here: a folder the user named is checked once, at the
+    /// start (`paths::check_root`), and the default per-user folder is the OS's protection (ADR 0092, revised 2026-11-12).
     pub fn read(path: &Path) -> Option<Discovery> {
-        trusted_folder(path).ok()?;
         serde_json::from_slice(&paddock_proc::hint::read_bounded(path)?).ok()
     }
 
@@ -164,32 +152,28 @@ mod tests {
         assert_eq!(Discovery::read(&real.join("agent.json")), Some(sample()));
     }
 
+    /// A default folder an older Dyno made under umask 002 (0775, the Ubuntu default) is used: written by the agent at bind and read by
+    /// the app and the CLI. The folder check belongs to the start, for folders the user named only (ADR 0092, revised 2026-11-12).
     #[cfg(unix)]
     #[test]
-    fn a_file_in_a_folder_others_can_change_is_neither_read_nor_written() {
+    fn a_default_folder_with_mode_0775_is_written_and_read() {
         use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("open");
+        let dir = tmp.path().join("data");
         std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o775)).unwrap();
         sample().write(&dir.join("agent.json")).unwrap();
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
-        assert_eq!(Discovery::read(&dir.join("agent.json")), None);
-        let e = sample().write(&dir.join("agent.json")).unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_link_to_a_folder_of_another_account_is_not_trusted() {
-        // `/` belongs to root: following a link to it is refused, so a planted link cannot lead the agent to a foreign folder.
-        if paddock_env::current_uid() == 0 {
-            return;
-        }
-        let tmp = tempfile::tempdir().unwrap();
-        let link = tmp.path().join("link");
-        std::os::unix::fs::symlink("/", &link).unwrap();
-        assert_eq!(Discovery::read(&link.join("agent.json")), None);
-        assert!(sample().write(&link.join("agent.json")).is_err());
+        assert_eq!(Discovery::read(&dir.join("agent.json")), Some(sample()));
+        assert_eq!(
+            std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777,
+            0o775,
+            "the folder is not changed"
+        );
+        assert_eq!(
+            std::fs::metadata(dir.join("agent.json")).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "the file is owner-only"
+        );
     }
 
     #[test]

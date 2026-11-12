@@ -68,6 +68,9 @@ use std::sync::Arc;
 pub enum StartError {
     /// Another agent already runs for this data folder ([`instance`]); this one must exit without touching anything.
     AlreadyRunning(instance::LockError),
+    /// The data folder is refused (a folder the user named that other accounts can write, ADR 0092): nothing was started, opened or
+    /// written, not the log, the lock or a marker. The text names the cause and the next step.
+    DataFolderRefused(String),
     /// Anything else, with its message.
     Failed(String),
 }
@@ -76,7 +79,7 @@ impl std::fmt::Display for StartError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StartError::AlreadyRunning(e) => write!(f, "{e}; this one exits."),
-            StartError::Failed(m) => f.write_str(m),
+            StartError::DataFolderRefused(m) | StartError::Failed(m) => f.write_str(m),
         }
     }
 }
@@ -155,6 +158,7 @@ impl Running {
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
     ) -> Result<Running, StartError> {
+        paths::check_root(&dirs).map_err(StartError::DataFolderRefused)?;
         wol::prepare_password_folder(&dirs);
         Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::os())
     }
@@ -169,6 +173,7 @@ impl Running {
         reveal: agent::Reveal,
         disk_ports: disk::DiskPorts,
     ) -> Result<Running, StartError> {
+        paths::check_root(&dirs).map_err(StartError::DataFolderRefused)?;
         let lock = instance::InstanceLock::acquire(&dirs);
         Running::start_with_lock(dirs, platform, details, reveal, disk_ports, lock)
     }
@@ -181,6 +186,7 @@ impl Running {
         reveal: agent::Reveal,
         wiring: agent::HelperWiring,
     ) -> Result<Running, StartError> {
+        paths::check_root(&dirs).map_err(StartError::DataFolderRefused)?;
         let lock = instance::InstanceLock::acquire(&dirs);
         Running::start_inner(dirs, platform, details, reveal, disk::DiskPorts::none(), lock, Some(wiring))
     }

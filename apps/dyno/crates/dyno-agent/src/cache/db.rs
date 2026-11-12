@@ -292,22 +292,15 @@ pub fn wipe_in_place(path: &Path) -> Result<(), CacheError> {
 
 fn prepare_folder(path: &Path) -> Result<(), CacheError> {
     if let Some(dir) = path.parent() {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
-            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
-        }
-        #[cfg(not(unix))]
-        std::fs::create_dir_all(dir)?;
+        // Owner-only from creation when missing (0700 on Unix, whatever the umask); an existing folder is used as it is (ADR 0092).
+        paddock_env::create_private_dir_all(dir)?;
     }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-        // Created private from the first byte; SQLite gives `-wal` and `-shm` the same mode.
+        use std::os::unix::fs::OpenOptionsExt;
+        // Created private from the first byte (no chmod after); SQLite gives `-wal` and `-shm` the same mode.
         let f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
         drop(f);
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     }
     Ok(())
 }
@@ -711,7 +704,8 @@ pub(crate) mod tests {
     #[test]
     fn creates_saves_lists_and_loads_back() {
         let d = tempfile::tempdir().unwrap();
-        let mut db = open_in(d.path());
+        let folder = d.path().join("cache");
+        let mut db = open_in(&folder);
         let t = tree("alpha", 50);
         let saved = db.save_disk(&params("volume:/"), &t, 5000, CacheLimits::default(), &Roomy).unwrap();
         let rows = db.list().unwrap();
@@ -727,7 +721,7 @@ pub(crate) mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode(d.path()), 0o700);
+            assert_eq!(mode(&folder), 0o700);
             assert_eq!(mode(db.path()), 0o600);
         }
     }

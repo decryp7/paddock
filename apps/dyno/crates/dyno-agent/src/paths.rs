@@ -3,38 +3,80 @@
 
 use std::path::{Path, PathBuf};
 
-/// Makes the data folder `root` ready at the agent's start: created private (0700, whatever the umask), and, when an older Dyno made
-/// it with the umask (0775 under umask 002) so only the account's own private group can write to it, that group write removed once.
-/// A folder others can write to is not touched and is refused later by the folder check.
+/// The one check of the data folder before anything is opened or written in it (ADR 0092, revised 2026-11-12): the agent's `run`,
+/// `Running::start` and the app call it first, so the log, the instance lock, the crash and run markers and the database wait for it.
+///
+/// The default per-user folder is created owner-only (0700 on Unix, whatever the umask) when it is missing and otherwise used as it is:
+/// the OS keeps other accounts out of the user's profile, and Chrome, VS Code and Electron apps make the same assumption (XDG: an
+/// existing folder's permissions are not changed). A folder the user supplied (`DYNO_DATA_DIR`, a test's own folder) is where other
+/// accounts can plausibly write (`C:\Dyno`, `/tmp`, a shared volume), so it is made owner-only if missing and refused when other
+/// accounts can change it, like ssh's StrictModes and git's `safe.directory`. A refusal means Dyno does not start: with the cause and
+/// the next step. There is no memory-only mode, which would lose the settings and Wake-on-LAN passwords without a word.
 ///
 /// # Errors
-/// The folder cannot be made, or it is open to others; the text ends with the next step.
-pub fn prepare_root(root: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    let others = |gid| paddock_env::group_has_other_members(gid, paddock_env::current_uid());
-    #[cfg(not(unix))]
-    let others = |_| true;
-    prepare_root_with(root, others)
+/// The text to show: the cause, the next step, and that nothing was started or changed.
+pub fn check_root(dirs: &Dirs) -> Result<(), String> {
+    check_places(
+        dirs.root(),
+        !dirs.is_users_own(),
+        &paddock_env::AppId::new(crate::logging::APP_ID, crate::logging::APP_NAME)
+            .and_then(|id| paddock_env::AppDirs::for_app(&id))
+            .ok(),
+    )
 }
 
-/// [`prepare_root`] with the group-membership lookup passed in (tests).
+/// Every place the agent or the app writes into at start: the data folder and, when the user supplied the app's folders (portable mode,
+/// `<ID>_HOME`), their `data` and `logs` (the log, the crash marker and the run marker go there). All the checks run first and nothing
+/// is made before they all pass, so a refused `<ID>_HOME` leaves a named `DYNO_DATA_DIR` uncreated too.
 ///
 /// # Errors
-/// See [`prepare_root`].
-pub fn prepare_root_with(root: &Path, group_has_others: impl FnOnce(u32) -> bool) -> Result<(), String> {
-    paddock_env::create_private_dir_all(root).map_err(|e| format!("Dyno could not create its data folder ({e})"))?;
-    #[cfg(unix)]
-    if let Err(r) = paddock_env::tighten_group_write(root, group_has_others) {
-        log::warn!(Why = r.reason(); "The data folder cannot be made private; run chmod go-w on it");
-        return Err(format!(
-            "the data folder is not safe to use ({}); run chmod go-w {}",
-            r.reason(),
-            root.display()
-        ));
+/// As [`check_root`].
+fn check_places(root: &Path, supplied: bool, app_dirs: &Option<paddock_env::AppDirs>) -> Result<(), String> {
+    let app_folders: Vec<&Path> = app_dirs
+        .as_ref()
+        .filter(|a| a.source() != paddock_env::Source::Os)
+        .map(|a| vec![a.data(), a.logs()])
+        .unwrap_or_default();
+    let named = supplied.then_some(root).into_iter().chain(app_folders.iter().copied());
+    for folder in named {
+        paddock_env::private::check_named_folder(folder).map_err(|e| refusal_text(&e.to_string()))?;
     }
-    #[cfg(not(unix))]
-    let _ = group_has_others;
+    check_root_with(root, supplied)?;
+    for folder in app_folders {
+        check_root_with(folder, true)?;
+    }
     Ok(())
+}
+
+/// [`check_root`] with the "supplied by the user" decision passed in (tests).
+///
+/// # Errors
+/// See [`check_root`].
+pub fn check_root_with(root: &Path, supplied: bool) -> Result<(), String> {
+    let failed = |why: String| {
+        log::error!(
+            "The data folder is not usable ({}); Dyno does not start",
+            if supplied {
+                "a folder the user named"
+            } else {
+                "the default folder"
+            }
+        );
+        refusal_text(&why)
+    };
+    if supplied {
+        // Checked first, from what exists, so a refused folder (and a refused parent) is left as it is: nothing is made inside it.
+        paddock_env::private::check_named_folder(root).map_err(|e| failed(e.to_string()))?;
+        paddock_env::private::PrivateDir::create_all(root)
+            .map(|_| ())
+            .map_err(|e| failed(e.to_string()))
+    } else {
+        paddock_env::create_private_dir_all(root).map_err(|e| failed(format!("{} could not be made ({e})", root.display())))
+    }
+}
+
+fn refusal_text(why: &str) -> String {
+    format!("Dyno did not start: {why}. Nothing was started or changed. Fix the folder, or start Dyno with DYNO_DATA_DIR set to a folder of your own.")
 }
 
 /// What to do when no data folder can be used (the same words for the agent and the CLI).
@@ -345,60 +387,140 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_data_folder_made_with_umask_002_still_lets_the_agent_write_and_read_agent_json() {
-        use std::os::unix::fs::PermissionsExt;
-        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
-        let tmp = scratch.work();
-        let root = tmp.join("data");
-        // What Dyno 1.1.0 left behind under umask 002: owned by the user, group write set, the user's own group.
-        std::fs::create_dir(&root).unwrap();
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
-        let file = root.join("agent.json");
-        let mine = crate::discovery::Discovery {
-            endpoint: "e".into(),
-            token: paddock_ipc::Token::from_bytes([1; 32]).to_hex(),
-            pid: std::process::id(),
-            started: 1,
-            version: "0.1.0".into(),
-            protocol: 1,
-            build: String::new(),
-        };
-        prepare_root_with(&root, |_| false).unwrap();
-        mine.write(&file).unwrap();
-        assert_eq!(crate::discovery::Discovery::read(&file), Some(mine));
-        assert_eq!(
-            std::fs::metadata(&root).unwrap().permissions().mode() & 0o022,
-            0,
-            "no group or world write is left"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn a_data_folder_others_can_write_to_is_refused_untouched_with_the_chmod_next_step() {
+    fn the_default_folder_is_used_as_it_is_even_when_others_can_write_it_and_a_missing_one_is_made_owner_only() {
         use std::os::unix::fs::PermissionsExt;
         let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
         let tmp = scratch.work();
         let root = tmp.join("data");
         std::fs::create_dir(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
-        let e = prepare_root_with(&root, |_| false).unwrap_err();
-        assert!(e.contains("chmod go-w"), "{e}");
-        assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o777);
-        // A shared group is refused too.
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
-        assert!(prepare_root_with(&root, |_| true).is_err());
+        check_root_with(&root, false).unwrap();
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o777,
+            "an existing default folder is not changed"
+        );
+        let made = tmp.join("a").join("new");
+        check_root_with(&made, false).unwrap();
+        assert_eq!(std::fs::metadata(&made).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
     #[cfg(unix)]
     #[test]
-    fn a_new_data_folder_is_private() {
+    fn a_folder_the_user_named_is_refused_when_others_can_write_it_and_left_as_it_was() {
         use std::os::unix::fs::PermissionsExt;
-        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
-        let tmp = scratch.work();
-        let root = tmp.join("a").join("data");
-        prepare_root_with(&root, |_| false).unwrap();
-        assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("data");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = check_root_with(&root, true).unwrap_err();
+        assert!(
+            e.contains("did not start") && e.contains("chmod go-w") && e.contains("DYNO_DATA_DIR"),
+            "cause and next step: {e}"
+        );
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().permissions().mode() & 0o777,
+            0o777,
+            "never tightened"
+        );
+        // A missing one is made owner-only; one under a parent others can change is refused.
+        let made = tmp.path().join("new");
+        check_root_with(&made, true).unwrap();
+        assert_eq!(std::fs::metadata(&made).unwrap().permissions().mode() & 0o777, 0o700);
+        assert!(check_root_with(&root.join("inner"), true).is_err());
+    }
+
+    /// Windows: a folder the user named under a place Everyone may write (the root of `C:\` is one) is refused; the default is not.
+    /// Owed to the Windows runner or VM, with the manual check of an Administrators-owned `%LOCALAPPDATA%\Dyno` (used, not refused).
+    #[cfg(windows)]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a Windows-only test runs icacls on its own temporary folder to set its access list"
+    )]
+    fn windows_a_named_folder_everyone_can_write_is_refused_and_the_default_is_used() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("data");
+        std::fs::create_dir(&root).unwrap();
+        let out = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(check_root_with(&root, true).unwrap_err().contains("did not start"));
+        check_root_with(&root, false).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_app_folders_the_user_supplied_are_refused_like_a_named_data_folder_and_the_os_own_are_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("home");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
+        let vars = paddock_env::MapVars::new().with("DYNO_HOME", root.clone().into_os_string());
+        let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
+        let e = check_places(&tmp.path().join("none"), false, &supplied).unwrap_err();
+        assert!(
+            e.contains("did not start") && e.contains("chmod go-w"),
+            "logs, crash marker and run marker: {e}"
+        );
+        let os_own = paddock_env::AppDirs::resolve(
+            &id,
+            paddock_env::Os::current(),
+            &paddock_env::MapVars::new().with("HOME", root.into_os_string()),
+            None,
+            false,
+        )
+        .ok();
+        assert_eq!(
+            check_places(&tmp.path().join("default"), false, &os_own),
+            Ok(()),
+            "the OS's own places are not checked"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_named_folder_has_nothing_made_inside_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777)).unwrap();
+        // The folder itself is missing under one others can write: refused, and not made.
+        assert!(check_root_with(&home.join("data"), true).is_err());
+        assert!(!home.join("data").exists());
+        // `<ID>_HOME` open to others: neither `data` nor `logs` is created before the refusal.
+        let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
+        let vars = paddock_env::MapVars::new().with("DYNO_HOME", home.clone().into_os_string());
+        let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
+        assert!(check_places(&tmp.path().join("none"), false, &supplied).is_err());
+        assert_eq!(
+            std::fs::read_dir(&home).unwrap().count(),
+            0,
+            "nothing was made inside the refused folder"
+        );
+    }
+
+    /// P2: a named data folder is not made when a supplied `<ID>_HOME` is refused: all the checks run before anything is created.
+    #[cfg(unix)]
+    #[test]
+    fn a_named_data_folder_is_not_made_when_a_supplied_app_home_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
+        let vars = paddock_env::MapVars::new().with("DYNO_HOME", home.into_os_string());
+        let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
+        let named = tmp.path().join("named");
+        assert!(check_places(&named, true, &supplied).is_err());
+        assert!(!named.exists(), "the named data folder was not made before the refusal");
     }
 
     #[cfg(unix)]

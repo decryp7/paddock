@@ -469,17 +469,21 @@ fn mode(p: &std::path::Path) -> u32 {
 
 #[cfg(unix)]
 #[test]
-fn the_password_folder_becomes_owner_only_even_when_it_existed_with_wider_rights() {
+fn the_password_folder_is_made_owner_only_when_missing_and_an_existing_one_is_used_as_it_is() {
     use std::os::unix::fs::PermissionsExt;
     let t = tempfile::tempdir().unwrap();
-    let folder = t.path().join("secrets");
-    std::fs::create_dir(&folder).unwrap();
-    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
-    dyno_agent::wol::prepare_folder(&folder).unwrap();
-    assert_eq!(mode(&folder), 0o700);
     let nested = t.path().join("a").join("b");
     dyno_agent::wol::prepare_folder(&nested).unwrap();
-    assert_eq!(mode(&nested), 0o700, "a missing folder is created owner-only");
+    assert_eq!(mode(&nested), 0o700, "a missing folder is created owner-only, whatever the umask");
+    let existing = t.path().join("existing");
+    std::fs::create_dir(&existing).unwrap();
+    std::fs::set_permissions(&existing, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dyno_agent::wol::prepare_folder(&existing).unwrap();
+    assert_eq!(
+        mode(&existing),
+        0o755,
+        "an existing folder is not changed (ADR 0092, revised 2026-11-12)"
+    );
 }
 
 #[cfg(target_os = "macos")]

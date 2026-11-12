@@ -551,60 +551,21 @@ fn unguessable_suffix() -> String {
     format!("{:016x}", h.finish())
 }
 
-/// Makes one folder that must not exist yet, readable and writable by its owner only: mode 0700, or on Windows a protected
-/// security descriptor that grants only the owner (`D:P(A;OICI;FA;;;OW)`), so no inherited right from a shared temp folder remains.
-#[cfg(any(windows, test))]
-#[allow(unsafe_code)] // the Win32 security-descriptor calls; each unsafe block says why it is sound
-fn create_owner_only(dir: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        use windows::core::{w, PCWSTR};
-        use windows::Win32::Foundation::{LocalFree, HLOCAL};
-        use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
-        use windows::Win32::Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES};
-        use windows::Win32::Storage::FileSystem::CreateDirectoryW;
-        let os_error = |e: windows::core::Error| std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF);
-        let mut descriptor = PSECURITY_DESCRIPTOR::default();
-        // SAFETY: the SDDL text is a constant; the descriptor it allocates is freed below with LocalFree after the call that uses it.
-        unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(w!("D:P(A;OICI;FA;;;OW)"), SDDL_REVISION_1, &mut descriptor, None) }
-            .map_err(os_error)?;
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: descriptor.0,
-            bInheritHandle: false.into(),
-        };
-        let wide: Vec<u16> = dir.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
-        // SAFETY: `wide` is NUL-terminated and outlives the call; `attributes` points at the live descriptor.
-        let made = unsafe { CreateDirectoryW(PCWSTR(wide.as_ptr()), Some(&attributes)) };
-        // SAFETY: the descriptor came from the conversion above and is not used after this.
-        unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
-        made.map_err(os_error)
-    }
-    #[cfg(not(windows))]
-    {
-        let mut builder = std::fs::DirBuilder::new();
-        #[cfg(unix)]
-        std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
-        builder.create(dir)
-    }
-}
-
-/// Makes a folder under `temp` that did not exist before (an unguessable name, created with `create_dir`, which refuses an existing
-/// path, link or junction), so another user cannot have planted it or what is in it. The temp folder itself may be shared
-/// (`C:\Windows\Temp` when Dyno runs elevated), so no fixed name is ever used there.
+/// Makes a folder under `temp` that did not exist before (an unguessable name) through the shared private-folder type (ADR 0092,
+/// rule 55: this file's own Win32 copy of it is gone): owner-only from creation (on Windows a protected descriptor that grants only
+/// the owner), made relative to a held parent, and refused when `temp` or the folder is one another account can change or replace.
+/// The temp folder itself may be shared (`C:\Windows\Temp` when Dyno runs elevated), so no fixed name is ever used there; a name
+/// that already exists is checked like any existing folder and refused unless it is ours and closed to others.
 #[cfg(any(windows, test))]
 fn fresh_private_folder(temp: &Path) -> std::io::Result<PathBuf> {
-    let mut last = None;
-    for _ in 0..8 {
-        let dir = temp.join(format!("Dyno-{}", unguessable_suffix()));
-        match create_owner_only(&dir) {
-            Ok(()) => return Ok(dir),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
-            Err(e) => return Err(e),
+    let dir = temp.join(format!("Dyno-{}", unguessable_suffix()));
+    match paddock_env::private::PrivateDir::create_all(&dir) {
+        Ok(held) => Ok(held.path().to_path_buf()),
+        Err(e) => {
+            log::warn!(Why = e.reason(); "The battery report folder is not safe; no report is read");
+            Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, e.to_string()))
         }
     }
-    Err(last.unwrap_or_else(|| std::io::Error::other("no free folder name")))
 }
 
 /// Reads the report through one open handle: what the handle names must be a regular file (the open follows a link, so the target
@@ -745,6 +706,46 @@ mod tests {
         let a = fresh_private_folder(&root).unwrap();
         let b = fresh_private_folder(&root).unwrap();
         assert_ne!(a, b);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_report_folder_under_a_parent_others_can_change_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp("battery-open");
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = fresh_private_folder(&root).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Windows: the report folder is made owner-only (the protected descriptor, no inherited entry) and is refused under a temp folder
+    /// that Everyone may change. Owed: runs on the Windows runner or VM.
+    #[cfg(windows)]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a Windows-only test runs icacls on its own temporary folder to set and read its access list"
+    )]
+    fn windows_the_report_folder_has_no_entry_for_others_and_an_open_temp_is_refused() {
+        let root = temp("battery-win");
+        let d = fresh_private_folder(&root).unwrap();
+        let out = std::process::Command::new("icacls").arg(&d).output().unwrap();
+        // The output starts with the folder's own path (`C:\\Users\\...`), which is not an entry: the path is cut out, and what is left is
+        // checked for entries (`<principal>:(<rights>)`) of the principals that must not be there.
+        let text = String::from_utf8_lossy(&out.stdout).replace(&d.display().to_string(), "");
+        for other in ["Everyone", "BUILTIN\\Users", "NT AUTHORITY\\Authenticated Users"] {
+            assert!(!text.contains(&format!("{other}:(")), "{other} must have no entry: {text}");
+        }
+        assert!(text.contains(":("), "the folder has entries at all (the parse saw them): {text}");
+        let g = std::process::Command::new("icacls")
+            .arg(&root)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(g.status.success());
+        assert!(fresh_private_folder(&root).is_err());
         let _ = std::fs::remove_dir_all(&root);
     }
 

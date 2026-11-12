@@ -322,3 +322,38 @@ fn a_second_instance_of_a_running_pipe_is_refused_to_an_account_with_only_the_in
         Some(std::io::ErrorKind::PermissionDenied)
     );
 }
+
+/// ADR 0092 DF-3: the client reads the serving process's account from its token before it sends anything. Here the server is this
+/// process, so the accounts match and the connect passes. Owed to the Windows runner or VM (never run on the host).
+#[cfg(windows)]
+#[test]
+fn a_pipe_served_by_our_own_account_passes_the_server_check() {
+    let mut l = Listener::bind().unwrap();
+    let name = l.name().to_string();
+    let c = std::thread::spawn(move || Stream::connect(&name, T));
+    let (_server, _) = l.accept(T).unwrap();
+    let client = c.join().unwrap().unwrap();
+    client.check_server_is_me().unwrap();
+}
+
+/// The same check refuses a pipe served by another account. The local VM script (`scripts/vm-checks/dyno-wp6-cross-account-pipe.sh`) serves, as a second
+/// account, a pipe every account may open (`paddock-ipc-test-child serve-open`), passes its name in `PADDOCK_OTHER_ACCOUNT_PIPE` and runs this test as the first account (never set in CI, so it returns at once there).
+/// Deleting the call in `Client::connect_on` makes it fail. Registered in docs/gates.toml.
+#[cfg(windows)]
+#[test]
+fn a_pipe_served_by_another_account_is_refused_before_the_token_is_sent() {
+    let Ok(name) = std::env::var("PADDOCK_OTHER_ACCOUNT_PIPE") else {
+        return;
+    };
+    let e = paddock_ipc::Client::connect(
+        &name,
+        &paddock_ipc::Token::random().unwrap(),
+        paddock_ipc::frame::FrameLimit::default(),
+        paddock_ipc::frame::ProtocolVersion::UNVERSIONED,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(e, paddock_ipc::IpcError::Auth(ref m) if m.contains("not served by your account")),
+        "{e:?}"
+    );
+}

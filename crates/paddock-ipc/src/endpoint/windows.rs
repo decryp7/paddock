@@ -323,6 +323,11 @@ impl Stream {
         Stream::new(pipe).map_err(super::SystemConnectError::Connect)
     }
 
+    /// The account of the process serving this pipe must be our own (the client's check before it sends a token).
+    pub(super) fn check_server_is_me(&self) -> Result<(), crate::trust::Untrusted> {
+        super::windows_peer::check_server_is_me(self.pipe.as_raw_handle())
+    }
+
     pub(super) fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
         Stream::new(open_pipe(name, timeout)?)
     }

@@ -108,6 +108,11 @@ dyno-agent service install|uninstall|status|ensure   register it to start at log
 /// nothing (the app then connects to the running one).
 pub const EXIT_ALREADY_RUNNING: i32 = 3;
 
+/// The exit code of `run` (and of the app) when the data folder is refused: nothing was started, opened or written, not even the log.
+/// The text on standard error says the cause and the next step; the app makes the same check and shows the same text. 78 is the code
+/// `Dirs::current` already uses for "no usable data folder" (`EX_CONFIG`).
+pub const EXIT_DATA_FOLDER_REFUSED: i32 = 78;
+
 /// Runs the command line; returns the exit code.
 pub fn main(args: Vec<String>) -> i32 {
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -246,6 +251,10 @@ fn run_exit_code(out: Result<(), StartError>) -> i32 {
             eprintln!("dyno-agent: {e}");
             EXIT_ALREADY_RUNNING
         }
+        Err(StartError::DataFolderRefused(e)) => {
+            eprintln!("dyno-agent: {e}");
+            EXIT_DATA_FOLDER_REFUSED
+        }
         Err(StartError::Failed(e)) => {
             eprintln!("dyno-agent: {e}");
             log::error!(ErrorCode = "StartFailed", ErrorChain = e.as_str(); "Agent could not start");
@@ -256,6 +265,8 @@ fn run_exit_code(out: Result<(), StartError>) -> i32 {
 
 fn run() -> Result<(), StartError> {
     let dirs = Dirs::current();
+    // Before the log, the lock and the markers: each of them writes into the data folder, and a refused one is never written to.
+    crate::paths::check_root(&dirs).map_err(StartError::DataFolderRefused)?;
     let dirs = dirs.clone().with_log_folder(crate::logging::log_dir(&dirs));
     // First: the agent's own dated log (and its panic hook), so every step below is in a file even under launchd.
     let _log = crate::logging::install(&dirs);

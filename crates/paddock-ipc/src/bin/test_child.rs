@@ -10,6 +10,9 @@
 //! - `stubborn`: `echo` without a lifeline, and keeps running after the connection closes
 //! - `companion <discovery file> <build>`: a link server for that build until a client calls `stop`; prints `ready` once
 //!   its discovery file is written
+//! - `serve-open <pipe name>` (Windows): a pipe that every account may open (`D:P(A;;GA;;;WD)`), served until killed, each client
+//!   dropped at once. For the cross-account VM step: the client then reaches its server-account check instead of being refused by the
+//!   pipe's access list (ER-33).
 //! - `observe <file>` (feature `testing`): connects, reads the raw stream of its connection to the end and writes what it
 //!   read to `<file>.bin` and how it ended (`eof`, `reset` or `timeout`) to `<file>.end` (the launcher's ending test)
 //! - `out-of-files` (Unix): a host and a raw client in this process; the host accepts the client with the last free file
@@ -247,6 +250,20 @@ fn main() {
             let guard = stopped.0.lock().unwrap();
             drop(stopped.1.wait_while(guard, |s| !*s).unwrap());
             drop(server);
+        }
+        #[cfg(windows)]
+        "serve-open" => {
+            use paddock_ipc::endpoint::{Access, Listener};
+            let access = Access {
+                mode: 0o666,
+                sddl: "D:P(A;;GA;;;WD)".into(),
+            };
+            let mut listener = Listener::bind_fixed(&arg(2), &access).unwrap();
+            println!("ready");
+            loop {
+                // Each accepted client is dropped (closed) at once; a timeout just waits again.
+                let _ = listener.accept(std::time::Duration::from_secs(1));
+            }
         }
         #[cfg(unix)]
         "out-of-files" => out_of_files(true),

@@ -21,6 +21,8 @@ jiff = "0.2"
 # Child processes the family's way (ER-22): a process group killed as a whole, a kill-on-close job object on Windows, lower priority.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+# The battery report's private folder (ADR 0092): the shared owner-only folder type, not a copy of it here (rule 55).
+paddock-env = { path = "../../../../crates/paddock-env" }
 # The helper checks a downloaded tool package against its own pinned SHA-256 (ADR 0027 section 7).
 sha2 = "0.10"
 # Keep awake and sleep/wake notifications (ADR 0032, D3); the fakes are what tests use.

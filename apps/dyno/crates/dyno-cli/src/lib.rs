@@ -55,6 +55,10 @@ pub fn run_mcp(args: &[String], env_key: Option<String>, err: &mut dyn Write) ->
         }
     };
     let file = paddock_mcp::listener::discovery_path(dirs.config());
+    if let Some(text) = refuse_supplied_config(dirs.config(), dirs.source()) {
+        let _ = writeln!(err, "dyno mcp: {text}");
+        return 1;
+    }
     let stdin = std::io::BufReader::new(std::io::stdin());
     match paddock_mcp::bridge::run(&file, key.trim(), stdin, &mut std::io::stdout()) {
         Ok(()) => 0,
@@ -62,6 +66,20 @@ pub fn run_mcp(args: &[String], env_key: Option<String>, err: &mut dyn Write) ->
             let _ = writeln!(err, "dyno mcp: {e}");
             1
         }
+    }
+}
+
+/// A folder the user supplied (portable mode, `<ID>_HOME`) is where others can plausibly write: the MCP discovery file in it is not
+/// believed unless the folder passes the same check as a named data folder (ADR 0092, revised 2026-11-12). The OS's own folder is
+/// not checked. `Some(text)`: the cause and the next step. A folder that does not exist means Dyno is not open, not a refusal.
+fn refuse_supplied_config(config: &std::path::Path, source: paddock_env::Source) -> Option<String> {
+    if source == paddock_env::Source::Os {
+        return None;
+    }
+    // The one check of a named folder, the agent's and the app's; a folder that does not exist means Dyno is not open.
+    match paddock_env::private::check_named_folder(config) {
+        Ok(()) => None,
+        Err(e) => Some(format!("AI access is not used: {e}")),
     }
 }
 
@@ -445,5 +463,34 @@ mod agent_route_tests {
         assert_eq!(agent_args(&v(&["status"])), None);
         assert_eq!(agent_args(&v(&["--json", "agent"])), None);
         assert_eq!(agent_args(&[]), None);
+    }
+}
+
+#[cfg(test)]
+mod supplied_config_tests {
+    #[cfg(unix)]
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_supplied_config_folder_others_can_write_is_refused_and_the_oss_own_is_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("config");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let text = refuse_supplied_config(&open, paddock_env::Source::Portable).expect("refused");
+        assert!(text.contains("AI access is not used") && text.contains("chmod go-w"), "{text}");
+        assert!(refuse_supplied_config(&open, paddock_env::Source::Override).is_some());
+        assert_eq!(
+            refuse_supplied_config(&open, paddock_env::Source::Os),
+            None,
+            "the OS's own folder is not checked"
+        );
+        assert_eq!(
+            refuse_supplied_config(&tmp.path().join("none"), paddock_env::Source::Portable),
+            None,
+            "missing: not open"
+        );
     }
 }

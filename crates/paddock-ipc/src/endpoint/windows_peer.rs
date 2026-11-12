@@ -30,8 +30,13 @@ use windows_sys::Win32::Security::{
     GetTokenInformation, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, RevertToSelf,
     TOKEN_GROUPS, TOKEN_QUERY, TOKEN_USER, TokenGroups, TokenUser,
 };
-use windows_sys::Win32::System::Pipes::{GetNamedPipeClientProcessId, ImpersonateNamedPipeClient};
-use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+use windows_sys::Win32::System::Pipes::{
+    GetNamedPipeClientProcessId, GetNamedPipeServerProcessId, ImpersonateNamedPipeClient,
+};
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentThread, OpenProcess, OpenProcessToken, OpenThreadToken,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 /// `SE_GROUP_USE_FOR_DENY_ONLY` (winnt.h): the group is in the token only to deny, as in a UAC-filtered administrator's token.
 const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
@@ -151,8 +156,8 @@ pub(super) fn raw_peer(pipe: HANDLE) -> Result<RawPeer, PeerError> {
     })
 }
 
-/// The owner SID of the kernel object `handle` (a pipe the client opened), checked to be SYSTEM.
-pub(super) fn check_owner_is_system(handle: HANDLE) -> Result<(), Untrusted> {
+/// The owner SID of the kernel object `handle`.
+fn owner_sid_of(handle: HANDLE) -> Result<String, Untrusted> {
     let mut owner: PSID = null_mut();
     let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
     // SAFETY: a valid handle; out pointers valid; the descriptor is freed below.
@@ -179,9 +184,74 @@ pub(super) fn check_owner_is_system(handle: HANDLE) -> Result<(), Untrusted> {
     unsafe {
         LocalFree(descriptor);
     }
-    let sid = sid.ok_or_else(|| Untrusted::Unreadable {
+    sid.ok_or_else(|| Untrusted::Unreadable {
         what: "ConvertSidToStringSid(owner)",
         cause: io::Error::last_os_error().to_string(),
-    })?;
-    crate::trust::check_pipe_owner(&sid)
+    })
+}
+
+/// The owner SID of the kernel object `handle` (a pipe the client opened), checked to be SYSTEM.
+pub(super) fn check_owner_is_system(handle: HANDLE) -> Result<(), Untrusted> {
+    crate::trust::check_pipe_owner(&owner_sid_of(handle)?)
+}
+
+/// The account SID of the process whose token is `token`.
+fn token_user_sid(token: HANDLE, what: &'static str) -> Result<String, Untrusted> {
+    let unreadable = |e: PeerError| Untrusted::Unreadable {
+        what,
+        cause: format!("{e:?}"),
+    };
+    let user = token_info(token, TokenUser, what).map_err(unreadable)?;
+    // SAFETY: the buffer holds a TOKEN_USER written by the call above.
+    sid_string(unsafe { (*user.as_ptr().cast::<TOKEN_USER>()).User.Sid }).ok_or_else(|| {
+        Untrusted::Unreadable {
+            what,
+            cause: io::Error::last_os_error().to_string(),
+        }
+    })
+}
+
+/// The account of the process serving `pipe` (a client handle) must be this process's own account: read from the server process's
+/// token, not from the pipe's access list (ADR 0092 DF-3; the twin of Unix's peer-uid check before the token is sent).
+pub(super) fn check_server_is_me(pipe: HANDLE) -> Result<(), Untrusted> {
+    let mut pid = 0u32;
+    // SAFETY: a connected pipe client handle and a valid out pointer.
+    if unsafe { GetNamedPipeServerProcessId(pipe, &mut pid) } == 0 {
+        return Err(Untrusted::Unreadable {
+            what: "GetNamedPipeServerProcessId",
+            cause: io::Error::last_os_error().to_string(),
+        });
+    }
+    // SAFETY: a plain query right on the server process; the handle is closed when the wrapper drops.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return Err(Untrusted::Unreadable {
+            what: "OpenProcess(server)",
+            cause: io::Error::last_os_error().to_string(),
+        });
+    }
+    // SAFETY: a fresh handle from the call above.
+    let process = unsafe { OwnedHandle::from_raw_handle(process) };
+    let server = process_user_sid(process.as_raw_handle(), "the server process")?;
+    // SAFETY: always valid; the pseudo handle needs no closing.
+    let own = process_user_sid(unsafe { GetCurrentProcess() }, "this process")?;
+    crate::trust::check_server_sid(&server, &own)?;
+    // The pipe object's owner too, closing the window in which the server's process id is reused by another account's process after
+    // it served the pipe: a pipe made by our own account is owned by it (or by Administrators when an elevated process made it).
+    crate::trust::check_pipe_owner_is(&owner_sid_of(pipe)?, &own)
+}
+
+/// The account SID of `process` (a handle with query rights).
+fn process_user_sid(process: HANDLE, what: &'static str) -> Result<String, Untrusted> {
+    let mut token: HANDLE = null_mut();
+    // SAFETY: a valid process handle and a valid out pointer.
+    if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+        return Err(Untrusted::Unreadable {
+            what: "OpenProcessToken",
+            cause: format!("{what}: {}", io::Error::last_os_error()),
+        });
+    }
+    // SAFETY: a fresh handle from the call above, closed when the wrapper drops.
+    let token = unsafe { OwnedHandle::from_raw_handle(token) };
+    token_user_sid(token.as_raw_handle(), "GetTokenInformation(TokenUser)")
 }

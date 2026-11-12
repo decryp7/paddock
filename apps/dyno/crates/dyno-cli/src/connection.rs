@@ -13,6 +13,9 @@ use std::time::Duration;
 pub struct Env {
     /// The agent's data folder.
     pub data_dir: PathBuf,
+    /// Whether the user named it (`DYNO_DATA_DIR`): only such a folder is checked before `agent.json` is believed (ADR 0092, revised
+    /// 2026-11-12); the default per-user folder is the OS's protection, and a 0775 folder an older Dyno made under umask 002 is fine.
+    pub supplied: bool,
 }
 
 impl Env {
@@ -36,6 +39,7 @@ impl Env {
     /// # Errors
     /// See [`Env::from_process`].
     pub fn resolve(env: &dyn Fn(&str) -> Option<PathBuf>, temp: &std::path::Path) -> Result<Env, String> {
+        let supplied = env("DYNO_DATA_DIR").is_some();
         let data_dir = match env("DYNO_DATA_DIR") {
             Some(d) => d,
             None => {
@@ -55,7 +59,7 @@ impl Env {
                 }
             }
         };
-        Ok(Env { data_dir })
+        Ok(Env { data_dir, supplied })
     }
 
     /// The discovery file.
@@ -86,21 +90,17 @@ impl Discovery {
         Discovery::read_checked(env).ok().flatten()
     }
 
-    /// [`Discovery::read`] that says when the folder is not trusted: a hint from a folder another account owns or can change is
-    /// not used at all (rule 53). A link to the user's own folder is followed.
+    /// [`Discovery::read`] that says when the folder is not trusted: a hint from a folder the user named that another account owns or
+    /// can change is not used at all (rule 53). A link to the user's own folder is followed.
     ///
     /// # Errors
     /// The reason the data folder is not trusted, with the next step.
     pub fn read_checked(env: &Env) -> Result<Option<Discovery>, String> {
         let path = env.discovery();
-        if env.data_dir.exists() {
-            paddock_env::check_data_folder(&env.data_dir, "the agent's discovery file").map_err(|e| {
-                format!(
-                    "the data folder is not safe to use ({}); it must belong to this account and not be writable by others (chmod go-w on it). \
-                     Run dyno as the account that runs Dyno, or set DYNO_DATA_DIR to a folder you own",
-                    e.reason()
-                )
-            })?;
+        if env.supplied {
+            // The one check of a named folder, the agent's and the app's (nothing is created by it).
+            paddock_env::private::check_named_folder(&env.data_dir)
+                .map_err(|e| format!("{e}. Run dyno as the account that runs Dyno, or set DYNO_DATA_DIR to a folder you own"))?;
         }
         Ok(Discovery::read_trusted(&path))
     }
@@ -312,6 +312,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let env = Env {
             data_dir: tmp.path().into(),
+            supplied: false,
         };
         assert!(Discovery::read(&env).is_none());
         std::fs::write(env.discovery(), "{ not json").unwrap();
@@ -326,7 +327,8 @@ mod tests {
         assert_eq!(Discovery::read(&env).unwrap().pid, 7);
         assert!(matches!(
             IpcAgent::connect(&Env {
-                data_dir: tmp.path().join("none")
+                data_dir: tmp.path().join("none"),
+                supplied: false,
             }),
             Err(Problem::NotRunning)
         ));
@@ -355,14 +357,57 @@ mod tests {
         std::fs::write(real.join("agent.json"), body).unwrap();
         let link = tmp.path().join("link");
         std::os::unix::fs::symlink(&real, &link).unwrap();
-        assert_eq!(Discovery::read(&Env { data_dir: link }).unwrap().pid, 7);
+        assert_eq!(
+            Discovery::read(&Env {
+                data_dir: link,
+                supplied: false
+            })
+            .unwrap()
+            .pid,
+            7
+        );
         if paddock_env::current_uid() != 0 {
             // `/` is root's: a data folder that leads there is not trusted, and the CLI says so instead of "not running".
-            let foreign = Env { data_dir: "/".into() };
+            let foreign = Env {
+                data_dir: "/".into(),
+                supplied: true,
+            };
             let why = Discovery::read_checked(&foreign).unwrap_err();
-            assert!(why.contains("belongs to another user") && why.contains("DYNO_DATA_DIR"), "{why}");
+            assert!(why.contains("not by this account") && why.contains("DYNO_DATA_DIR"), "{why}");
             assert!(matches!(IpcAgent::connect(&foreign), Err(Problem::Failed(_))));
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_default_folder_with_mode_0775_is_read_and_only_a_named_one_is_checked() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("data");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o775)).unwrap();
+        std::fs::write(
+            dir.join("agent.json"),
+            r#"{"endpoint":"e","token":"ab","pid":7,"started":1,"version":"0.1.0","protocol":1}"#,
+        )
+        .unwrap();
+        // What an older Dyno left under umask 002: used by the default resolution.
+        assert_eq!(
+            Discovery::read(&Env {
+                data_dir: dir.clone(),
+                supplied: false
+            })
+            .unwrap()
+            .pid,
+            7
+        );
+        // The same folder named with DYNO_DATA_DIR is refused, with the next step.
+        let why = Discovery::read_checked(&Env {
+            data_dir: dir,
+            supplied: true,
+        })
+        .unwrap_err();
+        assert!(why.contains("DYNO_DATA_DIR"), "{why}");
     }
 
     #[test]

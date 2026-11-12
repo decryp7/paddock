@@ -26,6 +26,7 @@ impl Harness {
         let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();
         let env = Env {
             data_dir: dirs.root().to_path_buf(),
+            supplied: false,
         };
         Harness {
             running: Some(running),
@@ -161,6 +162,7 @@ fn without_a_running_agent_it_says_so_and_a_damaged_file_does_too() {
     let tmp = tempfile::tempdir().unwrap();
     let env = Env {
         data_dir: tmp.path().to_path_buf(),
+        supplied: false,
     };
     let (code, _, err) = dyno_in(&env, "status");
     assert_eq!(code, 4);
@@ -188,6 +190,7 @@ fn usage_help_and_version_work_without_an_agent() {
     let tmp = tempfile::tempdir().unwrap();
     let env = Env {
         data_dir: tmp.path().to_path_buf(),
+        supplied: false,
     };
     let (code, out, _) = dyno_in(&env, "--help");
     assert_eq!(code, 0);
@@ -203,6 +206,7 @@ fn commands_that_used_to_change_something_are_gone() {
     let tmp = tempfile::tempdir().unwrap();
     let env = Env {
         data_dir: tmp.path().to_path_buf(),
+        supplied: false,
     };
     for cmd in ["end 100 --yes", "cap 100 25 --yes", "undo abc --yes", "status --yes"] {
         let (code, out, _) = dyno_in(&env, cmd);

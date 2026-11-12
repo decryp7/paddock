@@ -115,6 +115,79 @@ fn find_device(v: &WolView, wanted: &str) -> Result<u64, ToolError> {
     }
 }
 
+/// Makes the folder that holds the AI access files (`mcp-keys.json`, `mcp.json`, the listener's discovery file) ready (ADR 0092, W7,
+/// revised 2026-11-12). The OS's own per-user config folder is made owner-only when missing and otherwise used as it is (the OS keeps
+/// other accounts out of the profile). A folder the user supplied is where others can plausibly write: portable mode (data beside
+/// the executable, possibly on a shared volume) or `<ID>_HOME`; it is made owner-only if missing and refused when other accounts can
+/// change it, or its parent. `DYNO_DATA_DIR` does not move this folder.
+///
+/// # Errors
+/// The refusal text, with the cause and the next step.
+pub fn prepare_config_folder(config: &std::path::Path, supplied: bool) -> Result<(), String> {
+    if supplied {
+        paddock_env::private::PrivateDir::create_all(config)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    } else {
+        paddock_env::create_private_dir_all(config).map_err(|e| format!("{} could not be made ({e})", config.display()))
+    }
+}
+
+/// The key list and settings stores of a config folder that was refused: nothing is read from or written to the folder. The list
+/// is empty with the refusal as its problem (no key works, and the AI access page shows why), the settings are the defaults (off),
+/// and a save fails with the same text.
+struct RefusedFolder(String);
+
+impl paddock_mcp::KeyListStore for RefusedFolder {
+    fn load(&self) -> paddock_mcp::KeysLoad {
+        paddock_mcp::KeysLoad {
+            entries: vec![],
+            problem: Some(self.0.clone()),
+        }
+    }
+    fn save(&self, _: &[paddock_mcp::KeyEntry]) -> Result<(), String> {
+        Err(self.0.clone())
+    }
+}
+
+impl paddock_mcp::SettingsStore for RefusedFolder {
+    fn load(&self) -> paddock_mcp::McpSettings {
+        paddock_mcp::McpSettings::default()
+    }
+    fn save(&self, _: &paddock_mcp::McpSettings) -> Result<(), String> {
+        Err(self.0.clone())
+    }
+}
+
+/// What AI access works over: the stores, and whether the loopback listener may run.
+struct Access {
+    settings: Arc<dyn paddock_mcp::SettingsStore>,
+    keys: Arc<dyn paddock_mcp::KeyListStore>,
+    listener_allowed: bool,
+}
+
+/// Fails closed (ADR 0092, W7): a supplied config folder that is refused means AI access starts off, no key list or settings file is read,
+/// and no listener is built (it would write its discovery file into that folder). The refusal text becomes `keys_problem`. Logs
+/// the reason only, never the path (ER-27); the text with the path and the next step goes to the user.
+fn access_over(config: &std::path::Path, supplied: bool) -> Access {
+    match prepare_config_folder(config, supplied) {
+        Ok(()) => Access {
+            settings: Arc::new(FileSettings::new(config.join("mcp.json"))),
+            keys: Arc::new(FileKeys::new(config.join("mcp-keys.json"))),
+            listener_allowed: true,
+        },
+        Err(e) => {
+            log::error!("AI access is off: its folder is not safe, so no key is read and nothing listens; next step: make the folder yours and closed to others, or move it");
+            let refused = Arc::new(RefusedFolder(format!("AI access is off: {e}")));
+            Access {
+                settings: refused.clone(),
+                keys: refused,
+                listener_allowed: false,
+            }
+        }
+    }
+}
+
 /// Builds the AI access control the shell manages (`Builder::mcp`): the server with Dyno's tools (off until the user switches it on in
 /// Settings > AI access, every action off until allowed by name), the settings in the config folder, the client keys in the
 /// owner-only `mcp-keys.json` beside them (a hash per key, never the key, and never the OS credential store: opening a Keychain item of another build blocks the app before its window) and the audit log.
@@ -132,6 +205,7 @@ pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit, calls:
             log::error!("a Dyno MCP tool was refused: {e}");
         }
     }
+    let access = access_over(dirs.config(), dirs.source() != paddock_env::Source::Os);
     let keys = Arc::new(KeyStore::new());
     let listener = Arc::new(Listener::new(
         server.clone(),
@@ -143,8 +217,8 @@ pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit, calls:
         server,
         log,
         keys,
-        Arc::new(FileSettings::new(dirs.config().join("mcp.json"))),
-        Arc::new(FileKeys::new(dirs.config().join("mcp-keys.json"))),
+        access.settings,
+        access.keys,
         emit,
         Arc::new(|| {
             std::time::SystemTime::now()
@@ -154,7 +228,9 @@ pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit, calls:
     ));
     // Serves on 127.0.0.1 while AI access is on and a key exists (ADR 0007, ADR 0032 amendment 2026-11-05); this process holds the
     // tools (they ask the agent through the shell), so a client works while the window is closed and the app stays in the tray.
-    control.attach_listener(listener);
+    if access.listener_allowed {
+        control.attach_listener(listener);
+    }
     control
 }
 
@@ -555,5 +631,79 @@ mod tests {
         };
         assert!(describe_devices(&off).contains("turned off"));
         assert!(describe_devices(&WolView { enabled: true, ..off }).contains("No computers"));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn the_config_folder_is_made_owner_only_and_an_open_one_is_refused_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let made = tmp.path().join("config");
+        prepare_config_folder(&made, true).unwrap();
+        assert_eq!(std::fs::metadata(&made).unwrap().permissions().mode() & 0o777, 0o700);
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = prepare_config_folder(&open, true).unwrap_err();
+        assert!(e.contains("chmod go-w"), "{e}");
+        assert_eq!(std::fs::metadata(&open).unwrap().permissions().mode() & 0o777, 0o777);
+        // A folder under a parent others can change is refused too.
+        let under = open.join("config");
+        assert!(prepare_config_folder(&under, true).is_err());
+        // The OS's own per-user folder is used as it is, even when others could write it.
+        prepare_config_folder(&open, false).unwrap();
+    }
+    #[cfg(windows)]
+    #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a Windows-only test runs icacls on its own temporary folder to set and read its access list"
+    )]
+    fn windows_the_ai_access_folder_is_refused_when_everyone_can_write_to_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        let out = std::process::Command::new("icacls")
+            .arg(&open)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        assert!(prepare_config_folder(&open, true).is_err());
+        prepare_config_folder(&open, false).unwrap();
+        prepare_config_folder(&tmp.path().join("own").join("config"), true).unwrap();
+    }
+    /// W7 fails closed: a refused config folder means no key list or settings file is read or written, AI access is off, the refusal
+    /// is the keys problem, and no listener is allowed (it would write its discovery file into that folder).
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_config_folder_loads_no_keys_starts_nothing_and_writes_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        // A key list planted by another account: it must not be read.
+        std::fs::write(open.join("mcp-keys.json"), br#"{"version":1,"keys":[{"id":"planted"}]}"#).unwrap();
+        let before: Vec<_> = std::fs::read_dir(&open).unwrap().flatten().map(|e| e.file_name()).collect();
+        let access = access_over(&open, true);
+        assert!(!access.listener_allowed, "no listener from an unsafe folder");
+        let loaded = access.keys.load();
+        assert!(loaded.entries.is_empty(), "no planted key works");
+        let problem = loaded.problem.expect("the refusal is the keys problem");
+        assert!(problem.contains("AI access is off") && problem.contains("chmod go-w"), "{problem}");
+        assert!(!access.settings.load().enabled, "AI access starts off");
+        assert!(access.settings.save(&Default::default()).is_err());
+        assert!(access.keys.save(&[]).is_err());
+        let after: Vec<_> = std::fs::read_dir(&open).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(before, after, "nothing was written to the folder");
+        assert_eq!(
+            std::fs::metadata(&open).unwrap().permissions().mode() & 0o777,
+            0o777,
+            "never tightened"
+        );
+        // A safe folder still gets the real stores and the listener.
+        let own = access_over(&tmp.path().join("config"), true);
+        assert!(access_over(&open, false).listener_allowed, "the default folder is not refused");
+        assert!(own.listener_allowed && own.keys.load().problem.is_none());
     }
 }

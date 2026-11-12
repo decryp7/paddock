@@ -609,9 +609,9 @@ impl Shared {
     ) -> Result<Built, String> {
         let t = now();
         let mut notes: Vec<String> = Vec::new();
-        if let Err(e) = crate::paths::prepare_root(dirs.root()) {
-            notes.push(format!("{e}; history is kept in memory only."));
-        }
+        // A data folder that is refused (a folder the user named that others can write) is not used at all: the same check
+        // `Running::start` makes before the lock, repeated for callers of `Shared::build`.
+        crate::paths::check_root(&dirs)?;
         let (store, note, store_kind) = match Store::open(&dirs.database(), t) {
             Ok((s, n)) => (s, n, "file"),
             Err(e) => {

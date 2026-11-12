@@ -191,8 +191,8 @@ sites = 1
 path = "crates/paddock-ipc/src/bin/test_child.rs"
 reason = "paddock-ipc's own test child process, never shipped by an app."
 owner = "paddock-ipc"
-calls = ["paddock_ipc::Host::listen*", "paddock_ipc::link::LinkServer::start"]
-sites = 4
+calls = ["paddock_ipc::Host::listen*", "paddock_ipc::endpoint::Listener::bind*", "paddock_ipc::link::LinkServer::start"]
+sites = 5
 
 [[out_of_scope]]
 path = "crates/paddock-ipc/src/testing/**"

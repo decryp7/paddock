@@ -22,6 +22,23 @@ pub use dir::AccountId;
 pub use dir::{PrivateDir, PrivateFile};
 pub use error::{PrivateError, PrivateResult};
 
+/// The one check of a folder the user named (a data folder, a config folder), used by every app and tool (ADR 0092, revised 2026-11-12):
+/// the deepest folder of `root` that exists is opened through [`PrivateDir`] (owner, rights for others, its parent, links), and nothing
+/// is created. A missing `root` passes when the folder it would be made in passes.
+///
+/// # Errors
+/// [`PrivateError::Refused`] with the cause and the next step, or [`PrivateError::Io`].
+pub fn check_named_folder(root: &Path) -> PrivateResult<()> {
+    let mut existing = root;
+    while std::fs::symlink_metadata(existing).is_err() {
+        match existing.parent().filter(|p| !p.as_os_str().is_empty()) {
+            Some(parent) => existing = parent,
+            None => break,
+        }
+    }
+    PrivateDir::open(existing, crate::folder::Links::Follow).map(|_| ())
+}
+
 use crate::error::{EnvError, Result};
 use crate::folder::{FolderFacts, Refusal, current_uid, decide};
 use std::path::{Path, PathBuf};
@@ -207,5 +224,97 @@ mod tests {
             private_fallback_dir(t.path(), "Dyno"),
             Err(EnvError::NoHome(_))
         ));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod named_folder_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A refused folder, or the place a missing one would be made in, is refused and nothing is created.
+    #[test]
+    fn the_check_creates_nothing_and_refuses_a_folder_others_can_write_and_what_would_be_made_in_it()
+     {
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(matches!(
+            check_named_folder(&open),
+            Err(PrivateError::Refused { .. })
+        ));
+        let below = open.join("a").join("b");
+        assert!(matches!(
+            check_named_folder(&below),
+            Err(PrivateError::Refused { .. })
+        ));
+        assert_eq!(
+            std::fs::read_dir(&open).unwrap().count(),
+            0,
+            "nothing was created"
+        );
+        let own = tmp.path().join("own");
+        std::fs::create_dir(&own).unwrap();
+        std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            check_named_folder(&own.join("not").join("yet")).is_ok(),
+            "a missing folder in a private one passes"
+        );
+        assert!(!own.join("not").exists(), "and is not made by the check");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod named_folder_windows_tests {
+    use super::*;
+    use std::process::Command;
+
+    fn everyone_can_write(folder: &Path) {
+        let out = Command::new("icacls")
+            .arg(folder)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+
+    /// Windows twin of the Unix test: `PrivateDir::open` refuses a folder Everyone may write, the walk finds it from a missing folder
+    /// below it, and nothing is created. Owed to the Windows runner or VM.
+    #[test]
+    fn windows_the_check_walks_up_creates_nothing_and_refuses_a_folder_everyone_can_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let open = tmp.path().join("open");
+        std::fs::create_dir(&open).unwrap();
+        everyone_can_write(&open);
+        assert!(matches!(
+            PrivateDir::open(&open, crate::folder::Links::Follow),
+            Err(PrivateError::Refused { .. })
+        ));
+        assert!(matches!(
+            check_named_folder(&open),
+            Err(PrivateError::Refused { .. })
+        ));
+        let below = open.join("a").join("b");
+        assert!(matches!(
+            check_named_folder(&below),
+            Err(PrivateError::Refused { .. })
+        ));
+        assert_eq!(
+            std::fs::read_dir(&open).unwrap().count(),
+            0,
+            "nothing was created"
+        );
+        let own = tmp.path().join("own");
+        std::fs::create_dir(&own).unwrap();
+        assert!(
+            check_named_folder(&own.join("not").join("yet")).is_ok(),
+            "a missing folder in a private one passes"
+        );
+        assert!(!own.join("not").exists(), "and is not made by the check");
     }
 }
