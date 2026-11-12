@@ -12,6 +12,7 @@ mod inputs;
 mod ipc_endpoints;
 mod isolation;
 mod merge_check;
+mod pr;
 mod release_isolation;
 mod slots;
 mod tree;

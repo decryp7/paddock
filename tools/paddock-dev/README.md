@@ -50,6 +50,28 @@ cleanup removes a locked one. Run it from any checkout of the repository (or pas
 - Tests: `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh`
   adds the oracle comparison with `worktree.sh` (otherwise those tests print `not measured`).
 
+## `pr`: the branch ledger (user decision 2026-11-12)
+
+Every branch is a draft pull request against main; its labels (`.gitea/labels.toml`) say where it is. Design and the merge
+queue built on it: `docs/plans/merge-queue.md`. The token is `GITEA_TOKEN` (it needs write access to issues and pull
+requests), sent in a header through curl's standard input and printed nowhere. `--server`, `--repo` and `--root` go right
+after the command (`pr label` takes every later word as a change).
+
+- `pr sync [--dry-run]` creates the labels the server lacks and updates a changed colour, description or exclusivity; it
+  never deletes one and lists the server's extra labels. `[[template]]` entries expand per app folder (`app/<app>`).
+- `pr open <branch> [--labels a,b] [--base main]`: the branch must be pushed (`origin/<branch>` here). Title `WIP: <branch>`
+  (Gitea's draft prefix), body = its commits, label `state/built` unless a `state/` label is given. Refuses a second open
+  pull request for the branch. Opening one starts no CI run: no workflow has a `pull_request` trigger (rule 50).
+- `pr label <branch> +state/approved -owes/windows-tests`: adding a label of an exclusive scope (`state/`, `review-round/`)
+  removes the others of that scope; unknown labels are refused.
+- `pr list [--state approved] [--no-ci]`: number, branch, head, labels and the newest run per workflow of the head.
+- `pr plan-status [--write] [--files a,b]`: rows of `docs/plans/*.md` and `apps/*/docs/plans/*.md` tables with a State (or
+  Status) column whose references (branch or commit code spans in the State cell, else in a Branch or PR column) disagree
+  with the ledger. `--write` sets landed rows to ``done (`<commit>`)``; the rest are left for a person. Exit 5 on findings;
+  a reference nobody knows is `not measured`, never agreeing.
+- Tests: unit tests against an in-memory server (`src/pr/fake.rs`) and `tests/it/pr.rs`, the binary and curl against a
+  fake Gitea on 127.0.0.1. Never the real server.
+
 ## Not ported yet (R0b gaps, listed on purpose)
 
 `dev plan` is the port of `scripts/affected.mjs` (`--ci`, `--app`, the matrix legs and the commit range; its recorded cases are in

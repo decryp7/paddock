@@ -1,5 +1,5 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots, wait,
+    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, pr, release_isolation, slots, wait,
     worktree,
 };
 use clap::{Args, Parser, Subcommand};
@@ -48,6 +48,12 @@ enum Command {
     Worktree {
         #[command(subcommand)]
         command: worktree::WorktreeCommand,
+    },
+    /// The branch ledger on Gitea pull requests: open (a draft), label, list, sync (the labels of .gitea/labels.toml) and
+    /// plan-status (plan rows checked against the ledger). Reads GITEA_TOKEN; opening a pull request starts no CI run.
+    Pr {
+        #[command(subcommand)]
+        command: pr::PrCommand,
     },
     /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
     /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
@@ -440,6 +446,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::Primary(a),
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
+        Command::Pr { command } => pr::command(command),
         Command::Merge {
             command: MergeCommand::Check(a),
         } => merge_check::command(&merge_check::Request {
