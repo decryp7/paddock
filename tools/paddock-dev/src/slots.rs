@@ -44,7 +44,7 @@ pub const DEFAULT_MAX_HOLD_SECS: u64 = RUNNER_JOB_TIMEOUT_SECS + HOLD_MARGIN_SEC
 /// How long `acquire` waits for the holder's first line (its slot, or `none`) before it gives up and stops the holder.
 const DEFAULT_FIRST_LINE_SECS: u64 = 30;
 /// How long the holder keeps trying while every slot looks busy (paddock_slots::ACQUIRE_GRACE, in milliseconds).
-const DEFAULT_GRACE_MS: u64 = 5000;
+const DEFAULT_GRACE_MS: u64 = paddock_slots::ACQUIRE_GRACE.as_millis() as u64;
 
 /// `acquire`'s arguments.
 #[derive(Args)]
