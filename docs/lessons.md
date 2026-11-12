@@ -1971,3 +1971,15 @@ toast under the pointer when an alert arrives; holding the stack still while the
 Why the logs did not show it: the app logs alerts and Show, but not the click's target; the trace's console and screencast
 were enough. **Class: a control that moves under the pointer during a click (second instance after the timeline header of
 2026-11-08, run 7697).**
+
+## A detached Windows child inherits every inheritable handle, not only the standard ones (CI kit, 2026-11-12)
+Run 8019 (jobs 37039 and 37040): two Windows jobs shared slot s1 and the second removed the first's checkout mid-build. The
+slot holder that `./dev ci slot acquire` starts had died 10 s after the acquire step ended. Cause, confirmed on the test VM
+with the real binary (base: the step pipe stayed open; fixed: closed, holder alive): once `./dev ci isolation acquire` (Rust)
+started `ci slot acquire`, the step's output pipe reached `acquire` as a plain inherited handle (std spawns with inheritance on),
+and `acquire` cleared the inherit flag of its standard handles only, so the holder kept the pipe. The Gitea runner waits 10 s
+for a step's pipe after the step ends and then ends every process of the step's job object (gitea/runner
+`internal/pkg/process/treekill.go`). The shell path started `acquire` from Git bash, which passes no such handle. Fix:
+`acquire` clears the inherit flag of every handle it has before it starts the holder, and refuses to start one when it cannot
+(`tools/paddock-dev/src/fds.rs`). Lesson: a process meant to outlive its step must carry nothing of the step; on Windows that
+means the whole handle table, and a check of the standard handles alone passes while the real chain fails.

@@ -48,8 +48,8 @@ signal-hook = { version = "0.3", default-features = false }
 [target.'cfg(windows)'.dependencies]
 # pre_push: Ctrl+C sets the flag that ends the running gates (as tools/heavy does).
 ctrlc = "3"
-# fds.rs: the standard handles are made non-inheritable before the holder starts; release_isolation: the file index.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_System_SystemInformation"] }
+# fds.rs: every handle is made non-inheritable before the holder starts (Threading: the handle count); release_isolation: the file index.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

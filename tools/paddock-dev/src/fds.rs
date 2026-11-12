@@ -8,8 +8,14 @@
 //!   Linux uses `close_range(3, ~0)`; elsewhere the open descriptors are read from `/dev/fd`; only when that fails does it count
 //!   up to the descriptor limit.
 //! - **Windows:** `CreateProcessW` is called with handle inheritance on, so a child gets every inheritable handle of its parent,
-//!   including the runner's stdout pipe. `acquire` clears the inherit flag of its own standard handles before it starts the
-//!   holder ([`keep_standard_handles_from_children`]); the holder's own stdout pipe is passed explicitly and is not affected.
+//!   not only its standard handles. The runner's step pipe reaches `acquire` as a plain inherited handle when `acquire` was
+//!   started by another Rust program (`./dev ci isolation acquire`: std starts children with inheritance on, so the parent's own
+//!   standard handles travel along beside the child's). `acquire` therefore clears the inherit flag of EVERY handle it has
+//!   before it starts the holder ([`keep_handles_from_children`]); std makes the holder's own stdio inheritable at the spawn,
+//!   after that. Run 8019 (jobs 37039, 37040): with only the standard handles cleared, the holder kept the step's pipe; the
+//!   Gitea runner waits 10 s for a step's pipe after the step ends, then ends every process of the step's job object
+//!   (gitea/runner `internal/pkg/process/treekill.go`), the holder with it, and a second job took the slot. The documented
+//!   alternative, `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`, is unstable in std (`CommandExt::spawn_with_attributes`, issue 114854).
 
 /// The descriptor numbers (3 and above) in a listing of file names such as the entries of `/dev/fd`.
 #[cfg(unix)]
@@ -81,27 +87,51 @@ fn close(fd: i32) {
 #[cfg(not(unix))]
 pub fn close_inherited() {}
 
-/// Stops the standard handles of this process from being inherited by children it starts (Windows).
+/// The highest handle value [`keep_handles_from_children`] looks at. Handle values are multiples of 4 and a process's table
+/// fills from the bottom; a holder's starter is a small process, so its inherited handles are far below this.
 #[cfg(windows)]
-#[allow(unsafe_code)] // two Win32 calls on this process's own standard handles
-pub fn keep_standard_handles_from_children() {
-    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation};
-    use windows_sys::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
-    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-        // SAFETY: GetStdHandle has no preconditions; a null or invalid result is skipped.
-        let handle = unsafe { GetStdHandle(which) };
-        if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
-            // SAFETY: the handle is this process's own; clearing its inherit flag changes nothing else.
-            unsafe {
-                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+const HANDLE_SCAN_LIMIT: usize = 1 << 20;
+
+/// Stops every handle of this process from being inherited by children it starts later (Windows), and says how many were
+/// inheritable. A child std starts afterwards still gets the stdio handles std makes for it at the spawn. `Err` when a handle
+/// could not be changed: the caller must not start a detached child then (it would keep that handle, a pipe the runner waits on).
+#[cfg(windows)]
+#[allow(unsafe_code)] // Win32 calls on this process's own handle table
+pub fn keep_handles_from_children() -> std::io::Result<usize> {
+    use windows_sys::Win32::Foundation::{GetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT, SetHandleInformation};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessHandleCount};
+    let mut count = 0u32;
+    // SAFETY: GetCurrentProcess returns a pseudo handle; GetProcessHandleCount writes one u32.
+    if unsafe { GetProcessHandleCount(GetCurrentProcess(), &mut count) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let (mut seen, mut cleared) = (0u32, 0usize);
+    let mut value = 4usize;
+    while seen < count && value <= HANDLE_SCAN_LIMIT {
+        let handle = value as HANDLE;
+        let mut flags = 0u32;
+        // SAFETY: GetHandleInformation only reads the entry; a value that names no handle fails and is skipped.
+        if unsafe { GetHandleInformation(handle, &mut flags) } != 0 {
+            seen += 1;
+            if flags & HANDLE_FLAG_INHERIT != 0 {
+                // SAFETY: the handle is this process's own; clearing its inherit flag changes nothing else.
+                if unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) } == 0 {
+                    let e = std::io::Error::last_os_error();
+                    return Err(std::io::Error::new(e.kind(), format!("handle {value:#x} stays inheritable: {e}")));
+                }
+                cleared += 1;
             }
         }
+        value += 4;
     }
+    Ok(cleared)
 }
 
-/// Nothing to do: Unix children get only the descriptors they are given.
+/// Nothing to do: Unix children get only the descriptors they are given (the holder closes the rest, [`close_inherited`]).
 #[cfg(not(windows))]
-pub fn keep_standard_handles_from_children() {}
+pub fn keep_handles_from_children() -> std::io::Result<usize> {
+    Ok(0)
+}
 
 #[cfg(test)]
 mod tests {
@@ -168,7 +198,25 @@ mod tests {
     }
 
     #[test]
-    fn standard_handles_can_be_marked_non_inheritable_at_any_time() {
-        keep_standard_handles_from_children();
+    fn handles_can_be_marked_non_inheritable_at_any_time() {
+        keep_handles_from_children().unwrap();
+    }
+
+    /// An inheritable handle this process opened is no longer inheritable afterwards, and is counted.
+    #[cfg(windows)]
+    #[test]
+    #[allow(unsafe_code)] // Win32 calls on the test's own pipe handle
+    fn an_inheritable_handle_is_no_longer_inheritable() {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::Foundation::{GetHandleInformation, HANDLE_FLAG_INHERIT, SetHandleInformation};
+        let (_reader, writer) = std::io::pipe().unwrap();
+        let h = writer.as_raw_handle();
+        // SAFETY: the test's own open pipe handle.
+        assert_ne!(unsafe { SetHandleInformation(h, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) }, 0);
+        assert!(keep_handles_from_children().unwrap() >= 1);
+        let mut flags = 0u32;
+        // SAFETY: as above; one u32 written.
+        assert_ne!(unsafe { GetHandleInformation(h, &mut flags) }, 0);
+        assert_eq!(flags & HANDLE_FLAG_INHERIT, 0);
     }
 }
