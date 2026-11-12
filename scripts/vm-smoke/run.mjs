@@ -142,6 +142,8 @@ async function main(argv) {
   const out = resolve(o.out ?? process.env.PADDOCK_VM_SMOKE_OUT ?? join(REPO, 'vm-smoke-results'));
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-'));
+  // Owner record for the scratch folder (`./dev disk record`; skipped where `./dev disk` is absent, never fails the run).
+  spawnSync('bash', [join(REPO, 'scripts', 'disk-record.sh'), scratch, 'scratch'], { cwd: REPO, stdio: 'ignore' });
   const owner = mkdtempSync(join(tmpdir(), 'paddock-vm-owner-')); // the VM slot's holder lives as long as this folder
   const vm = `paddock-vmsmoke-${o.app}-${new Date().toISOString().replace(/\D/g, '').slice(0, 14)}-${process.pid}`;
   const slotRoot = join(tartHome, '.paddock-vm');

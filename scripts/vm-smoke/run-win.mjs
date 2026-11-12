@@ -94,6 +94,8 @@ async function main(argv) {
   const out = resolve(o.out ?? process.env.PADDOCK_VM_SMOKE_OUT ?? join(REPO, 'vm-smoke-results'));
   mkdirSync(out, { recursive: true });
   const scratch = mkdtempSync(join(tmpdir(), 'vm-smoke-win-'));
+  // Owner record for the scratch folder (`./dev disk record`; skipped where `./dev disk` is absent, never fails the run).
+  spawnSync('bash', [join(REPO, 'scripts', 'disk-record.sh'), scratch, 'scratch'], { cwd: REPO, stdio: 'ignore' });
   let started = false;
   let vnc = false;
   const cleanup = () => {
