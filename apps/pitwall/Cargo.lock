@@ -3723,6 +3723,7 @@ dependencies = [
  "paddock-env",
  "paddock-files",
  "paddock-health",
+ "paddock-ipc",
  "paddock-jobs",
  "paddock-limits",
  "paddock-log",

@@ -32,6 +32,8 @@ paddock-diag = { workspace = true, features = ["tauri"] }
 paddock-files = { workspace = true, features = ["tauri"] }
 paddock-download = { workspace = true, features = ["tauri", "http"] }
 paddock-health = { workspace = true, features = ["tauri"] }
+# Only for its limit registry (paddock-mcp links it): register_shared_limits names every registry the shell links.
+paddock-ipc = { workspace = true }
 paddock-jobs = { workspace = true, features = ["tauri"] }
 paddock-limits = { workspace = true }
 paddock-net = { workspace = true }
