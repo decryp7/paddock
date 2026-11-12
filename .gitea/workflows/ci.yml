@@ -114,7 +114,11 @@ jobs:
           PLAN_PLANNER: ${{ vars.PLAN_PLANNER }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
+          # Whether this run is full (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
+          # main, an app's own gates, a manual run with no base. `./dev ci verdict` reads this line (plan_since::MODE_LINE).
+          PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
         run: |
+          echo "plan mode: full=$PLAN_MODE_FULL"
           if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_PLANNER" = node ]; then
             echo "::warning::PLAN_PLANNER=node: planning with scripts/affected.mjs, the fallback that goes with the script (ADR 0022 R4). Unset the repository variable to plan with ./dev plan."
             node scripts/affected.mjs --ci
