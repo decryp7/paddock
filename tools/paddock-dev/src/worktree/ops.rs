@@ -4,9 +4,10 @@
 use super::git::{Git, GitError, Repo, WorkState, WorktreeInfo, is_under, key, worktrees};
 use super::note::{Note, check_owner, format_utc, now_secs};
 use super::owners::{Claim, OwnerError, OwnerMap, OwnerStore, PENDING_TTL, same_path};
+use super::procs;
 use paddock_cli::{CliError, Report};
 use serde_json::json;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The caller of a command: a named agent, or the coordinator (no agent id).
 #[derive(Debug, Clone, Default)]
@@ -548,24 +549,46 @@ fn authorize_owner(map: &OwnerMap, caller: &Caller, k: &str, what: &str) -> Resu
     }
 }
 
-/// `drop`: removes a worktree its owner claimed (a review copy). Refuses unpushed commits and uncommitted changes.
+/// Refuses to remove the free worktree `k` while some process has its current folder at or below it, or when the folders
+/// of processes could not be read (the answer is then unknown, and unknown is not "unused").
+fn not_in_use(k: &str, folders: Result<Vec<PathBuf>, String>) -> Result<(), CliError> {
+    match folders {
+        Err(why) => Err(CliError::refused(format!(
+            "{k} is free, but whether a process still works in it cannot be checked here ({why}); nothing was removed."
+        ))
+        .with_hint(
+            "Claim it with `./dev worktree claim` and drop it as its owner, or remove it by hand once you know nothing runs in it.",
+        )),
+        Ok(f) if procs::any_inside(&f, Path::new(k)) => Err(CliError::refused(format!(
+            "{k} is free, but a process has its current folder in it (an agent may still work there); nothing was removed."
+        ))
+        .with_hint("Wait until that process ends, or ask its owner; then drop again.")),
+        Ok(_) => Ok(()),
+    }
+}
+
+/// `drop`: removes a worktree that is the caller's own (claimed by it) or free (unlocked and unowned, as `release` leaves
+/// it), for any caller, the coordinator included. Refuses another agent's worktree, a locked unowned one, unpushed commits
+/// and uncommitted changes; always forgets the owner entry of what it removes.
 pub fn drop_own(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, CliError> {
-    let agent = need_agent(caller, "worktree drop")?;
     let store = OwnerStore::open(&repo.common_dir);
     let k = store
         .update(|map| -> Result<String, CliError> {
             let (w, k) = find_secondary(repo, path)?;
-            match map.get(&k) {
-                Some(e) if e.agent_id == agent.id => {}
-                Some(e) => {
-                    return Err(CliError::refused(format!(
-                        "{k} belongs to agent {}; you can only drop your own worktree.",
-                        e.agent_id
-                    )));
+            let mut free = false;
+            match (map.get(&k), &caller.agent) {
+                (Some(e), Some(a)) if e.agent_id == a.id => {}
+                (Some(e), _) => {
+                    return Err(
+                        CliError::refused(format!("{k} belongs to agent {}; only that agent can drop it.", e.agent_id)).with_hint(
+                            "The coordinator frees it with `./dev worktree reassign` or `release` once its agent ended, then drops it.",
+                        ),
+                    );
                 }
-                None => {
-                    return Err(CliError::refused(format!("{k} is not claimed by you."))
-                        .with_hint("`drop` removes only a worktree you claimed yourself."));
+                (None, _) if w.locked.is_none() => free = true,
+                (None, _) => {
+                    return Err(CliError::refused(format!("{k} is locked and not claimed by you."))
+                        .with_hint("Claim it with `./dev worktree claim`, or `release` it (unlock) and then drop it."));
                 }
             }
             // Never removes work no remote has, and never with --force: staged, modified and untracked files and commits on
@@ -588,6 +611,11 @@ pub fn drop_own(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, Cli
                 ))
                 .with_hint("Push them (or cherry-pick what you need elsewhere), then drop again."));
             }
+            // A free worktree (no owner, no lock) says nothing about who still works in it: "pushed and clean" is not "unused"
+            // (ER-2). Refuses while a process has its folder at or below it, and when that cannot be read (Windows).
+            if free {
+                not_in_use(&k, procs::process_folders())?;
+            }
             if let Some(reason) = &w.locked {
                 repo.git().text(&["worktree", "unlock", &k]).map_err(git_failure)?;
                 if let Err(e) = repo.git().text(&["worktree", "remove", &k]) {
@@ -608,4 +636,19 @@ pub fn drop_own(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, Cli
         })
         .map_err(owner_failure)??;
     Ok(Report::new(json!({"path": k, "removed": true}), format!("Dropped {k}.")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_free_worktree_with_a_process_inside_or_an_unreadable_process_list_is_not_dropped() {
+        let k = "/wt/free";
+        assert!(not_in_use(k, Ok(vec![PathBuf::from("/elsewhere"), PathBuf::from("/wt/free-not")])).is_ok());
+        let inside = not_in_use(k, Ok(vec![PathBuf::from("/wt/free/crates/x")])).unwrap_err();
+        assert!(inside.to_string().contains("current folder"), "{inside}");
+        let unknown = not_in_use(k, Err("no lsof".into())).unwrap_err();
+        assert!(unknown.to_string().contains("cannot be checked"), "{unknown}");
+    }
 }

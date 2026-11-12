@@ -615,13 +615,116 @@ fn drop_refuses_what_it_does_not_own() {
     let other = fx.dev(&["worktree", "drop", p(&mine), "--agent", "agent-S"]);
     assert_eq!(other.code, 4, "{}", other.err);
     let coordinator = fx.dev(&["worktree", "drop", p(&mine)]);
-    assert_eq!(coordinator.code, 2, "drop needs an agent: {}", coordinator.err);
+    assert_eq!(
+        coordinator.code, 4,
+        "another agent's worktree is not the coordinator's to drop: {}",
+        coordinator.err
+    );
     let unclaimed = fx.add("w1");
     let r = fx.dev(&["worktree", "drop", p(&unclaimed), "--agent", "agent-R"]);
     assert_eq!(r.code, 4, "{}", r.err);
     assert!(unclaimed.exists() && mine.exists());
     assert_eq!(fx.dev(&["worktree", "drop", p(&fx.primary), "--agent", "agent-R"]).code, 4);
     assert!(fx.primary.join("README.md").exists());
+}
+
+/// A branch worktree that is pushed and clean, claimed by `agent`.
+fn pushed_branch(fx: &Fixture, name: &str, agent: &str) -> std::path::PathBuf {
+    let path = fx.path(name);
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        name,
+        "-b",
+        name,
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--agent",
+        agent,
+    ]);
+    assert_eq!(r.code, 0, "{}", r.err);
+    fx.commit_in(&path, "f.txt");
+    fx.git(&path, &["push", "-q", "origin", name]);
+    path
+}
+
+#[test]
+fn release_then_drop_works_for_the_owner_and_for_the_coordinator() {
+    let fx = Fixture::new();
+    let mine = pushed_branch(&fx, "w1", "agent-A");
+    assert_eq!(fx.dev(&["worktree", "release", p(&mine), "--agent", "agent-A"]).code, 0);
+    let r = fx.dev(&["worktree", "drop", p(&mine), "--agent", "agent-A"]);
+    assert_eq!(r.code, 0, "agents run release and then drop: {} {}", r.json, r.err);
+    assert!(!mine.exists() && fx.owner_of(&mine).is_none());
+    let theirs = pushed_branch(&fx, "w2", "agent-B");
+    assert_eq!(fx.dev(&["worktree", "release", p(&theirs), "--agent", "agent-B"]).code, 0);
+    let r = fx.dev(&["worktree", "drop", p(&theirs)]);
+    assert_eq!(
+        r.code, 0,
+        "the coordinator drops a free worktree without an agent id: {} {}",
+        r.json, r.err
+    );
+    assert!(!theirs.exists() && fx.owner_of(&theirs).is_none());
+}
+
+#[test]
+fn drop_of_a_free_worktree_still_refuses_unpushed_and_uncommitted_work() {
+    let fx = Fixture::new();
+    let path = fx.path("w1");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        "w1",
+        "-b",
+        "w1",
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--agent",
+        "agent-A",
+    ]);
+    assert_eq!(r.code, 0, "{}", r.err);
+    fx.commit_in(&path, "f.txt");
+    assert_eq!(fx.dev(&["worktree", "release", p(&path), "--agent", "agent-A"]).code, 0);
+    let unpushed = fx.dev(&["worktree", "drop", p(&path)]);
+    assert_eq!(unpushed.code, 4, "{}", unpushed.err);
+    assert!(unpushed.err.contains("no remote"), "{}", unpushed.err);
+    fx.git(&path, &["push", "-q", "origin", "w1"]);
+    std::fs::write(path.join("new.txt"), "x").unwrap();
+    let dirty = fx.dev(&["worktree", "drop", p(&path), "--agent", "agent-A"]);
+    assert_eq!(dirty.code, 4, "{}", dirty.err);
+    assert!(path.join("new.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn drop_of_a_free_worktree_refuses_while_a_process_works_in_it() {
+    let fx = Fixture::new();
+    let path = pushed_branch(&fx, "w1", "agent-A");
+    assert_eq!(fx.dev(&["worktree", "release", p(&path), "--agent", "agent-A"]).code, 0);
+    // An agent's shell, a build or an editor: any process whose current folder is at or below the worktree.
+    let mut sleeper = paddock_proc::command("sleep");
+    sleeper.arg("60").current_dir(&path);
+    let mut child = sleeper.spawn().unwrap();
+    let refused = fx.dev(&["worktree", "drop", p(&path)]);
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert_eq!(refused.code, 4, "pushed and clean is not unused: {} {}", refused.json, refused.err);
+    assert!(refused.err.contains("current folder"), "{}", refused.err);
+    assert!(path.exists());
+    assert_eq!(fx.dev(&["worktree", "drop", p(&path)]).code, 0, "dropped once nothing runs in it");
+}
+
+#[test]
+fn drop_refuses_a_locked_unowned_worktree_even_for_the_coordinator() {
+    let fx = Fixture::new();
+    let locked = fx.add("w1");
+    let r = fx.dev(&["worktree", "drop", p(&locked)]);
+    assert_eq!(r.code, 4, "{}", r.err);
+    assert!(locked.exists() && fx.lock_reason(&locked).is_some());
 }
 
 #[test]
