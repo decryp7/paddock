@@ -4,8 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `paddock-testkit`: `start`, the wait for a started program (ADR 0071 WP-1)
-- New `paddock_testkit::start` (feature `start`, which adds `paddock-proc`): `wait_ready_or_exit(child, what, probe)` returns
+### `paddock-testkit-start`: the wait for a started program (ADR 0071 WP-1)
+- New crate `paddock-testkit-start` (a dev-dependency). It started as `paddock-testkit`'s `start` feature, but an optional
+  dependency of the kit on `paddock-proc`, whose tests use the kit, made a publish cycle (ci.yml 7989), so the wait is its
+  own crate and the kit depends on nothing of `paddock-proc`. `wait_ready_or_exit(child, what, probe)` returns
   `StartOutcome::Ready(value)` as soon as the probe gives one or `StartOutcome::Exited(ExitInfo)` as soon as the program ended,
   judged by `paddock_proc::StartWatch` (one "ready or exit" in the family) with `PATIENCE`, under which only the wall-clock
   `HANG_GUARD` ends a wait; that end panics as a hang, naming the pid and whether the process is alive, stopped or gone. Also

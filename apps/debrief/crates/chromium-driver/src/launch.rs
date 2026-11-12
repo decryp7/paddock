@@ -52,7 +52,7 @@ pub struct LaunchOptions {
     /// spins without becoming ready or does nothing at all fails it. Elapsed time alone never does.
     pub patience: Patience,
     /// How the browser's answers are waited for: judged while it starts and bounded afterwards (the product), or judged
-    /// until a hang guard (tests, [`Answers::Judged`] from `paddock_testkit::start`).
+    /// until a hang guard (tests, [`Answers::Judged`] from `paddock_testkit_start`).
     pub answers: Answers,
     /// Where its window opens; the browser's own choice when `None`.
     pub window: Option<WindowBounds>,

@@ -6,7 +6,7 @@
 //! deadline. On macOS the first run of the browser is paid once per process before the first launch (`warm_first_start`).
 
 use chromium_driver::{find_for_tests as find, Answers, Chromium, LaunchOptions, Profile};
-use paddock_testkit::start::{wait_exit, wait_ready_or_exit};
+use paddock_testkit_start::{wait_exit, wait_ready_or_exit};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -23,7 +23,7 @@ fn browser_or_skip() -> Option<chromium_driver::BrowserExe> {
     // process and file, before the launch's own judge looks. Not on Windows, where `--version` starts the browser.
     #[cfg(target_os = "macos")]
     if let Some(b) = &found {
-        paddock_testkit::start::warm_first_start(&b.path, &["--version"]);
+        paddock_testkit_start::warm_first_start(&b.path, &["--version"]);
     }
     found
 }
@@ -33,7 +33,7 @@ fn test_options(base: &std::path::Path) -> LaunchOptions {
     LaunchOptions {
         profile: Profile::Throwaway(base.join("profiles")),
         answers: Answers::Judged {
-            patience: paddock_testkit::start::PATIENCE,
+            patience: paddock_testkit_start::PATIENCE,
             guard: paddock_testkit::HANG_GUARD,
         },
         ..LaunchOptions::default()

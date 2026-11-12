@@ -12,9 +12,10 @@ use std::time::{Duration, Instant};
 /// its own message instead of being killed first.
 pub const HANG_GUARD: Duration = Duration::from_secs(40);
 
-/// The first poll interval and the longest one: the interval doubles from the first to the last.
-pub(crate) const FIRST: Duration = Duration::from_micros(200);
-pub(crate) const LAST: Duration = Duration::from_millis(20);
+/// The first poll interval and the longest one: the interval doubles from the first to the last (also the pace of
+/// `paddock_testkit_start`'s waits).
+pub const FIRST: Duration = Duration::from_micros(200);
+pub const LAST: Duration = Duration::from_millis(20);
 
 /// Polls `f` until it returns `Some(value)`; `None` after `guard`. The last poll happens after the bound too, so a value that arrived
 /// while the thread slept is not lost.
