@@ -619,3 +619,50 @@ fn strip_prefix_gives_the_rest_across_spellings_and_none_outside() {
     );
     assert_eq!(strip_prefix(p("/other/a"), p("/ws"), Os::Linux), None);
 }
+
+#[test]
+fn strip_prefix_refuses_a_remainder_that_can_leave_the_prefix() {
+    assert_eq!(strip_prefix(p(r"C:\ws\..\x"), p(r"C:\ws"), W), None);
+    assert_eq!(
+        strip_prefix(p(r"\\?\C:\ws\a\..\..\x"), p(r"C:\ws"), W),
+        None
+    );
+    assert_eq!(strip_prefix(p(r"C:\ws\.\x"), p(r"C:\ws"), W), None);
+    assert_eq!(strip_prefix(p("/ws/../x"), p("/ws"), Os::Linux), None);
+    assert_eq!(
+        strip_prefix(p(r"C:\ws\a.b\..c"), p(r"C:\ws"), W).as_deref(),
+        Some("a.b/..c")
+    );
+}
+
+#[test]
+fn strip_prefix_reads_unc_and_verbatim_unc_paths() {
+    assert_eq!(
+        strip_prefix(p(r"\\srv\share\a\b"), p(r"\\srv\share"), W).as_deref(),
+        Some("a/b")
+    );
+    assert_eq!(
+        strip_prefix(p(r"\\?\UNC\SRV\Share\a\b"), p(r"\\srv\share"), W).as_deref(),
+        Some("a/b")
+    );
+    assert_eq!(
+        strip_prefix(p(r"\\srv\share\a"), p(r"\\?\UNC\srv\share"), W).as_deref(),
+        Some("a")
+    );
+    assert_eq!(
+        strip_prefix(p(r"\\srv\share"), p(r"\\srv\share"), W).as_deref(),
+        Some("")
+    );
+    assert_eq!(
+        strip_prefix(p(r"\\srv\other\a"), p(r"\\srv\share"), W),
+        None
+    );
+    assert_eq!(
+        strip_prefix(p(r"\\srv\share\..\x"), p(r"\\srv\share"), W),
+        None
+    );
+    assert_eq!(
+        strip_prefix(p(r"C:\srv\share\a"), p(r"\\srv\share"), W),
+        None
+    );
+}

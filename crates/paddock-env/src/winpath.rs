@@ -252,13 +252,18 @@ pub fn starts_with(path: &Path, prefix: &Path, os: Os) -> bool {
 
 /// What is left of `path` below `prefix` (`/`-separated, empty when they are the same place), or `None` when `path` is not
 /// inside `prefix`. The comparison is [`starts_with`]'s: lexical, per component, no length limit; the remainder keeps the
-/// spelling of `path`.
+/// spelling of `path`. A remainder with a `.` or `..` component is `None`: the path is not resolved, so it may leave the
+/// prefix (`C:\ws\..\x` below `C:\ws`); resolve it first.
 pub fn strip_prefix(path: &Path, prefix: &Path, os: Os) -> Option<String> {
     if !starts_with(path, prefix, os) {
         return None;
     }
     let (all, head) = (components(path, os), components(prefix, os));
-    Some(all[head.len()..].join("/"))
+    let rest = &all[head.len()..];
+    if rest.iter().any(|c| c == "." || c == "..") {
+        return None;
+    }
+    Some(rest.join("/"))
 }
 
 /// The path as text for comparing and as a map key: on Windows the prefix dropped lexically and `/` separators (`C:/a/b`,
