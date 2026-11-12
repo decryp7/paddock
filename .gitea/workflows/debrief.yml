@@ -589,7 +589,7 @@ jobs:
         # app stays up and quits within 10 s (scripts/ci/macos-smoke.sh). The v1.0.1 store-worker abort reached users
         # because no macOS job ever started the sidecars.
         os: [ubuntu-latest, windows-latest, macos-latest]
-    # paddock-timing-job: macos — the start-up benchmark and the quit-within-10-s check read the clock (C110)
+    # paddock-timing-job: macos — the start-up benchmark and the quit-within-10-s check read the clock (C113)
     runs-on: ${{ matrix.os }}
     env:
       # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a tag run builds from source).

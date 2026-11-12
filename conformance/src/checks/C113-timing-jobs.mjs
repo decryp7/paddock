@@ -1,4 +1,4 @@
-// C110: a job that gates on time never shares a runner with a heavy job (ER-12, rule 5, ER-9; debrief.yml 8007 measured the macOS
+// C113: a job that gates on time never shares a runner with a heavy job (ER-12, rule 5, ER-9; debrief.yml 8007 measured the macOS
 // start-up benchmark at 1.8x its budgets beside the LTO bundle job). Timing jobs run real-app start-up budgets, benchmarks and the
 // sidecar start checks; heavy jobs are the bundle, installer, gates and Rust test builds. In one workflow file, every timing job
 // must be ordered with every heavy job that can run on a runner class it also uses: the timing job `needs:` the heavy one
@@ -81,7 +81,7 @@ export function unorderedPairs(jobs) {
 }
 
 export default {
-  id: 'C110',
+  id: 'C113',
   scope: 'both',
   mode: 'gate',
   title: 'Timing jobs never overlap heavy jobs on a runner class',
@@ -91,13 +91,13 @@ export default {
     for (const w of ctx.workflows()) {
       for (const j of w.jobs) {
         if (/^\s*#\s*paddock-timing-job:/m.test(body(j.text)) && !TIMING.test(body(j.text))) {
-          out.push(error('C110', 12, w.file, j.line, `job \`${j.id}\`: the paddock-timing-job declaration needs classes and a reason`, 'Write `# paddock-timing-job: macos — <why this job gates on time>` (classes: any, or linux, windows, macos).'));
+          out.push(error('C113', 12, w.file, j.line, `job \`${j.id}\`: the paddock-timing-job declaration needs classes and a reason`, 'Write `# paddock-timing-job: macos — <why this job gates on time>` (classes: any, or linux, windows, macos).'));
         }
       }
       for (const p of unorderedPairs(w.jobs)) {
         out.push(
           error(
-            'C110',
+            'C113',
             12,
             w.file,
             p.line,
