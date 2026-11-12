@@ -23,6 +23,7 @@
 //!   ([`ci_setup_rust`]), over [`ci_tool`], the wrapper contract for third-party programs a CI step runs (docs/plans/ci-in-rust.md);
 //! - `ci build-jobs [<split>]`: CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for a job, the port of `conformance/ci/build-jobs.sh`
 //!   ([`ci_build_jobs`]).
+//! - `locks check|sync`: every lockfile and the workspace hack current, and the command that regenerates them ([`locks`]).
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
 //! - `disk check|report|scan|clean|adopt|record`: free-space check, usage tracking (owner records and a SQLite index) and clean-up
 //!   of merged and stale-pushed folders ([`disk`]).
@@ -50,6 +51,7 @@ pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
 pub mod load;
+pub mod locks;
 pub mod log_text;
 pub mod merge_check;
 pub mod nextest_log;
