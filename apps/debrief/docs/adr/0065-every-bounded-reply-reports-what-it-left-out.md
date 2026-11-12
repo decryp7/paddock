@@ -1,6 +1,7 @@
 # 65. Every bounded reply reports what it left out
 
 - Status: Accepted 2026-11-06 (user), revision 5: D1 to D7 as recommended, full scope with D3's paged Show more. Revision 5 fixes the last diff review of `e447e4753`; revision 4 folded in the third review of `4e1fc4afe`, revision 3 the second of `fd622064a`, revision 2 the first of `1eaa14850`
+- Amendment 2026-11-12 (user, cut review of 2026-11-12; Tier A of the Debrief 1.2 plan, [section 10.7](../../../../docs/plans/debrief-1-2.md#107-cut-review-tier-a-applied-user-2026-11-12)): bounded replies keep the `Cut` and `Analyzed` types (B1 lean), the AI coverage fix (B4), the one UI note (B2) and the named instances (B5, B6). B7 (`xtask bounded-check`, the `syn` walker), B7b (conformance) and B8 (errors-on sweep) are not built, and B3 shrinks from 1.5 to 0.5 days; 24 days become 13. Earlier text is history.
 - Date: 2026-11-05, revised 2026-11-06
 - Related: family ADRs [0018](../../../../docs/adr/0018-bounded-loading-everywhere.md) (bounded loading, `Truncated`, `boundedBy`),
   [0019](../../../../docs/adr/0019-limits-explain-themselves.md) (limits explain themselves: `LimitId`, the registry, `limit_case!`, the completeness check), 0014 (monorepo, shared code); Debrief ADR 0016 (command table, generated

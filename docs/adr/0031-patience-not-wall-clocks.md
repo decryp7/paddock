@@ -2,6 +2,7 @@
 
 - Status: Accepted (2026-10-29), by the user, after independent review rounds 1-3. The user's decisions are at the end
   (Decisions of the user).
+- Amendment 2026-11-12 (user, cut review of 2026-11-12; Tier A of the Debrief 1.2 plan, [section 10.7](../plans/debrief-1-2.md#107-cut-review-tier-a-applied-user-2026-11-12)): Debrief's liveness is reduced (13 days to 4): no whole-call deadline on import calls, streamed items as the heartbeat, Cancel, and a plain notice when nothing has arrived for N seconds. The per-OS run state, CPU-seconds judging and frame version 3 with capability bits for the plugin path (WP-B2, WP-B3 there; Debrief's 2.6d, LV1, LV2, LV3) are not built; an idle or paused plugin is not auto-killed. Earlier text is history.
 - Date: 2026-10-29
 - Related: ER-1 (one release at a time), ER-12 (no sleeps or raised timeouts in tests), ER-18 and ER-19 (live phases,
   the UI never times out), ER-20 and rule 51 (bounded parallelism), ER-21 / rule 40 (recurring bugs mean a missing design

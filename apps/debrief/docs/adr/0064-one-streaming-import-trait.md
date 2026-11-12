@@ -1,6 +1,7 @@
 # 64. One streaming import trait: no importer holds a whole file just to read it
 
 - Status: Accepted (2026-11-06, by the user; D7 with option (c)). Revision 2 answers the independent review of `0f6e482f5`. Revision 3 answers the confirmation review of `570be48a1`
+- Amendment 2026-11-12 (user, cut review of 2026-11-12; Tier A of the Debrief 1.2 plan, [section 10.7](../../../../docs/plans/debrief-1-2.md#107-cut-review-tier-a-applied-user-2026-11-12)): less apparatus around the trait, which stays: SI-17 and SI-18 are cut; SI-14 (a static check and a generator for every format) becomes one flat-memory test per input kind; SI-15 drops the nightly 1 billion run; SI-16 deletes old callers as they move. IPC hardening (IP1) is lighter: items 1, 2, 3, 7 and 8 only, with no peer-uid check, no per-variant versions and no nightly all-crate fuzz. Earlier text is history.
 - Date: 2026-11-05
 - Related: ADR 0014 (database-first engine, `raw`), ADR 0017 (one IPC, host files), ADR 0023 (dumps), ADR 0027 (plugin SDK), ADR 0040 (encodings), ADR 0047 (time
   window), ADR 0051 (streaming discovery), ADR 0052 (stage pipelines), ADR 0062 (index and catalogue during the import), ADR
