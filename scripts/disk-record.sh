@@ -2,9 +2,9 @@
 # disk-record.sh <dir> <kind> [link-worktree]: writes an owner record for a folder a tool made (`./dev disk record`, ER-2 owner
 # records), so a later cleanup can tell whose it is. Never fails its caller: where `./dev disk` does not exist yet (it is on
 # branch feat/dev-disk until it lands) or the record fails, it prints nothing and exits 0.
-# Environment: PADDOCK_DEV the dev tool (default: ./dev in the current folder).
+# Environment: PADDOCK_DEV the dev tool (default: the repository root's dev, found from this script, never the current folder's).
 [ $# -ge 2 ] || { echo "usage: disk-record.sh <dir> <kind> [link-worktree]" >&2; exit 0; }
-DEV=${PADDOCK_DEV:-./dev}
-"$DEV" disk --help >/dev/null 2>&1 || exit 0
+DEV=${PADDOCK_DEV:-$(cd "$(dirname "$0")/.." && pwd)/dev}
+"$DEV" disk --help >/dev/null 2>&1 || exit 0 # absent or not built: nothing to record
 "$DEV" disk record "$1" --kind "$2" --link "${3:-$PWD}" >/dev/null 2>&1 || true
 exit 0
