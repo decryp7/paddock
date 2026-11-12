@@ -226,6 +226,11 @@ describe('the graph of this tree', () => {
     assert.ok(!run('docs/adr/0014-monorepo-under-paddock.md').tools);
   });
 
+  test("the secret scan's allow-list marks the conformance job only, where the scan runs", () => {
+    const g = run('.gitleaks.toml');
+    assert.deepEqual([g.conformance, g.all, g.crates, g.ui, g.apps], [true, false, false, false, []]);
+  });
+
   test('global inputs mark everything; an app release workflow marks one app', () => {
     for (const f of ['rust-toolchain.toml', 'package.json', '.npmrc', 'tsconfig/base.json']) {
       const r = run(f);
