@@ -30,6 +30,14 @@ const ALLOWED: &[(&str, &str)] = &[
         "tools/paddock-dev/src/release_isolation/fixture.rs",
         "a test fixture's own temp folder",
     ),
+    (
+        "tools/paddock-dev/src/merge_check/hakari.rs",
+        "its own scratch copy in the temp folder, made and removed by the same check (fix/merge-check-hakari)",
+    ),
+    (
+        "tools/paddock-dev/src/ci_setup_rust.rs",
+        "its own download folder in the job's temp folder, made and removed by the same step (ci setup-rust)",
+    ),
     ("tools/heavy/src/lock.rs", "heavy.sh's lock folders, not work folders"),
 ];
 
