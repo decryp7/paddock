@@ -302,7 +302,7 @@ pub struct RealExec {
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
-const PASS: &[&str] = &[
+pub(crate) const PASS: &[&str] = &[
     "CARGO_*",
     "RUSTUP_*",
     "RUSTFLAGS",

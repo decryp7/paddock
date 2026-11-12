@@ -15,6 +15,10 @@
 #     prune-build-folder <max-gb> [drop-bundles]  ci prune-build-folder --max-gb [--drop-bundles] | tools/prune-ci-build-folder.sh
 #     prune-folder <folder> <max-gb>              ci prune-folder | tools/prune-build-folders.sh
 #     host-cleanup <host-cleanup options>         ci host-cleanup | tools/host-cleanup.sh
+#     kept-clone <name> <profile> [<fresh>]       ci kept-clone --name --profile [--fresh] | kept-clone.sh (NAME, PROFILE, FRESH)
+#     guardian-as-user                            ci guardian-as-user | guardian-as-user.sh (the Linux crates job, from crates/)
+#   (`ci boot-volume external|temp` has no shim route: job-tmpdir.sh sources boot-volume.sh, and paddock_testkit and Dyno's
+#   check-bundle.sh run it; the Rust copy is job-tmpdir's rule in process. WP-5, docs/plans/ci-in-rust.md.)
 #
 # The shell is used for: PADDOCK_CI_KIT=shell (the fallback switch: one variable away, plan section 7), a tag run, a run that never
 # downloads the tool (PADDOCK_DEV_DOWNLOAD=0: release and rule 54 jobs), a checkout without tools/paddock-dev (another repository
@@ -118,7 +122,7 @@ dev_run() {
 }
 
 host_usage() {
-  echo "usage: kit.sh host stable-workspace <name> | node-caches <angular-dir> <name> | host-tools | sccache-stats | build-folder <workspace> <name> | prune-build-folder <max-gb> [drop-bundles] | prune-folder <folder> <max-gb> | host-cleanup <options>" >&2
+  echo "usage: kit.sh host stable-workspace <name> | node-caches <angular-dir> <name> | host-tools | sccache-stats | build-folder <workspace> <name> | prune-build-folder <max-gb> [drop-bundles] | prune-folder <folder> <max-gb> | host-cleanup <options> | kept-clone <name> <profile> [<fresh>] | guardian-as-user" >&2
   exit 2
 }
 
@@ -130,14 +134,18 @@ kit_host() {
   # Nothing to do, so no tool is fetched or built for it: a Linux container has a fixed workspace, and without sccache there are no
   # statistics.
   case "$step" in
-    stable-workspace) [ "${RUNNER_OS:-}" != Linux ] || exit 0 ;;
+    stable-workspace | kept-clone) [ "${RUNNER_OS:-}" != Linux ] || exit 0 ;;
     sccache-stats) command -v sccache >/dev/null 2>&1 || exit 0 ;;
   esac
   if [ "$kit" = dev ]; then
     case "$step" in
       stable-workspace) dev_run stable-workspace --name "${1:?stable-workspace needs a name}" ;;
       node-caches) dev_run node-caches --angular-dir "${1-}" --name "${2:?node-caches needs a name}" ;;
-      host-tools | sccache-stats) dev_run "$step" ;;
+      host-tools | sccache-stats | guardian-as-user) dev_run "$step" ;;
+      kept-clone)
+        if [ "${3:-}" = true ]; then dev_run kept-clone --name "${1:?kept-clone needs a name}" --profile "${2:?kept-clone needs a profile}" --fresh; fi
+        dev_run kept-clone --name "${1:?kept-clone needs a name}" --profile "${2:?kept-clone needs a profile}"
+        ;;
       build-folder | prune-folder | host-cleanup) dev_run "$step" "$@" ;;
       prune-build-folder)
         if [ "${2:-}" = true ]; then dev_run prune-build-folder --max-gb "${1:-20}" --drop-bundles; fi
@@ -150,6 +158,8 @@ kit_host() {
     stable-workspace) NAME="${1:?stable-workspace needs a name}" exec bash -e -o pipefail "$here/host/stable-workspace.sh" ;;
     node-caches) ANGULAR_DIR="${1-}" NAME="${2:?node-caches needs a name}" exec bash -e -o pipefail "$here/host/node-caches.sh" ;;
     host-tools | sccache-stats) exec bash -e -o pipefail "$here/host/$step.sh" ;;
+    kept-clone) NAME="${1:?kept-clone needs a name}" PROFILE="${2:?kept-clone needs a profile}" FRESH="${3:-false}" exec bash "$here/kept-clone.sh" ;;
+    guardian-as-user) exec bash "$here/guardian-as-user.sh" ;;
     build-folder) exec bash "$here/build-folder.sh" "$@" ;;
     prune-folder) exec bash "$root/tools/prune-build-folders.sh" "$@" ;;
     host-cleanup) exec bash "$root/tools/host-cleanup.sh" "$@" ;;

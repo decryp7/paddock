@@ -241,7 +241,10 @@ pub fn glob_expand(base: &Path, pattern: &str) -> Vec<PathBuf> {
 
 /// The keys of `git config --local --list` output that this step did not write: the first one, lower-cased (empty when there is none).
 fn foreign_key_of(list: &str) -> String {
-    let allowed = regex::Regex::new(ALLOWED_KEYS).expect("the allow-list is a valid pattern");
+    // A pattern that cannot be built (it can not, a test builds it) would count every key as foreign: the clone is made again.
+    let Ok(allowed) = regex::Regex::new(ALLOWED_KEYS) else {
+        return "(the allow-list)".to_string();
+    };
     list.lines()
         .map(|l| l.split('=').next().unwrap_or("").to_lowercase())
         .find(|k| !allowed.is_match(k))
@@ -304,10 +307,7 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
             .filter(|n| *n > 0)
             .unwrap_or(900),
     );
-    let max_mib: u64 = env
-        .get("PADDOCK_KEPT_CLONE_MAX_MIB")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(3072);
+    let max_mib: u64 = env.get("PADDOCK_KEPT_CLONE_MAX_MIB").and_then(|v| v.parse().ok()).unwrap_or(3072);
     let profile = args.profile.clone();
     let profiles: PathBuf = args
         .profiles
@@ -339,18 +339,29 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
 
     // --- what the plain checkout left ---
     let Some(work) = step.var("GITHUB_WORKSPACE").map(str::to_string) else {
-        return step.fail("GITHUB_WORKSPACE is not set.", "run this step in a runner job, after actions/checkout.");
+        return step.fail(
+            "GITHUB_WORKSPACE is not set.",
+            "run this step in a runner job, after actions/checkout.",
+        );
     };
     let ws = match paddock_env::winpath::real(Path::new(&work)) {
         Ok(p) => p,
-        Err(e) => return step.fail(format!("cannot read the work folder {work}: {e}."), "check the runner's work folder."),
+        Err(e) => {
+            return step.fail(
+                format!("cannot read the work folder {work}: {e}."),
+                "check the runner's work folder.",
+            );
+        }
     };
     let ws_text = ws.display().to_string();
-    let temp_root = env
-        .get("RUNNER_TEMP")
-        .filter(|t| !t.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
+    // The empty hooks folder goes in the job's temp folder; without one in the environment, beside the work folder (the runner's own
+    // per-job folder, which is writable).
+    let Some(temp_root) = super::temp_folder(env).or_else(|| ws.parent().map(Path::to_path_buf)) else {
+        return step.fail(
+            "no folder for the empty hooks folder (no temp variable is set and the work folder has no parent).",
+            "run this step in a runner job.",
+        );
+    };
     let hooks = temp_root.join(format!("paddock-kept-clone-{}", std::process::id()));
     if let Err(e) = std::fs::create_dir_all(&hooks) {
         return step.fail(
@@ -369,7 +380,9 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
         err: Mutex::new(String::new()),
         log: Mutex::new(Vec::new()),
     });
-    let code = run_inner(&mut step, kc, args, &profile, &excludes, &ws, &ws_text, started, limit, max_mib, hint, err);
+    let code = run_inner(
+        &mut step, kc, args, &profile, &excludes, &ws, &ws_text, started, limit, max_mib, hint, err,
+    );
     let _ = std::fs::remove_dir(&hooks);
     code
 }
@@ -408,7 +421,10 @@ fn run_inner(
     // The checkout's credential header, passed through the environment (git >= 2.31), never on a command line. Read with the quiet
     // probe: a checkout without one is fine.
     let header = kc
-        .git(false, &["-C", ws_text, "config", "--local", "--get-regexp", r"^http\..*\.extraheader$"])
+        .git(
+            false,
+            &["-C", ws_text, "config", "--local", "--get-regexp", r"^http\..*\.extraheader$"],
+        )
         .ok()
         .and_then(|t| t.lines().next().map(str::to_string))
         .and_then(|l| l.split_once(' ').map(|(_, v)| v.to_string()))
@@ -492,7 +508,11 @@ fn run_inner(
     // --- the clone ---
     let mut mode_created = args.fresh;
     if !mode_created && flow.healthy() {
-        let kib = flow.kc.git(false, &["-C", &stable_text, "count-objects", "-v"]).map(|t| clone_kib_of(&t)).unwrap_or(0);
+        let kib = flow
+            .kc
+            .git(false, &["-C", &stable_text, "count-objects", "-v"])
+            .map(|t| clone_kib_of(&t))
+            .unwrap_or(0);
         let bad = flow.foreign_key();
         if !bad.is_empty() {
             step.warn(format!(
@@ -523,10 +543,17 @@ fn run_inner(
         flow.remove_locks();
         mode_created = true;
         if flow.create(step, err).is_err() {
-            fallback!(format!("could not make the clone again at {stable_text} ({})", flow.kc.last_lines()));
+            fallback!(format!(
+                "could not make the clone again at {stable_text} ({})",
+                flow.kc.last_lines()
+            ));
         }
         if !flow.bring_up(step, mode_created) {
-            fallback!(format!("the clone at {stable_text} could not be brought to {} ({})", flow.sha, flow.kc.last_lines()));
+            fallback!(format!(
+                "the clone at {stable_text} could not be brought to {} ({})",
+                flow.sha,
+                flow.kc.last_lines()
+            ));
         }
     }
     let files = flow
@@ -545,7 +572,10 @@ fn run_inner(
         stable_text.clone()
     };
     if let Err(e) = step.append_to("GITHUB_ENV", &format!("PADDOCK_WORKSPACE={shown}")) {
-        return step.fail(format!("could not export PADDOCK_WORKSPACE: {e}."), "run this step in a runner job.");
+        return step.fail(
+            format!("could not export PADDOCK_WORKSPACE: {e}."),
+            "run this step in a runner job.",
+        );
     }
     // Where the work folder can be replaced (not under act on Windows, which holds it open) a link keeps every path that names it valid.
     if !runner_windows {
@@ -646,7 +676,13 @@ impl Flow {
         let kc = self.kc.clone();
         // A git command ends itself at the limit (and its whole process tree with it); the phase waits one second longer so that it is
         // the git command's end that is seen first, and a phase that hangs elsewhere (a file call) is abandoned after that.
-        let r = bounded_hung(step, label, self.limit + Duration::from_secs(1), Some(&self.kc.timed_out), move || f(&kc));
+        let r = bounded_hung(
+            step,
+            label,
+            self.limit + Duration::from_secs(1),
+            Some(&self.kc.timed_out),
+            move || f(&kc),
+        );
         self.flush(step);
         match r {
             Ok(v) => Ok(v),
@@ -666,8 +702,12 @@ impl Flow {
     /// The sparse patterns of the profile (everything but the excluded paths) for the tree's git.
     fn apply_profile(&self, tree: &Path) -> Result<(), String> {
         let t = tree.display().to_string();
-        self.kc.git(true, &["-C", &t, "config", "core.sparseCheckout", "true"]).map_err(|e| e.to_string())?;
-        self.kc.git(true, &["-C", &t, "config", "core.sparseCheckoutCone", "false"]).map_err(|e| e.to_string())?;
+        self.kc
+            .git(true, &["-C", &t, "config", "core.sparseCheckout", "true"])
+            .map_err(|e| e.to_string())?;
+        self.kc
+            .git(true, &["-C", &t, "config", "core.sparseCheckoutCone", "false"])
+            .map_err(|e| e.to_string())?;
         let info = tree.join(".git").join("info");
         std::fs::create_dir_all(&info).map_err(|e| e.to_string())?;
         let mut text = String::from("/*\n");
@@ -682,7 +722,10 @@ impl Flow {
         let t = self.stable_text();
         self.stable.join(".git").join("paddock-kept-clone").is_file()
             && self.kc.git(false, &["-C", &t, "rev-parse", "--git-dir"]).is_ok()
-            && self.kc.git(false, &["-C", &t, "config", "remote.origin.url"]).is_ok_and(|u| u == self.url)
+            && self
+                .kc
+                .git(false, &["-C", &t, "config", "remote.origin.url"])
+                .is_ok_and(|u| u == self.url)
     }
 
     /// The first local config key outside the allow-list (empty when there is none).
@@ -735,8 +778,20 @@ impl Flow {
             kc.remove(&parent, &stable)?;
             std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
             let s = stable.display().to_string();
-            kc.git(true, &["clone", "-q", "--no-checkout", "--no-tags", "--depth=1", "--filter=blob:none", &url, &s])
-                .map_err(|e| e.to_string())?;
+            kc.git(
+                true,
+                &[
+                    "clone",
+                    "-q",
+                    "--no-checkout",
+                    "--no-tags",
+                    "--depth=1",
+                    "--filter=blob:none",
+                    &url,
+                    &s,
+                ],
+            )
+            .map_err(|e| e.to_string())?;
             std::fs::write(stable.join(".git").join("paddock-kept-clone"), "1\n").map_err(|e| e.to_string())
         });
         if r.is_err() {
@@ -789,24 +844,54 @@ impl Flow {
             // A failure is named in the phase's error output by the command's own line.
             let _ = self.kc.git(true, &["-C", &t, "reset", "-q", "--hard", "HEAD"]);
         }
+        // conformance: scoped-cleanup — the kept clone is this step's own folder (a slot's src/<name>-<slot>): nothing else lives in it, and a clean of the whole clone is its job
         self.kc.git(true, &["-C", &t, "clean", "-q", "-ffdx"]).map(|_| ())
     }
 
     fn fetch(&self) -> Result<(), String> {
         let t = self.stable_text();
-        self.kc
-            .git(true, &["-C", &t, "fetch", "-q", "--depth=1", "--no-tags", "--filter=blob:none", "origin", &self.sha])?;
+        self.kc.git(
+            true,
+            &[
+                "-C",
+                &t,
+                "fetch",
+                "-q",
+                "--depth=1",
+                "--no-tags",
+                "--filter=blob:none",
+                "origin",
+                &self.sha,
+            ],
+        )?;
         let head = self.kc.git(true, &["-C", &t, "rev-parse", "FETCH_HEAD"])?;
-        if head == self.sha { Ok(()) } else { Err(format!("FETCH_HEAD is {head}")) }
+        if head == self.sha {
+            Ok(())
+        } else {
+            Err(format!("FETCH_HEAD is {head}"))
+        }
     }
 
     fn checkout(&self) -> Result<(), String> {
         let t = self.stable_text();
         self.sanitize()?;
         self.apply_profile(&self.stable)?;
-        self.kc
-            .git(true, &["-C", &t, "-c", "advice.detachedHead=false", "checkout", "-q", "-f", "--detach", &self.sha])?;
+        self.kc.git(
+            true,
+            &[
+                "-C",
+                &t,
+                "-c",
+                "advice.detachedHead=false",
+                "checkout",
+                "-q",
+                "-f",
+                "--detach",
+                &self.sha,
+            ],
+        )?;
         self.kc.git(true, &["-C", &t, "read-tree", "-mu", "HEAD"])?;
+        // conformance: scoped-cleanup — the kept clone is this step's own folder (a slot's src/<name>-<slot>): nothing else lives in it, and a clean of the whole clone is its job
         self.kc.git(true, &["-C", &t, "clean", "-q", "-ffdx"])?;
         // git clean leaves untracked files outside the sparse patterns alone (git 2.34+), so a file a job wrote into an excluded folder
         // would stay for ever: the excluded paths are removed by name.

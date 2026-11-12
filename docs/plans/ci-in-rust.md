@@ -304,6 +304,20 @@ Unix-only parity files, and a conformance test (`parity-twins.test.mjs`) require
 or a reason. **Planned, not built:** the shrink-only baselines of section 5 (no new tooling script; counted long and OS-branching `run:`
 blocks). The 0.5 days for them stay in WP-1's estimate and move to the next WP that touches workflows.
 
+## 8b. WP-5: kept clones, the guardian as a user and the boot-volume rule (built)
+
+`./dev ci kept-clone` replaces `conformance/ci/kept-clone.sh` (and `bounded.sh`, which only it sources) in the `kept-clone` action, and
+`./dev ci guardian-as-user` replaces `conformance/ci/guardian-as-user.sh` in ci.yml's Linux crates job, both through `kit.sh host
+<step>` (a tag run, `PADDOCK_DEV_DOWNLOAD=0` or `PADDOCK_CI_KIT=shell` keep the shell). `./dev ci boot-volume external|temp` is
+`boot-volume.sh`'s rule over a `Probe` seam (`df`, `diskutil` and `getconf` and the folders it looks at), and job-tmpdir's rule in
+process now delegates to it, so there is one implementation in the tool (the script stays for `job-tmpdir.sh`, `paddock_testkit` and
+Dyno's `check-bundle.sh`). `bounded.sh`'s caller side is `ci_host/phase.rs`, shared with `stable-workspace`. Parity: `host_steps.rs`
+runs each script and the command on the same fixtures (a local origin that allows partial clones, shims for `df`, `diskutil`,
+`getconf` and `cargo`), and `conformance/test/kept-clone.test.mjs` runs its 23 cases against the binary with `KEPT_CLONE_CMD`.
+Differences the parity found are listed in the test's normalisation with their reason (a hung git names itself in the last output, the
+exit status of a failed phase, a trailing space). The guardian's root path (setpriv, chown) is tested only through a fake machine;
+the shell side of its parity needs bash 4.4 or newer (macOS ships 3.2), so it runs on the Linux legs.
+
 ## 9. Common practice, and the cheaper option (ER-37)
 
 Read on 2026-11-12 unless marked.

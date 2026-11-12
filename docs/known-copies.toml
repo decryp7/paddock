@@ -1108,7 +1108,7 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
 
 [[mechanism]]
 id = "ci-host-steps"
-title = "The host-runner steps of the CI kit in two implementations: stable-workspace, node-caches, host-tools, sccache-stats, build-folder, the prune steps and host-cleanup in Rust, and the shell the release path keeps"
+title = "The host-runner steps of the CI kit in two implementations: stable-workspace, node-caches, host-tools, sccache-stats, build-folder, the prune steps, host-cleanup, kept-clone, guardian-as-user and boot-volume in Rust, and the shell the release path keeps"
 canonical = "tools/paddock-dev"
 paths = ["tools/paddock-dev/src/ci_host/mod.rs"]
 status = "built"
@@ -1124,11 +1124,15 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
     "tools/prune-build-folders.sh",
     "tools/prune-ci-build-folder.sh",
     "tools/host-cleanup.sh",
+    "conformance/ci/kept-clone.sh",
+    "conformance/ci/bounded.sh",
+    "conformance/ci/guardian-as-user.sh",
+    "conformance/ci/boot-volume.sh",
   ]
-  symbols = ["text:kit.sh", "text:prune", "text:host-cleanup"]
+  symbols = ["text:kit.sh", "text:prune", "text:host-cleanup", "text:kept-clone", "text:guardian-as-user", "text:boot-volume"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh `host <step>` picks the implementation by the rule of the other kit steps) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/host_steps.rs runs both on the same inputs, and conformance/test/ci-actions.test.mjs and tools/test/prune-and-cleanup.test.mjs keep the scripts' own cases. host-tools' pin is held equal by a unit test of ci_host/host_tools.rs. tools/prune-build-folders.ps1 was deleted with the port: a manual lister with no workflow, action, script or test caller, so no release-path run can need it; `./dev ci prune-agent-builds` replaces it on every OS."
+  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh `host <step>` picks the implementation by the rule of the other kit steps) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/host_steps.rs runs both on the same inputs, and conformance/test/ci-actions.test.mjs and tools/test/prune-and-cleanup.test.mjs keep the scripts' own cases. WP-5 (docs/plans/ci-in-rust.md): kept-clone.sh (with bounded.sh, which only it sources) runs in Rust as `ci kept-clone`, held equal by host_steps.rs and by conformance/test/kept-clone.test.mjs run against the binary (KEPT_CLONE_CMD); guardian-as-user.sh runs as `ci guardian-as-user` (its parity runs where bash is 4.4 or newer: the Linux legs; the root path is a fake machine's unit tests); boot-volume.sh stays for job-tmpdir.sh (sourced), paddock_testkit::boot_volume and Dyno's check-bundle.sh, and `ci boot-volume` is the same rule in Rust (job-tmpdir's rule in process delegates to it). host-tools' pin is held equal by a unit test of ci_host/host_tools.rs. tools/prune-build-folders.ps1 was deleted with the port: a manual lister with no workflow, action, script or test caller, so no release-path run can need it; `./dev ci prune-agent-builds` replaces it on every OS."
 
 # =====================================================================================================================
 # CI run readers (RT-8)

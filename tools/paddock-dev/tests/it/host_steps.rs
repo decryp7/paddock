@@ -88,6 +88,8 @@ struct Seen {
 fn norm(text: &str, fx: &Fx) -> String {
     let root = fx.root().display().to_string();
     let dur = regex::Regex::new(r" in \d+ s\b").unwrap();
+    let private = regex::Regex::new(r"<ROOT>/tmp/(tmp\.[A-Za-z0-9]+|guardian-as-user\.[0-9]+\.[0-9]+)").unwrap();
+    let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
     text.replace(&root, "<ROOT>")
         .lines()
@@ -103,6 +105,15 @@ fn norm(text: &str, fx: &Fx) -> String {
         })
         .map(|l| {
             let l = dur.replace_all(l, " in N s").to_string();
+            // The guardian step's private folder: `mktemp -d` in the shell, `guardian-as-user.<pid>.<n>` in Rust.
+            let l = private.replace_all(&l, "<PRIVATE>").to_string();
+            let l = secs_cell.replace_all(&l, "| N s |").to_string();
+            // The shell says `cargo test --no-run failed`, the Rust command quotes the command (backticks) and names how it ended.
+            let l = l.replace(
+                "`cargo test --no-run` failed (exit 101; output above).",
+                "cargo test --no-run failed (output above)",
+            );
+            let l = l.replace("cargo test --no-run failed (exit 101)", "cargo test --no-run failed (output above)");
             // The shell's `bounded` prints the exit status of the phase's last command; the Rust phase has one failure, `exit 1`.
             let l = l.replace(" failed (exit 128) in N s", " failed (exit 1) in N s");
             // A git that hangs: the Rust tool names the command in the last output (the shell's was empty, it ended the process itself).
@@ -823,7 +834,8 @@ fn host_cleanup_ends_a_real_process_of_the_job_and_only_that_one() {
 
 // ---- kept-clone ----
 
-const KEPT_PROFILES: &str = "exclude lean big/ large\nexclude lean apps/*/docs/screenshots shots\nexclude full nothing/ nothing\nbootstrap .gitea\n";
+const KEPT_PROFILES: &str =
+    "exclude lean big/ large\nexclude lean apps/*/docs/pics shots\nexclude full nothing/ nothing\nbootstrap .gitea\n";
 
 /// `git` in `dir` with a fixed identity and dates (both fixtures get the same commit ids) and no user or system configuration.
 fn git(fx: &Fx, dir: &Path, args: &[&str]) -> String {
@@ -842,11 +854,7 @@ fn git(fx: &Fx, dir: &Path, args: &[&str]) -> String {
         .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
         .output()
         .unwrap();
-    assert!(
-        out.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
@@ -859,7 +867,7 @@ fn kept_fixture(fx: &Fx) {
     for (rel, text) in [
         ("crates/a/lib.rs", "one"),
         ("big/shot.png", "png"),
-        ("apps/x/docs/screenshots/s.png", "png"),
+        ("apps/x/docs/pics/s.png", "png"),
         ("apps/x/docs/guide.md", "guide"),
         (".gitignore", "target/\n"),
     ] {
@@ -885,7 +893,11 @@ fn bootstrap_at(fx: &Fx, sha: &str) {
         git(
             fx,
             &ws,
-            &["config", "http.https://example.invalid/.extraheader", "AUTHORIZATION: basic SECRETTOKEN"],
+            &[
+                "config",
+                "http.https://example.invalid/.extraheader",
+                "AUTHORIZATION: basic SECRETTOKEN",
+            ],
         );
     }
     git(fx, &ws, &["fetch", "-q", "origin", sha]);
@@ -948,9 +960,10 @@ fn kept_step(os: &'static str, profile: &'static str, extra: Vec<(&'static str, 
 fn kept_facts(fx: &Fx) -> Vec<String> {
     let src = fx.p("home/.paddock-ci/src");
     let Some(stable) = std::fs::read_dir(&src).ok().and_then(|rd| {
-        rd.flatten()
-            .map(|e| e.path())
-            .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("decryp7_paddock-crate-")))
+        rd.flatten().map(|e| e.path()).find(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("decryp7_paddock-crate-"))
+        })
     }) else {
         return vec!["facts: no kept clone".into()];
     };
@@ -973,7 +986,10 @@ fn kept_facts(fx: &Fx) -> Vec<String> {
         format!("facts: head {}", q(&["rev-parse", "HEAD"]).trim()),
         format!("facts: config keys {keys:?}"),
         format!("facts: files {:?}", q(&["ls-files", "-v"]).lines().collect::<Vec<_>>()),
-        format!("facts: status {:?}", q(&["status", "--porcelain", "--ignored"]).lines().collect::<Vec<_>>()),
+        format!(
+            "facts: status {:?}",
+            q(&["status", "--porcelain", "--ignored"]).lines().collect::<Vec<_>>()
+        ),
         format!("facts: marker {}", stable.join(".git/paddock-kept-clone").exists()),
         format!("facts: remote {}", q(&["config", "remote.origin.url"]).trim()),
     ]
@@ -1022,13 +1038,25 @@ fn kept_clone_creates_the_slots_clone_at_the_commit_without_the_excluded_paths()
     assert!(seen.stdout.contains("kept-clone: ready: "), "{}", seen.stdout);
     assert!(seen.stdout.contains("(created, profile lean, 3 files)"), "{}", seen.stdout);
     assert!(
-        seen.github_env.starts_with("PADDOCK_WORKSPACE=<ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1"),
+        seen.github_env
+            .starts_with("PADDOCK_WORKSPACE=<ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1"),
         "{seen:?}"
     );
     let t = &seen.tree;
-    assert!(t.iter().any(|l| l.starts_with("f home/.paddock-ci/src/decryp7_paddock-crate-s1/crates/a/lib.rs")), "{t:?}");
-    assert!(!t.iter().any(|l| l.contains("crate-s1/big") || l.contains("crate-s1/apps/x/docs/screenshots")), "an excluded path is not checked out: {t:?}");
-    assert!(t.iter().any(|l| l.starts_with("l work/abc/hostexecutor -> ")), "macOS leaves a link: {t:?}");
+    assert!(
+        t.iter()
+            .any(|l| l.starts_with("f home/.paddock-ci/src/decryp7_paddock-crate-s1/crates/a/lib.rs")),
+        "{t:?}"
+    );
+    assert!(
+        !t.iter()
+            .any(|l| l.contains("crate-s1/big") || l.contains("crate-s1/apps/x/docs/pics")),
+        "an excluded path is not checked out: {t:?}"
+    );
+    assert!(
+        t.iter().any(|l| l.starts_with("l work/abc/hostexecutor -> ")),
+        "macOS leaves a link: {t:?}"
+    );
     assert!(!seen.stdout.contains("SECRETTOKEN"), "the credential header is never printed");
     // On a Windows runner the work folder stays (act holds it open); on Linux nothing is done.
     let win = kept_once(&|_| {}, &kept_step("Windows", "lean", vec![]));
@@ -1056,7 +1084,11 @@ fn kept_clone_reuses_the_clone_and_leaves_a_clean_tree_whatever_the_last_job_lef
     assert!(seen.stdout.contains("(reused, profile lean"), "{}", seen.stdout);
     assert!(seen.stdout.contains("kept-clone: clean: done"), "{}", seen.stdout);
     assert!(seen.tree.contains(&"facts: status []".to_string()), "{:?}", seen.tree);
-    assert!(!seen.tree.iter().any(|l| l.contains("untracked.rs") || l.contains("leak.txt")), "{:?}", seen.tree);
+    assert!(
+        !seen.tree.iter().any(|l| l.contains("untracked.rs") || l.contains("leak.txt")),
+        "{:?}",
+        seen.tree
+    );
 }
 
 #[test]
@@ -1072,7 +1104,11 @@ fn kept_clone_makes_the_clone_again_when_it_is_foreign_stale_locked_unmarked_or_
         },
         &step,
     );
-    assert!(seen.stdout.contains("carries the local git config key 'core.autocrlf'"), "{}", seen.stdout);
+    assert!(
+        seen.stdout.contains("carries the local git config key 'core.autocrlf'"),
+        "{}",
+        seen.stdout
+    );
     assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
     // The marker is missing (an older layout's checkout): never reused.
     let seen = kept_twice(
@@ -1101,7 +1137,11 @@ fn kept_clone_makes_the_clone_again_when_it_is_foreign_stale_locked_unmarked_or_
         },
         &step,
     );
-    assert!(seen.stdout.contains("kept-clone: git "), "the failing command is named: {}", seen.stdout);
+    assert!(
+        seen.stdout.contains("kept-clone: git "),
+        "the failing command is named: {}",
+        seen.stdout
+    );
     assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
     // The tag run never reuses a clone shared with branch jobs: the shell has FRESH=true, the Rust command --fresh.
     let (a, b) = (fixture(), fixture());
@@ -1118,7 +1158,11 @@ fn kept_clone_makes_the_clone_again_when_it_is_foreign_stale_locked_unmarked_or_
     rust_fresh.rust.push("--fresh");
     let (s, r) = (run_kept(&a, &shell_fresh, false), run_kept(&b, &rust_fresh, true));
     assert_eq!(s, r, "FRESH: the shell (left) and the Rust command (right) differ");
-    assert!(r.stdout.contains("(created, profile lean") && !r.stdout.contains("kept-clone: clean"), "{}", r.stdout);
+    assert!(
+        r.stdout.contains("(created, profile lean") && !r.stdout.contains("kept-clone: clean"),
+        "{}",
+        r.stdout
+    );
 }
 
 #[test]
@@ -1129,7 +1173,12 @@ fn kept_clone_falls_back_to_the_work_folder_and_fails_only_on_an_unknown_profile
             git(
                 fx,
                 &fx.p("work/abc/hostexecutor"),
-                &["remote", "set-url", "origin", &format!("file://{}/no-such-origin.git", fx.root().display())],
+                &[
+                    "remote",
+                    "set-url",
+                    "origin",
+                    &format!("file://{}/no-such-origin.git", fx.root().display()),
+                ],
             );
         },
         &kept_step("macOS", "lean", vec![]),
@@ -1141,14 +1190,28 @@ fn kept_clone_falls_back_to_the_work_folder_and_fails_only_on_an_unknown_profile
     let mut noslot = kept_step("macOS", "lean", vec![]);
     noslot.env.retain(|(k, _)| *k != "PADDOCK_CI_SLOT");
     let seen = kept_once(&|_| {}, &noslot);
-    assert!(seen.stdout.contains("::warning::kept-clone: no kept folder of this job's slot"), "{}", seen.stdout);
+    assert!(
+        seen.stdout.contains("::warning::kept-clone: no kept folder of this job's slot"),
+        "{}",
+        seen.stdout
+    );
     // The full profile leaves nothing out; an undeclared one is the one failure, with one ::error::.
     let full = kept_once(&|_| {}, &kept_step("macOS", "full", vec![]));
     assert!(full.tree.iter().any(|l| l.contains("crate-s1/big/shot.png")), "{:?}", full.tree);
     let bad = kept_once(&|_| {}, &kept_step("macOS", "nope", vec![]));
     assert_eq!(bad.code, 1);
-    assert_eq!(bad.stdout.lines().filter(|l| l.starts_with("::error::")).count(), 1, "{}", bad.stdout);
-    assert!(bad.stdout.contains("kept-clone: profile 'nope' is not declared in <ROOT>/profiles.txt"), "{}", bad.stdout);
+    assert_eq!(
+        bad.stdout.lines().filter(|l| l.starts_with("::error::")).count(),
+        1,
+        "{}",
+        bad.stdout
+    );
+    assert!(
+        bad.stdout
+            .contains("kept-clone: profile 'nope' is not declared in <ROOT>/profiles.txt"),
+        "{}",
+        bad.stdout
+    );
 }
 
 #[test]
@@ -1163,7 +1226,10 @@ fn kept_clone_plants_in_the_clone_do_not_act_in_the_next_job() {
                 "home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/hooks/post-checkout",
                 &format!("echo ran > '{}'", fx.p("hook-ran").display()),
             );
-            fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/info/attributes", "* text eol=crlf\n");
+            fx.write(
+                "home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/info/attributes",
+                "* text eol=crlf\n",
+            );
             fx.write("kept-angular-cache/cached.bin", "keep");
             std::fs::create_dir_all(k.join("ui/.angular")).unwrap();
             std::os::unix::fs::symlink(fx.p("kept-angular-cache"), k.join("ui/.angular/cache")).unwrap();
@@ -1171,7 +1237,11 @@ fn kept_clone_plants_in_the_clone_do_not_act_in_the_next_job() {
         },
         &step,
     );
-    assert!(!seen.tree.iter().any(|l| l.starts_with("f hook-ran")), "the planted hook did not run: {:?}", seen.tree);
+    assert!(
+        !seen.tree.iter().any(|l| l.starts_with("f hook-ran")),
+        "the planted hook did not run: {:?}",
+        seen.tree
+    );
     assert!(
         seen.tree.contains(&"f kept-angular-cache/cached.bin \"keep\"".to_string()),
         "the link's target survives: {:?}",
@@ -1186,12 +1256,230 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
     let setup = move |fx: &Fx| {
         fx.script(
             "bin/git",
-            &format!("case \" $* \" in *\" fetch \"*) exec sleep 30;; esac\nexec '{}' \"$@\"", real.trim()),
+            &format!(
+                "case \" $* \" in *\" fetch \"*) exec sleep 30;; esac\nexec '{}' \"$@\"",
+                real.trim()
+            ),
         )
     };
-    let seen = kept_once(&setup, &kept_step("macOS", "lean", vec![("PADDOCK_KEPT_CLONE_TIMEOUT", "1".into())]));
+    let seen = kept_once(
+        &setup,
+        &kept_step("macOS", "lean", vec![("PADDOCK_KEPT_CLONE_TIMEOUT", "1".into())]),
+    );
     assert_eq!(seen.code, 0, "{seen:?}");
     assert!(seen.stdout.contains("did not finish within 1 s"), "{}", seen.stdout);
     assert!(seen.stdout.contains("building from the work folder"), "{}", seen.stdout);
     assert!(!seen.stdout.contains("::error::"), "{}", seen.stdout);
+}
+
+// ---- boot-volume ----
+
+/// What a Mac's `df`, `diskutil` and `getconf` answer, by folder: a path under `ext` is on the external volume `/Volumes/Ext Disk`, any
+/// other on `/`. The programs are shims (the test never asks the machine it runs on); their answers are fixed by the fixture, not by the
+/// environment, as the tool starts them with a cleared one.
+struct Mac {
+    /// `df` names no mount.
+    no_mount: bool,
+    /// `diskutil` fails.
+    no_plist: bool,
+    /// What `getconf DARWIN_USER_TEMP_DIR` prints (`<ROOT>` filled in); empty: it fails.
+    getconf: &'static str,
+}
+
+const MAC: Mac = Mac {
+    no_mount: false,
+    no_plist: false,
+    getconf: "<ROOT>/home/internal-temp/",
+};
+
+fn boot_machine(fx: &Fx, mac: &Mac) {
+    for d in ["ext/tmp", "home/internal-temp"] {
+        std::fs::create_dir_all(fx.p(d)).unwrap();
+    }
+    let header = "echo 'Filesystem 512-blocks Used Available Capacity Mounted on'";
+    let df = if mac.no_mount {
+        header.to_string()
+    } else {
+        format!("case \"$2\" in */ext|*/ext/*) m='/Volumes/Ext Disk';; *) m='/';; esac\n{header}\necho \"/dev/disk9s1 100 1 99 1% $m\"")
+    };
+    fx.script("bin/df", &df);
+    let plist = if mac.no_plist {
+        "exit 1".to_string()
+    } else {
+        "case \"$*\" in *Ext*) v='<false/>';; *) v='<true/>';; esac\nprintf '<dict>\\n\\t<key>Internal</key>\\n\\t%s\\n</dict>\\n' \"$v\""
+            .to_string()
+    };
+    fx.script("bin/diskutil", &plist);
+    let getconf = if mac.getconf.is_empty() {
+        "exit 1".to_string()
+    } else {
+        format!("printf '%s\\n' '{}'", fill(mac.getconf, fx))
+    };
+    fx.script("bin/getconf", &getconf);
+}
+
+fn boot(args: &[&'static str], extra: Vec<(&'static str, String)>) -> Step {
+    let mut shell = vec!["conformance/ci/boot-volume.sh"];
+    shell.extend_from_slice(args);
+    let mut rust = vec!["boot-volume"];
+    rust.extend_from_slice(args);
+    Step {
+        shell,
+        shell_env: vec![],
+        rust,
+        env: extra,
+        cwd: None,
+    }
+}
+
+#[test]
+fn boot_volume_says_which_volume_a_folder_is_on_and_where_the_boot_volumes_temp_folder_is() {
+    let mac = |m: Mac| move |fx: &Fx| boot_machine(fx, &m);
+    // `external`: by the exit code; a folder that is not made yet sits on the volume of its nearest parent.
+    for (folder, code) in [
+        ("<ROOT>/ext/tmp", 0),
+        ("<ROOT>/home", 1),
+        ("<ROOT>/ext/not/yet/made", 0),
+        ("<ROOT>/home/not/yet/made", 1),
+    ] {
+        let seen = same(&mac(MAC), &boot(&["external", folder], vec![]));
+        assert_eq!(seen.code, code, "{folder}: {seen:?}");
+    }
+    // `temp`: an internal folder stays (a trailing slash goes), an external one moves to the user's temp folder of the boot volume.
+    let kept = same(&mac(MAC), &boot(&["temp", "<ROOT>/home/"], vec![]));
+    assert_eq!(kept.stdout, "<ROOT>/home");
+    let moved = same(&mac(MAC), &boot(&["temp", "<ROOT>/ext/tmp"], vec![]));
+    assert!(moved.stdout.ends_with("\n<ROOT>/home/internal-temp"), "{moved:?}");
+    assert!(
+        moved
+            .stdout
+            .contains("boot-volume: using <ROOT>/home/internal-temp instead of <ROOT>/ext/tmp: "),
+        "{moved:?}"
+    );
+    // No folder given: $TMPDIR.
+    let from_env = same(&mac(MAC), &boot(&["temp"], vec![("TMPDIR", "<ROOT>/ext/tmp".into())]));
+    assert!(from_env.stdout.ends_with("\n<ROOT>/home/internal-temp"), "{from_env:?}");
+    // getconf fails, names a relative folder, a missing one, or an external one: the folder stays, with the warning.
+    for getconf in ["", "relative", "<ROOT>/missing/", "<ROOT>/ext/tmp"] {
+        let seen = same(&mac(Mac { getconf, ..MAC }), &boot(&["temp", "<ROOT>/ext/tmp"], vec![]));
+        assert!(seen.stdout.ends_with("\n<ROOT>/ext/tmp"), "{getconf}: {seen:?}");
+        assert!(
+            seen.stdout.contains(
+                "::warning::boot-volume: <ROOT>/ext/tmp is on an external volume and getconf DARWIN_USER_TEMP_DIR gave no internal folder ("
+            ),
+            "{getconf}: {seen:?}"
+        );
+    }
+    // What cannot be judged is internal, with the reason on standard error; a failing diskutil is internal without one.
+    let nomount = same(&mac(Mac { no_mount: true, ..MAC }), &boot(&["external", "<ROOT>/ext/tmp"], vec![]));
+    assert_eq!(nomount.code, 1);
+    assert!(nomount.stdout.contains("df names no mount; treated as internal"), "{nomount:?}");
+    let noplist = same(&mac(Mac { no_plist: true, ..MAC }), &boot(&["external", "<ROOT>/ext/tmp"], vec![]));
+    assert_eq!((noplist.code, noplist.stdout.as_str()), (1, ""));
+}
+
+// ---- guardian-as-user ----
+
+/// A `crates` folder with a `cargo` that builds two unit-test binaries (fake programs) and a private temp folder. `proc_exit` is what
+/// the paddock-proc test binary exits with; a failing one leaves the guardian's log, as the real tests do.
+fn guardian_machine(fx: &Fx, proc_exit: i32) {
+    std::fs::create_dir_all(fx.p("tmp")).unwrap();
+    fx.shim(
+        "cargo",
+        "echo '   Compiling paddock-proc v0.1.0'\n\
+         echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)' >&2\n\
+         echo '  Executable tests/it/main.rs (target/debug/deps/it-ff)' >&2\n\
+         echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)' >&2",
+    );
+    fx.script(
+        "crates/target/debug/deps/paddock_proc-0123abcd",
+        &format!(
+            "echo \"proc tests: $*\"\n\
+             [ {proc_exit} = 0 ] || {{ echo 'guardian said no' > \"$PADDOCK_PROC_GUARDIAN_LOG\"; exit {proc_exit}; }}"
+        ),
+    );
+    fx.script("crates/target/debug/deps/paddock_chromium-9f8e7d", "echo \"chromium tests: $*\"");
+}
+
+fn guardian() -> Step {
+    Step {
+        shell: vec!["conformance/ci/guardian-as-user.sh"],
+        shell_env: vec![],
+        rust: vec!["guardian-as-user"],
+        // The summary file is read as `github-path` so the comparison sees it.
+        env: vec![
+            ("TMPDIR", "<ROOT>/tmp".into()),
+            ("GITHUB_STEP_SUMMARY", "<ROOT>/github-path".into()),
+        ],
+        cwd: Some("crates"),
+    }
+}
+
+/// bash before 4.4 (macOS ships 3.2) fails `"${as_user[@]}"` of an empty array under `set -u`: the script is for the Linux image (bash 5),
+/// so on such a bash only the Rust side runs, the shell side is NOT MEASURED here (printed), and the Linux leg of the job runs the parity.
+fn bash_too_old_for_the_script() -> bool {
+    let out = paddock_proc::command("bash")
+        .args(["-c", "echo $((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1]))"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().unwrap_or(0) < 404
+}
+
+fn guardian_same(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
+    if !bash_too_old_for_the_script() {
+        return same(setup, step);
+    }
+    eprintln!("NOT MEASURED: guardian-as-user.sh on bash < 4.4 (empty-array expansion under set -u); the Rust side alone is checked here");
+    let fx = fixture();
+    setup(&fx);
+    run_one(&fx, step, true)
+}
+
+#[test]
+fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the_calling_user() {
+    // Run by a user (the test is not root: no setpriv, no sudo, ER-14), the tests run directly; the root path is the unit tests' (a fake
+    // machine records the setpriv command line).
+    let seen = guardian_same(&|fx| guardian_machine(fx, 0), &guardian());
+    assert_eq!(seen.code, 0, "{seen:?}");
+    assert!(
+        seen.stdout.contains("Building the paddock-proc and paddock-chromium unit tests"),
+        "{seen:?}"
+    );
+    assert!(seen.stdout.contains("proc tests: guardian::"), "{seen:?}");
+    assert!(
+        seen.stdout
+            .contains("chromium tests: launch::tests::a_browser_whose_owner_is_killed"),
+        "{seen:?}"
+    );
+    assert!(seen.stdout.contains("The guardian's acting tests passed as uid "), "{seen:?}");
+    assert!(seen.github_path.contains("| `guardian::` | uid "), "{seen:?}");
+    assert!(
+        seen.calls
+            .starts_with("cargo test --no-run --all-features -p paddock-proc -p paddock-chromium"),
+        "{seen:?}"
+    );
+    // A failing test: its guardian log, one error line with the command, the summary row.
+    let red = guardian_same(&|fx| guardian_machine(fx, 3), &guardian());
+    assert_eq!(red.code, 1, "{red:?}");
+    assert!(red.stdout.contains("The guardian's log:\nguardian said no"), "{red:?}");
+    assert_eq!(red.stdout.lines().filter(|l| l.starts_with("::error::")).count(), 1, "{red:?}");
+    assert!(
+        red.stdout.contains("::error::guardian-as-user: `guardian::` failed as uid "),
+        "{red:?}"
+    );
+    assert!(red.github_path.contains("failed (exit 3)"), "{red:?}");
+    // A build that fails: its last lines, then one error line.
+    let broken = guardian_same(
+        &|fx| {
+            guardian_machine(fx, 0);
+            fx.shim("cargo", "echo 'error[E0425]: nothing here' >&2; exit 101");
+        },
+        &guardian(),
+    );
+    assert_eq!(broken.code, 1);
+    assert!(broken.stdout.contains("error[E0425]: nothing here"), "{broken:?}");
+    assert!(
+        broken.stdout.contains("::error::guardian-as-user: cargo test --no-run failed"),
+        "{broken:?}"
+    );
 }

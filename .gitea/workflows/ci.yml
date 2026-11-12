@@ -780,10 +780,10 @@ jobs:
           path: crates/lcov.info
           if-no-files-found: ignore
       # The container runs as root and the orphan guardian is off for root: run its acting tests as an unprivileged user
-      # (ADR 0076 amendment 2026-11-09; conformance/ci/guardian-as-user.sh prints one ::error:: per failure).
+      # (ADR 0076 amendment 2026-11-09; ./dev ci guardian-as-user prints one ::error:: per failure; the shell stays behind conformance/ci/kit.sh for tag runs).
       - name: Orphan guardian as a user (Linux)
         if: ${{ !cancelled() && runner.os == 'Linux' }}
-        run: bash ../conformance/ci/guardian-as-user.sh
+        run: bash ../conformance/ci/kit.sh host guardian-as-user
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
         if: always()
