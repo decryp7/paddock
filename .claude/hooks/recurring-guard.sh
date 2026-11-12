@@ -4,7 +4,7 @@
 # Input (stdin JSON): transcript_path, stop_hook_active, agent_id (present only inside a subagent).
 # Output: {"decision":"block","reason":...} to keep Claude going; nothing to allow. Never fails closed: any problem
 # reading the transcript allows the stop and warns on stderr. Reads only the tail of the transcript (fast on 20 MB).
-TAIL_BYTES=${RECURRING_GUARD_TAIL_BYTES:-4000000}
+TAIL_BYTES=${RECURRING_GUARD_TAIL_BYTES:-1000000}
 input=$(cat)
 [ "$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null)" = "true" ] && exit 0
 [ -n "$(printf '%s' "$input" | jq -r '.agent_id // empty' 2>/dev/null)" ] && exit 0
