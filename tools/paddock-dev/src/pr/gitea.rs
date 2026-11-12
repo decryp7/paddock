@@ -181,6 +181,14 @@ impl<'a> Api<'a> {
             .unwrap_or_default())
     }
 
+    /// Adds a comment to pull request (issue) `number`.
+    pub fn comment(&mut self, number: u64, body: &str) -> Result<(), String> {
+        let url = format!("{}/issues/{number}/comments", self.root);
+        self.http
+            .send_json("POST", &url, &self.token, Some(&json!({"body": body})))
+            .map(|_| ())
+    }
+
     /// The newest run of each workflow for commit `sha` (first page of 50, newest first), in the server's order.
     pub fn commit_runs(&mut self, sha: &str) -> Result<Vec<CommitRun>, String> {
         if sha.is_empty() || !sha.bytes().all(|b| b.is_ascii_hexdigit()) {

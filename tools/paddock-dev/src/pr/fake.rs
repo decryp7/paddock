@@ -17,6 +17,8 @@ pub struct FakeGitea {
     pub requests: Vec<String>,
     /// The bodies of every write, in order.
     pub bodies: Vec<Value>,
+    /// `(pull request number, text)` of every comment, in order.
+    pub comments: Vec<(u64, String)>,
     /// The repository's `autodetect_manual_merge` (absent when `None`).
     pub autodetect: Option<bool>,
     /// The server's own maximum page size (Gitea's `MAX_RESPONSE_ITEMS`), below what the client asks for.
@@ -145,6 +147,13 @@ impl Http for FakeGitea {
                 let p = self.pulls.last_mut().ok_or_else(|| not_found(url))?;
                 p["title"] = body["title"].clone();
                 Ok(p.clone())
+            }
+            ("POST", p) if p.starts_with("/issues/") && p.ends_with("/comments") => {
+                let n: u64 = p["/issues/".len()..p.len() - "/comments".len()]
+                    .parse()
+                    .map_err(|_| not_found(url))?;
+                self.comments.push((n, body["body"].as_str().unwrap_or("").to_string()));
+                Ok(json!({}))
             }
             ("PUT", p) if p.starts_with("/issues/") && p.ends_with("/labels") => {
                 let n: u64 = p["/issues/".len()..p.len() - "/labels".len()].parse().map_err(|_| not_found(url))?;

@@ -144,6 +144,17 @@ export const ALLOWED = {
   'scripts/vm-smoke/run-linux.mjs': 'downloads a run\'s artifacts',
   'scripts/vm-smoke/run-win.mjs': 'downloads a run\'s artifacts',
   'scripts/vm-smoke/report.mjs': 'reads a run only to name the commit of an installer under test',
+  'tools/paddock-dev/src/queue/real.rs': 'the queue lists the runs of its train head (running, finished, failed) to take its next step; the landing verdict is ./dev ci verdict (ci_runs::verdict)',
+  'tools/paddock-dev/src/ci_runs/dispatch.rs': 'ci dispatch: lists unfinished runs on a shared runner class before dispatching; no verdict',
+  'tools/paddock-dev/src/ci_runs/record.rs': 'ci record-fixture: records finished runs as test fixtures',
+  'tools/paddock-dev/src/ci_runs/triage.rs': 'ci triage: names the failed tests of one run and compares with main\'s last run',
+  'tools/paddock-dev/src/gates/ci.rs': 'the gate model names the runs API calls of the workflows it models',
+  'tools/paddock-dev/src/pr/fake.rs': 'the fake Gitea of the ledger tests',
+  'tools/paddock-dev/src/pr/gitea.rs': 'pr list: the newest run per workflow of a pull request head, shown in the table, no verdict',
+  'tools/paddock-dev/src/pr/ledger.rs': 'pr list: shows the CI line of a head',
+  'tools/paddock-dev/src/pr/mod.rs': 'the pr commands over the ledger',
+  '.gitea/workflows/ci.yml': 'a comment and a step that name the runs API of the plan job',
+  '.gitea/workflows/debrief-mutants.yml': 'reads the last run of the base to choose the changed-lines base (what to test, not whether to release)',
 };
 
 const SKIP_DIR = new Set(['node_modules', 'target', '.git', 'tests', 'fixtures', 'dist']);

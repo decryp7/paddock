@@ -84,3 +84,9 @@ name = "app/{app}"
 color = "#ededed"
 description = "Touches {app}"
 exclusive = false
+
+[[label]]
+name = "queue/hold"
+color = "#ededed"
+description = "On any pull request: the merge queue stops after reading the ledger (no build, dispatch or landing) until it is removed"
+exclusive = false

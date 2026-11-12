@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, pr, release_isolation, slots, wait,
-    worktree,
+    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, pr, queue, release_isolation, slots,
+    wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -54,6 +54,11 @@ enum Command {
     Pr {
         #[command(subcommand)]
         command: pr::PrCommand,
+    },
+    /// The merge queue (docs/plans/merge-queue.md): `queue tick` takes one step. Reads GITEA_TOKEN (queue-bot's).
+    Queue {
+        #[command(subcommand)]
+        command: queue::QueueCommand,
     },
     /// The CI planner: which projects a change reaches, the CI matrix and the commit lint's range (the port of
     /// scripts/affected.mjs; the arguments are its: <base> [<head>], --files a,b, --all, --ci [--app x], --commit-range, --commit-flags, --explain).
@@ -478,6 +483,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
         Command::Pr { command } => pr::command(command),
+        Command::Queue { command } => queue::command(command),
         Command::Merge {
             command: MergeCommand::Check(a),
         } => merge_check::command(&merge_check::Request {

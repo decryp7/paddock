@@ -47,6 +47,7 @@ pub mod plan_gitea;
 pub mod plan_repo;
 pub mod plan_since;
 pub mod pr;
+pub mod queue;
 pub mod release_isolation;
 pub mod slots;
 pub mod wait;

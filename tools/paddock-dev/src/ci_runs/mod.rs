@@ -17,14 +17,14 @@ pub mod dispatch;
 pub mod flakes;
 pub mod logfind;
 pub mod preconditions;
-pub mod schedule_skip;
 pub mod record;
+pub mod schedule_skip;
 #[cfg(test)]
 mod testutil;
 pub mod time;
 pub mod timings;
-pub mod verdict;
 pub mod triage;
+pub mod verdict;
 
 use crate::wait::CurlHttp;
 use clap::Args;
