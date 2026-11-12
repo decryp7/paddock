@@ -11,7 +11,7 @@
 //!   ended, or when `release` asks it to (a marker file; no signals, so the same on every OS);
 //! - leads its own process group (Unix) or process group without a console (Windows), so a runner that kills the job's
 //!   group at the end of a step does not free the slot in the middle of the job;
-//! - carries no handle or descriptor of the step that started it ([`crate::fds`]): the Gitea runner ends every process of a
+//! - carries no handle or descriptor of the step that started it ([`paddock_proc::spawn_detached`]): the Gitea runner ends every process of a
 //!   step's job object when the step's output pipe is still open 10 s after the step ended, and a holder that kept that pipe
 //!   died with the step (run 8019). A holder without it outlives the step: the step's job object does not kill on close. It
 //!   does not break away from the job object (the runner's job does not allow it); the runner ends it with the job, which is
@@ -233,8 +233,8 @@ fn canonical_even_if_missing(path: &Path) -> PathBuf {
     }
 }
 
-/// The holder's command: detached, with a pipe for its announcement and nothing else attached to this process, started in
-/// the CI home (never inside the job folder).
+/// The holder's command: a pipe for its announcement and nothing else attached to this process, started in the CI home (never
+/// inside the job folder). It is started with [`paddock_proc::spawn_detached`], which also detaches it.
 pub fn holder_command(exe: &Path, args: &[String], root: &Path) -> std::process::Command {
     let mut cmd = paddock_proc::command(exe);
     cmd.args(args)
@@ -242,17 +242,6 @@ pub fn holder_command(exe: &Path, args: &[String], root: &Path) -> std::process:
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
-        cmd.creation_flags(0x0800_0000 | 0x0000_0200);
-    }
     cmd
 }
 
@@ -287,17 +276,14 @@ pub fn acquire_with(a: &AcquireArgs, exe: &Path) -> Result<Report, CliError> {
     std::fs::create_dir_all(&a.root).map_err(|e| {
         CliError::failure(format!("{} cannot be created: {e}.", a.root.display())).with_hint("Pass a writable CI home with --root.")
     })?;
-    // The holder must not inherit the runner's pipes (Windows hands every inheritable handle to a child, not only the standard
-    // ones): a holder that keeps the step's pipe is ended with the step (run 8019; crate::fds). Fail closed: no holder at all
-    // rather than one that dies with the step and frees the slot in the middle of the job.
-    crate::fds::keep_handles_from_children().map_err(|e| {
-        CliError::failure(format!(
-            "The slot holder was not started: this process's handles could not be kept from it ({e}), so it would be ended with this step."
-        ))
-        .with_hint("Report it with the job's log; the slot was not taken, so no other job is affected.")
-    })?;
-    let mut child = holder_command(exe, &holder_args(a, &owner), &a.root).spawn().map_err(|e| {
-        CliError::failure(format!("The slot holder could not be started: {e}.")).with_hint("Check that the dev binary can run.")
+    // The holder must not inherit the runner's pipes (run 8019): a holder that keeps the step's pipe is ended with the step.
+    // `spawn_detached` fails closed: no holder at all rather than one that frees the slot in the middle of the job.
+    let mut child = paddock_proc::spawn_detached(&mut holder_command(exe, &holder_args(a, &owner), &a.root)).map_err(|e| match e {
+        paddock_proc::DetachError::Handles(_) => CliError::failure(format!("The slot holder was not started: {e}."))
+            .with_hint("Report it with the job's log; the slot was not taken, so no other job is affected."),
+        paddock_proc::DetachError::Spawn { .. } => {
+            CliError::failure(format!("The slot holder could not be started: {e}.")).with_hint("Check that the dev binary can run.")
+        }
     })?;
     let Some(line) = first_line(&mut child, Duration::from_secs(a.holder_timeout_secs.max(1))) else {
         // It neither took a slot nor said "none" in time: stop it, so it cannot take one later and keep it.
@@ -344,7 +330,7 @@ fn holder_pid(root: &Path, id: SlotId) -> Value {
 pub fn hold(a: &HoldArgs) -> Result<Report, CliError> {
     check_max(a.max)?;
     // Before anything else: descriptors inherited from the job (a pipe the runner waits on) must not outlive the step.
-    crate::fds::close_inherited();
+    paddock_proc::close_inherited();
     let locks = FsLocks::new(&a.root);
     let end = paddock_slots::hold_with(
         &locks,

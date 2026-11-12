@@ -36,7 +36,7 @@ pub enum Capture {
 pub fn dev_tool(ctx: &Ctx, args: &[&str], capture: Capture, extra_env: &[(&str, &str)]) -> R<Called> {
     let program: PathBuf = ctx.get("PADDOCK_DEV").map_or_else(|| ctx.exe.clone(), PathBuf::from);
     let mut cmd = paddock_proc::command(&program);
-    // Inherits this step's handles (std's Windows default); harmless: `ci slot acquire` keeps every handle from its holder (fds).
+    // Inherits this step's handles (std's Windows default); harmless: `ci slot acquire` keeps every handle from its holder (paddock_proc::spawn_detached).
     cmd.args(args).stdin(Stdio::null()).stderr(Stdio::inherit());
     for v in [
         "RUSTC_WRAPPER",

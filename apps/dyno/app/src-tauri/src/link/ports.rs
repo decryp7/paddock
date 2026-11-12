@@ -138,29 +138,18 @@ impl Launcher for ProcessLauncher {
             return Ok(());
         }
         let exe = (self.exe)()?;
-        // The one place the app starts a program: our own agent, which reports problems through its log and exits; no
-        // console window (see the creation flags below) and it is never waited on.
-        #[allow(clippy::disallowed_methods)]
-        let mut cmd = std::process::Command::new(&exe);
+        // Our own agent, which reports problems through its log and exits. It outlives this app and is never waited on, so it
+        // starts through `paddock_proc::spawn_detached`: its own process group, no console, and no inherited handle but its
+        // (null) standard streams, so it cannot keep a pipe of whoever started the app (rule 55).
+        let mut cmd = paddock_proc::command(&exe);
         cmd.arg("run")
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            // Its own process group: a Ctrl+C in the terminal that started the app does not reach it.
-            cmd.process_group(0);
-        }
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            // DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
-            cmd.creation_flags(0x0000_0008 | 0x0800_0000 | 0x0000_0200);
-        }
-        let child = cmd
-            .spawn()
-            .map_err(|e| format!("The Dyno agent ({}) could not be started: {e}", exe.display()))?;
+        let child = paddock_proc::spawn_detached(&mut cmd).map_err(|e| match e {
+            paddock_proc::DetachError::Spawn { source, .. } => format!("The Dyno agent ({}) could not be started: {source}", exe.display()),
+            handles => format!("The Dyno agent ({}) was not started: {handles}", exe.display()),
+        })?;
         slot.child = Some(child);
         slot.exited = None;
         Ok(())
