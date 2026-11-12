@@ -215,6 +215,18 @@ fn threads_running() -> bool {
     threads_at_exit().is_none_or(|all| !all.is_empty())
 }
 
+/// What the exit gate counts now, for the "still open" lines of `wait_log`.
+/// Reads atomics only: `debrief_core::wait_log` calls this from its watchdog thread and must never call into DuckDB or
+/// take a store lock, or the hang it reports could stop its own report.
+pub(crate) fn state() -> String {
+    format!(
+        "{} store statements running, {} borrowed in all, shutting down: {}",
+        ACTIVE.load(Ordering::SeqCst),
+        BORROWED.load(Ordering::Relaxed),
+        down()
+    )
+}
+
 /// Whether the process is exiting: background steps stop before their next statement.
 pub(crate) fn down() -> bool {
     DOWN.load(Ordering::SeqCst)
