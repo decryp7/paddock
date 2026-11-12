@@ -3,28 +3,26 @@
 //!
 //! The step, by what the ledger shows:
 //!
-//! - a `queue/hold` label anywhere: nothing ([`Tick::Held`]);
-//! - a pull request is taken only with an approving review of its CURRENT head (a label is not an approval), and never while it
-//!   carries an `owes/*` label (the Windows leg and the rule 54 build are not built yet); anything else goes back to review;
-//! - no `state/in-train` pull request: take up to [`MAX_BATCH`] approved ones and build the train in two steps: a tokenless
-//!   [`build_phase`] (merge, merge check, local gates, culprit mapping; its outcome is data, [`BuildOutcome`]) and a token step,
-//!   [`apply_build`] (comments, labels, the push). A gate failure that no pull request's files explain stops the queue with
-//!   `queue/hold` instead of dropping everyone;
+//! - a `queue/hold` label anywhere: nothing ([`Tick::Held`], a non-zero exit); a hold never outlives its closed pull request;
+//! - a pull request is taken only with an official approving review of its CURRENT head (a label is not an approval), and never
+//!   while it carries an `owes/*` label (the Windows leg and the rule 54 build are not built yet); anything else goes back to
+//!   review;
+//! - no `state/in-train` pull request: take up to [`MAX_BATCH`] approved ones, merge them into the train branch (git and the
+//!   merge check only: **the tick runs no code of any pull request**, the local gates are the first jobs of the dispatched
+//!   workflow), drop a conflict or a merge-check finding, push the train branch, label the rest `state/in-train`;
 //! - a train whose branch is stale or does not match the labels (main moved, a head moved, a drop was interrupted): rebuild it;
 //! - a train with no run of a reached workflow on its head: dispatch it (`ci.yml`, and each app workflow the plan reaches; a rebuild
 //!   after a drop reruns only what failed, `since_run`), unless the backup window or a busy runner says wait;
 //! - a run going: wait;
 //! - a failed run: triage it, drop every pull request whose affected projects hold a failure that is new (Q3: all suspects, no
-//!   bisection) with a comment naming the failed tests, and rebuild the rest;
+//!   bisection) with a comment naming the failed tests, and rebuild the rest; a run whose failures are all main's own marks the
+//!   train `queue/blocked` and is not triaged again until main moves or another pull request is approved;
 //! - a green run that is not a full one: dispatch the full run (ER-8); main is fast-forwarded only when EVERY reached workflow has
 //!   a full green run per `ci verdict`, outside the backup window, with no hold. A verdict that is not measured never lands.
 
-use super::ports::{
-    Blame, Built, Ci, CiRun, Failure, GateFailure, GateOutcome, Gates, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, label,
-};
+use super::ports::{Blame, Built, Ci, CiRun, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, label};
 use crate::ci_runs::verdict::Verdict;
 use crate::pr::gitea::Pull;
-use std::collections::BTreeSet;
 
 /// Pull requests per train (Q2).
 pub const MAX_BATCH: usize = 6;
@@ -144,14 +142,12 @@ pub struct Env {
     pub hour: Option<u32>,
 }
 
-/// The four ports of a tick.
+/// The three ports of a tick.
 pub struct Ports<'a> {
     /// Gitea.
     pub ledger: &'a mut dyn Ledger,
     /// The working copy.
     pub train: &'a mut dyn Train,
-    /// The local gates.
-    pub gates: &'a mut dyn Gates,
     /// CI.
     pub ci: &'a mut dyn Ci,
 }
@@ -219,6 +215,14 @@ fn admit(p: &mut Ports, pr: &Pull) -> Result<bool, String> {
 
 /// One tick. An `Err` is a failure to read or write (the network, git); a state the queue cannot leave is [`Tick::Stuck`].
 pub fn tick(p: &mut Ports, env: &Env) -> Result<Tick, String> {
+    // A hold does not outlive its pull request: closed, it stops nobody and says so.
+    for n in p.ledger.closed_held()? {
+        p.ledger.relabel(n, &["-queue/hold"])?;
+        p.ledger.comment(
+            n,
+            "queue: this pull request is closed, so its `queue/hold` is released; the queue is not held by it any more.",
+        )?;
+    }
     let pulls = p.ledger.open_pulls()?;
     if let Some(h) = pulls.iter().find(|x| has(x, label::HOLD)) {
         return Ok(Tick::Held(h.number));
@@ -254,6 +258,23 @@ pub fn tick(p: &mut Ports, env: &Env) -> Result<Tick, String> {
         let prs: Vec<Pull> = taken.into_iter().cloned().collect();
         return build_round(p, prs, 1, None, None, old);
     }
+    if in_train.iter().any(|x| has(x, label::BLOCKED)) {
+        // A blocked train (every failure was main's) waits for main to move; another approved pull request may be the fix, so it
+        // releases the train and everything is built again together.
+        let mut newcomers = false;
+        for pr in pulls.iter().filter(|x| x.base == "main" && has(x, label::APPROVED)) {
+            newcomers |= admit(p, pr)?;
+        }
+        if newcomers {
+            for pr in &in_train {
+                p.ledger.relabel(pr.number, &["+state/approved", "-queue/blocked"])?;
+                p.ledger.comment(pr.number, "queue: the blocked train is released because another pull request was approved (it may fix main); everything is built together again.")?;
+            }
+            return Ok(Tick::Idle(
+                "the blocked train was released for a newly approved pull request".into(),
+            ));
+        }
+    }
     let mut branches = vec!["main".to_string(), TRAIN_BRANCH.to_string()];
     branches.extend(in_train.iter().map(|x| x.branch.clone()));
     p.train.fetch(&branches)?;
@@ -287,6 +308,12 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
     };
     if !valid {
         return rebuild_stale(p, in_train, head, marker, &main);
+    }
+    if in_train.iter().any(|x| has(x, label::BLOCKED)) {
+        return Ok(Tick::Stuck {
+            why: "the train is blocked: every failure of its run also fails on main, and main has not moved. Not triaged again until main moves or another pull request is approved. Next step: fix main".into(),
+            measured: true,
+        });
     }
     let (head, marker) = (
         head.unwrap_or_default(),
@@ -345,229 +372,7 @@ fn newest_failed(runs: Vec<CiRun>) -> Option<u64> {
     runs.into_iter().find(|r| matches!(r.state, RunState::Failed(_))).map(|r| r.id)
 }
 
-/// The outcome of the tokenless half of a build: plain data, so the step that holds the token only applies it. A pull request
-/// number appears in at most one of `merged` and `dropped`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BuildOutcome {
-    /// The pull requests the train was built from.
-    pub batch: Vec<u64>,
-    /// The round (1 for a fresh train).
-    pub round: u32,
-    /// The failed run this round reruns, with its workflow.
-    pub since: Option<(u64, String)>,
-    /// The head of the train branch this build replaces.
-    pub old: Option<String>,
-    /// The new train head; `None` when nothing merged or the build stopped.
-    pub head: Option<String>,
-    /// The pull requests in it.
-    pub merged: Vec<u64>,
-    /// Dropped, with the reason for the comment.
-    pub dropped: Vec<(u64, String)>,
-    /// Why the queue must stop, and whether something could not be measured.
-    pub stuck: Option<(String, bool)>,
-}
-
-impl BuildOutcome {
-    /// The outcome as JSON (what the tokenless step writes and the token step reads).
-    pub fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "batch": self.batch, "round": self.round, "since": self.since.as_ref().map(|(r, w)| serde_json::json!({"run": r, "workflow": w})),
-            "old": self.old, "head": self.head, "merged": self.merged,
-            "dropped": self.dropped.iter().map(|(n, w)| serde_json::json!({"number": n, "why": w})).collect::<Vec<_>>(),
-            "stuck": self.stuck.as_ref().map(|(w, m)| serde_json::json!({"why": w, "measured": m})),
-        })
-    }
-
-    /// Reads [`BuildOutcome::to_json`] back; `None` for anything that is not one.
-    pub fn from_json(v: &serde_json::Value) -> Option<BuildOutcome> {
-        let nums = |k: &str| -> Option<Vec<u64>> { v[k].as_array()?.iter().map(|x| x.as_u64()).collect() };
-        Some(BuildOutcome {
-            batch: nums("batch")?,
-            round: u32::try_from(v["round"].as_u64()?).ok()?,
-            since: match &v["since"] {
-                serde_json::Value::Null => None,
-                s => Some((s["run"].as_u64()?, s["workflow"].as_str()?.to_string())),
-            },
-            old: v["old"].as_str().map(str::to_string),
-            head: v["head"].as_str().map(str::to_string),
-            merged: nums("merged")?,
-            dropped: v["dropped"]
-                .as_array()?
-                .iter()
-                .map(|d| Some((d["number"].as_u64()?, d["why"].as_str()?.to_string())))
-                .collect::<Option<_>>()?,
-            stuck: match &v["stuck"] {
-                serde_json::Value::Null => None,
-                s => Some((s["why"].as_str()?.to_string(), s["measured"].as_bool()?)),
-            },
-        })
-    }
-}
-
-/// Builds the train and runs the local gates. No token is needed, none is used, and nothing outside the working copy changes: no
-/// label, no comment, no push. The gates run PR code, so this is the half that runs without the queue's credentials.
-pub fn build_phase(
-    train: &mut dyn Train,
-    gates: &mut dyn Gates,
-    mut prs: Vec<Pull>,
-    round: u32,
-    since: Option<(u64, String)>,
-    old: Option<String>,
-) -> Result<BuildOutcome, String> {
-    let batch: Vec<u64> = prs.iter().map(|x| x.number).collect();
-    let mut out = BuildOutcome {
-        batch,
-        round,
-        since: since.clone(),
-        old,
-        head: None,
-        merged: Vec::new(),
-        dropped: Vec::new(),
-        stuck: None,
-    };
-    let stop = |mut out: BuildOutcome, why: String, measured: bool| {
-        out.stuck = Some((why, measured));
-        Ok(out)
-    };
-    for _ in 0..=prs.len() + 1 {
-        let main = train.main_head()?;
-        let marker = Marker {
-            prs: Vec::new(),
-            round,
-            since_run: since.as_ref().map(|(r, _)| *r),
-            since_workflow: since.as_ref().map(|(_, w)| w.clone()),
-        };
-        let Built { head, merged, dropped } = train.build(&main, &prs, &marker)?;
-        for (n, why) in &dropped {
-            out.dropped.push((*n, format!("it could not join the train: {why}")));
-        }
-        prs.retain(|x| !dropped.iter().any(|(n, _)| *n == x.number));
-        if merged.is_empty() {
-            return Ok(out);
-        }
-        match gates.run(&main, &head) {
-            GateOutcome::Green => {
-                out.head = Some(head);
-                out.merged = merged;
-                return Ok(out);
-            }
-            GateOutcome::NotMeasured(why) => {
-                return stop(
-                    out,
-                    format!(
-                        "a local gate did not look ({why}); a train that was not measured is not a train that passed. Next step: fix the gate, then `./dev queue unhold`"
-                    ),
-                    false,
-                );
-            }
-            GateOutcome::Red(fails) => {
-                // Main first: what fails on main itself is nobody's in this batch.
-                train.checkout(&main)?;
-                let on_main: Vec<String> = match gates.run(&main, &main) {
-                    GateOutcome::Green => Vec::new(),
-                    GateOutcome::Red(m) => m.into_iter().map(|f| f.name).collect(),
-                    GateOutcome::NotMeasured(why) => {
-                        return stop(
-                            out,
-                            format!(
-                                "the gates could not be run on main to tell main's own failures apart ({why}). Next step: fix the gate, then `./dev queue unhold`"
-                            ),
-                            false,
-                        );
-                    }
-                };
-                let ours: Vec<&GateFailure> = fails.iter().filter(|f| !on_main.contains(&f.name)).collect();
-                if ours.is_empty() {
-                    return stop(
-                        out,
-                        format!(
-                            "every failing gate ({}) also fails on main itself; no pull request is to blame. Next step: fix main, then `./dev queue unhold`",
-                            gate_names(&fails)
-                        ),
-                        true,
-                    );
-                }
-                let mut suspects: BTreeSet<u64> = BTreeSet::new();
-                for f in &ours {
-                    let named: BTreeSet<&str> = f.files.iter().map(String::as_str).collect();
-                    let mut mine = Vec::new();
-                    for pr in prs.iter().filter(|x| merged.contains(&x.number)) {
-                        if train.pr_files(&main, &pr.head)?.iter().any(|x| named.contains(x.as_str())) {
-                            mine.push(pr.number);
-                        }
-                    }
-                    if mine.is_empty() {
-                        return stop(
-                            out,
-                            format!(
-                                "the gate `{}` failed on the train and names no file of any pull request in it ({}); the queue blames nobody it cannot prove. Next step: read the gate's output, then `./dev queue unhold`",
-                                f.name,
-                                f.detail.lines().last().unwrap_or("")
-                            ),
-                            true,
-                        );
-                    }
-                    suspects.extend(mine);
-                }
-                let text = ours
-                    .iter()
-                    .map(|f| format!("- {}: {}", f.name, f.detail))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                for n in &suspects {
-                    out.dropped.push((
-                        *n,
-                        format!("a local gate failed on the train before any CI run, on files this branch changes:\n{text}"),
-                    ));
-                }
-                prs.retain(|x| !suspects.contains(&x.number));
-                if prs.is_empty() {
-                    return Ok(out);
-                }
-            }
-        }
-    }
-    stop(out, "the train kept failing its local gates; a person must look".into(), true)
-}
-
-fn gate_names(f: &[GateFailure]) -> String {
-    f.iter().map(|x| x.name.clone()).collect::<Vec<_>>().join(", ")
-}
-
-/// Applies a [`BuildOutcome`]: the comments and labels of what was dropped, the push of the train branch and the `state/in-train`
-/// labels. This is the half that needs the queue's token.
-pub fn apply_build(p: &mut Ports, o: &BuildOutcome) -> Result<Tick, String> {
-    for (n, why) in &o.dropped {
-        drop_pr(p, *n, why)?;
-    }
-    let dropped: Vec<u64> = o.dropped.iter().map(|(n, _)| *n).collect();
-    if let Some((why, measured)) = &o.stuck {
-        if let Some(first) = o.batch.iter().copied().filter(|n| !dropped.contains(n)).min() {
-            p.ledger.relabel(first, &["+queue/hold"])?;
-            p.ledger.comment(first, &format!("queue: stopped, {why}\n\n`queue/hold` is on this pull request; the queue does nothing until it is removed (`./dev queue unhold`)."))?;
-        }
-        return Ok(Tick::Stuck {
-            why: why.clone(),
-            measured: *measured,
-        });
-    }
-    match &o.head {
-        Some(head) => {
-            p.train.push_train(head, o.old.as_deref())?;
-            for n in &o.merged {
-                p.ledger.relabel(*n, &["+state/in-train"])?;
-            }
-            Ok(Tick::Built {
-                head: head.clone(),
-                prs: o.merged.clone(),
-                dropped: o.dropped.clone(),
-            })
-        }
-        None => Ok(Tick::Dropped { dropped, rebuilt: None }),
-    }
-}
-
-/// Builds the train, runs the gates, applies the outcome.
+/// Merges the batch into a fresh train and pushes it. No code of any pull request runs: git and the merge check only.
 fn build_round(
     p: &mut Ports,
     prs: Vec<Pull>,
@@ -576,9 +381,32 @@ fn build_round(
     since_wf: Option<String>,
     old: Option<String>,
 ) -> Result<Tick, String> {
-    let since = since_run.zip(since_wf);
-    let o = build_phase(p.train, p.gates, prs, round, since, old)?;
-    apply_build(p, &o)
+    let main = p.train.main_head()?;
+    let marker = Marker {
+        prs: Vec::new(),
+        round,
+        since_run,
+        since_workflow: since_wf.filter(|_| since_run.is_some()),
+    };
+    let Built { head, merged, dropped } = p.train.build(&main, &prs, &marker)?;
+    for (n, why) in &dropped {
+        drop_pr(p, *n, &format!("it could not join the train: {why}"))?;
+    }
+    if merged.is_empty() {
+        return Ok(Tick::Dropped {
+            dropped: dropped.iter().map(|(n, _)| *n).collect(),
+            rebuilt: None,
+        });
+    }
+    p.train.push_train(&head, old.as_deref())?;
+    for n in &merged {
+        p.ledger.relabel(*n, &["+state/in-train", "-queue/blocked"])?;
+    }
+    Ok(Tick::Built {
+        head,
+        prs: merged,
+        dropped,
+    })
 }
 
 fn drop_pr(p: &mut Ports, number: u64, why: &str) -> Result<(), String> {
@@ -706,6 +534,12 @@ fn failed_run(
     }
     let blamed: Vec<&Failure> = failures.iter().filter(|f| f.blame != Blame::OnMain).collect();
     if blamed.is_empty() {
+        for pr in in_train {
+            p.ledger.relabel(pr.number, &["+queue/blocked"])?;
+        }
+        if let Some(first) = in_train.first() {
+            p.ledger.comment(first.number, &format!("queue: every failure of run {run} of {workflow} also fails on main, so the train is blocked (`queue/blocked`) and is not triaged again until main moves or another pull request is approved."))?;
+        }
         return Ok(Tick::Stuck {
             why: format!(
                 "every failure of run {run} also fails on main; no pull request is to blame. Next step: fix main, then the train reruns"

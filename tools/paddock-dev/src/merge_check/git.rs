@@ -90,7 +90,11 @@ impl<'a> Git<'a> {
                 "-c",
                 "log.showSignature=false",
             ])
+            .args(["-c", "core.hooksPath=/dev/null"])
             .args(args);
+        // The merge check reads a merged tree that holds pull request code: no credentials in this child (queue).
+        let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
+        crate::child_env::scrub(&mut cmd, &parent);
         let shown = args.join(" ");
         let out =
             run_bounded(cmd, Limits::new(TIMEOUT).max_output(self.max_output)).map_err(|e| format!("git {shown} could not run: {e}"))?;

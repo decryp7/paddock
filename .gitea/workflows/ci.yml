@@ -918,6 +918,50 @@ jobs:
           # shellcheck disable=SC2086 # the flags are zero or one fixed option
           node conformance/bin/paddock-conformance.mjs commit-lint $flags --range "$range"
 
+  # The merge queue's local gates (docs/plans/merge-queue.md). The queue's tick runs no code of any pull request, so what a train
+  # needs checked on the merged tree runs here, in a job without the queue's token, as part of the train's dispatch run (a base
+  # is set; a normal push or a full run has these gates in the jobs above). A failure is an ordinary CI failure, triaged like any
+  # other. It catches what only a later gate saw on a merged train: a gate register gap, a conformance finding, a workspace-hack
+  # drift, a stale lockfile, a dependency cycle in the publish dry run. The commit lint is the `commits` job.
+  train-gates:
+    name: train gates (gate register, conformance, workspace hack, cargo metadata, publish dry run)
+    needs: [plan]
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.base != '' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["train-gates"]'), 'train-gates') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+
+      - name: Gate register (C100)
+        run: ./dev gates check
+
+      - name: Paddock conformance (the line of the conformance job)
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C110 --strict C36
+
+      - name: Workspace hack up to date
+        working-directory: crates
+        run: cargo hakari generate --diff
+
+      - name: Lockfiles are current (cargo metadata of every workspace)
+        run: |
+          for lock in $(git ls-files '*Cargo.lock'); do
+            dir=$(dirname "$lock")
+            (cd "$dir" && cargo metadata --locked --format-version 1 > /dev/null) || {
+              echo "::error::$lock is stale or the workspace does not resolve (a dependency cycle or a merge of two lockfiles). Next step: cargo update -w in $dir and commit it"; exit 1; }
+          done
+
+      - name: Publish dry run (a dependency cycle only the merged tree has)
+        run: node scripts/publish.mjs --skip-build --offline
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
+
   # One leg per affected app and operating system (ADR 0014 §6): the app's CI contract (apps/<app>/paddock.ci.json) through
   # the shared app-gates action, only the halves the change reaches (rust, ui). Linux (the paddock-ci image) carries the
   # whole contract: prepare, checks, the Rust gates and the UI. An app that lists Windows or macOS in `os` also gets a host

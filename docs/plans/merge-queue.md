@@ -53,13 +53,22 @@ batch, and only what failed is rerun.
    merged with `--no-ff` in order, then `./dev merge check` on the merge (ADR 0089) and the workspace-hack diff; a conflict
    or a merge-check finding drops that PR at once (`state/fixes`, comment with the conflicting files or the finding) and the
    train goes on without it. Lockfiles are regenerated, never hand-merged.
-3. **Local fast gates (ER-9).** fmt, clippy (host and xwin), lint and type-check of the touched files, the conformance line,
-   `./dev gates check`, commit-lint over `origin/main..train`. A failure here is mapped to its PR (step 5) and dropped
-   before any runner is used.
+3. **Gates in CI, not in the tick (coordinator decision, round 2 of the review).** The tick runs **no code of any pull request**:
+   a process that holds a write token never runs what a pull request wrote (GitHub's and GitLab's merge queues do the same: the
+   queue only merges, CI runs the code). So the gate register, the conformance line, commit-lint, the workspace-hack diff,
+   `cargo metadata --locked` of every lockfile and the publish dry run are jobs of the dispatched workflow, run without the
+   token: ci.yml's `train-gates` job (a train's dispatch has a `base`) and its `commits` job; a failure is an ordinary CI failure,
+   triaged like any other (step 5). fmt and clippy stay in their existing jobs. The tick itself does git and the API only: it
+   merges in its own clone of an explicit URL (never the job's checkout), with `core.hooksPath=/dev/null`,
+   `protocol.file.allow=never`, no global or system git configuration and no filter driver, runs the merge check in process, and
+   asks the planner from a checkout of `main` (a child without the token). No cargo, node or npm runs from the merged tree. The
+   token reaches exactly one child, the push, through a `GIT_ASKPASS` program scoped to that command (`--authenticated-fetch`
+   also gives it to clone and fetch for a private repository). A test plants hooks, a cargo wrapper, a `rust-toolchain.toml`
+   path, git attribute filters, a lefthook file, npm scripts and a gate script in a train and checks that nothing runs.
 4. **Dispatch (rule 50h, ER-10).** `ci.yml` (and each app workflow the plan reaches) by `workflow_dispatch` with `base` =
    origin/main: the affected plan of the whole train. Two things pull requests used to start must be dispatched or run here:
    debrief.yml's pull-request commit lint is gone (ci.yml's `commits` job lints the train's range on a dispatch, and step 3
-   runs commit-lint locally), and debrief-mutants' changed-lines run is a dispatch of `debrief-mutants.yml` with
+   is a CI job), and debrief-mutants' changed-lines run is a dispatch of `debrief-mutants.yml` with
    `base: origin/main` when the train touches `apps/debrief/crates/debrief-core`. The Windows leg runs every crate and app that an `owes/windows-tests`
    PR touches, in one leg (needs a new dispatch input, slice 2). Slower local checks (Linux container, tests under load)
    run beside it; a local failure cancels the run.
@@ -119,14 +128,12 @@ state in the PR labels and the train branch, so a tick can stop anywhere and the
   this server (ci.yml and debrief.yml use them; tools research: one run in 14 days outlived a newer push). Whether Gitea 28.3
   queues rather than drops a waiting run is checked in slice 6; the fallback is a lock the tick takes first (the train
   branch's lease, compare-and-swap on its ref) and a tick that finds it held exits at once.
-- **Runner: Linux** (`ubuntu-latest`, the paddock-ci image). The tick merges, runs the Linux fast gates (fmt, clippy, xwin
-  clippy, conformance, `./dev gates check`, commit-lint), dispatches and waits; it never takes the macOS or Windows runner,
-  which the dispatched runs need. Merging and gates run with no token in their environment (PR code runs there); the token
-  is set only on the steps that push, label, comment and dispatch.
+- **Runner: Linux** (`ubuntu-latest`, the paddock-ci image). The tick merges (git only), dispatches and waits; it never takes the
+  macOS or Windows runner, which the dispatched runs need, and it runs nothing a pull request wrote, so the token can be set for
+  the whole step (slice 6 still passes it only to the tick's step).
 - **Token: a new `queue-bot` account**, secret `QUEUE_BOT_TOKEN`, scopes: repository write (branches and main), issues and
   pull requests write, actions dispatch. Not release-bot: release-bot's token is the only one that can push protected `*-v*`
-  tags (tag.yml on `ci/release-bot-tag-workflow`), and the queue job runs PR code (the fast gates), so a token in that job
-  must not be able to tag. A separate bot also makes the history say who did what. Its push to main starts the push-to-main
+  tags (tag.yml on `ci/release-bot-tag-workflow`), and a queue job's token must not be able to tag whatever happens in it. A separate bot also makes the history say who did what. Its push to main starts the push-to-main
   runs, which the job's own token would not (Gitea ignores events whose doer is the Actions user, as tag.yml notes). The
   user creates queue-bot, as with release-bot.
 - **Hold.** The backup-window hold stays: a tick between 00:00 and 04:00 local dispatches nothing with a Windows leg (Q4),
@@ -146,6 +153,14 @@ state in the PR labels and the train branch, so a tick can stop anywhere and the
 - **Timing.** The full run on the landed sha is the push-to-main run that the fast-forward starts, so the request waits for
   it (`./dev wait --ci-run`, bounded); a red run means no tag and a comment on the PRs that bumped the version.
 - Depends on `ci/release-bot-tag-workflow` (`52e060a3a`) landing and on tag protection being on.
+
+## Landing prerequisites
+
+`./dev ci verdict` counts a run only with the plan job's `plan verdict: complete=` line, which ci.yml and debrief.yml print after
+the plan decides: `fix/ci-verdict-reader-review` (177b0663c) must be on main before the queue lands anything, or every verdict is
+red or not measured. Approval is an official Gitea review of the current head by an account that is neither queue-bot nor
+release-bot; a train whose run fails only in tests that also fail on main is `queue/blocked` (not triaged again) until main moves
+or another pull request is approved.
 
 ## Common practice (ER-37)
 

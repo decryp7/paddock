@@ -3,7 +3,7 @@
 
 use super::ports::*;
 use super::real::{self, GitTrain, GiteaLedger, MergeCheckFn};
-use super::tick::{BuildOutcome, apply_build, build_phase, inputs_for};
+use super::tick::inputs_for;
 use super::tick::{Env, Ports, Tick, tick};
 use crate::ci_runs::verdict::Verdict;
 use crate::pr::fake::FakeGitea;
@@ -124,40 +124,17 @@ impl Train for TestTrain {
     fn build(&mut self, m: &str, p: &[Pull], k: &Marker) -> Result<Built, String> {
         self.inner.build(m, p, k)
     }
-    fn pr_files(&mut self, m: &str, h: &str) -> Result<Vec<String>, String> {
-        self.inner.pr_files(m, h)
-    }
     fn affected(&mut self, _main: &str, head: &str) -> Result<BTreeSet<String>, String> {
         Ok(self.reach.get(head).cloned().unwrap_or_default())
     }
     fn reached_workflows(&mut self, _m: &str, _h: &str) -> Result<Vec<String>, String> {
         Ok(self.workflows.clone())
     }
-    fn checkout(&mut self, rev: &str) -> Result<(), String> {
-        self.inner.checkout(rev)
-    }
     fn push_train(&mut self, h: &str, o: Option<&str>) -> Result<(), String> {
         self.inner.push_train(h, o)
     }
     fn land(&mut self, h: &str) -> Result<(), String> {
         self.inner.land(h)
-    }
-}
-
-#[derive(Default)]
-struct FakeGates {
-    script: Vec<GateOutcome>,
-    ran: usize,
-}
-
-impl Gates for FakeGates {
-    fn run(&mut self, _m: &str, _h: &str) -> GateOutcome {
-        self.ran += 1;
-        if self.script.is_empty() {
-            GateOutcome::Green
-        } else {
-            self.script.remove(0)
-        }
     }
 }
 
@@ -235,6 +212,13 @@ impl Ledger for Hooked<'_> {
     fn approved_head(&mut self, n: u64, h: &str) -> Result<bool, String> {
         self.inner.approved_head(n, h)
     }
+    fn closed_held(&mut self) -> Result<Vec<u64>, String> {
+        self.inner.closed_held()
+    }
+}
+
+fn no_reach(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({"all": false}))
 }
 
 struct World {
@@ -242,11 +226,12 @@ struct World {
     gitea: FakeGitea,
     known: Vec<labels::LabelSpec>,
     reach: BTreeMap<String, BTreeSet<String>>,
-    gates: FakeGates,
     ci: FakeCi,
     workflows: Vec<String>,
     merge_check: Option<MergeCheckFn>,
     on_read: Option<fn(usize, &mut Vec<Pull>)>,
+    /// Run the tick on a real `GitTrain::open` (its own clone under this folder) instead of the table-driven one.
+    real_train: Option<PathBuf>,
 }
 
 impl World {
@@ -261,11 +246,11 @@ impl World {
             gitea,
             known,
             reach: BTreeMap::new(),
-            gates: FakeGates::default(),
             ci: FakeCi::new(),
             workflows: vec!["ci.yml".into()],
             merge_check: None,
             on_read: None,
+            real_train: None,
         }
     }
 
@@ -283,7 +268,7 @@ impl World {
     fn approve(&mut self, number: u64, head: &str) {
         self.gitea.reviews.push((
             number,
-            serde_json::json!({"user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": head, "dismissed": false}),
+            serde_json::json!({"id": self.gitea.reviews.len() + 1, "user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": head, "dismissed": false, "official": true}),
         ));
     }
 
@@ -329,9 +314,9 @@ impl World {
                 reads: 0,
                 on_read: self.on_read,
             };
-            let mut train = TestTrain {
+            let mut table = TestTrain {
                 inner: {
-                    let mut g = GitTrain::new(self.repos.queue.clone(), None);
+                    let mut g = GitTrain::for_clone(self.repos.queue.clone(), self.repos.origin.to_str().unwrap());
                     if let Some(f) = self.merge_check {
                         g.merge_check = f;
                     }
@@ -340,10 +325,18 @@ impl World {
                 reach: self.reach.clone(),
                 workflows: self.workflows.clone(),
             };
+            let mut real = self.real_train.as_ref().map(|scratch| {
+                let mut g = GitTrain::open(self.repos.origin.to_str().unwrap(), scratch, None, false, true).unwrap();
+                g.planner = no_reach;
+                g
+            });
+            let train: &mut dyn Train = match real.as_mut() {
+                Some(g) => g,
+                None => &mut table,
+            };
             let mut ports = Ports {
                 ledger: &mut ledger,
-                train: &mut train,
-                gates: &mut self.gates,
+                train,
                 ci: &mut self.ci,
             };
             tick(&mut ports, &Env { hour })
@@ -386,7 +379,6 @@ fn one_green_pull_request_is_built_dispatched_and_landed() {
     assert_eq!(prs, vec![1]);
     assert_eq!(w.labels_of(1), vec!["state/in-train"]);
     assert_eq!(w.train_head(), head, "the train branch is pushed");
-    assert_eq!(w.gates.ran, 1, "the local gates ran before any runner was used");
     // The next tick dispatches the affected run against main.
     assert!(matches!(w.tick(), Tick::Dispatched { .. }));
     assert_eq!(w.ci.dispatched, vec![vec![("base".to_string(), "origin/main".to_string())]]);
@@ -541,7 +533,11 @@ fn several_suspects_are_all_dropped_and_a_failure_that_also_fails_on_main_blames
         }],
     );
     assert!(matches!(w.tick(), Tick::Stuck { measured: true, .. }));
-    assert_eq!(w.labels_of(1), vec!["state/in-train"]);
+    assert_eq!(
+        w.labels_of(1),
+        vec!["state/in-train", "queue/blocked"],
+        "the train is marked blocked on main"
+    );
 }
 
 #[test]
@@ -553,7 +549,6 @@ fn a_hold_label_stops_the_tick_before_anything_changes() {
     assert_eq!(w.tick(), Tick::Held(2));
     assert_eq!(w.labels_of(1), vec!["state/approved"]);
     assert!(w.gitea.comments.is_empty());
-    assert_eq!(w.gates.ran, 0);
     let train = paddock_proc::command("git")
         .arg("-C")
         .arg(&w.repos.origin)
@@ -618,41 +613,6 @@ fn a_conflict_drops_the_later_pull_request_at_once_and_the_train_goes_on() {
     assert!(
         w.comments_of(2).join("\n").contains("crates/x/same.rs"),
         "the comment names the conflicting file"
-    );
-}
-
-#[test]
-fn a_gate_that_fails_on_the_train_drops_its_culprit_before_any_runner_is_used() {
-    let mut w = World::new();
-    w.approved(1, "crates/x/a.rs", &["x"]);
-    w.approved(2, "ui/b.ts", &["ui"]);
-    w.gates.script = vec![GateOutcome::Red(vec![GateFailure {
-        name: "conformance".into(),
-        detail: "C99 in ui/b.ts".into(),
-        files: vec!["ui/b.ts".into()],
-    }])];
-    let Tick::Built { prs, dropped, .. } = w.tick() else { panic!() };
-    assert_eq!(prs, vec![1]);
-    assert_eq!(dropped.iter().map(|(n, _)| *n).collect::<Vec<_>>(), vec![2]);
-    assert_eq!(w.labels_of(2), vec!["state/fixes"]);
-    assert!(w.comments_of(2).join("\n").contains("C99 in ui/b.ts"));
-    assert!(w.ci.dispatched.is_empty());
-    assert_eq!(
-        w.gates.ran, 3,
-        "the gates ran on the train, on main to tell main's failures apart, and on the rebuilt train"
-    );
-}
-
-#[test]
-fn a_gate_that_could_not_look_is_not_a_pass() {
-    let mut w = World::new();
-    w.approved(1, "crates/x/a.rs", &["x"]);
-    w.gates.script = vec![GateOutcome::NotMeasured("node is missing".into())];
-    assert!(matches!(w.tick(), Tick::Stuck { measured: false, .. }));
-    assert_eq!(
-        w.labels_of(1),
-        vec!["state/approved", "queue/hold"],
-        "the queue stopped itself with a hold; nothing was taken"
     );
 }
 
@@ -746,43 +706,6 @@ fn the_marker_round_trips_and_rows_name_their_projects() {
     assert_eq!(real::projects_of_plan(&serde_json::json!({"all": true})), set(&["*"]));
 }
 
-#[test]
-fn the_local_gates_include_the_checks_only_a_later_ci_gate_saw_on_a_merged_tree() {
-    let g = real::gate_commands(
-        "dev",
-        "node conformance/bin/paddock-conformance.mjs --app paddock --only C06",
-        "a..b",
-    );
-    let find = |needle: &str| {
-        g.iter()
-            .find(|c| c.args.iter().any(|a| a == needle))
-            .unwrap_or_else(|| panic!("no gate runs {needle}"))
-    };
-    assert_eq!(find("hakari").args, ["hakari", "generate", "--diff"]);
-    assert_eq!(find("hakari").dir, "crates");
-    let publish = find("scripts/publish.mjs");
-    assert_eq!(publish.args, ["scripts/publish.mjs", "--skip-build", "--offline"]);
-    assert!(g.iter().any(|c| c.name == "gates check") && g.iter().any(|c| c.args.contains(&"commit-lint".to_string())));
-}
-
-#[test]
-fn a_gate_that_cannot_start_is_not_measured_not_a_failure_of_a_pull_request() {
-    let g = real::GateCmd {
-        name: "x",
-        program: "paddock-no-such-program".into(),
-        args: vec![],
-        dir: ".",
-    };
-    let tmp = tempfile::tempdir().unwrap();
-    assert!(
-        real::LocalGates {
-            root: tmp.path().to_path_buf()
-        }
-        .run_one(&g)
-        .is_err()
-    );
-}
-
 fn failure(what: &str, projects: &[&str], blame: Blame) -> Failure {
     Failure {
         what: what.into(),
@@ -833,7 +756,7 @@ fn a_head_that_moves_after_approval_needs_a_new_approval() {
     w.gitea.pulls.iter_mut().find(|p| p["number"] == 1).unwrap()["head"]["sha"] = serde_json::json!(new);
     assert!(matches!(w.tick(), Tick::Idle(_)));
     assert_eq!(w.labels_of(1), vec!["state/built"]);
-    assert!(w.gates.ran == 0 && w.gitea.comments.len() == 1);
+    assert!(w.gitea.comments.len() == 1);
     // Approving the new head puts it back in the queue.
     set_labels(&mut w, 1, &["state/approved"]);
     w.approve(1, &new);
@@ -853,37 +776,71 @@ fn a_hand_set_in_train_label_never_joins_a_train() {
 }
 
 #[test]
-fn only_an_approval_of_the_exact_head_counts_and_a_later_change_request_or_dismissal_ends_it() {
+fn only_an_official_approval_of_the_exact_head_counts_and_a_later_change_request_or_dismissal_ends_it() {
     use crate::pr::gitea::{Review, approved_at};
-    let r = |who: &str, state: &str, commit: &str, dismissed: bool| Review {
+    let ex: &[&str] = &["queue-bot", "release-bot"];
+    let r = |id: u64, who: &str, state: &str, commit: &str, dismissed: bool, official: bool| Review {
+        id,
         reviewer: who.into(),
         state: state.into(),
         commit_id: commit.into(),
         dismissed,
+        official,
     };
-    assert!(approved_at(&[r("a", "APPROVED", "h1", false)], "h1"));
+    let ok = |reviews: &[Review]| approved_at(reviews, "h1", ex);
+    assert!(ok(&[r(1, "a", "APPROVED", "h1", false, true)]));
+    assert!(!ok(&[r(1, "a", "APPROVED", "h0", false, true)]), "an approval of an older head");
+    assert!(!ok(&[r(1, "a", "APPROVED", "h1", true, true)]), "dismissed");
+    assert!(!ok(&[r(1, "a", "COMMENT", "h1", false, true)]), "a comment is not an approval");
     assert!(
-        !approved_at(&[r("a", "APPROVED", "h0", false)], "h1"),
-        "an approval of an older head"
+        !ok(&[r(1, "a", "APPROVED", "h1", false, false)]),
+        "an unofficial review is advice, not an approval"
     );
-    assert!(!approved_at(&[r("a", "APPROVED", "h1", true)], "h1"), "dismissed");
     assert!(
-        !approved_at(&[r("a", "COMMENT", "h1", false)], "h1"),
-        "a comment is not an approval"
+        !ok(&[r(1, "queue-bot", "APPROVED", "h1", false, true)]),
+        "the queue's own account cannot approve"
     );
+    assert!(!ok(&[r(1, "release-bot", "APPROVED", "h1", false, true)]), "nor the release bot");
     assert!(
-        !approved_at(&[r("a", "APPROVED", "h1", false), r("a", "REQUEST_CHANGES", "h1", false)], "h1"),
+        !ok(&[
+            r(1, "a", "APPROVED", "h1", false, true),
+            r(2, "a", "REQUEST_CHANGES", "h1", false, true)
+        ]),
         "the reviewer changed their mind"
     );
     assert!(
-        !approved_at(&[r("a", "APPROVED", "h1", false), r("b", "REQUEST_CHANGES", "h1", false)], "h1"),
+        !ok(&[
+            r(1, "a", "APPROVED", "h1", false, true),
+            r(2, "b", "REQUEST_CHANGES", "h1", false, true)
+        ]),
         "another reviewer asks for changes"
     );
-    assert!(approved_at(
-        &[r("a", "REQUEST_CHANGES", "h1", false), r("a", "APPROVED", "h1", false)],
-        "h1"
-    ));
-    assert!(!approved_at(&[], "h1") && !approved_at(&[r("a", "APPROVED", "", false)], ""));
+    // The server may list them in any order: the id says which is later.
+    assert!(ok(&[
+        r(2, "a", "APPROVED", "h1", false, true),
+        r(1, "a", "REQUEST_CHANGES", "h1", false, true)
+    ]));
+    assert!(!ok(&[
+        r(2, "a", "REQUEST_CHANGES", "h1", false, true),
+        r(1, "a", "APPROVED", "h1", false, true)
+    ]));
+    // An unofficial or bot request for changes does not veto an official approval.
+    assert!(ok(&[
+        r(1, "a", "APPROVED", "h1", false, true),
+        r(2, "c", "REQUEST_CHANGES", "h1", false, false)
+    ]));
+    assert!(!ok(&[]) && !approved_at(&[r(1, "a", "APPROVED", "", false, true)], "", ex));
+}
+
+#[test]
+fn an_unofficial_review_does_not_get_a_pull_request_into_a_train() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    for (_, r) in w.gitea.reviews.iter_mut() {
+        r["official"] = serde_json::json!(false);
+    }
+    assert!(matches!(w.tick(), Tick::Idle(_)));
+    assert_eq!(w.labels_of(1), vec!["state/built"]);
 }
 
 // ---- debts and every reached workflow --------------------------------------------------------------------------------------------
@@ -897,7 +854,6 @@ fn a_pull_request_that_owes_windows_tests_or_a_rule_54_bundle_is_not_taken() {
         assert!(matches!(w.tick(), Tick::Idle(_)));
         assert!(w.labels_of(1).contains(&"state/built".to_string()) && w.labels_of(1).contains(&debt.to_string()));
         assert!(w.comments_of(1).join("\n").contains(debt));
-        assert_eq!(w.gates.ran, 0);
     }
 }
 
@@ -1015,129 +971,7 @@ fn a_gate_subprocess_sees_no_token_and_no_git_credentials() {
     );
 }
 
-#[test]
-fn the_gate_command_reads_the_conformance_line_from_origin_main_not_from_the_train() {
-    let w = World::new();
-    let ci = |line: &str| {
-        format!("jobs:\n  c:\n    steps:\n      - run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only {line}\n")
-    };
-    git(&w.repos.author, &["checkout", "--quiet", "main"]);
-    std::fs::create_dir_all(w.repos.author.join(".gitea/workflows")).unwrap();
-    std::fs::write(w.repos.author.join(".gitea/workflows/ci.yml"), ci("C06,C14")).unwrap();
-    git(&w.repos.author, &["add", "."]);
-    git(&w.repos.author, &["commit", "--quiet", "-m", "ci: gates"]);
-    git(&w.repos.author, &["push", "--quiet", "origin", "main"]);
-    git(&w.repos.queue, &["fetch", "--quiet", "origin"]);
-    git(&w.repos.queue, &["checkout", "--quiet", "--detach", "origin/main"]);
-    // A pull request that weakens its own gate: the train's ci.yml names no checks at all.
-    std::fs::write(w.repos.queue.join(".gitea/workflows/ci.yml"), ci("C00")).unwrap();
-    let line = real::conformance_line(&w.repos.queue).unwrap();
-    assert!(line.ends_with("--only C06,C14"), "{line}");
-}
-
-#[test]
-fn building_and_gating_is_tokenless_data_and_the_token_step_applies_it() {
-    let mut w = World::new();
-    w.approved(1, "crates/x/a.rs", &["x"]);
-    w.approved(2, "crates/x/a.rs", &["x"]);
-    let mut train = TestTrain {
-        inner: GitTrain::new(w.repos.queue.clone(), None),
-        reach: w.reach.clone(),
-        workflows: vec!["ci.yml".into()],
-    };
-    train.fetch(&["main".into(), "feat/pr1".into(), "feat/pr2".into()]).unwrap();
-    let prs: Vec<Pull> = {
-        let mut api_http = std::mem::take(&mut w.gitea);
-        let mut l = GiteaLedger {
-            api: Api::new(&mut api_http, FakeGitea::SERVER, FakeGitea::REPO, "t"),
-            known: w.known.clone(),
-        };
-        let p = l.open_pulls().unwrap();
-        w.gitea = api_http;
-        p
-    };
-    let requests_before = w.gitea.requests.len();
-    let out = build_phase(&mut train, &mut w.gates, prs, 1, None, None).unwrap();
-    assert_eq!(w.gitea.requests.len(), requests_before, "the build half touches no ledger");
-    assert!(w.gitea.comments.is_empty() && w.labels_of(1) == vec!["state/approved"]);
-    assert_eq!(out.merged, vec![1]);
-    assert_eq!(out.dropped.len(), 1);
-    // The outcome is data: written, read back, and applied by the token half.
-    let again = BuildOutcome::from_json(&out.to_json()).unwrap();
-    assert_eq!(again, out);
-    assert_eq!(BuildOutcome::from_json(&serde_json::json!({"nonsense": 1})), None);
-    let mut api_http = std::mem::take(&mut w.gitea);
-    let t = {
-        let mut ledger = GiteaLedger {
-            api: Api::new(&mut api_http, FakeGitea::SERVER, FakeGitea::REPO, "t"),
-            known: w.known.clone(),
-        };
-        let mut ports = Ports {
-            ledger: &mut ledger,
-            train: &mut train,
-            gates: &mut w.gates,
-            ci: &mut w.ci,
-        };
-        apply_build(&mut ports, &again).unwrap()
-    };
-    w.gitea = api_http;
-    assert!(matches!(t, Tick::Built { .. }));
-    assert_eq!(w.labels_of(1), vec!["state/in-train"]);
-    assert_eq!(w.labels_of(2), vec!["state/fixes"]);
-    assert_eq!(w.train_head(), out.head.unwrap());
-}
-
 // ---- blame only what can be proved -----------------------------------------------------------------------------------------------
-
-#[test]
-fn a_gate_failure_no_pull_request_explains_stops_the_queue_instead_of_dropping_everyone() {
-    for files in [vec![], vec!["docs/elsewhere.md".to_string()]] {
-        let mut w = World::new();
-        w.approved(1, "crates/x/a.rs", &["x"]);
-        w.approved(2, "ui/b.ts", &["ui"]);
-        w.gates.script = vec![GateOutcome::Red(vec![GateFailure {
-            name: "conformance".into(),
-            detail: "something".into(),
-            files,
-        }])];
-        let t = w.tick();
-        assert!(matches!(t, Tick::Stuck { measured: true, .. }), "{t:?}");
-        assert_eq!(w.labels_of(2), vec!["state/approved"], "nobody was dropped");
-        assert_eq!(w.labels_of(1), vec!["state/approved", "queue/hold"], "the queue holds itself");
-        assert!(w.comments_of(1).join("\n").contains("queue/hold"));
-        assert!(matches!(w.tick(), Tick::Held(1)), "and stays stopped, with no new comment");
-        assert_eq!(w.gitea.comments.len(), 1);
-    }
-}
-
-#[test]
-fn a_gate_that_also_fails_on_main_blames_no_pull_request() {
-    let mut w = World::new();
-    w.approved(1, "crates/x/a.rs", &["x"]);
-    let red = || {
-        GateOutcome::Red(vec![GateFailure {
-            name: "conformance".into(),
-            detail: "C99 in crates/x/a.rs".into(),
-            files: vec!["crates/x/a.rs".into()],
-        }])
-    };
-    w.gates.script = vec![red(), red()];
-    let t = w.tick();
-    assert!(
-        matches!(&t, Tick::Stuck { why, measured: true } if why.contains("also fails on main")),
-        "{t:?}"
-    );
-    assert_eq!(w.labels_of(1), vec!["state/approved", "queue/hold"]);
-}
-
-#[test]
-fn the_files_a_gate_names_are_read_from_its_output() {
-    let text = "error[C99]: crates/x/src/lib.rs:12: bad\n  --> ui/projects/a.ts:3:4\nsee `docs/rules.md` and (apps/dyno/x.rs) not a/b\nreadme.md and 1.2.3\n";
-    assert_eq!(
-        real::files_named(text),
-        vec!["crates/x/src/lib.rs", "ui/projects/a.ts", "docs/rules.md", "apps/dyno/x.rs"]
-    );
-}
 
 // ---- the backup window everywhere ------------------------------------------------------------------------------------------------
 
@@ -1344,7 +1178,11 @@ fn a_pull_request_whose_plan_runs_everything_is_not_a_suspect_for_everything() {
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["*"]), (2, "ui/b.ts", &["ui"])]);
     w.run(&head, 8001, RunState::Failed("failure".into()));
     w.ci.failures.insert(8001, vec![failure("x t", &["x"], Blame::New)]);
-    assert!(matches!(w.tick(), Tick::Stuck { measured: true, .. }));
+    let t = w.tick();
+    assert!(
+        matches!(&t, Tick::Stuck { why, measured: true } if why.contains("runs everything")),
+        "{t:?}"
+    );
     assert_eq!(w.labels_of(1), vec!["state/in-train"]);
 }
 
@@ -1366,4 +1204,503 @@ fn hold_and_unhold_set_and_clear_the_label_without_touching_the_others() {
         assert!(super::unhold(&mut l).unwrap().is_empty());
     }
     w.gitea = api_http;
+}
+
+// ---- no code of a pull request runs in a tick ----------------------------------------------------------------------------------
+
+/// A branch whose files try every way a repository can make a tool run its code: hooks, a git attributes filter, a cargo
+/// wrapper, a rust-toolchain path, a lefthook file, an npm script and a gate script. Each one touches `sentinel`.
+fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
+    git(&w.repos.author, &["checkout", "--quiet", "-B", name, "origin/main"]);
+    let dir = &w.repos.author;
+    let script = format!("#!/bin/sh\ntouch '{}'\n", sentinel.display());
+    let put = |path: &str, text: &str, exec: bool| {
+        let p = dir.join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, text).unwrap();
+        #[cfg(unix)]
+        if exec {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let _ = exec;
+    };
+    for hook in [
+        "pre-commit",
+        "post-checkout",
+        "post-merge",
+        "post-commit",
+        "commit-msg",
+        "pre-push",
+        "reference-transaction",
+    ] {
+        put(&format!(".githooks/{hook}"), &script, true);
+        put(&format!(".git-hooks/{hook}"), &script, true);
+    }
+    put("scripts/gate.sh", &script, true);
+    put("scripts/toolchain/bin/cargo", &script, true);
+    put(
+        ".cargo/config.toml",
+        "[build]\nrustc-wrapper = \"./scripts/gate.sh\"\n[alias]\nmetadata = \"!./scripts/gate.sh\"\n",
+        false,
+    );
+    put("rust-toolchain.toml", "[toolchain]\npath = \"./scripts/toolchain\"\n", false);
+    put(".gitattributes", "* filter=evil\n*.txt diff=evil merge=evil\n", false);
+    put(
+        "lefthook.yml",
+        "pre-commit:\n  commands:\n    gate:\n      run: ./scripts/gate.sh\n",
+        false,
+    );
+    put(
+        "package.json",
+        "{\"scripts\": {\"postinstall\": \"./scripts/gate.sh\", \"prepare\": \"./scripts/gate.sh\", \"test\": \"./scripts/gate.sh\"}}\n",
+        false,
+    );
+    put(
+        "conformance/bin/paddock-conformance.mjs",
+        "require('fs').writeFileSync(process.env.S || '/nonexistent', 'x');\n",
+        false,
+    );
+    put(
+        "crates/x/build.rs",
+        &format!("fn main() {{ std::fs::write(\"{}\", \"x\").unwrap(); }}\n", sentinel.display()),
+        false,
+    );
+    git(&w.repos.author, &["add", "-A"]);
+    git(
+        &w.repos.author,
+        &["commit", "--quiet", "-m", "feat: a branch that tries to run itself"],
+    );
+    git(&w.repos.author, &["push", "--quiet", "origin", name]);
+    git(&w.repos.author, &["rev-parse", "HEAD"])
+}
+
+#[test]
+fn a_train_full_of_things_that_run_executes_nothing_during_a_tick() {
+    let mut w = World::new();
+    let sentinel_dir = tempfile::tempdir().unwrap();
+    let sentinel = sentinel_dir.path().join("sentinel");
+    let head = booby_trapped(&w, "feat/pr1", &sentinel);
+    w.gitea.pull(1, "feat/pr1", &head, "open", None, &["state/approved"]);
+    w.approve(1, &head);
+    // Positive control: the files do run when something runs them, so the sentinel can see a violation.
+    git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
+    let ran = paddock_proc::command("sh")
+        .arg("scripts/gate.sh")
+        .current_dir(&w.repos.author)
+        .status()
+        .unwrap();
+    assert!(ran.success() && sentinel.exists(), "the sentinel mechanism works");
+    std::fs::remove_file(&sentinel).unwrap();
+    // The whole life of the train on a real clone: build, dispatch, wait, a failed run triaged, the retry, the landing.
+    let scratch = tempfile::tempdir().unwrap();
+    w.real_train = Some(scratch.path().to_path_buf());
+    let Tick::Built { head: train, .. } = w.tick() else {
+        panic!("built")
+    };
+    assert!(matches!(w.tick(), Tick::Dispatched { .. }));
+    w.run(&train, 7001, RunState::Running);
+    assert!(matches!(w.tick(), Tick::Waiting(_)));
+    w.green("ci.yml", &train, 7001);
+    assert!(matches!(w.tick(), Tick::Landed { .. }));
+    assert_eq!(w.repos.origin_ref("refs/heads/main"), train);
+    assert!(!sentinel.exists(), "nothing of the pull request ran in a tick");
+}
+
+#[test]
+fn every_git_child_runs_with_hooks_off_no_file_transport_and_no_token_but_the_push_gets_one_scoped_to_it() {
+    let scratch = tempfile::tempdir().unwrap();
+    let mut g = GitTrain::for_clone(scratch.path().to_path_buf(), "https://example.invalid/o/r.git");
+    g.token = Some("s3cret-token".into());
+    g.allow_file = false;
+    let args = |c: &std::process::Command| c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>();
+    let envs = |c: &std::process::Command| {
+        c.get_envs()
+            .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+            .collect::<BTreeMap<_, _>>()
+    };
+    for kind in [real::Child::Local, real::Child::Authed] {
+        let c = g.command(None, kind);
+        let a = args(&c);
+        for want in [
+            "core.hooksPath=/dev/null",
+            "protocol.file.allow=never",
+            "core.fsmonitor=false",
+            "credential.helper=",
+        ] {
+            assert!(a.iter().any(|x| x == want), "{kind:?} lacks -c {want}: {a:?}");
+        }
+        assert!(!a.iter().any(|x| x.contains("s3cret")), "the token is never an argument");
+        let e = envs(&c);
+        assert_eq!(e.get("GIT_TERMINAL_PROMPT"), Some(&Some("0".into())));
+        assert!(
+            e.get("GIT_CONFIG_GLOBAL").is_some_and(|v| v.is_some()),
+            "no global git configuration"
+        );
+    }
+    let local = envs(&g.command(None, real::Child::Local));
+    assert_eq!(local.get("GITEA_TOKEN"), Some(&None));
+    assert!(
+        !local.contains_key("GIT_ASKPASS") || local.get("GIT_ASKPASS") == Some(&None),
+        "a local child has no askpass"
+    );
+    assert!(!local.contains_key("PADDOCK_QUEUE_PUSH_TOKEN"));
+    let push = envs(&g.command(None, real::Child::Authed));
+    assert_eq!(push.get("PADDOCK_QUEUE_PUSH_TOKEN"), Some(&Some("s3cret-token".into())));
+    assert!(
+        push.get("GIT_ASKPASS")
+            .is_some_and(|v| v.as_deref().is_some_and(|p| p.ends_with("askpass.sh")))
+    );
+    // Production never allows the file transport; the tests' local origin needs it.
+    g.allow_file = true;
+    assert!(
+        args(&g.command(None, real::Child::Local))
+            .iter()
+            .any(|x| x == "protocol.file.allow=user")
+    );
+}
+
+#[test]
+fn the_planner_child_and_the_merge_check_run_without_the_queue_token() {
+    let parent: Vec<String> = ["PATH", "GITEA_TOKEN", "QUEUE_BOT_TOKEN", "CARGO_REGISTRIES_X_TOKEN", "MY_SECRET"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let mut cmd = paddock_proc::command("true");
+    crate::child_env::scrub(&mut cmd, &parent);
+    let envs: BTreeMap<String, Option<String>> = cmd
+        .get_envs()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+        .collect();
+    for gone in ["GITEA_TOKEN", "QUEUE_BOT_TOKEN", "CARGO_REGISTRIES_X_TOKEN", "MY_SECRET"] {
+        assert_eq!(envs.get(gone), Some(&None), "{gone}");
+    }
+    assert!(!envs.contains_key("PATH"));
+}
+
+#[test]
+fn open_makes_its_own_clone_of_the_given_url_and_resets_a_wrong_origin() {
+    let w = World::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let url = w.repos.origin.to_str().unwrap();
+    let g = GitTrain::open(url, scratch.path(), None, false, true).unwrap();
+    assert!(
+        g.root.join(".git").exists() && g.root != w.repos.queue,
+        "a clone of its own, not the job's checkout"
+    );
+    git(&g.root, &["remote", "set-url", "origin", "https://example.invalid/evil.git"]);
+    let g = GitTrain::open(url, scratch.path(), None, false, true).unwrap();
+    assert_eq!(
+        git(&g.root, &["remote", "get-url", "origin"]),
+        url,
+        "the URL is the queue's, whatever the clone says"
+    );
+}
+
+#[test]
+fn the_train_is_pushed_under_a_lease_so_a_train_someone_else_moved_is_not_overwritten() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!() };
+    // Someone else moves the train branch.
+    let other = w.repos.branch("other", "docs/other.md");
+    git(
+        &w.repos.author,
+        &["push", "--quiet", "--force", "origin", &format!("{other}:refs/heads/train/queue")],
+    );
+    let mut g = GitTrain::for_clone(w.repos.queue.clone(), w.repos.origin.to_str().unwrap());
+    git(&w.repos.queue, &["fetch", "--quiet", "origin"]);
+    let (stale, none) = (g.push_train(&head, Some(&head)), g.push_train(&head, None));
+    assert!(stale.is_err(), "a lease on a head the branch no longer has refuses: {stale:?}");
+    assert!(none.is_err(), "no lease on an existing branch refuses: {none:?}");
+    assert_eq!(w.train_head(), other, "the other train is untouched");
+    assert!(g.push_train(&head, Some(&other)).is_ok(), "the right lease replaces it");
+}
+
+// ---- the hour --------------------------------------------------------------------------------------------------------------------
+
+#[test]
+fn the_singapore_hour_is_utc_plus_eight_from_the_clock_alone() {
+    use std::time::{Duration, UNIX_EPOCH};
+    let at = |secs: u64| super::singapore_hour(UNIX_EPOCH + Duration::from_secs(secs));
+    // 2026-11-12T15:59:59Z is 23:59:59 in Singapore; one second later it is midnight; 19:59:59Z is 03:59:59; 20:00:00Z is 04:00.
+    let day = 1_794_441_600; // 2026-11-12T00:00:00Z
+    assert_eq!(at(day + 15 * 3600 + 3599), Some(23));
+    assert_eq!(at(day + 16 * 3600), Some(0));
+    assert_eq!(at(day + 19 * 3600 + 3599), Some(3));
+    assert_eq!(at(day + 20 * 3600), Some(4));
+    assert_eq!(at(day), Some(8));
+    assert_eq!(at(0), Some(8));
+    assert!(
+        super::singapore_hour(UNIX_EPOCH - Duration::from_secs(1)).is_none(),
+        "a clock before 1970 is not measured"
+    );
+}
+
+#[test]
+fn a_held_tick_does_not_exit_zero() {
+    assert_eq!(super::exit_of(&Tick::Held(3)), paddock_cli::Exit::Refused);
+    assert_eq!(super::exit_of(&Tick::Idle("x".into())), paddock_cli::Exit::Ok);
+    assert_eq!(
+        super::exit_of(&Tick::Stuck {
+            why: "x".into(),
+            measured: false
+        }),
+        paddock_cli::Exit::NotMeasured
+    );
+    assert_eq!(
+        super::exit_of(&Tick::Stuck {
+            why: "x".into(),
+            measured: true
+        }),
+        paddock_cli::Exit::Findings
+    );
+}
+
+// ---- workflow discovery from paddock.ci.json -------------------------------------------------------------------------------------
+
+fn reaches_debrief(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({"apps": ["debrief"], "crates": false}))
+}
+fn reaches_nothing(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({"apps": [], "crates": true}))
+}
+fn reaches_everything(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({"all": true}))
+}
+
+#[test]
+fn the_reached_workflows_come_from_the_apps_paddock_ci_json_on_main_and_the_plan() {
+    let w = World::new();
+    let put = |path: &str, text: &str| {
+        let p = w.repos.author.join(path);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    };
+    git(&w.repos.author, &["checkout", "--quiet", "main"]);
+    put("apps/debrief/paddock.ci.json", "{\"workflow\": \"debrief.yml\", \"cargo\": \".\"}");
+    put("apps/pitwall/paddock.ci.json", "{\"workflow\": \"pitwall.yml\"}");
+    put("apps/demo/paddock.ci.json", "{\"cargo\": \".\"}");
+    put("apps/odd/paddock.ci.json", "{\"workflow\": \"../evil.yml\"}");
+    put("apps/broken/paddock.ci.json", "not json");
+    git(&w.repos.author, &["add", "-A"]);
+    git(&w.repos.author, &["commit", "--quiet", "-m", "chore: apps"]);
+    git(&w.repos.author, &["push", "--quiet", "origin", "main"]);
+    // A branch that renames Debrief's workflow and gives the demo one: main's files decide, not the pull request's.
+    git(&w.repos.author, &["checkout", "--quiet", "-B", "evil", "main"]);
+    put("apps/debrief/paddock.ci.json", "{\"workflow\": \"evil.yml\"}");
+    put("apps/demo/paddock.ci.json", "{\"workflow\": \"demo.yml\"}");
+    git(&w.repos.author, &["add", "-A"]);
+    git(&w.repos.author, &["commit", "--quiet", "-m", "feat: evil"]);
+    git(&w.repos.author, &["push", "--quiet", "origin", "evil"]);
+    let scratch = tempfile::tempdir().unwrap();
+    let mut g = GitTrain::open(w.repos.origin.to_str().unwrap(), scratch.path(), None, false, true).unwrap();
+    g.fetch(&["main".into(), "evil".into()]).unwrap();
+    let (main, evil) = (g.main_head().unwrap(), w.repos.origin_ref("refs/heads/evil"));
+    g.planner = reaches_debrief;
+    assert_eq!(g.reached_workflows(&main, &evil).unwrap(), vec!["ci.yml", "debrief.yml"]);
+    g.planner = reaches_nothing;
+    assert_eq!(g.reached_workflows(&main, &evil).unwrap(), vec!["ci.yml"]);
+    g.planner = reaches_everything;
+    assert_eq!(
+        g.reached_workflows(&main, &evil).unwrap(),
+        vec!["ci.yml", "debrief.yml", "pitwall.yml"]
+    );
+}
+
+#[test]
+fn the_pure_workflow_selection_follows_the_plan_and_ignores_names_that_are_not_files_of_the_workflows_folder() {
+    let apps: BTreeMap<String, String> = [("debrief", "debrief.yml"), ("dyno", "dyno.yml")]
+        .iter()
+        .map(|(a, w)| (a.to_string(), w.to_string()))
+        .collect();
+    assert_eq!(real::select_workflows(&apps, &set(&["debrief"])), vec!["ci.yml", "debrief.yml"]);
+    assert_eq!(real::select_workflows(&apps, &set(&[])), vec!["ci.yml"]);
+    assert_eq!(
+        real::select_workflows(&apps, &set(&["*"])),
+        vec!["ci.yml", "debrief.yml", "dyno.yml"]
+    );
+    let tree = "apps/a\napps/b\nnot-apps/c\n";
+    let found = real::app_workflows(tree, &mut |p| match p {
+        "apps/a/paddock.ci.json" => Some("{\"workflow\": \"a.yml\"}".into()),
+        "apps/b/paddock.ci.json" => Some("{\"workflow\": \"sub/b.yml\"}".into()),
+        _ => None,
+    });
+    assert_eq!(found.into_iter().collect::<Vec<_>>(), vec![("a".to_string(), "a.yml".to_string())]);
+}
+
+// ---- blocked trains, closed holds, cancelled runs, resume ---------------------------------------------------------------------
+
+#[test]
+fn a_train_that_fails_only_on_mains_own_tests_is_blocked_not_triaged_again_and_a_fix_gets_through() {
+    let mut w = World::new();
+    let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
+    w.run(&head, 9100, RunState::Failed("failure".into()));
+    w.ci.failures.insert(9100, vec![failure("x t", &["x"], Blame::OnMain)]);
+    assert!(matches!(w.tick(), Tick::Stuck { measured: true, .. }));
+    assert_eq!(w.labels_of(1), vec!["state/in-train", "queue/blocked"]);
+    assert_eq!(w.comments_of(1).len(), 1);
+    // The next ticks do not triage (the failures are no longer even scripted) and do not comment again.
+    w.ci.failures.clear();
+    for _ in 0..3 {
+        let t = w.tick();
+        assert!(matches!(&t, Tick::Stuck { why, .. } if why.contains("blocked")), "{t:?}");
+    }
+    assert_eq!(w.comments_of(1).len(), 1);
+    // A pull request that fixes main is approved: the train is released and everything is built together.
+    w.approved(2, "docs/fix.md", &["docs"]);
+    assert!(matches!(w.tick(), Tick::Idle(_)));
+    assert_eq!(w.labels_of(1), vec!["state/approved"]);
+    let Tick::Built { prs, .. } = w.tick() else { panic!() };
+    assert_eq!(prs, vec![1, 2]);
+    assert_eq!(w.labels_of(1), vec!["state/in-train"], "the blocked mark is gone");
+}
+
+#[test]
+fn a_blocked_train_is_rebuilt_when_main_moves_and_unhold_makes_it_triage_afresh() {
+    let mut w = World::new();
+    let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
+    w.run(&head, 9100, RunState::Failed("failure".into()));
+    w.ci.failures.insert(9100, vec![failure("x t", &["x"], Blame::OnMain)]);
+    w.tick();
+    // unhold clears the blocked mark: the failed run is judged again, not rerun blindly.
+    let mut api_http = std::mem::take(&mut w.gitea);
+    {
+        let mut l = GiteaLedger {
+            api: Api::new(&mut api_http, FakeGitea::SERVER, FakeGitea::REPO, "t"),
+            known: w.known.clone(),
+        };
+        assert_eq!(super::unhold(&mut l).unwrap(), vec![1]);
+    }
+    w.gitea = api_http;
+    assert_eq!(w.labels_of(1), vec!["state/in-train"]);
+    w.ci.failures.insert(9100, vec![failure("x t", &["x"], Blame::New)]);
+    assert!(matches!(w.tick(), Tick::Dropped { .. }), "triaged afresh: now it is new");
+    // And a blocked train whose main moved is rebuilt.
+    let mut w = World::new();
+    let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
+    w.run(&head, 9100, RunState::Failed("failure".into()));
+    w.ci.failures.insert(9100, vec![failure("x t", &["x"], Blame::OnMain)]);
+    w.tick();
+    w.repos.branch("hand", "docs/hand.md");
+    git(&w.repos.author, &["push", "--quiet", "origin", "hand:main"]);
+    let Tick::Built { head: new, .. } = w.tick() else {
+        panic!("rebuilt on the new main")
+    };
+    assert_ne!(new, head);
+    assert_eq!(w.labels_of(1), vec!["state/in-train"]);
+}
+
+#[test]
+fn a_hold_does_not_outlive_its_closed_pull_request() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    w.approved(2, "ui/b.ts", &["ui"]);
+    set_labels(&mut w, 2, &["state/approved", "queue/hold"]);
+    assert_eq!(w.tick(), Tick::Held(2));
+    w.gitea.pulls.iter_mut().find(|p| p["number"] == 2).unwrap()["state"] = serde_json::json!("closed");
+    let Tick::Built { prs, .. } = w.tick() else {
+        panic!("the queue runs again")
+    };
+    assert_eq!(prs, vec![1]);
+    assert_eq!(w.labels_of(2), vec!["state/approved"], "the hold is released");
+    assert!(w.comments_of(2).join("\n").contains("closed"));
+}
+
+#[test]
+fn a_cancelled_run_stops_the_queue_and_is_never_triaged_or_blamed() {
+    let mut w = World::new();
+    let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
+    w.run(&head, 9200, RunState::Failed("cancelled".into()));
+    // Nothing is scripted for triage: a tick that triaged a cancelled run would fail here.
+    let t = w.tick();
+    assert!(
+        matches!(&t, Tick::Stuck { why, measured: true } if why.contains("cancelled")),
+        "{t:?}"
+    );
+    assert_eq!(w.labels_of(1), vec!["state/in-train"]);
+}
+
+#[test]
+fn a_train_whose_main_moved_is_rebuilt_even_when_its_pull_requests_did_not_change() {
+    let mut w = World::new();
+    let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
+    w.green("ci.yml", &head, 8001);
+    // Only main moves (by hand): the marker and the pull request heads are all still right.
+    w.repos.branch("hand", "docs/hand.md");
+    git(&w.repos.author, &["push", "--quiet", "origin", "hand:main"]);
+    let before = w.repos.origin_ref("refs/heads/main");
+    let Tick::Built { head: new, prs, .. } = w.tick() else {
+        panic!("a green run of the old train is not a landing")
+    };
+    assert_ne!(new, head);
+    assert_eq!(prs, vec![1]);
+    assert_eq!(
+        w.repos.origin_ref("refs/heads/main"),
+        before,
+        "the old tested train did not land on a main it does not contain"
+    );
+}
+
+// ---- the gates the tick no longer runs are jobs of the dispatched workflow ------------------------------------------------------------
+
+fn job_block(yml: &str, job: &str) -> String {
+    let head = format!("\n  {job}:\n");
+    let start = yml.find(&head).unwrap_or_else(|| panic!("ci.yml has no job {job}")) + 1;
+    let rest = &yml[start..];
+    let end = rest[head.len() - 1..]
+        .find("\n  ")
+        .and_then(|_| {
+            // The next job starts at a line indented by exactly two spaces that is a key.
+            rest.lines()
+                .skip(1)
+                .scan(rest.lines().next().map_or(0, |l| l.len() + 1), |off, l| {
+                    let at = *off;
+                    *off += l.len() + 1;
+                    Some((at, l))
+                })
+                .find(|(_, l)| {
+                    l.len() > 2
+                        && l.starts_with("  ")
+                        && !l.starts_with("   ")
+                        && l.trim_end().ends_with(':')
+                        && !l.trim_start().starts_with('#')
+                })
+                .map(|(at, _)| at)
+        })
+        .unwrap_or(rest.len());
+    rest[..end].to_string()
+}
+
+#[test]
+fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a_token() {
+    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let gates = job_block(ci, "train-gates");
+    for needle in [
+        "./dev gates check",
+        "paddock-conformance.mjs --app paddock",
+        "cargo hakari generate --diff",
+        "cargo metadata --locked --format-version 1",
+        "node scripts/publish.mjs --skip-build --offline",
+        "github.event.inputs.base != ''",
+        "needs: [plan]",
+    ] {
+        assert!(gates.contains(needle), "train-gates lacks `{needle}`:\n{gates}");
+    }
+    assert!(
+        !gates.contains("secrets.") && !gates.to_lowercase().contains("token"),
+        "the gates job holds no token"
+    );
+    // The conformance line is the conformance job's, word for word.
+    let line = |block: &str| {
+        block
+            .lines()
+            .find(|l| l.contains("paddock-conformance.mjs --app paddock"))
+            .map(|l| l.trim().to_string())
+    };
+    assert_eq!(line(&gates), line(&job_block(ci, "conformance")));
+    // The commit lint is the commits job, which runs on every dispatch.
+    assert!(job_block(ci, "commits").contains("commit-lint"));
+    // The planner's table knows the job, so a rerun of its failure plans it.
+    assert!(crate::plan_gitea::CI_JOBS.iter().any(|(j, _)| *j == "train-gates"));
 }

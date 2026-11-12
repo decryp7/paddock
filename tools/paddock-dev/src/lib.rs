@@ -29,6 +29,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod check;
+pub mod child_env;
 pub mod ci_isolation;
 pub mod ci_runs;
 mod cli;

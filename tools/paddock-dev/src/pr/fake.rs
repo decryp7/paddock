@@ -95,6 +95,26 @@ impl Http for FakeGitea {
         if path.starts_with("/labels?") {
             return Ok(self.page(self.labels.clone(), url));
         }
+        if let Some(rest) = path.strip_prefix("/issues/") {
+            let n: u64 = rest.parse().map_err(|_| not_found(url))?;
+            return self.pulls.iter().find(|p| p["number"] == n).cloned().ok_or_else(|| not_found(url));
+        }
+        if let Some(rest) = path.strip_prefix("/issues?") {
+            let q = |k: &str| rest.split('&').find_map(|p| p.strip_prefix(&format!("{k}=")));
+            let (state, label) = (q("state").unwrap_or("open"), q("labels").unwrap_or("").replace("%2F", "/"));
+            let items = self
+                .pulls
+                .iter()
+                .filter(|p| p["state"] == state)
+                .filter(|p| {
+                    p["labels"]
+                        .as_array()
+                        .is_some_and(|l| l.iter().any(|x| x["name"] == label.as_str()))
+                })
+                .cloned()
+                .collect();
+            return Ok(self.page(items, url));
+        }
         if let Some(rest) = path.strip_prefix("/pulls/") {
             let n: u64 = rest.split('/').next().and_then(|n| n.parse().ok()).ok_or_else(|| not_found(url))?;
             if rest[n.to_string().len()..].starts_with("/reviews") {

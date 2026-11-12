@@ -137,6 +137,33 @@ const SKIP_DIR = new Set(['node_modules', 'target', '.git', 'tests', 'fixtures',
 const SOURCE = /\.(?:mjs|js|sh|rs|py|ts|yml|yaml)$/;
 const TEST_FILE = /\.test\.(?:mjs|js|ts|sh)$/;
 
+/** Every source file under `dirs` of `root`: [relative path, text]. */
+function sources(root, dirs) {
+  const out = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) {
+        if (!SKIP_DIR.has(name)) walk(p);
+      } else if (SOURCE.test(name) && !TEST_FILE.test(name)) {
+        out.push([relative(root, p).split('\\').join('/'), readFileSync(p, 'utf8')]);
+      }
+    }
+  };
+  for (const d of dirs) if (existsSync(join(root, d))) walk(join(root, d));
+  return out;
+}
+
+const DIRS = ['conformance/ci', 'conformance/src', 'scripts', 'tools', '.gitea'];
+
+/** Files that carry a `ci-runs-reader:` marker but no longer read the runs API: the excuse outlived the reason. */
+export function staleMarkers(root, dirs = DIRS) {
+  return sources(root, dirs)
+    .filter(([, text]) => MARKER.test(text) && !READER.test(text))
+    .map(([rel]) => rel)
+    .sort();
+}
+
 /** The source files under `dirs` of `root` whose text reads the runs API and are not in `allowed`. */
 export function secondReaders(root, dirs = ['conformance/ci', 'conformance/src', 'scripts', 'tools', '.gitea']) {
   const found = [];
@@ -178,4 +205,18 @@ test('the scan sees a second reader (positive control)', async () => {
     'scripts/ident.rs': 'let commit_workflow_runs = 1;\n',
   });
   assert.deepEqual(secondReaders(root, ['scripts']), ['scripts/bad.mjs', 'scripts/inline.mjs', 'scripts/rust-bad.rs', 'scripts/short.mjs']);
+});
+
+test('no marker outlives the read it excuses (a marker in a file that no longer reads the runs is an error)', () => {
+  assert.deepEqual(staleMarkers(PADDOCK), [], 'remove the `ci-runs-reader:` line from these files: they no longer read the Actions runs API');
+});
+
+test('the stale-marker scan sees a marker without a read (positive control)', async () => {
+  const { makeApp } = await import('./helpers.mjs');
+  const root = makeApp({
+    'scripts/stale.mjs': '// ci-runs-reader: used to download the artifacts of a run\nconsole.log(1);\n',
+    'scripts/live.mjs': '// ci-runs-reader: downloads the artifacts of one run\nactions/runs\n',
+    'scripts/none.mjs': 'console.log(2);\n',
+  });
+  assert.deepEqual(staleMarkers(root, ['scripts']), ['scripts/stale.mjs']);
 });

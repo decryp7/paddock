@@ -85,6 +85,8 @@ impl Pull {
 /// One review of a pull request, as far as the queue reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Review {
+    /// The review's id (reviews are ordered by it, whatever order the server lists them in).
+    pub id: u64,
     /// The reviewer's login.
     pub reviewer: String,
     /// `APPROVED`, `REQUEST_CHANGES`, `COMMENT`, `PENDING`.
@@ -93,16 +95,23 @@ pub struct Review {
     pub commit_id: String,
     /// Whether it was dismissed.
     pub dismissed: bool,
+    /// Whether the server counts it (Gitea: the reviewer may review here, a write-access account listed as a reviewer); a
+    /// review from anyone else is advice, never an approval.
+    pub official: bool,
 }
 
-/// Whether the reviews approve exactly `head`: some reviewer's last decisive (approving or requesting changes, not dismissed)
-/// review is an approval made on `head`, and no reviewer's last decisive review requests changes. Reviews come oldest first.
-pub fn approved_at(reviews: &[Review], head: &str) -> bool {
-    let mut last: std::collections::BTreeMap<&str, &Review> = std::collections::BTreeMap::new();
-    for r in reviews
+/// Whether the reviews approve exactly `head`: counting only official reviews of accounts not in `excluded` (the queue's own
+/// bots), in id order, some reviewer's last decisive (approving or requesting changes, not dismissed) review is an approval made
+/// on `head`, and no reviewer's last decisive review requests changes.
+pub fn approved_at(reviews: &[Review], head: &str, excluded: &[&str]) -> bool {
+    let mut sorted: Vec<&Review> = reviews
         .iter()
-        .filter(|r| !r.dismissed && matches!(r.state.as_str(), "APPROVED" | "REQUEST_CHANGES"))
-    {
+        .filter(|r| r.official && !r.dismissed && !excluded.contains(&r.reviewer.as_str()))
+        .filter(|r| matches!(r.state.as_str(), "APPROVED" | "REQUEST_CHANGES"))
+        .collect();
+    sorted.sort_by_key(|r| r.id);
+    let mut last: std::collections::BTreeMap<&str, &Review> = std::collections::BTreeMap::new();
+    for r in sorted {
         last.insert(r.reviewer.as_str(), r);
     }
     !head.is_empty() && last.values().all(|r| r.state == "APPROVED") && last.values().any(|r| r.commit_id == head)
@@ -214,11 +223,33 @@ impl<'a> Api<'a> {
             .pages(&format!("/pulls/{number}/reviews"))?
             .iter()
             .map(|v| Review {
+                id: v["id"].as_u64().unwrap_or(0),
+                official: v["official"].as_bool().unwrap_or(false),
                 reviewer: v["user"]["login"].as_str().unwrap_or("").to_string(),
                 state: v["state"].as_str().unwrap_or("").to_string(),
                 commit_id: v["commit_id"].as_str().unwrap_or("").to_string(),
                 dismissed: v["dismissed"].as_bool().unwrap_or(false),
             })
+            .collect())
+    }
+
+    /// The names of the labels of issue (or pull request, open or closed) `number`.
+    pub fn issue_labels(&mut self, number: u64) -> Result<Vec<String>, String> {
+        let url = format!("{}/issues/{number}", self.root);
+        let v = self.http.get_json(&url, &self.token)?;
+        Ok(v["labels"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|l| l["name"].as_str().map(str::to_string)).collect())
+            .unwrap_or_default())
+    }
+
+    /// The numbers of closed pull requests that carry `label`.
+    pub fn closed_with_label(&mut self, label: &str) -> Result<Vec<u64>, String> {
+        let enc = label.replace('/', "%2F");
+        Ok(self
+            .pages(&format!("/issues?state=closed&type=pulls&labels={enc}"))?
+            .iter()
+            .filter_map(|v| v["number"].as_u64())
             .collect())
     }
 

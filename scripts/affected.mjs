@@ -113,6 +113,7 @@ export const CI_JOBS = {
   crates: ['crates'],
   crate: ['crates'],
   commits: ['tools'], // pull requests only; the tools job checks the rest of the file's contract
+  'train-gates': ['tools'], // a train's dispatch run (the merge queue's local gates, docs/plans/merge-queue.md)
   app: ['apps'],
   'paddock-dev': ['paddock-dev'],
 };

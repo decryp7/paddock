@@ -90,3 +90,9 @@ name = "queue/hold"
 color = "#ededed"
 description = "On any pull request: the merge queue stops after reading the ledger (no build, dispatch or landing) until it is removed"
 exclusive = false
+
+[[label]]
+name = "queue/blocked"
+color = "#ededed"
+description = "On the pull requests of a train whose run failed only in tests that also fail on main; the queue waits for main to move or another pull request to be approved"
+exclusive = false

@@ -1,7 +1,8 @@
 //! `queue tick|hold|unhold`: one step of the merge queue (docs/plans/merge-queue.md, slices 1 to 4 without rule 54, plan-status and the
 //! tags). Reads `GITEA_TOKEN` (queue-bot's, with write on the repository; the queue never pushes tags).
 //!
-//! - [`ports`]: the four ports (ledger, train repository, local gates, CI);
+//! - [`ports`]: the three ports (ledger, train repository, CI); the tick runs no code of any pull request, so there are no local
+//!   gates: they are the first jobs of the dispatched workflow;
 //! - [`tick`]: the pure state machine over them;
 //! - [`real`]: the adapters over Gitea, git, `ci dispatch`, `ci verdict` and `ci triage`.
 
@@ -64,16 +65,17 @@ pub fn hold(ledger: &mut dyn ports::Ledger, number: u64) -> Result<(), String> {
     ledger.relabel(number, &["+queue/hold"])
 }
 
-/// Removes `queue/hold` from every open pull request that has it; returns their numbers.
+/// Removes `queue/hold` and `queue/blocked` from every open pull request that has them; returns their numbers. A blocked train
+/// is judged again on the next tick (its failed run is triaged afresh), never rerun blindly.
 pub fn unhold(ledger: &mut dyn ports::Ledger) -> Result<Vec<u64>, String> {
     let held: Vec<u64> = ledger
         .open_pulls()?
         .iter()
-        .filter(|p| p.labels.iter().any(|l| l == ports::label::HOLD))
+        .filter(|p| p.labels.iter().any(|l| l == ports::label::HOLD || l == ports::label::BLOCKED))
         .map(|p| p.number)
         .collect();
     for n in &held {
-        ledger.relabel(*n, &["-queue/hold"])?;
+        ledger.relabel(*n, &["-queue/hold", "-queue/blocked"])?;
     }
     Ok(held)
 }
@@ -87,24 +89,40 @@ pub struct TickArgs {
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,
-    /// The queue's checkout (default: the folder containing .git, found from the current folder). It is reset to the train.
+    /// A checkout of main holding `.gitea/labels.toml` and the workflow files (default: found from the current folder). It is only
+    /// read: the queue merges in its own clone under --scratch.
     #[arg(long)]
     root: Option<PathBuf>,
-    /// The Asia/Singapore hour for the backup window (default: read from `date` with TZ=Asia/Singapore).
+    /// The folder of the queue's own clone, its planner checkout and its askpass program (kept between ticks, never the job's
+    /// checkout).
+    #[arg(long)]
+    scratch: PathBuf,
+    /// The repository's clone URL (default: <server>/<repo>.git).
+    #[arg(long)]
+    clone_url: Option<String>,
+    /// Also give the token to clone and fetch (a private repository); by default only the push gets it.
+    #[arg(long)]
+    authenticated_fetch: bool,
+    /// The Asia/Singapore hour for the backup window (default: the system clock plus 8 hours; no `date`, no time zone database).
     #[arg(long, value_parser = clap::value_parser!(u32).range(0..24))]
     hour: Option<u32>,
 }
 
-/// The hour in Asia/Singapore, whatever the runner's time zone; `None` when `date` cannot say (the queue then neither
-/// dispatches nor lands).
-fn singapore_hour() -> Option<u32> {
-    let out = paddock_proc::command("date")
-        .env("TZ", "Asia/Singapore")
-        .arg("+%H")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    String::from_utf8_lossy(&out.stdout).trim().parse().ok().filter(|h| *h < 24)
+/// The hour (0-23) in Asia/Singapore at `now`: UTC plus 8 hours, the zone has no daylight saving. `None` for a clock before 1970.
+pub fn singapore_hour(now: std::time::SystemTime) -> Option<u32> {
+    let secs = now.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    u32::try_from(((secs + 8 * 3600) / 3600) % 24).ok()
+}
+
+/// The exit code of a tick: a held queue did nothing on purpose (not a success for a script that expects a step), a stuck one
+/// needs a person, and one that could not measure something never reads as a pass.
+pub fn exit_of(t: &tick::Tick) -> Exit {
+    match t {
+        tick::Tick::Stuck { measured: false, .. } => Exit::NotMeasured,
+        tick::Tick::Stuck { .. } => Exit::Findings,
+        tick::Tick::Held(_) => Exit::Refused,
+        _ => Exit::Ok,
+    }
 }
 
 /// Runs one `queue` command.
@@ -122,8 +140,14 @@ pub fn command(c: QueueCommand) -> Result<Report, CliError> {
                 api: crate::pr::gitea::Api::new(&mut http_pr, &a.server, &a.repo, &token),
                 known,
             };
-            let mut train = real::GitTrain::new(root.clone(), Some(token.clone()));
-            let mut gates = real::LocalGates { root: root.clone() };
+            let url = a
+                .clone_url
+                .clone()
+                .unwrap_or_else(|| format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo));
+            let mut train = real::GitTrain::open(&url, &a.scratch, Some(token.clone()), a.authenticated_fetch, false).map_err(|e| {
+                CliError::failure(format!("queue tick: {e}"))
+                    .with_hint("The queue clones the repository itself; check --scratch and the URL.")
+            })?;
             let mut ci = real::GiteaCi {
                 server: a.server.clone(),
                 repo: a.repo.clone(),
@@ -135,21 +159,16 @@ pub fn command(c: QueueCommand) -> Result<Report, CliError> {
             let mut ports = tick::Ports {
                 ledger: &mut ledger,
                 train: &mut train,
-                gates: &mut gates,
                 ci: &mut ci,
             };
             let env = tick::Env {
-                hour: a.hour.or_else(singapore_hour),
+                hour: a.hour.or_else(|| singapore_hour(std::time::SystemTime::now())),
             };
             let t = tick::tick(&mut ports, &env).map_err(|e| {
                 CliError::failure(format!("queue tick: {e}"))
                     .with_hint("Check the network, GITEA_TOKEN's scope and the checkout; the next tick starts from the labels.")
             })?;
-            let exit = match &t {
-                tick::Tick::Stuck { measured: false, .. } => Exit::NotMeasured,
-                tick::Tick::Stuck { .. } => Exit::Findings,
-                _ => Exit::Ok,
-            };
+            let exit = exit_of(&t);
             let text = t.text();
             if exit != Exit::Ok {
                 eprintln!("{text}");

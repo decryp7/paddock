@@ -1,11 +1,16 @@
 // ci-runs-reader: the queue lists the runs of its train head (running, finished, failed) to take its next step; the landing verdict is ./dev ci verdict (ci_runs::verdict)
-//! The real adapters of the queue's ports: Gitea through [`crate::pr::gitea::Api`], git in the queue's working copy, the local
-//! gates through this tool and the conformance line of ci.yml, and CI through `ci dispatch`, `ci verdict` and `ci triage`.
-//! No logic of the queue lives here; the decisions are in [`super::tick`].
+//! The real adapters of the queue's ports: Gitea through [`crate::pr::gitea::Api`], git in the queue's own clone, and CI through
+//! `ci dispatch`, `ci verdict` and `ci triage`. No logic of the queue lives here; the decisions are in [`super::tick`].
+//!
+//! **No code of a pull request runs in this process or in any child of it.** git runs with hooks off (`core.hooksPath=/dev/null`),
+//! no file transport (`protocol.file.allow=never`), no global or system configuration and no filter driver (a fresh clone has
+//! none, and the repository cannot define one); the merges are made in the queue's own clone of an explicit URL, never in the job's
+//! checkout; no cargo, node or npm runs from the merged tree (the planner runs in a checkout of `main`); and the token reaches
+//! exactly one child, the push, through a `GIT_ASKPASS` program scoped to that command. The local gates (conformance, gate
+//! register, commit lint, workspace hack, publish dry run, cargo metadata) are jobs of the dispatched workflow, which runs
+//! without the queue's token.
 
-use super::ports::{
-    Blame, Built, Ci, CiRun, Failure, GateFailure, GateOutcome, Gates, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train,
-};
+use super::ports::{Blame, Built, Ci, CiRun, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train};
 use crate::ci_runs::client::Client;
 use crate::ci_runs::triage::{self, Status, Test};
 use crate::ci_runs::verdict::{self, Verdict};
@@ -14,6 +19,7 @@ use crate::pr::gitea::{Api, Pull, approved_at};
 use crate::pr::labels::{self, LabelSpec};
 use crate::wait::Http;
 use paddock_cli::{CliError, Report};
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -91,13 +97,10 @@ impl Ledger for GiteaLedger<'_> {
     fn relabel(&mut self, number: u64, changes: &[&str]) -> Result<(), String> {
         let words: Vec<String> = changes.iter().map(|s| s.to_string()).collect();
         let changes = labels::parse_changes(&words)?;
-        let now = self
-            .api
-            .pulls("open")?
-            .into_iter()
-            .find(|p| p.number == number)
-            .ok_or_else(|| format!("#{number} is not open"))?;
-        let after = labels::apply(&now.labels, &changes, &self.known)?;
+        // Read through the issue, so a closed pull request works too, and just before the write: the change merges into what the
+        // labels are now, never replaces them (a `queue/hold` set in between survives).
+        let now = self.api.issue_labels(number)?;
+        let after = labels::apply(&now, &changes, &self.known)?;
         let server = self.api.labels()?;
         let ids = after
             .iter()
@@ -112,14 +115,21 @@ impl Ledger for GiteaLedger<'_> {
         self.api.set_labels(number, &ids).map(|_| ())
     }
 
+    fn closed_held(&mut self) -> Result<Vec<u64>, String> {
+        self.api.closed_with_label("queue/hold")
+    }
+
     fn comment(&mut self, number: u64, text: &str) -> Result<(), String> {
         self.api.comment(number, text)
     }
 
     fn approved_head(&mut self, number: u64, head: &str) -> Result<bool, String> {
-        Ok(approved_at(&self.api.reviews(number)?, head))
+        Ok(approved_at(&self.api.reviews(number)?, head, APPROVAL_EXCLUDED))
     }
 }
+
+/// Accounts whose reviews never count as an approval: the bots that run the queue and the releases.
+pub const APPROVAL_EXCLUDED: &[&str] = &["queue-bot", "release-bot"];
 
 /// How triage's answer for a failed test counts for blame: flaky is still red (ER-12), so it is blamed, unless the same test also
 /// failed on the baseline run (then it is main's).
@@ -135,49 +145,151 @@ pub fn blame_of(status: &Status) -> Blame {
     }
 }
 
-/// git in the queue's working copy, as queue-bot.
-pub struct GitTrain {
-    /// The checkout.
-    pub root: PathBuf,
-    /// The token for the calls that talk to the server (fetch, push), passed to git in the environment (`GIT_CONFIG_*`, never an
-    /// argument). `None` in the tokenless half, which needs the branches already fetched.
-    pub token: Option<String>,
-    /// The merge check; [`crate::merge_check::command`] outside the tests.
-    pub merge_check: MergeCheckFn,
+/// How a git child is started: with no token at all, or as the one push that gets it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Child {
+    /// Everything but the push: no token in its environment.
+    Local,
+    /// The push (and the fetch, when asked): `GIT_ASKPASS` answers with the token, for this child only.
+    Authed,
 }
+
+/// The planner as the train asks it: the projects `main..head` reaches, run from a checkout of `main` (never of the pull request).
+pub type PlannerFn = fn(trusted: &Path, main: &str, head: &str) -> Result<serde_json::Value, String>;
 
 /// The merge check as the train builder calls it.
 pub type MergeCheckFn = fn(&crate::merge_check::Request) -> Result<Report, CliError>;
 
-impl GitTrain {
-    /// The real one.
-    pub fn new(root: PathBuf, token: Option<String>) -> GitTrain {
-        GitTrain {
-            root,
-            token,
-            merge_check: crate::merge_check::command,
-        }
-    }
+/// git in the queue's own clone, as queue-bot.
+pub struct GitTrain {
+    /// The clone the merges are made in.
+    pub root: PathBuf,
+    /// A checkout of `main` for the planner (a worktree of the clone); `None` where the planner is not used.
+    pub trusted: Option<PathBuf>,
+    /// The explicit URL of the repository (`origin` is set to it, whatever the job's checkout says).
+    pub url: String,
+    /// The token for the push (and the fetch with `authed_fetch`); `None` for a queue that cannot push.
+    pub token: Option<String>,
+    /// Whether fetch and clone also get the token (a private repository); the default reads without it.
+    pub authed_fetch: bool,
+    /// Whether the `file` transport is allowed (a local path as URL: the tests; never in production).
+    pub allow_file: bool,
+    /// The folder of the askpass program.
+    pub scratch: PathBuf,
+    /// The merge check; [`crate::merge_check::command`] outside the tests.
+    pub merge_check: MergeCheckFn,
+    /// The planner; [`run_planner`] outside the tests.
+    pub planner: PlannerFn,
 }
 
-const IDENT: [&str; 4] = ["-c", "user.name=queue-bot", "-c", "user.email=queue-bot@dev.decryptology.net"];
-
 impl GitTrain {
-    fn command(&self, authed: bool) -> std::process::Command {
+    /// The queue's clone of `url` under `scratch` (made once, then fetched into), and a worktree of `main` beside it for the
+    /// planner. Nothing here is the job's own checkout, and nothing in it ever runs.
+    pub fn open(url: &str, scratch: &Path, token: Option<String>, authed_fetch: bool, allow_file: bool) -> Result<GitTrain, String> {
+        std::fs::create_dir_all(scratch).map_err(|e| format!("cannot create {}: {e}", scratch.display()))?;
+        let g = GitTrain {
+            root: scratch.join("merge"),
+            trusted: Some(scratch.join("trusted")),
+            url: url.to_string(),
+            token,
+            authed_fetch,
+            allow_file,
+            scratch: scratch.to_path_buf(),
+            merge_check: crate::merge_check::command,
+            planner: run_planner,
+        };
+        if !g.root.join(".git").exists() {
+            let kind = if authed_fetch { Child::Authed } else { Child::Local };
+            let (ok, out) = g.run_in(
+                Some(scratch),
+                kind,
+                &["clone", "--quiet", "--no-checkout", "--no-tags", url, &g.root.display().to_string()],
+            )?;
+            if !ok {
+                return Err(format!("cannot clone {url}: {}", g.redact(&out)));
+            }
+        }
+        // The URL is ours, not whatever an earlier run or the job's configuration said.
+        g.ok(&["remote", "set-url", "origin", url])?;
+        Ok(g)
+    }
+
+    /// An existing clone, for the tests (its `origin` is already right).
+    pub fn for_clone(root: PathBuf, url: &str) -> GitTrain {
+        GitTrain {
+            scratch: root.clone(),
+            root,
+            trusted: None,
+            url: url.to_string(),
+            token: None,
+            authed_fetch: false,
+            allow_file: true,
+            merge_check: crate::merge_check::command,
+            planner: run_planner,
+        }
+    }
+
+    fn redact(&self, text: &str) -> String {
+        match self.token.as_deref() {
+            Some(t) if !t.is_empty() => text.replace(t, "***"),
+            _ => text.to_string(),
+        }
+    }
+
+    /// The git child: hooks off, no file transport, no global or system configuration, no prompt, and no token unless this is the
+    /// push. `dir` is the checkout to work in (the clone when `None`).
+    pub fn command(&self, dir: Option<&Path>, kind: Child) -> std::process::Command {
         let mut c = paddock_proc::command("git");
-        c.arg("-C").arg(&self.root).args(IDENT);
-        if let (true, Some(t)) = (authed, &self.token) {
-            c.env("GIT_CONFIG_COUNT", "1")
-                .env("GIT_CONFIG_KEY_0", "http.extraheader")
-                .env("GIT_CONFIG_VALUE_0", format!("Authorization: token {t}"))
-                .env("GIT_TERMINAL_PROMPT", "0");
+        c.arg("-C").arg(dir.unwrap_or(&self.root));
+        c.args(IDENT);
+        c.args(["-c", "core.hooksPath=/dev/null"]);
+        c.args([
+            "-c",
+            if self.allow_file {
+                "protocol.file.allow=user"
+            } else {
+                "protocol.file.allow=never"
+            },
+        ]);
+        c.args([
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.sshCommand=false",
+            "-c",
+            "credential.helper=",
+        ]);
+        let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
+        scrub(&mut c, &parent);
+        if let (Child::Authed, Some(t)) = (kind, &self.token) {
+            c.env("GIT_ASKPASS", self.scratch.join("askpass.sh"))
+                .env("PADDOCK_QUEUE_PUSH_TOKEN", t);
         }
         c
     }
 
-    fn run(&self, authed: bool, args: &[&str]) -> Result<(bool, String), String> {
+    /// Writes the askpass program: it answers a username prompt with the bot's name and anything else with the token from the
+    /// environment of the one child it runs for.
+    fn ensure_askpass(&self) -> Result<(), String> {
+        let path = self.scratch.join("askpass.sh");
+        let body =
+            "#!/bin/sh\ncase \"$1\" in\n  Username*) echo queue-bot ;;\n  *) printf '%s\\n' \"$PADDOCK_QUEUE_PUSH_TOKEN\" ;;\nesac\n";
+        std::fs::write(&path, body).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("cannot protect the askpass program: {e}"))?;
+        }
+        Ok(())
+    }
+
+    fn run_in(&self, dir: Option<&Path>, kind: Child, args: &[&str]) -> Result<(bool, String), String> {
+        if kind == Child::Authed {
+            self.ensure_askpass()?;
+        }
         let out = self
-            .command(authed)
+            .command(dir, kind)
             .args(args)
             .output()
             .map_err(|e| format!("cannot start git: {e}"))?;
@@ -189,7 +301,7 @@ impl GitTrain {
     }
 
     fn git(&self, args: &[&str]) -> Result<(bool, String), String> {
-        self.run(false, args)
+        self.run_in(None, Child::Local, args)
     }
 
     fn ok(&self, args: &[&str]) -> Result<String, String> {
@@ -201,18 +313,83 @@ impl GitTrain {
         }
     }
 
-    fn ok_authed(&self, args: &[&str]) -> Result<String, String> {
-        let (ok, out) = self.run(true, args)?;
+    fn ok_kind(&self, kind: Child, args: &[&str]) -> Result<String, String> {
+        let (ok, out) = self.run_in(None, kind, args)?;
         if ok {
             Ok(out)
         } else {
-            Err(format!(
-                "git {} failed: {}",
-                args.first().unwrap_or(&""),
-                out.replace(self.token.as_deref().unwrap_or("\u{0}"), "***").trim()
-            ))
+            Err(format!("git {} failed: {}", args.first().unwrap_or(&""), self.redact(out.trim())))
         }
     }
+
+    /// A checkout of `main` for the planner: the worktree beside the clone, moved to `main`. The planner reads the pull request's
+    /// changes through git; it never runs from the pull request's tree.
+    fn trusted_main(&self, main: &str) -> Result<PathBuf, String> {
+        let dir = self
+            .trusted
+            .clone()
+            .ok_or_else(|| "this train has no checkout of main for the planner".to_string())?;
+        if !dir.join(".git").exists() {
+            self.ok(&["worktree", "add", "--force", "--detach", &dir.display().to_string(), main])?;
+        } else {
+            let (ok, out) = self.run_in(Some(&dir), Child::Local, &["checkout", "--quiet", "--force", "--detach", main])?;
+            if !ok {
+                return Err(format!("cannot move the planner's checkout to {main}: {}", out.trim()));
+            }
+        }
+        Ok(dir)
+    }
+
+    fn fetch_kind(&self) -> Child {
+        if self.authed_fetch { Child::Authed } else { Child::Local }
+    }
+}
+
+const IDENT: [&str; 4] = ["-c", "user.name=queue-bot", "-c", "user.email=queue-bot@dev.decryptology.net"];
+
+/// The planner as a child of this tool in `trusted` (a checkout of main), without the queue's token.
+pub fn run_planner(trusted: &Path, main: &str, head: &str) -> Result<serde_json::Value, String> {
+    let me = std::env::current_exe().map_err(|e| format!("cannot find this program: {e}"))?;
+    let mut c = paddock_proc::command(me);
+    c.args(["plan", main, head]).current_dir(trusted);
+    let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
+    scrub(&mut c, &parent);
+    let out = c.output().map_err(|e| format!("cannot start the planner: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "the planner failed on {main}..{head}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("the planner's answer is not JSON: {e}"))
+}
+
+pub use crate::child_env::scrub;
+
+/// `(app, workflow)` of every app whose `paddock.ci.json` names its own workflow, as `main` has it.
+pub fn app_workflows(ls_tree: &str, show: &mut dyn FnMut(&str) -> Option<String>) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for line in ls_tree.lines() {
+        let Some(app) = line.strip_prefix("apps/") else { continue };
+        let wf = show(&format!("apps/{app}/paddock.ci.json"))
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v["workflow"].as_str().map(str::to_string));
+        if let Some(wf) = wf.filter(|w| !w.is_empty() && w.ends_with(".yml") && !w.contains('/')) {
+            out.insert(app.to_string(), wf);
+        }
+    }
+    out
+}
+
+/// `ci.yml`, then each app workflow whose app the plan reaches (all of them when the plan runs everything).
+pub fn select_workflows(apps: &BTreeMap<String, String>, reached: &BTreeSet<String>) -> Vec<String> {
+    let mut out = vec!["ci.yml".to_string()];
+    for (app, wf) in apps {
+        if (reached.contains("*") || reached.contains(&norm(app))) && !out.contains(wf) {
+            out.push(wf.clone());
+        }
+    }
+    out
 }
 
 fn marker_text(m: &Marker) -> String {
@@ -245,16 +422,22 @@ pub fn parse_marker(message: &str) -> Option<Marker> {
 impl Train for GitTrain {
     fn fetch(&mut self, branches: &[String]) -> Result<(), String> {
         for b in branches.iter().filter(|b| b.as_str() != TRAIN_BRANCH) {
-            self.ok_authed(&[
-                "fetch",
-                "--quiet",
-                "--no-tags",
-                "origin",
-                &format!("+refs/heads/{b}:refs/remotes/origin/{b}"),
-            ])?;
+            self.ok_kind(
+                self.fetch_kind(),
+                &[
+                    "fetch",
+                    "--quiet",
+                    "--no-tags",
+                    "origin",
+                    &format!("+refs/heads/{b}:refs/remotes/origin/{b}"),
+                ],
+            )?;
         }
         let spec = format!("+refs/heads/{TRAIN_BRANCH}:refs/remotes/origin/{TRAIN_BRANCH}");
-        if !self.run(true, &["fetch", "--quiet", "--no-tags", "origin", &spec])?.0 {
+        if !self
+            .run_in(None, self.fetch_kind(), &["fetch", "--quiet", "--no-tags", "origin", &spec])?
+            .0
+        {
             // No train branch on the server (or it was deleted): forget our copy.
             let _ = self.git(&["update-ref", "-d", &format!("refs/remotes/origin/{TRAIN_BRANCH}")])?;
         }
@@ -343,272 +526,49 @@ impl Train for GitTrain {
         Ok(Built { head, merged, dropped })
     }
 
-    fn pr_files(&mut self, main: &str, head: &str) -> Result<Vec<String>, String> {
-        Ok(self
-            .ok(&["diff", "--name-only", &format!("{main}...{head}")])?
-            .lines()
-            .map(str::to_string)
-            .collect())
-    }
-
     fn affected(&mut self, main: &str, head: &str) -> Result<BTreeSet<String>, String> {
-        let args = [main.to_string(), head.to_string()];
-        let r = crate::plan_cmd::command(&args, Some(self.root.clone())).map_err(|e| e.message)?;
-        Ok(projects_of_plan(&r.data))
+        let trusted = self.trusted_main(main)?;
+        Ok(projects_of_plan(&(self.planner)(&trusted, main, head)?))
     }
 
     fn reached_workflows(&mut self, main: &str, head: &str) -> Result<Vec<String>, String> {
-        let args = [main.to_string(), head.to_string()];
-        let plan = crate::plan_cmd::command(&args, Some(self.root.clone())).map_err(|e| e.message)?;
-        let reached = projects_of_plan(&plan.data);
-        let mut out = vec!["ci.yml".to_string()];
+        let reached = self.affected(main, head)?;
         // The apps and their workflows are read from main: a pull request cannot take its own app out of the gates.
-        for line in self.ok(&["ls-tree", "--name-only", main, "apps/"])?.lines() {
-            let Some(app) = line.strip_prefix("apps/") else { continue };
-            let (ok, text) = self.git(&["show", &format!("{main}:apps/{app}/paddock.ci.json")])?;
-            let wf = ok
-                .then(|| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .flatten()
-                .and_then(|v| v["workflow"].as_str().map(str::to_string));
-            if let Some(wf) = wf.filter(|w| !w.is_empty() && !out.contains(w))
-                && (reached.contains("*") || reached.contains(&norm(app)))
-            {
-                out.push(wf);
-            }
-        }
-        Ok(out)
-    }
-
-    fn checkout(&mut self, rev: &str) -> Result<(), String> {
-        self.ok(&["checkout", "--quiet", "--force", "--detach", rev]).map(|_| ())
+        let ls = self.ok(&["ls-tree", "--name-only", main, "apps/"])?;
+        let apps = app_workflows(&ls, &mut |path| {
+            let (ok, text) = self.git(&["show", &format!("{main}:{path}")]).ok()?;
+            ok.then_some(text)
+        });
+        Ok(select_workflows(&apps, &reached))
     }
 
     fn push_train(&mut self, head: &str, old: Option<&str>) -> Result<(), String> {
         let lease = format!("--force-with-lease=refs/heads/{TRAIN_BRANCH}:{}", old.unwrap_or(""));
-        self.ok_authed(&["push", "--quiet", &lease, "origin", &format!("{head}:refs/heads/{TRAIN_BRANCH}")])
-            .map(|_| ())
+        self.ok_kind(
+            Child::Authed,
+            &["push", "--quiet", &lease, "origin", &format!("{head}:refs/heads/{TRAIN_BRANCH}")],
+        )
+        .map(|_| ())
     }
 
     fn land(&mut self, head: &str) -> Result<(), String> {
         // A plain push: the server refuses anything that is not a fast-forward.
-        self.ok_authed(&["push", "--quiet", "origin", &format!("{head}:refs/heads/main")])?;
-        self.ok_authed(&[
-            "fetch",
-            "--quiet",
-            "--no-tags",
-            "origin",
-            "+refs/heads/main:refs/remotes/origin/main",
-        ])?;
+        self.ok_kind(Child::Authed, &["push", "--quiet", "origin", &format!("{head}:refs/heads/main")])?;
+        self.ok_kind(
+            self.fetch_kind(),
+            &[
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "origin",
+                "+refs/heads/main:refs/remotes/origin/main",
+            ],
+        )?;
         let now = self.main_head()?;
         if now == head {
             Ok(())
         } else {
             Err(format!("after the push origin/main is {now}, not the train head {head}"))
-        }
-    }
-}
-
-/// The local fast gates: the gate register, the conformance line of ci.yml (read from `origin/main`, never from the train: a
-/// pull request must not choose its own gate) and the commit lint of the train's range, the workspace-hack diff and the publish
-/// dry run. They run PR code, so every gate subprocess runs without the queue's credentials ([`scrub`]). Formatting and clippy
-/// run in the queue's Linux job (slice 6).
-pub struct LocalGates {
-    /// The checkout, at the train head.
-    pub root: PathBuf,
-}
-
-/// The variables and configuration a gate subprocess must not see: the queue's tokens, git credentials, and any other variable
-/// whose name says it is a secret. `parent` is the environment names of this process.
-pub fn scrub(cmd: &mut std::process::Command, parent: &[String]) {
-    const NAMED: [&str; 10] = [
-        "GITEA_TOKEN",
-        "QUEUE_BOT_TOKEN",
-        "PLAN_TOKEN",
-        "GITHUB_TOKEN",
-        "GIT_ASKPASS",
-        "SSH_ASKPASS",
-        "GIT_CONFIG_PARAMETERS",
-        "GIT_CONFIG_COUNT",
-        "ACTIONS_RUNTIME_TOKEN",
-        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
-    ];
-    const WORDS: [&str; 6] = ["TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH", "PRIVATE_KEY"];
-    for name in parent {
-        let up = name.to_ascii_uppercase();
-        if NAMED.contains(&up.as_str())
-            || up.starts_with("GIT_CONFIG_KEY_")
-            || up.starts_with("GIT_CONFIG_VALUE_")
-            || WORDS.iter().any(|w| up.contains(w))
-        {
-            cmd.env_remove(name);
-        }
-    }
-    for n in NAMED {
-        cmd.env_remove(n);
-    }
-    // No credential helper or extra header from any git configuration the job brought.
-    let null = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    cmd.env("GIT_CONFIG_GLOBAL", null)
-        .env("GIT_CONFIG_SYSTEM", null)
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_TERMINAL_PROMPT", "0");
-}
-
-/// One local gate: its name, program, arguments and the folder it runs in (relative to the checkout).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GateCmd {
-    /// The gate's name in comments.
-    pub name: &'static str,
-    /// The program.
-    pub program: String,
-    /// Its arguments.
-    pub args: Vec<String>,
-    /// Folder under the checkout.
-    pub dir: &'static str,
-}
-
-/// The gates of a train, in order. Besides the register, conformance and commit lint, three catch what only a later CI gate saw
-/// on a merged tree (the recurring class "a train-time conflict only a later gate sees": workspace-hack drift, a dependency
-/// cycle in the publish dry run): `cargo hakari generate --diff`, `scripts/publish.mjs --skip-build --offline`.
-pub fn gate_commands(me: &str, conformance: &str, range: &str) -> Vec<GateCmd> {
-    let c = |name, program: &str, args: &[&str], dir| GateCmd {
-        name,
-        program: program.into(),
-        args: args.iter().map(|s| s.to_string()).collect(),
-        dir,
-    };
-    vec![
-        c("gates check", me, &["gates", "check"], "."),
-        c("conformance", "sh", &["-c", conformance], "."),
-        c(
-            "commit-lint",
-            "node",
-            &["conformance/bin/paddock-conformance.mjs", "commit-lint", "--range", range],
-            ".",
-        ),
-        c(
-            "workspace-hack (cargo hakari generate --diff)",
-            "cargo",
-            &["hakari", "generate", "--diff"],
-            "crates",
-        ),
-        c(
-            "publish dry run (scripts/publish.mjs)",
-            "node",
-            &["scripts/publish.mjs", "--skip-build", "--offline"],
-            ".",
-        ),
-    ]
-}
-
-/// The repository files a gate's output names (`crates/x/src/lib.rs:12`, `ui/a.ts`), in order of first mention, at most 50.
-pub fn files_named(text: &str) -> Vec<String> {
-    static PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        #[allow(clippy::expect_used)]
-        regex::Regex::new(r"(?:^|[\s'\x22`(\[=:])((?:[A-Za-z0-9_.@-]+/)+[A-Za-z0-9_.@-]+\.[A-Za-z0-9]{1,6})").expect("a valid pattern")
-    });
-    let mut out: Vec<String> = Vec::new();
-    for m in PATH.captures_iter(text) {
-        let f = m[1].trim_start_matches("./").to_string();
-        if !out.contains(&f) {
-            out.push(f);
-        }
-        if out.len() == 50 {
-            break;
-        }
-    }
-    out
-}
-
-pub(crate) fn conformance_line(root: &Path) -> Option<String> {
-    let out = paddock_proc::command("git")
-        .arg("-C")
-        .arg(root)
-        .args(["show", "origin/main:.gitea/workflows/ci.yml"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .filter_map(|l| l.trim().trim_start_matches("- ").strip_prefix("run: "))
-        .find(|l| l.starts_with("node conformance/bin/paddock-conformance.mjs --app paddock") && l.contains("--only"))
-        .map(str::to_string)
-}
-
-impl LocalGates {
-    fn command(&self, g: &GateCmd) -> std::process::Command {
-        let mut c = paddock_proc::command(&g.program);
-        c.args(&g.args).current_dir(self.root.join(g.dir));
-        let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
-        scrub(&mut c, &parent);
-        c
-    }
-
-    /// Removes the credentials a checkout persisted in its own git configuration (an extra header, a credential helper), so PR
-    /// code reading `.git/config` finds none. The push step brings its own through the environment.
-    fn scrub_local_config(&self) {
-        let list = paddock_proc::command("git")
-            .arg("-C")
-            .arg(&self.root)
-            .args([
-                "config",
-                "--local",
-                "--name-only",
-                "--get-regexp",
-                r"^(http\..*extraheader|credential\..*)$",
-            ])
-            .output();
-        if let Ok(o) = list {
-            for key in String::from_utf8_lossy(&o.stdout).lines() {
-                let _ = paddock_proc::command("git")
-                    .arg("-C")
-                    .arg(&self.root)
-                    .args(["config", "--local", "--unset-all", key])
-                    .output();
-            }
-        }
-    }
-
-    /// `Ok(None)` passed, `Ok(Some(f))` failed, `Err` could not start (not measured).
-    pub(crate) fn run_one(&self, g: &GateCmd) -> Result<Option<GateFailure>, String> {
-        match self.command(g).output() {
-            Ok(o) if o.status.success() => Ok(None),
-            Ok(o) => {
-                let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-                let tail: Vec<&str> = text.lines().rev().take(12).collect();
-                let detail = tail.into_iter().rev().collect::<Vec<_>>().join("\n");
-                Ok(Some(GateFailure {
-                    name: g.name.into(),
-                    detail,
-                    files: files_named(&text),
-                }))
-            }
-            Err(e) => Err(format!("{}: could not start {}: {e}", g.name, g.program)),
-        }
-    }
-}
-
-impl Gates for LocalGates {
-    fn run(&mut self, main: &str, head: &str) -> GateOutcome {
-        let Some(line) = conformance_line(&self.root) else {
-            return GateOutcome::NotMeasured("origin/main's ci.yml has no conformance line to run".into());
-        };
-        self.scrub_local_config();
-        let me = std::env::current_exe()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "./dev".into());
-        let mut fails = Vec::new();
-        for g in gate_commands(&me, &line, &format!("{main}..{head}")) {
-            match self.run_one(&g) {
-                Ok(None) => {}
-                Ok(Some(f)) => fails.push(f),
-                Err(why) => return GateOutcome::NotMeasured(why),
-            }
-        }
-        if fails.is_empty() {
-            GateOutcome::Green
-        } else {
-            GateOutcome::Red(fails)
         }
     }
 }
