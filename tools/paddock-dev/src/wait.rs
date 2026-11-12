@@ -426,6 +426,11 @@ pub trait Http {
         let _ = (method, url, token, body);
         Err("this reader cannot write".into())
     }
+
+    /// Posts `body` as JSON to `url` (a `send_json` with `POST`); the answer may be empty (`Null`, Gitea's 204).
+    fn post_json(&mut self, url: &str, token: &str, body: &Value) -> Result<Value, String> {
+        self.send_json("POST", url, token, Some(body))
+    }
 }
 
 /// Waits for a Gitea Actions run to complete.

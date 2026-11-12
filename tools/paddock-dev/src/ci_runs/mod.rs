@@ -13,6 +13,7 @@
 //! The token is read from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
 
 pub mod client;
+pub mod dispatch;
 pub mod flakes;
 pub mod logfind;
 pub mod preconditions;
@@ -61,6 +62,34 @@ pub struct FlakesArgs {
     fail_on_flakes: bool,
     /// The repository checkout whose `apps/<app>/app/playwright.config.ts` is read for the Playwright precondition (default:
     /// the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+}
+
+/// Arguments of `ci dispatch`.
+#[derive(Args)]
+pub struct DispatchArgs {
+    /// The workflow file in `.gitea/workflows` (`dyno-release.yml`).
+    workflow: String,
+    /// The branch or tag to run it on.
+    #[arg(long = "ref", value_name = "REF")]
+    git_ref: String,
+    /// A workflow input, `key=value` (repeat for more).
+    #[arg(long = "input", value_name = "KEY=VALUE")]
+    inputs: Vec<String>,
+    /// The longest to wait for a busy runner, for example 30m. Required: the wait always ends.
+    #[arg(long, value_name = "DURATION")]
+    max: String,
+    /// How often to look (default 15s).
+    #[arg(long, value_name = "DURATION")]
+    interval: Option<String>,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+    /// The checkout whose `.gitea/workflows` is read (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     root: Option<PathBuf>,
 }
@@ -380,6 +409,51 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
     })?;
     // An answer with an UNKNOWN row or a gap is not a clean one: exit 5, so a script cannot read it as "nothing to worry about".
     Ok(Report::new(report.json(), report.text()).with_exit(report.exit()))
+}
+
+/// `ci dispatch`: waits while a run shares the workflow's single-machine runner class, then dispatches.
+pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
+    let hint = "Run `./dev ci dispatch --help`.";
+    let token =
+        token_from(std::env::var("GITEA_TOKEN").ok()).map_err(|e| e.with_hint("The dispatch needs a token that can write Actions."))?;
+    let req = dispatch::parse_request(&a.workflow, &a.git_ref, &a.inputs, &a.max, a.interval.as_deref())
+        .map_err(|e| CliError::usage(e).with_hint(hint))?;
+    let root = a
+        .root
+        .clone()
+        .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
+        .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
+    let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+    let mut http = CurlHttp;
+    let mut clock = dispatch::system_clock();
+    match dispatch::run(
+        &mut http,
+        &dispatch::Target {
+            server: &a.server,
+            repo: &a.repo,
+            token: &token,
+        },
+        &req,
+        &read,
+        &mut clock,
+        &mut std::io::stderr(),
+    ) {
+        Ok(dispatch::Dispatched::Yes { waited }) => Ok(Report::new(
+            serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64}),
+            format!(
+                "Dispatched {} on {} after waiting {}.",
+                req.workflow,
+                req.git_ref,
+                crate::wait::fmt_duration(waited)
+            ),
+        )),
+        Ok(dispatch::Dispatched::StillBusy { last }) => Err(CliError::failure(format!("not dispatched: the runner stayed busy ({last})."))
+            .with_hint("Wait for that run with `./dev wait --ci-run <id> --max <duration>`, then dispatch again.")),
+        Err(e) => {
+            eprintln!("::error::dispatch: {e}");
+            Err(CliError::failure(e).with_hint("Check the workflow name, GITEA_TOKEN's scope and the network."))
+        }
+    }
 }
 
 /// `ci timings`.
