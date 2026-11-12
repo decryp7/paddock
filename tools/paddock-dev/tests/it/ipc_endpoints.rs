@@ -354,6 +354,64 @@ blocks_tag = "none"
     assert!(tag_matches("a*b*c", "aXbYc") && !tag_matches("a*b*c", "aXcYb"));
 }
 
+/// ADR 0052 amendment (user, 2026-11-12): a deferred fault is reported, never a reason to refuse a tag.
+#[test]
+fn a_report_only_entry_blocks_no_tag_and_needs_no_logging_fault() {
+    let ratchet = parse_ratchet(
+        r#"
+[[ratchet]]
+instance = "I1"
+endpoint = "ipc-host"
+scenario = "stop-with-open-connection"
+fault = "no-reason"
+blocks_tag = "report-only"
+"#,
+    )
+    .unwrap();
+    assert!(blocked_by(&ratchet, "dyno-v1.1.1").is_empty(), "report-only blocks no tag");
+    let ratchet_text = "[[ratchet]]\ninstance = \"I1\"\nendpoint = \"ep\"\nscenario = \"stop-with-open-connection\"\nfault = \"no-reason\"\nblocks_tag = \"report-only\"\n";
+    let found = run(
+        &[("src/server.rs", SERVER), ("tests/endings.rs", TEST_FILE)],
+        GOOD_REGISTER,
+        ratchet_text,
+    );
+    assert!(found.is_empty(), "report-only is a valid value for any fault: {found:?}");
+    // a tag named like the value is not special: only the explicit value is exempt
+    assert!(
+        blocked_by(
+            &parse_ratchet(&ratchet_text.replace("report-only", "report-*")).unwrap(),
+            "report-only"
+        )
+        .len()
+            == 1
+    );
+    // the summary says how many entries only report
+    let dir = repo(
+        &[("src/server.rs", SERVER), ("tests/endings.rs", TEST_FILE)],
+        GOOD_REGISTER,
+        ratchet_text,
+    );
+    #[allow(clippy::disallowed_methods, reason = "runs the built binary under test as a plain child")]
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        .args(["check", "ipc-endpoints", "--root"])
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(text.contains("(0 block a tag, 1 report-only)"), "{text}");
+}
+
+/// The committed ratchet: the Dyno tag is not refused (it was, by 19 entries, against the 2026-11-11 trim of ADR 0072).
+#[test]
+fn the_committed_ratchet_refuses_no_dyno_tag() {
+    let ratchet = parse_ratchet(&std::fs::read_to_string(repo_root().join(RATCHET)).unwrap()).unwrap();
+    let blocking: Vec<String> = blocked_by(&ratchet, "dyno-v1.1.1")
+        .iter()
+        .map(|e| format!("{} / {} / {}", e.instance, e.endpoint, e.scenario))
+        .collect();
+    assert!(blocking.is_empty(), "these entries still refuse the Dyno tag: {blocking:?}");
+}
+
 #[test]
 fn the_cli_refuses_a_blocked_tag_and_accepts_the_others() {
     let ratchet = r#"

@@ -734,7 +734,7 @@ pub struct RatchetEntry {
     pub scenario: String,
     /// The fault kind.
     pub fault: String,
-    /// The tag pattern this entry blocks, or `none` for a logging gap.
+    /// The tag pattern this entry blocks, `none` for a logging gap, or `report-only` for a deferred fault that is listed and blocks nothing.
     pub blocks_tag: String,
     /// The operating systems it applies to (empty: all).
     pub os: String,
@@ -780,11 +780,15 @@ pub fn tag_matches(pattern: &str, tag: &str) -> bool {
     true
 }
 
+/// The `blocks_tag` value of an entry that is reported and never refuses a tag (ADR 0072's 2026-11-11 trim deferred these endings;
+/// ADR 0052's amendment of 2026-11-12 says a finding reports and does not fail a tag).
+pub const REPORT_ONLY: &str = "report-only";
+
 /// The ratchet entries that block `tag` (the tag-refusal hook of D8): an entry whose `blocks_tag` pattern matches.
 pub fn blocked_by<'a>(ratchet: &'a [RatchetEntry], tag: &str) -> Vec<&'a RatchetEntry> {
     ratchet
         .iter()
-        .filter(|e| e.blocks_tag != "none" && tag_matches(&e.blocks_tag, tag))
+        .filter(|e| e.blocks_tag != "none" && e.blocks_tag != REPORT_ONLY && tag_matches(&e.blocks_tag, tag))
         .collect()
 }
 
@@ -973,7 +977,7 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
         let logging = LOGGING_FAULTS.contains(&kind);
         if r.blocks_tag.is_empty() || (r.blocks_tag == "none" && !logging) {
             out.push(format!(
-                "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap or the deferred drain (WP-7, WP-2) may say `none`."
+                "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap or the deferred drain (WP-7, WP-2) may say `none`; `report-only` lists a deferred fault that blocks no tag."
             ));
         }
         for o in r.os.split(',').map(str::trim).filter(|o| !o.is_empty()) {
@@ -1041,14 +1045,18 @@ pub fn command(root: Option<PathBuf>, tag: Option<String>) -> Result<Report, Cli
         }
     }
     let text = format!(
-        "C102: {} listen site(s) in non-test code, {} endpoint(s), {} out-of-scope entr{}, {} ratchet entr{} ({} block a tag).",
+        "C102: {} listen site(s) in non-test code, {} endpoint(s), {} out-of-scope entr{}, {} ratchet entr{} ({} block a tag, {} report-only).",
         sites.len(),
         register.endpoints.len(),
         register.out_of_scope.len(),
         if register.out_of_scope.len() == 1 { "y" } else { "ies" },
         ratchet.len(),
         if ratchet.len() == 1 { "y" } else { "ies" },
-        ratchet.iter().filter(|e| e.blocks_tag != "none").count()
+        ratchet
+            .iter()
+            .filter(|e| e.blocks_tag != "none" && e.blocks_tag != REPORT_ONLY)
+            .count(),
+        ratchet.iter().filter(|e| e.blocks_tag == REPORT_ONLY).count()
     );
     Ok(Report::new(
         json!({"sites": sites.len(), "endpoints": register.endpoints.len(), "outOfScope": register.out_of_scope.len(), "ratchet": ratchet.len()}),

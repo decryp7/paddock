@@ -13,7 +13,7 @@
 //     line (its latest tag's minor plus one, patch 0), or a real date (YYYY-MM-DD) at most 60 days after the commit that wrote the
 //     entry (`git blame`; today where git cannot say): the bounds of §1.1. A tag that exists, a tag past the next line, a date
 //     that is not a date, and an expired or reached entry are findings; in a release run (`--version`, pitwall-release.yml) they
-//     are errors, so an owed test can never ride past the release it was owed for. A row never names a test it does not have.
+//     are still warnings: C85 is report-only and never blocks a tag (ADR 0052 amendment, user 2026-11-12). A row never names a test it does not have.
 //   * `na = ["outcome", "layout"]` with `na_why`: a kind of test that does not apply to the feature (the HTTP APIs have no UI).
 //   * `privileged:<kind>` wires, next to `agent-helper:`; `settings:<id>` surfaces (the ADR's example says `setting:`; amended).
 //   * `tests.outcome` and `tests.layout` (the visible-outcome and real-layout rows C86 and C89 will enumerate), required like `tauri`.
@@ -252,7 +252,7 @@ export function owedSummary(features, app) {
 
 const privileged = (wires) => wires.some((x) => /^(agent-helper|privileged):/.test(x));
 
-/** Judges the register against what the app has. Pure over its inputs; returns findings. `tags` and `since` feed the owed bounds; `release` makes those findings errors. */
+/** Judges the register against what the app has. Pure over its inputs; returns findings. `tags` and `since` feed the owed bounds; `release` only marks those findings as reported at a release (they stay warnings). */
 export function judge({ app, appDir, read, now, vmManifest, caps = {}, tags = null, since = () => null, release = false }) {
   const out = [];
   const FILE = 'features.toml';
@@ -265,8 +265,9 @@ export function judge({ app, appDir, read, now, vmManifest, caps = {}, tags = nu
   const features = tables.feature ?? [];
   const unlisted = tables.unlisted ?? [];
   if (!features.length) out.push(w(FILE, 1, 'features.toml has no [[feature]] row', 'Add the app\'s features, one row each.'));
-  // The owed bounds are errors in a release run, so an owed test never rides past the release it was owed for.
-  const owedFinding = (line, message, fix) => (release ? error(ID, RULE, FILE, line, message, fix) : w(FILE, line, message, fix));
+  // Report-only (ADR 0052, amended 2026-11-12 by the user): the owed bounds are warnings in a release run too. A due test is reported
+  // in the job log and the summary; it never blocks a tag. `release` is still read (the CLI passes `--version`) so the report can say so.
+  const owedFinding = (line, message, fix) => w(FILE, line, release ? `${message} (reported at the release; it does not block the tag)` : message, fix);
   const keyLine = (row, key) => {
     const lines = text.split('\n');
     for (let n = row.__line; n < lines.length && !/^\[/.test(lines[n]); n++) if (new RegExp(`^${key}\\s*=`).test(lines[n])) return n + 1;
