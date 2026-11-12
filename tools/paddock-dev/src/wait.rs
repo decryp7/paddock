@@ -1,3 +1,4 @@
+// ci-runs-reader: wait --ci-run: waits for one run to finish; no pass/fail on a commit
 //! `dev wait`: one bounded wait for agents and scripts (ER-21, ER-27).
 //!
 //! Agents kept writing `while pgrep -f "<cmd>"; do sleep 5; done`: the loop's own command line contains `<cmd>`, so it matches

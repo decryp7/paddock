@@ -1,3 +1,4 @@
+// ci-runs-reader: plan: the base of a diff is the last green push run of main (what to test, not whether to release)
 //! `dev plan`: the command line of the CI planner, the port of the entry points of `scripts/affected.mjs`:
 //!
 //! ```text

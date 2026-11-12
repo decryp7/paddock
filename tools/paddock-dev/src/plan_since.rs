@@ -1,3 +1,4 @@
+// ci-runs-reader: plan --since-run: the failed jobs and tests of one run, and the marker reader
 //! `dev plan --since-run <run>`: a plan that reruns only what failed in a finished CI run (ER-10, rule 50(i)): the failed jobs,
 //! and inside a job whose failures are all nextest failures in a step that takes a filter, only the failed tests. Passed jobs
 //! are not rerun; the full run at the end catches what the fixes broke elsewhere.

@@ -1,3 +1,4 @@
+// ci-runs-reader: pr list: the newest run per workflow of a pull request head, shown in the table, no verdict
 //! The Gitea API calls of the ledger: labels, pull requests and the CI runs of a commit. The token travels in a header only
 //! (the [`Http`] contract) and is in no message.
 

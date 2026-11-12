@@ -1,3 +1,4 @@
+// ci-runs-reader: ci record-fixture: records finished runs as test fixtures
 //! `ci record-fixture <run>...`: records finished runs of the Gitea Actions API as test fixtures, scrubbed on capture.
 //!
 //! A recording is kept in git for good, and the API's answers carry people and machines: full names, e-mail addresses, avatar

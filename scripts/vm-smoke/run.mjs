@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// ci-runs-reader: downloads a run's artifacts
 // Scripted VM start check (rule 54's "prove the release path"; docs: scripts/vm-smoke/README.md). On a fresh Tart clone, headless,
 // installs the app's macOS installer, cold-starts it and checks the process tree, the discovery files and Quit with evidence, then
 // writes one Markdown result file and deletes the clone. Local only: CI never starts a VM.

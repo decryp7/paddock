@@ -1,3 +1,4 @@
+// ci-runs-reader: the queue lists the runs of its train head (running, finished, failed) to take its next step; the landing verdict is ./dev ci verdict (ci_runs::verdict)
 //! The real adapters of the queue's ports: Gitea through [`crate::pr::gitea::Api`], git in the queue's working copy, the local
 //! gates through this tool and the conformance line of ci.yml, and CI through `ci dispatch`, `ci verdict` and `ci triage`.
 //! No logic of the queue lives here; the decisions are in [`super::tick`].

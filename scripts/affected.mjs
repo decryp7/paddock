@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// ci-runs-reader: the node fallback of the planner: the same last-green base as plan_cmd.rs, deleted with the script (ADR 0022 R4)
 // Affected projects between two commits of the Paddock monorepo (ADR 0014 §6): CI's plan job and a local helper.
 //
 //   node scripts/affected.mjs <base> [<head>]        the plan as JSON on stdout (head defaults to HEAD)

@@ -1,3 +1,4 @@
+// ci-runs-reader: the fake Gitea of the ledger tests
 //! An in-memory Gitea for the unit tests: labels, pull requests and runs by commit, with every request recorded. It answers
 //! the calls of [`super::gitea::Api`] only; anything else is a 404.
 

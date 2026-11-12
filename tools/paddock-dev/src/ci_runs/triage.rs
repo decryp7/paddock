@@ -1,3 +1,4 @@
+// ci-runs-reader: ci triage: names the failed tests of one run and compares with main's last run
 //! `ci triage <run>`: for each test that failed in a CI run, is the failure NEW, ALREADY FAILING ON MAIN, or FLAKY?
 //!
 //! It reads, and never writes: the failed jobs of the run and their logs (through [`logfind`], the reader `ci flakes` uses, which

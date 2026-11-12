@@ -1,3 +1,4 @@
+// ci-runs-reader: ci schedule-skip: is a train in CI (queued or running dispatch runs)
 //! `ci schedule-skip`: whether a scheduled run on `main` ends early because a train is in CI (user, 2026-11-12; ADR 0093
 //! amendment). A train's runs are `workflow_dispatch` runs on a `train/*` branch; while one is queued or running, `main` is about
 //! to move, so a scheduled full suite on today's `main` measures a tree that is about to be replaced and takes runner slots

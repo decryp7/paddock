@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// ci-runs-reader: downloads a run's artifacts
 // The Windows guest of the VM release checks (local only, never CI): reverts the Windows 11 test VM (VMware Fusion, `vm-win.sh`) to its
 // `gui-session-tools` snapshot, starts it, waits for the interactive session, stages the installer and win-suite.ps1, runs the suite there
 // (a scheduled task in the paddock-test session), polls for its result file with a bounded wait, and writes the Markdown result in the
