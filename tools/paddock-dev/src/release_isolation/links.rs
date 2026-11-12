@@ -7,8 +7,7 @@
 //! absent, a real folder, or the ledger's `node-modules` folder.
 
 use super::ledger::{Kind, Mode};
-use super::verify::{Ctx, Probe};
-use paddock_env::winpath;
+use super::verify::{Ctx, PathOps, Probe};
 use std::fs::DirEntry;
 use std::path::{Path, PathBuf};
 
@@ -27,30 +26,31 @@ struct Walk {
     links_ok: usize,
 }
 
-fn walk(dir: &Path, allowed: &[PathBuf], out: &mut Walk) {
+fn walk(paths: &PathOps, dir: &Path, allowed: &[PathBuf], out: &mut Walk) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for e in rd.flatten() {
         let p = e.path();
         if is_link(&e) {
-            match winpath::real_verbatim(&p) {
-                Ok(target) if allowed.iter().any(|a| target.starts_with(a)) => out.links_ok += 1,
+            match paths.real(&p) {
+                Ok(target) if allowed.iter().any(|a| paths.starts_with(&target, a)) => out.links_ok += 1,
                 Ok(target) => out.bad.push(format!("{} -> {}", p.display(), target.display())),
                 Err(_) => out.bad.push(format!("{} -> (a target that cannot be resolved)", p.display())),
             }
         } else if e.file_type().is_ok_and(|t| t.is_dir()) {
-            walk(&p, allowed, out);
+            walk(paths, &p, allowed, out);
         }
     }
 }
 
 pub(crate) fn links_probe(ctx: &mut Ctx) {
-    let root = winpath::real_verbatim(&ctx.ledger.job_root).unwrap_or_else(|_| ctx.ledger.job_root.clone());
+    let paths = ctx.opts.paths;
+    let root = paths.real(&ctx.ledger.job_root).unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let mut roots: Vec<PathBuf> = ctx
         .ledger
         .entries
         .iter()
         .filter(|e| matches!(Mode::parse(&e.mode), Some(Mode::Job | Mode::Run)))
-        .filter_map(|e| winpath::real_verbatim(Path::new(&e.path)).ok())
+        .filter_map(|e| paths.real(Path::new(&e.path)).ok())
         .filter(|p| p.is_dir())
         .collect();
     roots.sort();
@@ -58,7 +58,7 @@ pub(crate) fn links_probe(ctx: &mut Ctx) {
     // A folder inside another one that is walked is seen by that walk.
     let mut top: Vec<PathBuf> = Vec::new();
     for r in roots {
-        if !top.iter().any(|t| r.starts_with(t)) {
+        if !top.iter().any(|t| paths.starts_with(&r, t)) {
             top.push(r);
         }
     }
@@ -67,7 +67,7 @@ pub(crate) fn links_probe(ctx: &mut Ctx) {
         links_ok: 0,
     };
     for dir in &top {
-        walk(dir, &[root.clone(), dir.clone()], &mut out);
+        walk(&paths, dir, &[root.clone(), dir.clone()], &mut out);
     }
     if !out.bad.is_empty() {
         let shown: Vec<String> = out.bad.iter().take(LIST_LIMIT).cloned().collect();
@@ -88,7 +88,10 @@ pub(crate) fn links_probe(ctx: &mut Ctx) {
         let nm = clone.join("node_modules");
         if std::fs::symlink_metadata(&nm).is_ok_and(|m| m.file_type().is_symlink()) {
             let ledger_nm = ctx.folder(Kind::NodeModules);
-            let ok = winpath::real_verbatim(&nm).ok().is_some_and(|t| Some(&t) == ledger_nm.as_ref());
+            let ok = paths
+                .real(&nm)
+                .ok()
+                .is_some_and(|t| ledger_nm.as_ref().is_some_and(|l| paths.same(&t, l)));
             if !ok {
                 ctx.add(
                     Probe::Links,

@@ -1,7 +1,8 @@
 //! The configuration probes: compile cache, cargo configuration, git, npm and the Angular cache.
 
 use super::ledger::Kind;
-use super::verify::{Ctx, Env, Probe};
+use super::verify::{Ctx, Env, PathOps, Probe};
+use paddock_env::Os;
 use paddock_env::winpath;
 use paddock_proc::{Limits, Outcome, command, run_bounded};
 use std::collections::BTreeSet;
@@ -103,6 +104,8 @@ fn tail_text(text: &str, max: usize) -> String {
 /// end of the standard error. Callers read the output; the standard error is only for a `check broken` message, because git may
 /// print warnings on a run whose answer is fine.
 fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String, String), String> {
+    // The working folder is spelled for a program (no `\\?\` prefix); a folder with no plain spelling is a finding, not a guess.
+    let dir = winpath::for_tools(dir, Os::current()).map_err(|e| format!("git cannot be run in {}: {e}", dir.display()))?;
     let mut cmd = command("git");
     cmd.args(args).current_dir(dir).env_clear();
     for (k, v) in &env.0 {
@@ -120,11 +123,8 @@ fn git(env: &Env, dir: &Path, args: &[&str]) -> Result<(Option<i32>, String, Str
     }
 }
 
-fn inside_tagged_tree(canonical: &Path, clone: &Path, files: &BTreeSet<String>) -> bool {
-    canonical
-        .strip_prefix(clone)
-        .map(|rel| files.contains(&rel.to_string_lossy().replace('\\', "/")))
-        .unwrap_or(false)
+pub(crate) fn inside_tagged_tree(paths: &PathOps, canonical: &Path, clone: &Path, files: &BTreeSet<String>) -> bool {
+    paths.strip_prefix(canonical, clone).is_some_and(|rel| files.contains(&rel))
 }
 
 /// Every cargo configuration file cargo would read is a file of the tagged tree, or absent.
@@ -157,10 +157,10 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             ),
         },
     }
-    let stop = ctx.opts.walk_stop.as_ref().and_then(|p| winpath::real(p).ok());
+    let stop = ctx.opts.walk_stop.as_ref().and_then(|p| ctx.opts.paths.real(p).ok());
     let mut starts: Vec<PathBuf> = Vec::new();
     for w in &ctx.opts.cargo_workspaces {
-        match winpath::real(&clone.join(w)) {
+        match ctx.opts.paths.real(&clone.join(w)) {
             Ok(p) => starts.push(p),
             Err(_) => ctx.add(
                 Probe::CargoConfig,
@@ -179,7 +179,7 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
             for name in ["config.toml", "config"] {
                 candidates.push(dir.join(".cargo").join(name));
             }
-            if stop.as_deref() == Some(dir) {
+            if stop.as_deref().is_some_and(|s| ctx.opts.paths.same(s, dir)) {
                 break;
             }
         }
@@ -193,19 +193,19 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
         if !c.is_file() || !checked.insert(c.clone()) {
             continue;
         }
-        let canonical = winpath::real(&c).unwrap_or_else(|_| c.clone());
-        if !inside_tagged_tree(&canonical, &clone, &files) {
+        let canonical = ctx.opts.paths.real(&c).unwrap_or_else(|_| c.clone());
+        if !inside_tagged_tree(&ctx.opts.paths, &canonical, &clone, &files) {
             ctx.add(
                 Probe::CargoConfig,
                 format!("{} is a cargo configuration that is not a file of the tagged tree.", canonical.display()),
                 "Cargo reads it for every build (rustc-wrapper, [source], linker, rustflags, [env]): move it away from the runner or remove it.",
             );
         } else {
-            let rel = canonical
-                .strip_prefix(&clone)
-                .unwrap_or(&canonical)
-                .to_string_lossy()
-                .replace('\\', "/");
+            let rel = ctx
+                .opts
+                .paths
+                .strip_prefix(&canonical, &clone)
+                .unwrap_or_else(|| canonical.to_string_lossy().replace('\\', "/"));
             if !matches!(git(ctx.env, &clone, &["diff", "--quiet", "HEAD", "--", &rel]), Ok((Some(0), _, _))) {
                 ctx.add(
                     Probe::CargoConfig,
@@ -239,7 +239,12 @@ pub(crate) fn cargo_config(ctx: &mut Ctx) {
                 } else if let (Some(dir), Some(target)) = (
                     build.and_then(|b| b.get("target-dir")).and_then(toml::Value::as_str),
                     ctx.folder(Kind::Target),
-                ) && winpath::real(Path::new(dir)).map(|p| p != target).unwrap_or(true)
+                ) && ctx
+                    .opts
+                    .paths
+                    .real(Path::new(dir))
+                    .map(|p| !ctx.opts.paths.same(&p, &target))
+                    .unwrap_or(true)
                 {
                     ctx.add(
                         Probe::CargoConfig,
@@ -349,11 +354,11 @@ pub(crate) fn npm(ctx: &mut Ctx) {
     let mut seen: BTreeSet<PathBuf> = BTreeSet::new();
     for (what, path) in candidates {
         if path.is_file() {
-            let canonical = winpath::real(&path).unwrap_or_else(|_| path.clone());
+            let canonical = ctx.opts.paths.real(&path).unwrap_or_else(|_| path.clone());
             if !seen.insert(canonical.clone()) {
                 continue;
             }
-            if !inside_tagged_tree(&canonical, &clone, &files) {
+            if !inside_tagged_tree(&ctx.opts.paths, &canonical, &clone, &files) {
                 ctx.add(
                     Probe::Npm,
                     format!(
@@ -406,7 +411,7 @@ fn npm_prefix_candidates(env: &Env) -> Vec<PathBuf> {
     }
     let raw = which(env, "node");
     if let Some(raw) = raw {
-        for node_path in [Some(raw.clone()), winpath::real(&raw).ok()].into_iter().flatten() {
+        for node_path in [Some(raw.clone()), winpath::real_verbatim(&raw).ok()].into_iter().flatten() {
             if cfg!(windows) {
                 if let Some(dir) = node_path.parent() {
                     out.push(dir.join("etc").join("npmrc"));
@@ -437,7 +442,12 @@ pub(crate) fn angular(ctx: &mut Ctx) {
                 "Do not link the Angular cache in release mode; let the build write it inside the checkout.",
             ),
             Ok(_) => {
-                let inside = winpath::real(&cache).map(|p| p.starts_with(&clone)).unwrap_or(false);
+                let inside = ctx
+                    .opts
+                    .paths
+                    .real(&cache)
+                    .map(|p| ctx.opts.paths.starts_with(&p, &clone))
+                    .unwrap_or(false);
                 if !inside {
                     ctx.add(
                         Probe::Angular,

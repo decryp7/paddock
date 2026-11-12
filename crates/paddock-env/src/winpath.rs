@@ -250,6 +250,17 @@ pub fn starts_with(path: &Path, prefix: &Path, os: Os) -> bool {
             .all(|(x, y)| fold(x) == fold(y))
 }
 
+/// What is left of `path` below `prefix` (`/`-separated, empty when they are the same place), or `None` when `path` is not
+/// inside `prefix`. The comparison is [`starts_with`]'s: lexical, per component, no length limit; the remainder keeps the
+/// spelling of `path`.
+pub fn strip_prefix(path: &Path, prefix: &Path, os: Os) -> Option<String> {
+    if !starts_with(path, prefix, os) {
+        return None;
+    }
+    let (all, head) = (components(path, os), components(prefix, os));
+    Some(all[head.len()..].join("/"))
+}
+
 /// The path as text for comparing and as a map key: on Windows the prefix dropped lexically and `/` separators (`C:/a/b`,
 /// `//server/share/a`), off Windows the text as it is. Never refuses and never opens anything; not for a program
 /// ([`for_tools`]).

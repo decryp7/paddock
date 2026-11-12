@@ -600,3 +600,22 @@ fn the_fold_keeps_a_letter_whose_uppercase_is_two_letters() {
     assert!(!same(p("C:\\Stra\u{df}e"), p(r"C:\STRASSE"), W));
     assert!(same(p("C:\\Stra\u{df}e"), p("c:\\STRA\u{df}E"), W));
 }
+
+#[test]
+fn strip_prefix_gives_the_rest_across_spellings_and_none_outside() {
+    assert_eq!(
+        strip_prefix(p(r"\\?\C:\ws\a\B.toml"), p(r"c:\WS"), W).as_deref(),
+        Some("a/B.toml")
+    );
+    assert_eq!(
+        strip_prefix(p(r"C:\ws"), p(r"\\?\C:\ws"), W).as_deref(),
+        Some("")
+    );
+    assert_eq!(strip_prefix(p(r"C:\wsx\a"), p(r"C:\ws"), W), None);
+    assert_eq!(strip_prefix(p(r"D:\ws\a"), p(r"C:\ws"), W), None);
+    assert_eq!(
+        strip_prefix(p("/ws/a/b"), p("/ws"), Os::Linux).as_deref(),
+        Some("a/b")
+    );
+    assert_eq!(strip_prefix(p("/other/a"), p("/ws"), Os::Linux), None);
+}
