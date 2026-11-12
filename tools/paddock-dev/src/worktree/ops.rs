@@ -396,39 +396,50 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
     ))
 }
 
-/// How long `npm ci` of the conformance folder may take.
-const NPM_CI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+/// How long `npm ci -w conformance` may take. Measured 2026-11-13 in a fresh worktree: 0.4 s with a warm npm cache and 0.5 s with an
+/// empty one (2 packages, the registry reachable). The cap is 60 s: over a hundred times the measurement, so a slow registry still
+/// finishes, and a hung one is stopped and reported rather than waited for (ER-12: from a measurement, not a guess).
+const NPM_CI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The arguments of the install: `conformance` is a member of the root npm workspace (it has no lockfile of its own), so the install
+/// is made from the root, for that member only.
+const NPM_CI_ARGS: [&str; 5] = ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "-w=conformance"];
 
 /// The conformance gates need their own dependencies (the `yaml` package of C111); a fresh worktree has none. `Ok` is the log line, `Err`
 /// why it failed. The real runner is [`npm_ci`]; tests pass a fake.
 type DepsRunner<'a> = &'a dyn Fn(&Path) -> Result<String, String>;
 
-/// Installs `conformance/`'s dependencies in the new worktree `k` when it has a `conformance/package-lock.json`, and returns the line
-/// for the report: what happened and how long it took, or a warning that names the exact command to run by hand.
+/// Installs `conformance/`'s dependencies in the new worktree `k` (from its root, where `package-lock.json` is) and returns the line
+/// for the report: what happened and how long it took, or a warning that names the exact command to run by hand. A tree without a
+/// root `package-lock.json` or a `conformance/` folder is left alone.
 fn conformance_deps_note(k: &Path, run: DepsRunner<'_>) -> String {
-    let dir = k.join("conformance");
-    if !dir.join("package-lock.json").is_file() {
+    if !k.join("package-lock.json").is_file() || !k.join("conformance/package.json").is_file() {
         return String::new();
     }
     let started = std::time::Instant::now();
-    match run(&dir) {
+    match run(k) {
         Ok(_) => format!(
-            "\nconformance dependencies installed (`npm ci --ignore-scripts`, {:.1} s).",
+            "\nconformance dependencies installed (`npm ci --ignore-scripts -w conformance`, {:.1} s).",
             started.elapsed().as_secs_f64()
         ),
         Err(e) => format!(
-            "\nWarning: the conformance dependencies were not installed ({e}, after {:.1} s). The conformance gate says \"check broken\" until they are. Next: cd {} && npm ci --ignore-scripts",
+            "\nWarning: the conformance dependencies were not installed ({e}, after {:.1} s). The conformance gate says \"check broken\" until they are. Next: cd {} && npm ci --ignore-scripts -w conformance",
             started.elapsed().as_secs_f64(),
-            dir.display()
+            k.display()
         ),
     }
 }
 
-/// The real runner: `npm ci --ignore-scripts` in `dir`, bounded by [`NPM_CI_TIMEOUT`], its environment listed.
+/// The real runner: `npm ci --ignore-scripts -w conformance` in the worktree root, bounded by [`NPM_CI_TIMEOUT`], its environment listed.
 fn npm_ci(dir: &Path) -> Result<String, String> {
+    npm_ci_with("npm", dir)
+}
+
+/// [`npm_ci`] with the program named (a test passes a fake npm).
+fn npm_ci_with(program: &str, dir: &Path) -> Result<String, String> {
     let env: std::collections::HashMap<String, String> = std::env::vars().collect();
-    let ran = crate::ci_tool::ToolCall::new("npm")
-        .args(["ci", "--ignore-scripts", "--no-audit", "--no-fund"])
+    let ran = crate::ci_tool::ToolCall::new(program)
+        .args(NPM_CI_ARGS)
         .cwd(dir)
         .pass(
             crate::ci_tool::NETWORK_ENV
@@ -730,22 +741,50 @@ mod tests {
     fn a_new_worktree_gets_the_conformance_dependencies_and_a_failure_is_a_warning_with_the_command() {
         let d = tempfile::tempdir().unwrap();
         let k = d.path();
-        // No conformance/package-lock.json (another repository, a sparse tree): nothing to say, nothing run.
+        // No root package-lock.json (another repository, a sparse tree): nothing to say, nothing run. A conformance/ folder with a
+        // lockfile of its own is not what this repository has: the lock is the root's.
         assert_eq!(super::conformance_deps_note(k, &|_| panic!("must not run")), "");
         std::fs::create_dir_all(k.join("conformance")).unwrap();
-        std::fs::write(k.join("conformance/package-lock.json"), "{}").unwrap();
+        std::fs::write(k.join("conformance/package.json"), "{}").unwrap();
+        assert_eq!(super::conformance_deps_note(k, &|_| panic!("must not run")), "", "no root lockfile");
+        std::fs::write(k.join("package-lock.json"), "{}").unwrap();
         let ran = std::cell::RefCell::new(Vec::new());
         let ok = super::conformance_deps_note(k, &|dir| {
             ran.borrow_mut().push(dir.to_path_buf());
             Ok("exit 0".into())
         });
-        assert!(ok.contains("installed (`npm ci --ignore-scripts`"), "{ok}");
-        assert_eq!(ran.borrow().as_slice(), [k.join("conformance")]);
-        let bad = super::conformance_deps_note(k, &|_| Err("timed out after 180 s".into()));
-        assert!(bad.contains("Warning:") && bad.contains("timed out after 180 s"), "{bad}");
+        assert!(ok.contains("installed (`npm ci --ignore-scripts -w conformance`"), "{ok}");
+        assert_eq!(ran.borrow().as_slice(), [k.to_path_buf()], "run from the worktree root");
+        let bad = super::conformance_deps_note(k, &|_| Err("timed out after 60 s".into()));
+        assert!(bad.contains("Warning:") && bad.contains("timed out after 60 s"), "{bad}");
         assert!(
-            bad.contains(&format!("Next: cd {} && npm ci --ignore-scripts", k.join("conformance").display())),
+            bad.contains(&format!("Next: cd {} && npm ci --ignore-scripts -w conformance", k.display())),
             "{bad}"
+        );
+    }
+
+    /// The real runner against a fake npm: the command line and the folder it runs in are the ones the message names.
+    #[cfg(unix)]
+    #[test]
+    fn the_runner_calls_npm_ci_for_the_conformance_member_from_the_root_and_reports_its_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let log = d.path().join("log");
+        let fake = d.path().join("npm");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\necho \"$PWD $*\" >> '{}'\nexit ${{FAKE_NPM_EXIT:-0}}\n", log.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let root = d.path().join("wt");
+        std::fs::create_dir(&root).unwrap();
+        assert!(super::npm_ci_with(fake.to_str().unwrap(), &root).is_ok());
+        let line = std::fs::read_to_string(&log).unwrap();
+        let canon = root.canonicalize().unwrap();
+        assert_eq!(
+            line.trim(),
+            format!("{} ci --ignore-scripts --no-audit --no-fund -w=conformance", canon.display())
         );
     }
 
