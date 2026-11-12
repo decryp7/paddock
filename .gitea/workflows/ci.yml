@@ -114,8 +114,9 @@ jobs:
           PLAN_PLANNER: ${{ vars.PLAN_PLANNER }}
           # The crate and paddock-dev legs when the plan names none of its own (every run but a rerun of their failures).
           PLAN_OS_LEGS: '[{"os":"ubuntu-latest"},{"os":"windows-latest"},{"os":"macos-latest"}]'
-          # Whether this run is full (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
-          # main, an app's own gates, a manual run with no base. `./dev ci verdict` reads this line (plan_since::MODE_LINE).
+          # The scope of this run (tests everything its plan can reach, not a diff from a base or a rerun of failures): a push to
+          # main, an app's own gates, a manual run with no base. The line `plan verdict: complete=` at the end of the step is what
+          # `./dev ci verdict` reads (plan_since::COMPLETE_LINE); this one is only the scope.
           PLAN_MODE_FULL: ${{ github.event_name == 'push' || inputs.app != '' || (github.event_name == 'workflow_dispatch' && github.event.inputs.base == '' && github.event.inputs.since_run == '') }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
@@ -127,6 +128,10 @@ jobs:
           fi
           grep -q '^crate_legs=' "$GITHUB_OUTPUT" || echo "crate_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
           grep -q '^paddock_dev_legs=' "$GITHUB_OUTPUT" || echo "paddock_dev_legs=$PLAN_OS_LEGS" >> "$GITHUB_OUTPUT"
+          # After the plan decided: complete only for a full run that is not a rerun of failures (plan_since::COMPLETE_LINE).
+          complete=false
+          if [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
+          echo "plan verdict: complete=$complete"
 
   # C102 (ADR 0072): every listen site of the Rust sources is in docs/ipc-endpoints.toml with an ending test or a reason, and the
   # ratchet of connection endings is well formed. Always runs (./dev builds paddock-dev from source here, about a minute; the scan itself takes about 3 s): a listener added anywhere must not

@@ -14,7 +14,7 @@ import { windowWeightMain } from './window-weight/cli.mjs';
 
 const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
                            [--strict C30,C36] [--no-graph] [--scope apps/<app>] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
-                           [--preflight vX.Y.Z [--api url --repo owner/name]]
+                           [--preflight vX.Y.Z]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --file <path> | --range <rev-range>
        paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write]   # C28 baseline files and C23 doc blocks

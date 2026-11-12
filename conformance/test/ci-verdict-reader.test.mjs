@@ -2,12 +2,17 @@
 // of workflow W on commit S?". Two checks keep it that way: every workflow the tag gate can ask about prints the full-mode marker
 // in its plan job, and no other script or tool reads the runs API to make a pass/fail verdict.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
 
 // ---- the marker ---------------------------------------------------------------------------------------------------------------
+// `./dev ci verdict` trusts the line `plan verdict: complete=true` (plan_since::COMPLETE_LINE), which the plan job prints AFTER its
+// decision: the plan ran its jobs, the run is not a rerun of failures (since_run empty) and the mode is full. The scope line
+// `plan mode: full=` (plan_since::MODE_LINE) is logged before the decision and proves nothing about it.
+
 /** The text of one top-level job of a workflow, or null. */
 export function jobText(text, id) {
   const lines = text.split('\n');
@@ -17,14 +22,38 @@ export function jobText(text, id) {
   return lines.slice(start, end < 0 ? undefined : end).join('\n');
 }
 
-/** Why a workflow's plan job does not print the full-mode marker, or null when it does. */
+const VERDICT_ECHO = 'echo "plan verdict: complete=$complete"';
+
+/** The plan job's code lines (comments dropped). */
+const planCode = (text) =>
+  (jobText(text, 'plan') ?? '')
+    .split('\n')
+    .filter((l) => !l.trim().startsWith('#'))
+    .map((l) => l.trim());
+
+/** Why a workflow's plan job does not print the verdict marker after its decision, or null when it does. */
 export function markerProblem(text) {
-  const plan = jobText(text, 'plan');
-  if (plan == null) return 'it has no `plan` job';
-  const code = plan.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n');
-  if (!/^\s*PLAN_MODE_FULL:\s*\S/m.test(code)) return 'its plan job sets no PLAN_MODE_FULL';
-  if (!/echo "plan mode: full=\$\{?PLAN_MODE_FULL\}?"/.test(code)) return 'its plan job does not `echo "plan mode: full=$PLAN_MODE_FULL"` (plan_since::MODE_LINE)';
+  if (jobText(text, 'plan') == null) return 'it has no `plan` job';
+  const code = planCode(text);
+  const at = code.indexOf(VERDICT_ECHO);
+  if (at < 0) return `its plan job does not \`${VERDICT_ECHO}\` (plan_since::COMPLETE_LINE)`;
+  const decided = code.findLastIndex((l) => /^(?:\.\/dev plan\b|run=\$\(|echo "run=|node scripts\/affected\.mjs|grep -q|if \[ "\$EVENT")/.test(l) || /^echo "(?:run|crate_legs|paddock_dev_legs)=/.test(l) || /\|\| echo "(?:crate_legs|paddock_dev_legs)=/.test(l));
+  if (decided > at) return 'its plan job prints the verdict line before it has finished deciding';
+  if (!code.some((l) => /^if \[.*-z "\$PLAN_SINCE_RUN".*PLAN_MODE_FULL" = true.*complete=true/.test(l))) return 'its complete=true condition does not need an empty PLAN_SINCE_RUN and PLAN_MODE_FULL = true';
   return null;
+}
+
+/** The three lines that decide `complete` (from `complete=false` to the echo) of a plan job. */
+export function verdictSnippet(text) {
+  const code = planCode(text);
+  const at = code.indexOf(VERDICT_ECHO);
+  const from = code.lastIndexOf('complete=false', at);
+  return from < 0 || at < 0 ? null : code.slice(from, at + 1).join('\n');
+}
+
+/** Runs the snippet in bash with the plan's variables; returns the line it prints. */
+function runSnippet(snippet, env) {
+  return spawnSync('bash', ['-c', snippet], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } }).stdout.trim();
 }
 
 /** The workflows the tag gate can ask about: ci.yml (an app's legs, the demos, the shared packages) and each app's own `workflow`. */
@@ -41,26 +70,60 @@ function gateWorkflows(root) {
   return [...out].sort();
 }
 
-test('every gate workflow prints the full-mode marker in its plan job (the tag gate reads it through ./dev ci verdict)', () => {
+const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');
+
+test('every gate workflow prints the verdict marker after its plan decided (the tag gate reads it through ./dev ci verdict)', () => {
   const wfs = gateWorkflows(PADDOCK);
   assert.ok(wfs.includes('ci.yml') && wfs.includes('debrief.yml'), wfs.join(', '));
   for (const w of wfs) {
-    const p = markerProblem(readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8'));
+    const p = markerProblem(text(w));
     assert.equal(p, null, `${w}: ${p}. Without the marker a dispatch run is never full, so the tag workflow refuses the app's tag as "not full".`);
   }
 });
 
-test('the marker check sees a missing or commented-out marker (positive control)', () => {
-  const ok = 'jobs:\n  plan:\n    steps:\n      - env:\n          PLAN_MODE_FULL: ${{ true }}\n        run: |\n          echo "plan mode: full=$PLAN_MODE_FULL"\n  next:\n    x: 1\n';
+test('the verdict is complete=true only for a plan that ran, a full mode and no since_run (the snippets, run in bash)', () => {
+  for (const w of gateWorkflows(PADDOCK)) {
+    const snippet = verdictSnippet(text(w));
+    assert.ok(snippet, `${w}: no verdict snippet`);
+    const decides = snippet.includes('"$run"');
+    const say = (env) => runSnippet(snippet, { run: 'true', PLAN_MODE_FULL: 'true', PLAN_SINCE_RUN: '', ...env });
+    assert.equal(say({}), 'plan verdict: complete=true', w);
+    // A since_run rerun (debrief: with bundles, so the scope line says full=true) is not complete.
+    assert.equal(say({ PLAN_SINCE_RUN: '8001' }), 'plan verdict: complete=false', `${w}: since_run`);
+    assert.equal(say({ PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false', `${w}: not full`);
+    // A run the plan skipped (a schedule skipped for a train, an unchanged main, a tagged commit) ends green having tested nothing.
+    if (decides) assert.equal(say({ run: 'false' }), 'plan verdict: complete=false', `${w}: schedule-skipped (run=false)`);
+  }
+  assert.ok(verdictSnippet(text('debrief.yml')).includes('"$run"'), 'debrief.yml decides run=');
+});
+
+test('the marker check sees a missing, early or unguarded marker (positive control)', () => {
+  const ok = [
+    'jobs:',
+    '  plan:',
+    '    steps:',
+    '      - run: |',
+    '          run=$(./dev plan --ci --app x)',
+    '          echo "run=$run" >> "$GITHUB_OUTPUT"',
+    '          complete=false',
+    '          if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi',
+    '          echo "plan verdict: complete=$complete"',
+    '  next:',
+    '    x: 1',
+    '',
+  ].join('\n');
   assert.equal(markerProblem(ok), null);
-  assert.match(markerProblem(ok.replace('echo "plan mode', '# echo "plan mode')), /does not/);
-  assert.match(markerProblem(ok.replace('PLAN_MODE_FULL: ${{ true }}', 'X: 1')), /sets no PLAN_MODE_FULL/);
+  assert.match(markerProblem(ok.replace('echo "plan verdict', '# echo "plan verdict')), /does not/);
+  assert.match(markerProblem(ok.replace('-z "$PLAN_SINCE_RUN" ] && [ ', '')), /does not need an empty PLAN_SINCE_RUN/);
+  assert.match(markerProblem(ok.replace('          echo "plan verdict: complete=$complete"\n', '').replace('run=$(./dev plan', 'echo "plan verdict: complete=$complete"\n          run=$(./dev plan')), /before it has finished/);
   assert.match(markerProblem('jobs:\n  other:\n    x: 1\n'), /no `plan` job/);
+  // The scope line alone is not the marker.
+  assert.match(markerProblem(ok.replace('plan verdict: complete=', 'plan mode: full=')), /does not/);
 });
 
 // ---- no second reader ---------------------------------------------------------------------------------------------------------
 /** What reads the Actions runs: the API paths, the run list's JSON key, and the Rust client types. */
-export const READER = /actions\/(?:runs|jobs)\b|workflow_runs|GiteaRuns|ci_runs::client|\.runs_page/;
+export const READER = /actions\/(?:runs|jobs)\b|workflow_runs|GiteaRuns|ci_runs::client|\.runs_page|\/runs\?|\/runs\/\$\{/;
 
 /** Files that read the runs API for a purpose that is not "is there a full green run on this commit", each with the reason. */
 export const ALLOWED = {
@@ -77,7 +140,6 @@ export const ALLOWED = {
   'scripts/affected.mjs': 'the node fallback of the planner: the same last-green base as plan_cmd.rs, deleted with the script (ADR 0022 R4)',
   'scripts/ci-timings.mjs': 'the script ci timings was ported from',
   'conformance/ci/release-verdict.mjs': 'reads the current run\'s own jobs to say whether installers were built, not a verdict on a commit',
-  'conformance/src/checks/C07-release-preflight.mjs': 'the legacy --preflight (no workflow runs it): move it onto ./dev ci verdict or delete it before it is wired',
   'scripts/vm-smoke/run.mjs': 'downloads a run\'s artifacts',
   'scripts/vm-smoke/run-linux.mjs': 'downloads a run\'s artifacts',
   'scripts/vm-smoke/run-win.mjs': 'downloads a run\'s artifacts',
@@ -85,11 +147,11 @@ export const ALLOWED = {
 };
 
 const SKIP_DIR = new Set(['node_modules', 'target', '.git', 'tests', 'fixtures', 'dist']);
-const SOURCE = /\.(?:mjs|js|sh|rs|py|ts)$/;
+const SOURCE = /\.(?:mjs|js|sh|rs|py|ts|yml|yaml)$/;
 const TEST_FILE = /\.test\.(?:mjs|js|ts|sh)$/;
 
 /** The source files under `dirs` of `root` whose text reads the runs API and are not in `allowed`. */
-export function secondReaders(root, dirs = ['conformance/ci', 'conformance/src', 'scripts', 'tools'], allowed = ALLOWED) {
+export function secondReaders(root, dirs = ['conformance/ci', 'conformance/src', 'scripts', 'tools', '.gitea'], allowed = ALLOWED) {
   const found = [];
   const walk = (dir) => {
     for (const name of readdirSync(dir)) {
