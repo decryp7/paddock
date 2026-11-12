@@ -198,7 +198,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   const dir = mkdtempSync(join(tmpdir(), 'paddock-rustup-'));
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const at = text.indexOf('- name: Rust toolchain\n');
-  const block = text.slice(at, text.indexOf('- name: Install sccache', at));
+  const block = text.slice(at, text.indexOf('    # Every Rust job gets', at));
   const body = block.slice(block.indexOf('run: |\n') + 'run: |\n'.length).split('\n').map((l) => l.slice(8)).join('\n');
   mkdirSync(join(dir, 'bin'));
   const calls = join(dir, 'calls');
@@ -218,7 +218,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
       '',
     ].join('\n'),
   );
-  for (const tool of ['rustc', 'cargo']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} 1.99.1\n`);
+  for (const tool of ['rustc', 'cargo']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} "\${FAKE_RUSTC:-1.99.1}"\n`);
   for (const f of ['rustup', 'rustc', 'cargo']) chmodSync(join(dir, 'bin', f), 0o755);
   writeFileSync(join(dir, 'step.sh'), body);
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
@@ -227,6 +227,70 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
   });
   return { status: r.status, out: r.stdout + r.stderr, calls: existsSync(calls) ? read(calls) : '' };
 }
+
+// ADR 0090 D5(b): the version lives once, in the root rust-toolchain.toml; the step reads it when the job names no toolchain.
+test('setup-rust takes its toolchain from rust-toolchain.toml unless the job names one, and the repo pins one', () => {
+  const pin = read(join(PADDOCK, 'rust-toolchain.toml'));
+  const channel = /^channel\s*=\s*"(\d+\.\d+\.\d+)"/m.exec(pin)?.[1];
+  assert.ok(channel, 'rust-toolchain.toml pins an exact version, not a moving channel');
+  assert.match(pin, /components\s*=\s*\[[^\]]*"rustfmt"[^\]]*"clippy"|components\s*=\s*\[[^\]]*"clippy"[^\]]*"rustfmt"/);
+  const ws = mkdtempSync(join(tmpdir(), 'paddock-pin-'));
+  writeFileSync(join(ws, 'rust-toolchain.toml'), pin);
+  const fromFile = runToolchainStep({ TOOLCHAIN: '', GITHUB_WORKSPACE: ws, RUNNER_OS: 'Linux' });
+  assert.equal(fromFile.status, 0, fromFile.out);
+  assert.match(fromFile.calls, new RegExp(`toolchain install ${channel.replace(/\./g, '\\.')} `));
+  assert.match(fromFile.calls, new RegExp(`default ${channel.replace(/\./g, '\\.')}`));
+  const named = runToolchainStep({ TOOLCHAIN: 'nightly', GITHUB_WORKSPACE: ws, RUNNER_OS: 'Linux' });
+  assert.match(named.calls, /toolchain install nightly /, 'a job that names a toolchain keeps it');
+  const none = runToolchainStep({ TOOLCHAIN: '', GITHUB_WORKSPACE: mkdtempSync(join(tmpdir(), 'paddock-nopin-')), RUNNER_OS: 'Linux' });
+  assert.match(none.calls, /toolchain install stable /, 'no file: stable, as before');
+});
+
+// A rust-toolchain.toml outranks `rustup default`, so the step settles on one toolchain with RUSTUP_TOOLCHAIN (which outranks the file):
+// a job that names one (the fuzz jobs' dated nightly) runs it, and the CI image's `stable` is used as it is when it is the pinned version
+// (a different name to rustup than 1.99.1: using the file there downloads the toolchain on every run, without llvm-tools).
+test('setup-rust settles the toolchain every later step runs through RUSTUP_TOOLCHAIN', () => {
+  const pin = read(join(PADDOCK, 'rust-toolchain.toml'));
+  const channel = /^channel\s*=\s*"(\d+\.\d+\.\d+)"/m.exec(pin)[1];
+  const ws = mkdtempSync(join(tmpdir(), 'paddock-pin-'));
+  writeFileSync(join(ws, 'rust-toolchain.toml'), pin);
+  const ghEnv = () => join(mkdtempSync(join(tmpdir(), 'paddock-ghenv-')), 'env');
+  const image = join(ws, 'release');
+  writeFileSync(image, 'paddock-ci image\n');
+  const envOf = (f) => (existsSync(f) ? read(f) : '');
+
+  const named = ghEnv();
+  runToolchainStep({ TOOLCHAIN: 'nightly-2026-10-01', GITHUB_WORKSPACE: ws, GITHUB_ENV: named, RUNNER_OS: 'Linux' });
+  assert.match(envOf(named), /^RUSTUP_TOOLCHAIN=nightly-2026-10-01$/m, 'a named toolchain beats the repo pin for every later step');
+
+  const pinned = ghEnv();
+  const fresh = runToolchainStep({ TOOLCHAIN: '', GITHUB_WORKSPACE: ws, GITHUB_ENV: pinned, RUNNER_OS: 'Linux' });
+  assert.match(envOf(pinned), new RegExp(`^RUSTUP_TOOLCHAIN=${channel.replace(/\./g, '\\.')}$`, 'm'), fresh.out);
+
+  // The image's stable is the pinned version: used as it is, nothing is installed, llvm-tools stays available.
+  const match = ghEnv();
+  const m = runToolchainStep(
+    { TOOLCHAIN: '', GITHUB_WORKSPACE: ws, GITHUB_ENV: match, PADDOCK_CI_RELEASE_FILE: image, FAKE_RUSTC: channel, RUNNER_OS: 'Linux' },
+    { components: 'clippy-x rustfmt-x', },
+  );
+  assert.equal(m.status, 0, m.out);
+  assert.match(envOf(match), /^RUSTUP_TOOLCHAIN=stable$/m);
+  assert.doesNotMatch(m.calls, /toolchain install/, 'no download when the image has the pinned version');
+
+  // The image's stable is another version: the pinned one is installed.
+  const other = ghEnv();
+  const o = runToolchainStep(
+    { TOOLCHAIN: '', GITHUB_WORKSPACE: ws, GITHUB_ENV: other, PADDOCK_CI_RELEASE_FILE: image, FAKE_RUSTC: '1.100.0', RUNNER_OS: 'Linux' },
+    { components: 'clippy-x rustfmt-x' },
+  );
+  assert.match(o.calls, new RegExp(`toolchain install ${channel.replace(/\./g, '\\.')} `));
+  assert.match(envOf(other), new RegExp(`^RUSTUP_TOOLCHAIN=${channel.replace(/\./g, '\\.')}$`, 'm'));
+});
+
+test('the dated-nightly fuzz workflow that bypasses setup-rust exports RUSTUP_TOOLCHAIN too', () => {
+  const text = read(join(WORKFLOWS, 'debrief-fuzz.yml'));
+  assert.match(text, /echo "RUSTUP_TOOLCHAIN=\$FUZZ_TOOLCHAIN" >> "\$GITHUB_ENV"/);
+});
 
 test('a failed toolchain install fails the step with a message that names the cause, never a bare exit code', () => {
   const crashed = runToolchainStep({}, { installRc: 127 });
