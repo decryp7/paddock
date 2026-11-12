@@ -56,6 +56,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `--files` means working tree against HEAD: a committed change cannot be diffed, so it marks everything. Users that run only
   nightly, on a tag or manually are named as such in `--explain`; `e2e-webkit` never runs on a pull request. `./dev plan`
   (`tools/paddock-dev`) narrows the same way and answers the same plan; its golden test compares it with the script.
+- **Dispatching workflows.** Integrators dispatch through `./dev ci dispatch <workflow>.yml --ref <ref> --max <duration>`, never by a bare API call: it waits while another run is on the same single runner (the Mac runner took overlapping runs 7960/7961 and 7969-7971/7967 and timed out tests) and ends at `--max` with an `::error::` naming the busy run.
 - **Ownership.** [CODEOWNERS](CODEOWNERS) (Go regular expressions, Gitea's syntax) says who owns which paths; a brief
   names the paths its task owns. Shared integration points (`crates/*/src/lib.rs`, `crates/Cargo.toml`, `public-api.ts`,
   `_tokens.scss`, the root `package.json`, `.gitea/`, `renovate.json`, `CODEOWNERS`) are changed by the integrating agent
