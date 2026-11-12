@@ -28,8 +28,10 @@
 pub mod build_folder;
 pub mod cleanup;
 pub mod host_tools;
+pub mod kept_clone;
 pub mod links;
 pub mod node_caches;
+pub mod phase;
 pub mod prune;
 pub mod safe_remove;
 pub mod sccache_stats;
@@ -52,6 +54,9 @@ pub enum HostStep {
     NodeCaches(node_caches::Args),
     /// The pinned cargo-nextest on every OS: kept in the CI home on a host, checked everywhere (the port of the host-tools action).
     HostTools,
+    /// Brings the job slot's kept git clone to the job's commit and sets PADDOCK_WORKSPACE (the port of conformance/ci/kept-clone.sh).
+    /// Never fails the job for lack of a clone.
+    KeptClone(kept_clone::Args),
     /// Prints sccache's statistics and stops the job's own server (the port of the sccache-stats action).
     SccacheStats,
     /// A job's Rust build folder as cargo configuration, `<workspace>/.cargo/ci.toml` (the port of conformance/ci/build-folder.sh).
@@ -77,6 +82,7 @@ pub fn run(step: &HostStep, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         HostStep::StableWorkspace(a) => stable_workspace::run(&env, windows, a, out),
         HostStep::NodeCaches(a) => node_caches::run(&env, windows, a, out),
         HostStep::HostTools => host_tools::run(&env, windows, out),
+        HostStep::KeptClone(a) => kept_clone::run(&env, windows, a, out, err),
         HostStep::SccacheStats => sccache_stats::run(&env, out),
         HostStep::BuildFolder(a) => build_folder::run(&env, windows, a, out),
         HostStep::PruneBuildFolder(a) => prune::run_ci(&env, windows, a, out),

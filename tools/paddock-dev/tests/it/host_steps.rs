@@ -94,10 +94,23 @@ fn norm(text: &str, fx: &Fx) -> String {
         // The wrapper contract's lines, and the one line per pattern the Rust clean-up adds (ER-27).
         // The shim's `kit:` lines name the implementation it chose; they are not the step's output.
         .filter(|l| {
-            !l.starts_with("run: ") && !l.starts_with("ran: ") && !l.starts_with("host-cleanup: pattern ") && !l.starts_with("kit: ")
+            !l.starts_with("run: ")
+                && !l.starts_with("ran: ")
+                && !l.starts_with("host-cleanup: pattern ")
+                && !l.starts_with("kit: ")
+                // bash's own note about the phase it killed at its limit (a job-control message, not the step's).
+                && !l.contains(" Killed: 9 ")
         })
         .map(|l| {
             let l = dur.replace_all(l, " in N s").to_string();
+            // The shell's `bounded` prints the exit status of the phase's last command; the Rust phase has one failure, `exit 1`.
+            let l = l.replace(" failed (exit 128) in N s", " failed (exit 1) in N s");
+            // A git that hangs: the Rust tool names the command in the last output (the shell's was empty, it ended the process itself).
+            let l = l
+                .replace("Last output: kept-clone: git fetch failed (timed out after 1 s).", "Last output: .")
+                .replace("(kept-clone: git fetch failed (timed out after 1 s))", "()");
+            // The shell's last-output text ends with a space (the `tr` of the tail's last newline); the Rust text does not.
+            let l = l.replace(" ); ", "); ").replace(") )", "))");
             // `du`'s directory blocks and ours differ by a kilobyte or two: the size in a prune line is not compared.
             let l = sizes
                 .replace_all(&l, "$1 N$2")
@@ -806,4 +819,379 @@ fn host_cleanup_ends_a_real_process_of_the_job_and_only_that_one() {
     theirs.wait().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(!text.contains("still running"), "{text}");
+}
+
+// ---- kept-clone ----
+
+const KEPT_PROFILES: &str = "exclude lean big/ large\nexclude lean apps/*/docs/screenshots shots\nexclude full nothing/ nothing\nbootstrap .gitea\n";
+
+/// `git` in `dir` with a fixed identity and dates (both fixtures get the same commit ids) and no user or system configuration.
+fn git(fx: &Fx, dir: &Path, args: &[&str]) -> String {
+    let out = paddock_proc::command("git")
+        .args(["-c", "protocol.file.allow=always", "-c", "init.defaultBranch=main"])
+        .args(args)
+        .current_dir(dir)
+        .env("HOME", fx.p("home"))
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .env("GIT_AUTHOR_DATE", "2026-01-01T00:00:00Z")
+        .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// An origin that allows partial clones and fetches by commit (as the Gitea server does) with one commit, and the job's bootstrap
+/// checkout of it at `work/abc/hostexecutor` (what `actions/checkout` leaves, with its credential header), and the profile file.
+fn kept_fixture(fx: &Fx) {
+    let (repo, origin) = (fx.p("work-repo"), fx.p("origin.git"));
+    std::fs::create_dir_all(&repo).unwrap();
+    git(fx, &repo, &["init", "-q"]);
+    for (rel, text) in [
+        ("crates/a/lib.rs", "one"),
+        ("big/shot.png", "png"),
+        ("apps/x/docs/screenshots/s.png", "png"),
+        ("apps/x/docs/guide.md", "guide"),
+        (".gitignore", "target/\n"),
+    ] {
+        fx.write(&format!("work-repo/{rel}"), text);
+    }
+    git(fx, &repo, &["add", "-A"]);
+    git(fx, &repo, &["commit", "-qm", "one"]);
+    git(fx, fx.root().as_path(), &["clone", "-q", "--bare", "work-repo", "origin.git"]);
+    git(fx, &origin, &["config", "uploadpack.allowFilter", "true"]);
+    git(fx, &origin, &["config", "uploadpack.allowAnySHA1InWant", "true"]);
+    git(fx, &repo, &["remote", "add", "origin", &format!("file://{}", origin.display())]);
+    fx.write("profiles.txt", KEPT_PROFILES);
+    std::fs::remove_dir_all(fx.p("work/abc/hostexecutor")).unwrap();
+    bootstrap_at(fx, &git(fx, &repo, &["rev-parse", "HEAD"]));
+}
+
+/// The job's bootstrap checkout at `sha` (made again when it is not there yet).
+fn bootstrap_at(fx: &Fx, sha: &str) {
+    let ws = fx.p("work/abc/hostexecutor");
+    let url = format!("file://{}", fx.p("origin.git").display());
+    if !ws.exists() {
+        git(fx, &fx.root(), &["clone", "-q", "--no-checkout", &url, "work/abc/hostexecutor"]);
+        git(
+            fx,
+            &ws,
+            &["config", "http.https://example.invalid/.extraheader", "AUTHORIZATION: basic SECRETTOKEN"],
+        );
+    }
+    git(fx, &ws, &["fetch", "-q", "origin", sha]);
+    git(fx, &ws, &["-c", "advice.detachedHead=false", "checkout", "-q", "--detach", sha]);
+}
+
+/// A later job: the runner gives it a new work folder (the old one, a link into the kept clone on macOS, is gone) checked out at the
+/// origin's newest commit.
+fn fresh_job(fx: &Fx) {
+    let ws = fx.p("work/abc/hostexecutor");
+    match std::fs::symlink_metadata(&ws) {
+        Ok(m) if m.file_type().is_symlink() => std::fs::remove_file(&ws).unwrap(),
+        Ok(_) => std::fs::remove_dir_all(&ws).unwrap(),
+        Err(_) => {}
+    }
+    bootstrap_at(fx, &git(fx, &fx.p("work-repo"), &["rev-parse", "HEAD"]));
+}
+
+/// A new commit on the origin; returns its id.
+fn kept_commit(fx: &Fx, rel: &str, text: &str, msg: &str) -> String {
+    let repo = fx.p("work-repo");
+    fx.write(&format!("work-repo/{rel}"), text);
+    git(fx, &repo, &["add", "-A"]);
+    git(fx, &repo, &["commit", "-qm", msg]);
+    git(fx, &repo, &["push", "-q", "origin", "HEAD:refs/heads/main"]);
+    git(fx, &repo, &["rev-parse", "HEAD"])
+}
+
+fn kept_step(os: &'static str, profile: &'static str, extra: Vec<(&'static str, String)>) -> Step {
+    let mut env = vec![
+        ("RUNNER_OS", os.to_string()),
+        ("PADDOCK_CI_SLOT", "s1".into()),
+        ("GITHUB_WORKSPACE", "<ROOT>/work/abc/hostexecutor".into()),
+        ("GIT_CONFIG_NOSYSTEM", "1".into()),
+    ];
+    env.extend(extra);
+    Step {
+        shell: vec!["conformance/ci/kept-clone.sh"],
+        shell_env: vec![
+            ("NAME", "decryp7/paddock-crate".into()),
+            ("PROFILE", profile.into()),
+            ("KEPT_CLONE_PROFILES", "<ROOT>/profiles.txt".into()),
+        ],
+        rust: vec![
+            "kept-clone",
+            "--name",
+            "decryp7/paddock-crate",
+            "--profile",
+            profile,
+            "--profiles",
+            "<ROOT>/profiles.txt",
+        ],
+        env,
+        cwd: Some("work/abc/hostexecutor"),
+    }
+}
+
+/// The slot's kept clone as git sees it: what a later job (or a person) would find, compared besides the folder tree (whose `.git`
+/// objects differ in their packing, not in what they hold).
+fn kept_facts(fx: &Fx) -> Vec<String> {
+    let src = fx.p("home/.paddock-ci/src");
+    let Some(stable) = std::fs::read_dir(&src).ok().and_then(|rd| {
+        rd.flatten()
+            .map(|e| e.path())
+            .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("decryp7_paddock-crate-")))
+    }) else {
+        return vec!["facts: no kept clone".into()];
+    };
+    let q = |args: &[&str]| -> String {
+        let out = paddock_proc::command("git")
+            .args(args)
+            .current_dir(&stable)
+            .env("HOME", fx.p("home"))
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).replace(&fx.root().display().to_string(), "<ROOT>")
+    };
+    let mut keys: Vec<String> = q(&["config", "--local", "--list"])
+        .lines()
+        .map(|l| l.split('=').next().unwrap().to_string())
+        .collect();
+    keys.sort();
+    vec![
+        format!("facts: head {}", q(&["rev-parse", "HEAD"]).trim()),
+        format!("facts: config keys {keys:?}"),
+        format!("facts: files {:?}", q(&["ls-files", "-v"]).lines().collect::<Vec<_>>()),
+        format!("facts: status {:?}", q(&["status", "--porcelain", "--ignored"]).lines().collect::<Vec<_>>()),
+        format!("facts: marker {}", stable.join(".git/paddock-kept-clone").exists()),
+        format!("facts: remote {}", q(&["config", "remote.origin.url"]).trim()),
+    ]
+}
+
+fn run_kept(fx: &Fx, step: &Step, rust: bool) -> Seen {
+    let mut seen = run_one(fx, step, rust);
+    // The kept clone's own `.git` (and the bootstrap's) hold packs and logs that differ in bytes; `kept_facts` compares what they mean.
+    seen.tree.retain(|l| !l.contains("/.git/"));
+    seen.tree.extend(kept_facts(fx));
+    seen
+}
+
+/// Both implementations on a fresh kept fixture each: a first job, then `between` (what a later job finds), then a second job.
+/// Every job's result must agree; returns the Rust command's second result.
+fn kept_twice(first: &Step, between: &dyn Fn(&Fx), second: &Step) -> Seen {
+    let (a, b) = (fixture(), fixture());
+    kept_fixture(&a);
+    kept_fixture(&b);
+    let (s1, r1) = (run_kept(&a, first, false), run_kept(&b, first, true));
+    assert_eq!(s1, r1, "the first job: the shell (left) and the Rust command (right) differ");
+    for fx in [&a, &b] {
+        between(fx);
+        fresh_job(fx);
+    }
+    let (s2, r2) = (run_kept(&a, second, false), run_kept(&b, second, true));
+    assert_eq!(s2, r2, "the second job: the shell (left) and the Rust command (right) differ");
+    r2
+}
+
+fn kept_once(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
+    let (a, b) = (fixture(), fixture());
+    for fx in [&a, &b] {
+        kept_fixture(fx);
+        setup(fx);
+    }
+    let (s, r) = (run_kept(&a, step, false), run_kept(&b, step, true));
+    assert_eq!(s, r, "the shell (left) and the Rust command (right) differ");
+    r
+}
+
+#[test]
+fn kept_clone_creates_the_slots_clone_at_the_commit_without_the_excluded_paths() {
+    let seen = kept_once(&|_| {}, &kept_step("macOS", "lean", vec![]));
+    assert_eq!(seen.code, 0, "{seen:?}");
+    assert!(seen.stdout.contains("kept-clone: ready: "), "{}", seen.stdout);
+    assert!(seen.stdout.contains("(created, profile lean, 3 files)"), "{}", seen.stdout);
+    assert!(
+        seen.github_env.starts_with("PADDOCK_WORKSPACE=<ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1"),
+        "{seen:?}"
+    );
+    let t = &seen.tree;
+    assert!(t.iter().any(|l| l.starts_with("f home/.paddock-ci/src/decryp7_paddock-crate-s1/crates/a/lib.rs")), "{t:?}");
+    assert!(!t.iter().any(|l| l.contains("crate-s1/big") || l.contains("crate-s1/apps/x/docs/screenshots")), "an excluded path is not checked out: {t:?}");
+    assert!(t.iter().any(|l| l.starts_with("l work/abc/hostexecutor -> ")), "macOS leaves a link: {t:?}");
+    assert!(!seen.stdout.contains("SECRETTOKEN"), "the credential header is never printed");
+    // On a Windows runner the work folder stays (act holds it open); on Linux nothing is done.
+    let win = kept_once(&|_| {}, &kept_step("Windows", "lean", vec![]));
+    assert!(!win.tree.iter().any(|l| l.starts_with("l work/abc/hostexecutor")), "{:?}", win.tree);
+    let linux = kept_once(&|_| {}, &kept_step("Linux", "lean", vec![]));
+    assert_eq!(linux.stdout, "");
+    assert!(linux.tree.contains(&"facts: no kept clone".to_string()));
+}
+
+#[test]
+fn kept_clone_reuses_the_clone_and_leaves_a_clean_tree_whatever_the_last_job_left() {
+    let step = kept_step("macOS", "lean", vec![]);
+    let seen = kept_twice(
+        &step,
+        &|fx| {
+            fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/crates/a/untracked.rs", "x");
+            fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/target/ignored.bin", "x");
+            fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/crates/a/lib.rs", "modified");
+            fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/big/leak.txt", "leak");
+            // The next job runs at the next commit.
+            kept_commit(fx, "crates/a/lib.rs", "two", "two");
+        },
+        &step,
+    );
+    assert!(seen.stdout.contains("(reused, profile lean"), "{}", seen.stdout);
+    assert!(seen.stdout.contains("kept-clone: clean: done"), "{}", seen.stdout);
+    assert!(seen.tree.contains(&"facts: status []".to_string()), "{:?}", seen.tree);
+    assert!(!seen.tree.iter().any(|l| l.contains("untracked.rs") || l.contains("leak.txt")), "{:?}", seen.tree);
+}
+
+#[test]
+fn kept_clone_makes_the_clone_again_when_it_is_foreign_stale_locked_unmarked_or_too_big() {
+    let step = kept_step("macOS", "lean", vec![]);
+    // A config key this step did not write (it changes what git does): one warning naming it, a new clone.
+    let seen = kept_twice(
+        &step,
+        &|fx| {
+            let k = fx.p("home/.paddock-ci/src/decryp7_paddock-crate-s1");
+            git(fx, &k, &["config", "--local", "core.autocrlf", "true"]);
+            git(fx, &k, &["config", "--local", "core.fsmonitor", "touch /nonexistent/never"]);
+        },
+        &step,
+    );
+    assert!(seen.stdout.contains("carries the local git config key 'core.autocrlf'"), "{}", seen.stdout);
+    assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
+    // The marker is missing (an older layout's checkout): never reused.
+    let seen = kept_twice(
+        &step,
+        &|fx| std::fs::remove_file(fx.p("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/paddock-kept-clone")).unwrap(),
+        &step,
+    );
+    assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
+    // Too big.
+    let big = kept_step("macOS", "lean", vec![("PADDOCK_KEPT_CLONE_MAX_MIB", "0".into())]);
+    let seen = kept_twice(&step, &|_| {}, &big);
+    assert!(seen.stdout.contains("larger than 0 MiB; starting again"), "{}", seen.stdout);
+    // A broken HEAD.
+    let seen = kept_twice(
+        &step,
+        &|fx| fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/HEAD", "garbage\n"),
+        &step,
+    );
+    assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
+    // A stale lock: the first bring-up fails on it, a new clone succeeds, and the failing command is named.
+    let seen = kept_twice(
+        &step,
+        &|fx| {
+            fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/index.lock", "");
+            kept_commit(fx, "crates/a/lib.rs", "two", "two");
+        },
+        &step,
+    );
+    assert!(seen.stdout.contains("kept-clone: git "), "the failing command is named: {}", seen.stdout);
+    assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
+    // The tag run never reuses a clone shared with branch jobs: the shell has FRESH=true, the Rust command --fresh.
+    let (a, b) = (fixture(), fixture());
+    for fx in [&a, &b] {
+        kept_fixture(fx);
+    }
+    let first = kept_step("macOS", "lean", vec![]);
+    let _ = (run_kept(&a, &first, false), run_kept(&b, &first, true));
+    fresh_job(&a);
+    fresh_job(&b);
+    let mut shell_fresh = kept_step("macOS", "lean", vec![]);
+    shell_fresh.shell_env.push(("FRESH", "true".into()));
+    let mut rust_fresh = kept_step("macOS", "lean", vec![]);
+    rust_fresh.rust.push("--fresh");
+    let (s, r) = (run_kept(&a, &shell_fresh, false), run_kept(&b, &rust_fresh, true));
+    assert_eq!(s, r, "FRESH: the shell (left) and the Rust command (right) differ");
+    assert!(r.stdout.contains("(created, profile lean") && !r.stdout.contains("kept-clone: clean"), "{}", r.stdout);
+}
+
+#[test]
+fn kept_clone_falls_back_to_the_work_folder_and_fails_only_on_an_unknown_profile() {
+    // The origin is gone: the clone cannot be made; the job builds from the work folder with one warning.
+    let seen = kept_once(
+        &|fx| {
+            git(
+                fx,
+                &fx.p("work/abc/hostexecutor"),
+                &["remote", "set-url", "origin", &format!("file://{}/no-such-origin.git", fx.root().display())],
+            );
+        },
+        &kept_step("macOS", "lean", vec![]),
+    );
+    assert_eq!(seen.code, 0, "{seen:?}");
+    assert!(seen.stdout.contains("building from the work folder"), "{}", seen.stdout);
+    assert!(!seen.github_env.contains("PADDOCK_WORKSPACE"), "{seen:?}");
+    // No slot: nothing to keep.
+    let mut noslot = kept_step("macOS", "lean", vec![]);
+    noslot.env.retain(|(k, _)| *k != "PADDOCK_CI_SLOT");
+    let seen = kept_once(&|_| {}, &noslot);
+    assert!(seen.stdout.contains("::warning::kept-clone: no kept folder of this job's slot"), "{}", seen.stdout);
+    // The full profile leaves nothing out; an undeclared one is the one failure, with one ::error::.
+    let full = kept_once(&|_| {}, &kept_step("macOS", "full", vec![]));
+    assert!(full.tree.iter().any(|l| l.contains("crate-s1/big/shot.png")), "{:?}", full.tree);
+    let bad = kept_once(&|_| {}, &kept_step("macOS", "nope", vec![]));
+    assert_eq!(bad.code, 1);
+    assert_eq!(bad.stdout.lines().filter(|l| l.starts_with("::error::")).count(), 1, "{}", bad.stdout);
+    assert!(bad.stdout.contains("kept-clone: profile 'nope' is not declared in <ROOT>/profiles.txt"), "{}", bad.stdout);
+}
+
+#[test]
+fn kept_clone_plants_in_the_clone_do_not_act_in_the_next_job() {
+    let step = kept_step("macOS", "lean", vec![]);
+    let seen = kept_twice(
+        &step,
+        &|fx| {
+            let k = fx.p("home/.paddock-ci/src/decryp7_paddock-crate-s1");
+            // A hook that would leave a mark, an attributes file that would rewrite files, a link of the Angular cache to a kept folder.
+            fx.script(
+                "home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/hooks/post-checkout",
+                &format!("echo ran > '{}'", fx.p("hook-ran").display()),
+            );
+            fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/info/attributes", "* text eol=crlf\n");
+            fx.write("kept-angular-cache/cached.bin", "keep");
+            std::fs::create_dir_all(k.join("ui/.angular")).unwrap();
+            std::os::unix::fs::symlink(fx.p("kept-angular-cache"), k.join("ui/.angular/cache")).unwrap();
+            kept_commit(fx, "crates/a/lib.rs", "two", "two");
+        },
+        &step,
+    );
+    assert!(!seen.tree.iter().any(|l| l.starts_with("f hook-ran")), "the planted hook did not run: {:?}", seen.tree);
+    assert!(
+        seen.tree.contains(&"f kept-angular-cache/cached.bin \"keep\"".to_string()),
+        "the link's target survives: {:?}",
+        seen.tree
+    );
+}
+
+#[test]
+fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
+    // A `git fetch` that sleeps: the phase is bounded (1 s), then the work folder is expanded to the profile.
+    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let setup = move |fx: &Fx| {
+        fx.script(
+            "bin/git",
+            &format!("case \" $* \" in *\" fetch \"*) exec sleep 30;; esac\nexec '{}' \"$@\"", real.trim()),
+        )
+    };
+    let seen = kept_once(&setup, &kept_step("macOS", "lean", vec![("PADDOCK_KEPT_CLONE_TIMEOUT", "1".into())]));
+    assert_eq!(seen.code, 0, "{seen:?}");
+    assert!(seen.stdout.contains("did not finish within 1 s"), "{}", seen.stdout);
+    assert!(seen.stdout.contains("building from the work folder"), "{}", seen.stdout);
+    assert!(!seen.stdout.contains("::error::"), "{}", seen.stdout);
 }
