@@ -31,7 +31,7 @@ serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"
 [dev-dependencies]
 # The catalogue thread's exit hold (`DEBRIEF_EXIT_HOLD`) for the exit tests and the measurement.
 debrief-store-duck = { path = "../debrief-store-duck", features = ["exit-hold"] }
-paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+paddock-testkit = { path = "../../../../crates/paddock-testkit", features = ["start"] }
 debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
 getrandom.workspace = true
 chrono.workspace = true

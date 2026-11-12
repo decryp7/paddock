@@ -94,20 +94,25 @@ fn one_round(copies: usize) -> Round {
         })
         .collect();
     let dir = TempDir::new("exit-store");
+    crate::warm_binaries();
     let mut cfg = confined(env!("CARGO_BIN_EXE_debrief-store-worker"));
     cfg.memory_mode = MemoryMode::Normal;
     // Reaches the worker's environment: the hook of a temporary measurement build (the shipped worker has none).
     if let Ok(v) = std::env::var("DEBRIEF_EXIT_HOLD") {
         cfg.env.push(("DEBRIEF_EXIT_HOLD".into(), v));
     }
+    let phase = crate::Phases::new("exit round");
     let w = StoreWorker::new(cfg).unwrap();
     let store = w.open_store(&dir.0, Profile::default_profile(), true, None).unwrap();
     let pid = w.status().pid.expect("the worker runs");
+    phase.at(&format!("opened in the worker (pid {pid})"));
     store.open(&logs).unwrap().wait().unwrap();
+    phase.at("imported in the worker; stopping it");
     let waiter = std::thread::spawn(move || wait_how(pid));
     let started = Instant::now();
     w.shutdown();
     let ended = waiter.join().unwrap();
+    phase.at(&format!("the worker ended: {ended:?}"));
     Round {
         ended,
         stop: started.elapsed(),
@@ -135,6 +140,9 @@ fn the_worker_ends_cleanly_when_debrief_stops_it() {
 #[cfg(debug_assertions)] // the hold is not compiled into a release build
 #[test]
 fn the_worker_stops_its_store_threads_before_it_exits() {
+    let phase = crate::Phases::new("stops_its_store_threads");
+    crate::warm_binaries();
+    phase.at("binaries warmed");
     let marker = TempDir::new("exit-hold");
     let note = marker.0.join("hold.log");
     let dir = TempDir::new("exit-hold-store");
@@ -143,11 +151,14 @@ fn the_worker_stops_its_store_threads_before_it_exits() {
     let w = StoreWorker::new(cfg).unwrap();
     let _store = w.open_store(&dir.0, Profile::default_profile(), true, None).unwrap();
     let pid = w.status().pid.expect("the worker runs");
+    phase.at(&format!("opened in the worker (pid {pid})"));
     let held = || std::fs::read_to_string(&note).is_ok_and(|t| t.lines().any(|l| l == "held"));
     paddock_testkit::wait_until("the catalogue thread to be held inside DuckDB", held);
+    phase.at("the catalogue thread is held; stopping the worker");
     let waiter = std::thread::spawn(move || wait_how(pid));
     w.shutdown();
     let ended = waiter.join().unwrap();
+    phase.at(&format!("the worker ended: {ended:?}"));
     assert!(
         matches!(ended, Ended::Exited(0) | Ended::Unknown),
         "the worker did not exit with status 0: {ended:?}"
