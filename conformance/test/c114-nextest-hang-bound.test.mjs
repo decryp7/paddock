@@ -102,3 +102,13 @@ test('C114 reports an override problem through the runner with its line and the 
   assert.deepEqual(f.map((x) => [x.file, x.line]), [['a/.config/nextest.toml', 4]]);
   assert.match(f[0].fix, /# waiver:/);
 });
+
+test('C114 reports a config that is in the index but gone from the working tree instead of crashing', async () => {
+  const root = tracked({ 'a/Cargo.toml': WS, 'a/Cargo.lock': '', 'a/.config/nextest.toml': BOUNDED });
+  const { rmSync } = await import('node:fs');
+  rmSync(`${root}/a/.config/nextest.toml`);
+  const f = await findingsOf('C114', root);
+  assert.deepEqual(f.map((x) => x.file), ['a/.config/nextest.toml']);
+  assert.match(f[0].message, /file is gone/);
+  assert.match(f[0].fix, /git checkout|git rm/);
+});

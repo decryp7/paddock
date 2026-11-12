@@ -122,6 +122,10 @@ export default {
       configs.set(config, [...(configs.get(config) ?? []), ws]);
     }
     for (const config of new Set([...configs.keys(), ...tracked.filter((p) => /(?:^|\/)\.config\/nextest[^/]*\.toml$/.test(p))])) {
+      if (!existsSync(join(ctx.root, config))) {
+        findings.push(error('C114', 5, config, 1, `${config}: file is gone from the working tree but still listed by git, so its workspace's tests have no time bound`, `Restore it (\`git checkout -- ${config}\`) or remove it from git (\`git rm ${config}\`) together with the workspace it served.`));
+        continue;
+      }
       const text = readFileSync(join(ctx.root, config), 'utf8');
       for (const [line, what] of overrideProblems(text)) {
         findings.push(error('C114', 5, config, line, `${config}: ${what}`, 'Put a `# waiver: <why this test needs longer>` comment directly above the `[[profile.<p>.overrides]]` header and give its slow-timeout a `terminate-after` (period * N at most 480 s); a benchmark goes in the `bench` profile. Never raise the default.'));
