@@ -14,6 +14,7 @@
   "windowsClippy": true,
   "processPatterns": ["{build}[/\\\\]debug[/\\\\]pitwall-fake-engine(\\.exe)?( |$)"],
   "checks": [
+    "git fetch --no-tags --depth=1 origin '+refs/tags/pitwall-v*:refs/tags/pitwall-v*'",
     "node conformance/bin/paddock-conformance.mjs --app pitwall --root apps/pitwall --only C13,C85 --paddock .",
     "cd apps/pitwall",
     "node --test scripts/ci/*.test.mjs docs/diagrams/src/*.test.mjs",
