@@ -1343,3 +1343,24 @@ UPDATE ... FROM over a staging table, a read of the names the source did not hav
 trigrams. What is left of the 213 ms is the 250,000 trigram rows of 10,000 new names (a tail of text lines brings a few
 dozen names, not thousands). Cost per tail read: the events appended since the last read (read once, with their ids), plus
 a pass over the source's catalogue rows for the update join; never the source's other events.
+
+## The wait phase logs on a store call (2026-11-12, `debrief_core::wait_log`)
+
+Every store call now opens a few watches (`DuckStore::conn()`: one for the borrow of the connection, more only when a lock is
+contended), so the cost of one watch and its effect on a call were measured, before (`origin/main`, b519fd27a) and after
+(branch `fix/debrief-store-phase-logs`, with the review fixes: a registry in 16 shards, no allocation for a static label, a
+`Thread` handle in place of a name). The test is `tests/bench_waits.rs` of `debrief-store-duck` (`DEBRIEF_BENCH_WAITS=300`,
+the samples store of about 28k events, debug build, Mac mini, load about 22 throughout because other agents were building, so
+the noise is larger than the effect; two "after" runs, one "before" run).
+
+| per call | before | after, run 1 | after, run 2 |
+|---|---|---|---|
+| `summary()`, 1 thread | 10,781 us | 9,835 us | 9,055 us |
+| `summary()`, 8 threads | 2,822 us | 2,601 us | 2,529 us |
+| `page(500)`, 1 thread | 22,040 us | 20,961 us | 19,915 us |
+| `page(500)`, 8 threads | 4,670 us | 4,726 us | 4,317 us |
+
+One watch alone (open, drop, a static label): 330 ns on one thread, 240 ns per watch with eight threads at once (the review
+measured 326 ns and about 4 us per operation under 8 threads before the sharding). A call is 2,500 to 22,000 us here, so three
+watches (about 1 us) are under the noise and no slower call was measured. The `format!` labels of `sync::blocking` (about
+350 ns more, per shell request, next to a thread-pool hand-off) are not on the store's hot path.

@@ -505,7 +505,7 @@ impl Inner {
     /// returns shows up as "still open" with who started it (ER-27).
     #[track_caller]
     pub(crate) fn conn(&self) -> StoreResult<Conn<'_>> {
-        let held = wait_log::watch_with("store statement holds a connection", shutdown::state);
+        let held = wait_log::activity_with("store statement holds a connection", shutdown::state);
         let Some(active) = shutdown::Active::enter() else {
             log::debug!(
                 "a store statement was refused: the process is shutting down ({})",

@@ -29,14 +29,26 @@ pub async fn blocking<T: Send + 'static, E: From<CmdError> + Send + 'static>(
     what: &str,
     f: impl FnOnce() -> Result<T, E> + Send + 'static,
 ) -> Result<T, E> {
-    // Two phases, one correlation id: queued on the blocking pool, then running (ER-27). A request that never
-    // finishes shows in the log as the phase that stayed open, with the other open waits beside it.
-    let queued = debrief_core::wait_log::watch(format!("{what}: queued on the blocking pool"));
+    blocking_on(debrief_core::wait_log::global(), what, f).await
+}
+
+/// [`blocking`] with the set of watches that logs its phases (tests pass their own, with a short period).
+///
+/// Two phases, one correlation id: queued on the blocking pool (a wait), then running (an activity, long when healthy)
+/// (ER-27). A request that never finishes shows in the log as the phase that stayed open, with the other open waits
+/// beside it. The labels are formatted per request, which is nothing next to the pool hand-off; the hot path of the
+/// store (`conn()`) uses static labels.
+pub(crate) async fn blocking_on<T: Send + 'static, E: From<CmdError> + Send + 'static>(
+    waits: &'static debrief_core::wait_log::Waits,
+    what: &str,
+    f: impl FnOnce() -> Result<T, E> + Send + 'static,
+) -> Result<T, E> {
+    let queued = waits.watch(format!("{what}: queued on the blocking pool"));
     let id = queued.id();
     let what_run = what.to_string();
     tauri::async_runtime::spawn_blocking(move || {
         drop(queued);
-        let _running = debrief_core::wait_log::watch(format!("{what_run}: running (request #{id})"));
+        let _running = waits.activity(format!("{what_run}: running (request #{id})"));
         f()
     })
     .await
@@ -78,44 +90,49 @@ mod tests {
         assert!(failed.unwrap_err().contains("outer: inner"));
     }
 
-    /// A request stuck on the blocking pool leaves its phase in the log: `running` begins at once, the watchdog says
-    /// the wait is "still open" with the request id, and the end line has the duration (ER-27).
+    /// A request that is long on the blocking pool leaves its phase in the log: `running` is an activity, so the watchdog
+    /// reports it as "still open" at info with the request id, never at warn (the log has a daily byte budget), and its
+    /// end is at debug (ER-27).
     #[test]
-    fn a_blocked_request_logs_its_phase_and_a_still_open_line() {
-        // The global set reads this when first used; tests run one process each under nextest.
-        std::env::set_var("DEBRIEF_WAIT_STILL_MS", "20");
-        let _log = crate::activity::test_capture();
+    fn a_long_request_logs_its_phase_at_info_and_ends_at_debug() {
+        use debrief_core::wait_log::Waits;
+        let (tx, lines) = std::sync::mpsc::channel::<(log::Level, String)>();
+        let tx = Mutex::new(tx);
+        // The period is the set's own, not a process-wide setting: nothing here depends on one test per process.
+        let waits: &'static Waits = Box::leak(Box::new(Waits::new_tracing(
+            std::time::Duration::from_millis(20),
+            std::sync::Arc::new(move |l, s| {
+                let _ = lock(&tx).send((l, s));
+            }),
+        )));
         let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
         let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
         let request = std::thread::spawn(move || {
-            crate::test_support::block(blocking::<u8, CmdError>("reading the parsers of the sources", move || {
-                held_tx.send(()).unwrap();
-                // Held until the test has seen the line: the condition, not a sleep.
-                release_rx.recv().unwrap();
-                Ok(1)
-            }))
+            crate::test_support::block(blocking_on::<u8, CmdError>(
+                waits,
+                "reading the parsers of the sources",
+                move || {
+                    held_tx.send(()).unwrap();
+                    // Held until the test has seen the line: the condition, bounded.
+                    release_rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+                    Ok(1)
+                },
+            ))
         });
-        held_rx.recv().unwrap();
-        let still = loop {
-            let hit = crate::activity::captured().into_iter().find(|c| c.message.contains("still open"));
-            match hit {
-                Some(c) => break c,
-                None => std::thread::yield_now(),
+        held_rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+        let next = |needle: &str| loop {
+            let (level, text) = lines.recv_timeout(std::time::Duration::from_secs(30)).expect("the line never came");
+            if text.contains(needle) {
+                break (level, text);
             }
         };
-        assert_eq!(still.level, log::Level::Warn);
-        assert!(
-            still.message.contains("reading the parsers of the sources: running (request #"),
-            "{}",
-            still.message
-        );
+        let (level, text) = next("still open");
+        assert_eq!(level, log::Level::Info, "{text}");
+        assert!(text.contains("reading the parsers of the sources: running (request #"), "{text}");
         release_tx.send(()).unwrap();
         assert_eq!(request.join().unwrap().unwrap(), 1);
-        let all: Vec<String> = crate::activity::captured().into_iter().map(|c| c.message).collect();
-        assert!(
-            all.iter()
-                .any(|m| m.contains("ended after") && m.contains("reading the parsers of the sources: running")),
-            "{all:?}"
-        );
+        let (level, text) = next("running (request #");
+        assert_eq!(level, log::Level::Debug, "{text}");
+        assert!(text.contains("ended after"), "{text}");
     }
 }

@@ -3,25 +3,49 @@
 //! watch that stays open longer than a threshold, together with the other open watches. A hang that leaves no other
 //! trace then shows which wait was open, since when, where it was started, and what else was running.
 //!
-//! Bounded by design: the watchdog only reads and logs and never waits on the thing it watches; it reports each open
-//! watch every `still` period (the first after one period), naming at most [`SNAPSHOT_MAX`] other watches per line.
-//! No user content: labels are fixed phase names and a source location.
+//! Two kinds, because Debrief's log has a daily byte budget (`logging.rs`) that a chatty line would use up:
+//! - [`Kind::Wait`]: a lock or a queue. It is short when healthy, so a long one is a finding: "still open" at `warn`
+//!   every `still` period, the end at `warn` from one second.
+//! - [`Kind::Activity`]: a job, a borrowed connection, a request that is running. These are long when healthy (an import
+//!   of ten minutes), so they log "still open" at `info` with backoff (`still`, twice, four times ... up to
+//!   [`MAX_BACKOFF`] times `still`) and end at `debug`, never `warn`.
+//!
+//! Bounded by design: the watchdog only reads and logs and never waits on the thing it watches, so it must never call
+//! into DuckDB or take a store lock (a hang it is meant to explain must not be able to stop it). It names at most
+//! [`SNAPSHOT_MAX`] other watches per line. No user content: labels are fixed phase names and a source location.
+//!
+//! Cost: a watch is a registry insert in one of [`SHARDS`] shards (no allocation for a `&'static str` label; the thread
+//! is a handle, its name is read only when a line is written), measured in `docs/performance.md`.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::panic::Location;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::thread::Thread;
 use std::time::{Duration, Instant};
 
-/// How long a watch stays open before the watchdog says it is still open, and how often it repeats.
+/// How long a watch stays open before the watchdog says it is still open (the first interval of the backoff).
 pub const STILL: Duration = Duration::from_secs(5);
-/// A watch that ended after at least this long is logged at `warn` (shorter ones at `debug`).
+/// A [`Kind::Wait`] that ended after at least this long is logged at `warn` (shorter ones at `debug`).
 pub const SLOW: Duration = Duration::from_secs(1);
 /// Most other open watches named in one "still open" line.
 pub const SNAPSHOT_MAX: usize = 8;
+/// The backoff of an [`Kind::Activity`] stops growing at this many times `still` (5 s * 60 = 5 min).
+pub const MAX_BACKOFF: u32 = 60;
+/// Registry shards (a watch goes to the shard of its id): threads opening watches rarely meet on one lock.
+pub const SHARDS: usize = 16;
 
 const TARGET: &str = "debrief_core::wait_log";
+
+/// What a watch is for (see the module documentation).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// A lock or queue wait: long means something is wrong.
+    Wait,
+    /// Work that is long when healthy: reported at `info` with backoff, never at `warn`.
+    Activity,
+}
 
 /// Where the lines go (`log` in production, a channel in tests).
 type Sink = Arc<dyn Fn(log::Level, String) + Send + Sync>;
@@ -29,29 +53,30 @@ type Sink = Arc<dyn Fn(log::Level, String) + Send + Sync>;
 struct Entry {
     label: Cow<'static, str>,
     at: &'static Location<'static>,
-    thread: String,
+    thread: Thread,
+    kind: Kind,
     started: Instant,
+    /// When the watchdog reports it next, and the gap after that (doubles for an activity).
+    next: Instant,
+    gap: Duration,
     reported: bool,
-    last: Instant,
     detail: Option<fn() -> String>,
 }
 
-#[derive(Default)]
-struct State {
-    open: BTreeMap<u64, Entry>,
-    closed: bool,
-}
-
 struct Shared {
-    state: Mutex<State>,
+    shards: [Mutex<BTreeMap<u64, Entry>>; SHARDS],
+    idle: Mutex<()>,
     wake: Condvar,
+    closed: AtomicBool,
+    /// Send the begin and end lines to the sink whatever the log level (tests; production checks the level first).
+    all_lines: bool,
     still: Duration,
     sink: Sink,
 }
 
 impl Shared {
-    fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().unwrap_or_else(|p| p.into_inner())
+    fn shard(&self, id: u64) -> MutexGuard<'_, BTreeMap<u64, Entry>> {
+        self.shards[id as usize % SHARDS].lock().unwrap_or_else(|p| p.into_inner())
     }
 }
 
@@ -69,48 +94,57 @@ fn to_log(level: log::Level, line: String) {
 /// The process-wide set (reports through `log`).
 pub fn global() -> &'static Waits {
     static GLOBAL: std::sync::OnceLock<Waits> = std::sync::OnceLock::new();
-    GLOBAL.get_or_init(|| {
-        // `DEBRIEF_WAIT_STILL_MS` shortens the period (tests, or a diagnosis that wants an earlier first line).
-        let still = std::env::var("DEBRIEF_WAIT_STILL_MS")
-            .ok()
-            .and_then(|v| v.parse::<u64>().ok())
-            .filter(|ms| *ms > 0)
-            .map_or(STILL, Duration::from_millis);
-        Waits::new(still, Arc::new(to_log))
-    })
+    GLOBAL.get_or_init(|| Waits::new(STILL, Arc::new(to_log)))
 }
 
-/// Opens a watch on the global set; it ends when the guard drops. The caller's source location is in its lines.
+/// Opens a [`Kind::Wait`] on the global set; it ends when the guard drops. The caller's location is in its lines.
 #[track_caller]
 pub fn watch(label: impl Into<Cow<'static, str>>) -> Watch {
-    global().watch(label)
+    global().open(Kind::Wait, label.into(), None, Location::caller())
 }
 
-/// [`watch`] with a function whose text is added to the "still open" line (for example how many statements run).
+/// Opens a [`Kind::Activity`] on the global set (a job, a borrowed connection, a running request).
+#[track_caller]
+pub fn activity(label: impl Into<Cow<'static, str>>) -> Watch {
+    global().open(Kind::Activity, label.into(), None, Location::caller())
+}
+
+/// [`activity`] with a function whose text is added to the "still open" line (for example how many statements run).
+#[track_caller]
+pub fn activity_with(label: impl Into<Cow<'static, str>>, detail: fn() -> String) -> Watch {
+    global().open(Kind::Activity, label.into(), Some(detail), Location::caller())
+}
+
+/// [`watch`] with such a detail function.
 #[track_caller]
 pub fn watch_with(label: impl Into<Cow<'static, str>>, detail: fn() -> String) -> Watch {
-    global().watch_with(label, detail)
+    global().open(Kind::Wait, label.into(), Some(detail), Location::caller())
 }
 
 /// Locks `m` (recovering from poisoning). Only when another thread holds it, the wait is watched as `label`.
 #[track_caller]
 pub fn lock_watched<'a, T>(m: &'a Mutex<T>, label: &'static str) -> MutexGuard<'a, T> {
-    match m.try_lock() {
-        Ok(g) => g,
-        Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
-        Err(std::sync::TryLockError::WouldBlock) => {
-            let _w = watch(label);
-            m.lock().unwrap_or_else(|p| p.into_inner())
-        }
-    }
+    global().lock_watched(m, label)
 }
 
 impl Waits {
-    /// A set whose watchdog reports watches open longer than `still` to `sink`.
+    /// A set whose watchdog first reports watches open longer than `still` to `sink`.
     pub fn new(still: Duration, sink: Sink) -> Waits {
+        Waits::build(still, sink, false)
+    }
+
+    /// Like [`Waits::new`], and every begin and end line goes to `sink` whatever the log level (tests).
+    pub fn new_tracing(still: Duration, sink: Sink) -> Waits {
+        Waits::build(still, sink, true)
+    }
+
+    fn build(still: Duration, sink: Sink, all_lines: bool) -> Waits {
         let shared = Arc::new(Shared {
-            state: Mutex::new(State::default()),
+            shards: std::array::from_fn(|_| Mutex::new(BTreeMap::new())),
+            idle: Mutex::new(()),
             wake: Condvar::new(),
+            closed: AtomicBool::new(false),
+            all_lines,
             still,
             sink,
         });
@@ -122,58 +156,71 @@ impl Waits {
         Waits { shared }
     }
 
+    /// See [`lock_watched`].
     #[track_caller]
-    pub fn watch(&self, label: impl Into<Cow<'static, str>>) -> Watch {
-        self.open(label.into(), None, Location::caller())
-    }
-
-    #[track_caller]
-    pub fn watch_with(&self, label: impl Into<Cow<'static, str>>, detail: fn() -> String) -> Watch {
-        self.open(label.into(), Some(detail), Location::caller())
-    }
-
-    fn open(&self, label: Cow<'static, str>, detail: Option<fn() -> String>, at: &'static Location<'static>) -> Watch {
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
-        let now = Instant::now();
-        let first = {
-            let mut s = self.shared.state();
-            let first = s.open.is_empty();
-            s.open.insert(
-                id,
-                Entry {
-                    label: label.clone(),
-                    at,
-                    thread,
-                    started: now,
-                    reported: false,
-                    last: now,
-                    detail,
-                },
-            );
-            first
-        };
-        if first {
-            self.shared.wake.notify_all();
+    pub fn lock_watched<'a, T>(&self, m: &'a Mutex<T>, label: &'static str) -> MutexGuard<'a, T> {
+        match m.try_lock() {
+            Ok(g) => g,
+            Err(std::sync::TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                let _w = self.open(Kind::Wait, Cow::Borrowed(label), None, Location::caller());
+                m.lock().unwrap_or_else(|p| p.into_inner())
+            }
         }
-        if log::log_enabled!(target: TARGET, log::Level::Trace) {
+    }
+
+    /// Opens a watch of `kind` (see [`watch`], [`activity`]).
+    pub fn open(&self, kind: Kind, label: Cow<'static, str>, detail: Option<fn() -> String>, at: &'static Location<'static>) -> Watch {
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        let now = Instant::now();
+        if self.shared.all_lines || log::log_enabled!(target: TARGET, log::Level::Trace) {
             (self.shared.sink)(log::Level::Trace, format!("wait #{id} begins: {label} ({at})"));
         }
+        self.shared.shard(id).insert(
+            id,
+            Entry {
+                label,
+                at,
+                thread: std::thread::current(),
+                kind,
+                started: now,
+                next: now + self.shared.still,
+                gap: self.shared.still,
+                reported: false,
+                detail,
+            },
+        );
         Watch {
             id,
             shared: self.shared.clone(),
         }
     }
 
+    /// A [`Kind::Wait`] on this set.
+    #[track_caller]
+    pub fn watch(&self, label: impl Into<Cow<'static, str>>) -> Watch {
+        self.open(Kind::Wait, label.into(), None, Location::caller())
+    }
+
+    /// A [`Kind::Activity`] on this set.
+    #[track_caller]
+    pub fn activity(&self, label: impl Into<Cow<'static, str>>) -> Watch {
+        self.open(Kind::Activity, label.into(), None, Location::caller())
+    }
+
     /// How many watches are open.
     pub fn open_count(&self) -> usize {
-        self.shared.state().open.len()
+        self.shared
+            .shards
+            .iter()
+            .map(|s| s.lock().unwrap_or_else(|p| p.into_inner()).len())
+            .sum()
     }
 }
 
 impl Drop for Waits {
     fn drop(&mut self) {
-        self.shared.state().closed = true;
+        self.shared.closed.store(true, Ordering::SeqCst);
         self.shared.wake.notify_all();
     }
 }
@@ -194,13 +241,15 @@ impl Watch {
 
 impl Drop for Watch {
     fn drop(&mut self) {
-        let Some(e) = self.shared.state().open.remove(&self.id) else {
+        let Some(e) = self.shared.shard(self.id).remove(&self.id) else {
             return;
         };
         let took = e.started.elapsed();
-        let slow = took >= SLOW.min(self.shared.still);
-        let level = if slow { log::Level::Warn } else { log::Level::Debug };
-        if slow || log::log_enabled!(target: TARGET, level) {
+        let level = match e.kind {
+            Kind::Wait if took >= SLOW.min(self.shared.still) => log::Level::Warn,
+            _ => log::Level::Debug,
+        };
+        if level == log::Level::Warn || self.shared.all_lines || log::log_enabled!(target: TARGET, level) {
             let note = if e.reported { " (it was reported as still open)" } else { "" };
             (self.shared.sink)(
                 level,
@@ -216,72 +265,103 @@ impl Drop for Watch {
     }
 }
 
-fn watchdog(shared: &Shared) {
-    let tick = (shared.still / 4).max(Duration::from_millis(5));
-    let mut state = shared.state();
-    loop {
-        if state.closed {
-            return;
-        }
-        if state.open.is_empty() {
-            state = shared.wake.wait(state).unwrap_or_else(|p| p.into_inner());
-            continue;
-        }
-        let now = Instant::now();
-        let due: Vec<u64> = state
-            .open
-            .iter()
-            .filter(|(_, e)| now.duration_since(e.last) >= shared.still)
-            .map(|(id, _)| *id)
-            .collect();
-        let mut lines = Vec::new();
-        for id in &due {
-            lines.push((still_line(&state, *id, now), state.open[id].detail));
-            if let Some(e) = state.open.get_mut(id) {
-                e.reported = true;
-                e.last = now;
-            }
-        }
-        drop(state);
-        for (line, detail) in lines {
-            let extra = detail.map(|f| format!("; {}", f())).unwrap_or_default();
-            (shared.sink)(log::Level::Warn, format!("{line}{extra}"));
-        }
-        state = shared.state();
-        if state.closed {
-            return;
-        }
-        state = shared.wake.wait_timeout(state, tick).unwrap_or_else(|p| p.into_inner()).0;
+/// A line due from the watchdog: its level, the text and the watch's detail function.
+type Report = (log::Level, String, Option<fn() -> String>);
+
+/// The gap before the next report: a wait repeats every `still`; an activity doubles it up to `MAX_BACKOFF` times `still`.
+fn next_gap(kind: Kind, gap: Duration, still: Duration) -> Duration {
+    match kind {
+        Kind::Wait => still,
+        Kind::Activity => (gap * 2).min(still * MAX_BACKOFF),
     }
 }
 
-fn still_line(state: &State, id: u64, now: Instant) -> String {
-    let e = &state.open[&id];
-    let mut others: Vec<(&u64, &Entry)> = state.open.iter().filter(|(i, _)| **i != id).collect();
-    others.sort_by_key(|(_, o)| o.started);
-    let more = others.len().saturating_sub(SNAPSHOT_MAX);
-    let list: Vec<String> = others
-        .iter()
-        .take(SNAPSHOT_MAX)
-        .map(|(i, o)| {
-            format!(
-                "#{i} {} on {} for {} ms",
-                o.label,
-                o.thread,
-                now.duration_since(o.started).as_millis()
-            )
-        })
-        .collect();
-    format!(
-        "wait #{id} is still open after {} ms: {} ({}) on thread {}; {} other open: [{}]{}",
-        now.duration_since(e.started).as_millis(),
-        e.label,
-        e.at,
-        e.thread,
-        others.len(),
-        list.join("; "),
-        if more > 0 { format!(", and {more} more") } else { String::new() }
-    )
+/// The open watches whose report is due, with the line to write (the shards are locked one at a time and briefly;
+/// nothing here calls out of this module while a lock is held).
+fn due_lines(shared: &Shared, now: Instant) -> Vec<Report> {
+    struct Row {
+        id: u64,
+        label: Cow<'static, str>,
+        at: &'static Location<'static>,
+        thread: Thread,
+        started: Instant,
+        kind: Kind,
+        due: bool,
+        detail: Option<fn() -> String>,
+    }
+    let mut rows = Vec::new();
+    for i in 0..SHARDS {
+        let mut shard = shared.shards[i].lock().unwrap_or_else(|p| p.into_inner());
+        for (id, e) in shard.iter_mut() {
+            let due = now >= e.next;
+            if due {
+                e.reported = true;
+                e.gap = next_gap(e.kind, e.gap, shared.still);
+                e.next = now + e.gap;
+            }
+            rows.push(Row {
+                id: *id,
+                label: e.label.clone(),
+                at: e.at,
+                thread: e.thread.clone(),
+                started: e.started,
+                kind: e.kind,
+                due,
+                detail: e.detail,
+            });
+        }
+    }
+    rows.sort_by_key(|r| r.started);
+    let mut out = Vec::new();
+    for r in rows.iter().filter(|r| r.due) {
+        let others: Vec<&Row> = rows.iter().filter(|o| o.id != r.id).collect();
+        let list: Vec<String> = others
+            .iter()
+            .take(SNAPSHOT_MAX)
+            .map(|o| {
+                format!(
+                    "#{} {} on {} for {} ms",
+                    o.id,
+                    o.label,
+                    o.thread.name().unwrap_or("unnamed"),
+                    now.duration_since(o.started).as_millis()
+                )
+            })
+            .collect();
+        let more = others.len().saturating_sub(SNAPSHOT_MAX);
+        let line = format!(
+            "wait #{} is still open after {} ms: {} ({}) on thread {}; {} other open: [{}]{}",
+            r.id,
+            now.duration_since(r.started).as_millis(),
+            r.label,
+            r.at,
+            r.thread.name().unwrap_or("unnamed"),
+            others.len(),
+            list.join("; "),
+            if more > 0 { format!(", and {more} more") } else { String::new() }
+        );
+        let level = match r.kind {
+            Kind::Wait => log::Level::Warn,
+            Kind::Activity => log::Level::Info,
+        };
+        out.push((level, line, r.detail));
+    }
+    out
+}
+
+fn watchdog(shared: &Shared) {
+    let tick = (shared.still / 4).max(Duration::from_millis(5));
+    while !shared.closed.load(Ordering::SeqCst) {
+        for (level, line, detail) in due_lines(shared, Instant::now()) {
+            let extra = detail.map(|f| format!("; {}", f())).unwrap_or_default();
+            (shared.sink)(level, format!("{line}{extra}"));
+        }
+        let idle = shared.idle.lock().unwrap_or_else(|p| p.into_inner());
+        if shared.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let _ = shared.wake.wait_timeout(idle, tick);
+    }
 }
 
 #[cfg(test)]
@@ -291,13 +371,18 @@ mod tests {
 
     type Lines = mpsc::Receiver<(log::Level, String)>;
 
-    fn waits(still: Duration) -> (Waits, Lines) {
+    fn sink() -> (Sink, Lines) {
         let (tx, rx) = mpsc::channel();
         let tx = Mutex::new(tx);
         let sink: Sink = Arc::new(move |l, s| {
             let _ = tx.lock().unwrap_or_else(|p| p.into_inner()).send((l, s));
         });
-        (Waits::new(still, sink), rx)
+        (sink, rx)
+    }
+
+    fn waits(still: Duration) -> (Waits, Lines) {
+        let (sink, rx) = sink();
+        (Waits::new_tracing(still, sink), rx)
     }
 
     /// The next line containing `needle`: waits on the channel (the condition), bounded.
@@ -318,8 +403,13 @@ mod tests {
         let (in_wait_tx, in_wait_rx) = mpsc::channel();
         std::thread::scope(|s| {
             let h = s.spawn(|| {
-                let _job = w.watch("an import job");
-                let _w = w.watch_with("the pool lock", || "2 statements active".to_string());
+                let _job = w.activity("an import job");
+                let _w = w.open(
+                    Kind::Wait,
+                    "the pool lock".into(),
+                    Some(|| "2 statements active".to_string()),
+                    Location::caller(),
+                );
                 in_wait_tx.send(()).unwrap();
                 let _g = held.lock().unwrap();
             });
@@ -343,17 +433,61 @@ mod tests {
         assert_eq!(w.open_count(), 0);
     }
 
+    /// The log has a daily byte budget: a job that is long when healthy must never write at warn, neither while it
+    /// runs nor when it ends (review of 255b1db99, P1).
+    #[test]
+    fn a_long_activity_is_reported_at_info_with_backoff_and_never_at_warn() {
+        let (w, rx) = waits(Duration::from_millis(10));
+        let job = w.activity("import job runs");
+        let mut after = Vec::new();
+        while after.len() < 4 {
+            let (level, text) = line(&rx, "still open");
+            assert_eq!(level, log::Level::Info, "{text}");
+            let ms: u64 = text
+                .split("still open after ")
+                .nth(1)
+                .unwrap()
+                .split(" ms")
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            after.push(ms);
+        }
+        assert!(after.windows(2).all(|p| p[0] < p[1]), "reports come later each time: {after:?}");
+        drop(job);
+        let (level, text) = line(&rx, "ended after");
+        assert_eq!(level, log::Level::Debug, "an activity ends at debug however long it ran: {text}");
+        drop(w);
+        assert!(rx.iter().all(|(l, _)| l != log::Level::Warn), "nothing at warn");
+    }
+
+    #[test]
+    fn the_backoff_doubles_for_an_activity_up_to_the_cap_and_a_wait_repeats_every_period() {
+        let still = Duration::from_secs(5);
+        let mut gap = still;
+        let mut seen = vec![gap.as_secs()];
+        for _ in 0..8 {
+            gap = next_gap(Kind::Activity, gap, still);
+            seen.push(gap.as_secs());
+        }
+        assert_eq!(seen, [5, 10, 20, 40, 80, 160, 300, 300, 300]);
+        assert_eq!(next_gap(Kind::Wait, Duration::from_secs(80), still), still);
+    }
+
     #[test]
     fn a_quick_wait_logs_no_still_line_and_nothing_at_warn() {
         let (w, rx) = waits(Duration::from_secs(3600));
         drop(w.watch("quick"));
-        // Debug lines go through the log facade's level check; with no logger set none is sent at all.
+        let (level, text) = line(&rx, "ended after");
+        assert_eq!(level, log::Level::Debug, "{text}");
         drop(w);
         assert!(rx.iter().all(|(l, t)| l != log::Level::Warn && !t.contains("still open")));
     }
 
     #[test]
-    fn lock_watched_recovers_from_poisoning_and_watches_only_a_contended_lock() {
+    fn lock_watched_begins_a_wait_only_when_contended_and_recovers_from_poisoning() {
+        let (w, rx) = waits(Duration::from_secs(3600));
         let m = Arc::new(Mutex::new(1));
         let m2 = m.clone();
         let _ = std::thread::spawn(move || {
@@ -361,7 +495,20 @@ mod tests {
             panic!("poison");
         })
         .join();
-        assert_eq!(*lock_watched(&m, "x"), 1);
-        assert_eq!(global().open_count(), 0);
+        // Uncontended (and poisoned): no wait is opened, so no begin line.
+        assert_eq!(*w.lock_watched(&m, "the test lock"), 1);
+        assert_eq!(w.open_count(), 0);
+        assert!(rx.try_iter().next().is_none(), "an uncontended lock writes nothing");
+        // Contended: the wait begins (a line with its label and location) and ends when the lock is given.
+        let held = Mutex::new(());
+        let guard = held.lock().unwrap();
+        std::thread::scope(|s| {
+            let h = s.spawn(|| drop(w.lock_watched(&held, "the held lock")));
+            let (_, begin) = line(&rx, "begins: the held lock");
+            assert!(begin.contains("wait_log.rs:"), "{begin}");
+            drop(guard);
+            h.join().unwrap();
+        });
+        assert_eq!(w.open_count(), 0);
     }
 }

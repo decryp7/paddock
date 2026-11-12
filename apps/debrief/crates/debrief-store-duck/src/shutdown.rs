@@ -35,6 +35,8 @@ static BORROWED: AtomicUsize = AtomicUsize::new(0);
 static INTERRUPTS: std::sync::Mutex<Vec<std::sync::Weak<duckdb::InterruptHandle>>> = std::sync::Mutex::new(Vec::new());
 
 /// What the exit gate counts now, for the "still open" lines of `wait_log`.
+/// Reads atomics only: `debrief_core::wait_log` calls this from its watchdog thread and must never call into DuckDB or
+/// take a store lock, or the hang it reports could stop its own report.
 pub(crate) fn state() -> String {
     format!(
         "{} store statements running, {} borrowed in all, shutting down: {}",
