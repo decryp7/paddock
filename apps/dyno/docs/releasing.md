@@ -193,3 +193,30 @@ node apps/dyno/app/src-tauri/scripts/sidecar.mjs && (cd apps/dyno/app && npx tau
 
 The key must be the same for the signature and for the build that compiles `TAURI_UPDATER_PUBKEY` in, or the install says the
 helper does not match its signature. Unit tests use the fixtures in `crates/dyno-helper-service/tests/fixtures/` (a throwaway key).
+
+<!-- paddock:block releasing rev=8ad0c1a8 -->
+## Releasing from a tag
+
+Releases are made by CI from the tag `dyno-vX.Y.Z`, never from a workstation (rule 9). A local build for you to try is
+fine; it is never published.
+
+1. Make sure `main` is green in CI and the version in `tauri.conf.json`, `Cargo.toml` and `package.json` agree. The release
+   notes are generated from the commits since the previous `dyno-v*` tag (git-cliff); there is no committed changelog
+   file to update.
+2. Before tagging (rule 25): `cargo deny check advisories`, one CI build with bundles (the workflow's manual run), the
+   icon check, signing secrets stripped of whitespace, and the release notes' "First launch" section (until the apps are
+   signed).
+3. Tag the commit (`git tag dyno-vX.Y.Z`, never a `[skip ci]` commit) and push the tag. The tag workflow runs the gates
+   again, builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
+   and the DMG), publishes the release with its notes and `latest.json`.
+4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.
+<!-- /paddock:block releasing -->
+
+<!-- paddock:block first-launch rev=e18d3f38 -->
+### First launch
+
+Dyno is not code-signed yet, so your system may warn the first time you open it.
+
+- **macOS:** first drag Dyno from the disk image to Applications and open it from there. The first time, macOS says "“Dyno” Not Opened": choose **Done** (not Move to Trash). Open System Settings > Privacy & Security, scroll down to "“Dyno” was blocked to protect your Mac." and choose **Open Anyway**. macOS asks once more, "Open “Dyno”?": choose **Open Anyway** again, then enter an administrator's name and password. You do this once; later starts open normally. If the button is missing, open Dyno again first.
+- **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+<!-- /paddock:block first-launch -->

@@ -4,7 +4,7 @@ Sighter finds UI elements by sight: a recorder, a labelling and training studio,
 query. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI. **No product code exists
 yet**; the design is `docs/proposal.md` (open questions pending). Read it and `docs/suite-lessons.md` before building.
 
-<!-- paddock:block rules rev=7ad91a44 -->
+<!-- paddock:block rules rev=0aaf3ea1 -->
 ## Paddock rules (binding)
 
 The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/rules.md) (the source; update there first). Where an older rule in this file disagrees, these win.
@@ -119,8 +119,8 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     through it. Until v1, check every batch of bug reports for such patterns.
     The coordinator proposes the redesign in the same reply that relays the report (a question to the user, or a start under
     an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
-    Hooks that judge an agent's text (the recurring guard, `.claude/hooks/recurring-guard.sh`, advisory and being added) only warn; hooks that guard
-    state (the cd guard, safe-remove) still block (user, 2026-11-12).
+    Hooks that judge an agent's text (the recurring guard, hook `.claude/hooks/recurring-guard.sh` planned, advisory) only warn; hooks
+    that guard state (the cd guard, safe-remove) still block (user, 2026-11-12).
 
 ### Throughput (user, 2026-10-24)
 41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the

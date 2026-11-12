@@ -90,3 +90,30 @@ See [scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md) for what t
 ## First launch note
 
 The apps are not signed or notarized: updates are protected by the family update key, and paid certificates would be needed to remove the OS warnings (decision 2026-11-05). The release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+
+<!-- paddock:block releasing rev=8ad0c1a8 -->
+## Releasing from a tag
+
+Releases are made by CI from the tag `spotter-vX.Y.Z`, never from a workstation (rule 9). A local build for you to try is
+fine; it is never published.
+
+1. Make sure `main` is green in CI and the version in `tauri.conf.json`, `Cargo.toml` and `package.json` agree. The release
+   notes are generated from the commits since the previous `spotter-v*` tag (git-cliff); there is no committed changelog
+   file to update.
+2. Before tagging (rule 25): `cargo deny check advisories`, one CI build with bundles (the workflow's manual run), the
+   icon check, signing secrets stripped of whitespace, and the release notes' "First launch" section (until the apps are
+   signed).
+3. Tag the commit (`git tag spotter-vX.Y.Z`, never a `[skip ci]` commit) and push the tag. The tag workflow runs the gates
+   again, builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
+   and the DMG), publishes the release with its notes and `latest.json`.
+4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.
+<!-- /paddock:block releasing -->
+
+<!-- paddock:block first-launch rev=e18d3f38 -->
+### First launch
+
+Spotter is not code-signed yet, so your system may warn the first time you open it.
+
+- **macOS:** first drag Spotter from the disk image to Applications and open it from there. The first time, macOS says "“Spotter” Not Opened": choose **Done** (not Move to Trash). Open System Settings > Privacy & Security, scroll down to "“Spotter” was blocked to protect your Mac." and choose **Open Anyway**. macOS asks once more, "Open “Spotter”?": choose **Open Anyway** again, then enter an administrator's name and password. You do this once; later starts open normally. If the button is missing, open Spotter again first.
+- **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
+<!-- /paddock:block first-launch -->

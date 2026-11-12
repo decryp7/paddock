@@ -1,6 +1,7 @@
 {
   "app": "paddock",
   "timingLint": true,
+  "docBlocks": {},
   "limitSkip": ["paddock-limits"],
   "screenshotDirs": [
     "ui/docs/screenshots"
