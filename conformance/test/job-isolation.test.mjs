@@ -102,7 +102,7 @@ function host() {
     mkdirSync(temp, { recursive: true });
     const envFile = join(root, 'work', id, 'github-env');
     writeFileSync(envFile, '');
-    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', PADDOCK_DISK_WARN_GIB: '0', PADDOCK_DISK_REFUSE_GIB: '0', PADDOCK_SOCKET_ROOT: sockets, ...extra };
+    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', PADDOCK_DISK_WARN_GIB: '0', PADDOCK_DISK_REFUSE_GIB: '0', PADDOCK_DISK_INDEX: join(root, 'disk-index.sqlite'), PADDOCK_SOCKET_ROOT: sockets, ...extra };
     const exec = (args, more = {}) => isolation(args, { ...base, ...more });
     const exported = () => Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     /** Runs a command with what acquire exported, as the job's later steps see it. */

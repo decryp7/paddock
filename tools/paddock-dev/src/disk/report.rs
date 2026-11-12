@@ -161,7 +161,8 @@ pub fn run(a: &ReportArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn 
     }
     let mut disks = Vec::new();
     for root in &s.roots {
-        let free = free_bytes(root, &df).ok();
+        let exists = root.is_dir();
+        let free = if exists { free_bytes(root, &df).ok() } else { None };
         let mut rows: Vec<&FolderRow> = snap
             .folders
             .iter()
@@ -170,6 +171,14 @@ pub fn run(a: &ReportArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn 
         rows.sort_by(|x, y| size_of(&snap, y).cmp(&size_of(&snap, x)).then_with(|| x.path.cmp(&y.path)));
         let disk_total: u64 = rows.iter().filter_map(|f| size_of(&snap, f)).sum();
         if !a.summary {
+            if !exists {
+                text.push_str(&format!(
+                    "\n{}  not measured (the folder does not exist: is the disk mounted?)\n",
+                    root.display()
+                ));
+                disks.push(json!({"root": root.display().to_string(), "measured": false, "free_bytes": null, "tracked_bytes": null, "folders": []}));
+                continue;
+            }
             text.push_str(&format!(
                 "\n{}  free {}  tracked folders {}\n",
                 root.display(),

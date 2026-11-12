@@ -47,6 +47,7 @@ pub mod plan_gitea;
 pub mod plan_repo;
 pub mod plan_since;
 pub mod release_isolation;
+pub mod safe_remove;
 pub mod slots;
 pub mod wait;
 pub mod worktree;

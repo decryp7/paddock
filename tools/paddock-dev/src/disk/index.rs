@@ -60,31 +60,91 @@ fn e(what: &str) -> impl Fn(rusqlite::Error) -> String + '_ {
     move |err| format!("{what}: {err}")
 }
 
+/// Why an index could not be opened: its file is damaged (set aside and rebuilt), or something else is wrong now (another
+/// writer holds it, no permission, a full disk: the file may be fine, so it is never moved).
+#[derive(Debug)]
+pub enum OpenError {
+    /// Not a database, corrupt, or a schema this tool does not read.
+    Damaged(String),
+    /// Anything else.
+    Other(String),
+}
+
+impl std::fmt::Display for OpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OpenError::Damaged(s) | OpenError::Other(s) => f.write_str(s),
+        }
+    }
+}
+
+fn damaged(err: &rusqlite::Error) -> bool {
+    matches!(
+        err.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+    )
+}
+
+fn classify(what: &str) -> impl Fn(rusqlite::Error) -> OpenError + '_ {
+    move |err| {
+        let text = format!("{what}: {err}");
+        if damaged(&err) {
+            OpenError::Damaged(text)
+        } else {
+            OpenError::Other(text)
+        }
+    }
+}
+
 impl Index {
     /// Opens (creating it) the index at `path`.
     pub fn open(path: &Path) -> Result<Index, String> {
-        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
-            std::fs::create_dir_all(parent).map_err(|err| format!("cannot create {}: {err}", parent.display()))?;
-        }
-        let conn = Connection::open(path).map_err(e("cannot open the index"))?;
+        Index::open_timeout(path, BUSY_TIMEOUT).map_err(|e| e.to_string())
+    }
+
+    /// Opens the index read-only: nothing is created, no pragma that writes is run, no schema is made. For readers that must
+    /// not change the file (`disk check` at a job's start, `clean`'s size lookup).
+    pub fn open_read_only(path: &Path) -> Result<Index, String> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(e("cannot open the index read-only"))?;
         conn.busy_timeout(BUSY_TIMEOUT).map_err(e("busy timeout"))?;
+        Ok(Index { conn })
+    }
+
+    /// [`Index::open`] with the busy timeout given.
+    pub fn open_timeout(path: &Path, timeout: Duration) -> Result<Index, OpenError> {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent).map_err(|err| OpenError::Other(format!("cannot create {}: {err}", parent.display())))?;
+        }
+        if path.is_dir() {
+            return Err(OpenError::Damaged(format!("{} is a folder, not a database file", path.display())));
+        }
+        let conn = Connection::open(path).map_err(classify("cannot open the index"))?;
+        conn.busy_timeout(timeout).map_err(classify("busy timeout"))?;
         // The first real read: a file that is not a database fails here.
         let mode: String = conn
             .query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0))
-            .map_err(e("not a usable index"))?;
+            .map_err(classify("not a usable index"))?;
         if !mode.eq_ignore_ascii_case("wal") && !mode.eq_ignore_ascii_case("memory") {
-            return Err(format!("the index could not use WAL (journal mode {mode})"));
+            return Err(OpenError::Other(format!("the index could not use WAL (journal mode {mode})")));
         }
-        conn.pragma_update(None, "synchronous", "NORMAL").map_err(e("pragma"))?;
+        conn.pragma_update(None, "synchronous", "NORMAL").map_err(classify("pragma"))?;
         let check: String = conn
             .query_row("PRAGMA quick_check", [], |r| r.get(0))
-            .map_err(e("integrity check"))?;
+            .map_err(classify("integrity check"))?;
         if check != "ok" {
-            return Err(format!("integrity check says {check}"));
+            return Err(OpenError::Damaged(format!("integrity check says {check}")));
         }
-        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(e("version"))?;
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(classify("version"))?;
         if version != 0 && version != SCHEMA_VERSION {
-            return Err(format!("schema version {version}, this tool reads {SCHEMA_VERSION}"));
+            return Err(OpenError::Damaged(format!(
+                "schema version {version}, this tool reads {SCHEMA_VERSION}"
+            )));
         }
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS folders (
@@ -94,18 +154,32 @@ impl Index {
                 path TEXT NOT NULL, bytes INTEGER NOT NULL, partial INTEGER NOT NULL, measured_at INTEGER NOT NULL,
                 PRIMARY KEY (path, measured_at));",
         )
-        .map_err(e("schema"))?;
-        conn.pragma_update(None, "user_version", SCHEMA_VERSION).map_err(e("version"))?;
+        .map_err(classify("schema"))?;
+        conn.pragma_update(None, "user_version", SCHEMA_VERSION)
+            .map_err(classify("version"))?;
         Ok(Index { conn })
     }
 
-    /// Opens the index; a file that cannot be used is renamed to `<name>.corrupt-<time>` and a new one is made. `None` (with the
-    /// reasons) when even that fails: the caller then works without an index.
+    /// Opens the index; a file that is damaged (not a database, corrupt, another schema) is renamed to `<name>.corrupt-<time>` and
+    /// a new one is made. Any other failure (busy, no permission) leaves the file where it is and gives `None`: the caller works
+    /// without an index. Both come with the reasons to print.
     pub fn open_or_recover(path: &Path, now: u64) -> (Option<Index>, Vec<String>) {
+        Index::open_or_recover_timeout(path, now, BUSY_TIMEOUT)
+    }
+
+    /// [`Index::open_or_recover`] with the busy timeout given.
+    pub fn open_or_recover_timeout(path: &Path, now: u64, timeout: Duration) -> (Option<Index>, Vec<String>) {
         let mut notes = Vec::new();
-        match Index::open(path) {
+        match Index::open_timeout(path, timeout) {
             Ok(i) => return (Some(i), notes),
-            Err(first) => {
+            Err(OpenError::Other(why)) => {
+                notes.push(format!(
+                    "index {} cannot be used right now ({why}); working without it, the file is left as it is",
+                    path.display()
+                ));
+                return (None, notes);
+            }
+            Err(OpenError::Damaged(first)) => {
                 notes.push(format!("index {} is unusable ({first})", path.display()));
                 if path.exists() {
                     let mut aside = path.as_os_str().to_owned();
@@ -128,7 +202,7 @@ impl Index {
                 }
             }
         }
-        match Index::open(path) {
+        match Index::open_timeout(path, timeout) {
             Ok(i) => (Some(i), notes),
             Err(second) => {
                 notes.push(format!("a new index could not be made either ({second}); working without it"));
@@ -463,5 +537,51 @@ mod tests {
         assert_eq!(g.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["/grew", "/small"]);
         assert_eq!(g[0].grew_bytes, 250, "against the measurement at the window's start (8 days ago)");
         assert_eq!(g[1].grew_bytes, 5, "no older one: against the oldest inside the window");
+    }
+
+    #[test]
+    fn a_busy_index_is_left_where_it_is_and_the_caller_works_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("i.sqlite");
+        let mut good = Index::open(&path).unwrap();
+        good.sync_folders(&[folder("/a", "live")]).unwrap();
+        // Another process holds the file exclusively.
+        let holder = Connection::open(&path).unwrap();
+        holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let (index, notes) = Index::open_or_recover_timeout(&path, 9, Duration::from_millis(50));
+        assert!(index.is_none(), "{notes:?}");
+        assert!(notes.iter().any(|n| n.contains("left as it is")), "{notes:?}");
+        assert!(path.exists(), "a busy index is not a damaged one");
+        assert!(!dir.path().join("i.sqlite.corrupt-9").exists());
+        holder.execute_batch("ROLLBACK").unwrap();
+        assert_eq!(Index::open(&path).unwrap().folders().unwrap().len(), 1, "its rows are still there");
+    }
+
+    #[test]
+    fn a_read_only_open_changes_nothing_and_makes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("i.sqlite");
+        assert!(Index::open_read_only(&path).is_err());
+        assert!(!path.exists(), "a read-only open never creates the file");
+        let mut i = Index::open(&path).unwrap();
+        i.record_sizes(
+            &[SizeRow {
+                path: "/a".into(),
+                bytes: 3,
+                partial: false,
+                measured_at: 1_000_000_000,
+            }],
+            1_000_000_000,
+        )
+        .unwrap();
+        drop(i);
+        let before = std::fs::read(&path).unwrap();
+        let ro = Index::open_read_only(&path).unwrap();
+        assert_eq!(ro.latest_sizes().unwrap()["/a"].bytes, 3);
+        drop(ro);
+        assert_eq!(std::fs::read(&path).unwrap(), before, "the database file is untouched");
+        // A write attempt through the read-only handle fails (SQLite may still make its -shm/-wal side files to read a WAL file).
+        let ro = Index::open_read_only(&path).unwrap();
+        assert!(ro.conn.execute("INSERT INTO folders (path, kind, owner, branch, head, created, last_used, state, repo, link) VALUES ('x','','','','',0,0,'','','')", []).is_err());
     }
 }

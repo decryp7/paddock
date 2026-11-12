@@ -74,6 +74,12 @@ start, and cargo tracks the last use of its caches in SQLite (`cargo clean gc`, 
   and the folders that grew most in the last 7 days. States: live (locked, claimed, a train, a process inside, or used in the last
   48 hours), merged (HEAD is in `origin/main` or a train), stale-pushed (clean, every commit on a remote), unsaved (dirty,
   unpushed, or not established), orphan (no record).
+- Every deletion of a tool-made folder goes through `safe_remove` (`src/safe_remove.rs`), the one "safe to remove" check: it
+  removes only on positive proof, read again right before each removal (owner record; strictly below an allowed root with no
+  symlink; no process with its current folder inside; every git repository or worktree at any depth below clean, no stash, a
+  remote, nothing unpushed, a linked worktree unlocked and unclaimed). A fact it cannot establish (process list unreadable,
+  a git error, a walk past its limit) is a refusal. `tests/it/safe_remove_lint.rs` fails when other code under `tools/` deletes
+  folders without it; the listed exceptions (the CI slot sweep, `worktree drop` and `worktree clean`) adopt it in follow-ups.
 - `./dev disk clean` is a dry run; `--apply` removes only merged and stale-pushed folders that are not live, worktrees through
   `git worktree remove` (no force), re-checking each one right before removing it, and logs every path and size. Never touched: unsaved,
   orphan and live folders, CI slots (the CI kit sweeps those), and anything without a record (runners, sccache, VMs, Docker, user folders).

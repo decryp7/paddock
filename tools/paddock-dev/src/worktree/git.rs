@@ -49,7 +49,8 @@ impl Git {
     /// Runs git and returns what it printed whatever its status.
     pub fn run(&self, args: &[&str]) -> Result<Out, GitError> {
         let mut cmd = command("git");
-        cmd.arg("-C").arg(&self.dir).args(args);
+        // Never take git's optional locks (`status` refreshing the index): a reader must not collide with the work it reads.
+        cmd.arg("-C").arg(&self.dir).args(args).env("GIT_OPTIONAL_LOCKS", "0");
         let out = run_bounded(cmd, Limits::new(TIMEOUT).max_output(1 << 26)).map_err(|e| GitError {
             args: args.join(" "),
             stderr: e.to_string(),

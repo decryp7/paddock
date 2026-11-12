@@ -11,8 +11,7 @@ use super::measure::folder_size;
 use super::record::{self, Kind};
 use super::scan::{Found, Sizes, context, discover, scan};
 use super::state::{State, inspect};
-use crate::worktree::git::{Repo, key};
-use crate::worktree::owners::OwnerStore;
+use crate::safe_remove;
 use clap::Args;
 use paddock_cli::{CliError, Report};
 use serde_json::json;
@@ -46,42 +45,28 @@ pub fn refusal(f: &Found, state: State) -> Option<String> {
     }
 }
 
-fn safe_folder(path: &Path, s: &Settings) -> Result<(), String> {
-    let meta = path.symlink_metadata().map_err(|e| format!("cannot read it: {e}"))?;
-    if !meta.is_dir() {
-        return Err("not a real folder (a symlink or a file)".into());
-    }
-    let real = path.canonicalize().map_err(|e| format!("cannot resolve it: {e}"))?;
-    let under = s
-        .roots
-        .iter()
-        .filter_map(|r| r.canonicalize().ok())
-        .any(|r| real.starts_with(&r) && real != r);
-    if !under {
-        return Err("not below a configured root".into());
-    }
-    if record::read(path).ok().flatten().is_none() {
-        return Err("its owner record is gone".into());
-    }
-    Ok(())
-}
-
-fn remove_worktree(path: &Path) -> Result<(), String> {
-    let repo = Repo::discover(path).map_err(|e| e.to_string())?;
-    let k = key(path);
-    repo.git()
-        .text(&["worktree", "remove", &k])
-        .map_err(|e| format!("git would not remove it: {}", e.stderr.trim()))?;
-    let _ = OwnerStore::open(&repo.common_dir).update(|m| m.remove(&k));
-    Ok(())
-}
-
 /// Runs `clean`.
 pub fn run(a: &CleanArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn FnMut(&str)) -> Result<Report, CliError> {
+    run_with(a, env, note, &mut |_| {})
+}
+
+/// [`run`] with a hook called for each folder after it was judged removable and before the removal is tried (tests change the
+/// folder there, to show that the judgement is made again).
+pub fn run_with(
+    a: &CleanArgs,
+    env: &dyn Fn(&str) -> Option<String>,
+    note: &mut dyn FnMut(&str),
+    before_remove: &mut dyn FnMut(&Path),
+) -> Result<Report, CliError> {
     let s = Settings::resolve(&a.common, env);
-    let now = crate::worktree::note::now_secs();
-    let ctx = context(&s, now);
-    let mut cached = Index::open(&s.index).ok().and_then(|i| i.latest_sizes().ok()).unwrap_or_default();
+    if a.apply && context(&s, crate::worktree::note::now_secs()).process_folders.is_none() {
+        return Err(
+            CliError::refused("The processes' current folders cannot be read here, so whether a folder is in use is not known.").with_hint(
+                "Run `./dev disk clean --apply` on a machine where they can be read (Linux, macOS); `--dry-run` works everywhere.",
+            ),
+        );
+    }
+    let mut cached = Index::open_read_only(&s.index).and_then(|i| i.latest_sizes()).unwrap_or_default();
     let mut text = String::new();
     let (mut removed, mut kept) = (Vec::new(), Vec::new());
     let mut total = 0u64;
@@ -91,6 +76,8 @@ pub fn run(a: &CleanArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn F
         s.jobs
     ));
     for f in discover(&s) {
+        // The clock and the processes are read again for every folder: a long clean must not judge by what it saw minutes ago.
+        let ctx = context(&s, crate::worktree::note::now_secs());
         let state = inspect(&f.path, f.record.as_ref(), &ctx).state;
         if let Some(why) = refusal(&f, state) {
             // Orphans and non-reclaimable states are the bulk: only the reclaimable-but-refused ones are worth a line.
@@ -101,33 +88,40 @@ pub fn run(a: &CleanArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn F
             continue;
         }
         let p = f.path.display().to_string();
-        let bytes = cached
-            .remove(&p)
-            .map(|r| r.bytes)
-            .unwrap_or_else(|| folder_size(&f.path, s.folder_timeout).bytes);
         let (kind, owner) = f.record.as_ref().map_or(("", String::new()), |r| (r.kind.word(), r.owner.clone()));
-        if !a.apply {
-            text.push_str(&format!(
-                "would remove {p} ({}, {kind}, {}, owner {owner})\n",
-                gib(bytes),
-                state.word()
-            ));
-            removed.push(json!({"path": p, "bytes": bytes, "state": state.word(), "kind": kind, "owner": owner, "dry_run": true}));
-            total += bytes;
-            continue;
-        }
-        // Again, right before acting: the folder may have been used or changed since the first look.
-        let again = inspect(&f.path, record::read(&f.path).ok().flatten().as_ref(), &ctx).state;
-        let result = if !again.reclaimable() {
-            Err(format!("it became {} while cleaning", again.word()))
+        let result = if a.apply {
+            before_remove(&f.path);
+            // Again, right before acting: state, processes and the clock afresh, then the shared check inside `remove`.
+            let ctx = context(&s, crate::worktree::note::now_secs());
+            let again = inspect(&f.path, record::read(&f.path).ok().flatten().as_ref(), &ctx).state;
+            if again.reclaimable() {
+                // The size is read before the folder goes.
+                let bytes = cached
+                    .remove(&p)
+                    .map(|r| r.bytes)
+                    .unwrap_or_else(|| folder_size(&f.path, s.folder_timeout).bytes);
+                safe_remove::remove(&f.path, &s.roots).map(|_| bytes)
+            } else {
+                Err(format!("it became {} while cleaning", again.word()))
+            }
         } else {
-            safe_folder(&f.path, &s).and_then(|()| match f.record.as_ref().map(|r| r.kind) {
-                Some(Kind::Worktree) => remove_worktree(&f.path),
-                _ => std::fs::remove_dir_all(&f.path).map_err(|e| format!("could not remove it: {e}")),
-            })
+            let bytes = cached
+                .remove(&p)
+                .map(|r| r.bytes)
+                .unwrap_or_else(|| folder_size(&f.path, s.folder_timeout).bytes);
+            safe_remove::check(&f.path, &s.roots).map(|_| bytes)
         };
         match result {
-            Ok(()) => {
+            Ok(bytes) if !a.apply => {
+                text.push_str(&format!(
+                    "would remove {p} ({}, {kind}, {}, owner {owner})\n",
+                    gib(bytes),
+                    state.word()
+                ));
+                removed.push(json!({"path": p, "bytes": bytes, "state": state.word(), "kind": kind, "owner": owner, "dry_run": true}));
+                total += bytes;
+            }
+            Ok(bytes) => {
                 note(&format!(
                     "disk clean: removed {p} ({}, {kind}, {}, owner {owner})",
                     gib(bytes),
@@ -150,10 +144,11 @@ pub fn run(a: &CleanArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn F
         removed.len(),
         gib(total)
     ));
-    if a.apply
-        && let Ok(mut i) = Index::open(&s.index)
-    {
-        let _ = scan(&s, Sizes::Skip, Some(&mut i), &mut |_| {});
+    if a.apply {
+        let (index, _) = Index::open_or_recover(&s.index, crate::worktree::note::now_secs());
+        if let Some(mut i) = index {
+            let _ = scan(&s, Sizes::Skip, Some(&mut i), &mut |_| {});
+        }
     }
     Ok(Report::new(
         json!({"apply": a.apply, "removed": removed, "kept": kept, "bytes": total}),
@@ -252,25 +247,38 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_whose_record_vanishes_before_removal_is_kept() {
+    fn a_folder_used_after_it_was_judged_removable_is_judged_again_and_kept() {
+        let (d, mut a) = setup();
+        a.apply = true;
+        let victim = d.path().join("dev-targets/stale-build");
+        let mut logged = Vec::new();
+        // Between the first judgement and the removal someone uses the folder: its record is touched.
+        let r = run_with(&a, &|_| None, &mut |l| logged.push(l.to_string()), &mut |p| {
+            if p == victim {
+                let mut rec = record::read(p).unwrap().unwrap();
+                rec.last_used = crate::worktree::note::now_secs();
+                record::write(p, &rec).unwrap();
+            }
+        })
+        .unwrap();
+        assert!(victim.is_dir(), "it became live while cleaning and must stay");
+        assert!(logged.iter().any(|l| l.contains("became live")), "{logged:?}");
+        assert_eq!(r.data["removed"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn a_missing_root_is_not_measured_in_the_report() {
         let d = tempfile::tempdir().unwrap();
-        let root = d.path().join("r");
-        std::fs::create_dir_all(root.join("x")).unwrap();
-        let s = Settings::resolve(
-            &CommonArgs {
-                roots: vec![root.clone()],
+        let args = crate::disk::report::ReportArgs {
+            common: CommonArgs {
+                roots: vec![d.path().join("not-mounted")],
+                index: Some(d.path().join("i.sqlite")),
                 ..CommonArgs::default()
             },
-            &|_| None,
-        );
-        assert!(safe_folder(&root.join("x"), &s).unwrap_err().contains("record is gone"));
-        old_record(&root.join("x"), Kind::Build, "");
-        assert!(safe_folder(&root.join("x"), &s).is_ok());
-        assert!(safe_folder(&root, &s).is_err(), "a root itself is never removed");
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(root.join("x"), root.join("link")).unwrap();
-            assert!(safe_folder(&root.join("link"), &s).unwrap_err().contains("symlink"));
-        }
+            all: false,
+            summary: false,
+        };
+        let r = crate::disk::report::run(&args, &|_| None, &mut |_| {}).unwrap();
+        assert!(r.text.contains("not measured (the folder does not exist"), "{}", r.text);
     }
 }

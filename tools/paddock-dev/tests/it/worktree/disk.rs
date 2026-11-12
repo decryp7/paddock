@@ -91,7 +91,9 @@ fn report_gives_each_worktree_its_state_and_clean_removes_only_merged_and_stale_
     fx.git(&pushed, &["push", "-q", "origin", "pushed-one"]);
     // unsaved: an unpushed commit; another with a dirty file.
     let unpushed = released(&fx, "unpushed-one");
+    // Pushed first, so that only the dirty file can make it unsaved (the dirty check must stand on its own).
     let dirty = released(&fx, "dirty-one");
+    fx.git(&dirty, &["push", "-q", "origin", "dirty-one"]);
     std::fs::write(dirty.join("scratch.txt"), "wip\n").unwrap();
     // live: still locked.
     let locked = fx.add("locked-one");
@@ -216,4 +218,196 @@ fn a_corrupt_index_does_not_stop_the_report_it_is_set_aside_and_rebuilt_from_the
             .flatten()
             .any(|e| e.file_name().to_string_lossy().contains("index.sqlite.corrupt-"))
     );
+}
+
+/// A folder under the fixture's root with a build record (no link) holding a clone of the origin.
+fn build_with_clone(fx: &Fixture, name: &str) -> PathBuf {
+    let dir = fx.root.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    let r = fx.dev(&["disk", "record", s(&dir), "--kind", "build", "--owner", "implementer:probe"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    // The record is old: only real facts may keep it.
+    let rec = dir.join(".paddock-owner.toml");
+    let aged = std::fs::read_to_string(&rec)
+        .unwrap()
+        .lines()
+        .map(|l| {
+            if l.starts_with("last_used") || l.starts_with("created") {
+                format!("{} = \"2020-01-01T00:00:00Z\"", l.split(' ').next().unwrap())
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&rec, aged).unwrap();
+    fx.git(&fx.root, &["clone", "-q", "origin.git", &format!("{name}/inner")]);
+    age(&dir);
+    dir
+}
+
+/// The folder's own time counts as use: make it old.
+fn age(dir: &Path) {
+    let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+    std::fs::File::open(dir).unwrap().set_modified(old).unwrap();
+}
+
+#[test]
+fn a_build_folder_with_no_link_that_holds_a_repository_with_an_unpushed_commit_is_kept() {
+    // The reviewer's probe: no link, an old record, a clone inside with a commit that is on no remote.
+    let fx = Fixture::new();
+    let dir = build_with_clone(&fx, "probe-build");
+    fx.commit_in(&dir.join("inner"), "unsaved.txt");
+    age(&dir);
+    let go = disk(&fx, &["clean", "--apply"]);
+    assert_eq!(go.code, 0, "{} {}", go.json, go.err);
+    assert!(dir.join("inner/unsaved.txt").exists(), "unpushed work must survive: {}", go.err);
+    assert!(
+        go.err.contains("no remote") || go.json.to_string().contains("no remote"),
+        "{} {}",
+        go.json,
+        go.err
+    );
+}
+
+#[test]
+fn nested_repositories_with_a_dirty_file_a_stash_or_no_remote_are_kept_and_a_clean_pushed_one_goes() {
+    let fx = Fixture::new();
+    let clean = build_with_clone(&fx, "nested-clean");
+    let dirty = build_with_clone(&fx, "nested-dirty");
+    std::fs::write(dirty.join("inner/wip.txt"), "wip\n").unwrap();
+    let stash = build_with_clone(&fx, "nested-stash");
+    std::fs::write(stash.join("inner/README.md"), "changed\n").unwrap();
+    fx.git(&stash.join("inner"), &["stash", "push", "-q"]);
+    let local = fx.root.join("nested-local");
+    std::fs::create_dir_all(&local).unwrap();
+    assert_eq!(
+        fx.dev(&["disk", "record", s(&local), "--kind", "scratch", "--owner", "implementer:probe"])
+            .code,
+        0
+    );
+    fx.git(&local, &["init", "-q"]);
+    for d in [&clean, &dirty, &stash, &local] {
+        let rec = d.join(".paddock-owner.toml");
+        let t = std::fs::read_to_string(&rec).unwrap();
+        let aged: Vec<String> = t
+            .lines()
+            .map(|l| {
+                if l.starts_with("last_used") || l.starts_with("created") {
+                    format!("{} = \"2020-01-01T00:00:00Z\"", l.split(' ').next().unwrap())
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect();
+        std::fs::write(&rec, aged.join("\n")).unwrap();
+        age(d);
+    }
+    let go = disk(&fx, &["clean", "--apply"]);
+    assert_eq!(go.code, 0, "{} {}", go.json, go.err);
+    assert!(!clean.exists(), "{}", go.err);
+    for kept in [&dirty, &stash, &local] {
+        assert!(kept.is_dir(), "{kept:?} must be kept: {}", go.err);
+    }
+}
+
+#[test]
+fn a_build_folder_linked_to_a_dirty_worktree_is_kept() {
+    let fx = Fixture::new();
+    let wt = released(&fx, "linked-wt");
+    fx.git(&wt, &["push", "-q", "origin", "linked-wt"]);
+    std::fs::write(wt.join("wip.txt"), "wip\n").unwrap();
+    let build = fx.root.join("linked-wt-target");
+    std::fs::create_dir_all(&build).unwrap();
+    let r = fx.dev(&[
+        "disk",
+        "record",
+        s(&build),
+        "--kind",
+        "build",
+        "--owner",
+        "implementer:t",
+        "--link",
+        s(&wt),
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    let rec = build.join(".paddock-owner.toml");
+    let t = std::fs::read_to_string(&rec).unwrap();
+    let aged: Vec<String> = t
+        .lines()
+        .map(|l| {
+            if l.starts_with("last_used") || l.starts_with("created") {
+                format!("{} = \"2020-01-01T00:00:00Z\"", l.split(' ').next().unwrap())
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    std::fs::write(&rec, aged.join("\n")).unwrap();
+    age(&build);
+    let rep = disk(&fx, &["report"]);
+    assert_eq!(
+        state_of(&rep, &build),
+        "unsaved",
+        "a build folder follows the state of the worktree it serves"
+    );
+    let go = disk(&fx, &["clean", "--apply"]);
+    assert!(build.is_dir() && wt.is_dir(), "{} {}", go.json, go.err);
+}
+
+#[test]
+fn safe_remove_refuses_a_locked_or_claimed_worktree_even_with_an_old_record() {
+    let fx = Fixture::new();
+    let wt = fx.add("proof-locked");
+    let roots = vec![fx.root.clone()];
+    let e = paddock_dev::safe_remove::check_with(&wt, &roots, Ok(vec![])).unwrap_err();
+    assert!(e.contains("locked"), "{e}");
+    assert_eq!(fx.claim(&wt, "implementer:x").code, 0);
+    fx.git(&fx.primary, &["worktree", "unlock", s(&wt)]);
+    let e = paddock_dev::safe_remove::check_with(&wt, &roots, Ok(vec![])).unwrap_err();
+    assert!(e.contains("claimed"), "{e}");
+    assert!(wt.is_dir());
+}
+
+#[test]
+fn every_git_call_of_a_scan_runs_without_optional_locks() {
+    let fx = Fixture::new();
+    let _wt = fx.add("locks-wt");
+    let log = fx.root.join("git-env.log");
+    let path_env = fx.fake_git("locks", &format!("echo \"${{GIT_OPTIONAL_LOCKS:-unset}}\" >> '{}'", log.display()));
+    let index = fx.root.join("index.sqlite");
+    let out = fx
+        .cmd(
+            &fx.primary,
+            &["disk", "scan", "--no-sizes", "--root", s(&fx.root), "--index", s(&index)],
+        )
+        .env("PATH", path_env)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let seen = std::fs::read_to_string(&log).unwrap();
+    assert!(seen.lines().count() > 3, "the scan asked git something: {seen}");
+    assert!(
+        seen.lines().all(|l| l == "0"),
+        "every git call must set GIT_OPTIONAL_LOCKS=0: {seen}"
+    );
+}
+
+#[test]
+fn a_missing_root_is_not_measured_in_the_report_not_an_empty_disk() {
+    let fx = Fixture::new();
+    let index = fx.root.join("index.sqlite");
+    let gone = fx.root.join("not-mounted");
+    let r = super::run_of(
+        fx.cmd(
+            &fx.primary,
+            &["disk", "report", "--root", s(&fx.root), "--root", s(&gone), "--index", s(&index)],
+        )
+        .output()
+        .unwrap(),
+    );
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    let disk = r.json["disks"].as_array().unwrap().iter().find(|d| d["root"] == s(&gone)).unwrap();
+    assert_eq!(disk["measured"], false);
+    assert!(disk["free_bytes"].is_null());
 }

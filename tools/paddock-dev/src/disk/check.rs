@@ -82,7 +82,7 @@ fn largest(s: &Settings) -> Vec<String> {
             s.index.display()
         )];
     }
-    let rows = Index::open(&s.index).and_then(|i| i.latest_sizes());
+    let rows = Index::open_read_only(&s.index).and_then(|i| i.latest_sizes());
     match rows {
         Ok(sizes) if !sizes.is_empty() => {
             let mut v: Vec<_> = sizes.into_values().collect();
