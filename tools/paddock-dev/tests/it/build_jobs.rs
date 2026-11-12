@@ -107,7 +107,12 @@ impl Scratch {
 
 /// The shell's output as the Rust command spells it: the notice that names the file to fix, and a failure's next step.
 fn normalised(sh: &Result, rs: &Result) -> (Result, Result) {
-    let fix = |t: &str| t.replace("or fix build-jobs.sh if it differs", "or fix the class table in ci_build_jobs.rs if it differs");
+    let fix = |t: &str| {
+        t.replace(
+            "or fix build-jobs.sh if it differs",
+            "or fix the class table in ci_build_jobs.rs if it differs",
+        )
+    };
     let sh_out = fix(&sh.stdout);
     // Every `::error::` of the shell is one line; the Rust line starts with it and goes on with ` Next step: ...`.
     let rs_out = rs
@@ -173,7 +178,12 @@ fn the_class_values_are_the_documented_ones() {
     assert_eq!(mac.env_file, "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n");
     let win = same(&s, None, &host("Windows", "16", "32768"), true);
     assert_eq!(win.env_file, "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=8\n");
-    assert!(win.stdout.contains("::notice::build-jobs assumes the Windows runner's capacity is 3"), "{}", win.stdout);
+    assert!(
+        win.stdout
+            .contains("::notice::build-jobs assumes the Windows runner's capacity is 3"),
+        "{}",
+        win.stdout
+    );
     let linux = same(&s, None, &host("Linux", "16", "131072"), true);
     assert_eq!(linux.env_file, "", "Linux keeps cargo's default");
     let split = same(&s, Some("4"), &host("Linux", "16", "131072"), true);
@@ -210,7 +220,12 @@ fn memory_can_be_the_ceiling() {
     vars.push(("PADDOCK_CI_RESERVED_RAM_MB", "1024"));
     let r = same(&s, None, &vars, true);
     assert!(r.stderr.contains("MB per rustc"), "{}", r.stderr);
-    let unknown = same(&s, None, &[("RUNNER_OS", "macOS"), ("PADDOCK_CI_CORES", "14"), ("PADDOCK_CI_RAM_MB", "x")], true);
+    let unknown = same(
+        &s,
+        None,
+        &[("RUNNER_OS", "macOS"), ("PADDOCK_CI_CORES", "14"), ("PADDOCK_CI_RAM_MB", "x")],
+        true,
+    );
     assert!(unknown.stderr.contains("RAM unknown: no memory ceiling"), "{}", unknown.stderr);
 }
 
@@ -245,10 +260,20 @@ fn wrong_values_fail_with_the_shells_cause_and_a_next_step() {
 #[test]
 fn a_host_with_no_cores_to_count_or_no_core_left_still_builds() {
     let s = Scratch::new();
-    let r = same(&s, None, &[("RUNNER_OS", "macOS"), ("PADDOCK_CI_CORES", "abc"), ("PADDOCK_CI_RAM_MB", "8192")], true);
+    let r = same(
+        &s,
+        None,
+        &[("RUNNER_OS", "macOS"), ("PADDOCK_CI_CORES", "abc"), ("PADDOCK_CI_RAM_MB", "8192")],
+        true,
+    );
     assert_eq!((r.code, r.env_file.as_str()), (0, ""), "unknown cores leave cargo's default");
     assert!(r.stdout.contains("::warning::could not count this host's cores"), "{}", r.stdout);
-    let all_kept = same(&s, None, &[("RUNNER_OS", "macOS"), ("PADDOCK_CI_CORES", "2"), ("PADDOCK_CI_RAM_MB", "65536")], true);
+    let all_kept = same(
+        &s,
+        None,
+        &[("RUNNER_OS", "macOS"), ("PADDOCK_CI_CORES", "2"), ("PADDOCK_CI_RAM_MB", "65536")],
+        true,
+    );
     assert!(all_kept.stdout.contains("keeps all of this host's 2 cores"), "{}", all_kept.stdout);
     assert!(all_kept.env_file.starts_with("CARGO_BUILD_JOBS=1\n"), "{}", all_kept.env_file);
 }
@@ -313,6 +338,7 @@ fn a_token_of_the_job_never_reaches_a_probe() {
 /// A Windows runner (Rust only: the shell's Git bash has no Unix stand-in): `$GITHUB_ENV` arrives as a Git-bash path (`/c/x`) and
 /// is read as the drive path it names, as `PADDOCK_CI_ASSUME_WINDOWS=1` says for any OS; the class values are the Windows ones.
 #[test]
+#[allow(clippy::disallowed_methods)]
 fn on_a_windows_host_github_env_is_read_as_a_drive_path() {
     let s = Scratch::new();
     s.reset();
@@ -324,7 +350,14 @@ fn on_a_windows_host_github_env_is_read_as_a_drive_path() {
     let out = cmd.env_clear().envs(s.base_env(&vars, false)).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(1), "{stdout}");
-    assert!(stdout.contains("C:/paddock-build-jobs-test-no-such-folder/env"), "the drive path is what it tried: {stdout}");
+    assert!(
+        stdout.contains("C:/paddock-build-jobs-test-no-such-folder/env"),
+        "the drive path is what it tried: {stdout}"
+    );
     assert!(stdout.contains(" Next step: "), "{stdout}");
-    assert_eq!(stdout.lines().filter(|l| l.starts_with("::error::")).count(), 1, "one error line: {stdout}");
+    assert_eq!(
+        stdout.lines().filter(|l| l.starts_with("::error::")).count(),
+        1,
+        "one error line: {stdout}"
+    );
 }

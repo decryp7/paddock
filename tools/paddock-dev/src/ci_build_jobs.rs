@@ -90,10 +90,10 @@ impl Host for Probes {
         }
         if let Ok(max) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
             let max = max.trim_end_matches('\n');
-            if is_count(max) {
-                if let Ok(bytes) = max.parse::<u128>() {
-                    return (bytes / 1_048_576).to_string();
-                }
+            if is_count(max)
+                && let Ok(bytes) = max.parse::<u128>()
+            {
+                return (bytes / 1_048_576).to_string();
             }
         }
         if let Ok(info) = std::fs::read_to_string("/proc/meminfo") {
@@ -109,12 +109,11 @@ impl Host for Probes {
                 }
             }
         }
-        if let Some(bytes) = probe(env, "sysctl", &["-n", "hw.memsize"]) {
-            if is_count(&bytes) {
-                if let Ok(b) = bytes.parse::<u128>() {
-                    return (b / 1_048_576).to_string();
-                }
-            }
+        if let Some(bytes) = probe(env, "sysctl", &["-n", "hw.memsize"])
+            && is_count(&bytes)
+            && let Ok(b) = bytes.parse::<u128>()
+        {
+            return (b / 1_048_576).to_string();
         }
         String::new()
     }
@@ -162,7 +161,10 @@ pub fn class_default(os: &str, what: Setting) -> &'static str {
 
 /// The variable when it is set and not empty, else the default.
 fn setting(env: &HashMap<String, String>, name: &str, default: &str) -> String {
-    env.get(name).filter(|v| !v.is_empty()).cloned().unwrap_or_else(|| default.to_string())
+    env.get(name)
+        .filter(|v| !v.is_empty())
+        .cloned()
+        .unwrap_or_else(|| default.to_string())
 }
 
 fn var<'a>(env: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
@@ -257,12 +259,7 @@ pub fn run_with(
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> i32 {
-    let mut step = Step {
-        env,
-        out,
-        err,
-        windows,
-    };
+    let mut step = Step { env, out, err, windows };
     match decide(&mut step, host, &args.split) {
         Ok(()) => 0,
         Err(code) => code,
@@ -278,13 +275,13 @@ fn decide(step: &mut Step<'_>, host: &dyn Host, split_text: &str) -> Result<(), 
         ));
     }
     let split = number(split_text);
-    if let Some(t) = var(env, "PADDOCK_CI_TEST_THREADS") {
-        if !is_count(t) {
-            return Err(step.fail(
-                &format!("PADDOCK_CI_TEST_THREADS must be a whole number >= 1, not '{t}'"),
-                "fix the variable in the runner's runner.envs.",
-            ));
-        }
+    if let Some(t) = var(env, "PADDOCK_CI_TEST_THREADS")
+        && !is_count(t)
+    {
+        return Err(step.fail(
+            &format!("PADDOCK_CI_TEST_THREADS must be a whole number >= 1, not '{t}'"),
+            "fix the variable in the runner's runner.envs.",
+        ));
     }
     let os = var(env, "RUNNER_OS").unwrap_or("").to_string();
     let n = host.cores(env);
@@ -309,7 +306,11 @@ fn decide(step: &mut Step<'_>, host: &dyn Host, split_text: &str) -> Result<(), 
             &jobs.to_string(),
             &format!("the runner's PADDOCK_CI_BUILD_JOBS / {split} builds at once"),
         )?;
-        return step.put_threads(jobs, &format!("the runner's PADDOCK_CI_BUILD_JOBS / {split} test runs at once"), split);
+        return step.put_threads(
+            jobs,
+            &format!("the runner's PADDOCK_CI_BUILD_JOBS / {split} test runs at once"),
+            split,
+        );
     }
 
     let share = setting(env, "PADDOCK_CI_JOBS_PER_HOST", class_default(&os, Setting::Share));
@@ -441,7 +442,10 @@ mod tests {
         let (code, out, err) = go("1", &Fixed("14", "65536"), &[("RUNNER_OS", "macOS")]);
         assert_eq!(code, 0);
         assert_eq!(out, "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n");
-        assert!(err.contains("build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS"), "{err}");
+        assert!(
+            err.contains("build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -464,6 +468,9 @@ mod tests {
     #[test]
     fn a_negative_share_still_gives_one_job() {
         let (_, out, _) = go("1", &Fixed("2", "8192"), &[("RUNNER_OS", "macOS")]);
-        assert!(out.contains("CARGO_BUILD_JOBS=1\n") && out.contains("NEXTEST_TEST_THREADS=8"), "{out}");
+        assert!(
+            out.contains("CARGO_BUILD_JOBS=1\n") && out.contains("NEXTEST_TEST_THREADS=8"),
+            "{out}"
+        );
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_build_jobs, ci_isolation, ci_runs, ci_setup_rust, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation,
-    slots, wait, worktree,
+    check, ci_build_jobs, ci_isolation, ci_runs, ci_setup_rust, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd,
+    release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
