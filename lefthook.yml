@@ -89,9 +89,3 @@ pre-push:
       # so a dirty tree cannot change the answer (several refs in one push: one is checked, the others are "not measured").
       use_stdin: true
       run: ./dev check --pre-push --refs-from-stdin
-    # Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when protocol.rs or a wire type changed; a
-    # stale one fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh).
-    # The glob is the repo-root path and there is no `root:`, so how lefthook resolves a glob under `root:` does not matter.
-    dyno-wire-fixtures:
-      glob: "apps/dyno/crates/dyno-core/src/**/*.rs"
-      run: sh apps/dyno/scripts/regen-wire-fixtures.sh

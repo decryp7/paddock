@@ -322,6 +322,30 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             reason: "no Rust file or docs/ipc-endpoints.toml changed".into(),
         });
     }
+    // Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when dyno-core's sources changed; a stale one
+    // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test).
+    if change
+        .files
+        .iter()
+        .any(|f| f.starts_with("apps/dyno/crates/dyno-core/src/") && f.ends_with(".rs"))
+    {
+        out.push(Planned::Run(Gate {
+            heavy: true,
+            ..gate(
+                "dyno-wire-fixtures".into(),
+                "",
+                "sh",
+                &["apps/dyno/scripts/regen-wire-fixtures.sh"],
+                1,
+                "update the *.contract.spec.ts the script names and commit the regenerated *.wire.json with it".into(),
+            )
+        }));
+    } else {
+        out.push(Planned::Skip {
+            id: "dyno-wire-fixtures".into(),
+            reason: "no file under apps/dyno/crates/dyno-core/src changed".into(),
+        });
+    }
     out
 }
 

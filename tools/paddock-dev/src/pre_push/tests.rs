@@ -119,6 +119,27 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
 }
 
 #[test]
+fn a_dyno_core_change_regenerates_the_wire_fixtures_and_others_skip_it() {
+    // Was a lefthook entry beside the pre-push command (fix/test-temp-group-and-wire-fixtures); the hook is one command now.
+    let planned = plan_gates(&plan(), &change(&["apps/dyno/crates/dyno-core/src/protocol.rs"]), &facts());
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "dyno-wire-fixtures").cloned();
+    let g = g.expect("dyno-wire-fixtures is planned for a dyno-core change");
+    assert_eq!(
+        (g.program.as_str(), g.args.join(" ")),
+        ("sh", "apps/dyno/scripts/regen-wire-fixtures.sh".to_string())
+    );
+    assert!(g.heavy, "it runs cargo test");
+    let other = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts());
+    assert!(!run_gates(&other).iter().any(|g| g.id == "dyno-wire-fixtures"));
+    assert!(
+        other
+            .iter()
+            .any(|p| matches!(p, Planned::Skip { id, .. } if id == "dyno-wire-fixtures")),
+        "skipped with a reason, not silently"
+    );
+}
+
+#[test]
 fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     let docs = json!({"conformance": false, "apps": [], "packages": {}});
     let c = Change {
