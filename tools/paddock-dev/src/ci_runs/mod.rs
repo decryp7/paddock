@@ -17,11 +17,13 @@ pub mod flakes;
 pub mod logfind;
 pub mod preconditions;
 pub mod schedule_skip;
+pub mod record;
 #[cfg(test)]
 mod testutil;
 pub mod time;
 pub mod timings;
 pub mod verdict;
+pub mod triage;
 
 use crate::wait::CurlHttp;
 use clap::Args;
@@ -106,6 +108,31 @@ pub struct VerdictArgs {
     server: String,
 }
 
+/// Arguments of `ci triage`.
+#[derive(Args)]
+pub struct TriageArgs {
+    /// The finished CI run to triage (an id from the run's URL).
+    run: u64,
+    /// Compare with this run instead of the last finished main run of the same workflow.
+    #[arg(long)]
+    against: Option<u64>,
+    /// The app whose flake history is read (default: the workflow's own app and the `app <name>` jobs of the run).
+    #[arg(long)]
+    app: Option<String>,
+    /// The window of the flake history in days.
+    #[arg(long, default_value_t = 14, value_parser = clap::value_parser!(u32).range(1..=366))]
+    days: u32,
+    /// Skip the flake history (faster: it reads the failed job logs of the window).
+    #[arg(long)]
+    no_history: bool,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
 /// Arguments of `ci schedule-skip`. The event, server and repository default to the job's (`GITHUB_EVENT_NAME`,
 /// `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`).
 #[derive(Args)]
@@ -171,6 +198,23 @@ fn append(path: &str, text: &str) -> Result<(), CliError> {
         .open(path)
         .and_then(|mut f| f.write_all(text.as_bytes()))
         .map_err(|e| CliError::failure(format!("{path} cannot be written: {e}.")))
+}
+
+/// Arguments of `ci record-fixture`.
+#[derive(Args)]
+pub struct RecordArgs {
+    /// The finished runs to record (ids from the runs' URLs).
+    #[arg(required = true)]
+    runs: Vec<u64>,
+    /// The folder the files are written to (create it under the test folder of the tool that reads them).
+    #[arg(long)]
+    out: PathBuf,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
 }
 
 fn token() -> Result<String, CliError> {
@@ -314,6 +358,28 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         eprintln!("::error::ci verdict: {}", r.text);
     }
     Ok(r)
+}
+
+/// `ci triage`: read-only; it quarantines nothing and marks nothing green (ER-12).
+pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
+    let token = token()?;
+    let mut http = CurlHttp;
+    let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
+    let req = triage::Request {
+        run: a.run,
+        against: a.against,
+        app: a.app.clone(),
+        days: a.days,
+        history: !a.no_history,
+        repo: a.repo.clone(),
+        now_secs: time::now_secs(),
+    };
+    let report = triage::collect(&mut client, &req, &mut |l| eprintln!("{l}")).map_err(|e| {
+        CliError::failure(format!("run {} could not be triaged: {e}", a.run))
+            .with_hint("Check the network, that GITEA_TOKEN can read the repository, and that the run has finished.")
+    })?;
+    // An answer with an UNKNOWN row or a gap is not a clean one: exit 5, so a script cannot read it as "nothing to worry about".
+    Ok(Report::new(report.json(), report.text()).with_exit(report.exit()))
 }
 
 /// `ci timings`.

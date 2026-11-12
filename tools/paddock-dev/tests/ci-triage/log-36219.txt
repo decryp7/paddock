@@ -1,0 +1,4 @@
+2026-11-11T23:12:45.2024460Z Job: bundle
+2026-11-11T23:26:59.2039130Z ::error::stable-workspace: 'move the checkout to /Volumes/d7sst7/ci/home/src/debrief-bundle-macOS-s3' did not finish within 300 s (the step moves the checkout of /Volumes/disk/gitea-runners/runner-1/work/1c8746f5cf7f2d6b/hostexecutor to a kept folder); a process left from an earlier job on this runner probably holds a file or lock there. Last output: . Next step: list and end processes using the CI home's src folder on the runner, then re-run the job.
+2026-11-11T23:26:59.2889600Z ##[error]Process completed with exit code 1.
+2026-11-11T23:26:59.2893220Z ##[error]Process completed with exit code 1.

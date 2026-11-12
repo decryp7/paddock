@@ -1,0 +1,2 @@
+2026-11-11T13:51:00.4844920Z Job: tauri-smoke
+2026-11-11T13:57:32.9211270Z ##[error]Process completed with exit code 143.

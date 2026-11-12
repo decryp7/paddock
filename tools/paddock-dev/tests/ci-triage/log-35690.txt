@@ -1,0 +1,2 @@
+2026-11-11T11:21:47.6380837Z Job: e2e
+2026-11-11T11:40:10.8300148Z ##[error]Process completed with exit code 1.

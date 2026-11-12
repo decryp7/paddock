@@ -1,0 +1,8 @@
+2026-11-11T22:52:21.5944370Z Job: rust-test-macos
+2026-11-11T23:21:20.3396480Z [32;1m    Starting[0m [1m4217[0m tests across [1m101[0m binaries ([1m31[0m tests [33;1mskipped[0m)
+2026-11-11T23:23:42.3590470Z [31;1m        FAIL[0m [  79.875s] (2454/4217) [35;1mdebrief-app[0m [36mbrowser::renderer::tests[0m[36m::[0m[34;1ma_challenge_page_comes_to_the_front_and_the_work_continues_when_it_is_solved[0m
+2026-11-11T23:23:42.5205640Z [31;1m        FAIL[0m [  71.189s] (2455/4217) [35;1mdebrief-app[0m [36mbrowser::renderer::tests[0m[36m::[0m[34;1mreads_a_scripted_page_through_the_ports_with_nothing_of_ours_in_it[0m
+2026-11-11T23:26:25.4235530Z [31;1m     Summary[0m [ 305.743s] [1m4217[0m tests run: [1m4215[0m [32;1mpassed[0m ([1m4[0m [33;1mslow[0m), [1m2[0m [31;1mfailed[0m, [1m31[0m [33;1mskipped[0m
+2026-11-11T23:26:25.4235560Z [31;1m        FAIL[0m [  79.875s] (2454/4217) [35;1mdebrief-app[0m [36mbrowser::renderer::tests[0m[36m::[0m[34;1ma_challenge_page_comes_to_the_front_and_the_work_continues_when_it_is_solved[0m
+2026-11-11T23:26:25.4236190Z [31;1m        FAIL[0m [  71.189s] (2455/4217) [35;1mdebrief-app[0m [36mbrowser::renderer::tests[0m[36m::[0m[34;1mreads_a_scripted_page_through_the_ports_with_nothing_of_ours_in_it[0m
+2026-11-11T23:26:25.6000550Z ##[error]Process completed with exit code 100.
