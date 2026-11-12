@@ -1,7 +1,7 @@
 // A job gated on `needs.gate` must not use `always()`: it would also run once the workflow is cancelled. `!cancelled()` plus the
 // explicit result checks is the condition (the gate's own failure or cancellation still stops the job).
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
@@ -34,3 +34,25 @@ for (const [file, job] of GATED) {
     assert.match(cond, /needs\.gate\.outputs\.run != 'false'/);
   });
 }
+
+// A plain YAML scalar cannot start with `!` (a tag), `&`, `*`, `%`, `@` or a backtick: Gitea reads such a file as invalid, runs it
+// on a push with no jobs and fails it at once (run 7976 to 7978, `if: !cancelled() && ...`). The expression goes in `${{ }}`.
+test('no `if:` of a workflow or action starts with a YAML indicator unquoted (write `${{ !cancelled() }}`)', () => {
+  const dir = join(PADDOCK, '.gitea');
+  const files = [];
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.isDirectory()) walk(join(d, e.name));
+      else if (/\.ya?ml$/.test(e.name)) files.push(join(d, e.name));
+    }
+  };
+  walk(dir);
+  const bad = [];
+  for (const f of files) {
+    readFileSync(f, 'utf8').split('\n').forEach((l, i) => {
+      const m = /^\s*(?:- )?if:\s+(\S.*)$/.exec(l);
+      if (m && /^[!&*%@`]/.test(m[1])) bad.push(`${f}:${i + 1}: ${l.trim().slice(0, 80)}`);
+    });
+  }
+  assert.deepEqual(bad, []);
+});
