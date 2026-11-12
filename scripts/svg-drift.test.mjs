@@ -206,10 +206,20 @@ describe('normalising and comparing', () => {
   });
 
   test('one box moved is drift: by 14 (over the tolerance), and by 5 while the others stay put', () => {
-    assert.match(differs(box(30, 100), box(16, 100)), /more than 12|one box moved/);
+    assert.match(differs(box(30, 100), box(16, 100)), /more than 12|moved on its own/);
     const moved = '<svg width="300px"><rect x="21" y="1" width="9"/><rect x="100" y="1" width="9"/></svg>';
     const still = '<svg width="300px"><rect x="16" y="1" width="9"/><rect x="100" y="1" width="9"/></svg>';
-    assert.match(differs(moved, still), /one box moved/);
+    assert.match(differs(moved, still), /is 21 in the export and 16 .*moved on its own/);
+  });
+
+  test('the message names the coordinate that broke the shared shift, not one of the others', () => {
+    const rects = (xs) => `<svg width="9px">${xs.map((x, i) => `<rect x="${x}" y="${i}"/>`).join('')}</svg>`;
+    // a shifted drawing (every x +5) where the third rect did not move: name the third (x = 300)
+    const m = differs(rects([21, 121, 300, 221]), rects([16, 116, 300, 216]));
+    assert.match(m, /is 300 in the export and 300 in the committed.*differ by 5 px/);
+    assert.doesNotMatch(m, /is 21 in the export|is 121 in the export/);
+    // an unshifted drawing where only the third moved: name the third as well
+    assert.match(differs(rects([16, 116, 305, 216]), rects([16, 116, 300, 216])), /is 305 in the export and 300 in the committed.*differ by 0 px/);
   });
 
   test('a y coordinate moved is drift, also in a shifted drawing', () => {

@@ -39,6 +39,7 @@ import { fileURLToPath } from 'node:url';
  * diagram that differ only in the host's fonts. Measured 2026-11-12 over 143 committed SVGs against draw.io 32.6.10 on Linux amd64:
  * 132 identical, 10 differ only that way with a maximum of 12 (Pitwall uml-use-cases-clients; docs/benchmarks.md).
  */
+// A new host gets its own measured row in docs/benchmarks.md ("SVG drift check: font metrics"); do not raise this number.
 export const ROOT_TOLERANCE = 12;
 
 const EXPORT_ARGS = ['--export', '--format', 'svg', '--transparent', '--embed-svg-fonts', 'false', '--border', '16'];
@@ -102,10 +103,13 @@ export function differs(a, b, tolerance = ROOT_TOLERANCE) {
     } else if (isX(a, x.nums[k].at, x.nums[k].end)) xs.push({ k, d: p - q });
     else if (p !== q) return `number ${k + 1} (not an x coordinate) is ${p} in the export and ${q} in the committed file`;
   }
-  const t = xs.find(({ d }) => d !== 0)?.d ?? 0;
+  // The shared shift is the delta most x coordinates have (a tie goes to no shift), so the odd one out is the coordinate that broke it.
+  const count = new Map();
+  for (const { d } of xs) count.set(d, (count.get(d) ?? 0) + 1);
+  const t = [...count].sort((m, n) => n[1] - m[1] || Math.abs(m[0]) - Math.abs(n[0]))[0]?.[0] ?? 0;
   if (Math.abs(t) > tolerance) return `x coordinates moved by ${t} px, more than ${tolerance}`;
   const odd = xs.find(({ d }) => d !== t);
-  if (odd) return `x coordinate ${odd.k + 1} (after "${a.slice(Math.max(0, x.nums[odd.k].at - 30), x.nums[odd.k].at).replace(/\s+/g, ' ')}") is ${x.nums[odd.k].v} in the export and ${y.nums[odd.k].v} in the committed file, but the others differ by ${t} px: one box moved, not the host's fonts`;
+  if (odd) return `x coordinate ${odd.k + 1} (after "${a.slice(Math.max(0, x.nums[odd.k].at - 30), x.nums[odd.k].at).replace(/\s+/g, ' ')}") is ${x.nums[odd.k].v} in the export and ${y.nums[odd.k].v} in the committed file, but the other x coordinates differ by ${t} px: this one moved on its own, not the host's fonts`;
   return null;
 }
 
