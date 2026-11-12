@@ -1766,6 +1766,7 @@ fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a
         "cargo hakari generate --diff",
         "cargo metadata --locked --format-version 1",
         "node scripts/publish.mjs --offline",
+        "./dev gen check --base \"$TRAIN_BASE\"",
         "github.event.inputs.base != ''",
         "needs: [plan]",
     ] {
