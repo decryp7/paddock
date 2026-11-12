@@ -93,8 +93,13 @@ retries = 0
 # Then made cheaper (CI 7825 still took 84-142 s of them): under load large_folder 46-63 s -> 6 s, differential 23-32 s ->
 # 18-23 s (docs/performance.md, "The store's slow tests made cheaper", 2026-11-09). large_folder left the waiver then: about
 # 6 s under load, well inside the 90 s default.
+# The catalogue's unsaved-rows bound (regress_1_2) builds the catalogue of 100 000 events: 12 s quiet, 37 s locally at a load of
+# about 20, 46-61 s for 300 000 events on the CI Mac and past 90 s beside another job (CI 7961). It judges itself on progress
+# (ADR 0071, `paddock_testkit::guarded`, as paddock-dev's live scans): it fails with its own message when the corpus, the import
+# and the catalogue's committed rows all stand still for 60 s, so a hang is named and a slow host is not called one. The 180 s
+# here is only the backstop, and the group keeps it to two such suites at a time.
 [[profile.ci.overrides]]
-filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/))"
+filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/) | test(/^regress_1_2::building_the_catalogue_keeps_its_unsaved_rows_bounded$/))"
 slow-timeout = { period = "30s", terminate-after = 6 }
 test-group = 'duck-heavy'
 
