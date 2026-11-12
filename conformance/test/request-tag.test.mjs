@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkGreenRun, checkNotSkipCi, checkVersion, gateWorkflow, modeFromLog, parseTag, runChecks, summary } from '../ci/request-tag.mjs';
+import { checkNotSkipCi, checkVerdict, checkVersion, gateWorkflow, parseTag, runChecks, summary } from '../ci/request-tag.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const SHA = 'a'.repeat(40);
@@ -42,42 +42,22 @@ test('the gate workflow is the app\'s own, else ci.yml', () => {
   assert.equal(gateWorkflow(null, files({})), 'ci.yml');
 });
 
-const run = (o) => ({ id: 1, head_sha: SHA, path: 'ci.yml@refs/heads/main', status: 'completed', conclusion: 'success', event: 'push', head_branch: 'main', ...o });
-const dispatch = (o) => run({ event: 'workflow_dispatch', head_branch: 'main', ...o });
+const res = (status, o = {}) => ({ status, stdout: JSON.stringify(o), stderr: '' });
 
-test('a green run needs the exact sha, the right workflow, completed and success; none listed is not measured', async () => {
-  assert.equal((await checkGreenRun([run({})], SHA, 'ci.yml')).id, 1);
-  await assert.rejects(checkGreenRun([], SHA, 'ci.yml'), /not measured/);
-  await assert.rejects(checkGreenRun([run({ head_sha: 'b'.repeat(40) })], SHA, 'ci.yml'), /not measured/);
-  await assert.rejects(checkGreenRun([run({ path: 'nightly.yml@refs/heads/main' })], SHA, 'ci.yml'), /not measured/);
-  await assert.rejects(checkGreenRun([run({ conclusion: 'failure' })], SHA, 'ci.yml'), /is failure, not success/);
-  await assert.rejects(checkGreenRun([run({ status: 'in_progress', conclusion: '' })], SHA, 'ci.yml'), /in_progress/);
-  await assert.rejects(checkGreenRun([run({ conclusion: 'cancelled' })], SHA, 'ci.yml'), /cancelled/);
+test('the verdict of ./dev: only exit 0 with a green verdict passes; 5, 6 and silence never do', () => {
+  assert.equal(checkVerdict(res(0, { verdict: 'green', run: 7, detail: 'x' })), 7);
+  assert.throws(() => checkVerdict(res(5, { verdict: 'red', detail: 'ci.yml on aaaaaaaaaa: red or partial. run 9 failed' })), /run 9 failed.*request the tag/);
+  assert.throws(() => checkVerdict(res(6, { verdict: 'not_measured', detail: 'not measured. no run' })), /not measured. no run/);
+  // Exit 0 without a green verdict, a crash, a missing tool and unreadable output are all "not measured".
+  assert.throws(() => checkVerdict(res(0, {})), /not measured: .*did not answer/);
+  assert.throws(() => checkVerdict(res(1, { ok: false, error: 'boom' })), /did not answer \(exit 1: boom\)/);
+  assert.throws(() => checkVerdict({ status: null, error: new Error('ENOENT') }), /did not answer \(exit none: ENOENT\)/);
+  assert.throws(() => checkVerdict({ status: 0, stdout: 'not json', stderr: '' }), /did not answer/);
 });
 
-test('the newest full run decides: an old green run does not cover a newer red one', async () => {
-  await assert.rejects(checkGreenRun([run({ id: 1 }), run({ id: 2, conclusion: 'failure' })], SHA, 'ci.yml'), /run \(2\)/);
-  assert.equal((await checkGreenRun([run({ id: 1, conclusion: 'failure' }), run({ id: 2 })], SHA, 'ci.yml')).id, 2);
-});
-
-test('P1-3: a green since_run or base dispatch rerun cannot clear a red full run on the same sha', async () => {
-  const runs = [run({ id: 5, conclusion: 'failure' }), dispatch({ id: 9 })];
-  await assert.rejects(checkGreenRun(runs, SHA, 'ci.yml', async () => false), /run \(5\).*failure/);
-  await assert.rejects(checkGreenRun([dispatch({ id: 9 })], SHA, 'ci.yml', async () => false), /no ci\.yml run .* is a full run/);
-  await assert.rejects(checkGreenRun([dispatch({ id: 9 })], SHA, 'ci.yml', async () => null), /not measured/);
-});
-
-test('a dispatch run whose plan job logged full=true counts; a push from a feature branch does not', async () => {
-  assert.equal((await checkGreenRun([dispatch({ id: 9 })], SHA, 'ci.yml', async () => true)).id, 9);
-  await assert.rejects(checkGreenRun([run({ head_branch: 'feature/x' })], SHA, 'ci.yml', async () => false), /not measured/);
-  await assert.rejects(checkGreenRun([run({ event: 'pull_request' })], SHA, 'ci.yml', async () => false), /not measured/);
-});
-
-test('the mode line is read from a plan log, and a log without it says nothing', () => {
-  assert.equal(modeFromLog('2026-11-12T00:00:00Z plan mode: full=true\n'), true);
-  assert.equal(modeFromLog('x\nplan mode: full=false\n'), false);
-  assert.equal(modeFromLog('no marker here'), null);
-  assert.equal(modeFromLog(undefined), null);
+test('the verdict is read from the last line, so tool chatter before it does not matter', () => {
+  const out = `building...\n${JSON.stringify({ verdict: 'green', run: 3 })}\n`;
+  assert.equal(checkVerdict({ status: 0, stdout: out, stderr: '' }), 3);
 });
 
 function world(over = {}) {
@@ -87,8 +67,7 @@ function world(over = {}) {
     sha: SHA,
     read: files({ [c]: conf('1.1.0'), 'apps/dyno/paddock.ci.json': '{"workflow":"dyno.yml"}' }),
     git: (a) => (a[0] === 'branch' ? '  origin/main\n' : a[0] === 'log' ? 'feat: x\n' : ''),
-    fetchRuns: async () => [run({ path: 'dyno.yml@refs/heads/main' })],
-    fullMode: async () => false,
+    verdict: async () => res(0, { verdict: 'green', run: 1 }),
     ...over,
   };
 }
@@ -113,9 +92,7 @@ test('each failing check is reported by name, all of them, and the summary says 
     world({
       git: (a) => (a[0] === 'branch' ? '' : a[0] === 'log' ? 'x [skip ci]' : 'abc\trefs/tags/dyno-v1.1.0'),
       read: files({}),
-      fetchRuns: async () => {
-        throw new Error('not measured: HTTP 403');
-      },
+      verdict: async () => res(6, { verdict: 'not_measured', detail: 'not measured. HTTP 403' }),
     }),
   );
   assert.deepEqual(r.filter((x) => !x.ok).map((x) => x.name), ['commit is on origin main or release/*', 'not a skip-ci commit', 'tag does not exist', 'version matches the tag', 'CI is green on exactly this commit']);

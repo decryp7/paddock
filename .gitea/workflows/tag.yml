@@ -13,9 +13,10 @@
 # (conformance/ci/request-tag.mjs):
 #   - the tag's name; the sha is on origin/main or origin/release/*; it is not a skip-ci commit (ER-16); the tag does not exist;
 #   - the app's version source says the tag's version;
-#   - the newest FULL run of the app's gate workflow on exactly that sha is green. Full means a push to main, or a run whose plan
-#     job logged `plan mode: full=true` (plan_since::MODE_LINE; only debrief.yml prints it so far). A since_run rerun or a base
-#     dispatch is never full, so it cannot clear a red full run;
+#   - the newest FULL run of the app's gate workflow on exactly that sha is green, asked of `./dev ci verdict` (built from main;
+#     tools/paddock-dev/src/ci_runs/verdict.rs, the one reader of the runs for this answer). Full means a push to main, or a run
+#     whose plan job logged `plan mode: full=true` (plan_since::MODE_LINE; debrief.yml and ci.yml print it). A since_run rerun or
+#     a base dispatch is never full, so it cannot clear a red full run; unreadable is not measured, never a pass;
 #   - for an app tag, the tag gates the release workflows also run (`./dev gates ratchet`, `./dev check ipc-endpoints --tag`).
 # The ADR 0093 scheduled-CI gate (WP-5) is not built yet; it joins here when it is.
 # Not covered (TOCTOU): a run can change between the check and the push (a rerun going red); the tag's own release workflow runs

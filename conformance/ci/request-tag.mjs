@@ -5,11 +5,16 @@
 //
 //   node request-tag.mjs --tag pitcrew-v1.2.3 --sha <40 hex> [--root <trusted checkout>] --api https://host/api/v1 --repo owner/name
 //
+// "Is there a full green run of the gate workflow on this commit?" is not decided here: the check runs `./dev ci verdict`
+// (tools/paddock-dev/src/ci_runs/verdict.rs), the one reader of the Actions runs for that answer. The ./dev of the trusted
+// checkout is used, so no code of the tagged tree runs. Its exit code is 0 full green, 5 red or only partial runs, 6 not measured.
+//
 // This script runs from the DISPATCH ref's checkout (main). The tree being tagged is only read as data (`git show <sha>:path`), never run.
 // A guard rail against mistakes, not a security boundary: any repo writer can dispatch from their own ref.
-// The token for the Actions API is read from GITEA_TOKEN (the job's own read token; the bot's token is used only by the push job).
+// The token for the Actions API is read from GITEA_TOKEN by ./dev (the job's own read token; the bot's token is used only by the push job).
 import { appendFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 import { isMain } from '../src/util/is-main.mjs';
 import { checkTag } from './check-tag.mjs';
 
@@ -57,42 +62,27 @@ export function gateWorkflow(app, read) {
   return (text && JSON.parse(text).workflow) || 'ci.yml';
 }
 
-/** True when a run is a full run of its workflow without asking the log: a push to main. */
-export const isMainPush = (r) => r.event === 'push' && (r.head_branch ?? '') === 'main';
-
-/** The mode line of a plan job's log (`plan mode: full=true`, plan_since::MODE_LINE), or null when the log has none. */
-export function modeFromLog(text) {
-  const m = /plan mode: full=(true|false)/.exec(text ?? '');
-  return m ? m[1] === 'true' : null;
-}
-
 /**
- * Throws unless the newest FULL run of `workflow` on exactly `sha` is completed and successful. A full run is a push to main, or a
- * run whose plan job logged `plan mode: full=true` (`fullMode(run)` reads it); a rerun of failures (since_run) or a base-dispatch
- * run tests less and never counts, so it can neither clear nor replace the full run. `runs` are the API's run objects. No full
- * run listed is "not measured", which also fails.
+ * Throws unless `./dev ci verdict` (spawnSync's result) said full green. Exit 5 is red or partial runs only, 6 is not measured,
+ * anything else (the tool missing, killed, unreadable output) is also not measured: nothing here ever turns a failure into a pass.
+ * Returns the deciding run's id.
  */
-export async function checkGreenRun(runs, sha, workflow, fullMode = async () => false) {
-  const mine = runs
-    .filter((r) => (r.head_sha ?? '') === sha && String(r.path ?? '').split('@')[0].split('/').pop() === workflow)
-    .sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
-  if (!mine.length) throw new Error(`not measured: the Actions API lists no ${workflow} run for ${sha.slice(0, 10)}; push the commit, let ${workflow} finish green on it, then request the tag`);
-  let r = null;
-  for (const c of mine) {
-    if (isMainPush(c) || (await fullMode(c)) === true) {
-      r = c;
-      break;
-    }
+export function checkVerdict(res) {
+  let out = null;
+  try {
+    out = JSON.parse(String(res.stdout ?? '').trim().split('\n').pop() || 'null');
+  } catch {
+    out = null;
   }
-  if (!r) throw new Error(`not measured: no ${workflow} run for ${sha.slice(0, 10)} is a full run (a push to main, or a plan job that logged "plan mode: full=true"); rerun or push so a full run is green on this commit, then request the tag`);
-  const done = r.status === 'completed' || ['success', 'failure', 'cancelled', 'skipped'].includes(r.status);
-  const state = r.conclusion || (done ? r.status : r.status || 'unknown');
-  if (!done || state !== 'success') throw new Error(`the newest full ${workflow} run (${r.id}) for ${sha.slice(0, 10)} is ${state}, not success; get it green on this commit, then request the tag`);
-  return r;
+  const detail = out?.detail ?? out?.error;
+  if (res.status === 0 && out?.verdict === 'green') return out.run;
+  if (res.status === 5 || res.status === 6) throw new Error(`${detail ?? `./dev ci verdict exited ${res.status}`}; then request the tag`);
+  const why = res.error?.message ?? detail ?? String(res.stderr ?? '').trim().split('\n').slice(-3).join(' ');
+  throw new Error(`not measured: ./dev ci verdict did not answer (exit ${res.status ?? 'none'}${why ? `: ${why}` : ''}); check ./dev builds on main and GITEA_TOKEN can read the Actions runs`);
 }
 
 /** Runs every check; returns `[{ name, ok, detail }]`, stopping nowhere: all failures are reported. */
-export async function runChecks({ tag, sha, read, git, fetchRuns, fullMode }) {
+export async function runChecks({ tag, sha, read, git, verdict }) {
   const results = [];
   const step = async (name, fn) => {
     try {
@@ -125,8 +115,7 @@ export async function runChecks({ tag, sha, read, git, fetchRuns, fullMode }) {
   await step('version matches the tag', () => `version ${checkVersion(parsed.app, tag, read)}`);
   await step('CI is green on exactly this commit', async () => {
     const wf = gateWorkflow(parsed.app, read);
-    const r = await checkGreenRun(await fetchRuns(sha), sha, wf, fullMode);
-    return `${wf} full run ${r.id}`;
+    return `${wf} full run ${checkVerdict(await verdict(wf, sha))}`;
   });
   return results;
 }
@@ -164,26 +153,16 @@ if (isMain(import.meta.url)) {
       return null;
     }
   };
-  const get = async (path) => {
-    const token = process.env.GITEA_TOKEN;
-    return fetch(`${o.api.replace(/\/+$/, '')}/repos/${o.repo}/actions/${path}`, { headers: token ? { Authorization: `token ${token}` } : {} });
-  };
-  const fetchRuns = async (sha) => {
-    const res = await get(`runs?head_sha=${sha}&limit=50`);
-    if (!res.ok) throw new Error(`not measured: the Actions API answered HTTP ${res.status}; the job needs \`actions: read\``);
-    const body = await res.json();
-    return body.workflow_runs ?? body.runs ?? [];
-  };
-  // Whether a run that is not a push to main was full: its plan job's log says so (`plan mode: full=`); no line, no job or no log is "not full".
-  const fullMode = async (run) => {
-    const jobs = await get(`runs/${run.id}/jobs?limit=50`);
-    if (!jobs.ok) return false;
-    const plan = ((await jobs.json()).jobs ?? []).find((j) => /^plan\b/.test(j.name ?? ''));
-    if (!plan) return false;
-    const log = await get(`jobs/${plan.id}/logs`);
-    return log.ok ? modeFromLog(await log.text()) : false;
-  };
-  const results = await runChecks({ tag: o.tag, sha: o.sha, read, git, fetchRuns, fullMode });
+  // The verdict is `./dev ci verdict` of the trusted checkout (cwd = root); the job's read token reaches it as GITEA_TOKEN.
+  const server = o.api.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
+  const verdict = async (workflow, sha) =>
+    spawnSync(join(root, 'dev'), ['ci', 'verdict', '--json', '--workflow', workflow, '--sha', sha, '--repo', o.repo, '--server', server], {
+      cwd: root,
+      encoding: 'utf8',
+      maxBuffer: 16 << 20,
+      timeout: 20 * 60 * 1000,
+    });
+  const results = await runChecks({ tag: o.tag, sha: o.sha, read, git, verdict });
   const md = summary(o.tag, o.sha, results);
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, md);
   console.log(md);
