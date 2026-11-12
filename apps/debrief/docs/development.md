@@ -366,7 +366,7 @@ Gitea Actions workflows live in [`.gitea/workflows/`](../.gitea/workflows/):
 - **`fuzz.yml`** fuzzes every parser nightly (and on demand) in five shards and uploads reproducers on failure.
 - **`bench.yml`** runs the engine benchmarks on pushes to `main` that change `crates/debrief-core`, nightly and
   on demand, and uploads the criterion report.
-- **`mutants.yml`** runs cargo-mutants weekly over `debrief-core` and, on pull requests, over the changed lines.
+- **`mutants.yml`** runs cargo-mutants weekly over `debrief-core` and, on a manual run with a `base` input, over the lines changed since it.
 
 Runners are expected to carry the labels `ubuntu-latest`, `windows-latest` and `macos-latest`. Creating
 a release needs a repository secret **`RELEASE_TOKEN`** (a Gitea access token with `write:repository`

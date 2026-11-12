@@ -499,3 +499,25 @@ fn the_root_agents_md_links_the_rules_and_carries_every_common_doc_block_verbati
         assert!(agents.contains(text.trim()), "docs/blocks/{file} is in AGENTS.md as it is");
     }
 }
+
+/// Rule 50 and the branch ledger (docs/plans/merge-queue.md): pull requests are the ledger, so opening or updating one must
+/// start no CI run. No workflow listens on `pull_request` or `pull_request_target`; branches and trains run by dispatch.
+#[test]
+fn no_workflow_runs_on_a_pull_request() {
+    let trigger = Regex::new(r"(?m)^\s*-?\s*(pull_request|pull_request_target)\s*:|^on:\s*\[?[^\n]*\bpull_request").unwrap();
+    let mut found = Vec::new();
+    for f in tracked()
+        .into_iter()
+        .filter(|f| f.starts_with(".gitea/workflows/") && (f.ends_with(".yml") || f.ends_with(".yaml")))
+    {
+        let text = read(&f);
+        let on = text.split("\njobs:").next().unwrap_or("");
+        if trigger.is_match(on) {
+            found.push(f);
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "these workflows run on pull requests, which the ledger opens for every branch (rule 50): {found:?}"
+    );
+}
