@@ -86,7 +86,9 @@ pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
 };
-pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
+pub use run::{
+    DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, Sink, run_bounded, run_waited,
+};
 pub use runstate::{RunState, run_state};
 pub use stall::{StallAction, StallCause, StallReport};
 pub use start::{

@@ -17,12 +17,46 @@
 //! timeout; and the duration). The caller decides what a failure means and prints exactly one `::error::` line for it with
 //! [`error_line`]: the cause, then `Next step:`.
 
-use paddock_proc::{Limits, Outcome, ProcessId, command, kill_tree, run_bounded};
+use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded, run_waited};
+use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::time::{Duration, Instant};
+
+/// Variables every program keeps besides `paddock_proc::KEPT_ENV`: what Windows programs need to start and find their own
+/// files (PowerShell its modules). None of them holds a secret.
+const WINDOWS_BASE: &[&str] = &[
+    "SystemDrive",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "CommonProgramFiles",
+    "PATHEXT",
+    "COMSPEC",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PSModulePath",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+];
+
+/// The proxy and certificate variables a program that reaches the network may need.
+pub const NETWORK_ENV: &[&str] = &[
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "CURL_CA_BUNDLE",
+];
 
 /// How many lines of a failed program's error output are printed.
 pub const TAIL_LINES: usize = 40;
@@ -44,6 +78,7 @@ pub struct ToolCall {
     program: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
+    pass: Vec<String>,
     secrets: Vec<String>,
     timeout: Duration,
     output: Output,
@@ -69,6 +104,7 @@ impl ToolCall {
             program: program.into(),
             args: Vec::new(),
             env: Vec::new(),
+            pass: Vec::new(),
             secrets: Vec::new(),
             timeout: Duration::from_secs(120),
             output: Output::Capture,
@@ -85,6 +121,33 @@ impl ToolCall {
     pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> ToolCall {
         self.env.push((key.into(), value.into()));
         self
+    }
+
+    /// Variables of the caller's environment this program also gets, besides the base list: exact names, or a prefix ending
+    /// in `*` (`SCCACHE_*`). Everything else (tokens above all) never reaches it.
+    pub fn pass<I: IntoIterator<Item = S>, S: Into<String>>(mut self, names: I) -> ToolCall {
+        self.pass.extend(names.into_iter().map(Into::into));
+        self
+    }
+
+    /// The child's environment: the base list and the passed names from `parent`, then the call's own variables.
+    pub fn child_env(&self, parent: &HashMap<String, String>) -> Vec<(String, String)> {
+        let keep = |k: &str| {
+            KEPT_ENV.contains(&k)
+                || WINDOWS_BASE.iter().any(|b| b.eq_ignore_ascii_case(k))
+                || self.pass.iter().any(|p| match p.strip_suffix('*') {
+                    Some(prefix) => k.starts_with(prefix),
+                    None => p == k,
+                })
+        };
+        let mut env: Vec<(String, String)> = parent
+            .iter()
+            .filter(|(k, _)| keep(k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        env.sort();
+        env.extend(self.env.iter().cloned());
+        env
     }
 
     /// A value that is never printed (empty values are ignored).
@@ -123,9 +186,10 @@ impl ToolCall {
         mask(text, &self.secrets)
     }
 
-    /// Runs it, logging the `run:` and `ran:` lines to `log`. `Err` only when it could not be started (the message names the
-    /// program and what to do); every way it ends after a start is an `Ok`.
-    pub fn run(&self, log: &mut dyn Write) -> Result<Ran, String> {
+    /// Runs it with an environment built from `parent` ([`ToolCall::child_env`]), logging the `run:` and `ran:` lines to `log`.
+    /// `Err` only when it could not be started (the message names the program and what to do); every way it ends after a start
+    /// is an `Ok`.
+    pub fn run(&self, parent: &HashMap<String, String>, log: &mut dyn Write) -> Result<Ran, String> {
         let names: Vec<&str> = self.env.iter().map(|(k, _)| k.as_str()).collect();
         let set = if names.is_empty() {
             String::new()
@@ -134,10 +198,11 @@ impl ToolCall {
         };
         let _ = writeln!(log, "run: {}{set}", self.display());
         let started = Instant::now();
+        let cmd = self.build(parent);
         let ran = match &self.output {
-            Output::Capture => self.run_captured(),
-            Output::Stream => self.run_waited(None),
-            Output::File(p) => self.run_waited(Some(p.clone())),
+            Output::Capture => self.run_captured(cmd),
+            Output::Stream => self.run_to(cmd, Sink::Inherit, None),
+            Output::File(p) => self.run_to(cmd, Sink::File(p.clone()), Some(p)),
         }
         .map_err(|e| self.masked(&e))?;
         let _ = writeln!(log, "ran: {} ({}, {:.1} s)", self.program, ran.how, started.elapsed().as_secs_f64());
@@ -148,20 +213,31 @@ impl ToolCall {
         })
     }
 
-    fn build(&self) -> std::process::Command {
+    fn build(&self, parent: &HashMap<String, String>) -> std::process::Command {
         let mut cmd = command(&self.program);
-        cmd.args(&self.args);
-        for (k, v) in &self.env {
+        cmd.args(&self.args).env_clear();
+        for (k, v) in self.child_env(parent) {
             cmd.env(k, v);
         }
         cmd
     }
 
-    fn run_captured(&self) -> Result<Ran, String> {
-        let out = run_bounded(self.build(), Limits::new(self.timeout)).map_err(|e| e.to_string())?;
+    fn not_started(&self, e: RunError) -> String {
+        match e {
+            RunError::NotFound(_) => format!("{} is not installed on this runner (or not on PATH).", self.program),
+            other => other.to_string(),
+        }
+    }
+
+    fn timed_out(&self) -> String {
+        format!("timed out after {} s", self.timeout.as_secs())
+    }
+
+    fn run_captured(&self, cmd: std::process::Command) -> Result<Ran, String> {
+        let out = run_bounded(cmd, Limits::new(self.timeout)).map_err(|e| self.not_started(e))?;
         let (success, how) = match out.outcome {
             Outcome::Exited(s) => (s.success(), describe_status(s)),
-            Outcome::TimedOut => (false, format!("timed out after {} s", self.timeout.as_secs())),
+            Outcome::TimedOut => (false, self.timed_out()),
             Outcome::OutputCap => (false, "stopped at the output cap".to_string()),
         };
         Ok(Ran {
@@ -172,50 +248,20 @@ impl ToolCall {
         })
     }
 
-    /// Streamed or file output: no pipe to drain, so the child is waited for by polling its own exit status (a real completion
-    /// signal), with the timeout as the bound.
-    fn run_waited(&self, file: Option<PathBuf>) -> Result<Ran, String> {
-        let mut cmd = self.build();
-        cmd.stdin(Stdio::null());
-        if let Some(path) = &file {
-            let f = std::fs::File::create(path).map_err(|e| format!("cannot create {}: {e}", path.display()))?;
-            let g = f.try_clone().map_err(|e| format!("cannot open {} twice: {e}", path.display()))?;
-            cmd.stdout(f).stderr(g);
-        }
-        let mut child = cmd.spawn().map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => format!("{} is not installed on this runner (or not on PATH).", self.program),
-            _ => format!("{} could not be started: {e}", self.program),
-        })?;
-        let id = ProcessId::of(child.id());
-        let started = Instant::now();
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(s)) => break Some(s),
-                Ok(None) if started.elapsed() >= self.timeout => break None,
-                Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-                Err(e) => return Err(format!("waiting for {} failed: {e}", self.program)),
-            }
+    /// Streamed or file output, through `paddock_proc::run_waited` (bounded, the whole tree ended at the timeout).
+    fn run_to(&self, cmd: std::process::Command, sink: Sink, file: Option<&PathBuf>) -> Result<Ran, String> {
+        let outcome = run_waited(cmd, self.timeout, sink).map_err(|e| self.not_started(e))?;
+        let text = file.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let (success, how) = match outcome {
+            Outcome::Exited(s) => (s.success(), describe_status(s)),
+            Outcome::TimedOut => (false, self.timed_out()),
+            Outcome::OutputCap => (false, "stopped at the output cap".to_string()),
         };
-        let text = file.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
-        Ok(match status {
-            Some(s) => Ran {
-                success: s.success(),
-                how: describe_status(s),
-                stdout: String::new(),
-                stderr: text,
-            },
-            None => {
-                if let Some(id) = id {
-                    let _ = kill_tree(id);
-                }
-                let _ = child.wait();
-                Ran {
-                    success: false,
-                    how: format!("timed out after {} s", self.timeout.as_secs()),
-                    stdout: String::new(),
-                    stderr: text,
-                }
-            }
+        Ok(Ran {
+            success,
+            how,
+            stdout: String::new(),
+            stderr: text,
         })
     }
 }
@@ -320,6 +366,58 @@ mod tests {
         assert_eq!(error_line("x failed.", "do y."), "::error::x failed. Next step: do y.");
     }
 
+    fn parent(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn a_child_gets_the_base_list_and_what_the_call_passes_never_an_unlisted_token() {
+        let env = parent(&[
+            ("PATH", "/bin"),
+            ("HOME", "/h"),
+            ("PADDOCK_DEV_TOKEN", "t1"),
+            ("GITHUB_TOKEN", "t2"),
+            ("SCCACHE_DIR", "/s"),
+            ("CARGO_HOME", "/c"),
+            ("HTTPS_PROXY", "p"),
+            ("ProgramData", "C:/pd"),
+        ]);
+        let call = ToolCall::new("x").pass(["SCCACHE_*", "CARGO_*"]).env("SCCACHE_SERVER_PORT", "4227");
+        let names: Vec<String> = call.child_env(&env).into_iter().map(|(k, _)| k).collect();
+        assert_eq!(
+            names,
+            ["CARGO_HOME", "HOME", "PATH", "ProgramData", "SCCACHE_DIR", "SCCACHE_SERVER_PORT"]
+        );
+        let curl: Vec<String> = ToolCall::new("curl")
+            .pass(NETWORK_ENV.iter().copied())
+            .child_env(&env)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert!(
+            curl.contains(&"HTTPS_PROXY".to_string()) && !curl.iter().any(|k| k.ends_with("_TOKEN")),
+            "{curl:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unlisted_token_does_not_reach_the_program() {
+        let env = parent(&[("PATH", "/usr/bin:/bin"), ("PADDOCK_DEV_TOKEN", "hunter2"), ("SCCACHE_DIR", "/s")]);
+        let ran = ToolCall::new("sh")
+            .args(["-c", "env"])
+            .pass(["SCCACHE_*"])
+            .run(&env, &mut Vec::new())
+            .unwrap();
+        assert!(ran.success);
+        assert!(ran.stdout.contains("SCCACHE_DIR=/s"), "{}", ran.stdout);
+        assert!(
+            !ran.stdout.contains("PADDOCK_DEV_TOKEN") && !ran.stdout.contains("hunter2"),
+            "{}",
+            ran.stdout
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn a_run_reports_how_it_ended_and_what_it_wrote() {
@@ -328,7 +426,7 @@ mod tests {
             .args(["-c", "echo out; echo err-$SECRET >&2; exit 3"])
             .env("SECRET", "hunter2")
             .secret("hunter2")
-            .run(&mut log)
+            .run(&parent(&[("PATH", "/usr/bin:/bin")]), &mut log)
             .unwrap();
         assert!(!ran.success);
         assert_eq!(ran.how, "exit 3");
@@ -341,19 +439,30 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_waited_run_is_bounded_and_a_file_run_keeps_its_output() {
+    fn a_waited_run_is_bounded_ends_its_tree_and_a_file_run_keeps_its_output() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("out.txt");
+        let pid_file = dir.path().join("grandchild.pid");
+        let env = parent(&[("PATH", "/usr/bin:/bin")]);
         let ran = ToolCall::new("sh")
-            .args(["-c", "echo started; sleep 30"])
-            .timeout(Duration::from_millis(300))
+            .args([
+                "-c".to_string(),
+                format!("echo started; sleep 60 & echo $! > '{}'; wait", pid_file.display()),
+            ])
+            .timeout(Duration::from_millis(500))
             .output(Output::File(file))
-            .run(&mut Vec::new())
+            .run(&env, &mut Vec::new())
             .unwrap();
         assert!(!ran.success);
         assert!(ran.how.starts_with("timed out"), "{}", ran.how);
         assert_eq!(ran.stderr, "started\n");
-        let missing = ToolCall::new("paddock-no-such-program").output(Output::Stream).run(&mut Vec::new());
+        let pid: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+        paddock_testkit::wait_until_within("the grandchild to be gone", Duration::from_secs(10), || {
+            !paddock_proc::is_alive(pid)
+        });
+        let missing = ToolCall::new("paddock-no-such-program")
+            .output(Output::Stream)
+            .run(&env, &mut Vec::new());
         assert!(missing.unwrap_err().contains("not installed"));
     }
 }

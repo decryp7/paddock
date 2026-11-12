@@ -25,7 +25,7 @@
 //! base, so a test never reaches the network; the pinned checksum still decides).
 
 use crate::ci_isolation::{self, Ctx, Sinks, home};
-use crate::ci_tool::{Output, TAIL_LINES, ToolCall, error_line, tail};
+use crate::ci_tool::{NETWORK_ENV, Output, TAIL_LINES, ToolCall, error_line, tail};
 use clap::Args;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -39,6 +39,9 @@ pub const SCCACHE_VERSION: &str = "0.19.0";
 const RELEASES: &str = "https://github.com/mozilla/sccache/releases/download";
 /// The server port in a Linux container (one job per host there); a host job takes its slot's from ports.txt.
 const CONTAINER_PORT: &str = "4227";
+/// What an sccache child gets from the job's environment besides the base list (paddock_proc::KEPT_ENV): its own settings,
+/// cargo's and rustup's. Never a token.
+const SCCACHE_PASS: [&str; 3] = ["SCCACHE_*", "CARGO_*", "RUSTUP_*"];
 /// The packages Tauri needs on Linux.
 const TAURI_LINUX_PACKAGES: [&str; 6] = [
     "libwebkit2gtk-4.1-dev",
@@ -171,6 +174,14 @@ pub fn shown_endpoint(endpoint: &str) -> String {
     }
 }
 
+/// The password of a `redis://[user]:password@host` endpoint (or the user part when there is no colon), for masking.
+pub fn endpoint_password(endpoint: &str) -> Option<String> {
+    let rest = &endpoint[endpoint.find("://").map_or(0, |s| s + 3)..];
+    let (userinfo, _) = rest.rsplit_once('@')?;
+    let password = userinfo.split_once(':').map_or(userinfo, |(_, p)| p);
+    (!password.is_empty()).then(|| password.to_string())
+}
+
 /// The step's environment and streams.
 struct Step<'a> {
     ctx: Ctx,
@@ -285,7 +296,8 @@ impl Step<'_> {
 
     /// Runs a call, logging it to standard output.
     fn run(&mut self, call: &ToolCall) -> Result<crate::ci_tool::Ran, String> {
-        call.run(&mut *self.io.out)
+        let parent = self.ctx.env_snapshot();
+        call.run(&parent, &mut *self.io.out)
     }
 
     fn phase(&mut self, name: &str, f: impl FnOnce(&mut Self) -> Phase) -> Phase {
@@ -318,8 +330,10 @@ impl Step<'_> {
         };
         let dest = self.pinned_dir();
         let bin = dest.join(self.exe_name("sccache"));
-        // A failed download ends the phase without touching PATH, as the shell's `exit 0` did.
-        if !is_executable(&bin) && !self.download(pin, &dest, &bin)? {
+        // A copy in the tool cache is used only when it answers with the pinned version (a half-written or foreign file is
+        // replaced). A failed download ends the phase without touching PATH, as the shell's `exit 0` did.
+        let cached = is_executable(&bin) && self.sccache_version(&bin).as_deref() == Some(SCCACHE_VERSION);
+        if !cached && !self.download(pin, &dest, &bin)? {
             return Ok(());
         }
         let line = home::native(&dest.to_string_lossy());
@@ -330,7 +344,7 @@ impl Step<'_> {
         let call = ToolCall::new(exe.to_string_lossy())
             .args(["--version"])
             .timeout(Duration::from_secs(30));
-        let ran = self.run(&call).ok()?;
+        let ran = self.run(&call.pass(SCCACHE_PASS)).ok()?;
         // `sccache 0.19.0`: the second field, as `awk '{print $2}'`.
         ran.stdout.split_whitespace().nth(1).map(str::to_string)
     }
@@ -357,6 +371,7 @@ impl Step<'_> {
         let curl = ToolCall::new("curl")
             .args(["-fsSL", "--retry", "3", "-o"])
             .args([archive.to_string_lossy().into_owned(), url])
+            .pass(NETWORK_ENV.iter().copied())
             .timeout(Duration::from_secs(300));
         match self.run(&curl) {
             Ok(r) if r.success => {}
@@ -386,20 +401,27 @@ impl Step<'_> {
         self.extract(pin, &archive, dl)?;
         let exe = self.exe_name("sccache");
         let from = dl.join(&name).join(&exe);
-        // Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once.
-        let part = dest.join(format!("{exe}.part.{}", std::process::id()));
+        // Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once. The part file's
+        // name is this attempt's own (pid and time).
+        let part = dest.join(format!("{exe}.part.{}.{}", std::process::id(), nanos()));
         let placed = std::fs::create_dir_all(dest)
             .and_then(|()| std::fs::copy(&from, &part).map(|_| ()))
             .and_then(|()| make_executable(&part))
             .and_then(|()| std::fs::rename(&part, bin));
-        placed.map_err(|e| {
-            let _ = std::fs::remove_file(&part);
-            self.fail(error_line(
-                &format!("cannot put sccache into {}: {e}.", dest.display()),
-                "check the runner's tool cache folder (RUNNER_TOOL_CACHE) is writable.",
-            ))
-        })?;
-        Ok(true)
+        let Err(e) = placed else { return Ok(true) };
+        let _ = std::fs::remove_file(&part);
+        // Windows cannot replace a program that a concurrent job is running: that job put the same release there, which is
+        // as good when it answers with the pinned version.
+        if is_executable(bin) && self.sccache_version(bin).as_deref() == Some(SCCACHE_VERSION) {
+            self.say(format!(
+                "::notice::sccache {SCCACHE_VERSION} was put in place by another job meanwhile ({e}); using it."
+            ));
+            return Ok(true);
+        }
+        Err(self.fail(error_line(
+            &format!("cannot put sccache into {}: {e}.", dest.display()),
+            "check the runner's tool cache folder (RUNNER_TOOL_CACHE) is writable.",
+        )))
     }
 
     fn extract(&mut self, pin: Pin, archive: &Path, into: &Path) -> Phase {
@@ -451,6 +473,12 @@ impl Step<'_> {
             return Ok(());
         };
         let endpoint = self.get("PADDOCK_SCCACHE_REDIS_ENDPOINT").unwrap_or("").to_string();
+        // The runner masks it in every later line of the job too (the variable reaches $GITHUB_ENV).
+        if let Some(pw) = endpoint_password(&endpoint)
+            && self.get("GITHUB_ACTIONS") == Some("true")
+        {
+            self.say(format!("::add-mask::{pw}"));
+        }
         let backend = match choose_backend(&args.sccache_backend, &endpoint, &args.sccache_redis_db) {
             Ok(b) => b,
             Err(line) => return Err(self.fail(line)),
@@ -480,12 +508,15 @@ impl Step<'_> {
             .rsplit_once('@')
             .map(|(userinfo, _)| userinfo.to_string())
             .unwrap_or_default();
+        let password = endpoint_password(&endpoint).unwrap_or_default();
         let call = |a: &str| {
             let mut c = ToolCall::new(sccache.to_string_lossy())
                 .args([a])
                 .env("SCCACHE_SERVER_PORT", port.as_str())
                 .env("SCCACHE_IGNORE_SERVER_IO_ERROR", "1")
                 .secret(secret.clone())
+                .secret(password.clone())
+                .pass(SCCACHE_PASS)
                 .timeout(Duration::from_secs(60));
             for (k, v) in &settings {
                 c = c.env(k.as_str(), v.as_str());
@@ -562,6 +593,8 @@ impl Step<'_> {
                 None => ToolCall::new("apt-get"),
             };
             c.args(args.iter().copied())
+                .pass(NETWORK_ENV.iter().copied())
+                .pass(["DEBIAN_FRONTEND"])
                 .output(Output::Stream)
                 .timeout(Duration::from_secs(900))
         };
@@ -751,10 +784,86 @@ mod tests {
     }
 
     #[test]
+    fn the_password_of_an_endpoint_is_found_for_masking() {
+        assert_eq!(endpoint_password("redis://:pw@h:6379").as_deref(), Some("pw"));
+        assert_eq!(endpoint_password("redis://user:p:w@h").as_deref(), Some("p:w"));
+        assert_eq!(endpoint_password("redis://token@h").as_deref(), Some("token"));
+        assert_eq!(endpoint_password("redis://h:6379"), None);
+        assert_eq!(endpoint_password("redis://:@h"), None);
+        assert_eq!(endpoint_password(""), None);
+    }
+
+    #[test]
     fn a_password_in_the_endpoint_is_never_shown() {
         assert_eq!(shown_endpoint("redis://h:6379"), "redis://h:6379");
         assert_eq!(shown_endpoint("redis://:pw@h:6379"), "redis://***@h:6379");
         assert_eq!(shown_endpoint("redis://u:p@w@h"), "redis://***@h");
+    }
+
+    /// The success path of the download, which the shell's step cannot be pointed at: a release folder (`file://`) with an
+    /// archive whose checksum is the test's own pin. On a Unix runner and (by its program name) on a Windows one.
+    #[cfg(unix)]
+    #[test]
+    fn a_download_that_matches_its_pin_is_unpacked_and_put_in_place_whole() {
+        use std::os::unix::fs::PermissionsExt;
+        for os in ["macOS", "Windows"] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().canonicalize().unwrap();
+            let exe = if os == "Windows" { "sccache.exe" } else { "sccache" };
+            let name = format!("sccache-v{SCCACHE_VERSION}-test-target");
+            let stage = root.join("stage").join(&name);
+            std::fs::create_dir_all(&stage).unwrap();
+            std::fs::write(stage.join(exe), "#!/bin/sh\necho sccache 0.19.0\n").unwrap();
+            let rel = root.join("rel").join(format!("v{SCCACHE_VERSION}"));
+            std::fs::create_dir_all(&rel).unwrap();
+            let archive = rel.join(format!("{name}.tar.gz"));
+            let packed = paddock_proc::command("tar")
+                .arg("-czf")
+                .arg(&archive)
+                .arg("-C")
+                .arg(root.join("stage"))
+                .arg(&name)
+                .status()
+                .unwrap();
+            assert!(packed.success());
+            let pin = Pin {
+                target: "test-target",
+                ext: "tar.gz",
+                sha256: Box::leak(sha256_file(&archive).unwrap().into_boxed_str()),
+            };
+            let temp = root.join("temp");
+            std::fs::create_dir_all(&temp).unwrap();
+            let releases = format!("file://{}", root.join("rel").display());
+            let ctx = crate::ci_isolation::testkit::ctx(&[
+                ("PATH", "/usr/bin:/bin"),
+                ("RUNNER_OS", os),
+                ("TMPDIR", temp.to_str().unwrap()),
+                ("PADDOCK_SCCACHE_RELEASES", releases.as_str()),
+            ]);
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut step = Step {
+                ctx,
+                io: Sinks {
+                    out: &mut out,
+                    err: &mut err,
+                },
+            };
+            let dest = root.join("tools/sccache").join(SCCACHE_VERSION);
+            let bin = dest.join(exe);
+            assert_eq!(step.download(pin, &dest, &bin), Ok(true), "{os}: {}", String::from_utf8_lossy(&out));
+            assert_eq!(std::fs::metadata(&bin).unwrap().permissions().mode() & 0o777, 0o755, "{os}");
+            assert_eq!(std::fs::read_to_string(&bin).unwrap(), "#!/bin/sh\necho sccache 0.19.0\n");
+            let left: Vec<_> = std::fs::read_dir(&dest).unwrap().map(|e| e.unwrap().file_name()).collect();
+            assert_eq!(left.len(), 1, "{os}: no part file is left: {left:?}");
+            assert_eq!(std::fs::read_dir(&temp).unwrap().count(), 0, "{os}: the download folder is removed");
+            // A wrong pin for the same archive is a mismatch, and nothing is replaced.
+            let wrong = Pin {
+                sha256: "0".repeat(64).leak(),
+                ..pin
+            };
+            assert_eq!(step.download(wrong, &dest, &bin), Err(1));
+            assert!(String::from_utf8_lossy(&out).contains("checksum mismatch for test-target"));
+        }
     }
 
     #[test]

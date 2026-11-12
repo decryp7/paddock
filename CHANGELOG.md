@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-proc`: `run_waited`, a bounded run whose output is not read (docs/plans/ci-in-rust.md)
+- New `paddock_proc::run_waited(cmd, timeout, Sink)`: runs a program to completion with its output inherited (`Sink::Inherit`)
+  or written to a file (`Sink::File`), standard input closed, the child leading its own process group. At the timeout the
+  whole tree is ended by identity (ADR 0033) and the outcome is `Outcome::TimedOut`; a server the program started and left
+  running after it exited on its own is not touched. For programs whose pipe would never close (`sccache --start-server`) or
+  whose output a CI log should show live (`apt-get`). Additive: no existing function changes.
+
 ### `paddock-secrets`: `write_owner_only`, the secret-file writer for any trust-bearing file (ADR 0092 WP-0)
 - New `paddock_secrets::write_owner_only(path, bytes)`: the mechanism of `SecretFile::write` for a file that is not a secret
   value (Pitwall's `apps.json`, the access list). The folder is made private or refused, then a unique temporary file is
