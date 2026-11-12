@@ -340,7 +340,9 @@ fn a_real_browser_reads_a_page_and_closes_cleanly() {
     }
     let base = tempfile::tempdir().unwrap();
     let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
-    let pid = b.pid().unwrap();
+    // The browser's identity, read while it runs: after it ends, its pid alone may name another process (rule 53).
+    let pid = paddock_proc::ProcessId::of(b.pid().unwrap())
+        .expect("the running browser has a start time");
     let page = b.start_page().unwrap();
     page.track_dom_changes().unwrap();
     page.navigate(
@@ -508,11 +510,37 @@ fn close_by_itself(b: &mut Chromium) -> (bool, Duration) {
     (exited, waited)
 }
 
+/// Whether the browser `id` named is gone. A pid alone is not the browser: on a busy machine the OS hands an ended
+/// browser's pid to another process at once, which a pid check reads as the browser still running (rule 53).
+fn browser_gone(id: paddock_proc::ProcessId) -> bool {
+    !id.is_alive()
+}
+
+/// A pid that another process holds now is not the browser that ended: the identity (pid and start time) says gone where
+/// a pid check says alive. The pid of this test process stands for the reused one, and an earlier start time for the
+/// browser that had it before.
+#[test]
+fn a_reused_pid_is_not_the_browser_that_ended() {
+    let me =
+        paddock_proc::ProcessId::of(std::process::id()).expect("this process has a start time");
+    let earlier =
+        paddock_proc::StartTime::from_micros(me.started().as_micros().saturating_sub(5_000_000));
+    let ended_browser = paddock_proc::ProcessId::new(me.pid(), earlier);
+    assert!(
+        paddock_proc::is_alive(me.pid()),
+        "the pid is held (by this test)"
+    );
+    assert!(
+        browser_gone(ended_browser),
+        "a pid handed on to another process is not the browser"
+    );
+}
+
 /// The browser, its profile and its helpers are gone. Helpers end a moment after the browser, so they get a bounded wait
 /// on the condition, not an immediate check (rule 40).
-fn assert_nothing_left(pid: u32, dir: &std::path::Path) {
+fn assert_nothing_left(browser: paddock_proc::ProcessId, dir: &std::path::Path) {
     assert!(!dir.exists(), "the profile folder is removed");
-    assert!(!paddock_proc::is_alive(pid), "nothing is left behind");
+    assert!(browser_gone(browser), "nothing is left behind");
     let end = std::time::Instant::now() + Duration::from_secs(20);
     while !paddock_proc::processes_mentioning(&dir.to_string_lossy()).is_empty() {
         // conformance: hang-guard — a helper that never ends fails the test instead of hanging it
@@ -536,7 +564,9 @@ fn a_browser_ended_by_force_leaves_nothing_behind() {
     };
     let base = tempfile::tempdir().unwrap();
     let mut b = Chromium::launch(&exe, &options(base.path())).expect("Chrome for Testing starts");
-    let pid = b.pid().unwrap();
+    // The browser's identity, read while it runs: after it ends, its pid alone may name another process (rule 53).
+    let pid = paddock_proc::ProcessId::of(b.pid().unwrap())
+        .expect("the running browser has a start time");
     b.start_page().unwrap();
     let dir = b.profile_dir().to_path_buf();
     assert!(
