@@ -114,8 +114,8 @@ changes here, every app's copy is updated in the same change.
     through it. Until v1, check every batch of bug reports for such patterns.
     The coordinator proposes the redesign in the same reply that relays the report (a question to the user, or a start under
     an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
-    Hooks that judge an agent's text (the recurring guard, `.claude/hooks/recurring-guard.sh`, planned, advisory) only warn; hooks that guard
-    state (the cd guard, safe-remove) still block (user, 2026-11-12).
+    Hooks that judge an agent's text (the recurring guard, hook `.claude/hooks/recurring-guard.sh` planned, advisory) only warn; hooks
+    that guard state (the cd guard, safe-remove) still block (user, 2026-11-12).
 
 ## Throughput (user, 2026-10-24)
 41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the
