@@ -526,7 +526,11 @@ pub fn choose_base(root: &Path, p: &Pushed, fallback: &str) -> (String, String) 
     nearest_remote_branch(root, p, fallback)
 }
 
+/// The most `train/*` branches whose distance is counted (the newest by name): bounds the search on a remote with hundreds of branches.
+const MAX_TRAINS: usize = 40;
+
 fn nearest_remote_branch(root: &Path, p: &Pushed, fallback: &str) -> (String, String) {
+    let started = std::time::Instant::now();
     let git = |args: &[&str]| git_text(root, args);
     let branch = p.remote_ref.strip_prefix("refs/heads/").unwrap_or(&p.remote_ref);
     let upstream = p
@@ -535,45 +539,66 @@ fn nearest_remote_branch(root: &Path, p: &Pushed, fallback: &str) -> (String, St
         .and_then(|b| git(&["rev-parse", "--symbolic-full-name", &format!("{b}@{{upstream}}")]))
         .map(|t| t.trim().to_string())
         .filter(|t| t.starts_with("refs/remotes/"));
-    let refs = git(&["for-each-ref", "--format=%(refname)", "refs/remotes"]).unwrap_or_default();
-    // (distance, priority, name) of every remote branch the pushed commit descends from, except the same-named one.
-    let mut cands: Vec<(u32, u8, String)> = Vec::new();
-    for full in refs.lines().map(str::trim).filter(|l| !l.is_empty() && !l.ends_with("/HEAD")) {
+    // One process lists every remote branch the pushed commit descends from; the distance is counted only for the few that can be a
+    // base: its tracking upstream, the `train/*` branches and main (a repository with hundreds of branches made this search spawn
+    // about 1,100 git processes before).
+    let merged = git(&["for-each-ref", "--merged", &p.sha, "--format=%(refname)", "refs/remotes"]).unwrap_or_default();
+    let ancestors: Vec<&str> = merged
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.ends_with("/HEAD"))
+        .collect();
+    let on_remote = |full: &str| {
         let name = full.strip_prefix("refs/remotes/").unwrap_or(full);
-        let on_remote = name.split_once('/').map_or(name, |(_, rest)| rest);
-        if on_remote == branch || git(&["merge-base", "--is-ancestor", full, &p.sha]).is_none() {
-            continue;
+        name.split_once('/').map_or(name, |(_, rest)| rest).to_string()
+    };
+    let mut pool: Vec<&str> = ancestors.iter().copied().filter(|f| on_remote(f) != branch).collect();
+    pool.sort_by(|a, b| b.cmp(a));
+    let (mut trains, mut others): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    for f in pool {
+        let name = on_remote(f);
+        if upstream.as_deref() == Some(f) || name == "main" {
+            others.push(f);
+        } else if name.starts_with("train/") && trains.len() < MAX_TRAINS {
+            trains.push(f);
         }
+    }
+    // (distance, priority, name): the nearest wins; on a tie the tracking upstream, then a train, then main.
+    let mut cands: Vec<(u32, u8, String)> = Vec::new();
+    for full in trains.into_iter().chain(others) {
+        let name = on_remote(full);
         let dist = git(&["rev-list", "--count", &format!("{full}..{}", p.sha)])
             .and_then(|t| t.trim().parse().ok())
             .unwrap_or(u32::MAX);
         let prio = if upstream.as_deref() == Some(full) {
             0
-        } else if on_remote.starts_with("train/") {
+        } else if name.starts_with("train/") {
             1
-        } else if on_remote == "main" {
-            2
         } else {
-            3
+            2
         };
-        cands.push((dist, prio, name.to_string()));
-    }
-    // A tracking upstream the commit descends from wins outright; otherwise the nearest, train before main before others on a tie.
-    if let Some(up) = cands.iter().find(|c| c.1 == 0) {
-        return (
-            up.2.clone(),
-            format!("new remote ref {branch}: its tracking upstream, {} commit(s) ahead of it", up.0),
-        );
+        cands.push((dist, prio, full.strip_prefix("refs/remotes/").unwrap_or(full).to_string()));
     }
     cands.sort();
+    let took = format!(
+        "searched {} ancestor branch(es), counted {} in {} ms",
+        ancestors.len(),
+        cands.len(),
+        started.elapsed().as_millis()
+    );
     match cands.first() {
-        Some((dist, _, name)) => (
+        Some((dist, prio, name)) => (
             name.clone(),
-            format!("new remote ref {branch}: the nearest remote branch it descends from, {dist} commit(s) ahead of it"),
+            format!(
+                "new remote ref {branch}: the nearest of its upstream, the train branches and main that it descends from, {dist} commit(s) ahead{}; {took}",
+                if *prio == 0 { " (its tracking upstream)" } else { "" }
+            ),
         ),
         None => (
             fallback.to_string(),
-            format!("new remote ref {branch}: no remote branch is an ancestor of the pushed commit, so {fallback}"),
+            format!(
+                "new remote ref {branch}: no tracking upstream, train branch or main is an ancestor of the pushed commit, so {fallback}; {took}"
+            ),
         ),
     }
 }

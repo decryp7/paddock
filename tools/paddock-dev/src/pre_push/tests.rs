@@ -895,7 +895,10 @@ fn a_new_branch_cut_from_a_train_is_measured_against_the_train_not_main() {
     let f1 = r.commit("f1");
     let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
     assert_eq!(base, "origin/train/2026-11-12-7", "{why}");
-    assert!(why.contains("nearest remote branch") && why.contains("1 commit(s) ahead"), "{why}");
+    assert!(
+        why.contains("the nearest of") && why.contains("1 commit(s) ahead") && why.contains(" ms"),
+        "{why}"
+    );
 }
 
 #[test]
@@ -931,7 +934,7 @@ fn with_no_remote_branch_to_descend_from_the_base_is_main_and_says_so() {
     let c1 = r.commit("a");
     let (base, why) = super::choose_base(&r.root, &new_ref("main", &c1), "origin/main");
     assert_eq!(base, "origin/main");
-    assert!(why.contains("no remote branch is an ancestor"), "{why}");
+    assert!(why.contains("is an ancestor of the pushed commit, so origin/main"), "{why}");
     // An unrelated remote branch is not an ancestor either.
     r.git(&["checkout", "-q", "--orphan", "other"]);
     let o1 = r.commit("o");
@@ -951,13 +954,33 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     r.remote("train/x", &t1);
     r.git(&["checkout", "-q", "-b", "fix"]);
     let f1 = r.commit("f1");
-    // Tracking origin/main: that is the base even though the train is nearer.
+    // Tracking origin/main, but the train is nearer: the nearest wins, the upstream only breaks a tie.
     r.git(&["config", "remote.origin.url", "/nowhere"]);
     r.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
     r.git(&["config", "branch.fix.remote", "origin"]);
     r.git(&["config", "branch.fix.merge", "refs/heads/main"]);
     let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
-    assert_eq!((base.as_str(), why.contains("tracking upstream")), ("origin/main", true), "{why}");
+    assert_eq!(
+        base, "origin/train/x",
+        "an upstream that is main must not beat a nearer train: {why}"
+    );
+    // At the same distance the tracking upstream wins.
+    let r3 = Repo::new();
+    let c3 = r3.commit("a");
+    r3.remote("main", &c3);
+    r3.remote("train/z", &c3);
+    r3.git(&["config", "remote.origin.url", "/nowhere"]);
+    r3.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    r3.git(&["checkout", "-q", "-b", "fix"]);
+    let f3 = r3.commit("f");
+    r3.git(&["config", "branch.fix.remote", "origin"]);
+    r3.git(&["config", "branch.fix.merge", "refs/heads/main"]);
+    let (base, why) = super::choose_base(&r3.root, &new_ref("fix", &f3), "origin/main");
+    assert_eq!(
+        (base.as_str(), why.contains("its tracking upstream")),
+        ("origin/main", true),
+        "{why}"
+    );
     // Same distance to main and to a train: the train.
     let r2 = Repo::new();
     let c = r2.commit("a");

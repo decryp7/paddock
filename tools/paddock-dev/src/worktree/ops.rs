@@ -360,6 +360,13 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         ))
         .with_hint(format!("Run `./dev worktree claim {k}` as the agent that works in it."))
     })?;
+    // A full worktree has no `conformance/node_modules`, and the conformance gate then says "check broken" (C111, the yaml package):
+    // install them here, bounded and logged; a failure is a warning with the next step, never a failed `add`.
+    let deps_note = if req.branch.is_some() {
+        conformance_deps_note(Path::new(&k), &npm_ci)
+    } else {
+        String::new()
+    };
     let head = Git::at(Path::new(&k))
         .text(&["rev-parse", "HEAD"])
         .map(|s| s.trim().to_string())
@@ -380,13 +387,66 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
                "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json)}),
         format!(
-            "Made {k} ({}{}), locked: {note}{record_note}",
+            "Made {k} ({}{}), locked: {note}{record_note}{deps_note}",
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}")),
             attach
                 .describe()
                 .map_or(String::new(), |d| format!(", attached to the existing {d}"))
         ) + &drift.as_ref().map_or(String::new(), |d| format!("\n{}", d.text(req.base))),
     ))
+}
+
+/// How long `npm ci` of the conformance folder may take.
+const NPM_CI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// The conformance gates need their own dependencies (the `yaml` package of C111); a fresh worktree has none. `Ok` is the log line, `Err`
+/// why it failed. The real runner is [`npm_ci`]; tests pass a fake.
+type DepsRunner<'a> = &'a dyn Fn(&Path) -> Result<String, String>;
+
+/// Installs `conformance/`'s dependencies in the new worktree `k` when it has a `conformance/package-lock.json`, and returns the line
+/// for the report: what happened and how long it took, or a warning that names the exact command to run by hand.
+fn conformance_deps_note(k: &Path, run: DepsRunner<'_>) -> String {
+    let dir = k.join("conformance");
+    if !dir.join("package-lock.json").is_file() {
+        return String::new();
+    }
+    let started = std::time::Instant::now();
+    match run(&dir) {
+        Ok(_) => format!(
+            "\nconformance dependencies installed (`npm ci --ignore-scripts`, {:.1} s).",
+            started.elapsed().as_secs_f64()
+        ),
+        Err(e) => format!(
+            "\nWarning: the conformance dependencies were not installed ({e}, after {:.1} s). The conformance gate says \"check broken\" until they are. Next: cd {} && npm ci --ignore-scripts",
+            started.elapsed().as_secs_f64(),
+            dir.display()
+        ),
+    }
+}
+
+/// The real runner: `npm ci --ignore-scripts` in `dir`, bounded by [`NPM_CI_TIMEOUT`], its environment listed.
+fn npm_ci(dir: &Path) -> Result<String, String> {
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let ran = crate::ci_tool::ToolCall::new("npm")
+        .args(["ci", "--ignore-scripts", "--no-audit", "--no-fund"])
+        .cwd(dir)
+        .pass(
+            crate::ci_tool::NETWORK_ENV
+                .iter()
+                .copied()
+                .chain(["npm_config_*", "NPM_CONFIG_*", "NODE_*"]),
+        )
+        .timeout(NPM_CI_TIMEOUT)
+        .run(&env, &mut std::io::sink())?;
+    if ran.success {
+        Ok(ran.how)
+    } else {
+        Err(format!(
+            "{}: {}",
+            ran.how,
+            crate::ci_tool::tail(&ran.stderr, 3).trim().replace('\n', " | ")
+        ))
+    }
 }
 
 /// Never inside, or around, the primary, another worktree, an owner-map path or a path another `add` has reserved. Run under
@@ -666,6 +726,29 @@ pub fn drop_own(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, Cli
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_new_worktree_gets_the_conformance_dependencies_and_a_failure_is_a_warning_with_the_command() {
+        let d = tempfile::tempdir().unwrap();
+        let k = d.path();
+        // No conformance/package-lock.json (another repository, a sparse tree): nothing to say, nothing run.
+        assert_eq!(super::conformance_deps_note(k, &|_| panic!("must not run")), "");
+        std::fs::create_dir_all(k.join("conformance")).unwrap();
+        std::fs::write(k.join("conformance/package-lock.json"), "{}").unwrap();
+        let ran = std::cell::RefCell::new(Vec::new());
+        let ok = super::conformance_deps_note(k, &|dir| {
+            ran.borrow_mut().push(dir.to_path_buf());
+            Ok("exit 0".into())
+        });
+        assert!(ok.contains("installed (`npm ci --ignore-scripts`"), "{ok}");
+        assert_eq!(ran.borrow().as_slice(), [k.join("conformance")]);
+        let bad = super::conformance_deps_note(k, &|_| Err("timed out after 180 s".into()));
+        assert!(bad.contains("Warning:") && bad.contains("timed out after 180 s"), "{bad}");
+        assert!(
+            bad.contains(&format!("Next: cd {} && npm ci --ignore-scripts", k.join("conformance").display())),
+            "{bad}"
+        );
+    }
+
     use super::*;
 
     #[test]
