@@ -1,5 +1,5 @@
 //! `dev brief check <file>`: does a brief to an agent have the fields and the statements that every brief needs, and none of the
-//! patterns that have gone wrong before? The template is `docs/agents/brief-template.md`.
+//! patterns that have gone wrong before? The template is `templates/agents/brief-template.md`.
 //!
 //! The check is structural. It never judges the task. A field is a line `Label: value` (a leading `- ` or `**` is ignored); its
 //! block is that line and the lines after it up to the next field or heading. The known-bad patterns skip a line that says
@@ -16,15 +16,19 @@ use std::path::PathBuf;
 /// `brief` subcommands.
 #[derive(Subcommand)]
 pub enum BriefCommand {
-    /// Check a brief for the required fields and the known-bad patterns (docs/agents/brief-template.md).
+    /// Check a brief for the required fields and the known-bad patterns (templates/agents/brief-template.md).
     Check(CheckArgs),
 }
 
 /// Arguments of `brief check`.
 #[derive(Args)]
 pub struct CheckArgs {
-    /// The brief, a Markdown file.
+    /// The brief, a Markdown file; `-` reads standard input (a brief that is not saved yet).
+    #[arg(default_value = "-")]
     file: PathBuf,
+    /// Read the brief from standard input (the same as the file `-`).
+    #[arg(long)]
+    stdin: bool,
 }
 
 /// The scratch and worktree prefix an agent's files must be under.
@@ -50,14 +54,13 @@ pub fn scratch_ok(path: &str) -> Result<(), String> {
         return Err(format!("the scratch folder `{path}` has `..`: name the agent's own subfolder"));
     }
     for root in SCRATCH_ROOTS {
-        if let Some(rest) = trimmed.strip_prefix(root) {
-            return if rest.is_empty() {
-                Err(format!(
-                    "the scratch folder `{path}` is the root {root}, not a subfolder: name your own subfolder, for example {root}scratch/<agent id>"
-                ))
-            } else {
-                Ok(())
-            };
+        if trimmed == root.trim_end_matches('/') {
+            return Err(format!(
+                "the scratch folder `{path}` is the root {root}, not a subfolder: name your own subfolder, for example {root}scratch/<agent id>"
+            ));
+        }
+        if trimmed.starts_with(root) {
+            return Ok(());
         }
     }
     if trimmed.starts_with("/private/tmp/claude-") {
@@ -109,17 +112,15 @@ const REQUIRED: [&str; 9] = [
     "report",
 ];
 
-/// Statements every brief makes, as (code, pattern, what to say).
-const STATEMENTS: [(&str, &str, &str); 7] = [
+/// The fields of a short brief (see [`is_lite`]): no branch, base, plan line or gates, because it changes no code.
+const REQUIRED_LITE: [&str; 5] = ["role", "agent id", "worktree", "scratch", "report"];
+
+/// Statements every brief makes, as (code, pattern, what to say); the first and second do not apply to a short brief.
+const STATEMENTS: [(&str, &str, &str); 6] = [
     (
         "no-agent-id-export",
         r"PADDOCK_AGENT_ID",
         "tell the agent to export PADDOCK_AGENT_ID=<role>:<task> before `./dev worktree`",
-    ),
-    (
-        "no-claim-drop-order",
-        r"(?is)claim.*drop",
-        "give the worktree order: add (locks), claim, work, then drop at the end",
     ),
     (
         "no-subject-limit",
@@ -197,11 +198,49 @@ fn fields(text: &str) -> Vec<Field> {
     out
 }
 
-fn negated(line: &str) -> bool {
-    let l = line.to_lowercase();
-    ["never", "not ", "no ", "don't", "do not", "instead of", "forbidden", "refuse"]
-        .iter()
-        .any(|w| l.contains(w))
+/// Whether a match at byte `pos` of `line` is exempt because a negation comes before it in the same clause ("never `git stash`",
+/// "do not run cd x;"). A sentence ends at `.`, `;`, `!` or `?`; after a condition (if, when, unless) a comma also ends the clause. "Do not forget", "don't forget", "not only" and "not just" do not
+/// negate what follows ("Do not forget to `git stash`" is an instruction to stash), and a negation in an earlier clause or after
+/// the match ("If the build does not pass, run cd X;") exempts nothing.
+fn exempt(line: &str, pos: usize) -> bool {
+    let before = &line[..pos.min(line.len())];
+    // A full stop ends a sentence only before a space (`./dev` and `x.md` are paths).
+    let end = before
+        .char_indices()
+        .filter(|(i, c)| matches!(c, ';' | '!' | '?') || (*c == '.' && before[i + 1..].chars().next().is_none_or(char::is_whitespace)))
+        .map(|(i, _)| i)
+        .next_back();
+    let sentence = end.map_or(before, |i| &before[i + 1..]);
+    // A list ("Never /tmp, /var/folders or the internal disk") keeps its negation across commas; after a condition ("If the build
+    // does not pass, run ...") the comma starts the instruction, so the negation stays behind it.
+    let clause = if re(r"(?i)\b(if|when|unless|once|because|while)\b").is_match(sentence) {
+        sentence.rfind(',').map_or(sentence, |i| &sentence[i + 1..])
+    } else {
+        sentence
+    };
+    let mut clause = clause.to_lowercase();
+    for not_a_negation in [
+        "do not forget",
+        "don't forget",
+        "not only",
+        "not just",
+        "do not skip",
+        "don't skip",
+        "never mind",
+    ] {
+        clause = clause.replace(not_a_negation, " ");
+    }
+    re(r"\b(never|not|no|don't|mustn't|without|forbidden|refuse[sd]?|instead of)\b").is_match(&clause)
+}
+
+/// Whether `pattern` matches somewhere in `line` outside a negated clause.
+fn hit(pattern: &Regex, line: &str) -> bool {
+    pattern.find_iter(line).any(|m| !exempt(line, m.start()))
+}
+
+/// The byte offset of the first occurrence of `needle` in `line` outside a negated clause.
+fn first_free(line: &str, needle: &str) -> Option<usize> {
+    line.match_indices(needle).map(|(i, _)| i).find(|i| !exempt(line, *i))
 }
 
 fn placeholder() -> Regex {
@@ -213,13 +252,15 @@ pub fn check(text: &str) -> Vec<Finding> {
     let mut found = Vec::new();
     let fs = fields(text);
     let ph = placeholder();
-    for label in REQUIRED {
+    let lite = is_lite(&fs);
+    let required: &[&str] = if lite { &REQUIRED_LITE } else { &REQUIRED };
+    for label in required.iter().copied() {
         match fs.iter().find(|f| f.label == label) {
             None => found.push(Finding {
                 line: 0,
                 code: "missing-field",
                 message: format!(
-                    "the field `{label}` is missing; add a line `{}: ...` (see docs/agents/brief-template.md)",
+                    "the field `{label}` is missing; add a line `{}: ...` (see templates/agents/brief-template.md)",
                     capitalise(label)
                 ),
             }),
@@ -286,7 +327,13 @@ pub fn check(text: &str) -> Vec<Finding> {
             });
         }
     }
+    if !lite {
+        found.extend(order(text));
+    }
     for (code, pat, say) in STATEMENTS {
+        if lite && matches!(code, "no-agent-id-export" | "no-subject-limit") {
+            continue;
+        }
         if !re(pat).is_match(text) {
             found.push(Finding {
                 line: 0,
@@ -321,43 +368,42 @@ fn patterns(text: &str) -> Vec<Finding> {
     let mut drop_line = None;
     for (i, l) in text.lines().enumerate() {
         let n = i + 1;
-        let skip = negated(l);
-        if scratch.is_match(&l.replace("/private/tmp/claude-", "")) && !skip {
+        if hit(&scratch, &l.replace("/private/tmp/claude-", "")) {
             found.push(Finding {
                 line: n,
                 code: "bad-scratch",
                 message: format!("scratch under /tmp, /var/folders or $TMPDIR: use a folder under {SCRATCH_ROOT}"),
             });
         }
-        if unguarded_cd.is_match(l) && !skip {
+        if hit(&unguarded_cd, l) {
             found.push(Finding {
                 line: n,
                 code: "unguarded-cd",
                 message: "`cd <dir>;` runs the next command in the old folder when the cd fails: write `cd <dir> && ...` (ER-2)".into(),
             });
         }
-        if attribution.is_match(l) && !skip {
+        if hit(&attribution, l) {
             found.push(Finding {
                 line: n,
                 code: "attribution",
                 message: "an attribution line (Co-Authored-By, Generated with, a session trailer) is forbidden (ER-5)".into(),
             });
         }
-        if main_git.is_match(l) && !skip {
+        if hit(&main_git, l) {
             found.push(Finding {
                 line: n,
                 code: "main-checkout-write",
                 message: "a git write in the main checkout: work in your own worktree (ER-2)".into(),
             });
         }
-        if l.contains("git stash") && !skip {
+        if first_free(l, "git stash").is_some() {
             found.push(Finding {
                 line: n,
                 code: "git-stash",
                 message: "`git stash` is forbidden (ER-3): commit instead".into(),
             });
         }
-        if l.contains("--no-verify") && !skip {
+        if first_free(l, "--no-verify").is_some() {
             found.push(Finding {
                 line: n,
                 code: "no-verify",
@@ -376,10 +422,10 @@ fn patterns(text: &str) -> Vec<Finding> {
                 });
             }
         }
-        if let Some(col) = l.find("worktree release").filter(|_| !skip && release_line.is_none()) {
+        if let Some(col) = first_free(l, "worktree release").filter(|_| release_line.is_none()) {
             release_line = Some((n, col));
         }
-        if let Some(col) = l.find("worktree drop").filter(|_| !skip && drop_line.is_none()) {
+        if let Some(col) = first_free(l, "worktree drop").filter(|_| drop_line.is_none()) {
             drop_line = Some((n, col));
         }
     }
@@ -389,23 +435,84 @@ fn patterns(text: &str) -> Vec<Finding> {
             code: "release-without-drop",
             message: "`worktree release` at the end leaves the worktree behind: the agent ends with `worktree drop`".into(),
         }),
-        (Some(r), Some(d)) if r < d => found.push(Finding {
+        (Some(r), Some(d)) => found.push(Finding {
             line: r.0,
-            code: "release-before-drop",
-            message: format!("`worktree release` (line {}) comes before `worktree drop` (line {}): release unlocks the worktree and forgets its owner but removes nothing; the agent ends with drop only", r.0, d.0),
+            code: if r < d { "release-before-drop" } else { "release-after-drop" },
+            message: format!(
+                "`worktree release` (line {}) with `worktree drop` (line {}): release unlocks the worktree and forgets its owner but removes nothing; the agent ends with drop only",
+                r.0, d.0
+            ),
         }),
         _ => {}
     }
     found
 }
 
+/// The worktree order the template teaches: `worktree claim`, then the work, then `worktree drop` at the end.
+fn order(text: &str) -> Vec<Finding> {
+    let find = |needle: &str| {
+        text.lines()
+            .enumerate()
+            .find_map(|(i, l)| first_free(l, needle).map(|c| (i + 1, c)))
+    };
+    match (find("worktree claim"), find("worktree drop")) {
+        (None, _) => vec![Finding {
+            line: 0,
+            code: "no-claim",
+            message:
+                "give the worktree order: `worktree add` (it locks), `worktree claim <path>`, work, then `worktree drop <path>` at the end"
+                    .into(),
+        }],
+        (Some(_), None) => vec![Finding {
+            line: 0,
+            code: "no-drop",
+            message: "say that the agent ends with `worktree drop <path>`".into(),
+        }],
+        (Some(c), Some(d)) if d < c => vec![Finding {
+            line: d.0,
+            code: "drop-before-claim",
+            message: format!(
+                "`worktree drop` (line {}) comes before `worktree claim` (line {}): claim first, drop at the end",
+                d.0, c.0
+            ),
+        }],
+        _ => Vec::new(),
+    }
+}
+
+/// A short brief needs fewer fields: a scout's lookup, or any brief that works in no worktree (`Worktree: none`).
+fn is_lite(fs: &[Field]) -> bool {
+    let value = |label: &str| fs.iter().find(|f| f.label == label).map(|f| f.value.to_lowercase());
+    value("role").is_some_and(|r| r.starts_with("scout") || r.contains("lookup"))
+        || value("worktree").is_some_and(|w| w.starts_with("none"))
+}
+
 /// The command: reads the file, prints the findings, ends with `Exit::Findings` when there are any.
 pub fn command(c: BriefCommand) -> Result<Report, CliError> {
+    command_with(c, &mut std::io::stdin())
+}
+
+/// The longest brief read: a brief is a page or two.
+const MAX_BRIEF_BYTES: u64 = 1 << 20;
+
+/// [`command`] with standard input passed in.
+pub fn command_with(c: BriefCommand, stdin: &mut dyn std::io::Read) -> Result<Report, CliError> {
+    use std::io::Read;
     let BriefCommand::Check(a) = c;
-    let text = std::fs::read_to_string(&a.file).map_err(|e| {
-        CliError::failure(format!("cannot read {}: {e}.", a.file.display())).with_hint("Pass the path of the brief, a Markdown file.")
-    })?;
-    Ok(report(&a.file.display().to_string(), &check(&text)))
+    let (name, text) = if a.stdin || a.file.as_os_str() == "-" {
+        let mut text = String::new();
+        stdin
+            .take(MAX_BRIEF_BYTES)
+            .read_to_string(&mut text)
+            .map_err(|e| CliError::failure(format!("cannot read standard input: {e}.")).with_hint("Pipe the brief in, or pass a file."))?;
+        ("<stdin>".to_string(), text)
+    } else {
+        let text = std::fs::read_to_string(&a.file).map_err(|e| {
+            CliError::failure(format!("cannot read {}: {e}.", a.file.display())).with_hint("Pass the path of the brief, a Markdown file.")
+        })?;
+        (a.file.display().to_string(), text)
+    };
+    Ok(report(&name, &check(&text)))
 }
 
 /// The report of a check.
@@ -435,7 +542,7 @@ pub fn report(file: &str, found: &[Finding]) -> Report {
 mod tests {
     use super::*;
 
-    const TEMPLATE: &str = include_str!("../../../docs/agents/brief-template.md");
+    const TEMPLATE: &str = include_str!("../../../templates/agents/brief-template.md");
 
     /// The template with every field filled in plausibly.
     fn filled() -> String {
@@ -502,12 +609,16 @@ mod tests {
             "{}\nAt the end run `./dev worktree release <path>` and then `./dev worktree drop <path>`.\n",
             filled()
         );
-        assert!(codes(&text).contains(&"release-before-drop"));
-        let text = format!("{}\nAt the end run `./dev worktree release <path>`.\n", filled());
-        assert!(codes(&text).contains(&"release-without-drop"));
+        // The template already drops once, before this release.
+        assert!(codes(&text).contains(&"release-after-drop"));
+        let early = format!("At the start `./dev worktree release <path>`.\n{}", filled());
+        assert!(codes(&early).contains(&"release-before-drop"));
+        let only = filled().replace("worktree drop", "worktree remove");
+        let only = format!("{only}\nAt the end run `./dev worktree release <path>`.\n");
+        assert!(codes(&only).contains(&"release-without-drop"));
         // Drop alone, and a rule that says never release, are fine.
         let text = format!("{}\nUse drop, never `./dev worktree release`.\n", filled());
-        assert!(check(&text).is_empty());
+        assert_eq!(check(&text), Vec::new());
     }
 
     #[test]
@@ -621,6 +732,78 @@ mod tests {
             .join("\n");
         let c = codes(&text);
         assert!(c.contains(&"no-subject-limit") && c.contains(&"no-recurring-line"), "{c:?}");
+    }
+
+    #[test]
+    fn a_negation_only_exempts_what_follows_it_in_the_same_clause() {
+        let flagged = |line: &str| {
+            let c = codes(&format!("{}\n{line}\n", filled()));
+            c.contains(&"git-stash") || c.contains(&"unguarded-cd") || c.contains(&"no-verify") || c.contains(&"attribution")
+        };
+        // Instructions that only look negated.
+        assert!(flagged("Do not forget to `git stash` before the switch."));
+        assert!(flagged("Don't forget to run git stash first."));
+        assert!(flagged("Not only commit, also use `git stash`."));
+        assert!(flagged(
+            "If the build does not pass, run cd /Volumes/d8sst7/dev-targets/wt/a; cargo build"
+        ));
+        assert!(flagged("Never mind the order: git commit --no-verify."));
+        // Rules that forbid.
+        assert!(!flagged("Never `git stash`."));
+        assert!(!flagged("Do not run `git stash`."));
+        assert!(!flagged("Agents never use cd <dir>; they write cd <dir> && ... instead."));
+        assert!(!flagged("Use no --no-verify."));
+    }
+
+    #[test]
+    fn the_worktree_order_is_checked_not_just_the_words() {
+        let strip = |needle: &str| -> String { filled().replace(needle, "x") };
+        assert!(codes(&strip("worktree claim")).contains(&"no-claim"));
+        assert!(codes(&strip("worktree drop")).contains(&"no-drop"));
+        let swapped = filled()
+            .replace("worktree claim", "worktree TMP")
+            .replace("worktree drop", "worktree claim")
+            .replace("worktree TMP", "worktree drop");
+        let c = codes(&swapped);
+        assert!(c.contains(&"drop-before-claim"), "{c:?}");
+        assert!(check(&filled()).is_empty());
+    }
+
+    #[test]
+    fn a_scout_lookup_needs_only_the_short_field_list() {
+        let brief = "Role: scout\nAgent id: scout:ci-watch\nWorktree: none: read-only, use git show\nScratch: /Volumes/d8sst7/dev-targets/scratch/scout-ci-watch\n\
+            Report: the run's state, filtered. End with a `Recurring:` line; tip SHA of what you read. No attribution anywhere. No git writes in the main checkout.\n";
+        assert_eq!(check(brief), Vec::new(), "{:?}", check(brief));
+        // A scout still needs a scratch folder and the report.
+        let c = codes(&brief.replace("Scratch:", "Notes:"));
+        assert!(c.contains(&"missing-field"));
+        // A builder with the same text does not pass.
+        assert!(
+            !check(&brief.replace("Role: scout", "Role: implementer").replace(
+                "Worktree: none: read-only, use git show",
+                "Worktree: /Volumes/d8sst7/dev-targets/wt/x"
+            ))
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_scratch_root_gets_the_root_message() {
+        let e = scratch_ok("/Volumes/d8sst7/dev-targets").unwrap_err();
+        assert!(e.contains("is the root") && e.contains("not a subfolder"), "{e}");
+        assert!(scratch_ok("/Volumes/d8sst7/dev-targets/").unwrap_err().contains("is the root"));
+        assert!(scratch_ok("/Volumes/d8sst7/dev-targets/scratch/a").is_ok());
+        assert!(scratch_ok("/Volumes/d8sst7/dev-targets-other/x").is_err());
+    }
+
+    #[test]
+    fn a_brief_can_be_piped_in_with_a_dash_or_stdin() {
+        let args = |file: &str, stdin: bool| BriefCommand::Check(CheckArgs { file: file.into(), stdin });
+        let text = filled();
+        let r = command_with(args("-", false), &mut text.as_bytes()).unwrap();
+        assert_eq!((r.exit, r.data["file"].as_str()), (Exit::Ok, Some("<stdin>")));
+        let r = command_with(args("ignored.md", true), &mut "Role: scout\n".as_bytes()).unwrap();
+        assert_eq!(r.exit, Exit::Findings);
     }
 
     #[test]

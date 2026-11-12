@@ -33,7 +33,7 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
-    /// Briefs to agents: check one for the required fields and the known-bad patterns (docs/agents/brief-template.md).
+    /// Briefs to agents: check one for the required fields and the known-bad patterns (templates/agents/brief-template.md).
     Brief {
         #[command(subcommand)]
         command: brief_check::BriefCommand,
