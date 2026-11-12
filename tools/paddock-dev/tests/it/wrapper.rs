@@ -1368,6 +1368,10 @@ fn an_install_waits_for_a_live_holder_of_the_lock_and_never_runs_beside_it() {
     );
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts a short-lived sh to get a pid that has ended; nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_lock_of_a_gone_owner_or_of_a_reused_pid_is_taken_over_whatever_its_age() {
