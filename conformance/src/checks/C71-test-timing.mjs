@@ -28,7 +28,8 @@
 // an assertion that the field is still `None`/`is_none()` is an ordering check and passes. TypeScript: `{ ...x.status() }` (or
 // `snapshot`/`state`/`current`) in the statement right after an `await` of a timer or settle (`advanceTimers*`, `settle`, `flush*`,
 // `tick`) that did not read that getter: the copy is whichever state the race left. Wait for the field itself, or build the value from
-// scratch.
+// scratch. Not a race: an assertion on the name the wait's result is bound to, a field the wait's receiver names, or a site with
+// `// conformance: ordered — <why>` (on the wait or the assertion, or the line above either).
 // Also (ER-12): a Playwright config (`playwright*.config.*`) whose `retries` can be above 0 sets `failOnFlakyTests` (not `false`), so a
 // retry never turns a red run green; a config with `retries: 0` or no `retries` is fine.
 // Not yet (ADR 0041 §4 amendment, "first slice"): Instant/SystemTime/Date.now, recv_timeout/wait_timeout/Deadline::after,
@@ -315,7 +316,8 @@ export function rustWaitSites(source, { wholeFileIsTest = false } = {}) {
 }
 
 const RACE_WAIT = /\b(?:wait_until|wait_for|poll_for)\s*\(/;
-const FIELD = /\.([A-Za-z_]\w*)\b(?!\s*\()/g;
+const FIELD = /\.([A-Za-z_]\w*)\b(?!\s*\(|::)/g; // a method call `.f(` and a turbofish `.collect::<..>()` are not fields
+const ORDERED_WAIVER = /conformance:\s*ordered\s*[—–-]+\s*\S.{2,}/;
 
 /** Field names read in `text`, optionally leaving out what sits inside call arguments (`info(h.id)` reads no `id` of the subject). */
 function fieldsOf(text, { outsideCalls }) {
@@ -326,6 +328,7 @@ function fieldsOf(text, { outsideCalls }) {
 
 /** The statement races in the test code of one Rust file (see the header): [{ line, what }]. */
 export function rustRaceSites(source, { wholeFileIsTest = false } = {}) {
+  const lines = source.split('\n');
   const masked = maskRust(source);
   const ranges = wholeFileIsTest ? [[0, masked.length]] : rustTestRanges(masked);
   if (!ranges.length) return [];
@@ -341,9 +344,18 @@ export function rustRaceSites(source, { wholeFileIsTest = false } = {}) {
     if (stmtEnd < 0) continue;
     const stmt = masked.slice(end + 1, stmtEnd);
     if (!/^\s*assert(?:_eq|_ne)?!\s*\(/.test(stmt) || /\bNone\b|\bis_none\s*\(/.test(stmt)) continue;
-    const read = fieldsOf(args, { outsideCalls: false });
+    // The wait's own statement: what it is called on (`r.renderers.wait_for(..)` reads `renderers`) and the name it is bound to
+    // (`let seen = c.wait_for(..)`): an assertion on that name reads what the wait returned, not state a thread may still write.
+    const stmtStart = Math.max(masked.lastIndexOf(';', m.index), masked.lastIndexOf('{', m.index), masked.lastIndexOf('}', m.index)) + 1;
+    const head = masked.slice(stmtStart, m.index);
+    const read = new Set([...fieldsOf(args, { outsideCalls: false }), ...fieldsOf(head, { outsideCalls: false })]);
+    const bound = /\blet\s+(?:mut\s+)?(\w+)\s*(?::[^=]+)?=/.exec(head)?.[1];
+    if (bound && new RegExp(`\\b${bound}\\b`).test(stmt)) continue;
     if (![...fieldsOf(stmt, { outsideCalls: true })].some((f) => !read.has(f))) continue;
-    out.push({ line: lineOf(end + 1 + stmt.search(/\S/)), what: 'an assertion on a field the wait before it did not read: the writer may not have written it yet' });
+    const at = lineOf(end + 1 + stmt.search(/\S/));
+    const ordered = [lineOf(m.index) - 1, lineOf(m.index), at - 1].some((n) => ORDERED_WAIVER.test(lines[n - 1] ?? '')) || ORDERED_WAIVER.test(lines[at - 2] ?? '');
+    if (ordered) continue;
+    out.push({ line: at, what: 'an assertion on a field the wait before it did not read: the writer may not have written it yet' });
   }
   return out;
 }

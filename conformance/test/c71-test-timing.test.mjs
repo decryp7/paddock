@@ -309,3 +309,18 @@ test('C71 races (TypeScript): a spread of the current status right after a timer
   assert.deepEqual(r("store.set({ ...store.status()!, seq: 1 });\n"), [], 'no wait before it');
   assert.deepEqual(r("await settle(f);\nstore.set({ ...fresh, seq: 1 });\n"), [], 'not a spread of a getter');
 });
+
+test('C71 races (Rust): the wait\'s own return value, a turbofish, the receiver of the wait and an `ordered` waiver are not races', () => {
+  const t = (body) => `fn t() {\n${body}\n}\n`;
+  // debrief-cli progress.rs:116 and dyno bench.rs:1734: the assertion reads what the wait returned.
+  assert.deepEqual(races(t('    let report = wait_until(done, false, &mut out, || false).unwrap();\n    assert_eq!(report.events, 7);')), []);
+  assert.deepEqual(races(t('    let seen = c\n        .wait_for(D, |o| o.running.is_some())\n        .and_then(|o| o.running)\n        .expect("no phase");\n    assert_eq!((seen.phase.as_str(), seen.rep), ("cpu", 2));')), []);
+  // debrief-core events/tests.rs:37: `collect::<Vec<_>>()` is a call, not a field.
+  assert.deepEqual(races(t('    wait_until("delivery", || seen.lock().unwrap().len() == 100);\n    assert_eq!(*seen.lock().unwrap(), (1..=100).collect::<Vec<_>>());')), []);
+  // debrief renderer.rs:948: the receiver of the wait (`r.renderers`) is read by it.
+  assert.deepEqual(races(t('    assert_eq!(r.renderers.wait_for("main", SEEN, |p| p != Phase::None), Phase::Launching);\n    assert!(r.renderers.kill("main"), "running");')), []);
+  assert.deepEqual(races(t('    // conformance: ordered — the job reports before it exits\n    wait_until("up", || s.info().state == Up);\n    assert_eq!(s.info().other, 3);')), [], 'a waiver above the wait');
+  assert.deepEqual(races(t('    wait_until("up", || s.info().state == Up);\n    // conformance: ordered — set before the state\n    assert_eq!(s.info().other, 3);')), [], 'a waiver above the assertion');
+  assert.deepEqual(races(t('    wait_until("up", || s.info().state == Up);\n    // conformance: ordered\n    assert_eq!(s.info().other, 3);')).length, 1, 'a waiver needs its reason');
+  assert.deepEqual(races(t('    let n = wait_until("up", || s.info().state == Up);\n    assert_eq!(s.info().other, 3);')), [3], 'a bound name the assertion does not use');
+});
