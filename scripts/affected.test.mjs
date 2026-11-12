@@ -229,6 +229,13 @@ describe('the graph of this tree', () => {
     assert.deepEqual(run('conformance/test/core.test.mjs').apps, []);
   });
 
+  test("a change to the JS conformance runner or its baselines marks paddock-dev (its parity tests run it)", () => {
+    for (const f of ['conformance/src/checks/C53-pid-kills.mjs', 'conformance/src/util/fs.mjs', 'conformance/baselines/C53.json', 'conformance/bin/paddock-conformance.mjs']) {
+      assert.equal(run(f).paddockDev, true, f);
+    }
+    assert.equal(run('conformance/test/core.test.mjs').paddockDev, false, 'a conformance test does not');
+  });
+
   test('scripts mark the tools and ui jobs (test:scripts), the image folder the image and ui jobs', () => {
     const s = run('scripts/publish.mjs');
     assert.deepEqual([s.tools, s.ui, s.crates], [true, true, false]);

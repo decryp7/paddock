@@ -1,0 +1,25 @@
+use paddock_proc::{is_alive as up, ProcessId};
+use paddock_proc::presence;
+
+fn a(pid: u32) -> bool {
+    paddock_proc::is_alive(pid)
+}
+
+fn b(pid: u32) -> bool {
+    up(pid) && presence(pid) == Presence::Running
+}
+
+fn c(pid: i32) -> bool {
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+fn d(pid: u32) {
+    let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    let alive = sys.process(Pid::from_u32(pid)).is_some();
+    let known = nix::sys::signal::kill(Pid::from_raw(pid as i32), None);
+}
+
+fn e(pid: u32) -> bool {
+    // conformance: pid-liveness
+    paddock_proc::may_be_alive(pid)
+}

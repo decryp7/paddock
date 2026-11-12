@@ -15,6 +15,7 @@
 pub mod baseline;
 pub mod c39;
 pub mod c53;
+pub mod c53_liveness;
 pub mod finding;
 pub mod jsre;
 pub mod mask;
@@ -41,6 +42,11 @@ impl Ctx<'_> {
     /// The files this run looks at (all of the tree, or the `--files` that the tree knows), sorted.
     pub fn files(&self) -> Rc<Vec<String>> {
         self.scoped.clone()
+    }
+
+    /// The tree's root folder.
+    pub fn root(&self) -> &std::path::Path {
+        self.tree.root()
     }
 
     /// Every file of the tree, whatever the scope (for a precondition).

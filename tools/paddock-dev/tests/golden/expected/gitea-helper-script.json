@@ -8,7 +8,7 @@
  "tools": false,
  "icons": false,
  "ciImage": false,
- "paddockDev": false,
+ "paddockDev": true,
  "docs": false,
  "apps": [
   "x",
@@ -48,6 +48,9 @@
   ],
   "crates": [
    "conformance/src/util/paths.sh used by ci.yml, job crates"
+  ],
+  "paddock-dev": [
+   "its parity tests run the JS conformance runner on conformance/src/util/paths.sh (tools/paddock-dev/tests/it/check.rs)"
   ]
  }
 }

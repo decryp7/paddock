@@ -99,6 +99,10 @@ static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^li
 /// The planner and its tests: besides the scripts' owners, this tool's golden test runs them as its oracle.
 static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(\.test)?\.mjs$"));
 
+/// The JS conformance runner and what it reads: this tool's parity tests run it over fixtures and the live tree (C39, C53).
+/// Mirrors `PARITY_INPUT` in `scripts/affected.mjs`.
+static PARITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(src|bin|baselines)/"));
+
 /// What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app (scripts/affected.mjs
 /// `PER_MACHINE_INPUT`).
 static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
@@ -471,6 +475,12 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
             for a in &opts.conformance_apps {
                 st.mark(Some(format!("app:{a}")), format!("its checks run paddock-conformance ({f})"));
             }
+        }
+        if PARITY_INPUT.is_match(f) {
+            st.mark(
+                Some("paddock-dev".to_string()),
+                format!("its parity tests run the JS conformance runner on {f} (tools/paddock-dev/tests/it/check.rs)"),
+            );
         }
         if META.iter().any(|r| r.is_match(f)) {
             continue;

@@ -8,7 +8,7 @@
  "tools": true,
  "icons": false,
  "ciImage": false,
- "paddockDev": false,
+ "paddockDev": true,
  "docs": false,
  "apps": [
   "x",
@@ -45,6 +45,9 @@
   ],
   "conformance": [
    "conformance/src/a.mjs"
+  ],
+  "paddock-dev": [
+   "its parity tests run the JS conformance runner on conformance/src/a.mjs (tools/paddock-dev/tests/it/check.rs)"
   ],
   "tools": [
    "scripts/a.mjs"

@@ -3,7 +3,7 @@ fn a(c: &mut Child) {
 }
 
 fn b() {
-    let alive = sys.process(Pid::from_u32(pid)).is_some();
+    let alive = id.is_alive();
 }
 
 // libc::kill(p, 9) and Command::new("taskkill")
@@ -15,7 +15,7 @@ fn c() {
 
 fn d(p: i32) {
     unsafe { libc::kill(p, 9) };
-    if let Some(p) = sys.process(Pid::from_u32(pid)) { p.kill(); }
+    if let Some(p) = sys.process(id) { p.kill(); }
 }
 
 #[allow(clippy::disallowed_methods)]

@@ -243,6 +243,7 @@ impl Check for C53 {
                 }
             }
         }
+        findings.extend(super::c53_liveness::liveness_findings(ctx, ctx.root()));
         CheckOutput {
             findings,
             probes,
