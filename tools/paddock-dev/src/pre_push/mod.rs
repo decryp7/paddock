@@ -172,22 +172,29 @@ fn refuse_home(path: &Path, home: Option<&str>) -> Result<(), CliError> {
     if !path.is_absolute() || path.to_string_lossy().starts_with('~') {
         return Err(CliError::refused(format!("{} is not an absolute path.", path.display())).with_hint(hint));
     }
-    std::fs::create_dir_all(path).map_err(|e| CliError::failure(format!("{} cannot be created: {e}.", path.display())))?;
-    let resolved = path
-        .canonicalize()
-        .map_err(|e| CliError::failure(format!("{} cannot be resolved: {e}.", path.display())))?;
-    let Some(h) = home.filter(|h| !h.is_empty() && *h != "/") else {
-        return Ok(());
-    };
-    let home_resolved = Path::new(h).canonicalize().unwrap_or_else(|_| PathBuf::from(h));
-    if resolved.starts_with(&home_resolved) {
-        return Err(CliError::refused(format!(
-            "{} is inside the home folder {}.",
-            resolved.display(),
-            home_resolved.display()
-        ))
-        .with_hint(hint));
+    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(CliError::refused(format!("{} contains `..`.", path.display())).with_hint(hint));
     }
+    // Resolve the nearest ancestor that exists (symlinks followed) and put the rest of the path on it: the check runs before
+    // anything is created, so a refused folder is never made.
+    let ancestor = path.ancestors().find(|a| a.exists()).unwrap_or(path);
+    let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
+    let resolved = ancestor
+        .canonicalize()
+        .map_err(|e| CliError::failure(format!("{} cannot be resolved: {e}.", ancestor.display())))?
+        .join(rest);
+    if let Some(h) = home.filter(|h| !h.is_empty() && *h != "/") {
+        let home_resolved = Path::new(h).canonicalize().unwrap_or_else(|_| PathBuf::from(h));
+        if resolved.starts_with(&home_resolved) {
+            return Err(CliError::refused(format!(
+                "{} is inside the home folder {}.",
+                resolved.display(),
+                home_resolved.display()
+            ))
+            .with_hint(hint));
+        }
+    }
+    std::fs::create_dir_all(path).map_err(|e| CliError::failure(format!("{} cannot be created: {e}.", path.display())))?;
     Ok(())
 }
 

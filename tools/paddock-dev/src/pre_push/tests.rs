@@ -802,5 +802,12 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
     assert!(refuse_home(std::path::Path::new("~/pre-push"), Some(h)).is_err());
     let outside = d.path().join("disk").join("pre-push");
     assert!(refuse_home(&outside, Some(h)).is_ok());
-    assert!(outside.exists(), "the folder is created so it can be resolved");
+    assert!(outside.exists(), "an allowed folder is created");
+    // A refused folder is not created, not even empty.
+    let inside = home.join("work/never/pre-push");
+    assert!(refuse_home(&inside, Some(h)).is_err());
+    assert!(!home.join("work/never").exists(), "nothing was made inside home");
+    let through_link = link.join("also-never");
+    assert!(refuse_home(&through_link, Some(h)).is_err());
+    assert!(!home.join("work/also-never").exists());
 }
