@@ -224,8 +224,10 @@ impl Watcher {
         // silent: the watcher thread has already ended when its receiver is gone (it stopped the child itself)
         #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.stop.send(());
-        if let Some(t) = self.thread.take() {
-            crate::cleanup::join("the memory watcher thread", t);
+        if let Some(t) = self.thread.take()
+            && crate::cleanup::join("the memory watcher thread", t)
+        {
+            log::warn!("the memory watcher thread panicked while it was being stopped");
         }
     }
 }

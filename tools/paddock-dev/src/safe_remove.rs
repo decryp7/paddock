@@ -229,13 +229,23 @@ pub fn remove_with(path: &Path, roots: &[PathBuf], processes: ProcessFolders) ->
         repo.git()
             .text(&["worktree", "remove", &k])
             .map_err(|e| format!("git would not remove it: {}", e.stderr.trim()))?;
-        let _ = OwnerStore::open(&repo.common_dir).update(|m| m.remove(&k));
+        if let Some(warning) = forget_owner(&repo.common_dir, &k) {
+            eprintln!("{warning}");
+        }
     } else {
         std::fs::remove_dir_all(path).map_err(|e| format!("it could not be removed: {e}"))?; // the one deleting call
     }
     Ok(Removed {
         path: path.to_path_buf(),
         proof,
+    })
+}
+
+/// Drops the removed worktree's entry from the owner map. A map that cannot be updated leaves a stale entry behind, which
+/// is returned as the `::warning::` line to print (the removal itself already happened).
+fn forget_owner(common_dir: &Path, key: &str) -> Option<String> {
+    OwnerStore::open(common_dir).update(|m| m.remove(key)).err().map(|e| {
+        format!("::warning::the worktree {key} was removed but its owner-map entry could not be dropped ({e}); `./dev worktree list` shows it until the map is repaired")
     })
 }
 
@@ -344,5 +354,16 @@ mod tests {
         std::fs::write(root.join("a/x/.git"), "gitdir: /nowhere").unwrap();
         let found = find_repos(&root, WALK_LIMIT, WALK_ENTRIES).unwrap();
         assert_eq!(found, vec![root.join("a/b/c"), root.join("a/x")]);
+    }
+
+    #[test]
+    fn an_owner_map_that_cannot_be_updated_is_a_warning_not_a_silent_leftover() {
+        let d = tempfile::tempdir().unwrap();
+        let not_a_folder = d.path().join("file");
+        std::fs::write(&not_a_folder, b"x").unwrap();
+        let w = forget_owner(&not_a_folder, "/some/worktree").expect("a warning");
+        assert!(w.starts_with("::warning::"), "{w}");
+        assert!(w.contains("/some/worktree"), "{w}");
+        assert!(forget_owner(d.path(), "/some/worktree").is_none());
     }
 }

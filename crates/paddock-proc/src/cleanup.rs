@@ -24,6 +24,7 @@ pub fn logged<T, E: Display>(what: &str, result: Result<T, E>) -> bool {
 }
 
 /// Waits for a helper thread to end as a clean-up step; a thread that panicked is logged. Says whether it panicked.
+#[must_use = "true means the thread panicked: leftover state a caller should surface, not drop"]
 pub fn join<T>(what: &str, thread: std::thread::JoinHandle<T>) -> bool {
     if thread.join().is_err() {
         report(what, &"the thread panicked");
@@ -34,6 +35,7 @@ pub fn join<T>(what: &str, thread: std::thread::JoinHandle<T>) -> bool {
 }
 
 /// Removes the folder at `path` and everything in it as a clean-up step: not there is the goal, any other failure is logged.
+#[must_use = "true means the folder is still there (logged): the caller decides whether leftovers matter"]
 pub fn remove_dir_all(path: &Path) -> bool {
     match std::fs::remove_dir_all(path) {
         Ok(()) => false,
@@ -46,6 +48,7 @@ pub fn remove_dir_all(path: &Path) -> bool {
 }
 
 /// Removes the file at `path` as a clean-up step: a file that is not there is the goal, any other failure is logged.
+#[must_use = "true means the file is still there (logged): the caller decides whether leftovers matter"]
 pub fn remove_file(path: &Path) -> bool {
     match std::fs::remove_file(path) {
         Ok(()) => false,
