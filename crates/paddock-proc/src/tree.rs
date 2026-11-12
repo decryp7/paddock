@@ -249,7 +249,7 @@ pub fn end_unreaped_group(pid: u32) {
     #[cfg(unix)]
     crate::sys::signal_group(pid, crate::sys::SIGKILL);
     #[cfg(not(unix))]
-    let _ = pid;
+    let _: u32 = pid;
 }
 
 /// Every process below `root` (not including it), from a fresh look at the process table.
