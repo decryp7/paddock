@@ -449,8 +449,8 @@ jobs:
           # The image from v3 on has it (system packages belong to the image, not to a job). Until then: the same pinned package, checked
           # by SHA-256 (the Dockerfile's ARGs are the one source) and unpacked beside the job, not installed; its libraries are the image's.
           if command -v drawio >/dev/null 2>&1; then exit 0; fi
-          v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile)
-          sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile)
+          v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1)
+          sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1)
           echo "::notice::the CI image has no draw.io yet (it comes with the next image rebuild, ci-image/README.md); unpacking the pinned $v"
           bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb" \
             || { echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."; exit 1; }
@@ -1036,6 +1036,10 @@ jobs:
       - name: Gate register (C100)
         run: ./dev gates check
 
+      # Installed before the conformance line (C111 loads the yaml package, conformance/package.json) and the publish dry run,
+      # which builds the npm packages itself (no --skip-build: there is no ui/dist here).
+      - name: Install npm packages
+        run: npm ci
       - name: Paddock conformance (the line of the conformance job)
         run: node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS
 
@@ -1052,9 +1056,6 @@ jobs:
               echo "::error::$lock is stale or the workspace does not resolve (a dependency cycle or a merge of two lockfiles). Next step: cargo update -w in $dir and commit it"; exit 1; }
           done
 
-      # The dry run builds the npm packages itself (no --skip-build: there is no ui/dist here), so the packages are installed first.
-      - name: Install npm packages
-        run: npm ci
 
       - name: Publish dry run (a dependency cycle only the merged tree has)
         run: node scripts/publish.mjs --offline
