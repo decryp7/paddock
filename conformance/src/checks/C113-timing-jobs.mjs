@@ -1,6 +1,6 @@
 // C113: a job that gates on time never shares a runner with a heavy job (ER-12, rule 5, ER-9; debrief.yml 8007 measured the macOS
 // start-up benchmark at 1.8x its budgets beside the LTO bundle job). Timing jobs run real-app start-up budgets, benchmarks and the
-// sidecar start checks; heavy jobs are the bundle, installer, gates and Rust test builds. In one workflow file, every timing job
+// sidecar start checks; heavy jobs are the bundle, installer, gates and Rust test builds. SCOPE: one workflow file at a time; jobs of different files (debrief-bench.yml beside debrief.yml) are not compared. In one file, every timing job
 // must be ordered with every heavy job that can run on a runner class it also uses: the timing job `needs:` the heavy one
 // (through any chain), or the heavy one needs it. Otherwise the two start together and the budget measures the load.
 //

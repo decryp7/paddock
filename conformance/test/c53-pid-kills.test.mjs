@@ -82,6 +82,15 @@ test('C53 liveness good: a ProcessId, other uses of the names, comments, strings
   assert.deepEqual(live('fn a(pid: i32) -> bool {\n    unsafe { libc::kill(pid, 0) == 0 }\n}\n', 'crates/paddock-proc/src/sys.rs'), [], 'the one implementation');
 });
 
+test('C53 liveness precision: signals, the own pid, aliases and globs', () => {
+  assert.deepEqual(live('fn a(pid: i32) {\n    unsafe { libc::kill(pid, libc::SIGTERM) };\n    kill(pid, Signal::SIGKILL);\n}\n'), [], 'a signal is the kill check');
+  assert.deepEqual(live('fn a(pid: Pid) {\n    let _ = nix::sys::signal::kill(pid, None);\n}\n'), [2], 'nix kill with no signal is liveness');
+  assert.deepEqual(live('fn a() {\n    let me = Pid::from_u32(std::process::id());\n    let me = sysinfo::Pid::from_u32(process::id());\n}\n'), [], 'the own pid');
+  assert.deepEqual(live('use paddock_proc::is_alive as up;\nfn a(pid: u32) -> bool {\n    up(pid)\n}\n'), [3]);
+  assert.deepEqual(live('use paddock_proc::{presence as look, ProcessId};\nfn a(pid: u32) {\n    look(pid);\n}\n'), [3]);
+  assert.deepEqual(live('use paddock_proc::*;\nfn a(pid: u32) -> bool {\n    may_be_alive(pid)\n}\n'), [3]);
+});
+
 test('C53 liveness waivers: a reason passes, none is reported', () => {
   const ok = pidLiveness('fn a(pid: u32) -> bool {\n    // conformance: pid-liveness — the pid came from our own child handle\n    paddock_proc::is_alive(pid)\n}\n', 'crates/a/src/x.rs');
   assert.equal(ok[0].waived, 'reason');

@@ -13,7 +13,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/health/commands/tests.rs",
-   "line": 210,
+   "line": 198,
    "hash": "47706c5a2530c14a"
   },
   {
@@ -32,11 +32,6 @@
    "hash": "47706c5a2530c14a"
   },
   {
-   "file": "apps/debrief/app/src-tauri/src/system.rs",
-   "line": 103,
-   "hash": "84f8f71c7c1af130"
-  },
-  {
    "file": "apps/debrief/crates/chromium-driver/src/process.rs",
    "line": 71,
    "hash": "2a5f9a3be531c990"
@@ -52,18 +47,13 @@
    "hash": "7c1f23a4fae35f77"
   },
   {
-   "file": "apps/debrief/crates/debrief-core/tests/it/regress_1_2.rs",
-   "line": 36,
-   "hash": "b413c3b10aa3c5c7"
-  },
-  {
    "file": "apps/debrief/crates/debrief-etw/src/session.rs",
    "line": 160,
    "hash": "d45e75ef1393fcc6"
   },
   {
    "file": "apps/debrief/crates/debrief-etw/src/session.rs",
-   "line": 176,
+   "line": 160,
    "hash": "d45e75ef1393fcc6"
   },
   {
@@ -113,7 +103,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 483,
+   "line": 410,
    "hash": "47706c5a2530c14a"
   },
   {
@@ -130,11 +120,6 @@
    "file": "apps/dyno/app/src-tauri/src/tray_start.rs",
    "line": 102,
    "hash": "76beb7ba7d2384cd"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-agent/src/cli.rs",
-   "line": 415,
-   "hash": "ddb291ce95b2cae7"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/helper_holders.rs",
@@ -192,11 +177,6 @@
    "hash": "6f233d14631e64b9"
   },
   {
-   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
-   "line": 213,
-   "hash": "16699d3f68c8d146"
-  },
-  {
    "file": "apps/pitcrew/crates/pitcrew-service/src/process.rs",
    "line": 374,
    "hash": "87cf7401d9f57119"
@@ -210,11 +190,6 @@
    "file": "apps/pitcrew/crates/pitcrew-service/src/supervisor.rs",
    "line": 2044,
    "hash": "e14e05f971434a89"
-  },
-  {
-   "file": "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs",
-   "line": 191,
-   "hash": "16699d3f68c8d146"
   },
   {
    "file": "apps/pitwall/crates/pitwall-server/src/system.rs",
@@ -268,72 +243,62 @@
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 308,
-   "hash": "47b1678574d082b6"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 314,
-   "hash": "eadc3ccb460f3121"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 338,
+   "line": 340,
    "hash": "3c3dbe2e4f732c83"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 781,
+   "line": 783,
    "hash": "61e7f8d799a1d659"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 798,
+   "line": 783,
    "hash": "61e7f8d799a1d659"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 807,
+   "line": 809,
    "hash": "5bf6fa0c5156c473"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 826,
+   "line": 828,
    "hash": "8a067e42adbf609e"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 840,
+   "line": 842,
    "hash": "e67051af6cd450c9"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 967,
+   "line": 969,
    "hash": "9fb35627705ea408"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 968,
+   "line": 970,
    "hash": "ec452942fcc0aafb"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 999,
+   "line": 1001,
    "hash": "1a75df762c593087"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 1044,
+   "line": 1046,
    "hash": "5c75568cac5aebb2"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 1076,
+   "line": 1078,
    "hash": "5cf4327a1ee25137"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
-   "line": 1076,
+   "line": 1078,
    "hash": "5cf4327a1ee25137"
   },
   {

@@ -305,12 +305,14 @@ pub enum Presence {
 /// for a process (`terminate`: an unreadable table never makes it kill or wait). Code that deletes anything on "gone" (a
 /// profile folder, a discovery file) must use [`may_be_alive`] or [`presence`] instead.
 pub fn is_alive(pid: u32) -> bool {
+    // conformance: pid-liveness — this is the raw-pid function itself; callers hold a ProcessId
     presence(pid) == Presence::Running
 }
 
 /// Whether `pid` might be a running process: false only when the OS said it is gone. **Unknown counts as alive**, so a
 /// sweep that removes the files of dead processes removes nothing when the process table cannot be read.
 pub fn may_be_alive(pid: u32) -> bool {
+    // conformance: pid-liveness — this is the raw-pid function itself; callers hold a ProcessId
     presence(pid).may_be_alive()
 }
 

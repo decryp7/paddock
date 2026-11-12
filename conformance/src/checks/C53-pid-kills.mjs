@@ -97,15 +97,27 @@ export function pidLiveness(text, file = '') {
   add(new RegExp(`\\bpaddock_proc::(${LIVENESS_NAMES})\\s*\\(`, 'g'), (m) => `asks \`paddock_proc::${m[1]}\` about a raw pid`);
   const inProc = file.startsWith('crates/paddock-proc/');
   add(new RegExp(`\\bcrate::(${LIVENESS_NAMES})\\s*\\(`, 'g'), (m) => `asks \`${m[1]}\` about a raw pid`, () => inProc);
-  const imported = new Set([...masked.matchAll(/\buse\s+paddock_proc::(?:\{([^}]*)\}|(\w+))/g)].flatMap((m) => (m[1] ?? m[2]).split(',').map((n) => n.trim())));
+  // Names this file imports from paddock_proc: `use paddock_proc::{a, b as c}`, `use paddock_proc::a as c`, `use paddock_proc::*`.
+  const imported = new Set();
+  for (const m of masked.matchAll(/\buse\s+paddock_proc::(?:\{([^}]*)\}|(\*|\w+(?:\s+as\s+\w+)?))/g)) {
+    for (const item of (m[1] ?? m[2]).split(',').map((n) => n.trim())) {
+      if (item === '*') for (const n of LIVENESS_NAMES.split('|')) imported.add(n);
+      else {
+        const [name, alias] = item.split(/\s+as\s+/);
+        if (LIVENESS_NAMES.split('|').includes(name)) imported.add(alias ?? name);
+      }
+    }
+  }
+  const names = [...new Set([...LIVENESS_NAMES.split('|'), ...imported])].join('|');
   add(
-    new RegExp(`(?<![\\w.:])(${LIVENESS_NAMES})\\s*\\(`, 'g'),
+    new RegExp(`(?<![\\w.:])(${names})\\s*\\(`, 'g'),
     (m) => `asks \`${m[1]}\` about a raw pid`,
     (m) => (inProc || imported.has(m[1])) && !/\bfn\s+$/.test(masked.slice(Math.max(0, m.index - 12), m.index)),
   );
-  add(/\bkill\s*\([^;\n]*?,\s*0\s*\)/g, () => 'checks a raw pid with `kill(pid, 0)`', (m) => !/\.\s*$/.test(masked.slice(Math.max(0, m.index - 2), m.index)));
+  // Only `kill(pid, 0)` and nix's `kill(pid, None)` are liveness; a real signal is the kill check's.
+  add(/\bkill\s*\([^;\n]*?,\s*(?:0|None)\s*\)/g, () => 'checks a raw pid with `kill(pid, 0)`', (m) => !/\.\s*$/.test(masked.slice(Math.max(0, m.index - 2), m.index)));
   add(/\bOpenProcess\s*\(/g, () => 'opens a process by its raw pid with `OpenProcess`');
-  add(/\bPid::from(?:_u32|_usize)?\s*\(/g, () => 'looks a raw pid up in sysinfo');
+  add(/\bPid::from(?:_u32|_usize)?\s*\((?!\s*(?:std::)?process::id\(\))/g, () => 'looks a raw pid up in sysinfo');
   return hits
     .sort((a, b) => a.index - b.index)
     .map(({ index, what }) => {
