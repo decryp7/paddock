@@ -13,4 +13,14 @@ paddock-limits = { workspace = true }
 tempfile = "3"
 # `net::HeldPort::reset`: SO_LINGER 0 on an accepted connection.
 socket2 = "0.6"
+# `start` (ADR 0071): the wait for a started program drives the product's start judge.
+paddock-proc = { workspace = true, optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[target.'cfg(unix)'.dev-dependencies]
+# The scripted child of `start`'s tests stops itself with SIGSTOP (no signal to a pid from the test, rule 53).
+libc = "0.2"
+
+[features]
+# `start`: wait_ready_or_exit, wait_exit and warm_first_start (ADR 0071 section 1). Off by default: it adds paddock-proc.
+start = ["dep:paddock-proc"]
