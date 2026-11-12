@@ -287,9 +287,11 @@ test('setup-rust settles the toolchain every later step runs through RUSTUP_TOOL
   assert.match(envOf(other), new RegExp(`^RUSTUP_TOOLCHAIN=${channel.replace(/\./g, '\\.')}$`, 'm'));
 });
 
-test('the dated-nightly fuzz workflow names its toolchain in RUSTUP_TOOLCHAIN for every step', () => {
+test('the dated-nightly fuzz workflow names its toolchain in the fuzz job only; no workflow sets RUSTUP_TOOLCHAIN for every job', () => {
   const wf = loadWorkflow('debrief-fuzz.yml');
-  assert.match(String(wf.env.RUSTUP_TOOLCHAIN), /^nightly-\d{4}-\d{2}-\d{2}$/);
+  assert.match(String(wf.jobs.fuzz.env.RUSTUP_TOOLCHAIN), /^nightly-\d{4}-\d{2}-\d{2}$/);
+  const wide = readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).filter((f) => loadWorkflow(f).env?.RUSTUP_TOOLCHAIN);
+  assert.deepEqual(wide, [], 'a workflow-level RUSTUP_TOOLCHAIN reaches the jobs that run ./dev (they would build it under that toolchain)');
 });
 
 // rust-toolchain.toml outranks the `rustup default` that dtolnay/rust-toolchain sets, and names a version the garage image does not have
