@@ -2,7 +2,7 @@ import type { Neighbour, ThisPcWol, WolDevice, WolDeviceInput, WolOutcome, WolVi
 import wire from './wol.wire.json';
 
 /**
- * The wire contract of Wake-on-LAN. `wol.wire.json` is written by the Rust test `tests/wol_wire.rs` from the engine's own types;
+ * The wire contract of Wake-on-LAN. `wol.wire.json` is written by the Rust test `tests/wire/wol.rs` from the engine's own types;
  * the values below are the same ones as TypeScript literals, so the compiler checks them against `api.types.ts` and the test
  * checks they equal what Rust produces. Change one side without the other and this fails. Addresses are invented.
  */

@@ -5,7 +5,7 @@ import wire from './jobs.wire.json';
 import { TauriBackend, type InvokeFn, type ListenFn } from './tauri-backend';
 
 /**
- * The wire contract of the jobs. `jobs.wire.json` is written by the Rust test `tests/jobs_wire.rs` from the engine's own types;
+ * The wire contract of the jobs. `jobs.wire.json` is written by the Rust test `tests/wire/jobs.rs` from the engine's own types;
  * the values below are the same ones as TypeScript literals, so the compiler checks them against the shell's `SuJobSnapshot`
  * and `api.types.ts` and the test checks they equal what Rust produces, through the shell's own parser. Change one side
  * without the other and this fails.

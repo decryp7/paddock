@@ -3,7 +3,7 @@ import wire from './read-via.wire.json';
 
 /**
  * The wire contract of `via` (helper-wiring plan section 3.3). `read-via.wire.json` is written by the Rust test
- * `tests/read_via_wire.rs` from the engine's own types; the values below are the same ones as TypeScript literals, so the compiler
+ * `tests/wire/read_via.rs` from the engine's own types; the values below are the same ones as TypeScript literals, so the compiler
  * checks them against `api.types.ts` and the test checks they equal what Rust produces.
  */
 const needsHelper: ReadVia = { needsHelper: { reason: "Other accounts' processes are not readable without the helper.", next: { openSettings: 'helper' } } };
