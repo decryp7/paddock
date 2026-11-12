@@ -150,3 +150,5 @@ The reusable fuzz, mutation and never-panics workflows of the separate repositor
 `debrief-fuzz.yml` and `debrief-mutants.yml` run them for Debrief. C36 finds parser crates without a fuzz target or a never-panics test; `paddock_testkit::{corpus,
 never_panics}` is the dependency-free test for a parser. Debrief's `corpus.yml` stays in Debrief (its data and pins are its own); the
 `plan` and `nightly-mark` actions it hand-copied are the shared ones.
+
+**Shared enums (a test, not a numbered check).** `test/shared-enum-matches.test.mjs` reads `shared-enums.json` (`paddock_jobs::JobState`, `WireState`, `paddock_ipc::IpcError`) and fails when a non-test `match` in `apps/` on one of them ends in a catch-all arm (`_ =>` or a bare binding), so a variant added later (Dyno WP-8's `Interrupted`) breaks every app's match at compile time instead of taking the default. Existing matches are in `baselines/shared-enum-matches.json`; it may only shrink. ADR 0049 names no such check; this is the smallest piece of what its section 4 and rule 39 ask.

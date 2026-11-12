@@ -1,0 +1,7 @@
+{
+ "_comment": "Matches on a shared enum (conformance/shared-enums.json) that end in a catch-all arm today, as file:arm text. May only shrink: list the variants and delete the entry. Dyno's popover must name Interrupted at WP-8.",
+ "sites": [
+  "apps/dyno/crates/dyno-agent/src/popover.rs:_ => None,",
+  "apps/pitwall/app/src-tauri/src/jobs.rs:_ => \"total\","
+ ]
+}

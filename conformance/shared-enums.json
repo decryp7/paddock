@@ -1,0 +1,8 @@
+{
+ "_comment": "Shared enums whose variants grow across apps (ADR 0049 section 4 and the rule 39 lessons: a variant added to a shared enum updates every app in the same change). A non-test `match` in an app on one of them has no catch-all arm, so a new variant is a compile error in every app, not a silent default. Test: test/shared-enum-matches.test.mjs; baseline: baselines/shared-enum-matches.json (may only shrink).",
+ "enums": [
+  { "name": "JobState", "crate": "paddock_jobs", "definedIn": "crates/paddock-jobs/src/model.rs" },
+  { "name": "WireState", "crate": "paddock_jobs", "definedIn": "crates/paddock-jobs/src/wire.rs" },
+  { "name": "IpcError", "crate": "paddock_ipc", "definedIn": "crates/paddock-ipc/src/error.rs" }
+ ]
+}
