@@ -162,6 +162,16 @@ fn merge_check_runs_the_generators_a_merge_makes_due_and_only_those() {
 
     let (code, out) = stale.dev(&["merge", "check", "HEAD", "--no-generators"]);
     assert_eq!(code, 0, "{out}");
+    assert!(out.contains("generator checks not run (--no-generators)"), "{out}");
+    let (code, out) = stale.dev(&["--json", "merge", "check", "HEAD", "--no-generators"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("\"generators\":{\"outcome\":\"not run\""), "{out}");
+    let (code, out) = stale.dev(&["merge", "check", "--branch", "side", "--target", "main"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("generator checks not run (a branch is checked before it is merged"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -183,4 +193,117 @@ fn merge_check_without_a_registry_runs_as_before() {
     r.merge_touching("gen/input.txt");
     let (code, out) = r.dev(&["merge", "check", "HEAD"]);
     assert_eq!(code, 0, "{out}");
+}
+
+// Starts git, never a process by pid.
+#[allow(clippy::disallowed_methods)]
+fn git_files(root: &Path) -> Vec<String> {
+    let out = Command::new("git").arg("-C").arg(root).args(["ls-files"]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).lines().map(str::to_string).collect()
+}
+
+fn flag_value<'a>(argv: &'a [String], flag: &str) -> Option<&'a str> {
+    argv.iter()
+        .position(|a| a == flag)
+        .and_then(|i| argv.get(i + 1))
+        .map(String::as_str)
+}
+
+/// A cargo check that names a package or a test target that is not there fails the same way a build error does, which is not
+/// drift: every name in the registry must exist (the real run is `./dev gen check --all`, every night).
+#[test]
+fn every_cargo_test_target_and_package_the_registry_names_exists() {
+    let root = repo_root();
+    let reg = Registry::parse(&fs::read_to_string(root.join("docs/generators.toml")).unwrap()).unwrap();
+    let files = git_files(&root);
+    let manifests: Vec<String> = files
+        .iter()
+        .filter(|f| f.ends_with("/Cargo.toml") || *f == "Cargo.toml")
+        .map(|f| fs::read_to_string(root.join(f)).unwrap_or_default())
+        .collect();
+    let mut checked = 0;
+    for g in reg
+        .generators
+        .iter()
+        .filter(|g| g.check.first().map(String::as_str) == Some("cargo"))
+    {
+        let argv = &g.check;
+        for flag in ["-p", "--package"] {
+            if let Some(pkg) = flag_value(argv, flag) {
+                assert!(
+                    manifests.iter().any(|m| m.contains(&format!("name = \"{pkg}\""))),
+                    "{}: no package {pkg}",
+                    g.id
+                );
+                checked += 1;
+            }
+        }
+        if let Some(target) = flag_value(argv, "--test") {
+            let dir = format!("{}/tests", g.cwd);
+            let found = files
+                .iter()
+                .any(|f| f == &format!("{dir}/{target}.rs") || f == &format!("{dir}/{target}/main.rs"));
+            assert!(found, "{}: no test target {target} in {dir}", g.id);
+            // The filter after the target names a test module of it.
+            if let Some(filter) = argv.iter().skip_while(|a| a.as_str() != target).nth(1) {
+                let module = format!("{dir}/{target}/{filter}.rs");
+                assert!(
+                    files.contains(&module) || files.contains(&format!("{dir}/{target}.rs")),
+                    "{}: no module {filter}",
+                    g.id
+                );
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked >= 8, "{checked} names checked");
+}
+
+/// The tools' lockfiles go stale when a shared crate they path-depend on changes its dependencies: the entry's paths must name
+/// each such crate's manifest, taken from `cargo metadata` and not typed by hand.
+#[test]
+#[allow(clippy::disallowed_methods)] // starts cargo and rustc, never a process by pid
+fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depends_on() {
+    let root = repo_root();
+    let reg = Registry::parse(&fs::read_to_string(root.join("docs/generators.toml")).unwrap()).unwrap();
+    let rustc = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+        .arg("-vV")
+        .output()
+        .unwrap();
+    let host = String::from_utf8_lossy(&rustc.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
+        .unwrap();
+    for tool in ["tools/paddock-dev", "tools/heavy", "tools/wiki"] {
+        let out = Command::new(env!("CARGO"))
+            .args([
+                "metadata",
+                "--format-version",
+                "1",
+                "--locked",
+                "--offline",
+                "--filter-platform",
+                &host,
+            ])
+            .current_dir(root.join(tool))
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{tool}: {}", String::from_utf8_lossy(&out.stderr));
+        let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let entry = reg
+            .get(&format!("cargo-lock-{}", tool.replace('/', "-")))
+            .unwrap_or_else(|| panic!("no entry for {tool}"));
+        let mut shared = 0;
+        for p in meta["packages"].as_array().unwrap() {
+            let manifest = p["manifest_path"].as_str().unwrap();
+            let Some(rel) = manifest.strip_prefix(root.to_str().unwrap()).map(|r| r.trim_start_matches('/')) else {
+                continue;
+            };
+            if p["source"].is_null() && rel.starts_with("crates/") {
+                assert!(entry.marks(rel), "{}: its paths do not mark {rel}", entry.id);
+                shared += 1;
+            }
+        }
+        assert!(shared > 0, "{tool} depends on no shared crate?");
+    }
 }

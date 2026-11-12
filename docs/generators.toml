@@ -41,6 +41,7 @@ cwd = "crates"
 paths = ["crates/Cargo.toml", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["crates/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-tools-paddock-dev"
@@ -48,9 +49,10 @@ what = "tools/paddock-dev/Cargo.lock resolves with --locked (a manifest change, 
 check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "tools/paddock-dev"
-paths = ["tools/paddock-dev/Cargo.toml", "tools/paddock-dev/Cargo.lock", "crates/paddock-cli/Cargo.toml", "crates/paddock-env/Cargo.toml", "crates/paddock-proc/Cargo.toml", "crates/paddock-repo-graph/Cargo.toml", "crates/paddock-slots/Cargo.toml", "crates/paddock-testkit/Cargo.toml", "crates/paddock-workspace-hack/Cargo.toml"]
+paths = ["tools/paddock-dev/Cargo.toml", "tools/paddock-dev/Cargo.lock", "crates/*/Cargo.toml"]
 outputs = ["tools/paddock-dev/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-tools-heavy"
@@ -58,9 +60,10 @@ what = "tools/heavy/Cargo.lock resolves with --locked (a manifest change, a dupl
 check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "tools/heavy"
-paths = ["tools/heavy/Cargo.toml", "tools/heavy/**/Cargo.toml", "tools/heavy/Cargo.lock"]
-outputs = ["tools/heavy/Cargo.lock"]
+paths = ["tools/heavy/Cargo.toml", "tools/heavy/**/Cargo.toml", "tools/heavy/Cargo.lock", "crates/*/Cargo.toml"]
+outputs = ["tools/heavy/Cargo.lock", "crates/paddock-proc/Cargo.toml"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-tools-wiki"
@@ -68,9 +71,10 @@ what = "tools/wiki/Cargo.lock resolves with --locked (a manifest change, a dupli
 check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "tools/wiki"
-paths = ["tools/wiki/Cargo.toml", "tools/wiki/Cargo.lock", "crates/**/Cargo.toml"]
+paths = ["tools/wiki/Cargo.toml", "tools/wiki/Cargo.lock", "crates/*/Cargo.toml"]
 outputs = ["tools/wiki/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-debrief"
@@ -81,6 +85,7 @@ cwd = "apps/debrief"
 paths = ["apps/debrief/Cargo.toml", "apps/debrief/**/Cargo.toml", "apps/debrief/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/debrief/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-dyno"
@@ -91,6 +96,7 @@ cwd = "apps/dyno"
 paths = ["apps/dyno/Cargo.toml", "apps/dyno/**/Cargo.toml", "apps/dyno/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/dyno/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-pitcrew"
@@ -101,6 +107,7 @@ cwd = "apps/pitcrew"
 paths = ["apps/pitcrew/Cargo.toml", "apps/pitcrew/**/Cargo.toml", "apps/pitcrew/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/pitcrew/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-pitwall"
@@ -111,6 +118,7 @@ cwd = "apps/pitwall"
 paths = ["apps/pitwall/Cargo.toml", "apps/pitwall/**/Cargo.toml", "apps/pitwall/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/pitwall/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-spotter"
@@ -121,6 +129,7 @@ cwd = "apps/spotter"
 paths = ["apps/spotter/Cargo.toml", "apps/spotter/**/Cargo.toml", "apps/spotter/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/spotter/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-shell-demo"
@@ -131,6 +140,7 @@ cwd = "apps/shell-demo/src-tauri"
 paths = ["apps/shell-demo/src-tauri/Cargo.toml", "apps/shell-demo/src-tauri/**/Cargo.toml", "apps/shell-demo/src-tauri/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/shell-demo/src-tauri/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "cargo-lock-workbench-demo"
@@ -141,6 +151,7 @@ cwd = "apps/workbench-demo/src-tauri"
 paths = ["apps/workbench-demo/src-tauri/Cargo.toml", "apps/workbench-demo/src-tauri/**/Cargo.toml", "apps/workbench-demo/src-tauri/Cargo.lock", "crates/**/Cargo.toml", "crates/Cargo.lock"]
 outputs = ["apps/workbench-demo/src-tauri/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
 id = "npm-lock"
@@ -150,6 +161,7 @@ regenerate = "npm install --package-lock-only --ignore-scripts   # then commit p
 paths = ["package.json", "package-lock.json", "ui/package.json", "ui/projects/*/package.json", "eslint/package.json", "icons/package.json", "conformance/package.json", "apps/*/app/package.json", "apps/*/package.json"]
 outputs = ["package-lock.json"]
 cost = "heavy"
+drift_marker = ["in sync", "Missing:", "Invalid:"]
 
 [[generator]]
 id = "hakari"
@@ -162,16 +174,6 @@ outputs = ["crates/paddock-workspace-hack/Cargo.toml"]
 cost = "heavy"
 
 [[generator]]
-id = "locks"
-what = "every lockfile at once (cargo --locked per workspace, npm ci --dry-run, hakari): the one command that replaces the entries above once it is on main"
-check = ["./dev", "locks", "check"]
-regenerate = "./dev locks sync"
-paths = ["**/Cargo.toml", "**/Cargo.lock", "package-lock.json", "**/package.json", "crates/.config/hakari.toml"]
-outputs = []
-cost = "heavy"
-requires = ["tools/paddock-dev/src/locks.rs"]
-
-[[generator]]
 id = "publish-dry-run"
 what = "the shared packages publish: versions, manifests and ui/dist agree (scripts/publish.mjs without --publish)"
 check = ["node", "scripts/publish.mjs", "--skip-build", "--offline"]
@@ -179,14 +181,14 @@ regenerate = "none: fix what it names (a version, a manifest), then `npm run bui
 paths = ["crates/*/Cargo.toml", "crates/Cargo.lock", "ui/projects/paddock-ui/**", "ui/package.json", "scripts/publish.mjs"]
 outputs = []
 cost = "heavy"
-requires = ["ui/dist/paddock-ui/package.json"]
+requires = ["ui/dist/paddock-ui/package.json", "ui/dist/paddock-e2e/package.json"]
 
 # ---- the conformance run and its baselines -----------------------------------------------------------------------------
 
 [[generator]]
 id = "conformance-line"
 what = "every conformance check CI runs on the tree, the --only list read from the conformance step of ci.yml; includes the C71 baseline (it may only shrink)"
-check = ["sh", "-c", "eval \"$(grep -o 'node conformance/bin/paddock-conformance.mjs --app paddock --root . --only [A-Za-z0-9,]* --strict C36' .gitea/workflows/ci.yml | head -1)\""]
+check = ["sh", "-c", "line=$(grep -o 'node conformance/bin/paddock-conformance.mjs --app paddock --root . --only [A-Za-z0-9,]* --strict C36' .gitea/workflows/ci.yml | head -1); [ -n \"$line\" ] || { echo 'no conformance line found in .gitea/workflows/ci.yml' >&2; exit 6; }; eval \"$line\""]
 regenerate = "none: fix the findings it prints; `node conformance/bin/paddock-timing-baseline.mjs --write` rewrites conformance/baselines/C71.json (shrink only)"
 paths = ["**"]
 outputs = ["conformance/baselines/*.json"]
@@ -204,25 +206,25 @@ cwd = "ui"
 paths = ["ui/projects/paddock-ui/**", "ui/projects/shell-demo/**", "ui/paddock-i18n.json", "ui/package.json"]
 outputs = ["ui/projects/paddock-ui/i18n/*", "ui/projects/shell-demo/src/locale/*"]
 cost = "fast"
-requires = ["node_modules/.bin/ng"]
+requires = ["node_modules/.bin/ng", "ui/dist/paddock-ui/package.json"]
 
 [[generator]]
 id = "i18n-debrief"
 what = "Debrief's message catalogue (messages.xlf) and pseudo-locale, extracted from its templates"
-check = ["sh", "-c", "npx ng extract-i18n --output-path .i18n-check >/dev/null 2>&1 && node scripts/i18n/build-locales.mjs --check .i18n-check/messages.xlf"]
+check = ["sh", "-c", "npx ng extract-i18n --output-path .i18n-check >.i18n-check.log 2>&1 || { tail -3 .i18n-check.log >&2; exit 6; }; ! grep -qi duplicate .i18n-check.log || { echo 'duplicate i18n message ids' >&2; exit 1; }; node scripts/i18n/build-locales.mjs --check .i18n-check/messages.xlf"]
 regenerate = "npm run i18n   # in apps/debrief/app"
 cwd = "apps/debrief/app"
 paths = ["apps/debrief/app/src/**", "apps/debrief/app/scripts/i18n/**", "ui/projects/paddock-ui/**"]
 outputs = ["apps/debrief/app/src/locale/*"]
 cost = "heavy"
-requires = ["node_modules/.bin/ng"]
+requires = ["node_modules/.bin/ng", "ui/dist/paddock-ui/package.json"]
 
 # ---- notices ---------------------------------------------------------------------------------------------------------------
 
 [[generator]]
 id = "notices-debrief"
 what = "apps/debrief/app/src-tauri/resources/THIRD_PARTY_NOTICES.md (cargo-about for the Rust crates, the lockfile for npm production dependencies)"
-check = ["bash", "scripts/notices.sh", "debrief", "--check"]
+check = ["sh", "-c", "command -v cargo-about >/dev/null 2>&1 && [ \"$(cargo about --version | awk '{print $2}')\" = 0.9.2 ] || { echo 'cargo-about 0.9.2 is not installed (this check never installs it)' >&2; exit 6; }; bash scripts/notices.sh debrief --check"]
 regenerate = "bash scripts/notices.sh debrief   # then commit the file"
 paths = ["apps/debrief/Cargo.lock", "apps/debrief/paddock.ci.json", "apps/debrief/app/src-tauri/resources/THIRD_PARTY_NOTICES.md", "package-lock.json", "scripts/notices.sh", "conformance/src/notices/**", "conformance/bin/paddock-notices.mjs"]
 outputs = ["apps/debrief/app/src-tauri/resources/THIRD_PARTY_NOTICES.md"]
@@ -231,7 +233,7 @@ cost = "heavy"
 [[generator]]
 id = "notices-dyno"
 what = "apps/dyno/app/src-tauri/resources/THIRD_PARTY_NOTICES.md (cargo-about for the Rust crates, the lockfile for npm production dependencies)"
-check = ["bash", "scripts/notices.sh", "dyno", "--check"]
+check = ["sh", "-c", "command -v cargo-about >/dev/null 2>&1 && [ \"$(cargo about --version | awk '{print $2}')\" = 0.9.2 ] || { echo 'cargo-about 0.9.2 is not installed (this check never installs it)' >&2; exit 6; }; bash scripts/notices.sh dyno --check"]
 regenerate = "bash scripts/notices.sh dyno   # then commit the file"
 paths = ["apps/dyno/Cargo.lock", "apps/dyno/paddock.ci.json", "apps/dyno/app/src-tauri/resources/THIRD_PARTY_NOTICES.md", "package-lock.json", "scripts/notices.sh", "conformance/src/notices/**", "conformance/bin/paddock-notices.mjs"]
 outputs = ["apps/dyno/app/src-tauri/resources/THIRD_PARTY_NOTICES.md"]
@@ -240,7 +242,7 @@ cost = "heavy"
 [[generator]]
 id = "notices-pitwall"
 what = "apps/pitwall/app/src-tauri/resources/THIRD_PARTY_NOTICES.md (cargo-about for the Rust crates, the lockfile for npm production dependencies)"
-check = ["bash", "scripts/notices.sh", "pitwall", "--check"]
+check = ["sh", "-c", "command -v cargo-about >/dev/null 2>&1 && [ \"$(cargo about --version | awk '{print $2}')\" = 0.9.2 ] || { echo 'cargo-about 0.9.2 is not installed (this check never installs it)' >&2; exit 6; }; bash scripts/notices.sh pitwall --check"]
 regenerate = "bash scripts/notices.sh pitwall   # then commit the file"
 paths = ["apps/pitwall/Cargo.lock", "apps/pitwall/paddock.ci.json", "apps/pitwall/app/src-tauri/resources/THIRD_PARTY_NOTICES.md", "package-lock.json", "scripts/notices.sh", "conformance/src/notices/**", "conformance/bin/paddock-notices.mjs"]
 outputs = ["apps/pitwall/app/src-tauri/resources/THIRD_PARTY_NOTICES.md"]
@@ -257,6 +259,7 @@ cwd = "apps/debrief"
 paths = ["apps/debrief/crates/**/*.rs", "apps/debrief/app/src-tauri/**/*.rs", "apps/debrief/**/Cargo.toml", "apps/debrief/Cargo.lock"]
 outputs = ["apps/debrief/app/src/app/core/generated/*.ts"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "debrief-whats-new"
@@ -277,6 +280,7 @@ cwd = "apps/dyno"
 paths = ["apps/dyno/crates/dyno-core/**", "apps/dyno/Cargo.lock", "crates/paddock-widgets/**"]
 outputs = ["apps/dyno/app/src/app/core/generated/*.ts"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "ts-pitwall-widgets"
@@ -287,6 +291,7 @@ cwd = "apps/pitwall"
 paths = ["apps/pitwall/crates/pitwall-core/**", "apps/pitwall/Cargo.lock", "crates/paddock-widgets/**"]
 outputs = ["apps/pitwall/app/src/app/core/generated/*.ts"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "ts-dyno-shell"
@@ -297,16 +302,18 @@ cwd = "apps/dyno/app/src-tauri"
 paths = ["apps/dyno/app/src-tauri/**", "apps/dyno/crates/**/*.rs", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["apps/dyno/app/src/app/generated/*.ts"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "ts-pitwall-shell"
 what = "Pitwall's command names and dialog contracts for the UI, generated from its command and dialog tables"
-check = ["cargo", "test", "--test", "shell"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test --test shell   # in apps/pitwall/app/src-tauri"
+check = ["cargo", "test", "--test", "it", "shell"]
+regenerate = "PADDOCK_WRITE_TS=1 cargo test --test it shell   # in apps/pitwall/app/src-tauri"
 cwd = "apps/pitwall/app/src-tauri"
 paths = ["apps/pitwall/app/src-tauri/**", "apps/pitwall/crates/**/*.rs", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["apps/pitwall/app/src/app/generated/*.ts"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "ts-shell-demo"
@@ -317,6 +324,7 @@ cwd = "apps/shell-demo/src-tauri"
 paths = ["apps/shell-demo/src-tauri/**", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["ui/projects/shell-demo/src/app/generated/*.ts"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "ts-workbench-demo"
@@ -327,26 +335,29 @@ cwd = "apps/workbench-demo/src-tauri"
 paths = ["apps/workbench-demo/src-tauri/**", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
 outputs = ["ui/projects/workbench-demo/src/app/generated/*.ts"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "ts-shared-crates"
 what = "the shared crates' TypeScript (ts-rs types, command names, dialog contracts, fixtures), command_names.rs and window-classes.toml, each written by its crate's `generated` test"
-check = ["cargo", "test", "--workspace", "--lib", "generated"]
-regenerate = "PADDOCK_WRITE_TS=1 cargo test -p <crate> --lib generated   # in crates; the failing test names the crate"
+check = ["cargo", "test", "--workspace", "--all-features", "--lib", "generated"]
+regenerate = "PADDOCK_WRITE_TS=1 cargo test -p <crate> --all-features --lib generated   # in crates; the failing test names the crate"
 cwd = "crates"
 paths = ["crates/**/*.rs", "crates/**/Cargo.toml", "crates/Cargo.lock", "ui/projects/paddock-ui/**/generated/**"]
 outputs = ["ui/projects/paddock-ui/**/generated/*.ts", "crates/*/permissions/window-classes.toml", "crates/*/src/command_names.rs"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "tauri-permissions"
-what = "the Tauri permission files of the shared plugin crates (permissions/autogenerated), rewritten by their build scripts from the command tables"
-check = ["sh", "-c", "cargo check -p paddock-shell -p paddock-workbench >/dev/null && git diff --exit-code -- paddock-shell/permissions paddock-workbench/permissions"]
+what = "the Tauri permission files of the shared plugin crates (permissions/autogenerated and schemas), rewritten by their build scripts from the command tables; the check builds, reports what the build changed, and restores it"
+check = ["sh", "-c", "p='paddock-shell/permissions paddock-workbench/permissions'; [ -z \"$(git status --porcelain --untracked-files=all -- $p)\" ] || { echo \"uncommitted changes under $p: commit or discard them first\" >&2; exit 6; }; cargo check -p paddock-shell -p paddock-workbench >/dev/null || exit $?; d=$(git status --porcelain --untracked-files=all -- $p); if [ -n \"$d\" ]; then echo \"$d\" >&2; git checkout -- $p; git clean -fdq -- $p; echo 'permissions drift: the build rewrote the files above (restored here)' >&2; exit 1; fi"]
 regenerate = "cargo check -p paddock-shell -p paddock-workbench   # in crates; commit what it rewrites"
 cwd = "crates"
 paths = ["crates/paddock-shell/**", "crates/paddock-workbench/**", "crates/paddock-commands/**"]
-outputs = ["crates/*/permissions/autogenerated/**"]
+outputs = ["crates/*/permissions/autogenerated/**", "crates/*/permissions/schemas/schema.json"]
 cost = "heavy"
+drift_marker = ["permissions drift"]
 
 [[generator]]
 id = "service-files"
@@ -375,6 +386,7 @@ cwd = "crates"
 paths = ["crates/paddock-service/**", "crates/paddock-setup/nsis/**", "apps/*/app/src-tauri/tauri*.conf.json", "apps/*/app/src-tauri/windows/**"]
 outputs = ["apps/*/app/src-tauri/windows/paddock-per-machine*.nsh", "crates/paddock-setup/nsis/paddock-per-machine.nsh"]
 cost = "heavy"
+drift_marker = ["test result: FAILED"]
 
 # ---- icons and drawings --------------------------------------------------------------------------------------------------
 
@@ -388,12 +400,3 @@ outputs = ["apps/*/app/src-tauri/icons/**", "docs/images/src/icons/*", "apps/*/d
 cost = "fast"
 requires = ["node_modules/.package-lock.json"]
 
-[[generator]]
-id = "svg-drift"
-what = "the committed SVG of every .drawio source equals draw.io's own export (the script is on branch ci/svg-drift-check)"
-check = ["node", "scripts/svg-drift.mjs"]
-regenerate = "bash diagrams/scripts/export-diagrams.sh   # then commit the SVGs; never edit one by hand"
-paths = ["**/*.drawio", "**/diagrams/**", "scripts/svg-drift.mjs"]
-outputs = ["**/diagrams/svg/*.svg", "apps/*/docs/diagrams/*.svg"]
-cost = "heavy"
-requires = ["scripts/svg-drift.mjs"]

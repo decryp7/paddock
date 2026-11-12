@@ -38,6 +38,14 @@ regenerate = "node build-world-map.mjs"
 paths = ["maps/**"]
 cost = "heavy"
 [[generator]]
+id = "marked"
+what = "a cargo test"
+check = ["cargo", "marked-test"]
+regenerate = "r"
+paths = ["marked/**"]
+cost = "heavy"
+drift_marker = ["test result: FAILED"]
+[[generator]]
 id = "svg"
 what = "svgs"
 check = ["node", "scripts/svg-drift.mjs"]
@@ -56,15 +64,12 @@ struct Fake {
 }
 
 impl Runner for Fake {
-    fn run(&self, dir: &Path, argv: &[String]) -> Ran {
+    fn run(&self, dir: &Path, argv: &[String], _limit: std::time::Duration) -> Ran {
         self.started
             .lock()
             .unwrap()
             .push(format!("{} :: {}", dir.file_name().unwrap().to_string_lossy(), argv.join(" ")));
-        self.answers.get(&argv[1]).cloned().unwrap_or(Ran::Exited {
-            ok: true,
-            tail: String::new(),
-        })
+        self.answers.get(&argv[1]).cloned().unwrap_or(Ran::exit(0, ""))
     }
     fn exists(&self, path: &Path) -> bool {
         let rel = path.strip_prefix("/r").unwrap().to_string_lossy().into_owned();
@@ -90,7 +95,7 @@ fn only_the_generators_a_change_touches_run_each_in_its_folder() {
         started,
         ["crates :: cargo hakari verify", "r :: node icons/tools/install.mjs --check"]
     );
-    assert!(r.text.starts_with("gen check: 2 of 5 due: icons, hakari"), "{}", r.text);
+    assert!(r.text.starts_with("gen check: 2 of 6 due: icons, hakari"), "{}", r.text);
     assert_eq!(r.data["outcome"], "clean");
 }
 
@@ -100,19 +105,13 @@ fn a_change_that_touches_nothing_registered_runs_nothing_and_says_so() {
     let r = run(&fake, &["apps/x/src/lib.rs"], false, &[]);
     assert_eq!(r.exit, Exit::Ok);
     assert!(fake.started.lock().unwrap().is_empty());
-    assert!(r.text.contains("no generator is due (5 registered"));
+    assert!(r.text.contains("no generator is due (6 registered"));
 }
 
 #[test]
 fn drift_is_stale_with_the_regenerate_command_and_exit_5() {
     let mut fake = Fake::default();
-    fake.answers.insert(
-        "i18n.mjs".into(),
-        Ran::Exited {
-            ok: false,
-            tail: "messages.xlf is stale".into(),
-        },
-    );
+    fake.answers.insert("i18n.mjs".into(), Ran::exit(1, "messages.xlf is stale"));
     let r = run(&fake, &["ui/a.ts"], false, &[]);
     assert_eq!(r.exit, Exit::Findings);
     assert_eq!(r.data["outcome"], "stale");
@@ -153,13 +152,7 @@ fn a_missing_tool_a_timeout_and_a_file_not_on_this_tree_are_not_measured_never_a
 fn stale_beats_not_measured_in_the_exit() {
     let mut fake = Fake::default();
     fake.answers.insert("hakari".into(), Ran::Unavailable("x".into()));
-    fake.answers.insert(
-        "icons/tools/install.mjs".into(),
-        Ran::Exited {
-            ok: false,
-            tail: "differs".into(),
-        },
-    );
+    fake.answers.insert("icons/tools/install.mjs".into(), Ran::exit(1, "differs"));
     let r = run(&fake, &["crates/p/Cargo.toml", "icons/a"], false, &[]);
     assert_eq!(r.exit, Exit::Findings, "{}", r.text);
 }
@@ -176,7 +169,7 @@ fn a_present_required_file_lets_the_entry_run() {
 #[test]
 fn all_and_only_select_without_a_change_and_an_unknown_id_is_a_usage_error() {
     let fake = Fake::default();
-    assert_eq!(run(&fake, &[], true, &[]).data["due"].as_array().unwrap().len(), 4);
+    assert_eq!(run(&fake, &[], true, &[]).data["due"].as_array().unwrap().len(), 5);
     let r = run(&fake, &[], false, &["hakari"]);
     assert_eq!(r.data["due"], json!(["hakari"]));
     let reg = Registry::parse(REG).unwrap();
@@ -215,4 +208,50 @@ fn a_manual_entry_is_named_with_its_regenerate_command_and_never_fails_the_run()
         r.text
     );
     assert_eq!(r.data["manual"], json!(["world-map"]));
+}
+
+fn verdict_of(ran: Ran) -> (Exit, String) {
+    let mut fake = Fake::default();
+    fake.answers.insert("marked-test".into(), ran);
+    let r = run(&fake, &["marked/a"], false, &[]);
+    (r.exit, r.text)
+}
+
+#[test]
+fn a_crash_is_never_stale() {
+    // A build that does not compile exits 101 like a failing test, without the marker.
+    let (exit, text) = verdict_of(Ran::exit(101, "error: could not compile `x` (lib test) due to 1 previous error"));
+    assert_eq!(exit, Exit::NotMeasured, "{text}");
+    assert!(text.contains("the code does not compile"), "{text}");
+    // A failure without the entry's marker did not reach a verdict either.
+    let (exit, text) = verdict_of(Ran::exit(101, "thread panicked at src/lib.rs"));
+    assert_eq!(exit, Exit::NotMeasured, "{text}");
+    assert!(text.contains("without saying the files are stale"), "{text}");
+    // The marker makes it drift.
+    let (exit, _) = verdict_of(Ran::exit(
+        101,
+        "test generated::t ... FAILED\ntest result: FAILED. 0 passed; 1 failed",
+    ));
+    assert_eq!(exit, Exit::Findings);
+    // Statuses that mean "could not look", whatever the tool.
+    for code in [6, 126, 127] {
+        let (exit, _) = verdict_of(Ran::exit(code, "test result: FAILED"));
+        assert_eq!(exit, Exit::NotMeasured, "status {code}");
+    }
+    // Ended by a signal, and the output cap.
+    let (exit, _) = verdict_of(Ran::Exited {
+        code: None,
+        tail: "x".into(),
+        text: "x".into(),
+    });
+    assert_eq!(exit, Exit::NotMeasured);
+    let (exit, text) = verdict_of(Ran::OutputCap);
+    assert_eq!(exit, Exit::NotMeasured);
+    assert!(text.contains("more output than the cap"), "{text}");
+}
+
+#[test]
+fn the_limit_follows_the_cost_class() {
+    use super::registry::Cost;
+    assert!(run::limit(Cost::Fast) < run::limit(Cost::Heavy));
 }

@@ -9,31 +9,52 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-/// The longest any one check may run (a cold cargo build or a notices run).
-const LIMIT: Duration = Duration::from_secs(1800);
+/// The longest a check may run, by its cost class. These are hang guards, not measurements: a fast check is a script over files
+/// (seconds), a heavy one may build a workspace on a loaded machine (a cold `cargo test --workspace` is the longest known).
+pub fn limit(cost: Cost) -> Duration {
+    match cost {
+        Cost::Fast => Duration::from_secs(300),
+        Cost::Heavy => Duration::from_secs(1800),
+    }
+}
 /// Fast checks that run at once: scripts over files, not builds.
 const PARALLEL: usize = 4;
 
 /// What a started command did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ran {
-    /// It ran to the end; `tail` is the end of its output.
+    /// It ran to the end.
     Exited {
-        /// Exit status 0.
-        ok: bool,
-        /// The last lines it printed (stderr, then stdout).
+        /// Its exit status (`None`: ended by a signal).
+        code: Option<i32>,
+        /// The last lines it printed (stderr, then stdout), on one line.
         tail: String,
+        /// Everything it printed (capped), for the drift markers.
+        text: String,
     },
     /// It could not be started (a program that is not installed): the text says which.
     Unavailable(String),
     /// It did not finish within the limit and its tree was ended.
     TimedOut,
+    /// It wrote more than the output cap and its tree was ended.
+    OutputCap,
+}
+
+impl Ran {
+    /// A finished run with this status and output (the whole output is the tail).
+    pub fn exit(code: i32, output: &str) -> Ran {
+        Ran::Exited {
+            code: Some(code),
+            tail: output.to_string(),
+            text: output.to_string(),
+        }
+    }
 }
 
 /// Starts programs; faked in tests.
 pub trait Runner: Sync {
-    /// Runs `argv` in `dir`.
-    fn run(&self, dir: &Path, argv: &[String]) -> Ran;
+    /// Runs `argv` in `dir`, ending it after `limit`.
+    fn run(&self, dir: &Path, argv: &[String], limit: Duration) -> Ran;
     /// Whether `path` exists (the `requires` of an entry).
     fn exists(&self, path: &Path) -> bool;
 }
@@ -41,23 +62,35 @@ pub trait Runner: Sync {
 /// The real runner: bounded and started through `paddock-proc`.
 pub struct Real;
 
+/// The program as the OS can start it: on Windows `npm` is `npm.cmd` and is found on the `PATH` with its extension.
+fn resolve(program: &str) -> String {
+    if !cfg!(windows) || program.contains(['/', '\\']) {
+        return program.to_string();
+    }
+    let path = std::env::var("PATH").or_else(|_| std::env::var("Path")).unwrap_or_default();
+    let exts = crate::pathfind::extensions(std::env::var("PATHEXT").ok().as_deref());
+    crate::pathfind::find_program(&path, program, true, &exts).map_or_else(|| program.to_string(), |p| p.to_string_lossy().into_owned())
+}
+
 impl Runner for Real {
-    fn run(&self, dir: &Path, argv: &[String]) -> Ran {
+    fn run(&self, dir: &Path, argv: &[String], limit: Duration) -> Ran {
         let Some((program, args)) = argv.split_first() else {
             return Ran::Unavailable("the entry names no command".into());
         };
-        let mut cmd = command(program);
+        let mut cmd = command(resolve(program));
         cmd.current_dir(dir).args(args);
-        match run_bounded(cmd, Limits::new(LIMIT).max_output(1 << 22)) {
+        match run_bounded(cmd, Limits::new(limit).max_output(1 << 22).stop_on_cap()) {
             Ok(o) => match o.outcome {
-                Outcome::Exited(_) => {
-                    let tail = tail(&format!("{}\n{}", o.stderr_text(), o.stdout_text()));
-                    match broken_tool(&tail) {
-                        Some(why) if !o.success() => Ran::Unavailable(format!("the tool did not start ({why}): {tail}")),
-                        _ => Ran::Exited { ok: o.success(), tail },
+                Outcome::Exited(status) => {
+                    let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
+                    Ran::Exited {
+                        code: status.code(),
+                        tail: tail(&text),
+                        text,
                     }
                 }
-                _ => Ran::TimedOut,
+                Outcome::TimedOut => Ran::TimedOut,
+                Outcome::OutputCap => Ran::OutputCap,
             },
             Err(e) => Ran::Unavailable(e.to_string()),
         }
@@ -74,18 +107,32 @@ fn tail(text: &str) -> String {
     lines[lines.len().saturating_sub(4)..].join(" | ")
 }
 
-/// What a tool says when it could not run at all (a missing module, command or subcommand), which is not drift: the check did
-/// not look.
-pub fn broken_tool(tail: &str) -> Option<&'static str> {
-    const SIGNS: [(&str, &str); 6] = [
+/// What a tool says when it could not run at all (a missing module, command, subcommand or test target, a build that does not
+/// compile), which is not drift: the check did not look.
+pub fn broken_tool(text: &str) -> Option<&'static str> {
+    const SIGNS: [(&str, &str); 11] = [
         ("ERR_MODULE_NOT_FOUND", "a Node module is missing; run `npm ci`"),
         ("Cannot find module", "a Node module is missing; run `npm ci`"),
         ("command not found", "a program is not installed"),
         ("no such command", "a cargo subcommand is not installed"),
         ("no such subcommand", "a cargo subcommand is not installed"),
         ("could not find `Cargo.toml`", "there is no Cargo.toml in the folder"),
+        ("could not compile", "the code does not compile"),
+        ("no test target named", "the test target does not exist"),
+        ("did not match any packages", "the package does not exist"),
+        (
+            "library 'duckdb' not found",
+            "libduckdb is not set up; run `cargo xtask libduckdb` in apps/debrief",
+        ),
+        ("error: unexpected argument", "the command line is wrong"),
     ];
-    SIGNS.iter().find(|(sign, _)| tail.contains(sign)).map(|(_, why)| *why)
+    SIGNS.iter().find(|(sign, _)| text.contains(sign)).map(|(_, why)| *why)
+}
+
+/// The exit statuses that say "could not look" whatever the tool: 126 and 127 (the shell could not start the program) and 6
+/// (ADR 0089's not measured, which a check script uses for a missing precondition).
+fn status_says_not_measured(code: i32) -> bool {
+    matches!(code, 6 | 126 | 127)
 }
 
 /// What one check found.
@@ -152,6 +199,27 @@ pub fn execute(root: &Path, due: &[&Generator], runner: &dyn Runner, log: &(dyn 
         .collect()
 }
 
+/// A check that failed: drift only when it says so. A crash, a missing tool, a build that does not compile, a status that means
+/// "could not look", or (when the entry names `drift_marker`s) a failure that carries none of them is NOT MEASURED.
+pub fn classify_failure(g: &Generator, code: Option<i32>, tail: &str, text: &str) -> Verdict {
+    if let Some(c) = code.filter(|c| status_says_not_measured(*c)) {
+        return Verdict::NotMeasured(format!("it ended with status {c} (could not look): {tail}"));
+    }
+    if code.is_none() {
+        return Verdict::NotMeasured(format!("it was ended by a signal: {tail}"));
+    }
+    if let Some(why) = broken_tool(text) {
+        return Verdict::NotMeasured(format!("the tool did not run to a verdict ({why}): {tail}"));
+    }
+    if !g.drift_marker.is_empty() && !g.drift_marker.iter().any(|m| text.contains(m.as_str())) {
+        return Verdict::NotMeasured(format!(
+            "it failed without saying the files are stale (expected one of {:?}), so it did not reach a verdict: {tail}",
+            g.drift_marker
+        ));
+    }
+    Verdict::Stale(tail.to_string())
+}
+
 fn store(slot: &Mutex<Option<Checked>>, c: Checked) {
     if let Ok(mut s) = slot.lock() {
         *s = Some(c);
@@ -185,13 +253,14 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, log: &(dyn Fn(&str) + Sy
     }
     log(&format!("gen {}: running [{}] {}", g.id, g.cost.name(), g.check_line()));
     let start = Instant::now();
-    let ran = runner.run(&dir, &g.check);
+    let ran = runner.run(&dir, &g.check, limit(g.cost));
     let took = start.elapsed();
     let verdict = match ran {
-        Ran::Exited { ok: true, .. } => Verdict::Current,
-        Ran::Exited { ok: false, tail } => Verdict::Stale(tail),
+        Ran::Exited { code: Some(0), .. } => Verdict::Current,
+        Ran::Exited { code, tail, text } => classify_failure(g, code, &tail, &text),
         Ran::Unavailable(why) => Verdict::NotMeasured(why),
-        Ran::TimedOut => Verdict::NotMeasured(format!("it did not finish within {} s and was ended", LIMIT.as_secs())),
+        Ran::TimedOut => Verdict::NotMeasured(format!("it did not finish within {} s and was ended", limit(g.cost).as_secs())),
+        Ran::OutputCap => Verdict::NotMeasured("it wrote more output than the cap (4 MiB) and was ended".into()),
     };
     let word = match &verdict {
         Verdict::Current => "current",
@@ -210,6 +279,8 @@ mod tests {
     fn a_tool_that_could_not_run_is_not_drift() {
         assert!(broken_tool("Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'x'").is_some());
         assert!(broken_tool("sh: cargo-hakari: command not found").is_some());
+        assert!(broken_tool("error: could not compile `x`").is_some());
+        assert!(broken_tool("error: no test target named `shell`").is_some());
         assert!(broken_tool("error: no such command: `hakari`").is_some());
         assert_eq!(broken_tool("messages.xlf is stale"), None);
     }

@@ -19,6 +19,15 @@ pub struct Step {
     pub exit: Exit,
 }
 
+/// The step was not asked for or cannot apply: said out loud, never silent, and not a failure.
+pub fn not_run(why: &str) -> Step {
+    Step {
+        text: vec![format!("generator checks not run ({why})")],
+        data: json!({"outcome": "not run", "why": why}),
+        exit: Exit::Ok,
+    }
+}
+
 fn unmeasured(why: &str, next: &str) -> Step {
     Step {
         text: vec![format!(

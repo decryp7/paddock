@@ -471,9 +471,37 @@ jobs:
       seconds: "120"
       timeout-minutes: 45
 
+  # ER-40 / ER-41: every command of the generator registry (docs/generators.toml) runs on the real tree every night, so a
+  # check that passes without looking, or was never run, shows within a day. Slot: this workflow's 21:03 UTC (05:03 UTC+8,
+  # outside 00:00-04:00 local), one Linux slot. `--all` exits 5 on a stale file and 6 on a check that could not run.
+  generators:
+    name: generators (every registry check)
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.gitea/actions/setup-rust
+      - uses: ./.gitea/actions/node-caches
+      - name: Install
+        run: npm ci
+      # i18n:check and the publish dry run read the built package.
+      - name: Build the UI package
+        run: npm run build -w ui && npm run build:e2e -w ui
+      # The notices checks never install their tool (a missing one is NOT MEASURED), so the job does, at the pinned version.
+      - name: cargo-about
+        run: cargo install cargo-about --version 0.9.2 --locked --features cli
+      - name: ./dev gen check --all
+        run: ./dev gen check --all
+
   mark:
     name: mark the green nightly
-    needs: [ci, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
+    needs: [ci, generators, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:

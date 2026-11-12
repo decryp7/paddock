@@ -50,6 +50,9 @@ pub struct Generator {
     pub cost: Cost,
     /// Files that must exist for the check to be possible on this tree; a missing one is NOT MEASURED ("not on this tree").
     pub requires: Vec<String>,
+    /// Text a failing check prints when the files really are stale (any one of them, searched in all its output). When the entry
+    /// names some, a failure without one is NOT MEASURED: a build error or a crash is not drift. Empty: any plain failure is drift.
+    pub drift_marker: Vec<String>,
     /// Why there is no automatic check (an entry with `manual` has no `check` and never runs; it is listed when its paths change).
     pub manual: Option<String>,
     path_res: Vec<Regex>,
@@ -144,6 +147,7 @@ impl Registry {
                 "cost",
                 "requires",
                 "manual",
+                "drift_marker",
             ];
             for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
                 errors.push(format!("{at}: unknown key `{k}` (known: {})", known.join(", ")));
@@ -203,6 +207,7 @@ impl Registry {
                 cost,
                 requires: strings_of(t, "requires"),
                 manual,
+                drift_marker: strings_of(t, "drift_marker"),
                 path_res,
                 output_res,
             });

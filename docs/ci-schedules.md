@@ -27,7 +27,7 @@ ran the same jobs).
 | debrief-corpus | `43 14 * * *` | 22:43 | Linux | 0-21 min | 1 |
 | service-smoke | `17 15 * * *` | 23:17 | macOS VM | about 22 min | 0 |
 | debrief-fuzz | `13 15 * * *` | 23:13 | Linux | 77-90 min with 6 shards at once; about 3 h at 2 at a time | 2 (`max-parallel: 2`), alone in its window |
-| nightly | `3 21 * * *` | 05:03 | Linux, Windows, macOS | 25-123 min | uncapped for the rest (reusable ci.yml and many jobs); its five fuzz calls are chained in two chains, so at most 2 at once |
+| nightly | `3 21 * * *` | 05:03 | Linux, Windows, macOS | 25-123 min; its `generators` job (`./dev gen check --all`, every registry command, ER-40) is not measured yet | uncapped for the rest (reusable ci.yml and many jobs); its five fuzz calls are chained in two chains, so at most 2 at once |
 | debrief | `3 22 * * *` | 06:03 | Linux, Windows, macOS | 37-147 min | uncapped (parallel jobs, 4 e2e shards) |
 | dev-tool | `33 21 * * *` | 05:33 | Linux, Windows, macOS | not measured | 1 (Linux leg) |
 

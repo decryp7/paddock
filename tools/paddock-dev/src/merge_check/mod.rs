@@ -319,10 +319,14 @@ fn check(req: &Request) -> Result<(String, Vec<Finding>, Option<generator_step::
                 _ => Vec::new(),
             };
             // The generated files are checked in the checkout, so only a merge that exists as a commit has one to check.
-            let step = if req.generators && req.commit.is_some() {
-                generator_step::run(&root, &git, &merge, &crate::generators::run::Real, &|l| eprintln!("{l}"))
+            let step = if !req.generators {
+                Some(generator_step::not_run("--no-generators"))
+            } else if req.commit.is_none() {
+                Some(generator_step::not_run(
+                    "a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check <merge-commit>` after merging",
+                ))
             } else {
-                None
+                generator_step::run(&root, &git, &merge, &crate::generators::run::Real, &|l| eprintln!("{l}"))
             };
             Ok((merge.label, found, step))
         }

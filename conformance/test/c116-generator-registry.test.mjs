@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { globRegex, parseRegistry, saysGenerated } from '../src/checks/C116-generator-registry.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
@@ -92,4 +93,9 @@ test('C116: an outputs glob that matches no file is a warning, and a registry wi
 
 test('C116: a root without a registry reports nothing', async () => {
   assert.deepEqual(await findingsOf('C116', makeApp({ 'a.txt': 'x\n' })), []);
+});
+
+test('C116 does not flag its own source (its header describes the phrases without using them)', () => {
+  const own = readFileSync(new URL('../src/checks/C116-generator-registry.mjs', import.meta.url), 'utf8');
+  assert.equal(saysGenerated(own.slice(0, 600)), false);
 });
