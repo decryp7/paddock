@@ -1,0 +1,83 @@
+# verdict<TAB>scope<TAB>command. Both the C115 check (conformance) and the guard hook rule no-unscoped-cleanup (paddock-dev) must agree on every row of scope `both`; rows of scope `c115` are only the check's (git clean, rm).
+deny	both	git worktree prune
+deny	both	git -C /repo worktree prune --expire now
+deny	both	cd /x && git worktree prune
+deny	both	bash -c 'git worktree prune'
+allow	both	git worktree prune -n
+allow	both	git worktree prune --dry-run
+allow	both	git worktree list
+allow	both	git worktree remove /x/wt
+deny	both	for p in a b; do git worktree remove --force "$p"; done
+deny	both	for p in a b; do git -C "$M" worktree remove -f "$p"; done
+deny	both	while read p; do git worktree remove --force "$p"; done < list
+deny	both	ls | xargs -n1 git worktree remove --force
+allow	both	git worktree remove --force /x/wt
+allow	both	for p in a b; do git worktree remove "$p"; done
+deny	both	docker system prune -af
+deny	both	docker container prune -f
+deny	both	docker volume prune
+deny	both	docker image prune -a
+deny	both	docker builder prune
+deny	both	podman system prune
+deny	both	docker rm -f $(docker ps -aq)
+deny	both	docker stop `docker ps -q`
+deny	both	docker container rm -f $(docker container ls -aq)
+deny	both	docker ps -aq | xargs docker rm -f
+deny	both	docker ps -q | xargs -r docker stop
+deny	both	docker volume rm $(docker volume ls -q)
+deny	both	docker rmi $(docker images -q)
+deny	both	docker image rm $(docker image ls -q)
+allow	both	docker rm -f paddock-test-1
+allow	both	docker rm -f $(docker ps -q --filter label=paddock-own)
+allow	both	docker rm -f $(docker ps -q --filter=name=paddock)
+allow	both	docker rm -f $(docker ps -q -f name=paddock)
+allow	both	docker ps -q --filter name=paddock | xargs docker rm -f
+allow	both	docker rmi $(docker images -q --filter reference=paddock/*)
+allow	both	docker volume ls -q
+allow	both	docker run --rm img
+allow	both	docker system df
+deny	c115	git clean -fdx
+deny	c115	git clean -fd
+deny	c115	git clean -f -d
+deny	c115	git -C "$d" clean -fX
+deny	c115	git clean -fdx .
+deny	c115	git clean -fdx ./
+deny	c115	git clean -fd -- .
+deny	c115	git clean -fd -e target
+deny	c115	git clean -fdx --exclude=target
+deny	c115	git clean -fd -e target -e out
+deny	c115	git clean -fdx :/
+allow	c115	git clean -n -fdx
+allow	c115	git clean --dry-run -fd
+allow	c115	git clean -fd -- target/own
+allow	c115	git clean -fdx apps/debrief/out
+allow	c115	git clean -fd -e keep out
+allow	c115	git clean -f
+deny	c115	rm -rf "$DIR"
+deny	c115	rm -rf $DIR/*
+deny	c115	rm -rf "$DIR"/*
+deny	c115	rm -rf *
+deny	c115	rm -rf ./*
+deny	c115	rm -rf /*
+deny	c115	rm -rf ~
+deny	c115	rm -rf ~/*
+deny	c115	rm -rf .
+deny	c115	rm -rf "$HOME"
+deny	c115	rm -rf "$a" "$b"
+deny	c115	rm -rf "$a" build
+deny	c115	rm --recursive --force "$DIR"
+deny	c115	rm --force --recursive "$DIR"
+deny	c115	rm --force -r "$DIR"
+deny	c115	rm -f -R "$DIR"
+deny	c115	rm -r -- "$DIR"
+allow	c115	rm -rf "${DIR:?}"
+allow	c115	rm -rf "${DIR:?}"/*
+allow	c115	rm -rf "$DIR/build"
+allow	c115	rm -rf "$OWN"/cache
+allow	c115	rm -rf target/own
+allow	c115	rm -f "$file"
+allow	c115	rm "$x"
+allow	c115	rm --force "$x"
+allow	c115	tmp=$(mktemp -d); rm -rf "$tmp"
+allow	c115	t=$(mktemp -d "${TMPDIR:-/tmp}/x.XXXX"); rm -rf "${t}"
+allow	c115	t=`mktemp -d`; rm -rf $t

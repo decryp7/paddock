@@ -202,7 +202,6 @@ pub fn keep_reason(r: &Row, base: &str) -> Option<String> {
         return Some("the primary checkout".to_string());
     }
     if r.info.prunable {
-        // conformance: scoped-cleanup — message text only, nothing is run
         return Some("its folder is missing (git worktree prune)".to_string());
     }
     if let Some(reason) = &r.info.locked {

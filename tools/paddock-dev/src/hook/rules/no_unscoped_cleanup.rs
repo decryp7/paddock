@@ -3,7 +3,8 @@
 //! Refused: `git worktree prune` (it drops the record of every worktree whose folder is missing at that moment, also a live agent's on
 //! a drive that is not mounted; a dry run, `-n` or `--dry-run`, is allowed), `docker` or `podman` `system|container|volume|image|
 //! network|builder|buildx prune`, and a mass removal of every listed container (`docker rm -f $(docker ps -aq)`, `docker ps -q |
-//! xargs docker stop`) unless the listing is narrowed by `--filter`. The next step is named in the refusal: `./dev worktree clean`
+//! xargs docker stop`, `docker volume rm $(docker volume ls -q)`, `docker rmi $(docker images -q)`) unless the listing is narrowed by
+//! `-f` or `--filter` (also `--filter=`), and `git worktree remove --force`/`-f` inside a loop or under `xargs` (the 2026-11-10 shape). The next step is named in the refusal: `./dev worktree clean`
 //! for worktrees, a container's own name or label for containers. The same patterns in committed code are conformance check C115
 //! (this folder is outside its scan, since the rule names the patterns to refuse them). Like the other rules it answers every caller
 //! and reads commands, not text; a command the lexer cannot read gets the text check ([`Rule::legacy`]).
@@ -11,6 +12,7 @@
 use crate::hook::decision::Denial;
 use crate::hook::input::ToolCall;
 use crate::hook::lex::{Item, Script, Sep, Simple, Word, basename};
+use crate::hook::loops::loops;
 use crate::hook::rules::Rule;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -27,7 +29,8 @@ listed container. Stop and remove only what you started, by name or label: `dock
 reconfigure shared Docker or OrbStack.";
 
 const KINDS: &[&str] = &["system", "container", "volume", "image", "network", "builder", "buildx"];
-const REMOVERS: &[&str] = &["rm", "stop", "kill", "restart"];
+const REMOVERS: &[&str] = &["rm", "rmi", "stop", "kill", "restart"];
+const OBJECTS: &[&str] = &["container", "volume", "image", "network"];
 /// Engine options that take the next word as their value.
 const ENGINE_VALUE_OPTS: &[&str] = &["-H", "--host", "--context", "-c", "--config", "-l", "--log-level"];
 /// Git options that take the next word as their value.
@@ -73,19 +76,20 @@ fn is_engine(word: &Word) -> bool {
     matches!(basename(&word.text), "docker" | "podman")
 }
 
-/// `rm`, `stop`, `kill` or `restart`, alone or after `container`.
-fn removes_containers(rest: &[&str]) -> bool {
+/// `rm`, `rmi`, `stop`, `kill` or `restart`, alone or after an object word (`container`, `volume`, `image`, `network`).
+fn removes_objects(rest: &[&str]) -> bool {
     match rest {
-        ["container", sub, ..] => REMOVERS.contains(sub),
+        [kind, sub, ..] if OBJECTS.contains(kind) => REMOVERS.contains(sub),
         [sub, ..] => REMOVERS.contains(sub),
         [] => false,
     }
 }
 
-fn lists_containers(rest: &[&str]) -> bool {
+/// `ps`, `ls`, `images` or `list`, alone or after an object word.
+fn lists_objects(rest: &[&str]) -> bool {
     match rest {
-        ["container", sub, ..] => matches!(*sub, "ps" | "ls"),
-        [sub, ..] => matches!(*sub, "ps" | "ls"),
+        [kind, sub, ..] if OBJECTS.contains(kind) => matches!(*sub, "ps" | "ls" | "list"),
+        [sub, ..] => matches!(*sub, "ps" | "ls" | "images" | "list"),
         [] => false,
     }
 }
@@ -93,17 +97,22 @@ fn lists_containers(rest: &[&str]) -> bool {
 /// A listing of every container: `docker ps`/`ls` with no `--filter`.
 fn lists_all(cmd: &Simple) -> bool {
     let words = cmd.command();
-    words.iter().position(is_engine).is_some_and(|at| {
-        lists_containers(&after_options(words, at, ENGINE_VALUE_OPTS))
-            && !words.iter().any(|w| w.text.starts_with("--filter") || w.text == "-f")
-    })
+    words
+        .iter()
+        .position(is_engine)
+        .is_some_and(|at| lists_objects(&after_options(words, at, ENGINE_VALUE_OPTS)) && !words.iter().any(|w| is_filter(&w.text)))
+}
+
+/// `-f`, `--filter` and `--filter=...` narrow a listing.
+fn is_filter(t: &str) -> bool {
+    t == "-f" || t == "--filter" || t.starts_with("--filter=")
 }
 
 fn sub_lists_all(src: &str) -> bool {
     static LIST: OnceLock<Option<Regex>> = OnceLock::new();
-    LIST.get_or_init(|| Regex::new(r"\b(?:docker|podman)\s+(?:container\s+)?(?:ps|ls)\b").ok())
+    LIST.get_or_init(|| Regex::new(r"\b(?:docker|podman)\s+(?:(?:container|volume|image|network)\s+)?(?:ps|ls|images|list)\b").ok())
         .as_ref()
-        .is_some_and(|re| re.is_match(src) && !src.contains("--filter"))
+        .is_some_and(|re| re.is_match(src) && !src.split_whitespace().any(is_filter))
 }
 
 fn engine_refusal(cmd: &Simple, prev_lists_all: bool, piped: bool) -> bool {
@@ -119,7 +128,7 @@ fn engine_refusal(cmd: &Simple, prev_lists_all: bool, piped: bool) -> bool {
     let rest = after_options(words, at, ENGINE_VALUE_OPTS);
     match rest.as_slice() {
         [kind, "prune", ..] if KINDS.contains(kind) => true,
-        _ if removes_containers(&rest) => {
+        _ if removes_objects(&rest) => {
             (base == Some("xargs") && piped && prev_lists_all) || words.iter().any(|w| w.subs.iter().any(|s| sub_lists_all(s)))
         }
         _ => false,
@@ -135,6 +144,16 @@ fn worktree_prune(cmd: &Simple) -> bool {
     matches!(rest.as_slice(), ["worktree", "prune", tail @ ..] if !tail.iter().any(|t| *t == "-n" || *t == "--dry-run"))
 }
 
+/// `git worktree remove` with `-f` or `--force` (a second force also counts).
+fn forced_worktree_remove(cmd: &Simple) -> bool {
+    let words = cmd.command();
+    let Some(at) = words.iter().position(|w| basename(&w.text) == "git") else {
+        return false;
+    };
+    let rest = after_options(words, at, GIT_VALUE_OPTS);
+    matches!(rest.as_slice(), ["worktree", "remove", tail @ ..] if tail.iter().any(|t| *t == "-f" || *t == "--force"))
+}
+
 impl Rule for NoUnscopedCleanup {
     fn id(&self) -> &'static str {
         "no-unscoped-cleanup"
@@ -142,6 +161,16 @@ impl Rule for NoUnscopedCleanup {
 
     fn check(&self, _call: &ToolCall, script: Option<&Script>) -> Option<Denial> {
         let script = script?;
+        // A forced remove inside a loop, or on the other end of a pipe into xargs, removes whatever the list names.
+        let in_loop = |at: usize| loops(script).iter().any(|lp| lp.commands().any(|c| c == at));
+        for (at, item) in script.items.iter().enumerate() {
+            if let Item::Cmd(cmd) = item {
+                let xargs = cmd.command().first().is_some_and(|w| basename(&w.text) == "xargs") && forced_worktree_remove(cmd);
+                if forced_worktree_remove(cmd) && (xargs || in_loop(at)) {
+                    return Some(self.denial(WORKTREE_REASON));
+                }
+            }
+        }
         let mut prev: Option<&Simple> = None;
         let mut piped = false;
         for item in &script.items {
@@ -173,7 +202,8 @@ impl Rule for NoUnscopedCleanup {
                 ))
             })
             .as_ref()?;
-        if worktree.is_match(text) && !text.contains("--dry-run") {
+        let dry = Regex::new(r"(?:^|\s)(?:-n|--dry-run)\b").ok()?;
+        if worktree.is_match(text) && !dry.is_match(text) {
             return Some(self.denial(WORKTREE_REASON));
         }
         docker.is_match(text).then(|| self.denial(DOCKER_REASON))
@@ -285,6 +315,27 @@ mod tests {
         assert!(crate::hook::decide(&ok).denial.is_none());
         let unread = ToolCall::parse(r#"{"tool_name":"Bash","tool_input":{"command":"git worktree prune; echo 'x"}}"#).unwrap();
         assert_eq!(crate::hook::decide(&unread).denial.map(|d| d.rule), Some("no-unscoped-cleanup"));
+    }
+
+    #[test]
+    fn it_agrees_with_the_shared_corpus_that_conformance_check_c115_reads_too() {
+        let corpus = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/cleanup-corpus.tsv")).unwrap();
+        let mut rows = 0;
+        for row in corpus.lines().filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            let cols: Vec<&str> = row.splitn(3, '\t').collect();
+            let [expect, scope, cmd] = cols[..] else { panic!("bad row: {row}") };
+            if scope != "both" {
+                continue;
+            }
+            rows += 1;
+            assert_eq!(verdict(cmd).is_some(), expect == "deny", "{expect}: {cmd}");
+        }
+        assert!(rows >= 30, "only {rows} rows read");
+    }
+
+    #[test]
+    fn a_dry_run_is_allowed_in_the_text_check_too() {
+        assert!(NoUnscopedCleanup.legacy("echo 'x; git worktree prune -n").is_none());
     }
 
     #[test]
