@@ -5,4 +5,4 @@
 # Checked: Write/Edit targets, redirects, tee, touch, truncate, cp/mv/install/ln (last argument, unless it is an existing
 # folder), rm of a file, dd of=, curl -o, wget -O; relative paths use the command's effective cwd, `NAME=value` variables
 # are resolved. Lives on lib/shellscan.py. Agent vs coordinator: refused for everyone (the hook input has no marker).
-exec python3 -I "$(dirname "$0")/scratch-root-guard.py"
+exec python3 -I -B "$(dirname "$0")/scratch-root-guard.py"

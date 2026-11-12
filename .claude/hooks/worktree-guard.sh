@@ -9,4 +9,4 @@
 #     A subagent is told from the coordinator by `agent_id` in the hook input; the coordinator is not refused here.
 # Never fails closed: a parse problem allows the command and warns on stderr.
 # WORKTREE_GUARD_MAIN overrides the main checkout path (tests).
-exec python3 -I "$(dirname "$0")/worktree-guard.py"
+exec python3 -I -B "$(dirname "$0")/worktree-guard.py"
