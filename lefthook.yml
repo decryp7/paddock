@@ -78,22 +78,17 @@ commit-msg:
     conventional:
       run: node conformance/bin/paddock-conformance.mjs commit-lint --file {1}
 
+# One command, so the hook cannot drift from CI (ADR 0038, docs/plans/ci-in-rust.md WP-2): `./dev check --pre-push` runs ER-9's fast
+# gates for what the push changes (fmt, host and Windows Clippy of the workspaces with a changed file, conformance with ci.yml's own
+# list, commit-lint, lockfiles, Pitwall's script tests and deny, C102; the Linux Clippy with --linux). It reads the planner; a gate
+# that cannot run, or runs out of the 15-minute budget, is "not measured" and blocks the push.
 pre-push:
   commands:
-    # Fast static gates for the whole push (ADR 0038): conformance over the tree, as CI's conformance job runs it.
-    # `./dev check --pre-push` is not built yet; replace this entry with it when it lands. Skip with LEFTHOOK=0.
-    conformance:
-      run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98 --strict C36
-    pitwall-scripts:
-      root: "apps/pitwall/"
-      run: node --test scripts/ci/*.test.mjs
-    pitwall-deny:
-      root: "apps/pitwall/"
-      run: cargo deny --workspace check
-    # C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
-    # connection endings is well formed. The release path's tag check calls `./dev check ipc-endpoints --tag <tag>`.
-    ipc-endpoints:
-      run: ./dev check ipc-endpoints
+    pre-push:
+      # git's pre-push lines on standard input: the gate checks out the commit being pushed in a throw-away worktree and checks that,
+      # so a dirty tree cannot change the answer (several refs in one push: one is checked, the others are "not measured").
+      use_stdin: true
+      run: ./dev check --pre-push --refs-from-stdin
     # Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when protocol.rs or a wire type changed; a
     # stale one fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh).
     # The glob is the repo-root path and there is no `root:`, so how lefthook resolves a glob under `root:` does not matter.

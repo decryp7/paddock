@@ -1,6 +1,6 @@
 use crate::{
     brief_check, check, ci_build_jobs, ci_isolation, ci_runs, ci_setup_rust, disk, gates, hook, input_hash, ipc_endpoints, load, locks,
-    merge_check, plan, plan_cmd, pr, queue, release_isolation, slots, wait, worktree,
+    merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -138,6 +138,11 @@ enum CheckCommand {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// ER-9's fast gates for what this push changes (fmt, host and Windows Clippy, Linux Clippy in the CI image, conformance,
+    /// commit-lint, lockfiles `--locked`), the commands CI runs, in parallel and bounded by load. A gate that could not run
+    /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
+    #[command(name = "pre-push", long_flag = "pre-push")]
+    PrePush(pre_push::PrePushArgs),
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
     IpcEndpoints {
@@ -550,6 +555,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             app,
             out,
         }),
+        Command::Check {
+            command: CheckCommand::PrePush(a),
+        } => pre_push::command(&a),
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),

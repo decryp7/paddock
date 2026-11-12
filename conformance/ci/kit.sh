@@ -55,9 +55,11 @@ dev_env() {
   unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER
 }
 
-# tools_home: on a host runner, PADDOCK_DEV_HOME and PADDOCK_DEV_TARGET_DIR under the CI home's tools folder (unless the caller
+# tools_home: in a CI job on a host runner, PADDOCK_DEV_HOME and PADDOCK_DEV_TARGET_DIR under the CI home's tools folder (unless the caller
 # chose them), found without the tool.
 tools_home() {
+  # Only a CI job has a CI home: a person's machine keeps the tool where ./dev puts it (a RUNNER_OS in a shell profile must not move it).
+  [ "${GITHUB_ACTIONS:-}" = true ] || return 0
   [ "${RUNNER_OS:-}" != Linux ] || return 0
   [ -z "${PADDOCK_DEV_HOME:-}" ] || return 0
   tools="$(bash "$here/job-isolation.sh" path tools)"

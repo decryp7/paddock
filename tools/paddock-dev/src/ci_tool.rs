@@ -17,11 +17,11 @@
 //! timeout; and the duration). The caller decides what a failure means and prints exactly one `::error::` line for it with
 //! [`error_line`]: the cause, then `Next step:`.
 
-use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded, run_waited};
+use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded, run_waited_cancellable};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::time::{Duration, Instant};
 
@@ -82,6 +82,8 @@ pub struct ToolCall {
     secrets: Vec<String>,
     timeout: Duration,
     output: Output,
+    cwd: Option<PathBuf>,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// How a run ended.
@@ -108,6 +110,8 @@ impl ToolCall {
             secrets: Vec::new(),
             timeout: Duration::from_secs(120),
             output: Output::Capture,
+            cwd: None,
+            cancel: None,
         }
     }
 
@@ -156,6 +160,19 @@ impl ToolCall {
         if !v.is_empty() {
             self.secrets.push(v);
         }
+        self
+    }
+
+    /// Runs the program in this folder (default: the caller's).
+    pub fn cwd(mut self, dir: impl Into<PathBuf>) -> ToolCall {
+        self.cwd = Some(dir.into());
+        self
+    }
+
+    /// Ends the program's whole tree when this flag is set (a Ctrl+C or SIGTERM of the caller); `how` is then `cancelled`. Only for
+    /// [`Output::Stream`] and [`Output::File`] runs.
+    pub fn cancel_on(mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> ToolCall {
+        self.cancel = Some(flag);
         self
     }
 
@@ -216,6 +233,9 @@ impl ToolCall {
     fn build(&self, parent: &HashMap<String, String>) -> std::process::Command {
         let mut cmd = command(&self.program);
         cmd.args(&self.args).env_clear();
+        if let Some(dir) = &self.cwd {
+            cmd.current_dir(dir);
+        }
         for (k, v) in self.child_env(parent) {
             cmd.env(k, v);
         }
@@ -250,10 +270,13 @@ impl ToolCall {
 
     /// Streamed or file output, through `paddock_proc::run_waited` (bounded, the whole tree ended at the timeout).
     fn run_to(&self, cmd: std::process::Command, sink: Sink, file: Option<&PathBuf>) -> Result<Ran, String> {
-        let outcome = run_waited(cmd, self.timeout, sink).map_err(|e| self.not_started(e))?;
-        let text = file.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        let idle = std::sync::atomic::AtomicBool::new(false);
+        let flag: &std::sync::atomic::AtomicBool = self.cancel.as_deref().unwrap_or(&idle);
+        let (outcome, cancelled) = run_waited_cancellable(cmd, self.timeout, sink, flag).map_err(|e| self.not_started(e))?;
+        let text = file.map(|p| read_tail(p, FILE_TAIL_BYTES)).unwrap_or_default();
         let (success, how) = match outcome {
             Outcome::Exited(s) => (s.success(), describe_status(s)),
+            Outcome::TimedOut if cancelled => (false, "cancelled".to_string()),
             Outcome::TimedOut => (false, self.timed_out()),
             Outcome::OutputCap => (false, "stopped at the output cap".to_string()),
         };
@@ -263,6 +286,34 @@ impl ToolCall {
             stdout: String::new(),
             stderr: text,
         })
+    }
+}
+
+/// The most of a run's output file that is read back: its end, where a failure says what happened. A cargo build can write
+/// hundreds of megabytes; the whole file stays on disk for a person.
+pub const FILE_TAIL_BYTES: u64 = 256 * 1024;
+
+/// The last `max` bytes of the file at `path` (all of it when it is shorter; lossy UTF-8; empty when it cannot be read). The
+/// first line of a cut text is dropped, as it may start mid-line.
+pub fn read_tail(path: &Path, max: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return String::new();
+    };
+    let len = f.metadata().map_or(0, |m| m.len());
+    let cut = len > max;
+    if cut && f.seek(SeekFrom::Start(len - max)).is_err() {
+        return String::new();
+    }
+    let mut bytes = Vec::new();
+    if f.take(max).read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    if cut {
+        text.split_once('\n').map_or(String::new(), |(_, rest)| rest.to_string())
+    } else {
+        text
     }
 }
 
@@ -333,6 +384,22 @@ fn quote(arg: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_the_end_of_a_big_output_file_is_read_back() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("out.log");
+        let mut text = String::new();
+        for i in 0..2000 {
+            text.push_str(&format!("line {i:05}\n"));
+        }
+        std::fs::write(&f, &text).unwrap();
+        let tail = super::read_tail(&f, 100);
+        assert!(tail.len() <= 100 && tail.ends_with("line 01999\n"), "{tail:?}");
+        assert!(tail.starts_with("line "), "the cut first line is dropped: {tail:?}");
+        assert_eq!(super::read_tail(&f, 1 << 20), text, "a short file is read whole");
+        assert_eq!(super::read_tail(&d.path().join("missing"), 100), "");
+    }
+
     use super::*;
 
     #[test]

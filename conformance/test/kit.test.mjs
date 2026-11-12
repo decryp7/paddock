@@ -37,7 +37,7 @@ function checkout({ tools = true, rustc = true } = {}) {
     writeFileSync(log, '');
     const r = spawnSync('sh', [join(root, 'conformance', 'ci', 'kit.sh'), ...args], {
       cwd: root,
-      env: { PATH: `${join(root, 'bin')}:/usr/bin:/bin`, HOME: root, RUNNER_OS: 'macOS', ...env },
+      env: { PATH: `${join(root, 'bin')}:/usr/bin:/bin`, HOME: root, RUNNER_OS: 'macOS', GITHUB_ACTIONS: 'true', ...env },
       encoding: 'utf8',
     });
     return { ...r, log: readFileSync(log, 'utf8') };
@@ -147,6 +147,17 @@ test('build-jobs and value commands on a host also keep the tool under the CI ho
     assert.match(r.log, new RegExp(`dev ci build-jobs  ?home=${c.root}/ci-home/tools/paddock-dev `), r.log);
     r = c.run(['isolation', 'path', 'target', 'a'], { GITHUB_TOKEN: 't' });
     assert.match(r.log, new RegExp(`^dev ci isolation path target a home=${c.root}/ci-home/tools/paddock-dev `, 'm'), r.log);
+  } finally {
+    c.done();
+  }
+});
+
+test('a person\'s machine (no GITHUB_ACTIONS) never gets the CI home\'s tools folder: the tool stays where ./dev puts it', () => {
+  const c = checkout();
+  try {
+    const r = c.run(['build-jobs'], { GITHUB_ACTIONS: '', GITHUB_TOKEN: 't', RUNNER_OS: 'macOS' });
+    assert.doesNotMatch(r.log, /job-isolation\.sh path tools/, r.log);
+    assert.match(r.log, /^dev ci build-jobs  ?home= target= /m, r.log);
   } finally {
     c.done();
   }

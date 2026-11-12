@@ -69,7 +69,7 @@ max-threads = 2
 # waiver: not a longer budget. At most two of the tests that read the repository graph run at a time (the group above), which keeps
 # each of them far inside the 60 s budget on a loaded host runner.
 [[profile.ci.overrides]]
-filter = "test(/^(golden|tree|inputs)::/) | test(/^cli::graph_affected/)"
+filter = "test(/^(golden|tree|inputs|pre_push)::/) | test(/^cli::graph_affected/)"
 test-group = "repo-graph"
 
 [profile.ci.junit]

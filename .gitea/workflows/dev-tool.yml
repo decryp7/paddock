@@ -39,6 +39,10 @@ concurrency:
   group: dev-tool-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
 jobs:
   # A scheduled run ends early while a train's dispatch run is in CI (./dev ci schedule-skip; ADR 0093 amendment 2026-11-12).
   # Only scheduled runs have it; the jobs below run when it was skipped (any other event) or said run, never when it failed or was cancelled.

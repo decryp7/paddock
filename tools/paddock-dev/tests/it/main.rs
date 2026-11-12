@@ -17,6 +17,7 @@ mod isolation;
 mod locks;
 mod merge_check;
 mod pr;
+mod pre_push;
 mod release_isolation;
 mod safe_remove_lint;
 mod setup_rust;

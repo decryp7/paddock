@@ -14,6 +14,8 @@ on:
         default: "300"
 
 env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
   FUZZ_SECONDS: ${{ github.event.inputs.seconds || '300' }}
   # cargo-fuzz needs nightly (-Zsanitizer); see the toolchain step.
