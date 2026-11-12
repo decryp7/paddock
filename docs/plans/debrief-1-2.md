@@ -290,9 +290,11 @@ and `./dev gates ratchet --release-tag` (the first step of the `debrief.yml` pla
 `std::env::temp_dir` and `reqwest::Client::new`.** DBR-LINT is LINT-1 plus default clippy at `-D warnings` per crate, about 5.5
 raw (was 23.5). There is no crate-by-crate ratchet of `unwrap`, `expect` and `unsafe`: LINT-2 is not built for existing code (the
 7,165 `unwrap`/`expect` stay; a panic in a worker is contained by process isolation), and `unwrap_used`/`expect_used` apply to
-new crates and to parsers only. The `[[ratchet]]` of C13 for Debrief in `docs/gates.toml` no longer refuses `debrief-v1.2.0`: its
-target moved to `debrief-v2.0.0` in the same change (`Gates-date:` trailer, approved by the user), and the 46 members stay
-exempt from the opt-in. The keyring paths of `clippy_not_yet` are not part of the 1.2 gate either. Clippy's own README says
+new crates and to parsers only. **Not applied yet (the enforcing data):** the `[[ratchet]]` of C13 for Debrief in `docs/gates.toml` still refuses
+`debrief-v1.2.0` while its 46 `not_yet` members and the two keyring paths of `clippy_not_yet` remain. Moving its target is
+refused by C100 (`check_ratchets` demands a `Gates-date:` trailer but does not read one), and emptying `not_yet` would make C13
+require the opt-in of every member. It needs a code change to `dev gates` or C13 (a ratchet entry that reports and does not
+refuse a tag, as ADR 0052's amendment does for C85); until that lands the tag check disagrees with this plan. Clippy's own README says
 the `restriction` group "should, emphatically, not be enabled as a whole". Earlier text above is history.
 
 It is a row of the table below (DBR-LINT, 23.5) next to the 164 of the waves. It runs beside the waves, member by member, and every step is small and green on its own;
@@ -997,8 +999,8 @@ idle or paused plugin is not auto-killed, the person cancels it; a malicious sam
 already runs as the user); a new limit can ship without a message and a new silent cap can appear, review catches them; a slow
 regression is found at the tag, not per pull request; existing `unwrap`s stay.
 
-**Enforcing data changed with this section:** `docs/gates.toml`, the C13 `[[ratchet]]` of Debrief, target `debrief-v1.2.0` to
-`debrief-v2.0.0` (`Gates-date:` trailer, approved by the user 2026-11-12). The ADRs carry dated amendment lines: family ADR
+**Enforcing data: not changed** for C13 (see the DBR-LINT amendment: `docs/gates.toml` still refuses `debrief-v1.2.0`; it needs a
+code change first). The ADRs carry dated amendment lines: family ADR
 0019 (limits), 0031 (stall judge) and 0060 (C13 ratchet), and Debrief ADR 0064 (streaming import, IP1) and 0065 (bounded replies).
 **ER-37 section missing** (cut review, P2): ADRs 0065, 0066 and 0067 name no comparable software; a short section for each is
 a follow-up when the user decides Tier B.
