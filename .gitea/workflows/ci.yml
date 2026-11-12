@@ -58,7 +58,7 @@ permissions:
 
 # The conformance checks Paddock runs on itself: one line, read by the conformance job and by the train-gates job.
 env:
-  PADDOCK_CONFORMANCE_ARGS: "--app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115 --strict C36"
+  PADDOCK_CONFORMANCE_ARGS: "--app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115,C117 --strict C36"
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
 
@@ -550,24 +550,24 @@ jobs:
             echo "::error::tools/wiki/Cargo.lock is stale, run cargo update -w in tools/wiki and commit it"; exit 1; }
 
       - name: Format
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo fmt --check
 
       - name: Clippy
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo nextest run --profile ci --locked --no-fail-fast
 
       - name: Deny
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo deny check
 
       # The tool lints the wiki the way a person runs it (stale pages only warn).
       - name: Lint the wiki
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         env:
           # The run log in the workspace, not the container's home, so a failed run's log survives the job (uploaded below).
           WIKI_LOG_DIR: ${{ github.workspace }}/wiki-logs
@@ -590,7 +590,7 @@ jobs:
       # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of wiki and heavy needed GTK headers). The
       # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
       - name: No GTK in the tools' Linux build
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: .
         run: |
           # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
@@ -652,19 +652,19 @@ jobs:
             echo "::error::tools/heavy/Cargo.lock is stale, run cargo update -w in tools/heavy and commit it"; exit 1; }
 
       - name: Format
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo fmt --check
 
       - name: Clippy
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo nextest run --profile ci --locked --no-fail-fast
 
       - name: Deny
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo deny check
 
       - uses: ./.gitea/actions/sccache-stats
@@ -782,7 +782,7 @@ jobs:
       # The container runs as root and the orphan guardian is off for root: run its acting tests as an unprivileged user
       # (ADR 0076 amendment 2026-11-09; conformance/ci/guardian-as-user.sh prints one ::error:: per failure).
       - name: Orphan guardian as a user (Linux)
-        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' }}
         run: bash ../conformance/ci/guardian-as-user.sh
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats

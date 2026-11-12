@@ -283,12 +283,12 @@ jobs:
 
       # nextest does not run doc tests. This step and the next ones run even after the tests failed (each names what broke).
       - name: Doc tests (workspace)
-        if: ${{ !cancelled() && needs.plan.outputs.rust_test_filter == '' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.rust_test_filter == '' }}
         run: cargo test --workspace --doc
 
       # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
       - name: No temp folders left behind
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --check "$RUNNER_TEMP/temp-leaks.json"
 
       # The analyses' memory budget (ADR 0014) is the shipped worker's: measured on a release build, Linux only
@@ -298,7 +298,7 @@ jobs:
       # The test still runs and its failure shows as a warning; D-0 fixes the catalogue's memory and removes continue-on-error.
       # Debrief 1.2.0 does not ship while this step fails.
       - name: Memory budget
-        if: ${{ !cancelled() && needs.plan.outputs.rust_test_filter == '' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.rust_test_filter == '' }}
         continue-on-error: true
         run: cargo test --release -p debrief-store-duck --test analysis_memory -- --nocapture
 
@@ -384,12 +384,12 @@ jobs:
         run: cargo nextest run --workspace --profile ci ${RERUN_FILTER:+-E "$RERUN_FILTER"}
 
       - name: Doc tests (workspace)
-        if: ${{ !cancelled() && needs.plan.outputs.rust_test_macos_filter == '' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && needs.plan.outputs.rust_test_macos_filter == '' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: cargo test --workspace --doc
 
       - name: No temp folders left behind
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --check "$RUNNER_TEMP/temp-leaks.json"
 
@@ -881,7 +881,7 @@ jobs:
       # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
       # Nightly and manual runs only. macOS has measured budgets; Linux reports until its first nightly numbers are in.
       - name: Start-up benchmark (macOS)
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'macOS'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
           app=$(find "$PADDOCK_BUILD_FOLDER/debug/bundle/macos" -maxdepth 1 -name '*.app' | head -n 1)
@@ -889,7 +889,7 @@ jobs:
           node scripts/ci/startup-bench.mjs "$app" --runs 5 --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
       - name: Start-up benchmark (Linux, report only)
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os == 'Linux'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux'
         env:
           WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
@@ -901,7 +901,7 @@ jobs:
             --out "${RUNNER_TEMP:-/tmp}/startup-timings.json"
 
       - name: Start-up timings
-        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && runner.os != 'Windows'
+        if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Windows'
         uses: actions/upload-artifact@v3
         with:
           name: startup-timings-${{ runner.os }}
