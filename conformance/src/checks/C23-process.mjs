@@ -50,7 +50,7 @@ function commitFindings(ctx) {
     return [error('C23', 8, '.git', 1, `cannot read the commit history (${range}): ${e.message}`, 'Fetch enough history (fetch-depth) or set commitRange in paddock.conformance.json.')];
   }
   for (const { id, message } of items) {
-    for (const p of lint(message)) out.push(error('C23', 8, `commit ${id}`, 1, p, 'Reword the commit (git commit --amend / rebase) before it is pushed.'));
+    for (const p of lint(message, { landed: true })) out.push(error('C23', 8, `commit ${id}`, 1, p, 'Reword the commit (git commit --amend / rebase) before it is pushed.'));
   }
   return out;
 }

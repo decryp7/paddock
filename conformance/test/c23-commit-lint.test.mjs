@@ -172,3 +172,21 @@ test('commit-lint --subject checks a subject before committing: the same rules, 
   const shape = [];
   assert.equal(commitLintMain(['--subject', 'Added a thing'], process.cwd(), (l) => shape.push(l)), 1);
 });
+
+test('a commit that already exists is told to be reworded, not that nothing was committed (CI range, C23)', async () => {
+  const long = lint(`feat: ${'x'.repeat(100)}`, { landed: true }).join('\n');
+  assert.match(long, /Reword the commit before it lands/);
+  assert.doesNotMatch(long, /Nothing was committed|staged files/);
+  const out = [];
+  const dir = repo(['feat: ok', `feat: ${'y'.repeat(100)}`]);
+  assert.equal(commitLintMain(['--range', 'HEAD~1..HEAD'], dir, (l) => out.push(l)), 1);
+  assert.match(out.join('\n'), /Reword the commit before it lands/);
+  assert.doesNotMatch(out.join('\n'), /Nothing was committed/);
+  const found = await findingsOf('C23', repo(['feat: ok', `feat: ${'z'.repeat(100)}`]));
+  assert.ok(found.every((f) => !/Nothing was committed/.test(f.message + (f.fix ?? ''))), JSON.stringify(found));
+});
+
+test('a wrong-shape subject gets a next step too: the form to use', () => {
+  assert.match(lint('Added a thing').join('\n'), /Start the subject with "<type>: "/);
+  assert.match(lint('Added a thing', { landed: true }).join('\n'), /Reword the commit before it lands/);
+});
