@@ -63,7 +63,20 @@ def decide(data):
     text = (data.get("tool_input") or {}).get("command") or ""
     is_agent = bool(data.get("agent_id"))
     cmds = shellscan.scan(text, data.get("cwd"))
+    pending_commit, chain_has_commit = False, False   # a commit whose failure would not stop a later push
     for c in cmds:
+        g0 = shellscan.git_invocation(c)
+        if g0 and not c.cond:
+            if g0[1] == "push" and pending_commit and not chain_has_commit:
+                return ("Blocked: `git push` follows a `git commit` that is not joined to it by `&&` (the commit-msg hook can "
+                        "reject the commit and the push still runs; that happened twice on 2026-11-12). Next step: write "
+                        "`git commit ... && git push`, or `git commit ... || exit 1; git push`.")
+            if g0[1] == "commit" and not c.set_e:
+                pending_commit, chain_has_commit = True, True
+                if c.term == "||" and closes_with_exit(cmds, c):
+                    pending_commit = False
+        if c.term in (";", "\n", "&"):
+            chain_has_commit = False
         if c.is_cd and not c.cond:
             tgt = c.cd_target
             if c.term in (";", "\n") and not c.set_e and shellscan.next_cmd(cmds, c) is not None:

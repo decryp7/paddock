@@ -121,4 +121,17 @@ s0=$(python3 -c 'import time;print(time.time())'); out=$(run agent "$MAIN" "cat 
 $body
 EOF"); ms=$(python3 -c "import time;print(int((time.time()-$s0)*1000))")
 case "$out" in *deny*) echo "FAIL: a heredoc body full of cd lines must be skipped"; fail=1 ;; *) [ "$ms" -lt 1500 ] && echo "ok: a 5000-line heredoc is skipped in ${ms} ms" || { echo "FAIL: heredoc took ${ms} ms"; fail=1; } ;; esac
+
+# ---- a push after an unguarded commit (the commit-msg hook rejected it and the push still ran, twice on 2026-11-12)
+expect "commit; push is refused" deny agent "$WT" "git commit -m x; git push origin b"
+expect "commit newline push is refused" deny agent "$WT" $'git commit -m x\ngit push origin b'
+expect "commit && x; push is refused" deny coord "$WT" "git commit -m x && echo ok; git push"
+expect "commit && push is allowed" allow agent "$WT" "git commit -m x && git push origin b"
+expect "commit || exit 1; push is allowed" allow agent "$WT" "git commit -m x || exit 1; git push origin b"
+expect "commit || { ...; exit 1; }; push is allowed" allow agent "$WT" "git commit -m x || { echo no; exit 1; }; git push"
+expect "a push alone is allowed" allow agent "$WT" "git push origin b"
+expect "push before commit is allowed" allow agent "$WT" "git push origin a; git commit -m x"
+expect "if git commit; then git push is allowed" allow agent "$WT" "if git commit -m x; then git push; fi"
+expect "set -e then commit newline push is allowed" allow agent "$WT" $'set -e\ngit commit -m x\ngit push'
+out=$(run agent "$WT" "git commit -m x; git push"); case "$out" in *"commit"*"&&"*) echo "ok: message names the next step" ;; *) echo "FAIL: push message"; fail=1 ;; esac
 exit $fail
