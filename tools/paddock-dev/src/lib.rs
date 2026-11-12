@@ -27,11 +27,13 @@
 //! - `disk check|report|scan|clean|adopt|record`: free-space check, usage tracking (owner records and a SQLite index) and clean-up
 //!   of merged and stale-pushed folders ([`disk`]).
 //! - `load`: start, hold or stop for new agents, from the load, the free disk and the CI queue ([`load`], ER-24).
+//! - `brief check`: the fields and known-bad patterns of a brief to an agent ([`brief_check`], templates/agents/brief-template.md).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod brief_check;
 pub mod check;
 pub mod ci_build_jobs;
 pub mod ci_isolation;

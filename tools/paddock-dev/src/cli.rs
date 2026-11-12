@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_build_jobs, ci_isolation, ci_runs, ci_setup_rust, disk, gates, hook, input_hash, ipc_endpoints, load, merge_check, plan,
-    plan_cmd, release_isolation, slots, wait, worktree,
+    brief_check, check, ci_build_jobs, ci_isolation, ci_runs, ci_setup_rust, disk, gates, hook, input_hash, ipc_endpoints, load,
+    merge_check, plan, plan_cmd, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -35,6 +35,11 @@ enum Command {
     Wait(wait::WaitArgs),
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of d7 and d8 and the CI queue (ER-24).
     Load(load::LoadArgs),
+    /// Briefs to agents: check one for the required fields and the known-bad patterns (templates/agents/brief-template.md).
+    Brief {
+        #[command(subcommand)]
+        command: brief_check::BriefCommand,
+    },
     /// C100 and the gate register (ADR 0060): is every check run somewhere?
     Gates {
         #[command(subcommand)]
@@ -458,6 +463,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => ci_runs::dispatch(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Load(a) => load::command(&a),
+        Command::Brief { command } => brief_check::command(command),
         Command::Gates {
             command: GatesCommand::Model(a),
         } => gates::command::model(a.root.as_deref()),
