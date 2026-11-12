@@ -61,29 +61,103 @@ fn without_pins_verify_fails_unless_a_local_trial_allows_it_and_never_on_a_tag()
     assert!(v.findings.iter().any(|x| x.what.contains("refused on a tag run")), "{}", lines(&v));
 }
 
-#[test]
-fn every_planted_leak_fails_and_names_its_probe() {
-    for leak in Leak::all() {
-        let (_d, mut f) = job();
-        f.plant(leak);
-        let v = f.verify();
-        let hit = v.findings.iter().any(|x| x.probe == leak.probe() && x.what.contains(leak.needle()));
+/// One planted leak fails its probe and names it. Each leak is its own test (`leak_tests!`), so nextest runs them in
+/// parallel and one fixture build is one test's cost: the single loop over all leaks took 42.6 s alone and timed out at
+/// 60 s on a loaded runner (ADR 0071).
+fn a_planted_leak_fails_and_names_its_probe(leak: Leak) {
+    let (_d, mut f) = job();
+    f.plant(leak);
+    let v = f.verify();
+    let hit = v.findings.iter().any(|x| x.probe == leak.probe() && x.what.contains(leak.needle()));
+    assert!(
+        hit,
+        "{leak:?}: no {} finding containing {:?}; got:\n{}",
+        leak.probe().id(),
+        leak.needle(),
+        lines(&v)
+    );
+    for finding in &v.findings {
         assert!(
-            hit,
-            "{leak:?}: no {} finding containing {:?}; got:\n{}",
-            leak.probe().id(),
-            leak.needle(),
-            lines(&v)
+            finding.line().starts_with("::error::release-isolation "),
+            "{leak:?}: {}",
+            finding.line()
         );
-        for finding in &v.findings {
-            assert!(
-                finding.line().starts_with("::error::release-isolation "),
-                "{leak:?}: {}",
-                finding.line()
-            );
-            assert!(finding.line().contains("Next: "), "{leak:?}: a finding without its next step");
-        }
+        assert!(finding.line().contains("Next: "), "{leak:?}: a finding without its next step");
     }
+}
+
+/// Makes one test per leak and a list of the variant names it covers.
+macro_rules! leak_tests {
+    ($list:ident; $($name:ident => $leak:ident),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                a_planted_leak_fails_and_names_its_probe(Leak::$leak);
+            }
+        )*
+        const $list: &[&str] = &[$(stringify!($leak)),*];
+    };
+}
+
+leak_tests! { COMMON_LEAKS;
+    ledger_missing_kind => LedgerMissingKind,
+    ledger_shared_mode => LedgerSharedMode,
+    folder_replaced => FolderReplaced,
+    kept_folder => KeptFolder,
+    outside_job_root => OutsideJobRoot,
+    cargo_home_elsewhere => CargoHomeElsewhere,
+    sccache_dir_shared => SccacheDirShared,
+    rustc_wrapper => RustcWrapper,
+    sccache_requests => SccacheRequests,
+    sccache_stats_missing => SccacheStatsMissing,
+    crate_hash_mismatch => CrateHashMismatch,
+    crate_not_in_lock => CrateNotInLock,
+    no_crates => NoCrates,
+    config_in_parent => ConfigInParent,
+    config_in_cargo_home => ConfigInCargoHome,
+    config_untracked_in_clone => ConfigUntrackedInClone,
+    ci_toml_extra => CiTomlExtra,
+    git_hooks_path => GitHooksPath,
+    git_instead_of => GitInsteadOf,
+    user_npmrc => UserNpmrc,
+    tauri_file_tampered => TauriFileTampered,
+    npm_global_npmrc => NpmGlobalNpmrc,
+    npm_missing => NpmMissing,
+    tauri_pins_missing => TauriPinsMissing,
+    allow_unpinned_on_tag => AllowUnpinnedOnTag,
+    other_registry_index => OtherRegistryIndex,
+    git_checkouts_in_cargo_home => GitCheckoutsInCargoHome,
+    dev_tool_wrong_name => DevToolWrongName,
+    dev_tool_off => DevToolOff,
+    folder_kind_run => FolderKindRun,
+    config_tracked_modified => ConfigTrackedModified,
+    clone_not_at_tag => CloneNotAtTag,
+    allow_unpinned_in_ci_release_mode => AllowUnpinnedInCiReleaseMode,
+}
+
+#[cfg(unix)]
+leak_tests! { OS_LEAKS;
+    angular_link => AngularLink,
+    link_registry_src => LinkRegistrySrc,
+    link_node_modules => LinkNodeModules,
+    link_target_release => LinkTargetRelease,
+    git_missing => GitMissing,
+    npm_homebrew_link => NpmHomebrewLink,
+}
+
+#[cfg(windows)]
+leak_tests! { OS_LEAKS;
+    link_junction => LinkJunction,
+}
+
+/// A new `Leak` variant without its own test above fails here, so the per-leak tests cannot fall behind `Leak::all()`.
+#[test]
+fn every_leak_has_its_own_test() {
+    let mut covered: Vec<String> = COMMON_LEAKS.iter().chain(OS_LEAKS).map(|s| s.to_string()).collect();
+    let mut all: Vec<String> = Leak::all().iter().map(|l| format!("{l:?}")).collect();
+    covered.sort();
+    all.sort();
+    assert_eq!(covered, all, "add a `leak_tests!` line for each missing leak, drop the stale ones");
 }
 
 #[test]
