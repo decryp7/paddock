@@ -39,6 +39,15 @@ pub enum UserAction {
     DropConnection,
     /// Page loads stop finishing (a page that never fires its load event).
     StallLoads,
+    /// A browser that is up but slow to answer (a loaded machine): the answer to `Target.getTargets` is held until
+    /// [`UserAction::ReleaseAnswers`] (as in `paddock-chromium`'s fake).
+    HoldPageList,
+    /// As [`UserAction::HoldPageList`], for `Target.attachToTarget`.
+    HoldAttach,
+    /// As [`UserAction::HoldPageList`], for `Runtime.evaluate` (a page command after the start).
+    HoldEvaluate,
+    /// Held answers are sent, and nothing is held from now on.
+    ReleaseAnswers,
 }
 
 impl UserAction {
@@ -48,6 +57,10 @@ impl UserAction {
             UserAction::Quit => "quit",
             UserAction::DropConnection => "drop-connection",
             UserAction::StallLoads => "stall-loads",
+            UserAction::HoldPageList => "hold-page-list",
+            UserAction::HoldAttach => "hold-attach",
+            UserAction::HoldEvaluate => "hold-evaluate",
+            UserAction::ReleaseAnswers => "release-answers",
         }
     }
 }
@@ -192,6 +205,10 @@ pub fn serve_if_requested() {
 static WINDOW_CLOSED: AtomicBool = AtomicBool::new(false);
 static CONNECTION_DROPPED: AtomicBool = AtomicBool::new(false);
 static LOADS_STALLED: AtomicBool = AtomicBool::new(false);
+static PAGE_LIST_HELD: AtomicBool = AtomicBool::new(false);
+static ATTACH_HELD: AtomicBool = AtomicBool::new(false);
+static EVALUATE_HELD: AtomicBool = AtomicBool::new(false);
+static ANSWERS_RELEASED: AtomicBool = AtomicBool::new(false);
 /// Pages opened over DevTools (`Target.createTarget`), besides the ones the browser started with.
 static CREATED: AtomicUsize = AtomicUsize::new(0);
 
@@ -217,6 +234,10 @@ fn apply_control() {
             "close-window" => WINDOW_CLOSED.store(true, Ordering::SeqCst),
             "drop-connection" => CONNECTION_DROPPED.store(true, Ordering::SeqCst),
             "stall-loads" => LOADS_STALLED.store(true, Ordering::SeqCst),
+            "hold-page-list" => PAGE_LIST_HELD.store(true, Ordering::SeqCst),
+            "hold-attach" => ATTACH_HELD.store(true, Ordering::SeqCst),
+            "hold-evaluate" => EVALUATE_HELD.store(true, Ordering::SeqCst),
+            "release-answers" => ANSWERS_RELEASED.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
             _ => {}
         }
@@ -302,6 +323,20 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         };
         if let Some(s) = req.get("sessionId") {
             reply["sessionId"] = s.clone();
+        }
+        let held = match method {
+            "Target.getTargets" => &PAGE_LIST_HELD,
+            "Target.attachToTarget" => &ATTACH_HELD,
+            "Runtime.evaluate" => &EVALUATE_HELD,
+            _ => &ANSWERS_RELEASED,
+        };
+        if !std::ptr::eq(held, &ANSWERS_RELEASED) && held.load(Ordering::SeqCst) && !ANSWERS_RELEASED.load(Ordering::SeqCst) {
+            // A slow browser: the answer waits for the test's release (the control thread still quits the fake).
+            record_call(&format!("held {method}"));
+            while !ANSWERS_RELEASED.load(Ordering::SeqCst) {
+                apply_control();
+                std::thread::sleep(TICK);
+            }
         }
         if ws.send(Message::text(reply.to_string())).is_err() {
             return;

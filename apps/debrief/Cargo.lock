@@ -983,6 +983,8 @@ dependencies = [
  "log",
  "paddock-env",
  "paddock-proc",
+ "paddock-testkit",
+ "paddock-testkit-start",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1674,6 +1676,8 @@ dependencies = [
  "paddock-diag",
  "paddock-env",
  "paddock-proc",
+ "paddock-testkit",
+ "paddock-testkit-start",
  "semver",
  "serde",
  "serde_json",
@@ -1891,6 +1895,7 @@ dependencies = [
  "libc",
  "log",
  "paddock-proc",
+ "paddock-testkit",
  "postcard",
  "proptest",
  "serde",
@@ -2310,6 +2315,7 @@ dependencies = [
  "log",
  "paddock-proc",
  "paddock-testkit",
+ "paddock-testkit-start",
  "serde",
  "serde_json",
  "tempfile",
@@ -5395,6 +5401,15 @@ dependencies = [
  "paddock-workspace-hack",
  "socket2",
  "tempfile",
+]
+
+[[package]]
+name = "paddock-testkit-start"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
 ]
 
 [[package]]

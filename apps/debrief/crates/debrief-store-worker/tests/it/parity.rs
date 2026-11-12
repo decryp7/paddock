@@ -127,6 +127,9 @@ fn ask<S: Query + Analysis + Profiles + Diagnostics + Search + Positions>(s: &S,
 
 #[test]
 fn every_operation_over_the_worker_answers_like_the_store() {
+    let phase = crate::Phases::new("every_operation");
+    crate::warm_binaries();
+    phase.at("binaries warmed");
     let dir = TempDir::new("store");
     let exports = TempDir::new("exports");
     let roots: Vec<PathBuf> = ["serilog-text", "log4net", "serilog-clef"]
@@ -137,12 +140,16 @@ fn every_operation_over_the_worker_answers_like_the_store() {
     assert!(!roots.is_empty(), "the samples are there");
     let local = {
         // The same importers as the worker: the plugin processes next to the test binaries.
-        let plugins = debrief_plugin_host::Builtins::load(&debrief_plugin_host::builtins::default_binary()).plugins();
+        let plugins = crate::builtins().plugins();
+        phase.at("plugins loaded");
         let registry = debrief_store_worker::server::install_plugins(plugins, &[]);
         let store = DuckStore::create(&dir.0, Profile::default_profile(), registry).unwrap();
         store.open(&roots).unwrap().wait().unwrap();
+        phase.at("imported in process");
         store.wait_for_index(Duration::from_secs(120)).unwrap();
+        phase.at("indexed in process");
         let answers = ask(&store, &exports.0.join("local.csv"));
+        phase.at("asked in process");
         let mut events = 0usize;
         store
             .scan(&Filter::default(), &mut |b| {
@@ -155,7 +162,9 @@ fn every_operation_over_the_worker_answers_like_the_store() {
     };
     let w = StoreWorker::new(WorkerConfig::for_tests(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
     let remote_store = w.open_store(&dir.0, Profile::default_profile(), false, None).unwrap();
+    phase.at("opened in the worker");
     let remote = ask(&remote_store, &exports.0.join("remote.csv"));
+    phase.at("asked over the worker");
     for ((name, l), (_, r)) in local.iter().zip(&remote) {
         assert_eq!(l, r, "{name} differs over the worker");
     }
@@ -215,6 +224,7 @@ fn every_operation_over_the_worker_answers_like_the_store() {
     remote_store.close();
     assert_eq!(remote_store.summary().unwrap().total, total);
     w.shutdown();
+    phase.at("done");
 }
 
 /// What a store read from the mixed samples, independent of the ids it gave (sources by path, events by line).
@@ -262,6 +272,9 @@ fn mixed_answers<S: Query>(s: &S) -> Vec<(String, Value)> {
 /// several hosts and apps (the syslog plugin, run by the worker), and the instance key chosen per source.
 #[test]
 fn mixed_sources_imported_by_the_worker_read_like_in_process() {
+    let phase = crate::Phases::new("mixed_sources");
+    crate::warm_binaries();
+    phase.at("binaries warmed");
     let paths: Vec<PathBuf> = ["linux/logserver01/apps-20261014.log", "linux/logserver01/syslog-20261014.log"]
         .iter()
         .map(|p| samples().join(p))
@@ -275,18 +288,23 @@ fn mixed_sources_imported_by_the_worker_read_like_in_process() {
         "{} is missing: build it first with `cargo build -p debrief-plugins` (or run `cargo test --workspace`)",
         plugins_binary.display()
     );
-    let plugins = debrief_plugin_host::Builtins::load(&plugins_binary).plugins();
+    let plugins = crate::builtins().plugins();
+    phase.at("plugins loaded");
     let registry = debrief_store_worker::server::install_plugins(plugins, &[]);
     let local = DuckStore::create(&local_dir.0, Profile::default_profile(), registry).unwrap();
     local.open(&paths).unwrap().wait().unwrap();
     let local_answers = mixed_answers(&local);
     drop(local);
+    phase.at("imported and asked in process");
 
     let remote_dir = TempDir::new("mixed-remote");
     let w = StoreWorker::new(WorkerConfig::for_tests(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
     let remote = w.open_store(&remote_dir.0, Profile::default_profile(), true, None).unwrap();
+    phase.at("opened in the worker");
     remote.open(&paths).unwrap().wait().unwrap();
+    phase.at("imported in the worker");
     let remote_answers = mixed_answers(&remote);
+    phase.at("asked over the worker");
     for ((name, l), (_, r)) in local_answers.iter().zip(&remote_answers) {
         assert_eq!(l, r, "{name} differs between the worker's import and the import in process");
     }
@@ -314,7 +332,7 @@ fn the_redaction_summary_over_the_worker_answers_like_the_store() {
     use debrief_core::ports::Redaction;
     let dir = TempDir::new("redact");
     let profile = Profile::from_toml("name = 'Redacting'\n[redact]\ndetectors = ['email', 'ipv4']\n").unwrap();
-    let plugins = debrief_plugin_host::Builtins::load(&debrief_plugin_host::builtins::default_binary()).plugins();
+    let plugins = crate::builtins().plugins();
     let registry = debrief_store_worker::server::install_plugins(plugins, &[]);
     let local = DuckStore::create(&dir.0, profile.clone(), registry).unwrap();
     local.open(&[samples().join("serilog-clef")]).unwrap().wait().unwrap();
@@ -400,6 +418,9 @@ fn live_session<S: debrief_core::ports::Store>(s: &S, logs: &std::path::Path) ->
 /// Clock skew and live tail over the worker answer exactly what the store answers in process.
 #[test]
 fn clock_skew_and_live_tail_over_the_worker_answer_like_the_store() {
+    let phase = crate::Phases::new("clock_skew");
+    crate::warm_binaries();
+    phase.at("binaries warmed");
     let make_logs = |tag: &str| {
         let logs = TempDir::new(tag);
         for (host, skew) in [("web01", 0i64), ("web02", -2_500)] {
@@ -420,13 +441,17 @@ fn clock_skew_and_live_tail_over_the_worker_answer_like_the_store() {
     };
     let (l1, l2) = (make_logs("skew-local"), make_logs("skew-remote"));
     let (d1, d2) = (TempDir::new("skew-store-local"), TempDir::new("skew-store-remote"));
-    let plugins = debrief_plugin_host::Builtins::load(&debrief_plugin_host::builtins::default_binary()).plugins();
+    let plugins = crate::builtins().plugins();
+    phase.at("plugins loaded");
     let registry = debrief_store_worker::server::install_plugins(plugins, &[]);
     let local = DuckStore::create(&d1.0, Profile::default_profile(), registry).unwrap();
     let expected = live_session(&local, &std::fs::canonicalize(&l1.0).unwrap());
+    phase.at("live session in process");
     let w = StoreWorker::new(WorkerConfig::for_tests(env!("CARGO_BIN_EXE_debrief-store-worker"))).unwrap();
     let remote = w.open_store(&d2.0, Profile::default_profile(), true, None).unwrap();
+    phase.at("opened in the worker");
     let got = live_session(&remote, &std::fs::canonicalize(&l2.0).unwrap());
+    phase.at("live session over the worker");
     for ((name, e), (_, g)) in expected.iter().zip(&got) {
         assert_eq!(e, g, "{name} differs over the worker");
     }

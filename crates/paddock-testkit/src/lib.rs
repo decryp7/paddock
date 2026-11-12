@@ -17,6 +17,8 @@
 //! - [`guarded`], [`Progress`], [`StallGuard`]: a slow job (a whole-repository scan) judged on progress, not total time: it fails
 //!   only when no unit is finished for the stall limit (ADR 0071).
 //!
+//! - The wait for a program the test started (`wait_ready_or_exit`, ADR 0071) is in `paddock-testkit-start`: it drives
+//!   `paddock-proc`'s start judge, and `paddock-proc`'s own tests use this kit, so the kit cannot depend on it.
 //! - [`boot_volume`]: [`boot_volume::boot_volume_temp`], the folder for programs a test starts as their own responsible
 //!   process (disclaimed or by launchd): never on an external volume, where macOS prompts (TCC, Removable Volumes).
 //!

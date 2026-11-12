@@ -1,0 +1,20 @@
+[package]
+name = "paddock-testkit-start"
+version = "0.1.0"
+description = "The Paddock test kit's wait for a program a test started (a dev-dependency, ADR 0071): wait_ready_or_exit, try_wait_ready_or_exit and wait_exit (ready or ended, judged by paddock-proc's start judge, never a fixed budget; a wall-clock hang guard), Logged (a child whose error output comes back with its exit) and warm_first_start(s) (a fresh binary's first run paid once). Its own crate because paddock-proc's tests use paddock-testkit."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[dependencies]
+paddock-proc = { workspace = true }
+paddock-testkit = { workspace = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(unix)'.dev-dependencies]
+# The scripted child of the tests stops itself with SIGSTOP (no signal to a pid from the test, rule 53).
+libc = "0.2"

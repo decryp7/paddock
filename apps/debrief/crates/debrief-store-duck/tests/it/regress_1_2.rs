@@ -197,6 +197,13 @@ fn an_idle_store_statements_and_cpu() {
     eprintln!("IDLE {idle} s: {statements} statements, {used:.3} CPU-s");
 }
 
+/// How long the build of [`building_the_catalogue_keeps_its_unsaved_rows_bounded`] may go without progress (ADR 0071,
+/// `paddock_testkit::guarded`, as paddock-dev's live scans): the corpus written, the import's files and bytes, the catalogue's
+/// committed rows. A slow host stretches the run, never this: 12 s quiet against 37 s locally at a load of about 20 and 46-61 s
+/// on the CI Mac (607bb7928, CI 7961). nextest's slow-timeout (`.config/nextest.toml`, its waiver) is only the backstop.
+// conformance: hang-guard
+const BUILD_STALL: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// The service keeps the high-water mark of the rows committed and not yet checkpointed (a hook, [`RowStats`]), so the
 /// bound is read exactly: a sample of the store's memory taken from outside can miss the peak and pass without the fix.
 /// Without the mid-run checkpoint every row of the run stays unsaved and the mark is the total.
@@ -204,16 +211,33 @@ fn an_idle_store_statements_and_cpu() {
 fn building_the_catalogue_keeps_its_unsaved_rows_bounded() {
     let base = TempDir::new("regress-unsaved-corpus");
     let dir = TempDir::new("regress-unsaved");
+    let (corpus_dir, store_dir) = (base.0.join("corpus"), dir.0.clone());
     // 100 000 events commit about 340 000 rows, over three times the bound, which is all the probe below needs (ER-33);
-    // 300 000 committed ten times the bound and took 46-61 s on the CI Mac, past the 90 s limit under load (CI 7961).
-    let corpus = common::corpus::corpus(&base.0.join("corpus"), 100_000);
-    let store = debrief_store_duck::DuckStore::create(&dir.0, Profile::default_profile(), debrief_core::PluginRegistry::new()).unwrap();
-    store.open(&[corpus]).unwrap().wait().unwrap();
-    assert!(
-        store.wait_for_catalogue(std::time::Duration::from_secs(300)).unwrap(),
-        "the catalogue was not built"
-    );
-    let stats = store.catalogue_row_stats().expect("the store has a catalogue service");
+    // 300 000 committed ten times the bound and took 46-61 s on the CI Mac (CI 7961). The build is judged on its progress,
+    // not on its total time: a loaded host makes it slower, never red.
+    let stats = paddock_testkit::guarded("building the catalogue of 100 000 events", BUILD_STALL, move |progress| {
+        let corpus = common::corpus::corpus(&corpus_dir, 100_000);
+        progress.tick();
+        let store =
+            debrief_store_duck::DuckStore::create(&store_dir, Profile::default_profile(), debrief_core::PluginRegistry::new()).unwrap();
+        let import = store.open(&[corpus]).unwrap();
+        // The import's files and bytes; a new phase that starts its counters again counts as progress too.
+        progress.follow(|| {
+            let s = import.progress();
+            let level = [s.done as u64, s.total as u64, s.bytes_done]
+                .iter()
+                .fold(0u64, |h, v| h.wrapping_mul(1_000_003).wrapping_add(*v));
+            (level, import.is_finished())
+        });
+        import.wait().unwrap();
+        progress.tick();
+        // The catalogue's committed rows grow while it builds; each look also wakes the catalogue's thread.
+        progress.follow(|| {
+            let built = store.wait_for_catalogue(std::time::Duration::from_millis(1)).unwrap();
+            (store.catalogue_row_stats().map_or(0, |s| s.committed), built)
+        });
+        store.catalogue_row_stats().expect("the store has a catalogue service")
+    });
     eprintln!("{stats:?}");
     // The probe can see the thing (ER-33): the run wrote several times the bound, so an unbounded run would show it.
     assert!(
