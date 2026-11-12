@@ -80,9 +80,13 @@ commit-msg:
 
 pre-push:
   commands:
+    # Fast static gates for the whole push (ADR 0038): conformance over the tree, as CI's conformance job runs it.
+    # `./dev check --pre-push` is not built yet; replace this entry with it when it lands. Skip with LEFTHOOK=0.
+    conformance:
+      run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98 --strict C36
     pitwall-scripts:
       root: "apps/pitwall/"
-      run: node --test scripts/commit-lint.test.mjs scripts/release/latest-json.test.mjs scripts/ci/
+      run: node --test scripts/ci/*.test.mjs
     pitwall-deny:
       root: "apps/pitwall/"
       run: cargo deny --workspace check
