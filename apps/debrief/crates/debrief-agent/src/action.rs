@@ -8,7 +8,7 @@ use crate::config::Action;
 use crate::run::{dir_size, ActionRecord, ActionStatus};
 use debrief_collect::{select_logs, Collector, NoProgress};
 use debrief_core::export::ClefFileSink;
-use debrief_core::plugin::Collector as _;
+use debrief_core::plugin::Collector as MonitorCollector;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime};
@@ -133,6 +133,17 @@ fn wait(duration: Duration, stop: &AtomicBool, local: &AtomicBool) -> bool {
 }
 
 fn monitor(settings: &serde_json::Value, duration: Duration, dir: &Path, stop: &AtomicBool) -> ActionRecord {
+    monitor_with(&debrief_monitor::ProcessMonitor, settings, duration, dir, stop)
+}
+
+/// [`monitor`] with the collector given, so a test can make its sampling slow.
+fn monitor_with(
+    collector: &dyn MonitorCollector,
+    settings: &serde_json::Value,
+    duration: Duration,
+    dir: &Path,
+    stop: &AtomicBool,
+) -> ActionRecord {
     let out = dir.join("monitor");
     let sink = match ClefFileSink::new(&out, "process-monitor", MONITOR_FILE_BYTES, MONITOR_FILES) {
         Ok(s) => s,
@@ -141,7 +152,7 @@ fn monitor(settings: &serde_json::Value, duration: Duration, dir: &Path, stop: &
     let local = AtomicBool::new(false);
     let (result, stopped) = std::thread::scope(|s| {
         let timer = s.spawn(|| wait(duration, stop, &local));
-        let result = debrief_monitor::ProcessMonitor.run(settings, &sink, &local);
+        let result = collector.run(settings, &sink, &local);
         local.store(true, Ordering::Relaxed);
         (result, timer.join().unwrap_or(false))
     });

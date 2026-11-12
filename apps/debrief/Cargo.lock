@@ -1579,6 +1579,7 @@ dependencies = [
  "debrief-plugin-tools",
  "globset",
  "log",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "sysinfo",

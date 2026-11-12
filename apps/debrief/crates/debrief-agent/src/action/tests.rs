@@ -35,19 +35,116 @@ fn collect_writes_a_bundle() {
     assert!(rec.message.unwrap().contains("maxBundleMb"));
 }
 
+/// `Process stats` needs a second sample, one interval after the first, so a run of a fixed 600 ms had no stats event when the
+/// first sample came late on a loaded runner (ADR 0071). The run ends on the condition (the event is in the file), capped at
+/// 60 s so a monitor that never samples fails with its output instead of hanging.
 #[test]
-fn monitor_records_for_its_duration_or_until_stopped() {
+fn monitor_records_until_it_has_a_stats_event() {
+    const CAP: Duration = Duration::from_secs(60);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("monitor/process-monitor.clef");
+    let settings = serde_json::json!({ "targets": [{ "pid": std::process::id() }], "intervalMs": 250 });
+    let action = Action::Monitor {
+        settings,
+        duration: Duration::from_secs(3600),
+    };
+    let stop = AtomicBool::new(false);
+    let gave_up = AtomicBool::new(false);
+    let has_stats = || std::fs::read_to_string(&file).is_ok_and(|t| t.contains("Process stats"));
+    let rec = std::thread::scope(|s| {
+        s.spawn(|| {
+            if !paddock_testkit::poll_until_within(CAP, || stop.load(Ordering::Relaxed) || has_stats()) {
+                gave_up.store(true, Ordering::Relaxed);
+            }
+            stop.store(true, Ordering::Relaxed);
+        });
+        let rec = SystemExecutor {
+            perfmon: false,
+            ..SystemExecutor::default()
+        }
+        .execute(&action, dir.path(), &stop);
+        stop.store(true, Ordering::Relaxed);
+        rec
+    });
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    assert!(
+        !gave_up.load(Ordering::Relaxed),
+        "no Process stats event within {CAP:?}; the output:\n{text}"
+    );
+    assert_eq!(rec.status, ActionStatus::Stopped, "{rec:?}");
+    assert_eq!(rec.outputs, ["monitor"]);
+    assert!(text.contains("Process stats"), "{text}");
+    assert!(rec.bytes > 0);
+}
+
+/// A collector whose first sample comes `delay` late (a busy runner), by spinning rather than sleeping.
+struct SlowStart(Duration);
+
+impl debrief_core::plugin::Collector for SlowStart {
+    fn id(&self) -> &str {
+        "slow-start"
+    }
+    fn name(&self) -> &str {
+        "slow start"
+    }
+    fn run(&self, config: &serde_json::Value, sink: &dyn debrief_core::export::EventSink, stop: &AtomicBool) -> anyhow::Result<()> {
+        let end = Instant::now() + self.0;
+        while Instant::now() < end {
+            std::hint::spin_loop();
+        }
+        debrief_monitor::ProcessMonitor.run(config, sink, stop)
+    }
+}
+
+/// A first sample later than the duration (700 ms against 600 ms) gives a run with no stats event: a duration cannot say
+/// when the events are there, so the run ends on the condition instead, however late the sampler is.
+#[test]
+fn monitor_with_a_slow_first_sample_ends_on_the_condition() {
+    const CAP: Duration = Duration::from_secs(60);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("monitor/process-monitor.clef");
+    let settings = serde_json::json!({ "targets": [{ "pid": std::process::id() }], "intervalMs": 250 });
+    let stop = AtomicBool::new(false);
+    let gave_up = AtomicBool::new(false);
+    let has_stats = || std::fs::read_to_string(&file).is_ok_and(|t| t.contains("Process stats"));
+    let rec = std::thread::scope(|s| {
+        s.spawn(|| {
+            if !paddock_testkit::poll_until_within(CAP, || stop.load(Ordering::Relaxed) || has_stats()) {
+                gave_up.store(true, Ordering::Relaxed);
+            }
+            stop.store(true, Ordering::Relaxed);
+        });
+        let rec = monitor_with(
+            &SlowStart(Duration::from_millis(700)),
+            &settings,
+            Duration::from_secs(3600),
+            dir.path(),
+            &stop,
+        );
+        stop.store(true, Ordering::Relaxed);
+        rec
+    });
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    assert!(
+        !gave_up.load(Ordering::Relaxed),
+        "no Process stats event within {CAP:?}; the output:\n{text}"
+    );
+    assert!(text.contains("Process stats"), "{text}");
+    assert_eq!(rec.status, ActionStatus::Stopped, "{rec:?}");
+}
+
+/// The duration ends the run with `Ok`; how many samples fit in it depends on the scheduler, so only the end is asserted.
+#[test]
+fn monitor_ends_after_its_duration_or_when_stopped() {
     let dir = tempfile::tempdir().unwrap();
     let settings = serde_json::json!({ "targets": [{ "pid": std::process::id() }], "intervalMs": 250 });
     let action = Action::Monitor {
         settings: settings.clone(),
-        duration: Duration::from_millis(600),
+        duration: Duration::from_millis(1),
     };
     let rec = exec(&action, dir.path());
     assert_eq!(rec.status, ActionStatus::Ok, "{rec:?}");
     assert_eq!(rec.outputs, ["monitor"]);
-    let text = std::fs::read_to_string(dir.path().join("monitor/process-monitor.clef")).unwrap();
-    assert!(text.contains("Process stats"), "{text}");
     assert!(rec.bytes > 0);
 
     let stop = AtomicBool::new(true);
