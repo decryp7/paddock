@@ -1,0 +1,85 @@
+{
+ "_comment": "Known state races of ER-21 / C71 (an assertion on a field the wait before it did not read; a copy of the current status after a timer wait), by file and hash of the normalised line. May only shrink; wait for the field itself and delete the entry.",
+ "sites": [
+  {
+   "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
+   "line": 992,
+   "hash": "7082ab131971ef39"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
+   "line": 948,
+   "hash": "a30f53e4a4a799b9"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 1238,
+   "hash": "457dbcc8d83ec022"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
+   "line": 1244,
+   "hash": "d56b6dd03bb2414f"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/tools.rs",
+   "line": 602,
+   "hash": "ed13484cef60826a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
+   "line": 832,
+   "hash": "c214e9914f62c10d"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-cli/src/progress.rs",
+   "line": 116,
+   "hash": "ac8a11ecd78513f1"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/src/events/tests.rs",
+   "line": 37,
+   "hash": "ee576dae1ea115a3"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
+   "line": 706,
+   "hash": "4fc770834d83d988"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 575,
+   "hash": "94a8022d96d61ebb"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
+   "line": 1411,
+   "hash": "74e8e9a2478faad3"
+  },
+  {
+   "file": "apps/dyno/app/src/app/features/disk-map/disk-map-page.spec.ts",
+   "line": 252,
+   "hash": "0daf8f30ff619853"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/bench.rs",
+   "line": 1734,
+   "hash": "c8ae3cb9f314fcd4"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/firewall.rs",
+   "line": 504,
+   "hash": "119fe0b5b92fc3f6"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/tests/helper_seam.rs",
+   "line": 906,
+   "hash": "a38302f709b598e3"
+  },
+  {
+   "file": "crates/paddock-updater/src/tauri/tests.rs",
+   "line": 910,
+   "hash": "64e28b6b6689e928"
+  }
+ ]
+}

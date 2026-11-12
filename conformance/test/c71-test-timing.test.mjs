@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { againstBaseline, retriesWithoutFlakyFailure, lineHash, rustTimingSites, rustWaitSites, tsWaitSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
+import { againstBaseline, retriesWithoutFlakyFailure, lineHash, rustTimingSites, rustWaitSites, rustRaceSites, tsRaceSites, tsWaitSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const ts = (t) => tsTimingSites(t).map((s) => s.line);
@@ -247,4 +247,65 @@ test('C71 waits in TypeScript: a fixed timeout under 40 s on a wait is flagged; 
   assert.deepEqual(w("// conformance: expiry-under-test — the toast hides after 3 s\nawait vi.waitFor(() => gone(), { timeout: 4000 });\n"), []);
   assert.deepEqual(w("// await vi.waitFor(() => ok(), { timeout: 5000 });\n"), []);
   assert.deepEqual(w("useTestClock();\nawait vi.waitFor(() => ok(), { timeout: 5000 });\n"), []);
+});
+
+// The class "a test asserts on state another thread writes, right after waiting on a different condition" (ER-21: Debrief's ticker
+// test, CI 7963, fixed in 0e162bcdd; Dyno 2026-11-01, lessons.md). Own baseline conformance/baselines/C71-races.json.
+const RACE_OLD = `#[test]
+fn probes_and_reports_reach_the_snapshot_through_the_ticker() {
+    clock.advance(VISIBLE_AFTER_MS);
+    wait_until("the probe", || jobs.info(h.id).and_then(|i| i.progress.done) == Some(3));
+    assert_eq!(jobs.info(h.id).unwrap().message.as_deref(), Some("reading app.log"));
+    let before = changes.load(Ordering::SeqCst);
+}
+`;
+const RACE_FIXED = `#[test]
+fn probes_and_reports_reach_the_snapshot_through_the_ticker() {
+    wait_until("the probe", || jobs.info(h.id).and_then(|i| i.progress.done) == Some(3));
+    assert_eq!(jobs.info(h.id).unwrap().message, None, "the job has not reported yet");
+    report.send(()).unwrap();
+    wait_until("the job's message", || {
+        jobs.info(h.id).and_then(|i| i.message).as_deref() == Some("reading app.log")
+    });
+    let before = changes.load(Ordering::SeqCst);
+}
+`;
+const races = (t) => rustRaceSites(t, { wholeFileIsTest: true }).map((s) => s.line);
+
+test('C71 races (Rust): the old ticker test is flagged at the assertion on a field the wait did not read; the fixed test is not', () => {
+  assert.deepEqual(races(RACE_OLD), [5]);
+  assert.deepEqual(races(RACE_FIXED), []);
+});
+
+test('C71 races (Rust): the same field, an absence check, an assertion not right after the wait, and non-test code pass', () => {
+  const t = (body) => `fn t() {\n${body}\n}\n`;
+  assert.deepEqual(races(t('    wait_until("up", || s.info().state == Up);\n    assert_eq!(s.info().state, Up);')), []);
+  assert.deepEqual(races(t('    wait_until("up", || s.info().state == Up);\n    let x = 1;\n    assert_eq!(s.info().other, 3);')), [], 'only the statement right after');
+  assert.deepEqual(races(t('    wait_until("up", || s.info().state == Up);\n    assert!(s.info().other.is_none());')), []);
+  assert.deepEqual(races(t('    wait_for(|| a.count.load() > 1);\n    assert_eq!(h.id, 7);')), [3], 'a different field after a wait_for');
+  assert.deepEqual(rustRaceSites('fn a() {\n    wait_until("u", || s.x == 1);\n    assert_eq!(s.y, 2);\n}\n').length, 0, 'not test code');
+});
+
+const DYNO_OLD = `it('ghost', async () => {
+  btn(r.el, 'Scan')!.click();
+  await settle(r.f);
+  await vi.advanceTimersByTimeAsync(0);
+  r.store.receive({ ...r.store.status()!, seq: 70, state: 'running' });
+});
+`;
+const DYNO_FIXED = `it('ghost', async () => {
+  btn(r.el, 'Scan')!.click();
+  await vi.waitFor(async () => {
+    await settle(r.f);
+    expect(r.store.status()?.state).toBe('done');
+  });
+  r.store.receive({ ...r.store.status()!, seq: 70, state: 'running', hiddenBytes: null, scannedAt: null });
+});
+`;
+test('C71 races (TypeScript): a spread of the current status right after a timer or settle wait is flagged; after a wait that reads that status it is not', () => {
+  const r = (t) => tsRaceSites(t).map((s) => s.line);
+  assert.deepEqual(r(DYNO_OLD), [5]);
+  assert.deepEqual(r(DYNO_FIXED), []);
+  assert.deepEqual(r("store.set({ ...store.status()!, seq: 1 });\n"), [], 'no wait before it');
+  assert.deepEqual(r("await settle(f);\nstore.set({ ...fresh, seq: 1 });\n"), [], 'not a spread of a getter');
 });

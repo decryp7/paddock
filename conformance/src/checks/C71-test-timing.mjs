@@ -22,6 +22,13 @@
 // literal is a hang guard. Exempt: a `FakeClock`/`ManualPace`/`TestSeams` argument, or `// conformance: expiry-under-test — <why>`
 // (the test examines that window). No hang-guard waiver: a 20 s guard on a start is the bug.
 // In TypeScript specs: `vi.waitFor`, `waitFor`, `waitUntil`, `expect.poll` or `.toPass` with `{ timeout: n }` under 40 000 ms.
+// State races (ER-21, own baseline `conformance/baselines/C71-races.json`): a test that asserts on state another thread writes, right
+// after waiting on a different condition (Debrief's ticker test, CI 7963; Dyno's ghost test, lessons 2026-11-01). Rust: the statement
+// after `wait_until(..)`/`wait_for(..)` is an `assert*!` that reads a field (outside call arguments) the wait's condition did not read;
+// an assertion that the field is still `None`/`is_none()` is an ordering check and passes. TypeScript: `{ ...x.status() }` (or
+// `snapshot`/`state`/`current`) in the statement right after an `await` of a timer or settle (`advanceTimers*`, `settle`, `flush*`,
+// `tick`) that did not read that getter: the copy is whichever state the race left. Wait for the field itself, or build the value from
+// scratch.
 // Also (ER-12): a Playwright config (`playwright*.config.*`) whose `retries` can be above 0 sets `failOnFlakyTests` (not `false`), so a
 // retry never turns a red run green; a config with `retries: 0` or no `retries` is fine.
 // Not yet (ADR 0041 §4 amendment, "first slice"): Instant/SystemTime/Date.now, recv_timeout/wait_timeout/Deadline::after,
@@ -34,6 +41,7 @@ import { maskRust } from './C39-freed-port.mjs';
 
 export const BASELINE_PATH = 'conformance/baselines/C71.json';
 export const WAITS_BASELINE_PATH = 'conformance/baselines/C71-waits.json';
+export const RACES_BASELINE_PATH = 'conformance/baselines/C71-races.json';
 const WAIVER = /conformance:\s*hang-guard\s*[—–-]+\s*(\S.{2,})/;
 const BOUND = /(\d+(?:\.\d+)?)\s*(ms|milliseconds?|min|mins|minutes?|s|secs?|seconds?)\b/g;
 const FAKE_SEAM = /\b(?:FakeClock|ManualPace|TestSeams)\b/;
@@ -306,6 +314,64 @@ export function rustWaitSites(source, { wholeFileIsTest = false } = {}) {
   return out;
 }
 
+const RACE_WAIT = /\b(?:wait_until|wait_for|poll_for)\s*\(/;
+const FIELD = /\.([A-Za-z_]\w*)\b(?!\s*\()/g;
+
+/** Field names read in `text`, optionally leaving out what sits inside call arguments (`info(h.id)` reads no `id` of the subject). */
+function fieldsOf(text, { outsideCalls }) {
+  let t = text;
+  if (outsideCalls) for (let prev = ''; prev !== t; ) { prev = t; t = t.replace(/(?<=\w)\([^()]*\)/g, '()'); }
+  return new Set([...t.matchAll(FIELD)].map((m) => m[1]));
+}
+
+/** The statement races in the test code of one Rust file (see the header): [{ line, what }]. */
+export function rustRaceSites(source, { wholeFileIsTest = false } = {}) {
+  const masked = maskRust(source);
+  const ranges = wholeFileIsTest ? [[0, masked.length]] : rustTestRanges(masked);
+  if (!ranges.length) return [];
+  const out = [];
+  const lineOf = (k) => masked.slice(0, k).split('\n').length;
+  for (const m of masked.matchAll(new RegExp(RACE_WAIT.source, 'g'))) {
+    if (!ranges.some(([a, b]) => m.index >= a && m.index < b)) continue;
+    const open = m.index + m[0].length - 1;
+    const args = callArgs(masked, open);
+    const end = masked.indexOf(';', open + args.length + 1);
+    if (end < 0) continue;
+    const stmtEnd = masked.indexOf(';', end + 1);
+    if (stmtEnd < 0) continue;
+    const stmt = masked.slice(end + 1, stmtEnd);
+    if (!/^\s*assert(?:_eq|_ne)?!\s*\(/.test(stmt) || /\bNone\b|\bis_none\s*\(/.test(stmt)) continue;
+    const read = fieldsOf(args, { outsideCalls: false });
+    if (![...fieldsOf(stmt, { outsideCalls: true })].some((f) => !read.has(f))) continue;
+    out.push({ line: lineOf(end + 1 + stmt.search(/\S/)), what: 'an assertion on a field the wait before it did not read: the writer may not have written it yet' });
+  }
+  return out;
+}
+
+const TS_SPREAD = /\.\.\.\s*([\w.$!?]+)\.(?:status|snapshot|state|current)\s*\(\s*\)/;
+const TS_TIMER_WAIT = /\bawait\s+(?:vi\.advanceTimers\w*|vi\.runAllTimers\w*|vi\.runOnlyPendingTimers\w*|settle|flush\w*|tick)\s*\(/;
+
+/** The current-status copies after a timer or settle wait in one TypeScript test file: [{ line, what }] (see the header). */
+export function tsRaceSites(source) {
+  const masked = maskTs(source);
+  const lines = masked.split('\n');
+  const out = [];
+  lines.forEach((line, i) => {
+    const sp = TS_SPREAD.exec(line);
+    if (!sp) return;
+    // The previous statement: the nearest earlier non-blank line that ends a statement (`;` or `});`), read back to its start.
+    let j = i - 1;
+    while (j >= 0 && lines[j].trim() === '') j--;
+    if (j < 0) return;
+    let k = j;
+    while (k > 0 && !/[;{]\s*$/.test(lines[k - 1].trimEnd()) ) k--;
+    const prev = lines.slice(k, j + 1).join('\n');
+    if (!TS_TIMER_WAIT.test(prev) || prev.includes(`${sp[1]}.`) ) return;
+    out.push({ line: i + 1, what: 'a copy of the current status right after a timer or settle wait: it is whichever state the race left' });
+  });
+  return out;
+}
+
 const TS_WAIT = /\b(?:vi\.waitFor|waitFor|waitUntil|expect\.poll|toPass)\s*\(/;
 const TS_TIMEOUT = /\btimeout\s*:\s*([\d_]+)\b/;
 
@@ -334,7 +400,7 @@ export function tsWaitSites(source) {
 }
 
 /** Every fixed budget in a file tree, in the shape of [`timingSites`]. */
-export function waitSites(files, read) {
+export function waitSites(files, read, finders = { ts: tsWaitSites, rust: rustWaitSites }) {
   const out = [];
   for (const file of files) {
     if (SKIP_PATH.test(file)) continue;
@@ -342,12 +408,15 @@ export function waitSites(files, read) {
     if (!isTs && !file.endsWith('.rs')) continue;
     const text = read(file);
     if (!text) continue;
-    const found = isTs ? tsWaitSites(text) : rustWaitSites(text, { wholeFileIsTest: RUST_TEST_FILE.test(file) });
+    const found = isTs ? finders.ts(text) : finders.rust(text, { wholeFileIsTest: RUST_TEST_FILE.test(file) });
     const lines = text.split('\n');
     for (const s of found) out.push({ file, ...s, text: lines[s.line - 1], hash: lineHash(lines[s.line - 1]) });
   }
   return out;
 }
+
+/** Every state race in a file tree, in the shape of [`timingSites`]. */
+export const raceSites = (files, read) => waitSites(files, read, { ts: tsRaceSites, rust: rustRaceSites });
 
 /** Every site in a file tree: [{ file, line, what, hash, text }]. */
 export function timingSites(files, read) {
@@ -462,10 +531,11 @@ export default {
     };
     const fixFor = {
       [BASELINE_PATH]: 'Wait on the condition (an event, `expect.poll`, a locator assertion, `useTestClock`/`frozenClock`, the FakeClock), or for a real bound add `// conformance: hang-guard — <why>, <bound of at least 10 s>` on the line.',
+      [RACES_BASELINE_PATH]: 'Wait for the field the assertion reads (a second `wait_until` on it), or force the order the test needs; build a pushed status from scratch instead of copying the current one (lessons: "A test that copies the current status inherits whichever state the race left").',
       [WAITS_BASELINE_PATH]: 'Wait for the condition, ready or exit (ADR 0071: `wait_ready_or_exit`, `wait_until`), or pass the kit\'s `HANG_GUARD`/`UNTIL_CONNECTED`; a fixed budget under 40 s is a verdict the host speed decides. If the test examines that window, add `// conformance: expiry-under-test — <why>`.',
     };
     const out = [...flaky];
-    for (const [path, sites] of [[BASELINE_PATH, timingSites(ctx.files(), ctx.read)], [WAITS_BASELINE_PATH, waitSites(ctx.files(), ctx.read)]]) {
+    for (const [path, sites] of [[BASELINE_PATH, timingSites(ctx.files(), ctx.read)], [WAITS_BASELINE_PATH, waitSites(ctx.files(), ctx.read)], [RACES_BASELINE_PATH, raceSites(ctx.files(), ctx.read)]]) {
       const baseline = readBaseline(path);
       const { fresh, stale } = againstBaseline(sites, baseline.sites);
       out.push(...fresh.map((s) => error('C71', 49, s.file, s.line, `${s.what} (ER-12, rule 49): ${s.text.trim().slice(0, 100)}`, fixFor[path])));
