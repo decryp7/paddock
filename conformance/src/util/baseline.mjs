@@ -4,14 +4,49 @@
 // baselines of the CI-env and shared-enum tests all use this.
 import { execFileSync } from 'node:child_process';
 
+/**
+ * Matches `current` against `base` entries in two passes: first by `exact` (the full key, for example file + hash), then the leftovers
+ * by `loose` (for example the hash alone). A pass-two match is a MOVED entry (same text, another file): not new, not stale. Counts are
+ * per key, so two identical lines in two files never hide a real addition. Returns { fresh, stale, moved: [{ item, from }] }; with no
+ * `loose` nothing is moved; `canMove(item, from)` can refuse a pairing (the site check lets only an entry whose file is gone move).
+ */
+export function reconcile(current, base, exact, loose, canMove = () => true) {
+  const push = (m, k, v) => (m.get(k) ?? m.set(k, []).get(k)).push(v);
+  const buckets = new Map(); // exact key -> indexes into `base`, in order
+  base.forEach((e, i) => push(buckets, exact(e), i));
+  const unmatched = new Set(base.keys());
+  const rest = [];
+  for (const c of current) {
+    const hit = buckets.get(exact(c))?.shift();
+    if (hit === undefined) rest.push(c);
+    else unmatched.delete(hit);
+  }
+  const pool = new Map(); // loose key -> unmatched indexes
+  if (loose) for (const i of unmatched) push(pool, loose(base[i]), i);
+  const fresh = [];
+  const moved = [];
+  for (const c of rest) {
+    const list = loose ? pool.get(loose(c)) : undefined;
+    const at = list ? list.findIndex((j) => canMove(c, base[j])) : -1;
+    if (at < 0) fresh.push(c);
+    else {
+      const i = list.splice(at, 1)[0];
+      unmatched.delete(i);
+      moved.push({ item: c, from: base[i] });
+    }
+  }
+  return { fresh, stale: [...unmatched].sort((a, b) => a - b).map((i) => base[i]), moved };
+}
+
 const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
 
 /**
  * The entries of `current` that the baseline at the merge base does not have (a multiset difference by `keyOf`), or `{ reason }` when
  * it cannot be measured (no git, no merge base, an unreadable file). A baseline absent at the merge base is the first introduction:
- * nothing was added. `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
+ * nothing was added. With `looseKeyOf` an entry whose loose key (say the hash) is in the base but whose full key is not is `moved`, not
+ * added (`moved: [{ item, from }]`). `entriesOf(json)` reads the list out of the parsed file; `git` and `baseRef` are injectable for tests.
  */
-export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = process.env.PADDOCK_BASE_REF ?? 'origin/main' }) {
+export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = defaultGit(root), baseRef = process.env.PADDOCK_BASE_REF ?? 'origin/main', looseKeyOf }) {
   let base;
   let text;
   try {
@@ -24,21 +59,17 @@ export function baselineGrowth({ root, path, current, keyOf, entriesOf, git = de
   try {
     text = git(['show', `${base}:${path}`]);
   } catch (e) {
-    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [] };
+    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [], moved: [] };
     return { reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
   }
-  const left = new Map();
+  let entries;
   try {
-    for (const e of entriesOf(JSON.parse(text))) left.set(keyOf(e), (left.get(keyOf(e)) ?? 0) + 1);
+    entries = entriesOf(JSON.parse(text));
   } catch {
     return { reason: `the baseline at ${base.slice(0, 9)} cannot be parsed` };
   }
-  const added = [];
-  for (const e of current) {
-    if ((left.get(keyOf(e)) ?? 0) > 0) left.set(keyOf(e), left.get(keyOf(e)) - 1);
-    else added.push(e);
-  }
-  return { base, added };
+  const { fresh, moved } = reconcile(current, entries, keyOf, looseKeyOf);
+  return { base, added: fresh, moved };
 }
 
 /**
