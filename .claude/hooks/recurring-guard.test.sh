@@ -16,7 +16,7 @@ say() { jq -nc '{type:"assistant",message:{role:"assistant",content:[{type:"text
 check() { # name want transcript-file [extra-json]
   extra=${4:-"{}"}
   out=$(jq -nc --arg p "$3" --argjson extra "$extra" '{transcript_path:$p,hook_event_name:"Stop"} + $extra' | "$H" 2>/dev/null)
-  case "$out" in *'"block"'*) got=block ;; *) got=allow ;; esac
+  case "$out" in *'additionalContext'*) got=block ;; *) got=allow ;; esac
   if [ "$got" != "$2" ]; then echo "FAIL: $1 (want $2, got $got)"; fail=1; else echo "ok: $1"; fi
 }
 { echo "$human"; report none; say; } >"$T/none.jsonl"
@@ -29,7 +29,7 @@ check() { # name want transcript-file [extra-json]
 { echo "$human"; report "class"; say; echo '{"type":"assistant", oops'; } >"$T/bad.jsonl"
 check "Recurring: none allows" allow "$T/none.jsonl"
 check "Recurring: none. allows" allow "$T/none2.jsonl"
-check "a class with no follow-up blocks" block "$T/class.jsonl"
+check "a class with no follow-up gives the notice" block "$T/class.jsonl"
 check "a class followed by AskUserQuestion allows" allow "$T/asked.jsonl"
 check "a class followed by Agent allows" allow "$T/agent.jsonl"
 check "a class followed by SendMessage allows" allow "$T/send.jsonl"
@@ -45,7 +45,7 @@ big="$T/big.jsonl"; : >"$big"
 line=$(jq -nc '{type:"attachment",pad:("x" * 2000)}')
 yes "$line" | head -n 10000 >"$big"; { echo "$human"; report "big class"; say; } >>"$big"
 s=$(date +%s%N 2>/dev/null || python3 -c 'import time;print(int(time.time()*1e9))')
-check "a 20 MB transcript blocks" block "$big"
+check "a 20 MB transcript gives the notice" block "$big"
 e=$(date +%s%N 2>/dev/null || python3 -c 'import time;print(int(time.time()*1e9))')
 ms=$(( (e - s) / 1000000 )); echo "info: ${ms} ms on $(wc -c <"$big") bytes"
 [ "$ms" -lt 500 ] || { echo "FAIL: too slow (${ms} ms)"; fail=1; }
@@ -60,7 +60,7 @@ $1
 tool() { jq -nc --arg n "$1" '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",id:"t",name:$n,input:{}}]}}'; }
 t() { # want name file [extra]
   out=$(jq -nc --arg p "$3" --argjson x "${4:-null}" '{transcript_path:$p}+($x//{})' | "$H" 2>/dev/null)
-  case "$out" in *'"block"'*) g=block;; *) g=allow;; esac
+  case "$out" in *additionalContext*) g=block;; *) g=allow;; esac
   if [ "$g" = "$1" ]; then echo "ok: $2"; else echo "FAIL: $2 (want $1, got $g)"; fail=1; fi
 }
 mk() { f="$R/$1.jsonl"; shift; { echo "$human"; for x in "$@"; do echo "$x"; done; say; } > "$f"; echo "$f"; }
@@ -86,5 +86,9 @@ t block "report followed by 1.1 MB line (FN: outside tail)" "$(mk l "$(rep '  Re
 # A transcript with no human message within the scan limit is too large to scan: allow with a warning.
 pad=$(jq -nc '{type:"attachment",pad:("x" * 100000)}'); { for i in 1 2 3 4 5 6; do echo "$pad"; done; rep '  Recurring: flaky sleeps'; } > "$R/nohuman.jsonl"
 out=$(jq -nc --arg p "$R/nohuman.jsonl" '{transcript_path:$p}' | RECURRING_GUARD_MAX_SCAN=300000 "$H" 2>"$R/err.txt")
-case "$out" in *block*) echo "FAIL: too large to scan must allow"; fail=1 ;; *) grep -q "too large to scan" "$R/err.txt" && echo "ok: too large to scan allows with a warning" || { echo "FAIL: no warning"; fail=1; } ;; esac
+case "$out" in *additionalContext*) echo "FAIL: too large to scan must allow"; fail=1 ;; *) grep -q "too large to scan" "$R/err.txt" && echo "ok: too large to scan allows with a warning" || { echo "FAIL: no warning"; fail=1; } ;; esac
+
+# Advisory only: the output never carries a block decision, and names the class and the next step.
+out=$(jq -nc --arg p "$T/class.jsonl" '{transcript_path:$p}' | "$H")
+if printf '%s' "$out" | jq -e 'has("decision") | not' >/dev/null && printf '%s' "$out" | jq -e '.hookSpecificOutput.hookEventName == "Stop" and (.hookSpecificOutput.additionalContext | test("flaky waits via sleep") and test("ER-21"))' >/dev/null; then echo "ok: advisory notice, no block decision"; else echo "FAIL: notice shape: $out"; fail=1; fi
 exit $fail

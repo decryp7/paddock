@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Stop hook: do not stop while a subagent report names a recurring class and nothing followed (ER-21).
+"""Stop hook (ADVISORY, never blocks): when a subagent report names a recurring class and nothing followed, tell the
+model through hookSpecificOutput.additionalContext (ER-21).
 Reads the transcript backwards just far enough to reach the last human message."""
 import json, os, re, sys
 
@@ -116,7 +117,7 @@ def decide(data):
     for k, e in enumerate(events):
         if e[0] == "report" and e[1]:
             if not any(x[0] == "follow" for x in events[k + 1:]):
-                return ("A report named a recurring class (%s) — propose its fix now (ER-21): ask the user or start it "
+                return ("Notice: a report named a recurring class (%s) — propose its fix now (ER-21): ask the user or start it "
                         "under an earlier approval." % e[1][:80])
     return None
 
@@ -134,7 +135,8 @@ def main():
         sys.stderr.write("%s: could not read the transcript (%s); allowing\n" % (NAME, e))
         return
     if reason:
-        print(json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False))
+        # Advisory: no `decision: block`; Claude Code shows this as Stop hook feedback, not as a hook error.
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": reason}}, ensure_ascii=False))
 
 
 if __name__ == "__main__":
