@@ -19,7 +19,7 @@ fn manifest() -> &'static Path {
 }
 
 fn repo_root() -> PathBuf {
-    manifest().ancestors().nth(2).unwrap().to_path_buf()
+    crate::full_tree(manifest().ancestors().nth(2).unwrap())
 }
 
 fn fixtures() -> PathBuf {

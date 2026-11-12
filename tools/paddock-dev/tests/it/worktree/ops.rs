@@ -1110,3 +1110,17 @@ fn two_adds_with_different_roots_cannot_nest_through_a_reservation() {
     ]);
     assert_eq!(after.code, 4, "{}", after.err);
 }
+
+// ---- claim by name ----
+
+#[test]
+fn claim_takes_a_worktree_name_as_well_as_its_path() {
+    let fx = Fixture::new();
+    let path = fx.add("by-name");
+    let r = fx.dev(&["worktree", "claim", "by-name", "--agent", "agent-A"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["path"], p(&path));
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    let unknown = fx.dev(&["worktree", "claim", "no-such-name", "--agent", "agent-A"]);
+    assert_ne!(unknown.code, 0, "{} {}", unknown.json, unknown.err);
+}

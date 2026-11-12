@@ -44,6 +44,7 @@ pub mod ci_tool;
 mod cli;
 pub mod disk;
 mod fds;
+pub mod full_tree;
 pub mod gates;
 pub mod hook;
 pub mod input_hash;
@@ -62,6 +63,7 @@ pub mod release_isolation;
 pub mod safe_remove;
 pub mod slots;
 pub mod wait;
+pub mod wait_lock;
 pub mod worktree;
 
 pub use cli::run;
