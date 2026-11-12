@@ -55,7 +55,7 @@ fn build(fx: &Fixture) -> BTreeMap<&'static str, PathBuf> {
     let mut out = BTreeMap::new();
     for name in ["merged", "unmerged", "empty", "dirtymerged"] {
         sh(fx, &["add", name, "--base", "main"]);
-        out.insert(name, fx.root.join("sh-wt").join(name).canonicalize().unwrap());
+        out.insert(name, paddock_env::winpath::real(&fx.root.join("sh-wt").join(name)).unwrap());
     }
     for name in ["merged", "unmerged", "dirtymerged"] {
         fx.commit_in(&out[name], &format!("{name}.txt"));
@@ -144,7 +144,7 @@ fn clean_removes_the_same_worktrees_as_worktree_sh() {
 fn add_starts_from_the_same_commit_on_a_new_branch_but_locks_it() {
     let fx = Fixture::new();
     sh(&fx, &["add", "theirs", "--base", "main"]);
-    let theirs = fx.root.join("sh-wt/theirs").canonicalize().unwrap();
+    let theirs = paddock_env::winpath::real(&fx.root.join("sh-wt/theirs")).unwrap();
     let path = fx.path("ours");
     let r = fx.dev(&["worktree", "add", "ours", "--base", "main", "--owner", "implementer:x"]);
     assert_eq!(r.code, 0, "{}", r.err);

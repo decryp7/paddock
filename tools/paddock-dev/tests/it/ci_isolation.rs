@@ -23,7 +23,7 @@ struct Host {
 
 impl Host {
     fn new(root: &Path, kept: &str) -> Host {
-        let root = root.canonicalize().unwrap();
+        let root = paddock_env::winpath::real(root).unwrap();
         let home = root.join("home");
         let temp = root.join("work/0123456789abcdef/tmp");
         let tables = root.join("tables");

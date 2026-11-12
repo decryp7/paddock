@@ -15,7 +15,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 fn repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
 /// One fixture: a scratch folder with the runner's folders in it.
@@ -25,7 +25,7 @@ struct Fx {
 
 impl Fx {
     fn root(&self) -> PathBuf {
-        self.dir.path().canonicalize().unwrap()
+        paddock_env::winpath::real(self.dir.path()).unwrap()
     }
 
     fn p(&self, rel: &str) -> PathBuf {

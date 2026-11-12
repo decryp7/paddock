@@ -18,6 +18,7 @@ use crate::disk::record;
 use crate::worktree::git::{Git, Repo, key, worktrees};
 use crate::worktree::owners::OwnerStore;
 use crate::worktree::procs;
+use paddock_env::winpath;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -80,17 +81,18 @@ fn under_root(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, Refusal> {
     if !meta.is_dir() {
         return Err("it is not a folder".into());
     }
-    let real = path.canonicalize().map_err(|e| format!("its real path cannot be resolved ({e})"))?;
+    // Both sides of every comparison below are `real_verbatim`: the same spelling, whatever the prefix.
+    let real = winpath::real_verbatim(path).map_err(|e| format!("its real path cannot be resolved ({e})"))?;
     let parent_real = path
         .parent()
-        .and_then(|p| p.canonicalize().ok())
+        .and_then(|p| winpath::real_verbatim(p).ok())
         .ok_or_else(|| "its parent cannot be resolved".to_string())?;
     if real.parent() != Some(parent_real.as_path()) || real.file_name() != path.file_name() {
         return Err("its path goes through a symlink".into());
     }
     let allowed = roots
         .iter()
-        .filter_map(|r| r.canonicalize().ok())
+        .filter_map(|r| winpath::real_verbatim(r).ok())
         .any(|r| real.starts_with(&r) && real != r);
     if !allowed {
         return Err("it is not strictly below an allowed root".into());
