@@ -55,3 +55,17 @@ test('--blocks-only skips the baseline anywhere; a folder outside a monorepo is 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('an unmarked whole-file block keeps the app\'s own text below it', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sync-blocks-'));
+  try {
+    write(root, { ...blockFiles('demo'), 'docs/suite-lessons.md': '# Lessons shared across the suite\n\n- An app lesson that must survive.\n' });
+    const code = await main(['sync', '--app', 'demo', '--root', root, '--paddock', PADDOCK, '--write', '--blocks-only'], { log: () => {}, err: () => {} });
+    assert.equal(code, 0);
+    const text = readFileSync(join(root, 'docs/suite-lessons.md'), 'utf8');
+    assert.match(text, /^<!-- paddock:block suite-lessons rev=[0-9a-f]{8} -->/);
+    assert.match(text, /- An app lesson that must survive\.\n$/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
