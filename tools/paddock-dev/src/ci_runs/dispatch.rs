@@ -6,8 +6,8 @@
 //! bounded by the required `--max`) while one of them shares a class with the workflow to start. Linux jobs run on container
 //! runners that may overlap, so a Linux-only workflow dispatches at once.
 //!
-//! A class is read from the workflow text: any `macos...`, `windows...` label on a non-comment line (runs-on, a matrix list, a
-//! `runner.os` test: all mean the job can land there), following local `uses: ./.gitea/workflows/<file>` calls. The token is read
+//! A class is read from the jobs' `runs-on` labels (a matrix expression stands for the job's matrix values), following job-level
+//! `uses: ./.gitea/workflows/<file>` calls; other text of the file (steps, `runner.os` tests) does not count. The token is read
 //! from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
 
 use super::client::{Client, RunInfo};
@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::time::Duration;
+use yaml_rust2::{Yaml, YamlLoader};
 
 /// A runner class with a single machine behind it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -38,7 +39,9 @@ impl RunnerClass {
 /// Reads a workflow file of the repository by its file name (`dyno.yml`); `None` when it is not there.
 pub type ReadWorkflow<'a> = &'a dyn Fn(&str) -> Option<String>;
 
-/// The single-machine classes `workflow` can run on, including the workflows it calls. `Err` when the file cannot be read.
+/// The single-machine classes `workflow` can run on, including the workflows it calls. They come from each job's `runs-on`
+/// labels (a `${{ matrix.x }}` label stands for every value of the job's matrix) and never from other text of the file: a step
+/// that mentions macOS does not make a Linux job a Mac job. `Err` when the file cannot be read or parsed.
 pub fn classes_of(workflow: &str, read: ReadWorkflow<'_>) -> Result<BTreeSet<RunnerClass>, String> {
     let mut classes = BTreeSet::new();
     let mut seen = BTreeSet::new();
@@ -53,25 +56,59 @@ pub fn classes_of(workflow: &str, read: ReadWorkflow<'_>) -> Result<BTreeSet<Run
             }
             continue;
         };
-        for line in text.lines().filter(|l| !l.trim_start().starts_with('#')) {
-            let lower = line.to_ascii_lowercase();
-            if lower.contains("macos") {
-                classes.insert(RunnerClass::Macos);
-            }
-            if lower.contains("windows") {
-                classes.insert(RunnerClass::Windows);
-            }
-            if let Some(called) = called_workflow(line) {
-                todo.push(called);
+        let docs = match YamlLoader::load_from_str(&text) {
+            Ok(d) => d,
+            Err(e) if name == workflow => return Err(format!("workflow file {workflow} is not valid YAML: {e}")),
+            Err(_) => continue,
+        };
+        for doc in &docs {
+            let Some(jobs) = doc["jobs"].as_hash() else { continue };
+            for (_, job) in jobs {
+                if let Some(called) = job["uses"].as_str().and_then(called_workflow) {
+                    todo.push(called);
+                }
+                let mut labels = Vec::new();
+                collect_strings(&job["runs-on"], &mut labels);
+                let mut from_matrix = Vec::new();
+                collect_strings(&job["strategy"]["matrix"], &mut from_matrix);
+                for label in labels {
+                    if label.contains("${{") {
+                        classify_all(&from_matrix, &mut classes);
+                    } else {
+                        classify_all(&[label], &mut classes);
+                    }
+                }
             }
         }
     }
     Ok(classes)
 }
 
-/// The local workflow a `uses: ./.gitea/workflows/<file>` line calls.
-fn called_workflow(line: &str) -> Option<String> {
-    let rest = line.split_once("uses:")?.1.trim().strip_prefix("./.gitea/workflows/")?;
+/// Every string scalar under `y`, whatever the nesting.
+fn collect_strings(y: &Yaml, out: &mut Vec<String>) {
+    match y {
+        Yaml::String(s) => out.push(s.clone()),
+        Yaml::Array(a) => a.iter().for_each(|v| collect_strings(v, out)),
+        Yaml::Hash(h) => h.values().for_each(|v| collect_strings(v, out)),
+        _ => {}
+    }
+}
+
+fn classify_all(labels: &[String], classes: &mut BTreeSet<RunnerClass>) {
+    for l in labels {
+        let l = l.to_ascii_lowercase();
+        if l.contains("macos") {
+            classes.insert(RunnerClass::Macos);
+        }
+        if l.contains("windows") {
+            classes.insert(RunnerClass::Windows);
+        }
+    }
+}
+
+/// The local workflow a job's `uses: ./.gitea/workflows/<file>` calls.
+fn called_workflow(uses: &str) -> Option<String> {
+    let rest = uses.trim().strip_prefix("./.gitea/workflows/")?;
     let name: String = rest
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
@@ -327,6 +364,11 @@ mod tests {
             ),
             "caller.yml" => Some("jobs:\n  c:\n    uses: ./.gitea/workflows/mac.yml\n".into()),
             "comment.yml" => Some("# runs-on: macos-latest\njobs:\n  t:\n    runs-on: ubuntu-latest\n".into()),
+            "step-text.yml" => Some(
+                "jobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - if: runner.os != 'Windows'\n        run: echo macOS\n".into(),
+            ),
+            "bench.yml" => Some(include_str!("../../../../.gitea/workflows/debrief-bench.yml").into()),
+            "debrief.yml" => Some(include_str!("../../../../.gitea/workflows/debrief.yml").into()),
             _ => None,
         }
     }
@@ -421,6 +463,19 @@ mod tests {
         assert_eq!(c("caller.yml"), BTreeSet::from([RunnerClass::Macos]));
         assert!(c("comment.yml").is_empty());
         assert!(classes_of("missing.yml", &files).unwrap_err().contains("not in this checkout"));
+    }
+
+    #[test]
+    fn classes_come_from_runs_on_not_from_other_text() {
+        let c = |w| classes_of(w, &files).unwrap();
+        assert!(
+            c("step-text.yml").is_empty(),
+            "a step that mentions macOS or Windows is not a Mac job"
+        );
+        // debrief-bench.yml is all ubuntu-latest and its steps mention macOS and Windows.
+        assert!(c("bench.yml").is_empty());
+        // debrief.yml has a matrix with all three OS and a macos-latest job.
+        assert_eq!(c("debrief.yml"), BTreeSet::from([RunnerClass::Macos, RunnerClass::Windows]));
     }
 
     #[test]

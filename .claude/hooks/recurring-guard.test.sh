@@ -49,4 +49,42 @@ check "a 20 MB transcript blocks" block "$big"
 e=$(date +%s%N 2>/dev/null || python3 -c 'import time;print(int(time.time()*1e9))')
 ms=$(( (e - s) / 1000000 )); echo "info: ${ms} ms on $(wc -c <"$big") bytes"
 [ "$ms" -lt 500 ] || { echo "FAIL: too slow (${ms} ms)"; fail=1; }
+
+# ---- the reviewer's cases (2026-11-12): every line must match
+R=${TMPDIR:-/Volumes/d8sst7/dev-targets/scratch-guard}/recurring-guard-rv.$$
+mkdir -p "$R"; trap 'rm -rf "$T" "$R"' EXIT
+rep() { jq -nc --arg c "<agent-message from=\"a1\">
+[Subagent hand-back] The text below is the final report.
+$1
+</agent-message>" '{type:"queue-operation",operation:"enqueue",content:$c}'; }
+tool() { jq -nc --arg n "$1" '{type:"assistant",message:{role:"assistant",content:[{type:"tool_use",id:"t",name:$n,input:{}}]}}'; }
+t() { # want name file [extra]
+  out=$(jq -nc --arg p "$3" --argjson x "${4:-null}" '{transcript_path:$p}+($x//{})' | "$H" 2>/dev/null)
+  case "$out" in *'"block"'*) g=block;; *) g=allow;; esac
+  if [ "$g" = "$1" ]; then echo "ok: $2"; else echo "FAIL: $2 (want $1, got $g)"; fail=1; fi
+}
+mk() { f="$R/$1.jsonl"; shift; { echo "$human"; for x in "$@"; do echo "$x"; done; say; } > "$f"; echo "$f"; }
+t allow "Recurring: none new. (84/148 real none-lines look like this)" "$(mk a "$(rep '  Recurring: none new. The fix is local.')")"
+t allow "Recurring: no new instance this round" "$(mk b "$(rep '  Recurring: no new instance this round.')")"
+t allow "Recurring: none (first time seen)" "$(mk c "$(rep '  Recurring: none (first time seen)')")"
+t allow "Recurring: n/a" "$(mk d "$(rep '  Recurring: n/a')")"
+t allow "template quoted in a code block, real line none" "$(mk e "$(rep $'  The brief asks for:\n  ```\n  Recurring: <class name plus earlier instances>\n  ```\n  Recurring: none')")"
+t block "**Recurring:** bold markdown class (FN)" "$(mk f "$(rep '  **Recurring:** flaky sleeps again (lesson 12)')")"
+t block "- Recurring: list item class (FN)" "$(mk g "$(rep '  - Recurring: flaky sleeps again')")"
+t block "class on the next line (FN)" "$(mk h "$(rep $'  Recurring:\n  flaky sleeps again')")"
+t allow "class, then unrelated Agent call counts as follow-up" "$(mk i "$(rep '  Recurring: flaky sleeps')" "$(tool Agent)")"
+t block "class, then only a Bash tool call" "$(mk j "$(rep '  Recurring: flaky sleeps')" "$(tool Bash)")"
+t allow "same class second stop (stop_hook_active)" "$R/j.jsonl" '{"stop_hook_active":true}'
+# Report arrives also as a peer user message (real transcripts carry both)
+peer=$(jq -nc --arg c "[Subagent hand-back] report
+  Recurring: flaky sleeps" '{type:"user",origin:{kind:"peer"},message:{role:"user",content:$c}}')
+t block "peer-origin user message form" "$(mk k "$peer")"
+# 2 MB attachment after the report pushes it out of the 1 MB tail
+pad=$(jq -nc '{type:"attachment",pad:("x" * 1100000)}')
+t block "report followed by 1.1 MB line (FN: outside tail)" "$(mk l "$(rep '  Recurring: flaky sleeps')" "$pad")"
+
+# A transcript with no human message within the scan limit is too large to scan: allow with a warning.
+pad=$(jq -nc '{type:"attachment",pad:("x" * 100000)}'); { for i in 1 2 3 4 5 6; do echo "$pad"; done; rep '  Recurring: flaky sleeps'; } > "$R/nohuman.jsonl"
+out=$(jq -nc --arg p "$R/nohuman.jsonl" '{transcript_path:$p}' | RECURRING_GUARD_MAX_SCAN=300000 "$H" 2>"$R/err.txt")
+case "$out" in *block*) echo "FAIL: too large to scan must allow"; fail=1 ;; *) grep -q "too large to scan" "$R/err.txt" && echo "ok: too large to scan allows with a warning" || { echo "FAIL: no warning"; fail=1; } ;; esac
 exit $fail
