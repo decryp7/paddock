@@ -158,23 +158,13 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 689,
+   "line": 692,
    "hash": "1fa9f6f51d67343b"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 703,
-   "hash": "d6b395f9d534be1a"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 777,
+   "line": 781,
    "hash": "45ddea1acd767c2a"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 949,
-   "hash": "8a7b239b74fa9163"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/opener.rs",
@@ -203,7 +193,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
-   "line": 787,
+   "line": 788,
    "hash": "d6b395f9d534be1a"
   },
   {
@@ -908,12 +898,12 @@
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
-   "line": 331,
+   "line": 332,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
-   "line": 376,
+   "line": 377,
    "hash": "a837550434f7c685"
   },
   {
@@ -1040,11 +1030,6 @@
    "file": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
    "line": 685,
    "hash": "a31eb41757c45e18"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-core/tests/it/plugin_graph.rs",
-   "line": 704,
-   "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/debrief/crates/debrief-core/tests/it/store.rs",

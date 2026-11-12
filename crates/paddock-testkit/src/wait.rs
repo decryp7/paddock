@@ -81,6 +81,25 @@ pub fn wait_for_within<T>(what: &str, guard: Duration, f: impl FnMut() -> Option
     poll_for(guard, f).unwrap_or_else(|| panic!("timed out after {guard:?} waiting for {what}"))
 }
 
+/// Waits for a value on `rx` (at most [`HANG_GUARD`]); panics naming `what` when none comes or when every sender is gone
+/// without sending (a dropped sender is a failed test, not a longer wait).
+pub fn recv<T>(what: &str, rx: &std::sync::mpsc::Receiver<T>) -> T {
+    recv_within(what, HANG_GUARD, rx)
+}
+
+/// [`recv`] with a bound of the caller's.
+pub fn recv_within<T>(what: &str, guard: Duration, rx: &std::sync::mpsc::Receiver<T>) -> T {
+    match rx.recv_timeout(guard) {
+        Ok(v) => v,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("timed out after {guard:?} waiting for {what}")
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("every sender was dropped before sending {what}")
+        }
+    }
+}
+
 /// A counter of work done, for [`guarded`]: the work calls [`Progress::tick`] for every unit it finishes (a file scanned, a line
 /// read), from any thread. Cloning shares the count.
 #[derive(Debug, Clone, Default)]
@@ -207,6 +226,20 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[test]
+    fn recv_returns_the_value_and_names_a_dropped_sender() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(7).unwrap();
+        assert_eq!(recv("a value", &rx), 7);
+        drop(tx);
+        let e = std::panic::catch_unwind(|| recv("the gone value", &rx)).unwrap_err();
+        assert!(
+            e.downcast_ref::<String>()
+                .unwrap()
+                .contains("every sender was dropped before sending the gone value")
+        );
+    }
 
     #[test]
     fn a_condition_that_holds_at_once_is_not_polled_again() {

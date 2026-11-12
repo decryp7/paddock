@@ -179,7 +179,8 @@ fn a_denied_or_cancelled_pairing_changes_nothing_but_says_so() {
     assert!(pw.view().pairing.is_some());
     assert!(pw.cancel_pairing());
     assert!(!pw.cancel_pairing());
-    wait_for("the cancelled pairing to clear", || pw.view().pairing.is_none());
+    // Nothing to wait for: cancelling takes the pairing synchronously, and the pairing thread's late outcome is dropped
+    // by `finish_pairing` (the pairing is gone), so the view below is final.
     let v = pw.view();
     assert!(v.pairing.is_none() && v.problem.is_none() && !v.paired);
 }

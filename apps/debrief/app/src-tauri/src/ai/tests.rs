@@ -55,7 +55,8 @@ fn open_samples(w: &tauri::WebviewWindow<MockRuntime>) {
 }
 
 fn wait_until(what: &str, f: impl FnMut() -> bool) {
-    paddock_testkit::wait_until(what, f);
+    // Generous: a loaded runner stalls a test for many seconds; the bound only turns a hang into a message.
+    paddock_testkit::wait_until_within(what, Duration::from_secs(180), f);
 }
 
 fn code(e: Value) -> String {

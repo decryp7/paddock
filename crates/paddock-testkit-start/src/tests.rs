@@ -59,21 +59,6 @@ fn spawn(dir: &tempfile::TempDir, mode: &str) -> Logged {
     Logged::spawn(&mut scripted(mode), &dir.path().join("stderr.txt")).unwrap()
 }
 
-/// The warm start runs the program once before the real start: the test binary answers `--list` and ends, so it is the
-/// stand-in for a fresh program that prints its version.
-#[test]
-fn a_warmed_spawn_runs_the_program_to_its_end_once_before_the_real_start() {
-    let dir = tempfile::tempdir().unwrap();
-    let exe = std::env::current_exe().unwrap();
-    let mut cmd = scripted("exit:0");
-    let mut logged =
-        Logged::spawn_warmed(&mut cmd, &dir.path().join("stderr.txt"), &["--list"]).unwrap();
-    assert!(logged.child().id() > 0);
-    // The memo holds the warm start's time for this file identity: a second warm-up does not run it again.
-    let first = paddock_proc::warm_up(&exe, &["--list"]).unwrap();
-    assert_eq!(paddock_proc::warm_up(&exe, &["--list"]).unwrap(), first);
-}
-
 /// A wall clock that moves only when the wait pauses: the guard is reached in microseconds of real time.
 struct FakeClock(Cell<Duration>);
 

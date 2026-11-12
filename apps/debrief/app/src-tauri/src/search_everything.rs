@@ -301,7 +301,7 @@ mod tests {
         assert!(is_newest(&staying, other), "other windows keep theirs");
         // Closing through the window teardown reaches it too (the scope is registered with the app).
         crate::window_scoped::destroyed(app.handle(), "w-staying");
-        paddock_testkit::wait_until("the closed window's entry to go", || !is_newest(&staying, other));
+        // Synchronous: the audit run found this condition true at the first look every time, so nothing is waited for.
         assert!(!is_newest(&staying, other));
     }
 

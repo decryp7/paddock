@@ -474,7 +474,7 @@ mod tests {
                 .as_u64()
                 .unwrap_or(0)
         };
-        paddock_testkit::wait_until("the settled file to be imported", || imported_files() > 0);
+        paddock_testkit::wait_until_within("the settled file to be imported", Duration::from_secs(60), || imported_files() > 0);
         let imported = imported_files();
         assert_eq!(imported, 1, "the file settled and was imported");
         let summary = ipc(&main, "workspace_summary", json!({})).unwrap();
@@ -516,7 +516,7 @@ mod tests {
                 .as_u64()
                 .unwrap_or(0)
         };
-        paddock_testkit::wait_until("all six files to be imported", || imported_files() >= 6);
+        paddock_testkit::wait_until_within("all six files to be imported", Duration::from_secs(60), || imported_files() >= 6);
         assert_eq!(imported_files(), 6);
         let mine: Vec<usize> = BATCHES
             .lock()

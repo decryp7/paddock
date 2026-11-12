@@ -110,7 +110,7 @@ mod tests {
         a.start();
         a.start();
         let mut names: Vec<_> = (0..2)
-            .map(|_| paddock_testkit::wait_for("an after-paint task to run", || rx.try_recv().ok()).unwrap())
+            .map(|_| paddock_testkit::recv("an after-paint task to run", &rx).unwrap())
             .collect();
         names.sort();
         assert_eq!(names, vec!["after-paint-one", "after-paint-two"]);
@@ -123,7 +123,7 @@ mod tests {
         a.start();
         let (tx, rx) = mpsc::channel();
         a.later("late", move || tx.send(()).unwrap());
-        paddock_testkit::wait_for("the late task to run", || rx.try_recv().ok());
+        paddock_testkit::recv("the late task to run", &rx);
     }
 
     #[test]
@@ -147,6 +147,6 @@ mod tests {
             "another window's paint does not count"
         );
         ready(crate::windows::MAIN);
-        paddock_testkit::wait_for("the probe task to run once the main window is ready", || rx.try_recv().ok());
+        paddock_testkit::recv("the probe task to run once the main window is ready", &rx);
     }
 }

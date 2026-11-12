@@ -568,6 +568,9 @@ pub(crate) async fn open_paths_live<R: Runtime>(
 
 #[cfg(test)]
 mod tests {
+    /// A loaded CI runner can stall these tests for many seconds: the bound only turns a hang into a message.
+    const LOADED_CI: Duration = Duration::from_secs(90);
+
     use super::*;
     use crate::test_support::Json as _;
     use crate::test_support::Now as _;
@@ -650,7 +653,7 @@ mod tests {
         assert!([1, 0].contains(&report.appended), "{report:?}");
         emit_report(app.handle(), "main", &report);
         emit_report(app.handle(), "main", &TailReport::default());
-        paddock_testkit::wait_until("the second event to reach the store", || {
+        paddock_testkit::wait_until_within("the second event to reach the store", LOADED_CI, || {
             crate::test_support::store_summary(&st()).total >= 2
         });
         assert_eq!(block(workspace_summary(st())).unwrap().json()["total"], 2);
@@ -692,18 +695,19 @@ mod tests {
         // The follow-up flush thread may deliver the held line before this refresh does; either way it arrives once.
         let report = apply_changes(&st(), &[]);
         assert!([0, 1].contains(&report.appended), "{report:?}");
-        paddock_testkit::wait_until("the third event to reach the store", || {
+        paddock_testkit::wait_until_within("the third event to reach the store", LOADED_CI, || {
             crate::test_support::store_summary(&st()).total >= 3
         });
         assert_eq!(crate::test_support::store_summary(&st()).total, 3);
         // A throttled annotator (at most one run a second) asks for another refresh: do what the follow-up flush does
         // until nothing is wanted, within a bound.
-        let deadline = std::time::Instant::now() + Duration::from_secs(90);
-        while st().live.flush_wanted.load(Ordering::SeqCst) && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
+        paddock_testkit::wait_until_within("no follow-up refresh to be wanted", LOADED_CI, || {
+            if !st().live.flush_wanted.load(Ordering::SeqCst) {
+                return true;
+            }
             apply_changes(&st(), &[]);
-        }
-        assert!(!st().live.flush_wanted.load(Ordering::SeqCst));
+            false
+        });
         // A refresh that changes nothing is reported as no change.
         assert!(apply_changes(&st(), &[]).is_empty());
     }
@@ -946,10 +950,13 @@ mod tests {
         opened(&app, "main", &dir.0);
         let options: LiveOptions = serde_json::from_value(serde_json::json!({ "watch": "polling", "pollIntervalMs": 100 })).unwrap();
         assert_eq!(block(set_live(app.handle().clone(), st(), true, Some(options))).unwrap(), 1);
-        std::thread::sleep(Duration::from_millis(300));
+        // The session follows the file from its end: only then does an appended line count as new.
+        paddock_testkit::wait_until("the session to follow the file from its end", || {
+            block(tail_status(st())).is_ok_and(|s| s.files.len() == 1 && s.files[0].size > 0 && s.files[0].offset == s.files[0].size)
+        });
         let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
         std::io::Write::write_all(&mut f, b"2026-10-14 10:00:01 INFO second\n").unwrap();
-        paddock_testkit::wait_until("the appended event to reach the store", || {
+        paddock_testkit::wait_until_within("the appended event to reach the store", LOADED_CI, || {
             crate::test_support::store_summary(&st()).total >= 2
         });
         assert_eq!(crate::test_support::store_summary(&st()).total, 2);

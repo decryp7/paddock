@@ -422,7 +422,7 @@ pub(crate) mod tests {
         windows.get_or_create(MAIN).unwrap();
         let w = windows.clone();
         let slow = std::thread::spawn(move || w.get_or_create("slow").map(|s| s.label().to_string()));
-        paddock_testkit::wait_for("the slow window to be building", || building.try_recv().ok());
+        paddock_testkit::recv("the slow window to be building", &building);
         let started = std::time::Instant::now();
         assert!(windows.get(MAIN).is_some());
         assert_eq!(windows.all().len(), 1);
@@ -545,7 +545,7 @@ pub(crate) mod tests {
         })
         .unwrap();
         w.publish(debrief_core::events::SnapshotTaken { id: "snap-1".into() });
-        assert_eq!(paddock_testkit::wait_for("the snapshot event", || rx.try_recv().ok()), "snap-1");
+        assert_eq!(paddock_testkit::recv("the snapshot event", &rx), "snap-1");
         let m = w.event_metrics();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].plugin, "test.listener");

@@ -3,7 +3,7 @@
  "sites": [
   {
    "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
-   "line": 987,
+   "line": 988,
    "hash": "7082ab131971ef39"
   },
   {
@@ -13,7 +13,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
-   "line": 828,
+   "line": 829,
    "hash": "c214e9914f62c10d"
   },
   {

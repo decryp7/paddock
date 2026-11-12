@@ -698,13 +698,7 @@ fn the_watchdog_marks_a_sleeping_service_hung_on_the_calling_thread() {
     });
     let s = r.service::<dyn Clock>("slow", "*").unwrap();
     let h = r.health();
-    let watcher = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !h.get("t.slow").hung && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        h.get("t.slow").hung
-    });
+    let watcher = std::thread::spawn(move || paddock_testkit::poll_until_within(paddock_testkit::HANG_GUARD, || h.get("t.slow").hung));
     // The call itself cannot be pre-empted: it completes, late.
     assert_eq!(s.call(|c| c.now()).unwrap(), 1);
     assert!(watcher.join().unwrap(), "marked hung while running");

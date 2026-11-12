@@ -1036,7 +1036,7 @@ mod tests {
             },
         )
         .unwrap();
-        paddock_testkit::wait_for("the first import to be running", || is_running.try_recv().ok());
+        paddock_testkit::recv("the first import to be running", &is_running);
 
         let open = |name: &str| {
             let files = vec![samples().join(name).to_string_lossy().into_owned()];
