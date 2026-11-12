@@ -174,6 +174,9 @@ enum CiCommand {
     Flakes(ci_runs::FlakesArgs),
     /// Real CI timings of the family from the Gitea API (the port of scripts/ci-timings.mjs, same Markdown).
     Timings(ci_runs::TimingsArgs),
+    /// Whether a scheduled run ends early because a train's dispatch run is queued or running (skip=true|false to
+    /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
+    ScheduleSkip(ci_runs::ScheduleSkipArgs),
 }
 
 #[derive(Subcommand)]
@@ -396,6 +399,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Timings(a),
         } => ci_runs::timings(&a),
+        Command::Ci {
+            command: CiCommand::ScheduleSkip(a),
+        } => ci_runs::schedule_skip(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Gates {
             command: GatesCommand::Model(a),

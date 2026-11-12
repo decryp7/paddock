@@ -25,11 +25,38 @@ defaults:
     working-directory: apps/debrief
 
 jobs:
+  # A scheduled run ends early while a train's dispatch run is in CI (./dev ci schedule-skip; ADR 0093 amendment 2026-11-12).
+  # Only scheduled runs have it; the jobs below run when it was skipped (any other event) or said run, never when it failed or was cancelled.
+  gate:
+    name: gate (no train in CI?)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    defaults:
+      run:
+        working-directory: .
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: train
+        uses: ./.gitea/actions/schedule-skip
+        with:
+          workflow: debrief-fuzz.yml
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      - id: decide
+        env:
+          SKIP: ${{ steps.train.outputs.skip }}
+        run: if [ "$SKIP" = true ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
+
   # Six shards of up to nine targets instead of one job per target: each shard compiles the fuzz workspace once
   # (cargo fuzz build builds every target in one cargo run) and then fuzzes its targets one after another,
   # where 28 jobs each compiled the whole workspace and queued for the few shared Linux runner slots.
   fuzz:
     name: fuzz (shard ${{ matrix.shard }}/6)
+    needs: [gate]
+    if: ${{ !cancelled() && needs.gate.result != 'failure' && needs.gate.result != 'cancelled' && needs.gate.outputs.run != 'false' }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5

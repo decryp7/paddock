@@ -7,6 +7,9 @@ inputs:
   plan-run:
     description: "needs.plan.outputs.run ('true' or 'false'); empty when the workflow has no plan job."
     default: ""
+  skip-reason:
+    description: "'train' when the plan ended a scheduled run early because a train was in CI; empty otherwise."
+    default: ""
   release-result:
     description: needs.<release job>.result.
     required: true
@@ -26,6 +29,7 @@ runs:
         EVENT: ${{ github.event_name }}
         REF: ${{ github.ref }}
         PLAN_RUN: ${{ inputs.plan-run }}
+        SKIP_REASON: ${{ inputs.skip-reason }}
         RELEASE_RESULT: ${{ inputs.release-result }}
         GATES_RESULT: ${{ inputs.gates-result }}
         SERVER_URL: ${{ github.server_url }}

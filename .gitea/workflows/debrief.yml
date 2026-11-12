@@ -36,6 +36,10 @@ on:
         description: "Full run: also the installers, the real-app smoke tests and the end-to-end tests in WebKit"
         type: boolean
         default: false
+      since_run:
+        description: "Rerun only what failed in this finished debrief.yml run (its number): the failed jobs, the failed e2e shards, inside rust tests only the failed nextest tests and inside the frontend job only the failed vitest files (./dev plan --ci --app debrief; ER-10). A full run's failures need bundles: true too. A full run before landing catches the rest."
+        required: false
+        default: ""
 
 env:
   CARGO_TERM_COLOR: always
@@ -72,6 +76,14 @@ jobs:
         working-directory: .
     outputs:
       run: ${{ steps.plan.outputs.run }}
+      # A rerun of a run's failures (the since_run input; tools/paddock-dev/src/plan_since.rs): the jobs that rerun (empty
+      # otherwise; each job's `if` reads an empty list as its own name), the nextest filter of a rust tests job narrowed to its
+      # failed tests, the failed vitest files of the frontend job, and the e2e shards (every shard unless a rerun names some).
+      rerun_jobs: ${{ steps.plan.outputs.rerun_jobs }}
+      rust_test_filter: ${{ steps.plan.outputs.rust_test_filter }}
+      rust_test_macos_filter: ${{ steps.plan.outputs.rust_test_macos_filter }}
+      frontend_include: ${{ steps.plan.outputs.frontend_include }}
+      e2e_shards: ${{ steps.plan.outputs.e2e_shards }}
       full: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
     env:
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
@@ -90,6 +102,13 @@ jobs:
           key: debrief-nightly-green-${{ github.sha }}
           lookup-only: true
 
+      # A scheduled run ends early while a train's dispatch run is queued or running (ADR 0093 amendment 2026-11-12).
+      - id: train
+        uses: ./.gitea/actions/schedule-skip
+        with:
+          workflow: debrief.yml
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
+
       - name: Decide
         id: plan
         shell: bash
@@ -98,15 +117,27 @@ jobs:
           REF: ${{ github.ref }}
           SHA: ${{ github.sha }}
           GREEN: ${{ steps.green.outputs.cache-hit }}
+          TRAIN_SKIP: ${{ steps.train.outputs.skip }}
           PLAN_TOKEN: ${{ github.token }}
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
           PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+          # The rerun reads the earlier run's jobs and logs through the API; PLAN_FULL says whether this rerun is full.
+          PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
+          PLAN_FULL: ${{ github.event.inputs.bundles }}
+          # The `full` output's expression, copied (tools/paddock-dev/tests/it/tree.rs keeps them equal): the mode line below lets a
+          # later rerun of this run's failures tell whether it was full (plan_since::read_full).
+          PLAN_MODE_FULL: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
         run: |
+          echo "plan mode: full=$PLAN_MODE_FULL"
           run=$(./dev plan --ci --app debrief)
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
             run=false
             echo "::notice::main has not changed since the last green run ($SHA); skipping."
           fi
+          if [ "$EVENT" = schedule ] && [ "$TRAIN_SKIP" = true ]; then
+            run=false
+          fi
+          grep -q '^e2e_shards=' "$GITHUB_OUTPUT" || echo 'e2e_shards=[{"shard":1},{"shard":2},{"shard":3},{"shard":4}]' >> "$GITHUB_OUTPUT"
           if [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ]; then
             # Lightweight tags list the commit itself, annotated ones list the tag object and the peeled commit (^{}).
             tag=$(git ls-remote --tags origin 'refs/tags/debrief-v*' | awk -v sha="$SHA" '$1 == sha { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
@@ -133,7 +164,7 @@ jobs:
   rust-lint:
     name: rust format + clippy
     needs: [plan]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["rust-lint"]'), 'rust-lint')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -169,7 +200,7 @@ jobs:
   rust-test:
     name: rust tests
     needs: [plan]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["rust-test"]'), 'rust-test')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -200,7 +231,9 @@ jobs:
       # rule 7): the image's (CHROMIUM_TEST_PATH) when it is Debrief's pin, else the pin, installed into the job's temp.
       - name: Pinned test browser
         run: |
-          want=$(sed -n 's/.*PINNED_VERSION: &str = "\([^"]*\)".*/\1/p' app/src-tauri/src/browser/runtime.rs)
+          # `[&]` and the quoted case pattern below keep this file free of YAML-anchor look-alikes, so the planner can split it
+          # into jobs (a since_run rerun reads the job names from it; tools/paddock-dev/tests/it/tree.rs checks it).
+          want=$(sed -n 's/.*PINNED_VERSION: [&]str = "\([^"]*\)".*/\1/p' app/src-tauri/src/browser/runtime.rs)
           have=$("${CHROMIUM_TEST_PATH:-/nonexistent}" --version 2>/dev/null | awk '{ print $NF }' || true)
           if [ -n "$want" ] && [ "$have" = "$want" ]; then
             echo "Chrome for Testing $have from the CI image: $CHROMIUM_TEST_PATH"
@@ -210,7 +243,7 @@ jobs:
           out=$(node ../../conformance/ci/install-test-browser.mjs --rust-source app/src-tauri/src/browser/runtime.rs \
             --dir "$RUNNER_TEMP/debrief-test-browser" --env-prefix DEBRIEF)
           printf '%s\n' "$out"
-          case "$out" in *CHROMIUM_TEST_PATH=*) ;; *) echo "::error::the test browser installer printed no CHROMIUM_TEST_PATH"; exit 1 ;; esac
+          case "$out" in *"CHROMIUM_TEST_PATH="*) ;; *) echo "::error::the test browser installer printed no CHROMIUM_TEST_PATH"; exit 1 ;; esac
 
       - name: Temp folders before the tests
         run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --snapshot "$RUNNER_TEMP/temp-leaks.json"
@@ -219,8 +252,11 @@ jobs:
       # .config/nextest.toml serialises the tests that time real child processes. The ci profile never retries (a flaky
       # test is fixed, not retried), stops a test after its time budget and writes a JUnit report.
       # xvfb-run: a virtual display (no screen, no desktop) for the real-browser tests' windows.
+      # A since_run rerun narrowed to the failed tests passes their nextest filter (the plan job's rust_test_filter).
       - name: Tests (workspace)
-        run: xvfb-run -a cargo nextest run --workspace --profile ci
+        env:
+          RERUN_FILTER: ${{ needs.plan.outputs.rust_test_filter }}
+        run: xvfb-run -a cargo nextest run --workspace --profile ci ${RERUN_FILTER:+-E "$RERUN_FILTER"}
 
       - name: Test report (JUnit)
         if: always()
@@ -232,7 +268,7 @@ jobs:
 
       # nextest does not run doc tests. This step and the next ones run even after the tests failed (each names what broke).
       - name: Doc tests (workspace)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.plan.outputs.rust_test_filter == '' }}
         run: cargo test --workspace --doc
 
       # Tests clean up after themselves (docs/testing/temp-leaks.md): a debrief-* / imt-* folder left behind fails the job.
@@ -247,7 +283,7 @@ jobs:
       # The test still runs and its failure shows as a warning; D-0 fixes the catalogue's memory and removes continue-on-error.
       # Debrief 1.2.0 does not ship while this step fails.
       - name: Memory budget
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.plan.outputs.rust_test_filter == '' }}
         continue-on-error: true
         run: cargo test --release -p debrief-store-duck --test analysis_memory -- --nocapture
 
@@ -267,7 +303,7 @@ jobs:
   rust-test-macos:
     name: rust tests (macOS)
     needs: [plan]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["rust-test-macos"]'), 'rust-test-macos')
     runs-on: macos-latest
     env:
       # Read credential and tag rule for ./dev's prebuilt download (ADR 0022 R0b; a tag run builds from source).
@@ -325,12 +361,15 @@ jobs:
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: node scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --snapshot "$RUNNER_TEMP/temp-leaks.json"
 
+      # A since_run rerun narrowed to the failed tests passes their nextest filter (the plan job's rust_test_macos_filter).
       - name: Tests (workspace)
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
-        run: cargo nextest run --workspace --profile ci
+        env:
+          RERUN_FILTER: ${{ needs.plan.outputs.rust_test_macos_filter }}
+        run: cargo nextest run --workspace --profile ci ${RERUN_FILTER:+-E "$RERUN_FILTER"}
 
       - name: Doc tests (workspace)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.plan.outputs.rust_test_macos_filter == '' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: cargo test --workspace --doc
 
@@ -354,7 +393,7 @@ jobs:
   plugin-sdk:
     name: plugin SDK templates
     needs: [plan]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["plugin-sdk"]'), 'plugin-sdk')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -397,7 +436,7 @@ jobs:
   licences:
     name: licences, notices + commits
     needs: [plan]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["licences"]'), 'licences')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -455,7 +494,7 @@ jobs:
   frontend:
     name: frontend build, lint + unit tests
     needs: [plan]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["frontend"]'), 'frontend')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -486,20 +525,24 @@ jobs:
         run: (cd ../../.. && npm run build -w ui)
 
       - name: Lint
+        if: needs.plan.outputs.frontend_include == ''
         run: npm run lint
 
       # Needs the installed TypeScript (a type-checked call-graph walk), so it runs here and not with the other script tests.
       - name: Dialog command lint tests
+        if: needs.plan.outputs.frontend_include == ''
         run: node --test scripts/check-dialog-commands.test.mjs
 
       # --stats-json writes dist/app/browser-stats.json for the window-weight step below (the one build of this job).
       - name: Frontend build
+        if: needs.plan.outputs.frontend_include == ''
         run: npx ng build --stats-json
 
       # Paddock rule 35: the JS the main window loads before first paint (static closure of main, bootstrap, app and
       # app.config) stays under its budget (measured + 10%, docs/performance.md); pop-out and dialog are reported, the
       # About dialog window is bounded too.
       - name: First-paint JS budget (main window)
+        if: needs.plan.outputs.frontend_include == ''
         run: |
           node scripts/window-weight.mjs main --max 1355
           node scripts/window-weight.mjs popout
@@ -507,19 +550,27 @@ jobs:
 
       # No inline <style>/<script> (Tauri's CSP nonce would disable the app's styles) and the start-up splash is present.
       - name: Built index.html (no inline elements, splash present)
+        if: needs.plan.outputs.frontend_include == ''
         run: node ../scripts/ci/check-index.mjs
 
       - name: Translations are extracted and the pseudo-locale builds
+        if: needs.plan.outputs.frontend_include == ''
         run: |
           node --test scripts/i18n/locales.test.mjs
           npx ng extract-i18n --output-path .i18n-check 2>&1 | tee .i18n-check.log
           if grep -qi 'duplicate' .i18n-check.log; then echo 'Duplicate i18n message ids (see above)'; exit 1; fi
           node scripts/i18n/build-locales.mjs --check .i18n-check/messages.xlf
 
+      # A since_run rerun narrowed to the failed spec files (frontend_include) runs only those, without coverage (the full
+      # run before landing measures it); the steps above passed in that run and are skipped.
       - name: Frontend unit tests
+        env:
+          RERUN_INCLUDE: ${{ needs.plan.outputs.frontend_include }}
         run: |
           node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --snapshot "$RUNNER_TEMP/temp-leaks-ui.json"
-          npx ng test --watch=false --coverage
+          args=(--coverage)
+          if [ -n "$RERUN_INCLUDE" ]; then args=(); for f in $RERUN_INCLUDE; do args+=(--include "$f"); done; fi
+          npx ng test --watch=false "${args[@]}"
           node ../scripts/ci/check-temp-leaks.mjs --dir "$PADDOCK_JOB_TEMP" --socket-dir "$PADDOCK_SOCKET_BASE" --shared --check "$RUNNER_TEMP/temp-leaks-ui.json"
 
       - uses: ./.gitea/actions/job-tmpdir
@@ -533,14 +584,16 @@ jobs:
   e2e:
     name: end-to-end (shard ${{ matrix.shard }}/4)
     needs: [plan]
-    if: needs.plan.outputs.run == 'true'
+    if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        # Every shard; a since_run rerun only the failed ones (the plan job writes all four otherwise). The `include` form of
+        # ci.yml's crate legs, proven on this Gitea.
+        include: ${{ fromJSON(needs.plan.outputs.e2e_shards) }}
     defaults:
       run:
         working-directory: apps/debrief/app
@@ -586,7 +639,7 @@ jobs:
   tauri-smoke:
     name: real-app smoke (${{ matrix.os }})
     needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["tauri-smoke"]'), 'tauri-smoke')
     strategy:
       fail-fast: false
       matrix:
@@ -856,7 +909,7 @@ jobs:
   bundle:
     name: bundle (${{ matrix.os }})
     needs: [plan, rust-lint]
-    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true'
+    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["bundle"]'), 'bundle')
     strategy:
       fail-fast: false
       matrix:
@@ -1141,7 +1194,8 @@ jobs:
   # waits for it. Tags and manual runs only; ci.yml's c99 job covers pull requests, main and the nightly.
   keychain:
     name: C99 (no Keychain in a macOS build)
-    if: startsWith(github.ref, 'refs/tags/debrief-v') || github.event_name == 'workflow_dispatch'
+    needs: [plan]
+    if: (startsWith(github.ref, 'refs/tags/debrief-v') || github.event_name == 'workflow_dispatch') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["keychain"]'), 'keychain')
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
@@ -1238,10 +1292,11 @@ jobs:
 
   # Records a fully green scheduled run for this commit; `plan` skips the next scheduled run while main is unchanged.
   # Never runs when anything failed, so a red commit is retried every night.
+  # A run the plan skipped (main unchanged, or a train in CI) measured nothing and is never marked.
   nightly-mark:
     name: nightly-mark
-    needs: [rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, tauri-smoke, bundle]
-    if: github.event_name == 'schedule' && success()
+    needs: [plan, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, tauri-smoke, bundle]
+    if: github.event_name == 'schedule' && success() && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
