@@ -108,7 +108,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/activity/report.rs",
-   "line": 1368,
+   "line": 1373,
    "hash": "5b49960b70255439"
   },
   {
@@ -142,16 +142,6 @@
    "hash": "d6b395f9d534be1a"
   },
   {
-   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
-   "line": 1027,
-   "hash": "855cc4dd1d9f922c"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
-   "line": 1054,
-   "hash": "8a7b239b74fa9163"
-  },
-  {
    "file": "apps/debrief/app/src-tauri/src/config_store.rs",
    "line": 389,
    "hash": "ad246e7f5236447e"
@@ -168,17 +158,17 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/dumps.rs",
-   "line": 714,
+   "line": 728,
    "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/dumps.rs",
-   "line": 843,
+   "line": 857,
    "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/health/commands/tests.rs",
-   "line": 295,
+   "line": 292,
    "hash": "3d5815373692ceed"
   },
   {
@@ -188,52 +178,52 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 904,
+   "line": 943,
    "hash": "421b7cec5c980f1f"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 1017,
+   "line": 1056,
    "hash": "b7e19e0c8723bfb3"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 1182,
+   "line": 1278,
    "hash": "b7e19e0c8723bfb3"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/tests.rs",
-   "line": 273,
+   "line": 368,
    "hash": "d9c419ca60ddbc31"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/tests.rs",
-   "line": 297,
+   "line": 392,
    "hash": "cbc4d73b333a2312"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/lib.rs",
-   "line": 1475,
+   "line": 1479,
    "hash": "3d5815373692ceed"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
-   "line": 827,
+   "line": 898,
    "hash": "9f38707b0db4ca99"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
-   "line": 905,
+   "line": 976,
    "hash": "71828e6915248dfa"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
-   "line": 912,
+   "line": 983,
    "hash": "343b993c41d17c4d"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
-   "line": 919,
+   "line": 990,
    "hash": "8f2dc70f955d8e23"
   },
   {
@@ -288,7 +278,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/profiling.rs",
-   "line": 690,
+   "line": 759,
    "hash": "8a7b239b74fa9163"
   },
   {
@@ -298,7 +288,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/search_everything.rs",
-   "line": 301,
+   "line": 306,
    "hash": "4cad119e99fa6b8c"
   },
   {
@@ -478,7 +468,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/core/activity/coverage-guard.spec.ts",
-   "line": 26,
+   "line": 24,
    "hash": "71c8ba03aec8805d"
   },
   {
@@ -513,7 +503,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/diagnostics/diagnostics.spec.ts",
-   "line": 191,
+   "line": 192,
    "hash": "64bbf516d7b23e4c"
   },
   {
@@ -858,22 +848,22 @@
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 352,
+   "line": 356,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 586,
+   "line": 590,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 591,
+   "line": 595,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/debrief/app/src/app/search-everything/search-everything.spec.ts",
-   "line": 596,
+   "line": 600,
    "hash": "fab39cd8206d4975"
   },
   {
@@ -983,7 +973,7 @@
   },
   {
    "file": "apps/debrief/app/src/app/watched/watched-folders.spec.ts",
-   "line": 40,
+   "line": 45,
    "hash": "6460a11b205cdcd7"
   },
   {
@@ -1012,21 +1002,6 @@
    "hash": "04921d8fdbaf8b3b"
   },
   {
-   "file": "apps/debrief/crates/chromium-driver/tests/it/real_browser.rs",
-   "line": 76,
-   "hash": "a837550434f7c685"
-  },
-  {
-   "file": "apps/debrief/crates/chromium-driver/tests/it/real_browser.rs",
-   "line": 101,
-   "hash": "8a7b239b74fa9163"
-  },
-  {
-   "file": "apps/debrief/crates/chromium-driver/tests/it/real_browser.rs",
-   "line": 122,
-   "hash": "8a7b239b74fa9163"
-  },
-  {
    "file": "apps/debrief/crates/debrief-agent/src/agent/tests.rs",
    "line": 79,
    "hash": "cb140ea841063684"
@@ -1038,12 +1013,12 @@
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
-   "line": 405,
+   "line": 410,
    "hash": "42e24ddec41c190f"
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs",
-   "line": 500,
+   "line": 521,
    "hash": "a837550434f7c685"
   },
   {
@@ -1058,12 +1033,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
-   "line": 335,
-   "hash": "d6b395f9d534be1a"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/tests.rs",
-   "line": 380,
+   "line": 395,
    "hash": "a837550434f7c685"
   },
   {
@@ -1273,7 +1243,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-ipc/src/supervisor.rs",
-   "line": 400,
+   "line": 412,
    "hash": "cb140ea841063684"
   },
   {
@@ -1303,7 +1273,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-monitor/src/source.rs",
-   "line": 183,
+   "line": 238,
    "hash": "4cad119e99fa6b8c"
   },
   {
@@ -1398,22 +1368,22 @@
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 111,
+   "line": 120,
    "hash": "c69aa0a4d55d7a61"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 116,
+   "line": 125,
    "hash": "af4d226ec4967c29"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 145,
+   "line": 154,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 243,
+   "line": 252,
    "hash": "a837550434f7c685"
   },
   {
@@ -1588,7 +1558,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-store-duck/tests/it/large_folder.rs",
-   "line": 83,
+   "line": 88,
    "hash": "ad246e7f5236447e"
   },
   {
@@ -1642,68 +1612,58 @@
    "hash": "af4d226ec4967c29"
   },
   {
-   "file": "apps/debrief/crates/debrief-store-worker/src/server.rs",
-   "line": 520,
-   "hash": "e84168b19821460d"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-store-worker/src/server.rs",
-   "line": 549,
-   "hash": "e84168b19821460d"
-  },
-  {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/parity.rs",
-   "line": 199,
+   "line": 208,
    "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 119,
+   "line": 123,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 242,
+   "line": 272,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 249,
+   "line": 292,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 260,
+   "line": 303,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 264,
+   "line": 307,
    "hash": "8a7b239b74fa9163"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 364,
+   "line": 406,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 493,
+   "line": 535,
    "hash": "a101d0b50615fe0b"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 508,
+   "line": 550,
    "hash": "1f59029f9370b7f7"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 521,
+   "line": 563,
    "hash": "a101d0b50615fe0b"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 625,
+   "line": 667,
    "hash": "8a7b239b74fa9163"
   },
   {
@@ -1743,17 +1703,17 @@
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 19,
+   "line": 20,
    "hash": "58bc5f6c17c7dc29"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 28,
+   "line": 29,
    "hash": "767f0cb771c9e849"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 41,
+   "line": 42,
    "hash": "7ea17622a91efd03"
   },
   {
@@ -1768,12 +1728,12 @@
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 797,
+   "line": 815,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 809,
+   "line": 828,
    "hash": "c0f7df0977a37afe"
   },
   {
@@ -1878,17 +1838,17 @@
   },
   {
    "file": "apps/dyno/app/src/app/features/lookup/lookup-dialogs.spec.ts",
-   "line": 24,
+   "line": 25,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/dyno/app/src/app/features/lookup/lookup-dialogs.spec.ts",
-   "line": 115,
+   "line": 141,
    "hash": "12110a956d013a5e"
   },
   {
    "file": "apps/dyno/app/src/app/features/lookup/lookup-dialogs.spec.ts",
-   "line": 121,
+   "line": 147,
    "hash": "30577aeef0bf033a"
   },
   {
@@ -1948,27 +1908,27 @@
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 348,
+   "line": 368,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 620,
+   "line": 640,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 1077,
+   "line": 1097,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 1112,
+   "line": 1132,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 1134,
+   "line": 1154,
    "hash": "d6b395f9d534be1a"
   },
   {
@@ -2003,17 +1963,7 @@
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
-   "line": 69,
-   "hash": "c0f7df0977a37afe"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
-   "line": 103,
-   "hash": "c0f7df0977a37afe"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-agent/tests/term.rs",
-   "line": 173,
+   "line": 67,
    "hash": "c0f7df0977a37afe"
   },
   {
@@ -2028,12 +1978,12 @@
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/network.rs",
-   "line": 300,
+   "line": 304,
    "hash": "5b49960b70255439"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/network.rs",
-   "line": 316,
+   "line": 320,
    "hash": "5b49960b70255439"
   },
   {
@@ -2048,7 +1998,7 @@
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/sensors.rs",
-   "line": 362,
+   "line": 423,
    "hash": "f73b6d836ad7b1d8"
   },
   {
@@ -2108,12 +2058,12 @@
   },
   {
    "file": "apps/pitcrew/crates/pitcrew-service/src/launch.rs",
-   "line": 393,
+   "line": 389,
    "hash": "cb140ea841063684"
   },
   {
    "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
-   "line": 289,
+   "line": 305,
    "hash": "4aac62194072eaf4"
   },
   {
@@ -2268,12 +2218,12 @@
   },
   {
    "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
-   "line": 274,
+   "line": 288,
    "hash": "70f143c28effce27"
   },
   {
    "file": "apps/pitwall/app/src/app/features/playground/playground.store.spec.ts",
-   "line": 283,
+   "line": 297,
    "hash": "7a49582c912ad22f"
   },
   {
@@ -2313,7 +2263,7 @@
   },
   {
    "file": "apps/pitwall/crates/pitwall-loopback/src/lib.rs",
-   "line": 394,
+   "line": 427,
    "hash": "6dd9cc9ffe53f850"
   },
   {
@@ -2323,22 +2273,22 @@
   },
   {
    "file": "apps/pitwall/crates/pitwall-server/src/engines.rs",
-   "line": 1000,
+   "line": 1105,
    "hash": "229271371e69f6cc"
   },
   {
    "file": "apps/pitwall/crates/pitwall-server/src/library.rs",
-   "line": 606,
+   "line": 684,
    "hash": "949c0b5ead5323a5"
   },
   {
    "file": "apps/pitwall/crates/pitwall-server/src/library.rs",
-   "line": 632,
+   "line": 710,
    "hash": "c5a4568c03c73cb6"
   },
   {
    "file": "apps/pitwall/crates/pitwall-server/src/library.rs",
-   "line": 636,
+   "line": 714,
    "hash": "949c0b5ead5323a5"
   },
   {
@@ -2483,7 +2433,7 @@
   },
   {
    "file": "apps/spotter/crates/spotter-render/src/page.rs",
-   "line": 675,
+   "line": 693,
    "hash": "50e8c3d16541ae4d"
   },
   {
@@ -2493,17 +2443,17 @@
   },
   {
    "file": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
-   "line": 78,
+   "line": 100,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
-   "line": 298,
+   "line": 346,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/spotter/crates/spotter-render/tests/real_browser.rs",
-   "line": 321,
+   "line": 370,
    "hash": "a837550434f7c685"
   },
   {
