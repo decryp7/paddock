@@ -250,6 +250,9 @@ impl Waits {
 impl Drop for Waits {
     fn drop(&mut self) {
         self.shared.closed.store(true, Ordering::SeqCst);
+        // Under the idle lock, as `open` does: the watchdog reads `closed` and goes to sleep while holding it, so the
+        // notify cannot land between its check and its (untimed) wait and be lost.
+        drop(self.shared.idle.lock().unwrap_or_else(|p| p.into_inner()));
         self.shared.wake.notify_all();
     }
 }
@@ -564,6 +567,25 @@ mod tests {
         until(&w, PARK_TIMED);
         drop(held);
         until(&w, PARK_IDLE);
+    }
+
+    /// Dropping the set ends the watchdog thread (which then releases the sink): the sink's channel disconnects. The
+    /// watchdog is asleep with no timeout at that point, so a lost notify would leave it, and the sink, alive for good.
+    #[test]
+    fn dropping_the_set_ends_the_watchdog_and_releases_its_sink() {
+        let (sink, rx) = sink();
+        let w = Waits::new(Duration::from_millis(10), sink);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while w.parked() != PARK_IDLE {
+            assert!(Instant::now() < deadline, "the watchdog never went idle");
+            std::thread::yield_now();
+        }
+        drop(w);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(30)),
+            Err(mpsc::RecvTimeoutError::Disconnected),
+            "the watchdog thread did not end"
+        );
     }
 
     #[test]
