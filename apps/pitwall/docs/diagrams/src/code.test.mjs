@@ -30,3 +30,7 @@ test('the check fails on a name the code does not have (mutation)', () => {
   const fake = { x: { nodes: [{ name: 'NoSuchThing', tech: 'src/nothing_here.rs' }], classes: [{ name: 'Ghost', attrs: ['zzz_field: u8'], ops: ['zzz_op() → ()'] }], messages: ['zzz_call(x)'] } };
   assert.equal(unknownCode(fake, code).length, 6);
 });
+
+test('recording leaves no switch behind in the environment (rule 49)', () => {
+  assert.equal(process.env.DIAGRAM_RECORD, undefined);
+});

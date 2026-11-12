@@ -60,7 +60,7 @@ classes('uml-class-access', {
   title: 'Domain model — apps, keys and usage', desc: 'Who may call Pitwall and what it has used: apps own keys and permissions; AppState holds the usage store, which keeps hourly and daily buckets per app.', cols: 4,
   items: [
     ['as', 0, 0, { name: 'AppState', attrs: ['auth: Auth', 'usage: Usage', 'serving: Serving', 'updates: Updates'], ops: ['start_chat(Principal, …) → Run', 'save_usage()  // usage.json'] }],
-    ['au', 1, 0, { name: 'Auth', attrs: ['apps: Vec<AppRecord> (max 64)', 'pending: pairing requests (max 8)', 'admin: String (admin.key)', 'rates: per-app window'], ops: ['authenticate(credential, …)', '  → Principal', 'admit(app, per_min, now)', 'request_pairing, decide_pairing, poll_pairing'] }],
+    ['au', 1, 0, { name: 'Auth', attrs: ['apps: Vec<AppRecord> (max 64)', 'pending: pairing requests (max 8)', 'admin: String (admin.key)', 'rates: per-app window'], ops: ['authenticate(credential, …)', '  → Principal', 'admit(app, per_min, now)', 'request_pairing, decide_pairing', 'poll_pairing'] }],
     ['ar', 2, 0, { name: 'AppRecord', attrs: ['id: AppId, name', 'suite: bool', 'keys: Vec<StoredKey>', 'permissions: AppPermissions', 'last_seen_at'], role: 'core' }],
     ['sk', 3, 0, { name: 'StoredKey', attrs: ['id, shown (pw_3f9a1c…)', 'sha256: hex of the secret', 'created_at, last_used_at'], ops: ['keys::matches(secret, key)'], role: 'core' }],
     ['uh', 0, 1, { name: 'Usage', attrs: ['hours: Buckets (kept 7 days)', 'days: Buckets (kept 90 days)', 'per bucket: Map<app, Counters>'], ops: ['record(&UsageEvent)', 'series(range, now, app?) → UsageSeries', 'budget_use(at, app) → BudgetUse', 'restore(json, now), to_json()'], role: 'core' }],

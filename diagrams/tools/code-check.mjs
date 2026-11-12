@@ -13,8 +13,15 @@ import { pathToFileURL } from 'node:url';
 
 /** Imports each diagram source (`<dir>/<name>.mjs`) with writing switched off and returns { diagramFile: { nodes, classes, messages } }. */
 export async function recordDiagrams(dir, names) {
+  // The switch is on only while the sources are imported, then restored (rule 49: a test never leaves a patch behind).
+  const before = process.env.DIAGRAM_RECORD;
   process.env.DIAGRAM_RECORD = '1';
-  for (const n of names) await import(pathToFileURL(join(dir, `${n}.mjs`)).href);
+  try {
+    for (const n of names) await import(pathToFileURL(join(dir, `${n}.mjs`)).href);
+  } finally {
+    if (before === undefined) delete process.env.DIAGRAM_RECORD;
+    else process.env.DIAGRAM_RECORD = before;
+  }
   return globalThis.__recordedDiagrams ?? {};
 }
 
