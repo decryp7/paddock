@@ -2034,8 +2034,9 @@ fn forged_train_is_rebuilt_not_landed(make: impl FnOnce(&World, &str) -> String,
     assert_eq!(w.labels_of(1), vec!["state/in-train"]);
 }
 
+// One test per forged shape (each builds its own world, about 2 s): in one test they ran 24 s in series and hit the CI bound.
 #[test]
-fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
+fn a_hand_pushed_train_is_rebuilt_a_commit_on_top_of_the_real_train() {
     forged_train_is_rebuilt_not_landed(
         |w, _| {
             // The reviewer's attack: the real train plus evil.txt, with the marker's own message.
@@ -2052,6 +2053,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a commit on top of the real train",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_an_empty_commit_on_top_of_the_real_train() {
     forged_train_is_rebuilt_not_landed(
         |w, _| {
             // An empty commit with the marker's message on top: the tree is right, the chain is not.
@@ -2066,6 +2071,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "an empty commit on top of the real train",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_the_marker_commit_changes_the_tree() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             forge(
@@ -2078,6 +2087,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "the marker commit changes the tree",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_merge_that_is_not_what_merging_gives() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             forge(
@@ -2090,6 +2103,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a merge that is not what merging gives",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_merge_of_a_commit_that_is_not_the_approved_head() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             // A descendant of the approved head (not the approved head) is merged, under the approved head's message.
@@ -2109,6 +2126,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a merge of a commit that is not the approved head",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_an_extra_merge_the_marker_does_not_list() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             let other = w.repos.branch("other", "docs/other.md");
@@ -2116,6 +2137,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "an extra merge the marker does not list",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_no_no_ff_merge() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             // No merge commit at all: the pull request's head fast-forwarded, then the marker.
@@ -2139,6 +2164,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "no --no-ff merge",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_non_merge_commit_between_main_and_the_first_merge() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             forge(
@@ -2151,6 +2180,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a non-merge commit between main and the first merge",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_merge_with_a_third_parent() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             // An octopus merge: a third parent that changes nothing, so the tree is still what merging two parents gives.
@@ -2169,6 +2202,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a merge with a third parent",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_since_run_on_round_1() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             forge(
@@ -2181,6 +2218,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a since-run on round 1",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_marker_commit_with_two_parents() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             let other = w.repos.branch("other", "docs/other.md");
@@ -2194,6 +2235,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a marker commit with two parents",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_marker_message_with_skip_ci() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             forge(
@@ -2206,6 +2251,10 @@ fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
         },
         "a marker message with [skip ci]",
     );
+}
+
+#[test]
+fn a_hand_pushed_train_is_rebuilt_a_merge_message_with_skip_ci() {
     forged_train_is_rebuilt_not_landed(
         |w, pr| {
             // The merge message carries the directive; everything else is right.
