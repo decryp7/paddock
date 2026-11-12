@@ -88,6 +88,19 @@ impl Settings {
     }
 }
 
+/// Refuses thresholds that cannot mean anything: not finite (NaN, infinity), negative, or a start above the stop threshold.
+pub fn validate(start_below: f64, hold_above: f64) -> Result<(), String> {
+    for (name, v) in [("--start-below", start_below), ("--hold-above", hold_above)] {
+        if !v.is_finite() || v < 0.0 {
+            return Err(format!("{name} {v} is not a finite number of zero or more."));
+        }
+    }
+    if start_below > hold_above {
+        return Err(format!("--start-below {start_below} is above --hold-above {hold_above}."));
+    }
+    Ok(())
+}
+
 /// The CI queue as measured.
 #[derive(Debug, Clone, PartialEq)]
 pub enum CiQueue {
@@ -95,12 +108,14 @@ pub enum CiQueue {
     Skipped,
     /// The queue could not be read; the text says why.
     NotMeasured(String),
-    /// Runs in the newest page of the run list.
+    /// Runs in the newest pages of the run list (at most [`QUEUE_PAGES`] pages of 50).
     Counts {
         /// Runs that are executing.
         running: u64,
         /// Runs that wait for a runner.
         queued: u64,
+        /// Runs whose status this tool does not know: counted as a hold, never ignored.
+        unknown: u64,
     },
 }
 
@@ -184,9 +199,14 @@ pub fn verdict(i: &Inputs, s: &Settings) -> Verdict {
     match &i.ci {
         CiQueue::Skipped => {}
         CiQueue::NotMeasured(e) => hold.push(format!("CI queue not measured: {e}")),
-        CiQueue::Counts { running, queued } => {
+        CiQueue::Counts { running, queued, unknown } => {
             if running + queued >= s.ci_hold {
                 hold.push(format!("CI has {running} running and {queued} queued runs (limit {})", s.ci_hold));
+            }
+            if *unknown > 0 {
+                hold.push(format!(
+                    "{unknown} CI run(s) have a status this tool does not know: the queue is not measured"
+                ));
             }
         }
     }
@@ -222,28 +242,62 @@ pub fn parse_df(text: &str) -> Option<u64> {
     cols[3].parse::<u64>().ok()?.checked_mul(1024)
 }
 
-/// Counts the queued and running runs of a run list.
-pub fn count_queue(runs: &[RunInfo]) -> (u64, u64) {
-    let (mut running, mut queued) = (0, 0);
+/// Counts the running, queued and unrecognised runs of a run list. A finished run is one of the API's final statuses.
+pub fn count_queue(runs: &[RunInfo]) -> (u64, u64, u64) {
+    let (mut running, mut queued, mut unknown) = (0, 0, 0);
     for r in runs {
         match r.status.as_str() {
             "in_progress" | "running" => running += 1,
             "queued" | "waiting" | "blocked" | "pending" => queued += 1,
-            _ => {}
+            "completed" | "success" | "failure" | "cancelled" | "skipped" => {}
+            _ => unknown += 1,
         }
     }
-    (running, queued)
+    (running, queued, unknown)
 }
 
+/// Pages of the run list read for the queue (50 runs each): the newest 200 runs. Queued and running runs are the newest ones; a
+/// queue older than that is not seen, and the documentation says so.
+pub const QUEUE_PAGES: u32 = 4;
+
+/// How long `df` and `sysctl` may take: a hung network volume must not hang the verdict.
+const TOOL_SECONDS: u64 = 10;
+
 fn output_of(program: &str, args: &[&str]) -> Result<String, String> {
-    let out = paddock_proc::command(program)
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = paddock_proc::command(program)
         .args(args)
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
         .map_err(|e| format!("cannot start {program}: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("{program} exited with {}", out.status));
+    let mut stdout = child.stdout.take().ok_or_else(|| format!("{program} has no output"))?;
+    // The output is small; a reader thread keeps a full pipe from blocking the child while this thread watches the clock.
+    let reader = std::thread::spawn(move || {
+        let mut s = String::new();
+        let _ = stdout.read_to_string(&mut s);
+        s
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if started.elapsed().as_secs() >= TOOL_SECONDS => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{program} did not answer within {TOOL_SECONDS} s"));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+            Err(e) => return Err(format!("{program} failed: {e}")),
+        }
+    };
+    let text = reader.join().unwrap_or_default();
+    if !status.success() {
+        return Err(format!("{program} exited with {status}"));
     }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(text)
 }
 
 /// The 1- and 5-minute load of this machine.
@@ -264,9 +318,19 @@ pub fn free_bytes(path: &str) -> Result<u64, String> {
     parse_df(&text).ok_or_else(|| "the df output could not be read".into())
 }
 
-/// The CI queue from the newest page of the run list (read-only).
-pub fn ci_queue(client: &mut Client<'_>) -> Result<(u64, u64), String> {
-    Ok(count_queue(&client.runs_page(1)?.runs))
+/// The CI queue from the newest pages of the run list (read-only): pages are read until one has no unfinished run, at most
+/// [`QUEUE_PAGES`].
+pub fn ci_queue(client: &mut Client<'_>) -> Result<(u64, u64, u64), String> {
+    let (mut running, mut queued, mut unknown) = (0, 0, 0);
+    for page in 1..=QUEUE_PAGES {
+        let runs = client.runs_page(page)?.runs;
+        let (r, q, u) = count_queue(&runs);
+        (running, queued, unknown) = (running + r, queued + q, unknown + u);
+        if runs.len() < 50 || r + q + u == 0 {
+            break;
+        }
+    }
+    Ok((running, queued, unknown))
 }
 
 /// The text of a verdict: one line.
@@ -289,7 +353,12 @@ pub fn line(v: &Verdict, i: &Inputs, s: &Settings) -> String {
     let ci = match &i.ci {
         CiQueue::Skipped => "ci skipped".to_string(),
         CiQueue::NotMeasured(_) => "ci not measured".to_string(),
-        CiQueue::Counts { running, queued } => format!("ci {running} running {queued} queued"),
+        CiQueue::Counts {
+            running,
+            queued,
+            unknown: 0,
+        } => format!("ci {running} running {queued} queued"),
+        CiQueue::Counts { running, queued, unknown } => format!("ci {running} running {queued} queued {unknown} unknown"),
     };
     let mut out = format!("{}: {load}; {}; {ci}", v.kind.word(), disks.join(", "));
     if !v.reasons.is_empty() {
@@ -309,7 +378,9 @@ pub fn report(i: &Inputs, s: &Settings) -> Report {
     let ci = match &i.ci {
         CiQueue::Skipped => json!({"status": "skipped"}),
         CiQueue::NotMeasured(e) => json!({"status": "not measured", "error": e}),
-        CiQueue::Counts { running, queued } => json!({"status": "measured", "running": running, "queued": queued}),
+        CiQueue::Counts { running, queued, unknown } => {
+            json!({"status": "measured", "running": running, "queued": queued, "unknown": unknown, "pages": QUEUE_PAGES})
+        }
     };
     let data = json!({
         "verdict": v.kind.word(),
@@ -355,7 +426,7 @@ pub fn command(a: &LoadArgs) -> Result<Report, CliError> {
                 let mut http = CurlHttp;
                 let mut client = Client::new(&mut http, &a.server, &a.repo, &token);
                 match ci_queue(&mut client) {
-                    Ok((running, queued)) => CiQueue::Counts { running, queued },
+                    Ok((running, queued, unknown)) => CiQueue::Counts { running, queued, unknown },
                     Err(e) => CiQueue::NotMeasured(e),
                 }
             }
@@ -401,7 +472,11 @@ mod tests {
                 path: "/d7".into(),
                 free: Ok(500 * GIB),
             }],
-            ci: CiQueue::Counts { running: 1, queued: 0 },
+            ci: CiQueue::Counts {
+                running: 1,
+                queued: 0,
+                unknown: 0,
+            },
         }
     }
 
@@ -451,7 +526,11 @@ mod tests {
     #[test]
     fn a_long_ci_queue_holds() {
         let mut i = ok_inputs();
-        i.ci = CiQueue::Counts { running: 2, queued: 2 };
+        i.ci = CiQueue::Counts {
+            running: 2,
+            queued: 2,
+            unknown: 0,
+        };
         assert_eq!(verdict(&i, &s()).kind, Kind::Hold);
     }
 
@@ -473,10 +552,75 @@ mod tests {
     }
 
     #[test]
+    fn a_run_with_an_unknown_status_holds() {
+        let mut i = ok_inputs();
+        i.ci = CiQueue::Counts {
+            running: 0,
+            queued: 0,
+            unknown: 1,
+        };
+        let v = verdict(&i, &s());
+        assert_eq!(v.kind, Kind::Hold);
+        assert!(v.reasons[0].contains("does not know"), "{v:?}");
+        let (r, q, u) = count_queue(&[run("in_progress"), run("completed"), run("brand_new_status")]);
+        assert_eq!((r, q, u), (1, 0, 1));
+    }
+
+    #[test]
+    fn thresholds_that_are_not_finite_or_are_negative_are_refused() {
+        assert!(validate(12.0, 20.0).is_ok());
+        assert!(validate(0.0, 0.0).is_ok());
+        for (a, b) in [
+            (f64::NAN, 20.0),
+            (12.0, f64::NAN),
+            (f64::INFINITY, f64::INFINITY),
+            (12.0, f64::INFINITY),
+            (-1.0, 20.0),
+            (12.0, -5.0),
+        ] {
+            assert!(validate(a, b).is_err(), "{a} {b}");
+        }
+        assert!(validate(21.0, 20.0).is_err());
+    }
+
+    #[test]
+    fn the_queue_is_paged_until_a_page_has_no_unfinished_run() {
+        // 50 runs on page 1 with one unfinished one: page 2 is read; it is all finished, so reading stops there.
+        struct Pages(std::cell::RefCell<Vec<String>>);
+        impl Http for Pages {
+            fn get_json(&mut self, url: &str, _token: &str) -> Result<Value, String> {
+                self.0.borrow_mut().push(url.to_string());
+                let page: u32 = url.rsplit("page=").next().and_then(|p| p.parse().ok()).unwrap_or(0);
+                let runs: Vec<Value> = (0..50)
+                    .map(|i| run_json(if page == 1 && i == 0 { "queued" } else { "completed" }))
+                    .collect();
+                Ok(json!({"total_count": 500, "workflow_runs": runs}))
+            }
+        }
+        let mut h = Pages(Default::default());
+        let mut c = Client::new(&mut h, "https://gitea.invalid", "example/paddock", "t");
+        assert_eq!(ci_queue(&mut c), Ok((0, 1, 0)));
+        assert_eq!(h.0.borrow().len(), 2);
+    }
+
+    #[test]
+    fn a_tool_that_hangs_is_cut_off_with_a_reason() {
+        // `sleep 30` stands for a df on a dead network volume; the call must come back in about TOOL_SECONDS, not 30.
+        let started = std::time::Instant::now();
+        let e = output_of("sleep", &["30"]).unwrap_err();
+        assert!(e.contains("did not answer"), "{e}");
+        assert!(started.elapsed().as_secs() < 20);
+    }
+
+    #[test]
     fn stop_beats_hold_and_lists_every_reason() {
         let mut i = ok_inputs();
         i.load = Ok((30.0, 25.0));
-        i.ci = CiQueue::Counts { running: 5, queued: 5 };
+        i.ci = CiQueue::Counts {
+            running: 5,
+            queued: 5,
+            unknown: 0,
+        };
         let v = verdict(&i, &s());
         assert_eq!(v.kind, Kind::Stop);
         assert_eq!(v.reasons.len(), 2, "{v:?}");
@@ -500,6 +644,19 @@ mod tests {
         assert_eq!(parse_df(""), None);
     }
 
+    fn run(status: &str) -> RunInfo {
+        RunInfo {
+            id: 1,
+            path: "ci.yml@refs/heads/main".into(),
+            event: "push".into(),
+            status: status.into(),
+            conclusion: String::new(),
+            head_sha: "a".into(),
+            created_at: String::new(),
+            run_attempt: 1,
+        }
+    }
+
     fn run_json(status: &str) -> Value {
         json!({"id": 1, "path": "ci.yml@refs/heads/main", "event": "push", "status": status, "conclusion": "", "head_sha": "a", "created_at": ""})
     }
@@ -510,7 +667,7 @@ mod tests {
             run_json("in_progress"), run_json("queued"), run_json("waiting"), run_json("completed"), run_json("in_progress")
         ]}));
         let mut c = Client::new(&mut f, "https://gitea.invalid", "decryp7/paddock", "t");
-        assert_eq!(ci_queue(&mut c), Ok((2, 2)));
+        assert_eq!(ci_queue(&mut c), Ok((2, 2, 0)));
     }
 
     #[test]
