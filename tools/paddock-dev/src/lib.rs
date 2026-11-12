@@ -32,6 +32,8 @@
 //! - `ci triage <run>`: NEW, ALREADY FAILING ON MAIN or FLAKY for each failed test of a run ([`ci_runs::triage`]).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
+//! - `pr open|label|list|sync|plan-status`: the branch ledger on Gitea draft pull requests with labels, and plan rows checked
+//!   against it ([`pr`], docs/plans/merge-queue.md).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
@@ -61,6 +63,7 @@ pub mod plan_cmd;
 pub mod plan_gitea;
 pub mod plan_repo;
 pub mod plan_since;
+pub mod pr;
 pub mod release_isolation;
 pub mod safe_remove;
 pub mod slots;

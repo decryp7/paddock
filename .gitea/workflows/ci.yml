@@ -1,9 +1,11 @@
 # The monorepo's CI (ADR 0014 §6): a plan job decides which projects a change reaches (scripts/affected.mjs: the Cargo and
 # npm graphs plus the frontendDist and config-path edges), then only those run: the shared UI package and its entry points,
 # the reference apps, the Rust crates, the conformance, tools and ESLint packages, and one matrix leg per affected app
-# (apps/<app>/paddock.ci.json, through .gitea/actions/app-gates). The base of the diff: a pull request's merge base, the last
-# green push run of main for a push to main, the `base` input of a manual run; tags and manual runs without a base run
-# everything. nightly.yml runs everything, Chromium and WebKit, every night (the safety net for a wrong filter).
+# (apps/<app>/paddock.ci.json, through .gitea/actions/app-gates). The base of the diff: the last green push run of main for a
+# push to main, the `base` input of a manual run; tags and manual runs without a base run everything. No pull_request trigger:
+# pull requests are the branch ledger (`./dev pr`, docs/plans/merge-queue.md) and opening one starts no run (the contract test
+# no_workflow_runs_on_a_pull_request); branches and trains run by dispatch.
+# nightly.yml runs everything, Chromium and WebKit, every night (the safety net for a wrong filter).
 # Publishing is not here: a v* tag runs publish.yml (gates, then the cargo and npm registries and the Gitea release); this
 # workflow ends with the publish dry run, so a tag never meets a packaging problem first.
 #
@@ -16,7 +18,6 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-  pull_request:
   workflow_dispatch:
     inputs:
       base:
@@ -245,7 +246,7 @@ jobs:
         run: npx playwright test --shard=${{ matrix.shard }}/2
 
   # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it on the Mac host runner
-  # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch and pull request runs stay Chromium-only (rule 3).
+  # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch runs stay Chromium-only (rule 3).
   e2e-webkit:
     name: reference apps in WebKit (macOS)
     needs: [plan]
@@ -910,15 +911,15 @@ jobs:
           mode: release
 
   # Conventional Commits and no AI attribution (rules 4, 8) for every commit of a change, whichever project it touches.
-  # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a pull request since its target branch,
-  # a push `before..sha`, a manual run from the plan's base. On a push to main that is `--first-parent`: only the commits main
+  # Only the commits a change adds are linted (scripts/affected.mjs commitLintRange): a push `before..sha`, a manual run from the
+  # plan's base. On a push to main that is `--first-parent`: only the commits main
   # itself gets (the landing merge, a direct commit), not the ones a merge brought in. A branch's commits are linted by the
   # integrator before landing (`commit-lint --range origin/main..<branch>`, docs/rules.md rule 50(g)); C23 in the conformance
   # run is the backstop for a branch that landed without that. Tags and an app's tag gates skip it (ER-15).
   commits:
     name: commit messages
     needs: [plan]
-    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["commits"]'), 'commits') }}
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["commits"]'), 'commits') }}
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2

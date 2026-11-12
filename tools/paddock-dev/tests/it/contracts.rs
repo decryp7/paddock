@@ -499,3 +499,24 @@ fn the_root_agents_md_links_the_rules_and_carries_every_common_doc_block_verbati
         assert!(agents.contains(text.trim()), "docs/blocks/{file} is in AGENTS.md as it is");
     }
 }
+
+/// The branch ledger (docs/plans/merge-queue.md): pull requests are the ledger, so opening or updating one must start no CI
+/// run. No workflow listens on `pull_request` or `pull_request_target`; branches and trains run by dispatch. The `on:` keys
+/// are read by C100's workflow parser, so every form (`on: [push, pull_request]`, a mapping, a list) is seen.
+#[test]
+fn no_workflow_runs_on_a_pull_request() {
+    let mut found = Vec::new();
+    for f in tracked()
+        .into_iter()
+        .filter(|f| f.starts_with(".gitea/workflows/") && (f.ends_with(".yml") || f.ends_with(".yaml")))
+    {
+        let events = paddock_dev::gates::ci::workflow_events(&f, &read(&f)).unwrap_or_else(|e| panic!("{f}: {e}"));
+        if events.contains("pull_request") || events.contains("pull_request_target") {
+            found.push(f);
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "these workflows run on pull requests, which the ledger opens for every branch: {found:?}"
+    );
+}

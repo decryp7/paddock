@@ -420,10 +420,16 @@ pub trait Http {
         let _ = (url, token);
         Err("this reader fetches JSON only".into())
     }
-    /// Posts `body` as JSON to `url`; the answer may be empty (`Null`, Gitea's 204). Errors are texts without the token.
+    /// Sends `body` (or nothing) with `method` (`POST`, `PUT`, `PATCH`, `DELETE`) and returns the JSON answer (`null` for an
+    /// empty one); errors are texts without the token. Only writers (`./dev pr`) use it.
+    fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+        let _ = (method, url, token, body);
+        Err("this reader cannot write".into())
+    }
+
+    /// Posts `body` as JSON to `url` (a `send_json` with `POST`); the answer may be empty (`Null`, Gitea's 204).
     fn post_json(&mut self, url: &str, token: &str, body: &Value) -> Result<Value, String> {
-        let _ = (url, token, body);
-        Err("this client reads only".into())
+        self.send_json("POST", url, token, Some(body))
     }
 }
 
@@ -477,18 +483,31 @@ pub struct CurlHttp;
 impl CurlHttp {
     /// One GET through curl: the body, at most `max_bytes`, within `seconds`.
     fn get(url: &str, token: &str, accept: &str, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
-        CurlHttp::send(url, token, accept, None, max_bytes, seconds)
+        CurlHttp::request("GET", url, token, accept, None, max_bytes, seconds)
     }
 
-    /// One request through curl: a GET, or a POST of `post` (JSON text) when given.
-    fn send(url: &str, token: &str, accept: &str, post: Option<&str>, max_bytes: u64, seconds: u32) -> Result<Vec<u8>, String> {
+    /// One request through curl; a body is sent as JSON through the config on standard input (never an argument).
+    fn request(
+        method: &str,
+        url: &str,
+        token: &str,
+        accept: &str,
+        body: Option<&str>,
+        max_bytes: u64,
+        seconds: u32,
+    ) -> Result<Vec<u8>, String> {
         use std::process::Stdio;
         if url.contains(['"', '\n', '\\']) || token.contains(['"', '\n', '\\']) {
             return Err("the URL or the token has a character that cannot be sent".into());
         }
+        if method.is_empty() || !method.bytes().all(|b| b.is_ascii_uppercase()) {
+            return Err(format!("{method:?} is not an HTTP method"));
+        }
         let (max_bytes, seconds) = (max_bytes.to_string(), seconds.to_string());
         let mut child = paddock_proc::command("curl")
             .args([
+                // First: no ~/.curlrc, so only this config shapes the request.
+                "-q",
                 "-sS",
                 "--fail-with-body",
                 "--max-time",
@@ -510,15 +529,19 @@ impl CurlHttp {
             } else {
                 format!("header = \"Authorization: token {token}\"\n")
             };
-            let data = match post {
-                // curl's config syntax: inside quotes only `\\` and `\"` need escaping, a newline is `\n`.
-                Some(json) => format!(
-                    "request = \"POST\"\nheader = \"Content-Type: application/json\"\ndata = \"{}\"\n",
-                    json.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n")
-                ),
-                None => String::new(),
-            };
-            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n{data}");
+            let _ = write!(stdin, "url = \"{url}\"\n{auth}header = \"Accept: {accept}\"\n");
+            if method != "GET" {
+                let _ = writeln!(stdin, "request = \"{method}\"");
+            }
+            if let Some(body) = body {
+                // curl's config quoting: within double quotes only \\ and \" (and \t \n \r \v) are escapes.
+                let quoted = body
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
+                let _ = write!(stdin, "header = \"Content-Type: application/json\"\ndata-binary = \"{quoted}\"\n");
+            }
         }
         let out = child.wait_with_output().map_err(|e| format!("curl failed: {e}"))?;
         if !out.status.success() {
@@ -551,12 +574,13 @@ impl Http for CurlHttp {
         Ok(String::from_utf8_lossy(&body).into_owned())
     }
 
-    fn post_json(&mut self, url: &str, token: &str, body: &Value) -> Result<Value, String> {
-        let out = CurlHttp::send(url, token, "application/json", Some(&body.to_string()), 1 << 20, 30)?;
-        if out.iter().all(u8::is_ascii_whitespace) {
+    fn send_json(&mut self, method: &str, url: &str, token: &str, body: Option<&Value>) -> Result<Value, String> {
+        let text = body.map(Value::to_string);
+        let answer = CurlHttp::request(method, url, token, "application/json", text.as_deref(), 16 << 20, 30)?;
+        if answer.iter().all(u8::is_ascii_whitespace) {
             return Ok(Value::Null);
         }
-        Ok(serde_json::from_slice(&out).unwrap_or(Value::Null))
+        serde_json::from_slice(&answer).map_err(|e| format!("the server's answer is not JSON: {e}"))
     }
 }
 

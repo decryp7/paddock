@@ -23,7 +23,7 @@ pub enum Level {
     Nightly,
     /// A tag push.
     Release,
-    /// A manual run only (`workflow_dispatch`); never counts as `Branch`.
+    /// A manual run only (`workflow_dispatch`); counts as `Branch` only for the workflows of [`BRANCH_DISPATCH`].
     Manual,
 }
 
@@ -258,6 +258,11 @@ fn parse_matrix(n: &Node) -> Matrix {
         }
     }
     m
+}
+
+/// The events a workflow file listens on (`on:`), read by the same parser as the model.
+pub fn workflow_events(path: &str, text: &str) -> Result<BTreeSet<String>, String> {
+    parse_workflow(path, text).map(|w| w.events)
 }
 
 fn parse_workflow(path: &str, text: &str) -> Result<Workflow, String> {
@@ -1176,6 +1181,16 @@ fn base_scope_clone<'a>(s: &Scope<'a>) -> Scope<'a> {
     }
 }
 
+/// The workflows that a branch or a train runs by dispatch. No workflow runs on a pull request (pull requests are the branch
+/// ledger, docs/plans/merge-queue.md; the contract test `no_workflow_runs_on_a_pull_request`), so a branch run of these is a dispatch on the branch's ref, and ADR 0060 §2.4
+/// counts it at the `branch` level ("pull requests and branch runs"). Every other dispatch stays `manual`. These are the
+/// workflows that had the `pull_request` trigger until the ledger; a test checks each one has `workflow_dispatch`.
+pub const BRANCH_DISPATCH: &[&str] = &[
+    ".gitea/workflows/ci.yml",
+    ".gitea/workflows/debrief.yml",
+    ".gitea/workflows/debrief-mutants.yml",
+];
+
 fn contexts(wf: &Workflow) -> Vec<Context> {
     let mut out = Vec::new();
     let dispatch = wf.dispatch_inputs.clone();
@@ -1225,12 +1240,22 @@ fn contexts(wf: &Workflow) -> Vec<Context> {
                 level: Level::Nightly,
                 inputs: BTreeMap::new(),
             }),
-            "workflow_dispatch" => out.push(Context {
-                event: "workflow_dispatch",
-                git_ref: "refs/heads/main".into(),
-                level: Level::Manual,
-                inputs: dispatch.clone(),
-            }),
+            "workflow_dispatch" => {
+                out.push(Context {
+                    event: "workflow_dispatch",
+                    git_ref: "refs/heads/main".into(),
+                    level: Level::Manual,
+                    inputs: dispatch.clone(),
+                });
+                if BRANCH_DISPATCH.contains(&wf.path.as_str()) {
+                    out.push(Context {
+                        event: "workflow_dispatch",
+                        git_ref: "refs/heads/topic".into(),
+                        level: Level::Branch,
+                        inputs: dispatch.clone(),
+                    });
+                }
+            }
             _ => out.push(Context {
                 event: "other",
                 git_ref: "refs/heads/main".into(),
@@ -1357,6 +1382,30 @@ mod tests {
 
     fn find<'a>(m: &'a CiModel, needle: &str) -> Vec<&'a RunLine> {
         m.lines.iter().filter(|l| l.text.contains(needle)).collect()
+    }
+
+    #[test]
+    fn a_dispatch_is_a_branch_run_only_for_the_branch_dispatch_workflows() {
+        let wf = "on:\n  workflow_dispatch:\njobs:\n  c:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node x.mjs\n";
+        let m = build(&sources(&[(".gitea/workflows/ci.yml", wf)]));
+        assert_eq!(only(&m, "x.mjs").levels.get(&Level::Branch), Some(&Status::Gated));
+        let m = build(&sources(&[(".gitea/workflows/ci-token-check.yml", wf)]));
+        assert_eq!(only(&m, "x.mjs").levels.get(&Level::Branch), None, "another dispatch stays manual");
+        assert_eq!(only(&m, "x.mjs").levels.get(&Level::Manual), Some(&Status::Gated));
+    }
+
+    #[test]
+    fn every_branch_dispatch_workflow_exists_and_can_be_dispatched() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for p in BRANCH_DISPATCH {
+            let text = std::fs::read_to_string(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+            let w = parse_workflow(p, &text).unwrap();
+            assert!(
+                w.events.contains("workflow_dispatch"),
+                "{p} is a branch-run workflow but cannot be dispatched"
+            );
+            assert!(!w.events.contains("pull_request"), "{p}: rule 50, no pull_request trigger");
+        }
     }
 
     fn only<'a>(m: &'a CiModel, needle: &str) -> &'a RunLine {

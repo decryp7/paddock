@@ -3,8 +3,8 @@
 # input, or a global one); Debrief is not a leg of ci.yml because its gates span three OS, real-app smoke tests and the
 # installers.
 #
-# Branch and pull request runs are the checks: Rust (Linux and macOS), plugin SDK, licences, frontend and the end-to-end
-# tests in Chromium. A full run adds the real-app smoke tests on three OS, the installers and the end-to-end tests in WebKit
+# Branch runs (a manual dispatch; there is no pull_request trigger: pull requests are the branch ledger, docs/plans/
+# merge-queue.md, and start no run) are the checks: Rust (Linux and macOS), plugin SDK, licences, frontend and the end-to-end tests in Chromium. A full run adds the real-app smoke tests on three OS, the installers and the end-to-end tests in WebKit
 # (Paddock rule 3: WebKit and the slow legs run on the combined result). Full runs are pushes to main, debrief-v* tags
 # (which also publish the Gitea release and the moving debrief-latest release the app's updater reads), the nightly run and
 # a manual run with `bundles: true` (the plan job's `full` output).
@@ -25,7 +25,6 @@ on:
   push:
     branches: [main]
     tags: ["debrief-v*"]
-  pull_request:
   # Nightly on the default branch (main), with the installers. Scheduled runs start at night local time (UTC+8). The
   # Windows legs start after the Proxmox backup window (00:00 to 04:00 local) and are staggered; see docs/ci-schedules.md.
   schedule:
@@ -47,7 +46,7 @@ env:
   # memory when linking the test binaries. The test profile inherits this from dev.
   CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
-# A newer push to the same branch (or pull request) supersedes the run still going; tags have their own ref,
+# A newer push or dispatch on the same branch supersedes the run still going; tags have their own ref,
 # so releases are never cancelled by later pushes.
 # The event is part of the group, so a push to main never cancels the nightly or a manual run of main.
 concurrency:
@@ -482,10 +481,6 @@ jobs:
             /usr/local/cargo/advisory-dbs
           key: debrief-licences-${{ runner.os }}-${{ hashFiles('apps/debrief/Cargo.lock') }}
           restore-keys: debrief-licences-${{ runner.os }}-
-
-      - name: Commit messages follow Conventional Commits
-        if: github.event_name == 'pull_request'
-        run: node scripts/commit-lint.mjs --range "origin/${{ github.base_ref }}..HEAD"
 
       # The binary, not the Docker-based action: no image to pull on every run. Every workspace crate, not just
       # the root package.

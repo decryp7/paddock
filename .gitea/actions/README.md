@@ -69,7 +69,7 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
 3. **Delete the copies**, after checking each is the kit's (diff it; port any behaviour the copy has and the kit lacks into the kit as a
    parameter or a default, with a test in `conformance/test/`, never keep the copy): `scripts/release/*` (`conformance/release/`),
    `scripts/ci/macos-verify-bundle.sh` (`conformance/release/macos-verify-bundle.sh`), `scripts/commit-lint.mjs`
-   (`paddock-conformance commit-lint`, run on pull requests by `ci.yml`'s `commits` job), `scripts/export-diagrams.sh`
+   (`paddock-conformance commit-lint`, run on pushes and dispatches by `ci.yml`'s `commits` job), `scripts/export-diagrams.sh`
    (`diagrams/scripts/export-diagrams.sh`, run from the app folder with an absolute source), `scripts/check-index.mjs`
    (`conformance/ci/check-index.mjs`, called from `tauri.conf.json`'s `beforeBuildCommand`), and the old workflow.
 4. **Keep what is the app's own**: `sidecar.mjs` (it uses the shared `cargoTargetDir`), bootstrap and verify scripts for the service

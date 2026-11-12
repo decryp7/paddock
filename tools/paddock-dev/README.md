@@ -100,6 +100,31 @@ start, and cargo tracks the last use of its caches in SQLite (`cargo clean gc`, 
 - `./dev disk adopt` writes records for existing worktrees (`git worktree list`) and for build folders named after one (the
   longest matching worktree name); everything else stays an orphan.
 - The nightly (`nightly.yml`, job `disk-summary`) writes `./dev disk report --summary` to the job summary; it follows the night's skip.
+## `pr`: the branch ledger (user decision 2026-11-12)
+
+Every branch is a draft pull request against main; its labels (`.gitea/labels.toml`) say where it is. Design and the merge
+queue built on it: `docs/plans/merge-queue.md`. The token is `GITEA_TOKEN` (it needs write access to issues and pull
+requests), sent in a header through curl's standard input and printed nowhere. `--server`, `--repo` and `--root` go right
+after the command (`pr label` takes every later word as a change).
+
+- `pr sync [--dry-run]` reads the repository's "autodetect manual merge" and warns while it is off (a fast-forwarded
+  pull request then stays open on the server; `plan-status` still sees it as landed, from git). It creates the labels the server lacks and updates a changed colour, description or exclusivity; it
+  never deletes one and lists the server's extra labels. `[[template]]` entries expand per app folder (`app/<app>`).
+- `pr open <branch> [--labels a,b] [--base main]`: the branch must be pushed (`origin/<branch>` here). Title `WIP: <branch>`
+  (Gitea's draft prefix), body = its commits, label `state/built` unless a `state/` label is given. Refuses a second open
+  pull request for the branch. Opening one starts no CI run: no workflow has a `pull_request` trigger (the contract
+  test `no_workflow_runs_on_a_pull_request`). It fetches the base and the branch from origin first.
+- `pr label <branch> +state/approved -owes/windows-tests`: adding a label of an exclusive scope (`state/`, `review-round/`)
+  removes the others of that scope; unknown labels are refused.
+- `pr list [--state approved] [--no-ci]`: number, branch, head, labels and the newest run per workflow of the head.
+- `pr plan-status [--write] [--files a,b]`: rows of `docs/plans/*.md` and `apps/*/docs/plans/*.md` tables with a State (or
+  Status) column whose references (branch or commit code spans in the State cell, else in a Branch or PR column) disagree
+  with the ledger. A pull request counts as landed when it is merged, labelled `state/landed`, or its head is on
+  main (a fast-forward landing). `--write` sets landed rows to ``done (`<commit>`)``, keeping the cell's other references
+  (``done (`<commit>`), was `feat/x` ``); the rest are left for a person. Exit 5 on findings;
+  a reference nobody knows is `not measured`, never agreeing.
+- Tests: unit tests against an in-memory server (`src/pr/fake.rs`) and `tests/it/pr.rs`, the binary and curl against a
+  fake Gitea on 127.0.0.1. Never the real server.
 
 ## Not ported yet (R0b gaps, listed on purpose)
 

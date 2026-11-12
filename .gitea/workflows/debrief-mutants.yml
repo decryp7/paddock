@@ -1,5 +1,7 @@
 # Mutation testing of the engine with cargo-mutants: how many deliberately injected bugs the tests catch.
-# Weekly over all of debrief-core; on pull requests only the mutants in the changed lines (--in-diff).
+# Weekly over all of debrief-core; a manual run with a `base` tests only the mutants in the lines changed since it (--in-diff).
+# No pull_request trigger: pull requests are the branch ledger (docs/plans/merge-queue.md) and start no run (the contract test
+# no_workflow_runs_on_a_pull_request).
 # Surviving mutants are listed in mutants.out (uploaded); they point at untested behaviour.
 
 name: debrief-mutants
@@ -7,11 +9,14 @@ name: debrief-mutants
 on:
   schedule:
     - cron: "3 12 * * 6" # Saturday 20:03 UTC+8
-  pull_request:
-    paths: ["apps/debrief/crates/debrief-core/**"]
   workflow_dispatch:
+    inputs:
+      base:
+        description: "A commit or origin/<branch> (for example origin/main): only the mutants in the lines of debrief-core changed since it (empty: all of debrief-core)"
+        required: false
+        default: ""
 
-# A newer push to the same branch supersedes a running pull request run (the weekly run has its own group).
+# A newer dispatch on the same branch supersedes the one still running.
 concurrency:
   group: mutants-${{ github.ref }}
   cancel-in-progress: true
@@ -108,19 +113,22 @@ jobs:
         run: command -v cargo-mutants || cargo install cargo-mutants --locked
 
       - name: Mutants in the changed lines
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'workflow_dispatch' && inputs.base != ''
+        env:
+          BASE: ${{ inputs.base }}
         run: |
-          git diff --relative "origin/${{ github.base_ref }}...HEAD" -- crates/debrief-core > pr.diff
-          cargo mutants -p debrief-core --in-diff pr.diff --timeout-multiplier 3 --no-shuffle
+          case "$BASE" in -*) echo "::error::base '$BASE' is not a commit. Dispatch with a commit id or branch name."; exit 1 ;; esac
+          git diff --relative "$BASE...HEAD" -- crates/debrief-core > base.diff
+          cargo mutants -p debrief-core --in-diff base.diff --timeout-multiplier 3 --no-shuffle
 
       # Two mutants build at once (--jobs 2): each gets half of the job's share, so the job's rustc count stays its share.
       - uses: ./.gitea/actions/build-jobs
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'workflow_dispatch' || inputs.base == ''
         with:
           split: "2"
 
       - name: Mutants in debrief-core
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'workflow_dispatch' || inputs.base == ''
         run: cargo mutants -p debrief-core --timeout-multiplier 3 --jobs 2
 
       - name: Upload results

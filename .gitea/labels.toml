@@ -1,0 +1,86 @@
+# The labels of the branch ledger: every branch is a draft pull request against main, and its labels say where it is (user
+# decision 2026-11-12; docs/plans/merge-queue.md). `./dev pr sync` creates the missing labels on the server and updates a changed
+# colour, description or exclusivity; it never deletes a label. `./dev pr open|label|list` refuse a label that is not here.
+#
+# `exclusive = true` makes a scope (the text before the last `/`) hold one label at a time, on the server (Gitea's scoped
+# labels) and in `./dev pr label`: adding `state/approved` removes `state/in-review`.
+#
+# [[template]] entries expand once per app folder (`apps/<app>/paddock.ci.json`), with `{app}` replaced by the app's name.
+
+[[label]]
+name = "state/built"
+color = "#c5def5"
+description = "Built and pushed; waiting for review"
+exclusive = true
+
+[[label]]
+name = "state/in-review"
+color = "#1d76db"
+description = "An independent review is running"
+exclusive = true
+
+[[label]]
+name = "state/fixes"
+color = "#e99695"
+description = "Review findings or a failed queue run to fix; the comment names them"
+exclusive = true
+
+[[label]]
+name = "state/approved"
+color = "#0e8a16"
+description = "Approved; the merge queue may take it"
+exclusive = true
+
+[[label]]
+name = "state/in-train"
+color = "#5319e7"
+description = "In a train (merge queue) branch now"
+exclusive = true
+
+[[label]]
+name = "state/landed"
+color = "#000000"
+description = "On main"
+exclusive = true
+
+[[label]]
+name = "owes/windows-tests"
+color = "#fbca04"
+description = "Windows tests not run yet; the queue's Windows leg runs them"
+exclusive = false
+
+[[label]]
+name = "owes/vm-rows"
+color = "#fbca04"
+description = "Test VM rows not run yet (manual list in the PR body)"
+exclusive = false
+
+[[label]]
+name = "owes/rule54-bundle"
+color = "#fbca04"
+description = "Touches a release path: the app's installers must be built before landing (rule 54)"
+exclusive = false
+
+[[label]]
+name = "security"
+color = "#b60205"
+description = "Security-relevant change"
+exclusive = false
+
+[[label]]
+name = "review-round/1"
+color = "#d4c5f9"
+description = "First review round"
+exclusive = true
+
+[[label]]
+name = "review-round/2"
+color = "#bfa8f0"
+description = "Second review round"
+exclusive = true
+
+[[template]]
+name = "app/{app}"
+color = "#ededed"
+description = "Touches {app}"
+exclusive = false
