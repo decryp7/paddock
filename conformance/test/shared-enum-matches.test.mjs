@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { RUST_TEST_FILE } from '../src/checks/C71-test-timing.mjs';
 import { enumMatches } from '../src/util/shared-enum-matches.mjs';
+import { enforceShrinkOnly } from '../src/util/baseline.mjs';
 import { openTree } from '../src/util/fs.mjs';
 import { PADDOCK } from './helpers.mjs';
 
@@ -57,8 +58,11 @@ test('an exhaustive match (Interrupted handled by name) is listed and not report
 
 test('guarded wildcards, nested matches, other enums, strings, comments and test code are read correctly', () => {
   assert.deepEqual(found('fn a(s: JobState) {\n    match s {\n        JobState::Done => 1,\n        x if x.is_final() => 2,\n        JobState::Queued | JobState::Running { .. } => 3,\n        JobState::Failed { .. } | JobState::Cancelled { .. } => 4,\n    }\n}\n'), [[2, 0]], 'a guarded binding is not a catch-all');
-  assert.deepEqual(found('fn a(o: Option<WireState>) {\n    match o {\n        Some(WireState::Done) => {}\n        Some(_) => {}\n        None => {}\n    }\n}\n'), [[2, 0]], 'Some(_) is not a catch-all of the enum; None is a variant of Option');
+  assert.deepEqual(found('fn a(o: Option<WireState>) {\n    match o {\n        Some(WireState::Done) => {}\n        Some(_) => {}\n        None => {}\n    }\n}\n'), [[2, 4]], 'Some(_) takes every state inside Some: a catch-all of the enum');
   assert.deepEqual(found('fn a(o: Option<WireState>) {\n    match o {\n        Some(WireState::Done) => {}\n        _ => {}\n    }\n}\n'), [[2, 4]]);
+  // The two real ones the review found: Dyno's cli.rs (`Some(_) => {}` on WireState) and the link's `Err(e)` on IpcError.
+  assert.deepEqual(found('fn a(s: Option<&WireState>) {\n    match s {\n        Some(WireState::Done) => break,\n        Some(WireState::Failed { message, .. }) => return,\n        Some(_) => {}\n        None => return,\n    }\n}\n'), [[2, 5]]);
+  assert.deepEqual(enumMatches('fn a(r: Result<M, IpcError>) {\n    match r {\n        Ok(Message::Reply(x)) => 1,\n        Ok(_) => 2,\n        Err(IpcError::Timeout) => 3,\n        Err(IpcError::Closed(_)) => 4,\n        Err(e) => 5,\n    }\n}\n', ['IpcError']).map((m) => [m.line, m.catchAllLine]), [[2, 7]], 'Err(e) is flagged; Ok(_) is not (Ok names no variant of the enum)');
   assert.deepEqual(found('fn a(k: Kind) {\n    match k {\n        Kind::A => {}\n        _ => {}\n    }\n}\n'), [], 'another enum');
   assert.deepEqual(found('// match s { WireState::Done => 1, _ => 2 }\nfn a() { let t = "match s { WireState::Done => 1, _ => 2 }"; }\n'), []);
   assert.deepEqual(found('fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t(s: WireState) {\n        match s {\n            WireState::Done => {}\n            _ => {}\n        }\n    }\n}\n'), [], 'test code');
@@ -99,5 +103,6 @@ test('no app match on a shared enum has a catch-all arm, except the listed ones 
   }
   assert.deepEqual(fresh, [], 'Next step: list the variants (a new one must break this match at compile time), or if the default is meant, say so in a variant-by-variant arm.');
   const gone = [...left].filter(([, n]) => n > 0).map(([k]) => k);
-  assert.deepEqual(gone, [], 'baselines/shared-enum-matches.json lists matches that are fixed or gone. Next step: remove those entries (the list only shrinks).');
+  // Fixed entries only warn (remove them); entries the merge base's list lacks fail (conformance/src/util/baseline.mjs).
+  enforceShrinkOnly({ root: PADDOCK, path: 'conformance/baselines/shared-enum-matches.json', current: listed, gone, keyOf: (k) => k, entriesOf: (j) => j.sites });
 });

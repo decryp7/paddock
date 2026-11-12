@@ -89,6 +89,17 @@ function catchAll(pattern) {
   });
 }
 
+const WRAPPED = /^([A-Z]\w*)\s*\(\s*([\s\S]*?)\s*\)$/;
+
+/**
+ * The wrapper (`Some`, `Err`, ...) of an arm part that wraps a catch-all, as `Some(_)` or `Err(e)`: such an arm takes every value the
+ * wrapper holds, so it absorbs a new variant of the enum inside it exactly as `_` does when the other arms of that wrapper name variants.
+ */
+function wrappedCatchAll(part) {
+  const m = WRAPPED.exec(part);
+  return m && catchAll(m[2]) ? m[1] : null;
+}
+
 /**
  * The matches on one of `names` (enum type names) in `source`: [{ line, enumName, variants, catchAllLine }], where `catchAllLine` is the
  * line of the catch-all arm or 0. Test code is left out: `#[cfg(test)]` items, or the whole file when `wholeFileIsTest`.
@@ -127,7 +138,15 @@ export function enumMatches(source, names, { wholeFileIsTest = false } = {}) {
       }
     }
     if (!variants.size) continue;
-    const wild = list.find((a) => catchAll(a.pattern));
+    const names = (a) => [...a.pattern.matchAll(mention)].length > 0;
+    const wild =
+      list.find((a) => catchAll(a.pattern)) ??
+      list.find((a) =>
+        alternatives(a.pattern).parts.some((part) => {
+          const w = wrappedCatchAll(part);
+          return w && !alternatives(a.pattern).guarded && list.some((o) => o !== a && names(o) && alternatives(o.pattern).parts.some((p) => p.startsWith(`${w}(`)));
+        }),
+      );
     out.push({ line: lineOf(m.index), enumName, variants: [...variants], catchAllLine: wild ? lineOf(wild.at) : 0 });
   }
   return out;
