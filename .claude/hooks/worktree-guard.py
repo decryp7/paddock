@@ -91,6 +91,11 @@ def decide(data):
         if not g:
             continue
         eff, sub, args = g
+        if is_agent and sub in ("commit", "push", "merge", "cherry-pick", "rebase", "am"):
+            bypass = [e for e in c.env if e.split("=", 1)[0] in ("LEFTHOOK_EXCLUDE",) or e in ("LEFTHOOK=0", "LEFTHOOK=false")]
+            if bypass or (sub in ("commit", "push") and "--no-verify" in args):
+                return ("Blocked: git hooks are bypassed (%s). Hooks must pass: cherry-pick the hook fix or stop and report "
+                        "(no bypass)." % (bypass[0] if bypass else "--no-verify"))
         if not is_write(sub, args):
             continue
         if c.after_cd_chain:

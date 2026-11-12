@@ -19,7 +19,7 @@ class TooBig(Exception):
 
 class Cmd:
     __slots__ = ("words", "argv", "redirs", "term", "cwd", "depth", "cond", "is_cd", "cd_target", "after_cd_chain",
-                 "opens", "set_e", "idx")
+                 "opens", "set_e", "idx", "env")
 
     def __init__(self):
         self.words = []
@@ -35,6 +35,7 @@ class Cmd:
         self.opens = 0        # leading `{` count
         self.set_e = False    # `set -e` was seen before it
         self.idx = 0
+        self.env = []         # NAME=value words that set the command's environment (prefix or `env X=1`)
 
 
 # ---- lexer ----
@@ -333,8 +334,8 @@ def resolve(cur, target, home):
     return os.path.normpath(os.path.join(cur, target))
 
 
-def _strip(argv):
-    """Remove wrappers (env, sudo, xargs, ...) from the front of a command."""
+def _strip(argv, env):
+    """Remove wrappers (env, sudo, xargs, ...) from the front of a command; NAME=value words go to `env`."""
     argv = list(argv)
     while argv:
         a = argv[0]
@@ -343,6 +344,8 @@ def _strip(argv):
         elif a in ("env", "sudo", "nice", "ionice", "caffeinate", "stdbuf"):
             argv = argv[1:]
             while argv and (argv[0].startswith("-") or _ASSIGN.match(argv[0])):
+                if _ASSIGN.match(argv[0]):
+                    env.append(argv[0])
                 skip = 2 if argv[0] in _ENV_ARG or (a == "nice" and argv[0] == "-n") else 1
                 argv = argv[skip:]
         elif a == "xargs":
@@ -350,6 +353,7 @@ def _strip(argv):
             while argv and argv[0].startswith("-"):
                 argv = argv[2 if argv[0] in _XARGS_ARG else 1:]
         elif _ASSIGN.match(a):
+            env.append(a)
             argv = argv[1:]
         else:
             break
@@ -392,8 +396,10 @@ def _finish(st, words, redirs, term, depth):
             if _ASSIGN.match(a):
                 name, _, val = a.partition("=")
                 st.vars[name] = val
-    argv = _strip(w[k:] if k < len(w) else [])
+    env = list(w[:k]) if k < len(w) else []
+    argv = _strip(w[k:] if k < len(w) else [], env)
     cmd.argv = argv
+    cmd.env = env
     if argv and argv[0] == "set" and any(a.startswith("-") and not a.startswith("--") and "e" in a for a in argv[1:]):
         st.set_e = True
     if argv and argv[0] == "cd":

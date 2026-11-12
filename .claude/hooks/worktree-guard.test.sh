@@ -134,4 +134,19 @@ expect "push before commit is allowed" allow agent "$WT" "git push origin a; git
 expect "if git commit; then git push is allowed" allow agent "$WT" "if git commit -m x; then git push; fi"
 expect "set -e then commit newline push is allowed" allow agent "$WT" $'set -e\ngit commit -m x\ngit push'
 out=$(run agent "$WT" "git commit -m x; git push"); case "$out" in *"commit"*"&&"*) echo "ok: message names the next step" ;; *) echo "FAIL: push message"; fail=1 ;; esac
+
+# ---- agents may not bypass the git hooks (lefthook)
+expect "agent LEFTHOOK=0 git commit" deny agent "$WT" "LEFTHOOK=0 git commit -m x"
+expect "agent env LEFTHOOK=0 git push" deny agent "$WT" "env LEFTHOOK=0 git push origin b"
+expect "agent LEFTHOOK_EXCLUDE=x git push" deny agent "$WT" "LEFTHOOK_EXCLUDE=commit-msg git push"
+expect "agent git commit --no-verify" deny agent "$WT" "git commit --no-verify -m x"
+expect "agent git push --no-verify" deny agent "$WT" "git push --no-verify origin b"
+expect "agent git -C wt commit -n --no-verify" deny agent "$WT" "git -C $WT commit -m x --no-verify"
+expect "agent export-less LEFTHOOK=0 then git commit on its own line is not an env prefix" allow agent "$WT" $'LEFTHOOK=0\ngit commit -m x'
+expect "agent plain commit is allowed" allow agent "$WT" "git commit -m x"
+expect "agent LEFTHOOK=1 is allowed" allow agent "$WT" "LEFTHOOK=1 git commit -m x"
+expect "coordinator LEFTHOOK=0 git commit is allowed" allow coord "$WT" "LEFTHOOK=0 git commit -m x"
+expect "coordinator --no-verify is allowed" allow coord "$WT" "git commit --no-verify -m x"
+expect "agent mentions --no-verify in a message" allow agent "$WT" "git commit -m 'never use --no-verify'"
+out=$(run agent "$WT" "git commit --no-verify -m x"); case "$out" in *"Hooks must pass: cherry-pick the hook fix or stop and report (no bypass)"*) echo "ok: bypass message" ;; *) echo "FAIL: bypass message"; fail=1 ;; esac
 exit $fail
