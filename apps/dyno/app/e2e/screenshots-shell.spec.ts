@@ -103,7 +103,7 @@ test.describe('Dyno shell screenshots, sized', () => {
               };
             });
             await page.goto(`/?latency=0#/${path}`);
-            await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 30_000 });
+            await page.getByRole('heading', { level: 1 }).first().waitFor();
             if (name === 'listening') await page.getByRole('radio', { name: 'Listening' }).click();
             if (name === 'dashboard-cpu-metric') {
               // The Memory graph card, its Metric set to CPU (not its default), then the layout bar closed again.
