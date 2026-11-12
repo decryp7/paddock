@@ -25,7 +25,8 @@ slow-timeout = { period = "30s", terminate-after = 10 }
 # retried), a JUnit report.
 [profile.ci]
 fail-fast = false
-retries = 0
+retries = 1
+flaky-result = "fail"
 failure-output = "immediate-final"
 # Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) build-jobs.sh
 # sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).

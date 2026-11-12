@@ -286,30 +286,6 @@ review_by = 2026-12-06
 approved = "coordinator"
 
 [[not_gated]]
-id = "scripts/demo/check-agent-version.test.mjs"
-reason = "no reachable CI line runs this script"
-owner = "ADR 0060 WP-7"
-since = 2026-11-08
-review_by = 2026-12-27
-approved = "coordinator"
-
-[[not_gated]]
-id = "scripts/shell-demo/build-linux-arm64.test.mjs"
-reason = "no reachable CI line runs this script"
-owner = "ADR 0060 WP-7"
-since = 2026-11-08
-review_by = 2026-12-27
-approved = "coordinator"
-
-[[not_gated]]
-id = "scripts/shell-demo/smoke-service-update.test.mjs"
-reason = "no reachable CI line runs this script"
-owner = "ADR 0060 WP-7"
-since = 2026-11-08
-review_by = 2026-12-27
-approved = "coordinator"
-
-[[not_gated]]
 id = "apps/debrief/app:check:dialog-weight"
 reason = "defined, but no reachable CI line runs this npm script or its command in the package folder"
 owner = "ADR 0060 WP-7"

@@ -5,6 +5,7 @@ slow-timeout = { period = "20s", terminate-after = 3 }
 
 [profile.ci]
 fail-fast = false
-retries = 0
+retries = 1
+flaky-result = "fail"
 failure-output = "immediate-final"
 slow-timeout = { period = "20s", terminate-after = 3 }
