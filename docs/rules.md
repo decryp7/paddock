@@ -103,6 +103,8 @@ changes here, every app's copy is updated in the same change.
     panes or apps), stop fixing instances: name the pattern, propose a redesign as an ADR that makes the class impossible
     or checked (a declared contract, one shared mechanism, a lint or test over every instance), and fix the instances
     through it. Until v1, check every batch of bug reports for such patterns.
+    The coordinator proposes the redesign in the same reply that relays the report (a question to the user, or a start under
+    an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
 
 ## Throughput (user, 2026-10-24)
 41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the

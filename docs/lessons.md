@@ -1770,3 +1770,10 @@ A survey found that Pitcrew's LocalSystem service (shipped in pitcrew-v1.0.1) st
 over its pipe, with no prompt, because ADR 0004 authorised by the pipe ACL alone; Dyno's helper already checked the caller
 per connection. Rule 77 (ER-38): privileged services authorise changing requests by the caller's OS identity, and a
 request that changes what runs elevated needs an administrator caller; user-chosen elevation needs only a risk warning.
+
+## The user had to ask "any redesign?" three times in one morning (2026-11-12)
+
+Every agent report carried a `Recurring:` line, yet the coordinator relayed reports and kept proposals for a later batch, so
+classes seen twice reached the user only when they asked. Cause: relaying reports and batching proposals for later. Fix: rule
+40 (ER-21) now asks for the proposal in the same reply that relays the report (a question, or a start under an earlier
+approval); a Stop hook, `.claude/hooks/recurring-guard.sh`, is planned on `fix/scratch-root-guard-and-runner-busy`.
