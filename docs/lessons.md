@@ -1931,3 +1931,21 @@ growth over 20% going back to the user, and one cut review per release. Rules 14
 ER-33, ER-30 retired, rules 22 and 55 and 54 narrowed, and hooks that judge an agent's text only warn. The review's
 proposed cap on review rounds was not adopted: security code keeps its rounds. Mechanism: text rules and the reviewer
 line, no tool.
+## Store threads still inside DuckDB when the process exits: stop them, do not only order the drain (Debrief, 2026-11-12)
+
+CI 6734 (SIGSEGV) and CI 7997 (SIGBUS) were one class: a background thread of the store (the catalogue builder, the indexer)
+still ran a statement while `exit()` destroyed DuckDB's statics. `9dba20d4b` made the exit drain run first of all (on the
+main thread, from a thread-local destructor armed before `main`), which cured the order; the cause, threads nobody joined
+(a worker thread's strong reference, a leaked store, a test that ended while the catalogue still built), stayed. Measured
+on that fix: 6 crashes in 200 runs of the failing `debrief-app` test before it, 0 in 300 after it.
+
+The fix for the cause: every store thread registers itself in `debrief_store_duck::shutdown` while it runs (the thread drops
+the registration last); the exit drain asks every registered thread to stop and waits for the list to empty, in every binary
+that opens a store; `StoreThreadsGuard` and `stop_store_threads_when_this_thread_ends` (the app's `test_app`) do the same
+when a test ends and fail it, naming the thread, if one stays. Windows (reasoning, not measured): libduckdb is a DLL whose
+statics die in `DLL_PROCESS_DETACH`, after `ExitProcess` ended the other threads, so the destroyed-static crash cannot happen
+there; a thread ended inside DuckDB holding a lock is what stays open, and the same drain, run by `atexit` before
+`ExitProcess`, now stops those threads first.
+
+Rule of thumb: a destructor order that cures a crash is not the cause while a thread can still be running native code; look
+for who owns the thread and make the owner end it.

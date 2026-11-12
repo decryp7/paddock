@@ -364,15 +364,11 @@ mod tests {
 
         /// A browser that ended by itself is cleaned up by the watcher thread: its profile goes shortly after the process.
         fn removed(dir: &std::path::Path) -> bool {
-            (0..100).any(|_| {
-                std::thread::sleep(Duration::from_millis(50));
-                !dir.exists()
-            })
+            paddock_testkit::poll_until_within(paddock_testkit::HANG_GUARD, || !dir.exists())
         }
 
         fn gone(pid: u32) -> bool {
-            (0..40).any(|_| {
-                std::thread::sleep(Duration::from_millis(50));
+            paddock_testkit::poll_until_within(paddock_testkit::HANG_GUARD, || {
                 // A look that could not be made (Unknown) is not "gone": a blind probe must fail the check, not pass it.
                 paddock_proc::presence(pid) == paddock_proc::Presence::Gone
             })

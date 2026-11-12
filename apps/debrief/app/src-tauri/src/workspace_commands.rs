@@ -1051,14 +1051,13 @@ mod tests {
             Controls::default(),
             move |_| -> Result<Done<()>, String> {
                 let _ = running.send(());
-                let _ = hold.recv_timeout(std::time::Duration::from_secs(30));
+                // Held until the test lets go (or ends: the sender is dropped).
+                let _ = hold.recv();
                 Ok(Done::new(()))
             },
         )
         .unwrap();
-        is_running
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("the first import is running");
+        paddock_testkit::recv("the first import to be running", &is_running);
 
         let open = |name: &str| {
             let files = vec![samples().join(name).to_string_lossy().into_owned()];

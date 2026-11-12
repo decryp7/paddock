@@ -549,6 +549,9 @@ pub struct FtsShared {
     /// Tests: the next writes through [`FtsService`] fail after their operations are queued.
     #[cfg(test)]
     pub(crate) fail_writes: AtomicBool,
+    /// Tests: the thread kept (leaked) its connection because exit had begun.
+    #[cfg(test)]
+    pub(crate) kept_at_exit: AtomicBool,
 }
 
 /// The indexing thread of a store; stopped and joined on drop.
@@ -590,13 +593,38 @@ impl FtsService {
             gate: Gate::new(generation),
             #[cfg(test)]
             fail_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            kept_at_exit: AtomicBool::new(false),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
         let store_dir = dir.to_path_buf();
-        let handle = std::thread::Builder::new()
-            .name("debrief-fts".into())
-            .spawn(move || run(&s, &store_dir, &conn, &write_lock, epoch))?;
+        let for_exit = shared.clone();
+        // Listed before it starts, so the exit drain and the tests' guard always see it; the thread drops it last.
+        let alive = crate::shutdown::register_thread(
+            "debrief-fts",
+            Arc::new(move || {
+                for_exit.stop.store(true, Ordering::SeqCst);
+                for_exit.gate.news();
+                *crate::lock(&for_exit.wake.0) = true;
+                for_exit.wake.1.notify_all();
+            }),
+        );
+        let handle = std::thread::Builder::new().name("debrief-fts".into()).spawn(move || {
+            // Declared first, so it is dropped last: the connection goes before the thread leaves the exit drain's list.
+            let _alive = alive;
+            let conn = conn;
+            run(&s, &store_dir, &conn, &write_lock, epoch);
+            if crate::shutdown::down() {
+                // The process is exiting: duckdb_disconnect here would race C++ destroying DuckDB's statics (as in
+                // catalogue.rs). The OS reclaims what is leaked.
+                #[cfg(test)]
+                s.kept_at_exit.store(true, Ordering::SeqCst);
+                std::mem::forget(conn);
+                return;
+            }
+            drop(conn);
+        })?;
         Ok(FtsService {
             shared,
             epoch,
@@ -954,6 +982,8 @@ mod tests {
             bulk_import: Arc::new(AtomicBool::new(false)),
             gate: Gate::new(Arc::new(AtomicU64::new(0))),
             fail_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            kept_at_exit: AtomicBool::new(false),
         };
         let write_lock = Mutex::new(());
         let held = write_lock.lock().unwrap();
@@ -997,6 +1027,8 @@ mod tests {
             bulk_import: Arc::new(AtomicBool::new(false)),
             gate: Gate::new(Arc::new(AtomicU64::new(0))),
             fail_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            kept_at_exit: AtomicBool::new(false),
         };
         let write_lock = Mutex::new(());
         let seg_dir = dir.join(SEGMENTS_DIR);
@@ -1042,6 +1074,8 @@ mod tests {
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
             fail_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            kept_at_exit: AtomicBool::new(false),
             gate: Gate::new(Arc::new(AtomicU64::new(0))),
         };
         run(&s, dir.path(), &conn, &Mutex::new(()), 1);
@@ -1071,6 +1105,8 @@ mod tests {
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
             fail_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            kept_at_exit: AtomicBool::new(false),
             gate: Gate::new(Arc::new(AtomicU64::new(0))),
         }
     }
@@ -1324,6 +1360,70 @@ mod tests {
         assert!(
             moved.iter().all(|id| !hits.contains(id)),
             "old documents of the moved events: {hits:?}"
+        );
+    }
+}
+
+/// The indexer thread's end when the process is exiting: it keeps its DuckDB connection (dropping it would run
+/// duckdb_disconnect while C++ destroys DuckDB's statics) and leaves the exit drain's list only after that.
+#[cfg(test)]
+mod exit_tests {
+    use super::*;
+    use debrief_core::ports::Ingest;
+    use debrief_core::{PluginRegistry, Profile};
+
+    const EXIT_CHILD: &str = "DEBRIEF_FTS_EXIT_CHILD";
+
+    /// Runs in the child process only.
+    #[test]
+    fn an_indexer_turn_after_exit_began_child() {
+        let Some(dir) = std::env::var_os(EXIT_CHILD) else { return };
+        let store = crate::DuckStore::create(std::path::Path::new(&dir), Profile::default_profile(), PluginRegistry::new()).unwrap();
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples/serilog-text");
+        store.open(&[samples]).unwrap().wait().unwrap();
+        assert!(
+            store.wait_for_index(std::time::Duration::from_secs(120)).unwrap().ready,
+            "index built"
+        );
+        let service = store.inner.fts.as_ref().expect("an indexing thread");
+        let shared = service.shared.clone();
+        crate::shutdown::begin_exit();
+        service.wake();
+        assert!(
+            paddock_testkit::poll_until_within(std::time::Duration::from_secs(60), || {
+                crate::lock(&service.handle)
+                    .as_ref()
+                    .is_some_and(std::thread::JoinHandle::is_finished)
+            }),
+            "the indexing thread did not end once exit began"
+        );
+        assert!(
+            shared.kept_at_exit.load(Ordering::SeqCst),
+            "the indexing thread did not keep its connection once exit began (duckdb_disconnect during exit)"
+        );
+        std::mem::forget(store);
+    }
+
+    #[test]
+    fn an_indexer_turn_after_exit_began_keeps_its_connection() {
+        let dir = debrief_ipc::testing::scratch_dir("fts-exit-turn");
+        let out = debrief_core::process::quiet_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "fts::exit_tests::an_indexer_turn_after_exit_began_child",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(EXIT_CHILD, &dir)
+            .output()
+            .unwrap();
+        crate::test_scratch::remove_or_defer(&dir);
+        assert!(
+            out.status.success(),
+            "{:?}\n{}{}",
+            out.status,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
         );
     }
 }

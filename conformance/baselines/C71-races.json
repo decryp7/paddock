@@ -3,22 +3,17 @@
  "sites": [
   {
    "file": "apps/debrief/app/src-tauri/src/ai/tests.rs",
-   "line": 992,
+   "line": 988,
    "hash": "7082ab131971ef39"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 1238,
-   "hash": "457dbcc8d83ec022"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 1244,
+   "line": 1248,
    "hash": "d56b6dd03bb2414f"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
-   "line": 832,
+   "line": 829,
    "hash": "c214e9914f62c10d"
   },
   {

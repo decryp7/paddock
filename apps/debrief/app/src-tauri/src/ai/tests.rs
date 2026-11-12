@@ -54,13 +54,9 @@ fn open_samples(w: &tauri::WebviewWindow<MockRuntime>) {
     ipc(w, "open_paths", json!({ "paths": [dir.to_string_lossy()] })).unwrap();
 }
 
-fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
-    let start = Instant::now();
-    while !f() {
-        // Generous: a loaded runner stalls a test for many seconds; the bound only turns a hang into a message.
-        assert!(start.elapsed() < Duration::from_secs(180), "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+fn wait_until(what: &str, f: impl FnMut() -> bool) {
+    // Generous: a loaded runner stalls a test for many seconds; the bound only turns a hang into a message.
+    paddock_testkit::wait_until_within(what, Duration::from_secs(180), f);
 }
 
 fn code(e: Value) -> String {

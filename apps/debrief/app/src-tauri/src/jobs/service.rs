@@ -936,12 +936,8 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
-        let start = Instant::now();
-        while !f() {
-            assert!(start.elapsed() < Duration::from_secs(20), "timed out waiting for {what}");
-            std::thread::sleep(Duration::from_millis(2));
-        }
+    pub(crate) fn wait_until(what: &str, f: impl FnMut() -> bool) {
+        paddock_testkit::wait_until(what, f);
     }
 
     fn service() -> (Jobs, Arc<ManualClock>) {
@@ -1052,9 +1048,7 @@ pub(crate) mod tests {
         let s = stopped.clone();
         let running: JobHandle<(), String> = jobs
             .submit(ai("running"), Controls::cancel(move || s.store(true, Ordering::SeqCst)), |ctx| {
-                while !ctx.is_cancelled() {
-                    std::thread::sleep(Duration::from_millis(1));
-                }
+                paddock_testkit::wait_until("the job to be cancelled", || ctx.is_cancelled());
                 Err("stopped by the user".into())
             })
             .unwrap();
@@ -1274,9 +1268,7 @@ pub(crate) mod tests {
                 JobSpec::new(JobKind::Export, "running").window("main"),
                 Controls::default(),
                 |ctx| {
-                    while !ctx.is_cancelled() {
-                        std::thread::sleep(Duration::from_millis(1));
-                    }
+                    paddock_testkit::wait_until("the job to be cancelled", || ctx.is_cancelled());
                     Err("stopped".into())
                 },
             )

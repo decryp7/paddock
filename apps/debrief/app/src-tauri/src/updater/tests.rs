@@ -611,14 +611,11 @@ fn rig_in(dir: TempDir, path: PathBuf, with_key: bool) -> Rig {
 }
 
 fn wait_for(updates: &Updates, what: &str, done: impl Fn(&UpdatePhase) -> bool) -> UpdatePhase {
-    for _ in 0..500 {
+    paddock_testkit::poll_for(paddock_testkit::HANG_GUARD, || {
         let phase = updates.status().phase;
-        if done(&phase) {
-            return phase;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    panic!("timed out waiting for {what}: {:?}", updates.status().phase);
+        done(&phase).then_some(phase)
+    })
+    .unwrap_or_else(|| panic!("timed out waiting for {what}: {:?}", updates.status().phase))
 }
 
 #[test]

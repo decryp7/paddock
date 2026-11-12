@@ -985,7 +985,7 @@ mod tests {
             },
         )
         .unwrap();
-        running.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        paddock_testkit::recv("the job to be running", &running);
         std::fs::write(&log, "2026-10-14 10:00:00 INFO first\n2026-10-14 10:00:01 INFO second\n").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
         let started = std::time::Instant::now();

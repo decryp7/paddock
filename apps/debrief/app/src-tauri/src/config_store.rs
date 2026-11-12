@@ -384,10 +384,7 @@ mod tests {
         debounced.flush(Duration::from_secs(10));
         assert_eq!(*written.lock().unwrap(), [5], "one write with the newest snapshot");
         debounced.schedule(6);
-        let start = std::time::Instant::now();
-        while written.lock().unwrap().len() < 2 && start.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        paddock_testkit::wait_until("the delayed write", || written.lock().unwrap().len() >= 2);
         assert_eq!(*written.lock().unwrap(), [5, 6], "written after the delay without a flush");
     }
 

@@ -285,13 +285,11 @@ fn a_real_store_worker_killed_over_and_over_is_quarantined_then_repair_restarts_
 
     // And no process is left behind.
     drop(guard);
-    for _ in 0..100 {
-        if !process_is_alive(new_pid) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-    panic!("the store worker (pid {new_pid}) is still running after shutdown");
+    // Synchronous: dropping the guard joins the worker (the audit run found it gone at the first look every time).
+    assert!(
+        !process_is_alive(new_pid),
+        "the store worker (pid {new_pid}) is still running after shutdown"
+    );
 }
 
 #[test]

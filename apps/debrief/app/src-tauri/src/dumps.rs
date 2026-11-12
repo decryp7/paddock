@@ -723,10 +723,7 @@ mod tests {
         fn fetch(&self, key: &debrief_symbols::id::PdbKey, cache: &Path) -> Result<std::path::PathBuf, debrief_symbols::fetch::FetchError> {
             use std::sync::atomic::Ordering;
             if self.wait && !self.started.swap(true, Ordering::SeqCst) {
-                let t = std::time::Instant::now();
-                while !self.release.load(Ordering::SeqCst) && t.elapsed() < Duration::from_secs(20) {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
+                paddock_testkit::wait_until("the test to release the fetch", || self.release.load(Ordering::SeqCst));
             }
             if self.ok.contains(&key.name().to_string()) {
                 return Ok(cache.join("fetched.pdb"));
@@ -852,10 +849,7 @@ mod tests {
         // Cancel while the first PDB is being asked: no more are asked, the rest go back to missing.
         let fetcher = scripted(&[], None, true);
         let (docs, id, job) = begin(fetcher.clone(), None);
-        let t = std::time::Instant::now();
-        while !fetcher.started.load(Ordering::SeqCst) && t.elapsed() < Duration::from_secs(20) {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        paddock_testkit::wait_until("the first fetch to start", || fetcher.started.load(Ordering::SeqCst));
         assert!(matches!(
             status_of(&module_statuses(&docs, id), &names[1]),
             SymbolStatusDto::Downloading

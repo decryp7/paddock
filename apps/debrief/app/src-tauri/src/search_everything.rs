@@ -301,10 +301,7 @@ mod tests {
         assert!(is_newest(&staying, other), "other windows keep theirs");
         // Closing through the window teardown reaches it too (the scope is registered with the app).
         crate::window_scoped::destroyed(app.handle(), "w-staying");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while is_newest(&staying, other) && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        // Synchronous: the audit run found this condition true at the first look every time, so nothing is waited for.
         assert!(!is_newest(&staying, other));
     }
 

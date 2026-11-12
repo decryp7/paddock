@@ -136,10 +136,7 @@ mod tests {
     fn answer_when_waiting(a: &Arc<Approvals>, chat: &'static str, id: u64, d: Decision) -> std::thread::JoinHandle<bool> {
         let a = a.clone();
         std::thread::spawn(move || {
-            let start = Instant::now();
-            while a.waiting() == 0 && start.elapsed() < Duration::from_secs(5) {
-                std::thread::sleep(Duration::from_millis(5));
-            }
+            paddock_testkit::wait_until("a request to wait for its answer", || a.waiting() > 0);
             a.respond("main", chat, id, d)
         })
     }
@@ -170,9 +167,7 @@ mod tests {
         assert!(!a.respond("main", "chat-9", 1, Decision::Allow));
         let a2 = a.clone();
         let t = std::thread::spawn(move || approver(&a2, "chat-2").approve(&req(4)));
-        while a.waiting() == 0 {
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        paddock_testkit::wait_until("the request to wait", || a.waiting() > 0);
         assert!(!a.respond("main", "chat-2", 5, Decision::Allow));
         assert!(!a.respond("w-2", "chat-2", 4, Decision::Allow));
         a.deny_chat("main", "other");

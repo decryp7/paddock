@@ -44,11 +44,7 @@ fn paired_state() -> FakeState {
 }
 
 fn wait_for(what: &str, f: impl Fn() -> bool) {
-    let t = Instant::now();
-    while !f() {
-        assert!(t.elapsed() < Duration::from_secs(10), "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    paddock_testkit::wait_until(what, f);
 }
 
 fn ask(p: &dyn LlmProvider, req: &ChatRequest) -> (crate::Result<crate::llm::ChatResponse>, String) {
@@ -183,7 +179,8 @@ fn a_denied_or_cancelled_pairing_changes_nothing_but_says_so() {
     assert!(pw.view().pairing.is_some());
     assert!(pw.cancel_pairing());
     assert!(!pw.cancel_pairing());
-    std::thread::sleep(Duration::from_millis(50));
+    // Nothing to wait for: cancelling takes the pairing synchronously, and the pairing thread's late outcome is dropped
+    // by `finish_pairing` (the pairing is gone), so the view below is final.
     let v = pw.view();
     assert!(v.pairing.is_none() && v.problem.is_none() && !v.paired);
 }

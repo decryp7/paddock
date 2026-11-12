@@ -108,32 +108,17 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
-   "line": 112,
-   "hash": "206f8a6b3d8640a4"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
-   "line": 115,
+   "line": 117,
    "hash": "b7e1269d3179b163"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
-   "line": 124,
-   "hash": "09a139aee6ccf581"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
-   "line": 144,
+   "line": 146,
    "hash": "8c652b5267e94a90"
   },
   {
-   "file": "apps/debrief/app/src-tauri/src/after_first_paint.rs",
-   "line": 148,
-   "hash": "09a139aee6ccf581"
-  },
-  {
    "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 1087,
+   "line": 1081,
    "hash": "95aab429f1af29ca"
   },
   {
@@ -147,44 +132,9 @@
    "hash": "5e357144c042ec53"
   },
   {
-   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
-   "line": 988,
-   "hash": "639be9cfeebcec58"
-  },
-  {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 727,
+   "line": 728,
    "hash": "7013f0dc80f4f11f"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/snapshots.rs",
-   "line": 1245,
-   "hash": "e62bd42f05e82852"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/windows.rs",
-   "line": 417,
-   "hash": "b7e296d15cb35bea"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/windows.rs",
-   "line": 424,
-   "hash": "70d9b303400b6d6c"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/windows.rs",
-   "line": 547,
-   "hash": "497861cbbebd7662"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/workspace_commands.rs",
-   "line": 1033,
-   "hash": "d2b7853b092327a5"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/workspace_commands.rs",
-   "line": 1039,
-   "hash": "5d151640414272a4"
   },
   {
    "file": "apps/debrief/app/src/app/ai/folder-setup/folder-setup.store.spec.ts",
