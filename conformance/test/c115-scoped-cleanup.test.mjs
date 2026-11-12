@@ -190,3 +190,26 @@ test('C115 baseline tool: lists sites and waived sites, shrinks without adding',
   const after = JSON.parse(readFileSync(join(root, 'conformance/baselines/C115.json'), 'utf8')).sites;
   assert.deepEqual(after.map((s) => s.file), ['scripts/old.sh'], 'the gone entry is removed and the new site is not added');
 });
+
+test('C115 treats a variable assigned from a value with a literal part as scoped', () => {
+  assert.deepEqual(lines('stage="$dir/setup-disc"\nrm -rf "$stage"\n'), []);
+  assert.deepEqual(lines('local stage=${root}/out\nrm -rf "$stage"\n'), []);
+  assert.deepEqual(lines('stage="$dir"\nrm -rf "$stage"\n'), [2], 'a bare copy of a variable is still bare');
+  assert.deepEqual(lines('stage="$1"\nrm -rf "$stage"\n'), [2]);
+});
+
+test('C115 does not take the word system in a message string for a command call', () => {
+  assert.deepEqual(lines('println!("the system said: git worktree prune");\n', 'a.rs'), []);
+  assert.deepEqual(lines('const m = "system: git worktree prune";\n', 'a.mjs'), []);
+  assert.deepEqual(lines('system("git worktree prune");\n', 'a.mjs'), [1]);
+});
+
+test('C115 ignores for, while and done inside quotes when it looks for a loop', () => {
+  assert.deepEqual(lines('echo "for x in y; do"\ngit worktree remove --force "$p"\n'), []);
+  assert.deepEqual(lines('for p in a; do echo "done"\ngit worktree remove --force "$p"\ndone\n'), [2]);
+});
+
+test('C115 skips the tests/fixtures folders', () => {
+  assert.equal(isCleanupSource('tools/heavy/tests/fixtures/plock.sh'), false);
+  assert.equal(isCleanupSource('tools/heavy/tests/plock.sh'), true);
+});

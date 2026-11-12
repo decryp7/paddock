@@ -133,6 +133,7 @@ vm_lock_acquire() {
       return 0
     fi
     if [ "$src" != 4 ]; then
+      # conformance: scoped-cleanup — $owner is this call's own mktemp -d folder and $errf is its ".err" file
       cat "$errf" >&2; rm -rf "$owner" "$errf"
       echo "::error::vm-lock: could not take the lock (paddock-dev exit $src). Next step: ./dev ci slot status --max 1 --root $_vm_lock_root" >&2; exit 3
     fi
@@ -144,6 +145,7 @@ vm_lock_acquire() {
       now="$(_vm_lock_start "$pid")"
       if ! _vm_lock_same_start "$now" "$start"; then
         echo "vm-lock: the holder ($olabel, pid $pid, started $start) is no longer running (dead holder); taking over" >&2
+        # conformance: scoped-cleanup — the holder was already shown dead by pid plus start time (_vm_lock_same_start), so $other and its .err are its stale lock folder
         rm -rf "$other" "$other.err"; sleep 1; continue
       fi
     else
@@ -152,6 +154,7 @@ vm_lock_acquire() {
       pid="?"; start="?"; olabel="unknown (no who file)"
     fi
     if [ "$waited" -ge "$wait" ]; then
+      # conformance: scoped-cleanup — $owner is this call's own mktemp -d folder and $errf is its ".err" file
       rm -rf "$owner" "$errf"
       echo "::error::vm-lock: the test machine lock is held by $olabel (pid $pid, started $start)$([ "$wait" -gt 0 ] && echo "; still held after ${waited}s")." \
         "Next step: wait for that run to finish, or set PADDOCK_VM_LOCK_WAIT=<seconds> to wait; never stop another agent's VM." >&2

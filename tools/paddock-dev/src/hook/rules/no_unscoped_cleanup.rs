@@ -193,17 +193,18 @@ impl Rule for NoUnscopedCleanup {
     }
 
     fn legacy(&self, text: &str) -> Option<Denial> {
-        static PATTERNS: OnceLock<Option<(Regex, Regex)>> = OnceLock::new();
-        let (worktree, docker) = PATTERNS
+        static PATTERNS: OnceLock<Option<(Regex, Regex, Regex)>> = OnceLock::new();
+        let (worktree, docker, dry) = PATTERNS
             .get_or_init(|| {
                 Some((
-                    Regex::new(r"\bgit\b[^;&|\n]*\bworktree\s+prune\b").ok()?,
+                    // The whole command that holds the prune, so a dry-run flag counts only when it is this command's.
+                    Regex::new(r"\bgit\b[^;&|\n]*\bworktree\s+prune\b[^;&|\n]*").ok()?,
                     Regex::new(r"\b(?:docker|podman)\s+(?:system|container|volume|image|network|builder|buildx)\s+prune\b").ok()?,
+                    Regex::new(r"(?:^|\s)(?:-n|--dry-run)\b").ok()?,
                 ))
             })
             .as_ref()?;
-        let dry = Regex::new(r"(?:^|\s)(?:-n|--dry-run)\b").ok()?;
-        if worktree.is_match(text) && !dry.is_match(text) {
+        if worktree.find_iter(text).any(|m| !dry.is_match(m.as_str())) {
             return Some(self.denial(WORKTREE_REASON));
         }
         docker.is_match(text).then(|| self.denial(DOCKER_REASON))
@@ -336,6 +337,10 @@ mod tests {
     #[test]
     fn a_dry_run_is_allowed_in_the_text_check_too() {
         assert!(NoUnscopedCleanup.legacy("echo 'x; git worktree prune -n").is_none());
+        // an `-n` or `--dry-run` of another command is no dry run of the prune
+        assert!(NoUnscopedCleanup.legacy("echo 'x; git worktree prune; ls -n").is_some());
+        assert!(NoUnscopedCleanup.legacy("git worktree prune; git clean --dry-run # '").is_some());
+        assert!(NoUnscopedCleanup.legacy("git worktree prune --dry-run; echo '").is_none());
     }
 
     #[test]

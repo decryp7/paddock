@@ -15,14 +15,13 @@
 // - `rm -r` (also `-R`, `--recursive`, with other flags in any order) / `Remove-Item -Recurse` with any target that is a bare variable
 //   (`"$VAR"`, `$VAR/*`, `$env:X`), `~`, `~/*`, `.`, `*`, `./*` or `/*`. Heuristic, kept narrow on purpose: a target with a literal
 //   part (`"$DIR/build"`) is not flagged, because the variable is then a prefix the script owns; `"${VAR:?}"` is guarded (it
-//   fails when the variable is empty) and a variable assigned from `$(mktemp ...)` in the same file is the script's own folder.
+//   fails when the variable is empty) and a variable assigned from `$(mktemp ...)` or from a value with a literal path part (`stage="$dir/setup-disc"`) in the same file is the script's own folder.
 // In Rust and JS only commands are read: an argument array (`["worktree", "prune"]`) or a line that runs a command (`Command::new`,
 // `.arg(`, `exec`, `spawn`, `system`, `sh -c`), never a message string that mentions one. `rm -r` is read in shell, YAML and PowerShell
 // only. Accepted gaps: `xargs rm -rf`, `find <root> -delete`, and a command assembled at run time; Rust `remove_dir_all` and JS `rmSync`.
 // The guard hook (`tools/paddock-dev/src/hook/rules/no_unscoped_cleanup.rs`) refuses the worktree and container shapes at run time; both
 // answer the rows of `tools/paddock-dev/tests/fixtures/cleanup-corpus.tsv` the same way (each tests against it).
-// Not read: full-line comments, the hook rule file, this check, `conformance/test` and `conformance/fixtures`, the paddock-dev oracle
-// fixtures (`tools/paddock-dev/tests/fixtures/`), `node_modules`, build output and vendored code.
+// Not read: full-line comments, the hook rule file, this check, `conformance/test` and `conformance/fixtures`, every `tests/fixtures/` folder (sample scripts, the paddock-dev oracle files), `node_modules`, build output and vendored code.
 // A site that only touches its own items carries `// conformance: scoped-cleanup — <why>` (or the `#` form) on the line or the line
 // above; the check lists the waived sites in one warning. Existing sites (the `rm -r` on a bare variable of scripts that clean up their
 // own folders) sit in `conformance/baselines/C115.json` as {file, hash of the normalised line}, as C71's do: a listed site passes, any
@@ -37,7 +36,7 @@ const BARE_WAIVER = /conformance:\s*scoped-cleanup/;
 const SOURCE = /\.(?:rs|sh|bash|ps1|psm1|js|mjs|cjs|ya?ml)$/;
 const CODE = /\.(?:rs|js|mjs|cjs)$/;
 const SKIP_PATH =
-  /^conformance\/(?:test\/|fixtures\/|src\/checks\/C115)|(?:^|\/)(?:node_modules|dist|target)\/|^apps\/[^/]+\/vendor\/|^tools\/paddock-dev\/(?:tests\/fixtures\/|src\/hook\/rules\/no_unscoped_cleanup\.rs$)/;
+  /^conformance\/(?:test\/|fixtures\/|src\/checks\/C115)|(?:^|\/)(?:node_modules|dist|target)\/|(?:^|\/)tests\/fixtures\/|^apps\/[^/]+\/vendor\/|^tools\/paddock-dev\/(?:tests\/fixtures\/|src\/hook\/rules\/no_unscoped_cleanup\.rs$)/;
 const Q = '["\'`]';
 const ENGINE = '(?:docker|podman)';
 const KIND = '(?:(?:container|volume|image|network)\\s+)?';
@@ -45,7 +44,9 @@ const KINDS = '(?:system|container|volume|image|network|builder|buildx)';
 const STOP = '(?:rm|rmi|stop|kill|restart)';
 const LIST = '(?:ps|ls|images|list)';
 /** A line that runs a command in Rust or JS (as opposed to a message string). */
-const RUNS = /\b(?:Command::new|exec(?:Sync|File|FileSync)?|spawn(?:Sync)?|system|shell|bash|sh)\b|\.args?\(/;
+const RUNS = /\bCommand::new\b|\b(?:exec(?:Sync|File|FileSync)?|spawn(?:Sync)?|system)\s*\(|\.args?\(/;
+/** The line with the contents of its string literals blanked, so a word inside a message is not read as a call. */
+const unstring = (line) => line.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`[^`]*`/g, (q) => q[0] + q[0]);
 
 const PRUNE_FIX = 'Use `./dev worktree clean` (it removes only unlocked, merged, clean worktrees that are not in use). A site that only touches its own items carries `// conformance: scoped-cleanup — <why>`.';
 const DOCKER_FIX = 'Stop or remove only objects this task started, by name or label (`docker rm -f <name>`, `docker ps -q --filter label=<own>`), never every container, image or volume on the machine. A justified case carries `// conformance: scoped-cleanup — <why>`.';
@@ -97,7 +98,12 @@ function wideClean(words) {
 }
 
 /** Names the file assigns from `mktemp`: the script's own folders. */
-const tempNames = (code) => new Set([...code.matchAll(/(?:^|[\s;&(])(?:(?:local|export|declare|readonly)\s+)?(\w+)=["']?(?:\$\(|`)\s*mktemp\b/g)].map((m) => m[1]));
+const tempNames = (code) =>
+  new Set([
+    ...code.matchAll(/(?:^|[\s;&(])(?:(?:local|export|declare|readonly)\s+)?(\w+)=["']?(?:\$\(|`)\s*mktemp\b/g),
+    // `stage="$dir/setup-disc"`: a value with a literal path part below a variable is a folder the script names itself.
+    ...code.matchAll(/(?:^|[\s;&(])(?:(?:local|export|declare|readonly)\s+)?(\w+)=["']?[^\s"']*\$\{?\w+\}?\/[A-Za-z0-9._-]+/g),
+  ].map((m) => m[1]));
 
 /** Whether an `rm` target is bare: an unguarded variable, `~`, `.`, `*`, `/*` (not a mktemp variable of this file). */
 function bareTarget(raw, temps) {
@@ -120,7 +126,7 @@ function maskComments(text, file) {
 
 /** Whether shell text is inside a `for`/`while`/`until` loop at `index`: opened and not yet closed by `done`. */
 function inShellLoop(code, index) {
-  const before = code.slice(Math.max(0, index - 4000), index);
+  const before = code.slice(Math.max(0, index - 4000), index).replace(/"[^"\n]*"|'[^'\n]*'/g, '""');
   const opens = (before.match(/(?:^|[\s;&|({])(?:for|while|until)\s/g) ?? []).length;
   const closes = (before.match(/(?:^|[\s;&|)}])done\b/g) ?? []).length;
   return opens > closes;
@@ -134,7 +140,7 @@ export function unscopedCleanups(text, file = 'x.sh') {
   const hits = [];
   const add = (index, what, fix) => hits.push({ index, what, fix });
   // Text forms in Rust and JS count only on a line that runs a command; array forms always.
-  const textOk = (index) => !isCode || RUNS.test(lineOf(code, index));
+  const textOk = (index) => !isCode || RUNS.test(unstring(lineOf(code, index)));
   const near = (index) => code.slice(Math.max(0, index - 160), index);
 
   for (const m of code.matchAll(new RegExp(`\\bworktree(${Q}?\\s*,\\s*${Q}|\\s+)prune\\b`, 'g'))) {

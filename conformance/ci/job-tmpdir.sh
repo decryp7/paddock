@@ -122,6 +122,7 @@ cmd_remove() {
   local base="${PADDOCK_SOCKET_BASE:-}" j="${PADDOCK_JOB_TEMP:-}" iroot
   iroot="$(internal_root)"
   if [ -n "$j" ] && [ "${RUNNER_OS:-}" = macOS ] && [ -d "$j" ] && [ ! -L "$j" ] && [ "$(dirname "$j")" = "$iroot" ] && [ "$j" != "${RUNNER_TEMP:-}" ]; then
+    # conformance: scoped-cleanup — $j is guarded above: a real directory, not a symlink, directly under the internal root and not RUNNER_TEMP
     rm -rf "$j" "$iroot/$(basename "$j").owner"
     echo "job-tmpdir: removed the internal job folder $j" >&2
   fi

@@ -2,11 +2,6 @@
  "_comment": "Known sites of C115 (a cleanup touches only its own items): `rm -r` on a bare variable in scripts that clean up their own folders, by file and hash of the normalised line (line is for reading only). May only shrink; scope the cleanup (an owned prefix, \"${VAR:?}\", mktemp) and delete its entry.",
  "sites": [
   {
-   "file": ".gitea/actions/node-caches/action.yml",
-   "line": 43,
-   "hash": "bcbcfc67de3406ea"
-  },
-  {
    "file": ".gitea/actions/stable-workspace/action.yml",
    "line": 87,
    "hash": "308947ff5a9ca5e9"
@@ -17,19 +12,9 @@
    "hash": "20ccf0f0320a68b1"
   },
   {
-   "file": ".gitea/workflows/service-smoke.yml",
-   "line": 53,
-   "hash": "468d60eefde677ad"
-  },
-  {
    "file": "apps/debrief/crates/debrief-store-duck/scripts/fetch-libduckdb.sh",
    "line": 44,
    "hash": "9298b38440afa974"
-  },
-  {
-   "file": "apps/debrief/scripts/ci/windows-node-modules.sh",
-   "line": 41,
-   "hash": "a9479bb6039f973b"
   },
   {
    "file": "apps/debrief/scripts/ci/windows-node-modules.sh",
@@ -53,17 +38,12 @@
   },
   {
    "file": "conformance/ci/job-tmpdir.sh",
-   "line": 125,
-   "hash": "c96ab6bfcfbda0e0"
-  },
-  {
-   "file": "conformance/ci/job-tmpdir.sh",
-   "line": 146,
+   "line": 147,
    "hash": "88828da3160ea13d"
   },
   {
    "file": "conformance/ci/job-tmpdir.sh",
-   "line": 156,
+   "line": 157,
    "hash": "9cb843ea621be30d"
   },
   {
@@ -132,104 +112,9 @@
    "hash": "bde95ebb929a6a61"
   },
   {
-   "file": "scripts/shell-demo/smoke-desktop-linux.sh",
-   "line": 39,
-   "hash": "b95cea0a4d14a3ad"
-  },
-  {
-   "file": "scripts/shell-demo/smoke-desktop-linux.sh",
-   "line": 56,
-   "hash": "41735691435f448c"
-  },
-  {
-   "file": "scripts/shell-demo/smoke-service-update-linux.sh",
-   "line": 46,
-   "hash": "3238373214fc7b5a"
-  },
-  {
-   "file": "scripts/shell-demo/smoke-service-update-linux.sh",
-   "line": 56,
-   "hash": "d9924a76eb5bc285"
-  },
-  {
-   "file": "scripts/shell-demo/smoke-service-update-linux.sh",
-   "line": 62,
-   "hash": "e6645769b3c5028e"
-  },
-  {
-   "file": "scripts/shell-demo/smoke-service-update.sh",
-   "line": 52,
-   "hash": "3238373214fc7b5a"
-  },
-  {
-   "file": "scripts/shell-demo/smoke-service-update.sh",
-   "line": 72,
-   "hash": "b895dba15d59ae12"
-  },
-  {
-   "file": "scripts/shell-demo/smoke-service-update.sh",
-   "line": 79,
-   "hash": "4bb72db0ec67e256"
-  },
-  {
    "file": "scripts/vm-lock.sh",
    "line": 91,
    "hash": "32c58f509cf0fffe"
-  },
-  {
-   "file": "scripts/vm-lock.sh",
-   "line": 136,
-   "hash": "f8711defefdf0345"
-  },
-  {
-   "file": "scripts/vm-lock.sh",
-   "line": 147,
-   "hash": "7520360629ae4be7"
-  },
-  {
-   "file": "scripts/vm-lock.sh",
-   "line": 155,
-   "hash": "c07914e6aa3078a1"
-  },
-  {
-   "file": "scripts/vm-win/prepare.sh",
-   "line": 100,
-   "hash": "c61417826abc194b"
-  },
-  {
-   "file": "scripts/vm-win/prepare.sh",
-   "line": 101,
-   "hash": "499bbd507b03cd00"
-  },
-  {
-   "file": "scripts/vm-win/prepare.sh",
-   "line": 127,
-   "hash": "c61417826abc194b"
-  },
-  {
-   "file": "tools/heavy/tests/fixtures/plock.sh",
-   "line": 126,
-   "hash": "82a04dfee73ed566"
-  },
-  {
-   "file": "tools/heavy/tests/fixtures/plock.sh",
-   "line": 130,
-   "hash": "b7f3e8bfa6b2d322"
-  },
-  {
-   "file": "tools/heavy/tests/fixtures/plock.sh",
-   "line": 154,
-   "hash": "a01dda881167c774"
-  },
-  {
-   "file": "tools/heavy/tests/fixtures/plock.sh",
-   "line": 240,
-   "hash": "fe884548800cc5cf"
-  },
-  {
-   "file": "tools/host-cleanup.sh",
-   "line": 99,
-   "hash": "c12785faf8f61dc6"
   },
   {
    "file": "tools/prune-build-folders.sh",
