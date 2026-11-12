@@ -2,6 +2,7 @@
 //! made from a tree with folders missing. The check itself is `conformance/src/util/full-checkout.mjs`, copied into the fixture.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 #![cfg(unix)]
+// windows-twin: none: owed; the test came Unix-only with the worktree gates profile (73fad2308) and has no Windows run yet
 use std::path::Path;
 use std::process::Command;
 
