@@ -2,6 +2,10 @@
 
 - Date: 2026-11-07. Status: proposed, revision 2 after the independent review of `eeddb8189` ("not yet"). Docs only:
   nothing here is built or measured.
+- Amended 2026-11-12 (user, cut review of 2026-11-12; decisions, not a rewrite): **B9b is one `tauri-driver` smoke**, the 58 `owed_until`
+  entries of `apps/pitwall/features.toml` moved to `pitwall-v1.2.0`, and **B12 is the user's 2026-11-08 half-day shape**. **Speech stays in
+  1.1** (the user kept it). ADR 0052's amendment makes `features.toml` and C85 report-only: they never block the tag. The base total
+  and the Phase D figures below that still say 8–12 for B9b or 5–8 for B12 are history; the rows and the totals in section 1 win.
 - Decision it follows (user, 2026-11-07): Pitwall 1.1 runs **alongside** Debrief 1.2, no longer after it, so the user can try
   the Dyno MCP proof of concept early: Pitwall's Playground chat using Dyno's read-only MCP tools. The scope is unchanged and
   is not split. Inside 1.1, the chat with an MCP client against Dyno's tools comes first. Shared-code changes still land
@@ -78,11 +82,11 @@ install, the waivers and the VM round. This list replaces it.
 | B7 | The six waivers removed before 2026-12-31: C37 (integration tests into `tests/it`), C39 (three freed-port tests to a refusing connector or `HeldPort::reset`), C53 (two kills through `paddock_proc`) | app | implementer | 1.5–2.5 | B0 | done (`db9ab0ee9`, `81831d009`, `a8b26d8f7`, `4cc7a6bee`, `457a35481`; no Pitwall C37, C39 or C53 entry is left in `paddock.waivers.toml`) |
 | B8 | Copies register: the six `pitwall-v1.1.0` entries closed with `Copies-removed:` (`tray.rs` included: its registered items are gone, section 0; `tray_model.rs` keeps its registered `pitwall-v1.2.0`); `copies --check-register` and C58 green. Only if the check finds a registered item still present does the tray entry need a date move, which is a user decision (Q5) | app + register | implementer | 0.5–1.5 | B0 | done (`f3ca5da6f`; no `pitwall-v1.1.0` entry is left in `docs/known-copies.toml`) |
 | B9 | ADR 0052 checks: `features.toml` rows (wired, visible outcome, real layout) for every 1.1 feature, the chat's included | app | implementer | 1.5–2.5 | ADR 0023 WP-12 for the chat rows | open (no `features.toml` for Pitwall; `feat/pitwall-b3-b9-wp12` is not in the train and adds only `features.md` and the user guide) |
-| B9b | **The test kit the owed rows of `features.toml` wait on** (user decision 2026-11-12: build the kit before the Pitwall 1.1 tag): ADR 0037 WP-7 (`@decryp7/paddock-e2e/tauri`, the real-app kit, Linux and Windows legs; 3 days in 0037), ADR 0052's outcome harness (WP-B3, C86; 2 days) and the real-layout check (WP-C2 `layoutProblems`/`expectLayoutClean`, 2.5 days; WP-C3 C89), then the Pitwall specs that turn the `owed` entries (`tauri`, `outcome`, `layout`; 57 on 19 rows at ba09a44f7, `owed_until = "pitwall-v1.1.0"`) into named tests. C85's release-time gate fails the tag while one is owed | shared + app | implementer, designer for the kit | 8–12 | B9; ADR 0037 WP-7; ADR 0052 WP-B1, WP-C2 | open |
+| B9b | **One `tauri-driver` smoke** (amended 2026-11-12, user, cut review; was: the test kit the owed rows of `features.toml` wait on, ADR 0037 WP-7 plus ADR 0052's outcome harness and real-layout check, 8–12 days). Tauri's documented WebDriver (`tauri-driver`, Linux and Windows) drives the real app through launch, loading a tiny model, one chat with one Dyno tool call, and quit. The kit the 19 owed rows wait on (the `@decryp7/paddock-e2e/tauri` kit, C86, C89 and the specs that turn the `tauri`, `outcome` and `layout` entries into named tests) is out of 1.1: every `owed_until` of `apps/pitwall/features.toml` is `pitwall-v1.2.0` now (19 rows, 58 entries; the `pitwall-release.yml` check reads them and, since ADR 0052's amendment of the same date, only reports). Layout and outcome regressions are found by B10's screenshot review and the VM round | app | implementer | 2–3 | B9 | open (the previous B9b text is history; the register moved with `docs/cut-review-plans-2026-11-12`) |
 | B10 | Independent UI review on the merged base (ER-23, rule 22): screenshots at 1440x900, both themes, every route and dialog, the chat included; P1 and P2 fixed | app | reviewer, designer for fixes | 1.5–2.5 | B3, WP-4b | open |
 | B11 | Release machinery: CHANGELOG and release notes (First launch, the 1.0.x reinstall by hand, ADR 0057's delete command), rule 25's pre-tag checks, the rule 54 dispatches, the tag | app | implementer | 1–2 | all | open |
-| B12 | **VM round** with the rule 71 rows of section 7, on macOS 26, Windows 11 and Ubuntu; Windows is its first real run | app | implementer, designer to judge | 5–8 | everything but B11 | open (needs the VM round; Windows is its first real run) |
-| | **Base total** | | | **26.75–44.5** | | |
+| B12 | **VM round, back to the user's 2026-11-08 shape** (amended 2026-11-12, user, cut review): one session of about half a day. Rows: the Windows install, per-machine, service, upgrade and uninstall rows, a macOS install smoke, one Linux install, and the Dyno-connected row. The rule 71 / ER-33 precondition and positive control still apply to every row that runs (section 7 keeps the full table as the list to choose from); the long-jobs, layout, quit and dialogs-as-windows rows rely on CI and B10 | app | implementer, designer to judge | 2–3 | everything but B11 | open (needs the VM round; Windows is its first real run) |
+| | **Base total** (was 26.75–44.5 before the 2026-11-12 cuts of B9b and B12) | | | **17.75–30.5** | | |
 
 **Known test flake (found 2026-11-08, not fixed): `dyno-agent` `term` tests exit 143 under load.** In a full `cargo nextest run --workspace` of
 `apps/dyno` run while other builds ran, `dyno-agent::term the_agents_start_and_stop_are_in_its_own_dated_log_with_millisecond_counts`
@@ -330,7 +334,7 @@ Holidays are not counted; the end of December will move these dates.
   whitespace, release notes with the First launch section, the 1.0.x reinstall by hand (`CHANGELOG.md:5-9`) and ADR 0057's
   delete command for the old Keychain item.
 - **Rule 23:** `codesign --verify --deep --strict` on the .app and the DMG; `pitwall-server` started from the built app.
-- **ADR 0052:** every 1.1 feature has its wired, outcome and layout rows (B9).
+- **ADR 0052:** every 1.1 feature has its row in `features.toml` (B9); C85 is report-only (amendment 2026-11-12) and an owed test never blocks the tag.
 - **Rule 55:** no `pitwall-v1.1.0` entry left in `docs/known-copies.toml` (B8; `copies --tag pitwall-v1.1.0`). **Waivers:**
   none of Pitwall's left (B7).
 - **B6 and B6b are a gate:** no Windows build ships whose LocalSystem service runs a program the user can write (B6: the install verb refuses one; B6b: the installer never puts one there).
