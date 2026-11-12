@@ -42,6 +42,8 @@ windows = { workspace = true, features = ["Win32_System_JobObjects", "Win32_Secu
 [dev-dependencies]
 proptest.workspace = true
 debrief-ipc = { path = ".", features = ["test-support"] }
+# Condition waits in the tests (`wait_until`, a 40 s hang guard): never a sleep that guesses an order (ADR 0041, 0071).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The paused clock: a test of a wait that runs for virtual minutes (link.rs).
 tokio = { workspace = true, features = ["test-util"] }
 

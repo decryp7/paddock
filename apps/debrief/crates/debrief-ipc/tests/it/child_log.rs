@@ -61,6 +61,26 @@ fn a_child_stopped_by_debrief_and_restarted_counts_runs() {
     assert!(text.contains("\"@m\":\"ready\""), "{text}");
 }
 
+/// A well-behaved child exits as soon as its connection closes, so its exit can be seen before Debrief's kill of it runs
+/// (CI 7981, Linux: run 1 logged `"Event":"exit"` with "exit code 0" right after its ready line). That exit is still a stop
+/// by Debrief. The order is forced here: the stop waits until the child has exited before it goes on to the kill.
+#[test]
+fn a_child_that_exits_as_debrief_closes_its_connection_is_stopped_by_debrief() {
+    let s = ChildSpec::new(spec(&["--say=ready"], "capture-stop-order"));
+    let child = launch(&s, Arc::new(NoCalls)).unwrap();
+    child.stop_after(|| paddock_testkit::wait_until("the child to exit as its connection closed", || child.exited()));
+    let log = child_log::find("capture-stop-order").unwrap();
+    let st = log.status();
+    assert_eq!(
+        (st.state, st.last_exit.as_deref()),
+        (ChildRunState::Stopped, Some("stopped by Debrief")),
+        "{st:?}"
+    );
+    let text = log.tail_text();
+    assert_eq!(text.matches("\"Event\":\"stop\"").count(), 1, "{text}");
+    assert_eq!(text.matches("\"Event\":\"exit\"").count(), 0, "{text}");
+}
+
 #[test]
 fn a_child_that_cannot_start_leaves_a_note() {
     let mut s = spec(&[], "capture-missing");

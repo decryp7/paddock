@@ -558,10 +558,18 @@ impl ChildProcess {
         None
     }
 
-    /// Closes the child's stdin: a well-behaved child exits on its own (this is what happens when Debrief dies).
-    pub fn close_lifeline(&self) {
+    /// Debrief begins to stop the child: an exit it already made on its own is recorded as its own (a crash stays a crash),
+    /// and from now on however it ends is a stop by Debrief. Call it before anything that makes a well-behaved child exit
+    /// (closing its connection or its lifeline): that exit can be seen at once, and must not read as the child's own
+    /// (CI 7981: "exit code 0" logged for a child Debrief stopped).
+    pub(crate) fn begin_stop(&self) {
         self.note_own_exit();
         self.mark_stopping();
+    }
+
+    /// Closes the child's stdin: a well-behaved child exits on its own (this is what happens when Debrief dies).
+    pub fn close_lifeline(&self) {
+        self.begin_stop();
         *lock(&self.stdin) = None;
     }
 
@@ -575,8 +583,7 @@ impl ChildProcess {
     /// Stops the child and reaps it: its lifeline is closed first and a well-behaved child exits at once
     /// (see [`crate::child::child_main`]); one that has not after [`KILL_GRACE`] is killed.
     pub fn kill(&self) {
-        self.note_own_exit();
-        self.mark_stopping();
+        self.begin_stop();
         *lock(&self.stdin) = None;
         let taken = lock(&self.child).take();
         if let Some(mut c) = taken {
