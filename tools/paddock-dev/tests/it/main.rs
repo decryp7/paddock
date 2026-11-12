@@ -9,6 +9,7 @@ mod cli;
 mod contracts;
 mod dev_tool_publish;
 mod dev_tool_workflow;
+mod generators;
 mod golden;
 mod host_steps;
 mod host_steps_golden;
