@@ -13,13 +13,17 @@ real-browser = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'package(paddock-chromium) & binary(it) & test(/^real_browser::/)'
 test-group = 'real-browser'
+# waiver: a real browser's start is judged on its run state and may wait up to 120 s of CPU (see the ci profile's waiver below); two
+# minutes in total would stop it first, so the default profile gives it 180 s.
+slow-timeout = { period = "30s", terminate-after = 6 }
 
 [profile.default]
 # One test per core but one (rules.md 13), so a full run leaves the machine usable.
 test-threads = -1
-# A test still running after 30 s is reported as SLOW (and again every 30 s); one still running after five minutes is
-# stopped instead of letting a hang stall the run.
-slow-timeout = { period = "30s", terminate-after = 10 }
+# A test still running after 30 s is reported as SLOW (and again every 30 s); one still running after two minutes (four
+# periods) is stopped and fails instead of letting a hang stall the run. Conformance C114 checks every workspace has this
+# bound; a test that legitimately needs longer is a named override with a `# waiver:` line, not a longer default.
+slow-timeout = { period = "30s", terminate-after = 4 }
 
 # CI (.gitea/workflows/ci.yml, publish.yml): every failure reported, no retries (rules.md 5: a flaky test is fixed, not
 # retried), a JUnit report.

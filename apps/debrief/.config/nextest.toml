@@ -30,9 +30,10 @@ duck-heavy = { max-threads = 2 }
 [profile.default]
 # One test per core but one (Paddock rule 13), so a full run leaves the machine usable.
 test-threads = -1
-# A test still running after 30 s is reported as SLOW (and again every 30 s); one still running after five minutes is
-# stopped instead of letting a hang stall the run.
-slow-timeout = { period = "30s", terminate-after = 10 }
+# A test still running after 30 s is reported as SLOW (and again every 30 s); one still running after two minutes (four
+# periods) is stopped and fails instead of letting a hang stall the run. Conformance C114 checks every workspace has this
+# bound; a test that legitimately needs longer is a named override with a `# waiver:` line, not a longer default.
+slow-timeout = { period = "30s", terminate-after = 4 }
 
 [[profile.default.overrides]]
 filter = '''
@@ -61,6 +62,16 @@ test-group = 'real-browser'
 [[profile.default.overrides]]
 filter = 'package(debrief-app) & kind(lib)'
 test-group = 'app-plugin-processes'
+
+# waiver: the same tests as the ci profile's waivers below (a real browser's start; the DuckDB store's whole-workspace suites; the
+# catalogue's bound test): they outlast two minutes on a loaded host, so the default profile gives them the same 180 s.
+[[profile.default.overrides]]
+filter = "package(chromium-driver) & binary(it) & test(/^real_browser::/)"
+slow-timeout = { period = "30s", terminate-after = 6 }
+
+[[profile.default.overrides]]
+filter = "package(debrief-store-duck) & binary(it) & (test(/^differential::answers_like_the_workspace_/) | test(/^analysis::analyses_match_the_workspace_/) | test(/^regress_1_2::building_the_catalogue_keeps_its_unsaved_rows_bounded$/))"
+slow-timeout = { period = "30s", terminate-after = 6 }
 
 # CI (.gitea/workflows/debrief.yml (repo root)): every failure reported, no retries, a JUnit report.
 [profile.ci]
