@@ -5,7 +5,8 @@
 //!
 //! Two kinds, because Debrief's log has a daily byte budget (`logging.rs`) that a chatty line would use up:
 //! - [`Kind::Wait`]: a lock or a queue. It is short when healthy, so a long one is a finding: "still open" at `warn`
-//!   every `still` period, the end at `warn` from one second.
+//!   every `still` period for the first [`WARN_REPORTS`] reports, then at `info` with the same backoff as an activity (a
+//!   lock held behind a long compaction is not a new finding every 5 s); the end at `warn` from one second.
 //! - [`Kind::Activity`]: a job, a borrowed connection, a request that is running. These are long when healthy (an import
 //!   of ten minutes), so they log "still open" at `info` with backoff (`still`, twice, four times ... up to
 //!   [`MAX_BACKOFF`] times `still`) and end at `debug`, never `warn`.
@@ -20,7 +21,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::panic::Location;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::Thread;
 use std::time::{Duration, Instant};
@@ -33,8 +34,17 @@ pub const SLOW: Duration = Duration::from_secs(1);
 pub const SNAPSHOT_MAX: usize = 8;
 /// The backoff of an [`Kind::Activity`] stops growing at this many times `still` (5 s * 60 = 5 min).
 pub const MAX_BACKOFF: u32 = 60;
+/// How many "still open" reports of a [`Kind::Wait`] are at `warn` (the next ones back off at `info`).
+pub const WARN_REPORTS: u32 = 3;
 /// Registry shards (a watch goes to the shard of its id): threads opening watches rarely meet on one lock.
 pub const SHARDS: usize = 16;
+
+/// The watchdog is working or between timed wake-ups.
+const PARK_RUNNING: u8 = 0;
+/// It sleeps with no timeout: no watch is open.
+const PARK_IDLE: u8 = 1;
+/// It sleeps until its next tick: a watch is open.
+const PARK_TIMED: u8 = 2;
 
 const TARGET: &str = "debrief_core::wait_log";
 
@@ -59,7 +69,8 @@ struct Entry {
     /// When the watchdog reports it next, and the gap after that (doubles for an activity).
     next: Instant,
     gap: Duration,
-    reported: bool,
+    /// How many "still open" reports were written.
+    reports: u32,
     detail: Option<fn() -> String>,
 }
 
@@ -68,6 +79,10 @@ struct Shared {
     idle: Mutex<()>,
     wake: Condvar,
     closed: AtomicBool,
+    /// Watches open now: the watchdog sleeps without a timeout while it is 0 (no idle wake-ups).
+    open: AtomicUsize,
+    /// What the watchdog is doing (`PARK_*`), for the idle test.
+    parked: AtomicU8,
     /// Send the begin and end lines to the sink whatever the log level (tests; production checks the level first).
     all_lines: bool,
     still: Duration,
@@ -144,6 +159,8 @@ impl Waits {
             idle: Mutex::new(()),
             wake: Condvar::new(),
             closed: AtomicBool::new(false),
+            open: AtomicUsize::new(0),
+            parked: AtomicU8::new(PARK_RUNNING),
             all_lines,
             still,
             sink,
@@ -176,6 +193,12 @@ impl Waits {
         if self.shared.all_lines || log::log_enabled!(target: TARGET, log::Level::Trace) {
             (self.shared.sink)(log::Level::Trace, format!("wait #{id} begins: {label} ({at})"));
         }
+        if self.shared.open.fetch_add(1, Ordering::SeqCst) == 0 {
+            // The first watch wakes the watchdog; taking the lock first means it is either not yet asleep (and then
+            // sees the count) or asleep (and is notified): no wake-up is lost.
+            drop(self.shared.idle.lock().unwrap_or_else(|p| p.into_inner()));
+            self.shared.wake.notify_one();
+        }
         self.shared.shard(id).insert(
             id,
             Entry {
@@ -186,7 +209,7 @@ impl Waits {
                 started: now,
                 next: now + self.shared.still,
                 gap: self.shared.still,
-                reported: false,
+                reports: 0,
                 detail,
             },
         );
@@ -206,6 +229,12 @@ impl Waits {
     #[track_caller]
     pub fn activity(&self, label: impl Into<Cow<'static, str>>) -> Watch {
         self.open(Kind::Activity, label.into(), None, Location::caller())
+    }
+
+    /// What the watchdog does now: running, asleep with no timeout (nothing open) or asleep until its next tick (tests).
+    #[cfg(test)]
+    fn parked(&self) -> u8 {
+        self.shared.parked.load(Ordering::SeqCst)
     }
 
     /// How many watches are open.
@@ -244,13 +273,14 @@ impl Drop for Watch {
         let Some(e) = self.shared.shard(self.id).remove(&self.id) else {
             return;
         };
+        self.shared.open.fetch_sub(1, Ordering::SeqCst);
         let took = e.started.elapsed();
         let level = match e.kind {
             Kind::Wait if took >= SLOW.min(self.shared.still) => log::Level::Warn,
             _ => log::Level::Debug,
         };
         if level == log::Level::Warn || self.shared.all_lines || log::log_enabled!(target: TARGET, level) {
-            let note = if e.reported { " (it was reported as still open)" } else { "" };
+            let note = if e.reports > 0 { " (it was reported as still open)" } else { "" };
             (self.shared.sink)(
                 level,
                 format!(
@@ -268,11 +298,20 @@ impl Drop for Watch {
 /// A line due from the watchdog: its level, the text and the watch's detail function.
 type Report = (log::Level, String, Option<fn() -> String>);
 
-/// The gap before the next report: a wait repeats every `still`; an activity doubles it up to `MAX_BACKOFF` times `still`.
-fn next_gap(kind: Kind, gap: Duration, still: Duration) -> Duration {
+/// The gap after report number `reports` (1-based): a wait repeats every `still` for its [`WARN_REPORTS`] warn reports,
+/// then backs off like an activity, which doubles from the first report up to `MAX_BACKOFF` times `still`.
+fn next_gap(kind: Kind, gap: Duration, still: Duration, reports: u32) -> Duration {
     match kind {
-        Kind::Wait => still,
-        Kind::Activity => (gap * 2).min(still * MAX_BACKOFF),
+        Kind::Wait if reports < WARN_REPORTS => still,
+        _ => (gap * 2).min(still * MAX_BACKOFF),
+    }
+}
+
+/// The level of report number `reports` (1-based).
+fn report_level(kind: Kind, reports: u32) -> log::Level {
+    match kind {
+        Kind::Wait if reports <= WARN_REPORTS => log::Level::Warn,
+        _ => log::Level::Info,
     }
 }
 
@@ -287,6 +326,7 @@ fn due_lines(shared: &Shared, now: Instant) -> Vec<Report> {
         started: Instant,
         kind: Kind,
         due: bool,
+        reports: u32,
         detail: Option<fn() -> String>,
     }
     let mut rows = Vec::new();
@@ -295,8 +335,8 @@ fn due_lines(shared: &Shared, now: Instant) -> Vec<Report> {
         for (id, e) in shard.iter_mut() {
             let due = now >= e.next;
             if due {
-                e.reported = true;
-                e.gap = next_gap(e.kind, e.gap, shared.still);
+                e.reports += 1;
+                e.gap = next_gap(e.kind, e.gap, shared.still, e.reports);
                 e.next = now + e.gap;
             }
             rows.push(Row {
@@ -307,6 +347,7 @@ fn due_lines(shared: &Shared, now: Instant) -> Vec<Report> {
                 started: e.started,
                 kind: e.kind,
                 due,
+                reports: e.reports,
                 detail: e.detail,
             });
         }
@@ -340,11 +381,7 @@ fn due_lines(shared: &Shared, now: Instant) -> Vec<Report> {
             list.join("; "),
             if more > 0 { format!(", and {more} more") } else { String::new() }
         );
-        let level = match r.kind {
-            Kind::Wait => log::Level::Warn,
-            Kind::Activity => log::Level::Info,
-        };
-        out.push((level, line, r.detail));
+        out.push((report_level(r.kind, r.reports), line, r.detail));
     }
     out
 }
@@ -352,14 +389,25 @@ fn due_lines(shared: &Shared, now: Instant) -> Vec<Report> {
 fn watchdog(shared: &Shared) {
     let tick = (shared.still / 4).max(Duration::from_millis(5));
     while !shared.closed.load(Ordering::SeqCst) {
+        shared.parked.store(PARK_RUNNING, Ordering::SeqCst);
         for (level, line, detail) in due_lines(shared, Instant::now()) {
             let extra = detail.map(|f| format!("; {}", f())).unwrap_or_default();
             (shared.sink)(level, format!("{line}{extra}"));
         }
-        let idle = shared.idle.lock().unwrap_or_else(|p| p.into_inner());
+        let mut idle = shared.idle.lock().unwrap_or_else(|p| p.into_inner());
+        // With nothing open it sleeps with no timeout (an idle Debrief must not wake every few ms: no idle CPU); the first
+        // watch opened notifies it.
+        while shared.open.load(Ordering::SeqCst) == 0 {
+            if shared.closed.load(Ordering::SeqCst) {
+                return;
+            }
+            shared.parked.store(PARK_IDLE, Ordering::SeqCst);
+            idle = shared.wake.wait(idle).unwrap_or_else(|p| p.into_inner());
+        }
         if shared.closed.load(Ordering::SeqCst) {
             return;
         }
+        shared.parked.store(PARK_TIMED, Ordering::SeqCst);
         let _ = shared.wake.wait_timeout(idle, tick);
     }
 }
@@ -463,16 +511,59 @@ mod tests {
     }
 
     #[test]
-    fn the_backoff_doubles_for_an_activity_up_to_the_cap_and_a_wait_repeats_every_period() {
+    fn the_backoff_doubles_for_an_activity_up_to_the_cap_and_a_wait_backs_off_after_its_warn_reports() {
         let still = Duration::from_secs(5);
-        let mut gap = still;
-        let mut seen = vec![gap.as_secs()];
-        for _ in 0..8 {
-            gap = next_gap(Kind::Activity, gap, still);
-            seen.push(gap.as_secs());
+        let gaps = |kind| {
+            let mut gap = still;
+            let mut seen = Vec::new();
+            for n in 1..=9 {
+                gap = next_gap(kind, gap, still, n);
+                seen.push(gap.as_secs());
+            }
+            seen
+        };
+        assert_eq!(gaps(Kind::Activity), [10, 20, 40, 80, 160, 300, 300, 300, 300]);
+        assert_eq!(
+            gaps(Kind::Wait),
+            [5, 5, 10, 20, 40, 80, 160, 300, 300],
+            "every period for the warn reports, then backing off"
+        );
+        assert_eq!(report_level(Kind::Wait, WARN_REPORTS), log::Level::Warn);
+        assert_eq!(report_level(Kind::Wait, WARN_REPORTS + 1), log::Level::Info);
+        assert_eq!(report_level(Kind::Activity, 1), log::Level::Info);
+    }
+
+    /// A lock held behind a long job (a compaction) must not warn every period for as long as it is held.
+    #[test]
+    fn a_wait_held_for_long_warns_three_times_then_reports_at_info_with_backoff() {
+        let (w, rx) = waits(Duration::from_millis(10));
+        let held = w.watch("the write lock");
+        let mut levels = Vec::new();
+        while levels.len() < 5 {
+            levels.push(line(&rx, "still open").0);
         }
-        assert_eq!(seen, [5, 10, 20, 40, 80, 160, 300, 300, 300]);
-        assert_eq!(next_gap(Kind::Wait, Duration::from_secs(80), still), still);
+        use log::Level::{Info, Warn};
+        assert_eq!(levels, [Warn, Warn, Warn, Info, Info]);
+        drop(held);
+    }
+
+    /// An idle Debrief must not wake a thread every few milliseconds: with no watch open the watchdog sleeps with no
+    /// timeout; the first watch wakes it, and when the last one ends it goes back (ER-36, idle CPU).
+    #[test]
+    fn the_watchdog_sleeps_without_a_timeout_when_no_watch_is_open() {
+        let (w, _rx) = waits(Duration::from_millis(10));
+        let until = |w: &Waits, state: u8| {
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while w.parked() != state {
+                assert!(Instant::now() < deadline, "the watchdog never reached state {state}");
+                std::thread::yield_now();
+            }
+        };
+        until(&w, PARK_IDLE);
+        let held = w.watch("something");
+        until(&w, PARK_TIMED);
+        drop(held);
+        until(&w, PARK_IDLE);
     }
 
     #[test]
