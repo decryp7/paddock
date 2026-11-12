@@ -706,7 +706,8 @@ test('paddock-dev has the same nextest ci profile as the crates, and its longer 
   const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
   const own = ci.slice(0, ci.search(/^\[/m));
   assert.match(own, /^slow-timeout = \{ period = "\d+s", terminate-after = \d+ \}$/m);
-  assert.match(own, /^retries = 0$/m, 'a flaky test is fixed, not retried');
+  assert.match(own, /^retries = 1$/m, 'one retry only (ER-12)');
+  assert.match(own, /^flaky-result = "fail"$/m, 'a test that needed its retry still fails the run (ER-12)');
   assert.match(text, /\[profile\.ci\.junit\]/);
   const lines = text.split('\n');
   for (const at of lines.flatMap((l, i) => (l.trim() === '[[profile.ci.overrides]]' ? [i] : []))) {
@@ -811,7 +812,8 @@ test('every app workspace has a nextest ci profile that stops a slow test, and e
     const text = read(file);
     const ci = text.slice(text.indexOf('[profile.ci]\n') + '[profile.ci]\n'.length);
     assert.match(ci.slice(0, ci.search(/^\[/m)), /^slow-timeout = \{ period = "30s", terminate-after = 2 \}$/m, `${app}: the 60-second budget`);
-    assert.match(ci, /^retries = 0$/m, `${app}: no retries (rule 5)`);
+    assert.match(ci, /^retries = 1$/m, `${app}: one retry only (ER-12)`);
+    assert.match(ci, /^flaky-result = "fail"$/m, `${app}: a retry must not turn the run green (ER-12)`);
     const lines = text.split('\n');
     for (const [at] of lines.map((l, i) => [i, l]).filter(([, l]) => l.trim() === '[[profile.ci.overrides]]')) {
       let j = at - 1;
