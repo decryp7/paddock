@@ -89,7 +89,9 @@ impl ProcessId {
     }
 
     /// Whether this process is **confirmed gone**: nothing runs under its pid, or the pid was handed on. **Unknown is
-    /// `false`**, so a wait on it never passes because the process table could not be read.
+    /// `false`**, so a wait on it never passes because the process table could not be read. `Unknown` can persist (a root
+    /// process whose start time a non-root user cannot read stays unknown for its whole life), so every wait on this is bounded
+    /// by a deadline and fails or reports when it expires.
     pub fn has_ended(self) -> bool {
         ended_by(self.presence())
     }

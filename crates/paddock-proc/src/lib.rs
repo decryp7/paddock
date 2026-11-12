@@ -28,6 +28,9 @@
 //!   ```
 //!
 //!   A [`ProcessId`] answers [`ProcessId::confirmed_running`] and [`ProcessId::has_ended`], both false on `Unknown`.
+//!   `Unknown` can persist: for a root-owned process (pid 1, a service) whose start time a non-root user cannot read, it is
+//!   the answer every time. A wait on [`ProcessId::has_ended`] therefore always carries its own deadline and reports on
+//!   expiry; it never loops on "not yet gone".
 //!
 //! - [`warm_up`]: pays the first run of a program (`--version`) before the start that matters, memoised by file identity and
 //!   with its duration printed (ADR 0071); the start itself is waited for on ready or exit through [`StartWatch`].

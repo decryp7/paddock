@@ -74,6 +74,8 @@ pub mod queue;
 pub mod release_isolation;
 pub mod safe_remove;
 pub mod slots;
+#[cfg(test)]
+mod test_sleeper;
 pub mod wait;
 pub mod wait_lock;
 pub mod worktree;

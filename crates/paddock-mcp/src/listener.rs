@@ -48,7 +48,15 @@ impl Discovery {
     /// process was killed and only waits to be collected by its parent). **Unknown counts as running** (the process table could
     /// not be read): a client must not tell the user the app is closed on a failed read (rule 53).
     pub fn writer_alive(&self) -> bool {
-        writer_runs(ProcessId::new(self.pid, StartTime::from_micros(self.started_us)).presence())
+        self.writer_alive_by(&ProcessId::presence)
+    }
+
+    /// [`Discovery::writer_alive`] over a look at the writer's identity (tests give one that cannot read the process table).
+    fn writer_alive_by(&self, look: &dyn Fn(ProcessId) -> paddock_proc::Presence) -> bool {
+        writer_runs(look(ProcessId::new(
+            self.pid,
+            StartTime::from_micros(self.started_us),
+        )))
     }
 }
 
@@ -242,13 +250,42 @@ impl Drop for Listener {
 
 #[cfg(test)]
 mod writer_tests {
-    use super::writer_runs;
+    use super::{Discovery, writer_runs};
     use paddock_proc::Presence;
+
+    fn discovery() -> Discovery {
+        Discovery {
+            pid: 4242,
+            started_us: 1_700_000_000_000_000,
+            port: 1,
+            app: "App".into(),
+            version: "1.0.0".into(),
+        }
+    }
 
     #[test]
     fn an_unreadable_process_table_does_not_make_the_writer_gone() {
         assert!(writer_runs(Presence::Running));
         assert!(writer_runs(Presence::Unknown), "unknown is not gone");
         assert!(!writer_runs(Presence::Gone));
+    }
+
+    /// The real decision: `writer_alive` asks about the identity the file records (pid and start time) and only a proven
+    /// `Gone` makes the writer stale.
+    #[test]
+    fn writer_alive_asks_the_three_valued_look_with_the_recorded_identity() {
+        let d = discovery();
+        assert!(d.writer_alive_by(&|id| {
+            assert_eq!(
+                (id.pid(), id.started().as_micros()),
+                (4242, 1_700_000_000_000_000)
+            );
+            Presence::Running
+        }));
+        assert!(
+            d.writer_alive_by(&|_| Presence::Unknown),
+            "an unreadable table is not an app that closed"
+        );
+        assert!(!d.writer_alive_by(&|_| Presence::Gone));
     }
 }

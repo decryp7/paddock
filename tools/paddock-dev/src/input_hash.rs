@@ -651,31 +651,23 @@ mod tests {
     #[test]
     fn a_program_that_reads_its_input_but_never_ends_is_killed_at_the_limit_with_its_tree() {
         let dir = tempfile::tempdir().unwrap();
-        let pidfile = dir.path().join("grandchild.pid");
+        let report = dir.path().join("grandchild.identity");
         let script = format!(
-            "echo stuck-here >&2; sleep 30 & echo $! > '{}'; cat >/dev/null; wait",
-            pidfile.display()
+            "echo stuck-here >&2; {} & cat >/dev/null; wait",
+            crate::test_sleeper::shell_command()
         );
         let mut cmd = proc_command("sh");
-        cmd.args(["-c", &script]);
+        cmd.args(["-c", &script]).env(crate::test_sleeper::FILE_VAR, &report);
         let child = spawn_piped(&mut cmd).unwrap();
         let started = std::time::Instant::now();
-        // The grandchild's identity is read while it lives (pid and start time): once it is gone a bare pid reads the same as
-        // a failed look, and the wait below would pass on nothing (rule 53).
-        let (err, grandchild) = std::thread::scope(|s| {
-            let run = s.spawn(|| pipe_in(child, b"x", Duration::from_secs(3)).unwrap_err());
-            let grandchild = paddock_testkit::wait_for("the grandchild's identity", || {
-                std::fs::read_to_string(&pidfile)
-                    .ok()
-                    .and_then(|t| t.trim().parse::<u32>().ok())
-                    .and_then(paddock_proc::ProcessId::of)
-            });
-            (run.join().unwrap(), grandchild)
-        });
+        let err = pipe_in(child, b"x", Duration::from_millis(500)).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
         assert!(err.to_string().contains("stuck-here"), "the stderr tail is in the error: {err}");
-        // The `sleep` grandchild holds the pipes open for 30 s: the limit must still end the call, and end the grandchild too.
-        assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+        // The grandchild holds the pipes open for its whole life: the limit must still end the call, and end the grandchild too.
+        assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+        // It reported its own identity (pid and start time) when it ran: once it is gone a bare pid reads the same as a failed
+        // look, and the wait below would pass on nothing (rule 53).
+        let grandchild = crate::test_sleeper::reported(&report).expect("the grandchild reported its identity before the limit");
         let gone = paddock_testkit::poll_until_within(Duration::from_secs(10), || grandchild.has_ended());
         assert!(gone, "the grandchild (pid {}) is still running after the limit", grandchild.pid());
     }
