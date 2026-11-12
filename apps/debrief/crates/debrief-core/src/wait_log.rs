@@ -439,7 +439,7 @@ mod tests {
     /// The next line containing `needle`: waits on the channel (the condition), bounded.
     fn line(rx: &Lines, needle: &str) -> (log::Level, String) {
         loop {
-            let l = rx.recv_timeout(Duration::from_secs(30)).expect("the line never came");
+            let l = rx.recv_timeout(paddock_testkit::HANG_GUARD).expect("the line never came");
             if l.1.contains(needle) {
                 return l;
             }
@@ -582,7 +582,7 @@ mod tests {
         }
         drop(w);
         assert_eq!(
-            rx.recv_timeout(Duration::from_secs(30)),
+            rx.recv_timeout(paddock_testkit::HANG_GUARD),
             Err(mpsc::RecvTimeoutError::Disconnected),
             "the watchdog thread did not end"
         );

@@ -114,14 +114,14 @@ mod tests {
                 move || {
                     held_tx.send(()).unwrap();
                     // Held until the test has seen the line: the condition, bounded.
-                    release_rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+                    release_rx.recv_timeout(paddock_testkit::HANG_GUARD).unwrap();
                     Ok(1)
                 },
             ))
         });
-        held_rx.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+        held_rx.recv_timeout(paddock_testkit::HANG_GUARD).unwrap();
         let next = |needle: &str| loop {
-            let (level, text) = lines.recv_timeout(std::time::Duration::from_secs(30)).expect("the line never came");
+            let (level, text) = lines.recv_timeout(paddock_testkit::HANG_GUARD).expect("the line never came");
             if text.contains(needle) {
                 break (level, text);
             }
