@@ -336,8 +336,8 @@ fn a_pipe_served_by_our_own_account_passes_the_server_check() {
     client.check_server_is_me().unwrap();
 }
 
-/// The same check refuses a pipe served by another account. The local VM script starts a server under a second account, passes the
-/// pipe's name in `PADDOCK_OTHER_ACCOUNT_PIPE` and runs this test as the first account (never set in CI, so it returns at once there).
+/// The same check refuses a pipe served by another account. The local VM script (`scripts/vm-checks/dyno-wp6-cross-account-pipe.sh`) serves, as a second
+/// account, a pipe every account may open (`paddock-ipc-test-child serve-open`), passes its name in `PADDOCK_OTHER_ACCOUNT_PIPE` and runs this test as the first account (never set in CI, so it returns at once there).
 /// Deleting the call in `Client::connect_on` makes it fail. Registered in docs/gates.toml.
 #[cfg(windows)]
 #[test]

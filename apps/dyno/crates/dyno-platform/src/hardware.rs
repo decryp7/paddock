@@ -732,10 +732,13 @@ mod tests {
         let root = temp("battery-win");
         let d = fresh_private_folder(&root).unwrap();
         let out = std::process::Command::new("icacls").arg(&d).output().unwrap();
-        let text = String::from_utf8_lossy(&out.stdout).to_string();
-        for other in ["Everyone", "Users", "Authenticated Users"] {
-            assert!(!text.contains(other), "{other} must have no entry: {text}");
+        // The output starts with the folder's own path (`C:\\Users\\...`), which is not an entry: the path is cut out, and what is left is
+        // checked for entries (`<principal>:(<rights>)`) of the principals that must not be there.
+        let text = String::from_utf8_lossy(&out.stdout).replace(&d.display().to_string(), "");
+        for other in ["Everyone", "BUILTIN\\Users", "NT AUTHORITY\\Authenticated Users"] {
+            assert!(!text.contains(&format!("{other}:(")), "{other} must have no entry: {text}");
         }
+        assert!(text.contains(":("), "the folder has entries at all (the parse saw them): {text}");
         let g = std::process::Command::new("icacls")
             .arg(&root)
             .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
