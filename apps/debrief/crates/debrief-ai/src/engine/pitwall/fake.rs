@@ -88,6 +88,8 @@ pub struct FakePitwall {
     stop: Arc<AtomicBool>,
     /// Connections it has started reading a request from.
     reading: Arc<AtomicUsize>,
+    /// The accept thread; `kill` joins it, so the listener is closed when `kill` returns.
+    accept: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl Drop for FakePitwall {
@@ -105,7 +107,7 @@ impl FakePitwall {
         let stop = Arc::new(AtomicBool::new(false));
         let reading = Arc::new(AtomicUsize::new(0));
         let (s, st, r) = (state.clone(), stop.clone(), reading.clone());
-        std::thread::spawn(move || {
+        let accept = std::thread::spawn(move || {
             while !st.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((conn, _)) => {
@@ -126,6 +128,7 @@ impl FakePitwall {
             state,
             stop,
             reading,
+            accept: Mutex::new(Some(accept)),
         }
     }
 
@@ -142,9 +145,14 @@ impl FakePitwall {
         std::fs::write(dir.join(super::discovery::FILE_NAME), text.to_string()).expect("discovery file");
     }
 
-    /// Stops listening and drops the connections it is serving (Pitwall quit).
+    /// Stops listening and drops the connections it is serving (Pitwall quit). Returns once the listener is closed:
+    /// a connect right after gets `ConnectionRefused`.
     pub fn kill(&self) {
         self.stop.store(true, Ordering::Relaxed);
+        let handle = self.accept.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(h) = handle {
+            let _ = h.join();
+        }
     }
 
     /// How many connections it has started reading a request from.
