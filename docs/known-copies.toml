@@ -203,7 +203,7 @@ adr = "0030"
   paths = ["apps/debrief/crates/chromium-driver/src/**"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
-  note = "The start is judged by paddock-proc's StartWatch like the canonical's (fix/chromium-start-judge, the real_browser flake of CI 7213/7250); still no NetworkServiceSandbox switch. Adopt the canonical instead of patching further."
+  note = "The start is judged by paddock-proc's StartWatch like the canonical's (fix/chromium-start-judge, the real_browser flake of CI 7213/7250), and so are its first answers (answer.rs, ported from 8d8424805 and 2dd883b47 on fix/debrief-train5-waits after CI 7963). It also has Answers::Judged, the test form that judges every answer and page load until the kit's hang guard (ADR 0071), which the canonical lacks; still no NetworkServiceSandbox switch. Adopt the canonical instead of patching further."
 
 [[mechanism]]
 id = "instance-lock"

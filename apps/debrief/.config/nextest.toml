@@ -51,6 +51,13 @@ retries = 2
 filter = 'package(chromium-driver) & binary(it) & test(/^real_browser::/)'
 test-group = 'real-browser'
 
+# The research browser's real-browser tests in the shell (browser::renderer, the same pinned Chrome for Testing) take turns
+# with chromium-driver's: three browsers started side by side on the shared Mac runner took 70-140 s each (CI 7963). The
+# group, not a longer limit (ER-12). Before the shell's group below: the first override that sets a test group wins.
+[[profile.default.overrides]]
+filter = 'package(debrief-app) & kind(lib) & test(/^browser::renderer::tests::real_browser::/)'
+test-group = 'real-browser'
+
 [[profile.default.overrides]]
 filter = 'package(debrief-app) & kind(lib)'
 test-group = 'app-plugin-processes'

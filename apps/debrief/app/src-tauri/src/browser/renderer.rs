@@ -966,114 +966,131 @@ mod tests {
         }
     }
 
-    // ---- a real browser, when the machine has one (skipped otherwise) ----
+    /// A real browser, when the machine has one (skipped otherwise): the pinned Chrome for Testing. These tests take turns with
+    /// chromium-driver's in nextest's `real-browser` group (`.config/nextest.toml`), and wait for the browser the way ADR 0071
+    /// says: every answer and page load while the browser is there ([`chromium_driver::Answers::Judged`]), and the page's
+    /// content until it appears or the browser ends ([`paddock_testkit::start::wait_ready_or_exit`]), never a fixed count or
+    /// deadline (CI 7963: `navigate: Timeout` behind the driver's fixed 5 s and 10 s command deadlines).
+    mod real_browser {
+        use super::*;
+        use paddock_testkit::start::{wait_exit, wait_ready_or_exit};
 
-    fn serve() -> u16 {
-        use std::io::{Read, Write};
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = l.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            for mut s in l.incoming().flatten() {
-                let mut b = [0u8; 2048];
-                let n = s.read(&mut b).unwrap_or(0);
-                let first = String::from_utf8_lossy(&b[..n]).lines().next().unwrap_or("").to_string();
-                let body = if first.contains("/check") {
-                    // A human check that goes away after three seconds, as if the user had solved it.
-                    "<title>Just a moment</title><body><p id=m>Verify you are human to continue</p><script>setTimeout(()=>{document.title='Done';m.textContent='Welcome. This is the real page.'},3000)</script></body>"
-                } else {
-                    "<title>Results</title><body><div id=r></div><script>setTimeout(()=>{for(let i=1;i<=3;i++){const a=document.createElement('a');a.href='https://example.org/'+i;a.textContent='Result '+i;r.appendChild(a)}},200)</script></body>"
-                };
-                let _ = write!(
-                    s,
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-            }
-        });
-        port
-    }
-
-    /// The folder throwaway profiles go below, the renderers, a page over them and the cues it sent. The folder is first so
-    /// that its binding, declared first, is dropped last: after the browsers that write into it.
-    type Live = (tempfile::TempDir, Arc<Renderers>, ChromiumPage, Arc<Mutex<Vec<Cue>>>);
-
-    fn live_page() -> Option<Live> {
-        chromium_driver::find_for_tests()?;
-        let renderers = Arc::new(Renderers::default());
-        // Throwaway profiles go below the test's own folder, as they go below Debrief's local folder in the app: without
-        // one no browser starts (2e9ffb7a3).
-        let dir = tempfile::tempdir().unwrap();
-        renderers.set_throwaway_base(Some(dir.path().join("browser-profiles")));
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let s2 = seen.clone();
-        let page = ChromiumPage {
-            renderers: renderers.clone(),
-            owner: "main".into(),
-            may_drive: Some(Box::new(|| true)),
-            rules: None,
-            product: "Debrief".into(),
-            notify: Arc::new(move |c| s2.lock().unwrap().push(c)),
-            lease: Lease::default(),
-        };
-        Some((dir, renderers, page, seen))
-    }
-
-    #[test]
-    fn reads_a_scripted_page_through_the_ports_with_nothing_of_ours_in_it() {
-        let Some((_dir, renderers, page, seen)) = live_page() else { return };
-        let port = serve();
-        let url = WebUrl::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
-        page.navigate(&url).expect("navigate");
-        let mut links = 0;
-        for _ in 0..30 {
-            links = page.results_page(&[]).map(|p| p.links.len()).unwrap_or(0);
-            if links == 3 {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(200));
+        fn serve() -> u16 {
+            use std::io::{Read, Write};
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            std::thread::spawn(move || {
+                for mut s in l.incoming().flatten() {
+                    let mut b = [0u8; 2048];
+                    let n = s.read(&mut b).unwrap_or(0);
+                    let first = String::from_utf8_lossy(&b[..n]).lines().next().unwrap_or("").to_string();
+                    let body = if first.contains("/check") {
+                        // A human check that goes away after three seconds, as if the user had solved it.
+                        "<title>Just a moment</title><body><p id=m>Verify you are human to continue</p><script>setTimeout(()=>{document.title='Done';m.textContent='Welcome. This is the real page.'},3000)</script></body>"
+                    } else {
+                        "<title>Results</title><body><div id=r></div><script>setTimeout(()=>{for(let i=1;i<=3;i++){const a=document.createElement('a');a.href='https://example.org/'+i;a.textContent='Result '+i;r.appendChild(a)}},200)</script></body>"
+                    };
+                    let _ = write!(
+                        s,
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                }
+            });
+            port
         }
-        assert_eq!(links, 3, "the script-rendered results are read");
-        let cap = page.capture().unwrap();
-        assert!(cap.text.contains("Result 1"));
-        // Nothing of ours in the page: no node, attribute or text added by Debrief.
-        let s = renderers.current("main").unwrap();
-        let html = s.page().evaluate("document.documentElement.outerHTML").unwrap();
-        let html = html.as_str().unwrap();
-        assert!(
-            !html.to_lowercase().contains("debrief") && !html.contains("AI is browsing"),
-            "{html}"
-        );
-        assert_eq!(
-            s.page().evaluate("document.querySelectorAll('script').length").unwrap(),
-            serde_json::json!(1)
-        );
-        // The cue went to the status chip, with the product name in the window title.
-        let cues = seen.lock().unwrap().clone();
-        assert!(cues
-            .iter()
-            .any(|c| c.title == "Debrief AI — reading: 127.0.0.1" || c.title.starts_with("Debrief AI — searching")));
-        // Stop: the process ends at once and later calls fail with a clear message.
-        let pid = s.pid().unwrap();
-        assert!(renderers.kill("main"));
-        #[cfg(unix)]
-        {
-            std::thread::sleep(Duration::from_millis(300));
-            assert!(!chromium_driver::process::process_exists(pid), "browser process leaked");
-        }
-        let _ = pid;
-        assert!(renderers.current("main").is_none());
-    }
 
-    #[test]
-    fn a_challenge_page_comes_to_the_front_and_the_work_continues_when_it_is_solved() {
-        let Some((_dir, renderers, page, seen)) = live_page() else { return };
-        let port = serve();
-        let url = WebUrl::parse(&format!("http://127.0.0.1:{port}/check")).unwrap();
-        page.navigate(&url).expect("navigates once the check is gone");
-        let cues = seen.lock().unwrap().clone();
-        assert!(cues.iter().any(|c| c.activity == Activity::WaitingForYou), "the user was asked");
-        assert!(cues.last().unwrap().activity == Activity::Reading, "and it went on afterwards");
-        assert!(page.capture().unwrap().text.contains("real page"));
-        renderers.kill_all();
+        /// The folder throwaway profiles go below, the renderers, a page over them and the cues it sent. The folder is first so
+        /// that its binding, declared first, is dropped last: after the browsers that write into it.
+        type Live = (tempfile::TempDir, Arc<Renderers>, ChromiumPage, Arc<Mutex<Vec<Cue>>>);
+
+        fn live_page() -> Option<Live> {
+            let exe = chromium_driver::find_for_tests()?;
+            // The OS holds the first run of a browser bundle on macOS with no CPU and no output (ADR 0071): paid here, once
+            // per process and file, before the launch's own judge looks. Not on Windows, where `--version` starts the browser.
+            #[cfg(target_os = "macos")]
+            paddock_testkit::start::warm_first_start(&exe.path, &["--version"]);
+            drop(exe);
+            let renderers = Arc::new(Renderers::default());
+            // The test form of the answers: a loaded host makes the test slower, never red (ADR 0071).
+            renderers.set_answers(chromium_driver::Answers::Judged {
+                patience: paddock_testkit::start::PATIENCE,
+                guard: paddock_testkit::HANG_GUARD,
+            });
+            // Throwaway profiles go below the test's own folder, as they go below Debrief's local folder in the app: without
+            // one no browser starts (2e9ffb7a3).
+            let dir = tempfile::tempdir().unwrap();
+            renderers.set_throwaway_base(Some(dir.path().join("browser-profiles")));
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let s2 = seen.clone();
+            let page = ChromiumPage {
+                renderers: renderers.clone(),
+                owner: "main".into(),
+                may_drive: Some(Box::new(|| true)),
+                rules: None,
+                product: "Debrief".into(),
+                notify: Arc::new(move |c| s2.lock().unwrap().push(c)),
+                lease: Lease::default(),
+            };
+            Some((dir, renderers, page, seen))
+        }
+
+        /// The browser of `owner`, by identity, for the kit's waits.
+        fn browser_of(renderers: &Renderers) -> paddock_proc::ProcessId {
+            let pid = renderers.current("main").expect("a browser").pid().expect("its pid");
+            paddock_proc::ProcessId::of(pid).expect("the browser's identity")
+        }
+
+        #[test]
+        fn reads_a_scripted_page_through_the_ports_with_nothing_of_ours_in_it() {
+            let Some((_dir, renderers, page, seen)) = live_page() else { return };
+            let port = serve();
+            let url = WebUrl::parse(&format!("http://127.0.0.1:{port}/")).unwrap();
+            page.navigate(&url).expect("navigate");
+            let browser = browser_of(&renderers);
+            // The results appear when the page's script has run: waited for until they do or the browser ends.
+            let links = wait_ready_or_exit(browser, "the browser showing the script-rendered results", || {
+                page.results_page(&[]).ok().map(|p| p.links.len()).filter(|n| *n == 3)
+            })
+            .expect_ready("the browser");
+            assert_eq!(links, 3, "the script-rendered results are read");
+            let cap = page.capture().unwrap();
+            assert!(cap.text.contains("Result 1"));
+            // Nothing of ours in the page: no node, attribute or text added by Debrief.
+            let s = renderers.current("main").unwrap();
+            let html = s.page().evaluate("document.documentElement.outerHTML").unwrap();
+            let html = html.as_str().unwrap();
+            assert!(
+                !html.to_lowercase().contains("debrief") && !html.contains("AI is browsing"),
+                "{html}"
+            );
+            assert_eq!(
+                s.page().evaluate("document.querySelectorAll('script').length").unwrap(),
+                serde_json::json!(1)
+            );
+            // The cue went to the status chip, with the product name in the window title.
+            let cues = seen.lock().unwrap().clone();
+            assert!(cues
+                .iter()
+                .any(|c| c.title == "Debrief AI — reading: 127.0.0.1" || c.title.starts_with("Debrief AI — searching")));
+            // Stop: the process ends at once and later calls fail with a clear message.
+            drop(s);
+            assert!(renderers.kill("main"));
+            wait_exit(browser, "the stopped browser");
+            assert!(renderers.current("main").is_none());
+        }
+
+        #[test]
+        fn a_challenge_page_comes_to_the_front_and_the_work_continues_when_it_is_solved() {
+            let Some((_dir, renderers, page, seen)) = live_page() else { return };
+            let port = serve();
+            let url = WebUrl::parse(&format!("http://127.0.0.1:{port}/check")).unwrap();
+            page.navigate(&url).expect("navigates once the check is gone");
+            let cues = seen.lock().unwrap().clone();
+            assert!(cues.iter().any(|c| c.activity == Activity::WaitingForYou), "the user was asked");
+            assert!(cues.last().unwrap().activity == Activity::Reading, "and it went on afterwards");
+            assert!(page.capture().unwrap().text.contains("real page"));
+            renderers.kill_all();
+        }
     }
 }

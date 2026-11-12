@@ -982,6 +982,7 @@ dependencies = [
  "log",
  "paddock-env",
  "paddock-proc",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -1672,6 +1673,7 @@ dependencies = [
  "paddock-diag",
  "paddock-env",
  "paddock-proc",
+ "paddock-testkit",
  "semver",
  "serde",
  "serde_json",
@@ -5385,6 +5387,7 @@ version = "0.1.0"
 dependencies = [
  "paddock-jobs",
  "paddock-limits",
+ "paddock-proc",
  "paddock-workspace-hack",
  "socket2",
  "tempfile",
