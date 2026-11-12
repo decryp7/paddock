@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots, wait,
-    worktree,
+    check, ci_isolation, ci_runs, gates, generators, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation,
+    slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -57,6 +57,11 @@ enum Command {
     Merge {
         #[command(subcommand)]
         command: MergeCommand,
+    },
+    /// Generated and pinned files (ER-40): the registry docs/generators.toml and the checks it declares.
+    Gen {
+        #[command(subcommand)]
+        command: GenCommand,
     },
     /// The project graph.
     Graph {
@@ -126,8 +131,37 @@ enum CheckCommand {
 enum MergeCommand {
     /// Did a merge silently drop one side's work? Flags files that go backwards against the first parent, hunks a parent added
     /// that the result lacks (reason: `Hunks-dropped: <path>: <reason>` in the merge message) and tests a parent has that the
-    /// result lacks (`Tests-removed: <name>: <reason>`). Exit 5 on findings; a check that could not look is an error, never a pass.
+    /// result lacks (`Tests-removed: <name>: <reason>`). Given a merge commit that is checked out, it also runs the generator
+    /// checks the merge makes due (docs/generators.toml; `--no-generators` skips them). Exit 5 on findings; a check that could not
+    /// look is an error, never a pass.
     Check(MergeCheckArgs),
+}
+
+#[derive(Subcommand)]
+enum GenCommand {
+    /// Run the checks of the generators a change touches (docs/generators.toml: the lockfiles, catalogues, notices, workspace
+    /// hack, baselines and bindings that are derived from other files). Each command and its duration is logged; a stale file
+    /// is exit 5 with its regenerate command; a check that could not run (tool missing, file not on this tree) is exit 6, never a pass.
+    Check(GenCheckArgs),
+}
+
+#[derive(Args)]
+struct GenCheckArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// Run every generator, not only those the change touches.
+    #[arg(long)]
+    all: bool,
+    /// Run only these generator ids (comma-separated), whatever the change is.
+    #[arg(long, value_delimiter = ',')]
+    only: Vec<String>,
+    /// The changed paths (comma-separated), instead of asking git.
+    #[arg(long, value_delimiter = ',')]
+    files: Vec<String>,
+    /// The revision the change is measured against (its merge base with HEAD, working tree included).
+    #[arg(long, default_value = "origin/main")]
+    base: String,
 }
 
 #[derive(Args)]
@@ -143,6 +177,10 @@ struct MergeCheckArgs {
     target: Option<String>,
     /// The merge commit to check.
     commit: Option<String>,
+    /// Do not run the generator checks of docs/generators.toml (by default the commit form runs those the merge makes due; the
+    /// checkout must be the merge result, else they are NOT MEASURED).
+    #[arg(long)]
+    no_generators: bool,
 }
 
 #[derive(Subcommand)]
@@ -352,6 +390,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     commit: a.commit,
                     branch: a.branch,
                     target: a.target,
+                    generators: !a.no_generators,
                 },
                 out,
                 err,
@@ -447,6 +486,16 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             commit: a.commit,
             branch: a.branch,
             target: a.target,
+            generators: !a.no_generators,
+        }),
+        Command::Gen {
+            command: GenCommand::Check(a),
+        } => generators::command(&generators::CheckArgs {
+            root: a.root,
+            all: a.all,
+            only: a.only,
+            files: a.files,
+            base: a.base,
         }),
         Command::Plan(a) => plan_cmd::command(&a.args, a.root),
         Command::Hook { .. } => Ok(Report::new(serde_json::json!({}), String::new())),

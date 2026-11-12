@@ -6,6 +6,7 @@ mod cli;
 mod contracts;
 mod dev_tool_publish;
 mod dev_tool_workflow;
+mod generators;
 mod golden;
 mod hostile;
 mod inputs;

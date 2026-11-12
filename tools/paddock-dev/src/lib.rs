@@ -13,6 +13,8 @@
 //!   ([`ipc_endpoints`], ADR 0072);
 //! - `hook pre-tool-use` and `hooks install`: Claude Code's PreToolUse guard and its installer ([`hook`], ADR 0083);
 //! - `merge check`: did a merge silently drop one side's hunks or tests? ([`merge_check`], ADR 0089 outcomes);
+//! - `gen check`: the checks of the generated and pinned files a change touches, from `docs/generators.toml`
+//!   ([`generators`], ER-40); `merge check` runs the ones a merge makes due;
 //! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
 //!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]);
 //! - `plan`: the CI planner, the whole command line of `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
@@ -31,6 +33,7 @@ pub mod ci_runs;
 mod cli;
 mod fds;
 pub mod gates;
+pub mod generators;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
