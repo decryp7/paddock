@@ -11,7 +11,7 @@ use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StallReport, S
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long [`Chromium::start_page`] waits for the page the browser opens with.
@@ -231,7 +231,8 @@ pub struct Chromium {
     // Field order matters: the connection closes before the process is killed and the profile removed.
     answering: Arc<Answering>,
     conn: Arc<Connection>,
-    process: Supervised,
+    /// Shared with the waits for its answers ([`crate::answer`]), which read whether it runs from the held child.
+    process: Arc<Mutex<Supervised>>,
     dir: PathBuf,
     throwaway: bool,
     alive: Arc<AtomicBool>,
@@ -298,9 +299,11 @@ impl Chromium {
         match connect(&dir, &mut process, id, opts, &timed_out) {
             Ok(conn) => {
                 let conn = Arc::new(conn);
+                let process = Arc::new(Mutex::new(process));
                 Ok(Chromium {
                     answering: Arc::new(Answering::new(
                         conn.clone(),
+                        process.clone(),
                         id,
                         timed_out,
                         opts.max_lifetime,
@@ -325,22 +328,29 @@ impl Chromium {
     }
 
     pub fn pid(&self) -> Option<u32> {
-        self.process.id()
+        self.proc().id()
+    }
+
+    /// The browser's process (a poisoned lock still gives it: the process handle is never left half-changed).
+    fn proc(&self) -> std::sync::MutexGuard<'_, Supervised> {
+        self.process.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn is_running(&mut self) -> bool {
-        self.process.is_running() && !self.conn.is_closed()
+        self.proc().is_running() && !self.conn.is_closed()
     }
 
     /// Why the browser and its `page` can no longer be used, if so. No round trip to the browser (see
     /// [`Page::exists`] for one).
     pub fn gone(&mut self, page: &Page) -> Option<Gone> {
-        if !self.process.is_running() {
+        if !self.proc().is_running() {
             Some(Gone::Exited)
         } else if self.conn.is_closed() {
             Some(Gone::Disconnected)
         } else {
-            page.is_closed().then_some(Gone::PageClosed)
+            // The page's own end, read without the connection: a connection that closes after the check above is a
+            // `Disconnected` at the next look, never a page the user closed (a race: 3 of 19 runs of the suite on Linux failed this way).
+            page.detached().then_some(Gone::PageClosed)
         }
     }
 
@@ -407,13 +417,13 @@ impl Chromium {
         self.alive.store(false, Ordering::Release);
         let _ = self.conn.call(None, "Browser.close", json!({}), grace.min(Duration::from_secs(2)));
         let end = Instant::now() + grace;
-        let mut exited = !self.process.is_running();
+        let mut exited = !self.proc().is_running();
         while !exited && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(25));
-            exited = !self.process.is_running();
+            exited = !self.proc().is_running();
         }
         // Whatever is left of the process tree (helpers, or the browser itself when it ignored the request) ends now.
-        self.process.kill();
+        self.proc().kill();
         cleanup(&self.dir, self.throwaway);
         exited
     }
@@ -421,7 +431,7 @@ impl Chromium {
     /// Ends the browser at once.
     pub fn kill(&mut self) {
         self.alive.store(false, Ordering::Release);
-        self.process.kill();
+        self.proc().kill();
     }
 }
 

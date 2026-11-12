@@ -66,6 +66,13 @@ impl Page {
     }
 
     /// The page is gone: its window or tab was closed (by the user), it crashed, or the browser connection ended.
+    /// The browser reported this page's session or target gone (its window or tab was closed, it crashed); unlike
+    /// [`Page::is_closed`] it does not look at the connection, so a caller that has just checked the connection reads one
+    /// state, not two ([`crate::Chromium::gone`]).
+    pub(crate) fn detached(&self) -> bool {
+        self.conn.is_gone(&self.session) || self.conn.is_gone(&self.target)
+    }
+
     pub fn is_closed(&self) -> bool {
         self.conn.is_closed() || self.conn.is_gone(&self.session) || self.conn.is_gone(&self.target)
     }

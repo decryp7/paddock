@@ -16,12 +16,13 @@
 //! Every wait that gives up logs the command, the step and the bound or reason (ER-27), and its error says the same.
 
 use crate::cdp::{Connection, Pending};
+use crate::process::Supervised;
 use crate::{Error, Result};
-use paddock_proc::{ExitInfo, Liveness, Pace, Patience, Presence, ProcessId, StallCause, StartProbe, StartState, StartWatch, Watched};
+use paddock_proc::{ExitInfo, Liveness, Pace, Patience, ProcessId, StallCause, StartProbe, StartState, StartWatch, Watched};
 use serde_json::Value;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// After this long without an answer a note goes to the log (the wait goes on).
@@ -42,6 +43,8 @@ pub enum Answers {
 /// What the waits of one browser share: its connection, its identity and limits, and how answers are waited for.
 pub(crate) struct Answering {
     pub(crate) conn: Arc<Connection>,
+    /// The browser's process, held: whether it runs is read from the child (`try_wait`), never guessed from a pid.
+    process: Arc<Mutex<Supervised>>,
     id: Option<ProcessId>,
     timed_out: Arc<AtomicBool>,
     max_lifetime: Duration,
@@ -61,6 +64,7 @@ struct Judging {
 impl Answering {
     pub(crate) fn new(
         conn: Arc<Connection>,
+        process: Arc<Mutex<Supervised>>,
         id: Option<ProcessId>,
         timed_out: Arc<AtomicBool>,
         max_lifetime: Duration,
@@ -69,6 +73,7 @@ impl Answering {
     ) -> Answering {
         Answering {
             conn,
+            process,
             id,
             timed_out,
             max_lifetime,
@@ -161,7 +166,11 @@ impl Answering {
         let began = Instant::now();
         let pid = self.id.map(ProcessId::pid);
         let slot: RefCell<Option<Result<T>>> = RefCell::new(None);
-        let probe = Probe { id: self.id, slot: &slot };
+        let probe = Probe {
+            process: &self.process,
+            id: self.id,
+            slot: &slot,
+        };
         let pace = Steps {
             step,
             slot: &slot,
@@ -254,21 +263,24 @@ fn with_note(p: Patience) -> Patience {
     }
 }
 
-/// What the judge looks at: the browser by identity (a table that cannot be read counts as there, rule 53) and whether the
-/// thing waited for came.
+/// What the judge looks at: the browser's held process, its identity (for its run state and CPU time) and whether the thing
+/// waited for came.
 struct Probe<'a, T> {
+    process: &'a Mutex<Supervised>,
     id: Option<ProcessId>,
     slot: &'a RefCell<Option<Result<T>>>,
 }
 
 impl<T> StartProbe for Probe<'_, T> {
     fn liveness(&mut self) -> Liveness {
-        match self.id.map(ProcessId::presence) {
-            Some(Presence::Gone) => Liveness::Exited(ExitInfo {
+        if self.process.lock().unwrap_or_else(|e| e.into_inner()).is_running() {
+            Liveness::Running
+        } else {
+            // The browser's output goes nowhere (a GUI program), so there is no tail to show.
+            Liveness::Exited(ExitInfo {
                 status: None,
                 stderr_tail: None,
-            }),
-            _ => Liveness::Running,
+            })
         }
     }
     fn pid(&self) -> Option<ProcessId> {
