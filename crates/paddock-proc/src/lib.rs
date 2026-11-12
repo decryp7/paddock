@@ -49,6 +49,7 @@ mod supervised;
 mod sys;
 mod tree;
 mod usage;
+mod waited;
 mod warm;
 mod watch;
 
@@ -86,10 +87,7 @@ pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,
 };
-pub use run::{
-    DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, Sink, run_bounded, run_waited,
-    run_waited_cancellable,
-};
+pub use run::{DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, run_bounded};
 pub use runstate::{RunState, run_state};
 pub use stall::{StallAction, StallCause, StallReport};
 pub use start::{
@@ -108,6 +106,7 @@ pub use usage::{
     tree_cpu_time_from, tree_cpu_time_of, tree_memory, tree_memory_from, tree_memory_of,
     tree_memory_with,
 };
+pub use waited::{Sink, run_waited, run_waited_cancellable};
 pub use warm::warm_up;
 pub use watch::{
     MemoryEvent, MemoryListener, MemoryUse, MemoryWatch, REARM_PERCENT, Verdict, WARN_PERCENT,

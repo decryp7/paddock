@@ -217,13 +217,13 @@
    "hash": "6fcff80839eb5410"
   },
   {
-   "file": "crates/paddock-proc/src/run.rs",
-   "line": 597,
+   "file": "crates/paddock-proc/src/waited.rs",
+   "line": 153,
    "hash": "49f26750c4908ef7"
   },
   {
-   "file": "crates/paddock-proc/src/run.rs",
-   "line": 622,
+   "file": "crates/paddock-proc/src/waited.rs",
+   "line": 178,
    "hash": "49f26750c4908ef7"
   },
   {
