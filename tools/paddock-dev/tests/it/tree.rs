@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
+    crate::full_tree(Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap())
 }
 
 fn graph() -> &'static RepoGraph {

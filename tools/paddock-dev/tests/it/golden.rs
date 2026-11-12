@@ -44,7 +44,7 @@ fn only_on_the_linux_leg(what: &str) -> bool {
 }
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap().to_path_buf()
+    crate::full_tree(Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap())
 }
 
 /// What `node scripts/affected.mjs --files <files> --explain` answers for each sample, from one node process: the script's

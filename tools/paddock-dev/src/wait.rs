@@ -589,11 +589,14 @@ pub struct Env<'a> {
     pub process: &'a dyn Fn(u32) -> Option<ProcessId>,
     /// A look at a pid, asked only when `process` finds no identity: only a proven `Gone` is "not running".
     pub look: &'a dyn Fn(u32) -> Presence,
+    /// Where the one-waiter-per-target locks are (`None`: outside a repository, no lock is taken).
+    pub locks: Option<crate::wait_lock::Locks<'a>>,
 }
 
 /// Runs the command against the real machine.
 pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
     let var = |k: &str| std::env::var(k).ok();
+    let presence = |id: ProcessId| id.presence();
     let mut http = CurlHttp;
     let env = Env {
         var: &var,
@@ -602,8 +605,20 @@ pub fn command(args: &WaitArgs) -> Result<Report, CliError> {
         alive: Box::new(ProcessId::presence),
         process: &ProcessId::of,
         look: &paddock_proc::presence,
+        locks: real_locks(&presence),
     };
     run_with(args, env, &mut SystemClock::new(), &mut std::io::stderr())
+}
+
+/// The lock folder under the current repository's git common directory, or `None` outside a repository.
+fn real_locks<'a>(presence: &'a dyn Fn(ProcessId) -> Presence) -> Option<crate::wait_lock::Locks<'a>> {
+    let cwd = std::env::current_dir().ok()?;
+    let repo = crate::worktree::git::Repo::discover(&cwd).ok()?;
+    Some(crate::wait_lock::Locks {
+        dir: crate::wait_lock::dir_for(&repo.common_dir),
+        me: ProcessId::of(std::process::id())?,
+        presence,
+    })
 }
 
 fn usage(m: String) -> CliError {
@@ -627,6 +642,43 @@ pub fn run_with(args: &WaitArgs, env: Env<'_>, clock: &mut dyn Clock, log: &mut 
     }
     .max(MIN_INTERVAL);
 
+    // One waiter per target (ER-32): a second one exits at once with the first one's pid.
+    let target = if let Some(n) = &args.plock {
+        format!("plock:{n}")
+    } else if let Some(p) = args.pid {
+        format!("pid:{p}")
+    } else if let Some(f) = &args.file {
+        format!("file:{}", f.display())
+    } else if let Some(r) = args.ci_run {
+        format!("ci-run:{}/{}/{r}", args.server, args.repo)
+    } else {
+        String::new()
+    };
+    let _lock = match env
+        .locks
+        .as_ref()
+        .filter(|_| !target.is_empty())
+        .map(|l| crate::wait_lock::acquire(l, &target))
+    {
+        Some(Err(crate::wait_lock::LockError::Held { pid })) => {
+            let who = if pid == 0 {
+                "another waiter".to_string()
+            } else {
+                format!("pid {pid}")
+            };
+            let msg = format!("::error::wait: {who} already waits for {target}; a second waiter on one event is refused (ER-32).");
+            let _ = writeln!(log, "{msg}");
+            return Err(CliError::failure(msg).with_hint(format!(
+                "Next: let {who} finish (it ends at its own --max), or stop it, then run `./dev wait` again; never start a second waiter."
+            )));
+        }
+        Some(Err(crate::wait_lock::LockError::Io(e))) => {
+            let _ = writeln!(log, "wait: no waiter lock ({e}); waiting without one");
+            None
+        }
+        Some(Ok(l)) => Some(l),
+        None => None,
+    };
     let kind;
     let outcome = if let Some(name) = &args.plock {
         kind = "plock";
@@ -1047,6 +1099,7 @@ mod tests {
             alive: Box::new(|_| Presence::Running),
             process: &process,
             look,
+            locks: None,
         };
         let mut clock = FakeClock::default();
         let mut log = Vec::new();
@@ -1149,5 +1202,65 @@ mod tests {
         // The log names the path as the OS spells it: `/p\pitcrew-lock-activity.log` on Windows.
         let expected = Path::new("/p").join("pitcrew-lock-activity.log");
         assert!(log.contains(&expected.display().to_string()), "{log}");
+    }
+
+    #[test]
+    fn a_second_waiter_on_the_same_target_exits_with_the_first_ones_pid_and_the_lock_is_released_on_exit() {
+        use crate::wait_lock::{Locks, acquire};
+        use paddock_proc::StartTime;
+        let dir = tempfile::tempdir().unwrap();
+        let running = |_: ProcessId| Presence::Running;
+        let other = ProcessId::new(4242, StartTime::from_micros(7));
+        let first = Locks {
+            dir: dir.path().into(),
+            me: other,
+            presence: &running,
+        };
+        let held = acquire(&first, "file:/l").unwrap();
+        let files = FakeFiles::default();
+        files.put("/l", "ready\n");
+        let a = args(&["--file", "/l", "--line", "ready", "--include-past", "--max", "5s"]);
+        let go_with = |locks: Option<Locks<'_>>| {
+            let var = |_: &str| None;
+            let process = |_: u32| None;
+            let mut http = FakeHttp {
+                answers: vec![],
+                urls: vec![],
+            };
+            let env = Env {
+                var: &var,
+                files: &files,
+                http: &mut http,
+                alive: Box::new(|_| Presence::Running),
+                process: &process,
+                look: &|_| Presence::Running,
+                locks,
+            };
+            let mut log = Vec::new();
+            let r = run_with(&a, env, &mut FakeClock::default(), &mut log);
+            (r, String::from_utf8(log).unwrap())
+        };
+        let mine = ProcessId::new(5, StartTime::from_micros(9));
+        let (r, log) = go_with(Some(Locks {
+            dir: dir.path().into(),
+            me: mine,
+            presence: &running,
+        }));
+        let e = r.unwrap_err();
+        assert!(e.message.contains("pid 4242 already waits for file:/l"), "{}", e.message);
+        assert!(e.hint.contains("Next:"), "{}", e.hint);
+        assert_eq!(log.matches("::error::").count(), 1, "{log}");
+        drop(held);
+        let (r, _) = go_with(Some(Locks {
+            dir: dir.path().into(),
+            me: mine,
+            presence: &running,
+        }));
+        assert_eq!(r.unwrap().data["result"], "done");
+        assert_eq!(
+            std::fs::read_dir(dir.path()).unwrap().count(),
+            0,
+            "the lock is released when the wait ends"
+        );
     }
 }

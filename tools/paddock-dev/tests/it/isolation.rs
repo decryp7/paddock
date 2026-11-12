@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn script() -> PathBuf {
+    crate::full_tree(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."));
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/ci/job-isolation.sh")
 }
 

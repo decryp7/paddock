@@ -17,3 +17,12 @@ mod tree;
 mod worktree;
 mod wrapper;
 mod wrapper_download;
+
+/// The repository root, after checking that the tree around it is whole: the tests that read the repository fail with one
+/// clear line in a sparse worktree (`sparse worktree: ...`), not with a missing file deep inside a test.
+pub(crate) fn full_tree(root: &std::path::Path) -> std::path::PathBuf {
+    if let Some(m) = paddock_dev::worktree::area::sparse_problem(root) {
+        panic!("{m}");
+    }
+    root.to_path_buf()
+}

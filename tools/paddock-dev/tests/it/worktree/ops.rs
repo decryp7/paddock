@@ -804,3 +804,161 @@ fn two_adds_with_different_roots_cannot_nest_through_a_reservation() {
     ]);
     assert_eq!(after.code, 4, "{}", after.err);
 }
+
+// ---- --existing, claim by name, full or sparse (2026-11-12 foundation items) ----
+
+fn push_branch(fx: &Fixture, name: &str) {
+    fx.git(&fx.primary, &["branch", name, "origin/main"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", name]);
+}
+
+#[test]
+fn add_existing_adopts_a_local_branch_locked_and_owned_like_a_new_worktree() {
+    let fx = Fixture::new();
+    fx.git(&fx.primary, &["branch", "fix/local", "origin/main"]);
+    let path = fx.path("ex1");
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        "ex1",
+        "--existing",
+        "fix/local",
+        "--owner",
+        "implementer:x",
+        "--agent",
+        "agent-A",
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["branch"], "fix/local");
+    assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "fix/local");
+    let reason = fx.lock_reason(&path).expect("locked");
+    assert!(
+        reason.contains("owner=implementer:x") && reason.contains("branch=fix/local"),
+        "{reason}"
+    );
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+}
+
+#[test]
+fn add_existing_adopts_a_remote_only_branch_with_a_tracking_local_branch() {
+    let fx = Fixture::new();
+    push_branch(&fx, "fix/remote");
+    fx.git(&fx.primary, &["branch", "-D", "fix/remote"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+    assert!(!fx.git_ok(&fx.primary, &["rev-parse", "--verify", "--quiet", "refs/heads/fix/remote"]));
+    let path = fx.path("ex2");
+    let r = fx.dev(&["worktree", "add", "ex2", "--existing", "fix/remote", "--owner", "implementer:x"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]), "fix/remote");
+    assert_eq!(fx.git(&path, &["rev-parse", "--abbrev-ref", "@{u}"]), "origin/fix/remote");
+    assert!(fx.lock_reason(&path).is_some());
+}
+
+#[test]
+fn add_existing_refuses_an_unknown_branch_and_makes_nothing() {
+    let fx = Fixture::new();
+    let r = fx.dev(&["worktree", "add", "ex3", "--existing", "nope", "--owner", "implementer:x"]);
+    assert_eq!(r.code, 2, "{} {}", r.json, r.err);
+    assert!(
+        r.err.contains("no branch `nope`") || r.json.to_string().contains("no branch `nope`"),
+        "{} {}",
+        r.json,
+        r.err
+    );
+    assert!(!fx.path("ex3").exists());
+}
+
+#[test]
+fn claim_takes_a_worktree_name_as_well_as_its_path() {
+    let fx = Fixture::new();
+    let path = fx.add("by-name");
+    let r = fx.dev(&["worktree", "claim", "by-name", "--agent", "agent-A"]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert_eq!(r.json["path"], p(&path));
+    assert_eq!(fx.owner_of(&path).as_deref(), Some("agent-A"));
+    let unknown = fx.dev(&["worktree", "claim", "no-such-name", "--agent", "agent-A"]);
+    assert_ne!(unknown.code, 0, "{} {}", unknown.json, unknown.err);
+}
+
+fn tools_tree(fx: &Fixture) {
+    for d in ["tools", "ui"] {
+        std::fs::create_dir_all(fx.primary.join(d)).unwrap();
+        std::fs::write(fx.primary.join(d).join("f.txt"), d).unwrap();
+    }
+    fx.git(&fx.primary, &["add", "."]);
+    fx.git(&fx.primary, &["commit", "-q", "-m", "dirs"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", "main"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+}
+
+#[test]
+fn add_is_a_full_checkout_by_default_and_for_tools_and_a_sparse_request_naming_tools() {
+    let fx = Fixture::new();
+    tools_tree(&fx);
+    for (name, extra) in [
+        ("f1", vec![]),
+        ("f2", vec!["--for", "tools"]),
+        ("f3", vec!["--sparse", "ui,tools"]),
+        ("f4", vec!["--full"]),
+    ] {
+        let mut a = vec!["worktree", "add", name, "--base", "origin/main", "--owner", "a:b"];
+        a.extend(extra);
+        let r = fx.dev(&a);
+        assert_eq!(r.code, 0, "{name} {} {}", r.json, r.err);
+        assert!(
+            fx.path(name).join("tools/f.txt").exists() && fx.path(name).join("ui/f.txt").exists(),
+            "{name} is full"
+        );
+    }
+}
+
+#[test]
+fn add_for_an_app_or_ui_is_sparse() {
+    let fx = Fixture::new();
+    tools_tree(&fx);
+    std::fs::create_dir_all(fx.primary.join("conformance")).unwrap();
+    std::fs::write(fx.primary.join("conformance/c.txt"), "c").unwrap();
+    fx.git(&fx.primary, &["add", "."]);
+    fx.git(&fx.primary, &["commit", "-q", "-m", "c"]);
+    fx.git(&fx.primary, &["push", "-q", "origin", "main"]);
+    fx.git(&fx.primary, &["fetch", "-q", "origin"]);
+    let r = fx.dev(&[
+        "worktree",
+        "add",
+        "s1",
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--for",
+        "app:dyno",
+    ]);
+    assert_eq!(r.code, 0, "{} {}", r.json, r.err);
+    assert!(fx.path("s1").join("ui/f.txt").exists());
+    assert!(!fx.path("s1").join("conformance/c.txt").exists());
+    let bad = fx.dev(&[
+        "worktree",
+        "add",
+        "s2",
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--for",
+        "nonsense",
+    ]);
+    assert_eq!(bad.code, 2, "{} {}", bad.json, bad.err);
+    let both = fx.dev(&[
+        "worktree",
+        "add",
+        "s3",
+        "--base",
+        "origin/main",
+        "--owner",
+        "a:b",
+        "--full",
+        "--sparse",
+        "ui",
+    ]);
+    assert_ne!(both.code, 0);
+}

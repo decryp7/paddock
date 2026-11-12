@@ -7,12 +7,21 @@
 //! - [`owners`]: the owner map `<git-common-dir>/paddock/owners.json`, which the guard hook (RT-7) reuses;
 //! - [`note`], [`git`], [`procs`]: the lock note and UTC time, git and the repository, and the folders processes are in.
 //!
+//! # Which checkout `add` makes
+//!
+//! The full tree by default: work in `tools/`, `conformance/` or `.gitea/` needs it (the paddock-dev and conformance tests read
+//! the repository around them and fail with "sparse worktree: ..." in a sparse one). `--sparse <folders>` or `--for <area>`
+//! (`crates`, `ui`, `docs`, `scripts` or `app:<name>`) asks for a cone; `--sparse` naming tools, conformance or `.gitea` and
+//! `--for tools|conformance|ci` give the full tree again, `--full` forces it. `--existing <branch>` adopts a local or remote
+//! branch (locked and owned like a new one) instead of a raw `git worktree add`; `claim` takes the worktree's name or path.
+//!
 //! The engine reads no Paddock path: the base ref and the main branch are the constants of [`primary`] and the default of
 //! `--base`, so it can move to a generic tool (RT plan, "Generic code stays generic").
 
 /// The exit code of `check primary` when its only problems are checks that could not run (5 is a found problem).
 pub const EXIT_NOT_MEASURED: i32 = 6;
 
+pub mod area;
 pub mod git;
 pub mod inventory;
 pub mod note;
@@ -68,9 +77,13 @@ pub struct Common {
 pub struct AddArgs {
     /// The folder name (one component); the worktree is made at <root>/<name>.
     name: String,
-    /// The commit-ish to start from (for example origin/main).
-    #[arg(long)]
-    base: String,
+    /// The commit-ish to start from (for example origin/main). Not with --existing.
+    #[arg(long, required_unless_present = "existing", conflicts_with = "existing")]
+    base: Option<String>,
+    /// Adopt an existing branch, local or on a remote (a remote one gets a tracking local branch): the worktree is locked and
+    /// owned like a new one. Use it instead of a raw `git worktree add`, which skips the lock and the owner record.
+    #[arg(long, value_name = "BRANCH", conflicts_with_all = ["branch", "detach"])]
+    existing: Option<String>,
     /// The new branch (default: the name). Not with --detach.
     #[arg(short = 'b', long = "branch", conflicts_with = "detach")]
     branch: Option<String>,
@@ -80,9 +93,16 @@ pub struct AddArgs {
     /// A review copy at the base: no branch.
     #[arg(long)]
     detach: bool,
-    /// Sparse cone folders (comma separated).
+    /// Sparse cone folders (comma separated). Naming tools, conformance or .gitea makes it a full checkout.
     #[arg(long, value_delimiter = ',')]
     sparse: Vec<String>,
+    /// The whole tree (the default; work in tools/, conformance/ or .gitea/ needs it).
+    #[arg(long, conflicts_with = "sparse")]
+    full: bool,
+    /// The area of work, which picks the checkout when neither --full nor --sparse is given: tools, conformance or ci (full);
+    /// crates, ui, docs or scripts (sparse); app:<name> (sparse with that app).
+    #[arg(long = "for", value_name = "AREA")]
+    area: Option<String>,
     /// The folder all agent worktrees go under (default: git config paddock.worktreeRoot, then PADDOCK_WORKTREE_ROOT).
     /// The tool refuses a path inside the primary checkout or another worktree.
     #[arg(long)]
@@ -172,20 +192,27 @@ pub fn command(c: WorktreeCommand) -> Result<Report, CliError> {
     match c {
         WorktreeCommand::Add(a) => {
             let root = ops::resolve_root(&repo, a.root.as_deref(), &env)?;
+            let sparse = match area::choose(a.full, &a.sparse, a.area.as_deref())? {
+                area::Checkout::Full => Vec::new(),
+                area::Checkout::Sparse(v) => v,
+            };
+            let branch = a.existing.as_deref().or(if a.detach {
+                None
+            } else {
+                Some(a.branch.as_deref().unwrap_or(&a.name))
+            });
+            let base = a.base.as_deref().unwrap_or("");
             ops::add(
                 &repo,
                 &caller,
                 &ops::AddRequest {
                     name: &a.name,
                     root: &root,
-                    branch: if a.detach {
-                        None
-                    } else {
-                        Some(a.branch.as_deref().unwrap_or(&a.name))
-                    },
-                    base: &a.base,
+                    branch,
+                    existing: a.existing.is_some(),
+                    base,
                     owner: &a.owner,
-                    sparse: &a.sparse,
+                    sparse: &sparse,
                 },
             )
         }

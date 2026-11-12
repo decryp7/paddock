@@ -44,6 +44,7 @@ pub mod plan_since;
 pub mod release_isolation;
 pub mod slots;
 pub mod wait;
+pub mod wait_lock;
 pub mod worktree;
 
 pub use cli::run;
