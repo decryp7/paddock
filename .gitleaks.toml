@@ -1,0 +1,53 @@
+# gitleaks configuration (scripts/gitleaks.sh, .gitea/actions/gitleaks). The default rules stay on; the allow-list below is
+# only for known test fixtures and false positives, each entry with its reason and scoped to the paths and rules it needs.
+# A new finding is a leak until it is shown to be one of these: add an entry with a reason, never a blanket path.
+title = "paddock"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Redaction and secret-masking tests: the values are invented, same-shape strings that the redactors under test must hide"
+targetRules = ["generic-api-key", "stripe-access-token", "jwt", "gitlab-pat", "private-key"]
+paths = [
+  '''^apps/debrief/app/src-tauri/src/activity/report\.rs$''',
+  '''^apps/debrief/crates/debrief-ai/src/web/privacy\.rs$''',
+  '''^apps/debrief/crates/debrief-collect/tests/it/plan_redact\.rs$''',
+  '''^apps/debrief/crates/debrief-core/src/redact/tests\.rs$''',
+  '''^apps/debrief/crates/debrief-ipc/src/child_log\.rs$''',
+  '''^apps/pitcrew/crates/pitcrew-core/src/redact\.rs$''',
+  '''^crates/paddock-diag/src/secrets\.rs$''',
+  '''^crates/paddock-diag/tests/it/hostile\.rs$''',
+  '''^tools/heavy/tests/it/ported\.rs$''',
+]
+
+[[allowlists]]
+description = "Pitwall dialog fixtures and specs: an invented API key shown in the key dialogs, never accepted by any service"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^apps/pitwall/app/e2e/dialog-fixtures\.ts$''',
+  '''^apps/pitwall/app/src/app/features/apps/app-dialogs\.spec\.ts$''',
+  '''^apps/pitwall/app/src/app/shell/dialogs\.spec\.ts$''',
+]
+
+[[allowlists]]
+description = "Cargo.lock package names next to a checksum line, matched by the generic entropy rule; the lock holds no secrets"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/(fuzz/)?Cargo\.lock$''']
+
+[[allowlists]]
+description = "Names that contain the word key or token but are keybindings, storage keys or key ids, not secrets"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^apps/debrief/app/src/app/diagnostics/diagnostics\.ids\.ts$''',
+  '''^apps/debrief/app/src/app/palette/palette-recent\.ts$''',
+  '''^ui/projects/paddock-ui/workbench/palette/src/recent\.ts$''',
+  '''^apps/debrief/crates/debrief-plugin-package/src/manifest\.rs$''',
+  '''^crates/paddock-plugin-package/src/manifest\.rs$''',
+  '''^apps/debrief/crates/chromium-driver/src/fake\.rs$''',
+]
+
+[[allowlists]]
+description = "Dyno ADR 0033: prose about a network logon token (no secret value)"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/dyno/docs/adr/0033-no-test-fake-in-a-release-build\.md$''']

@@ -1,0 +1,31 @@
+name: gitleaks
+description: "Secret scan of the checked-out tree with the pinned gitleaks (checksum-verified release, .gitleaks.toml at the repository root). Fails with one ::error:: per finding (file:line and rule, never the value)."
+runs:
+  using: composite
+  steps:
+    - name: gitleaks dir
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd "${GITHUB_WORKSPACE:-.}"
+        # The pin: bump the version with the SHA-256 values of its release archives (gitleaks_<version>_checksums.txt).
+        VERSION=8.30.1
+        case "$RUNNER_OS-$(uname -m)" in
+          Linux-x86_64)  A=linux_x64;    SUM=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb ;;
+          macOS-arm64)   A=darwin_arm64; SUM=b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5 ;;
+          *) echo "::error::no pinned gitleaks for $RUNNER_OS $(uname -m) (.gitea/actions/gitleaks)"; exit 1 ;;
+        esac
+        dl=$(mktemp -d)
+        trap 'rm -rf "$dl"' EXIT
+        F="gitleaks_${VERSION}_${A}.tar.gz"
+        curl -fsSL --retry 3 -o "$dl/$F" "https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/$F"
+        if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$dl/$F" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$dl/$F" | cut -d' ' -f1); fi
+        [ "$GOT" = "$SUM" ] || { echo "::error::gitleaks $VERSION checksum mismatch for $F (got $GOT); fix the pin in .gitea/actions/gitleaks/action.yml"; exit 1; }
+        tar -xzf "$dl/$F" -C "$dl" gitleaks
+        echo "gitleaks $("$dl/gitleaks" version) scanning $(pwd)"
+        # --redact=100 keeps every secret value out of the log; the report only names file, line and rule.
+        if ! "$dl/gitleaks" dir . --config .gitleaks.toml --redact=100 --no-banner --exit-code 1 -f json -r "$dl/report.json"; then
+          node -e 'for (const f of JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) console.log(`::error file=${f.File},line=${f.StartLine}::gitleaks rule ${f.RuleID}: not a known test fixture? remove it and rotate the secret, or add a reasoned entry to .gitleaks.toml`)' "$dl/report.json" || true
+          exit 1
+        fi
+        echo "gitleaks: no leaks"
