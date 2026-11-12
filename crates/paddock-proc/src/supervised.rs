@@ -616,7 +616,8 @@ mod tests {
         let mut r = BufReader::new(s.take_stdout().unwrap());
         let grand = pid_line(&mut r);
         let pid = s.id().unwrap();
-        assert!(s.is_running() && crate::is_alive(grand));
+        // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
+        assert!(s.is_running() && (crate::presence(grand) == crate::Presence::Running));
         assert_eq!(reg.pids(), vec![pid]);
         drop(s);
         // The pipe is shared with the grandchild: EOF means every holder is dead.
@@ -663,7 +664,11 @@ mod tests {
             assert!(Instant::now() < end, "the child did not exit");
             std::thread::yield_now();
         }
-        assert!(crate::is_alive(grand), "the helper outlived the child");
+        assert!(
+            // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
+            (crate::presence(grand) == crate::Presence::Running),
+            "the helper outlived the child"
+        );
         s.kill();
         let mut rest = Vec::new();
         r.read_to_end(&mut rest).unwrap();

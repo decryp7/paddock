@@ -660,20 +660,24 @@ mod tests {
         cmd.args(["-c", &script]);
         let child = spawn_piped(&mut cmd).unwrap();
         let started = std::time::Instant::now();
-        let err = pipe_in(child, b"x", Duration::from_millis(500)).unwrap_err();
+        // The grandchild's identity is read while it lives (pid and start time): once it is gone a bare pid reads the same as
+        // a failed look, and the wait below would pass on nothing (rule 53).
+        let (err, grandchild) = std::thread::scope(|s| {
+            let run = s.spawn(|| pipe_in(child, b"x", Duration::from_secs(3)).unwrap_err());
+            let grandchild = paddock_testkit::wait_for("the grandchild's identity", || {
+                std::fs::read_to_string(&pidfile)
+                    .ok()
+                    .and_then(|t| t.trim().parse::<u32>().ok())
+                    .and_then(paddock_proc::ProcessId::of)
+            });
+            (run.join().unwrap(), grandchild)
+        });
         assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
         assert!(err.to_string().contains("stuck-here"), "the stderr tail is in the error: {err}");
         // The `sleep` grandchild holds the pipes open for 30 s: the limit must still end the call, and end the grandchild too.
-        assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
-        let pid: u32 = std::fs::read_to_string(&pidfile)
-            .expect("the script wrote its grandchild's pid")
-            .trim()
-            .parse()
-            .unwrap();
-        let gone = paddock_testkit::poll_until_within(Duration::from_secs(10), || {
-            !paddock_proc::ProcessId::of(pid).is_some_and(|p| p.is_alive())
-        });
-        assert!(gone, "the grandchild (pid {pid}) is still running after the limit");
+        assert!(started.elapsed() < Duration::from_secs(10), "took {:?}", started.elapsed());
+        let gone = paddock_testkit::poll_until_within(Duration::from_secs(10), || grandchild.has_ended());
+        assert!(gone, "the grandchild (pid {}) is still running after the limit", grandchild.pid());
     }
 
     #[test]

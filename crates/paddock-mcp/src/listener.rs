@@ -44,11 +44,17 @@ impl Discovery {
         serde_json::from_slice(&hint::read_bounded(path)?).ok()
     }
 
-    /// Whether the process that wrote it still runs (same pid and same start time, and not one that was killed and is only
-    /// waiting to be collected by its parent).
+    /// Whether the process that wrote it may still run: false only when it is gone (the pid is free, was handed on, or the
+    /// process was killed and only waits to be collected by its parent). **Unknown counts as running** (the process table could
+    /// not be read): a client must not tell the user the app is closed on a failed read (rule 53).
     pub fn writer_alive(&self) -> bool {
-        ProcessId::new(self.pid, StartTime::from_micros(self.started_us)).is_alive()
+        writer_runs(ProcessId::new(self.pid, StartTime::from_micros(self.started_us)).presence())
     }
+}
+
+/// The decision of [`Discovery::writer_alive`] over a look at the writer: only `Gone` is stale.
+fn writer_runs(look: paddock_proc::Presence) -> bool {
+    look.may_be_alive()
 }
 
 impl Hint for Discovery {
@@ -231,5 +237,18 @@ impl Listener {
 impl Drop for Listener {
     fn drop(&mut self) {
         self.reconcile(false);
+    }
+}
+
+#[cfg(test)]
+mod writer_tests {
+    use super::writer_runs;
+    use paddock_proc::Presence;
+
+    #[test]
+    fn an_unreadable_process_table_does_not_make_the_writer_gone() {
+        assert!(writer_runs(Presence::Running));
+        assert!(writer_runs(Presence::Unknown), "unknown is not gone");
+        assert!(!writer_runs(Presence::Gone));
     }
 }

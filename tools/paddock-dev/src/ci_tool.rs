@@ -511,22 +511,29 @@ mod tests {
         let file = dir.path().join("out.txt");
         let pid_file = dir.path().join("grandchild.pid");
         let env = parent(&[("PATH", "/usr/bin:/bin")]);
-        let ran = ToolCall::new("sh")
+        let call = ToolCall::new("sh")
             .args([
                 "-c".to_string(),
                 format!("echo started; sleep 60 & echo $! > '{}'; wait", pid_file.display()),
             ])
-            .timeout(Duration::from_millis(500))
-            .output(Output::File(file))
-            .run(&env, &mut Vec::new())
-            .unwrap();
+            .timeout(Duration::from_secs(3))
+            .output(Output::File(file));
+        // The grandchild's identity is read while it lives (pid and start time): after the run it is gone, and a bare pid
+        // of an ended process reads the same as a failed look (rule 53).
+        let (ran, grandchild) = std::thread::scope(|s| {
+            let run = s.spawn(|| call.run(&env, &mut Vec::new()).unwrap());
+            let grandchild = paddock_testkit::wait_for("the grandchild's identity", || {
+                std::fs::read_to_string(&pid_file)
+                    .ok()
+                    .and_then(|t| t.trim().parse::<u32>().ok())
+                    .and_then(paddock_proc::ProcessId::of)
+            });
+            (run.join().unwrap(), grandchild)
+        });
         assert!(!ran.success);
         assert!(ran.how.starts_with("timed out"), "{}", ran.how);
         assert_eq!(ran.stderr, "started\n");
-        let pid: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
-        paddock_testkit::wait_until_within("the grandchild to be gone", Duration::from_secs(10), || {
-            !paddock_proc::is_alive(pid)
-        });
+        paddock_testkit::wait_until_within("the grandchild to be gone", Duration::from_secs(10), || grandchild.has_ended());
         let missing = ToolCall::new("paddock-no-such-program")
             .output(Output::Stream)
             .run(&env, &mut Vec::new());

@@ -720,7 +720,7 @@ mod tests {
             .parse()
             .unwrap();
         assert!(
-            paddock_proc::ProcessId::of(pid).is_none_or(|id| !id.is_alive()),
+            paddock_proc::ProcessId::of(pid).is_none_or(|id| id.has_ended()),
             "the silent browser (pid {pid}) was left running"
         );
         assert_eq!(
@@ -776,11 +776,11 @@ mod tests {
         assert!(e.contains("exit status: 3"), "{e}");
         let pid: u32 = std::fs::read_to_string(base.path().join("helper")).unwrap().trim().parse().unwrap();
         let end = Instant::now() + Duration::from_secs(10);
-        while paddock_proc::ProcessId::of(pid).is_some_and(|id| id.is_alive()) && Instant::now() < end {
+        while paddock_proc::ProcessId::of(pid).is_some_and(|id| !id.has_ended()) && Instant::now() < end {
             std::thread::sleep(Duration::from_millis(50)); // conformance: hang-guard — polling for the helper to be gone, bound 10 s
         }
         let helper = paddock_proc::ProcessId::of(pid);
-        if let Some(id) = helper.filter(|id| id.is_alive()) {
+        if let Some(id) = helper.filter(|id| !id.has_ended()) {
             paddock_proc::kill_tree(id);
             panic!("the helper (pid {pid}) of an exited browser was left running");
         }
