@@ -34,7 +34,7 @@ changes here, every app's copy is updated in the same change.
    container of the user's, and Docker was down for about 15 minutes.
     Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture; a check fails on real-looking values (ER-14; 2026-11-12). Paddock's planned check C110 does this.
 8. **Every lesson goes into [lessons.md](lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
-    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; conformance always runs (ER-41).
+    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; running conformance on every change is planned (ER-41).
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.
     A tag or landing counts only a complete CI run on that exact commit, not a skipped run, a failed-only rerun or an in-place retry; `./dev ci verdict` is the one reader (planned; ER-15; 2026-11-12).
@@ -119,6 +119,7 @@ changes here, every app's copy is updated in the same change.
     an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
     Hooks that judge an agent's text (the recurring guard, hook `.claude/hooks/recurring-guard.sh` planned, advisory) only warn; hooks
     that guard state (the cd guard, safe-remove) still block (user, 2026-11-12).
+    A gate's "passed" is a value only the check can produce, and its tests show both a deleted check and a skipped gate fail (PRINCIPLES.md, robustness; 2026-11-12).
 
 ## Throughput (user, 2026-10-24)
 41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the
@@ -223,7 +224,7 @@ changes here, every app's copy is updated in the same change.
     full green run. The planner is getting a mode for this (`./dev plan --since-run <id>` lists the failed jobs and tests of
     a run, a train-3 item); until it exists, the coordinator builds that list by hand.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
-    (i) Every merge into a train or integration branch runs at merge time the checks that fail only on combined code (workspace-hack, publish dry run, conformance), not first in the full run (ER-8; 2026-11-12).
+    (j) Every merge into a train or integration branch runs at merge time the checks that fail only on combined code (workspace-hack, publish dry run, conformance), not first in the full run (ER-8; 2026-11-12).
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
