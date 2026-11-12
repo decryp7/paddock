@@ -6,7 +6,9 @@
 //!    (b48df1818), or the merge changed a file the branch never touched; answered by `Reverted: <path>: <reason>`;
 //! 2. hunks a parent added since the merge base that the result lacks ([`hunks`]); answered by `Hunks-dropped: <path>: <reason>`;
 //! 3. tests a parent has that the result lacks, three-way ([`lost_tests`]); answered by `Tests-removed: <name>: <reason>`;
-//! 4. files taken whole from one parent although the other changed them too ([`whole_file`]); answered by `Hunks-dropped`.
+//! 4. files taken whole from one parent although the other changed them too ([`whole_file`]); answered by `Hunks-dropped`;
+//! 5. a stale workspace-hack, which no merge message can excuse ([`hakari`]): the fix is `cargo hakari generate` (the check compares the
+//!    generated file only; refreshing the lockfiles is the author's step and is not verified).
 //!
 //! What it covers. 087570da4 restored what merge f94934ec5 dropped: a merge-level drop, found by detectors 2 and 3 (and 1 for
 //! two of its files). 85f326139, 439861fcf and 359be91b4 are commit-level drops (single-parent commits that restored work an
@@ -36,6 +38,7 @@ mod backwards;
 mod diff;
 mod generated;
 mod git;
+mod hakari;
 mod hunks;
 mod lost_tests;
 mod testnames;
@@ -58,6 +61,8 @@ pub enum Kind {
     LostTest,
     /// The result is one parent's version of a file the other parent changed too.
     WholeFile,
+    /// `crates/paddock-workspace-hack` is not what `cargo hakari generate` writes for the result.
+    WorkspaceHack,
 }
 
 impl Kind {
@@ -67,6 +72,7 @@ impl Kind {
             Kind::DroppedHunk => "dropped-hunk",
             Kind::LostTest => "lost-test",
             Kind::WholeFile => "whole-file",
+            Kind::WorkspaceHack => "workspace-hack",
         }
     }
 }
@@ -199,7 +205,23 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         out.extend(hunks::check(&cx, i, base, &diffs[i])?);
         out.extend(lost_tests::check(&cx, i, base, &diffs[i])?);
     }
+    // Not a merge's own loss but a result that no longer generates: every merged branch can be right and the sum stale.
+    match hakari::check(git, tree, &result_blobs, &hakari_program()) {
+        Ok(found) => out.extend(found),
+        // Detectors 1-4's findings stay; what hakari could not say is reported beside them, never as a pass (ADR 0089).
+        Err(why) => out.push(Finding {
+            kind: Kind::WorkspaceHack,
+            subject: "cargo hakari generate --diff".into(),
+            detail: format!("NOT MEASURED: {why}"),
+            excerpts: Vec::new(),
+        }),
+    }
     Ok(out)
+}
+
+/// The program that runs `hakari`: `cargo`, or `PADDOCK_MERGE_CHECK_CARGO` (tests point it at a stand-in).
+fn hakari_program() -> String {
+    std::env::var("PADDOCK_MERGE_CHECK_CARGO").unwrap_or_else(|_| "cargo".into())
 }
 
 fn diff_of(git: &Git, from: &str, to: &str) -> Result<Vec<diff::FileDiff>, String> {
@@ -287,9 +309,18 @@ fn findings_text(label: &str, found: &[Finding]) -> String {
         lines.push(format!("  [{}] {}: {}", f.kind.name(), f.subject, f.detail));
         lines.extend(f.excerpts.iter().map(|e| format!("      {e}")));
     }
+    let hack = found.iter().filter(|f| f.kind == Kind::WorkspaceHack).count();
+    let mut next = Vec::new();
+    if hack < found.len() {
+        next.push("restore what was dropped, or if it was meant, say so in the merge message with `Hunks-dropped: <path>: <reason>`, `Reverted: <path>: <reason>` or `Tests-removed: <name>: <reason>`".to_string());
+    }
+    if hack > 0 {
+        next.push("run `cargo hakari generate` in crates/ and refresh the lockfiles that list a changed crate (a merge message cannot excuse a stale workspace-hack; if cargo-hakari could not run, install it with `cargo install --locked cargo-hakari` and run `cargo hakari generate --diff` yourself)".to_string());
+    }
     lines.push(format!(
-        "::error::{label}: {} finding(s). Next step: restore what was dropped, or if it was meant, say so in the merge message with `Hunks-dropped: <path>: <reason>`, `Reverted: <path>: <reason>` or `Tests-removed: <name>: <reason>`, then run it again.",
-        found.len()
+        "::error::{label}: {} finding(s). Next step: {}, then run it again.",
+        found.len(),
+        next.join("; and ")
     ));
     lines.join("\n")
 }
