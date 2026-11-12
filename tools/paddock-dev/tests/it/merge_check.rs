@@ -1120,10 +1120,10 @@ mod hakari {
     use std::os::unix::fs::PermissionsExt;
 
     const FAKE_CARGO: &str = r#"#!/bin/sh
-# argv: hakari generate --diff, run in <tree>/crates
+# argv: hakari generate --diff, run in <tree>/crates. Like cargo-hakari 0.9.39, it prints the diff on STANDARD ERROR.
 [ "$1 $2 $3" = "hakari generate --diff" ] || { echo "unexpected: $*" >&2; exit 2; }
 if grep -q base64 x/Cargo.toml && ! grep -q base64 paddock-workspace-hack/Cargo.toml; then
-  printf 'info: \n--- original\n+++ modified\n+base64 = { version = "0.23" }\n'
+  printf 'info: \n--- original\n+++ modified\n+base64 = { version = "0.23" }\n' >&2
   exit 1
 fi
 exit 0
@@ -1161,6 +1161,55 @@ exit 0
         r.commit("feat: x needs base64");
         r.git(&["merge", "-q", "--no-ff", "-m", "Merge other", "other"]);
         r
+    }
+
+    /// The merge of `evil_file_merge` (main's five added lines are dropped from `f.txt`), in a tree that also has a stale
+    /// workspace-hack or, with `broken`, whose hakari cannot run.
+    fn dropped_hunk_and_hakari() -> Repo {
+        let r = Repo::new();
+        let base = lines(30, "a");
+        r.write("crates/.config/hakari.toml", "hakari-package = \"paddock-workspace-hack\"\n");
+        r.write("crates/paddock-workspace-hack/Cargo.toml", "[dependencies]\nserde = \"1\"\n");
+        r.write("crates/x/Cargo.toml", "[dependencies]\nserde = \"1\"\n");
+        r.write("f.txt", &base);
+        r.commit("initial");
+        r.git(&["checkout", "-q", "-b", "feature"]);
+        r.write("f.txt", &format!("{base}branch tail one\n"));
+        r.commit("feat: branch edit");
+        r.git(&["checkout", "-q", "main"]);
+        r.write("f.txt", &format!("{}{base}", five()));
+        r.write("crates/x/Cargo.toml", "[dependencies]\nserde = \"1\"\nbase64 = \"0.23\"\n");
+        r.commit("fix: main adds");
+        r.git(&["merge", "-q", "-s", "ours", "--no-commit", "feature"]);
+        r.write("f.txt", &format!("{base}branch tail one\n"));
+        r.git(&["add", "--all"]);
+        r.git(&["commit", "-q", "-m", "Merge feature"]);
+        r
+    }
+
+    #[test]
+    fn a_stale_hack_is_reported_beside_the_other_detectors_findings() {
+        let (code, out) = check(&dropped_hunk_and_hakari());
+        assert_eq!(code, 5, "{out}");
+        assert!(out.contains("[dropped-hunk] f.txt"), "{out}");
+        assert!(out.contains("[workspace-hack] crates/paddock-workspace-hack/Cargo.toml"), "{out}");
+    }
+
+    #[test]
+    fn a_hakari_that_cannot_run_keeps_the_other_detectors_findings_and_says_it_was_not_measured() {
+        let r = dropped_hunk_and_hakari();
+        let out = r
+            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
+            .args(["merge", "check", "--root"])
+            .arg(r.path())
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_eq!(out.status.code(), Some(5), "{text}");
+        assert!(text.contains("[dropped-hunk] f.txt"), "the detectors' finding is not lost: {text}");
+        assert!(text.contains("NOT MEASURED") && text.contains("cargo hakari"), "{text}");
     }
 
     fn check(r: &Repo) -> (i32, String) {
@@ -1219,5 +1268,6 @@ exit 0
         let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert_ne!(out.status.code(), Some(0), "{text}");
         assert!(text.contains("NOT MEASURED"), "{text}");
+        assert_eq!(text.lines().filter(|l| l.contains("::error::")).count(), 1, "{text}");
     }
 }

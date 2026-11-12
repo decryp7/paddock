@@ -7,7 +7,8 @@
 //! 2. hunks a parent added since the merge base that the result lacks ([`hunks`]); answered by `Hunks-dropped: <path>: <reason>`;
 //! 3. tests a parent has that the result lacks, three-way ([`lost_tests`]); answered by `Tests-removed: <name>: <reason>`;
 //! 4. files taken whole from one parent although the other changed them too ([`whole_file`]); answered by `Hunks-dropped`;
-//! 5. a stale workspace-hack, which no merge message can excuse ([`hakari`]): `cargo hakari generate` and the lockfiles.
+//! 5. a stale workspace-hack, which no merge message can excuse ([`hakari`]): the fix is `cargo hakari generate` (the check compares the
+//!    generated file only; refreshing the lockfiles is the author's step and is not verified).
 //!
 //! What it covers. 087570da4 restored what merge f94934ec5 dropped: a merge-level drop, found by detectors 2 and 3 (and 1 for
 //! two of its files). 85f326139, 439861fcf and 359be91b4 are commit-level drops (single-parent commits that restored work an
@@ -205,7 +206,16 @@ fn run(git: &Git, merge: &Merge) -> Result<Vec<Finding>, String> {
         out.extend(lost_tests::check(&cx, i, base, &diffs[i])?);
     }
     // Not a merge's own loss but a result that no longer generates: every merged branch can be right and the sum stale.
-    out.extend(hakari::check(git, tree, &result_blobs, &hakari_program())?);
+    match hakari::check(git, tree, &result_blobs, &hakari_program()) {
+        Ok(found) => out.extend(found),
+        // Detectors 1-4's findings stay; what hakari could not say is reported beside them, never as a pass (ADR 0089).
+        Err(why) => out.push(Finding {
+            kind: Kind::WorkspaceHack,
+            subject: "cargo hakari generate --diff".into(),
+            detail: format!("NOT MEASURED: {why}"),
+            excerpts: Vec::new(),
+        }),
+    }
     Ok(out)
 }
 
@@ -305,7 +315,7 @@ fn findings_text(label: &str, found: &[Finding]) -> String {
         next.push("restore what was dropped, or if it was meant, say so in the merge message with `Hunks-dropped: <path>: <reason>`, `Reverted: <path>: <reason>` or `Tests-removed: <name>: <reason>`".to_string());
     }
     if hack > 0 {
-        next.push("run `cargo hakari generate` in crates/ and refresh the lockfiles that list a changed crate (a merge message cannot excuse a stale workspace-hack)".to_string());
+        next.push("run `cargo hakari generate` in crates/ and refresh the lockfiles that list a changed crate (a merge message cannot excuse a stale workspace-hack; if cargo-hakari could not run, install it with `cargo install --locked cargo-hakari` and run `cargo hakari generate --diff` yourself)".to_string());
     }
     lines.push(format!(
         "::error::{label}: {} finding(s). Next step: {}, then run it again.",

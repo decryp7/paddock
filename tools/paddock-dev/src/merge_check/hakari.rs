@@ -3,6 +3,9 @@
 //! member's dependencies together (trains 2026-11-10-4 and 2026-11-11-5 went red on exactly that). The check writes the
 //! result tree's `crates/` and `.cargo/` to a scratch folder and runs `cargo hakari generate --diff` there: exit 0 is clean,
 //! exit 1 with a diff is drift, anything else (no `cargo-hakari`, no registry) is not measured, never a pass (ADR 0089).
+//! cargo-hakari 0.9.39 prints the diff on STANDARD ERROR (standard output is empty), so both streams are read. The check compares
+//! `paddock-workspace-hack/Cargo.toml` only; refreshing the lockfiles that list a changed crate is the author's next step and is not
+//! verified here.
 //! A tree without `crates/.config/hakari.toml` has nothing to check.
 
 use super::git::Git;
@@ -30,11 +33,11 @@ pub enum Verdict {
 
 /// Reads the exit code and output of `cargo hakari generate --diff` (pure, so every shape is tested).
 pub fn interpret(code: Option<i32>, stdout: &str, stderr: &str) -> Verdict {
+    let both = format!("{stdout}\n{stderr}");
     match code {
         Some(0) => Verdict::Clean,
-        Some(1) if stdout.contains("--- original") => Verdict::Drift(
-            stdout
-                .lines()
+        Some(1) if both.contains("--- original") => Verdict::Drift(
+            both.lines()
                 .filter(|l| !l.trim().is_empty())
                 .take(EXCERPT_LINES)
                 .map(str::to_string)
@@ -59,14 +62,15 @@ pub fn interpret(code: Option<i32>, stdout: &str, stderr: &str) -> Verdict {
 struct Scratch(PathBuf);
 
 impl Scratch {
-    /// Inside the repository's git folder (explicit, on the repository's own disk, never a system temp folder).
-    fn new(git: &Git) -> Result<Scratch, String> {
-        let gitdir = git.text(&["rev-parse", "--absolute-git-dir"])?;
+    /// In the system's temp folder, on purpose: the copy must sit outside every checkout, or cargo and rustup would also read the
+    /// `.cargo/config.toml` and toolchain file of whichever checkout (the main one, another worktree) is above it.
+    #[allow(clippy::disallowed_methods)] // conformance: scratch outside every checkout, see above
+    fn new() -> Result<Scratch, String> {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let dir = Path::new(gitdir.trim()).join(format!("paddock-merge-check-hakari-{}-{nanos}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("paddock-merge-check-hakari-{}-{nanos}", std::process::id()));
         std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make the scratch folder {}: {e}", dir.display()))?;
         Ok(Scratch(dir))
     }
@@ -83,13 +87,19 @@ pub fn check(git: &Git, tree: &str, files: &HashMap<String, String>, cargo: &str
     if !files.contains_key(CONFIG) {
         return Ok(Vec::new());
     }
-    let scratch = Scratch::new(git)?;
+    let scratch = Scratch::new()?;
     let tarball = scratch.0.join("tree.tar");
     let tarball_arg = tarball.to_string_lossy().into_owned();
     // `.cargo/` holds the registry the lockfile names; a tree without it (a small fixture) is archived without.
     let mut args = vec!["archive", "--format=tar", "-o", &tarball_arg, tree, "crates"];
     if files.keys().any(|p| p.starts_with(".cargo/")) {
         args.push(".cargo");
+    }
+    // The tree's own toolchain pin, when it has one (so the result is judged with the tree's rustc, not the machine's default).
+    for pin in ["rust-toolchain", "rust-toolchain.toml"] {
+        if files.contains_key(pin) {
+            args.push(pin);
+        }
     }
     git.bytes(&args)?;
     extract(&tarball, &scratch.0)?;
@@ -132,11 +142,22 @@ mod tests {
         assert_eq!(interpret(Some(0), "", ""), Verdict::Clean);
     }
 
+    /// What cargo-hakari 0.9.39 printed for a workspace-hack that lacked `base64` (captured from the real tool, 2026-11-12): the
+    /// diff is on STANDARD ERROR, standard output is empty.
+    const REAL_DRIFT_STDERR: &str = include_str!("../../tests/fixtures/merge-check/hakari/drift.stderr.txt");
+
     #[test]
-    fn exit_one_with_a_diff_is_drift_and_keeps_the_diff() {
-        let diff = "info: \n--- original\n+++ modified\n@@ -1,5 +1,6 @@\n+base64 = { version = \"0.23\" }\n";
-        match interpret(Some(1), diff, "") {
+    fn the_real_tools_diff_on_standard_error_is_drift_and_keeps_the_diff() {
+        match interpret(Some(1), "", REAL_DRIFT_STDERR) {
             Verdict::Drift(lines) => assert!(lines.iter().any(|l| l.starts_with("+base64")), "{lines:?}"),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_diff_on_standard_output_is_drift_too() {
+        match interpret(Some(1), "info: \n--- original\n+++ modified\n+x = 1\n", "") {
+            Verdict::Drift(lines) => assert!(lines.iter().any(|l| l == "+x = 1"), "{lines:?}"),
             other => panic!("{other:?}"),
         }
     }
