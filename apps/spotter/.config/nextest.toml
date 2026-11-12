@@ -4,9 +4,18 @@
 # around a shared outside resource (a real browser, a port) is a test group here, not only a static Mutex.
 
 [profile.default]
+# Bounded: a test still running after two minutes (four periods) is stopped and fails (ER-21, conformance C114); a test
+# that needs longer is a named override with a `# waiver:` line, not a longer default.
 # One test per core but one (rules.md 13), so a full run leaves the machine usable.
 test-threads = -1
-slow-timeout = { period = "30s", terminate-after = 10 }
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# waiver: the real-browser tests wait up to the 120 s START_GUARD of tests/real_browser.rs, then the page (the ci profile's waiver
+# below says why); two minutes in total would stop them first.
+[[profile.default.overrides]]
+filter = "package(spotter-render) & binary(real_browser)"
+slow-timeout = { period = "30s", terminate-after = 8 }
+
 
 # CI: every failure reported, one retry that still fails the run (ER-12: flaky-result = "fail"), a JUnit report.
 [profile.ci]

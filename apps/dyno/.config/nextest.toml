@@ -4,9 +4,17 @@
 # around a shared outside resource (a real browser, a port) is a test group here, not only a static Mutex.
 
 [profile.default]
+# Bounded: a test still running after two minutes (four periods) is stopped and fails (ER-21, conformance C114); a test
+# that needs longer is a named override with a `# waiver:` line, not a longer default.
 # One test per core but one (rules.md 13), so a full run leaves the machine usable.
 test-threads = -1
-slow-timeout = { period = "30s", terminate-after = 10 }
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# waiver: the real agent's start tests wait for the process (see the ci profile's waiver below: up to the 120 s READY_GUARD); two
+# minutes in total would stop them first.
+[[profile.default.overrides]]
+filter = "package(dyno-agent) & binary(term) & (test(/^term_stops_/) | test(/^the_agents_start/) | test(/^a_refused_second/) | test(/^an_agent_on_a_data/))"
+slow-timeout = { period = "30s", terminate-after = 6 }
 
 # CI: every failure reported, one retry that still fails the run (ER-12: flaky-result = "fail"), a JUnit report.
 [profile.ci]
@@ -30,3 +38,16 @@ path = "junit.xml"
 [[profile.ci.overrides]]
 filter = "package(dyno-agent) & binary(term) & (test(/^term_stops_/) | test(/^the_agents_start/) | test(/^a_refused_second/) | test(/^an_agent_on_a_data/))"
 slow-timeout = { period = "30s", terminate-after = 6 }
+
+# Benchmarks (`cargo nextest run --profile bench ...`, the commands of docs/performance.md): ignored tests that measure a large
+# corpus (idle windows of 130 s, a 600 s catalogue wait, minutes of import) and would be stopped by the default profile's two-minute
+# bound. Bounded all the same: a bench that waits on something that never comes is stopped after 30 minutes (60 s x 30). The
+# profile's own override is matched before the default profile's, so this limit wins over their shorter ones.
+[profile.bench]
+slow-timeout = { period = "60s", terminate-after = 30 }
+
+# waiver: the benchmarks of docs/performance.md, 30 minutes at most (the profile above says why); all() so that this limit, matched
+# first, replaces the shorter ones of the default profile's overrides.
+[[profile.bench.overrides]]
+filter = "all()"
+slow-timeout = { period = "60s", terminate-after = 30 }

@@ -2,8 +2,10 @@
 # profile as crates/.config/nextest.toml (one retry that still fails the run (ER-12); a time budget; a JUnit report).
 
 [profile.default]
+# Bounded: a test still running after two minutes (four periods) is stopped and fails (ER-21, conformance C114); a test
+# that needs longer is a named override with a `# waiver:` line, not a longer default.
 test-threads = -1
-slow-timeout = { period = "30s", terminate-after = 10 }
+slow-timeout = { period = "30s", terminate-after = 4 }
 
 [profile.ci]
 fail-fast = false
