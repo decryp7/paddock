@@ -99,9 +99,11 @@ fn only_own_children(rest: &[Word]) -> bool {
 }
 
 /// A `kill` whose targets include a negative pid: after `--` any `-N`; before it a second `-N` (the first is the signal), or a
-/// `-$var` after the signal. `kill -9 -1`, `kill -- -123`, `kill -TERM -$pgid`.
+/// `-$var` after the signal. `kill -9 -1`, `kill -- -123`, `kill -TERM -$pgid`. `-$$` is the
+/// script's own process group and is allowed.
 fn kills_a_group(args: &[Word]) -> bool {
-    let negative = |t: &str| t.len() > 1 && t.starts_with('-') && (t[1..].chars().all(|c| c.is_ascii_digit()) || t.starts_with("-$"));
+    let negative =
+        |t: &str| t != "-$$" && t.len() > 1 && t.starts_with('-') && (t[1..].chars().all(|c| c.is_ascii_digit()) || t.starts_with("-$"));
     let mut signal_seen = false;
     let mut targets = false;
     let mut k = 0;
@@ -292,6 +294,8 @@ mod tests {
             "kill -s KILL -1",
             "kill -9 1234 -1",
             "kill -9 -$pgid",
+            "kill -- -$$ -1",
+            "kill -TERM -$$ -$other",
             "sudo kill -9 -1",
             "bash -c 'kill -- -1'",
             "taskkill /F /FI \"IMAGENAME eq node.exe\"",
@@ -331,6 +335,9 @@ mod tests {
             "kill $!",
             "kill $(cat my.pid)",
             "pkill -P $$",
+            "kill -- -$$",
+            "kill -TERM -$$",
+            "kill -9 -- -$$",
             "pkill -P$$",
             "pkill -P $BASHPID",
             "pkill -9 -P $BASHPID",
