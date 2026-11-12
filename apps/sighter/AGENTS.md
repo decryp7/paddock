@@ -4,7 +4,7 @@ Sighter finds UI elements by sight: a recorder, a labelling and training studio,
 query. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI. **No product code exists
 yet**; the design is `docs/proposal.md` (open questions pending). Read it and `docs/suite-lessons.md` before building.
 
-<!-- paddock:block rules rev=f499be02 -->
+<!-- paddock:block rules rev=35e04459 -->
 ## Paddock rules (binding)
 
 The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/rules.md) (the source; update there first). Where an older rule in this file disagrees, these win.
@@ -209,12 +209,13 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     `node conformance/bin/paddock-conformance.mjs commit-lint --range origin/main..<branch>`. A push to main lints only what main
     itself gets (`--first-parent`), so this is where a branch's own subjects and trailers are checked; C23 is the backstop.
     (h) Local checks and CI overlap; a local failure cancels the run (ER-9). Before dispatch, run the fast static gates locally,
-    in parallel and bounded by the machine's load: `cargo fmt --check`, clippy on the host and, for Windows, `cargo xwin clippy
-    --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings` (an import or helper used only by a unix-gated
-    test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in tests"), lint and type-check of the touched
-    files, conformance, commit-lint (rule 50g), lockfiles with `--locked`. When `crates/` or `.cargo/` changed, also CI's
-    workspace Clippy on Linux, `bash tools/linux-clippy-touched.sh` (the CI image, `--cpus 4 --memory 12g`; without Docker it
-    exits 3, "NOT MEASURED", and an agent never starts Docker, ER-14). Then dispatch with `./dev`
+    in parallel and bounded by the machine's load: `./dev check --pre-push` (the pre-push hook runs it): `cargo fmt --check`,
+    clippy on the host and, for Windows, `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings`
+    (an import or helper used only by a unix-gated test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in
+    tests"), conformance with ci.yml's own list, commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
+    changed, also CI's workspace Clippy on Linux in the CI image (`--cpus 4 --memory 12g`). A gate that cannot run (no Docker, no
+    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). Lint and type-check of the touched TS
+    files stay by hand until WP-3. Then dispatch with `./dev`
     and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
     `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
     (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
