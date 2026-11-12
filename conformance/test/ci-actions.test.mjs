@@ -11,6 +11,7 @@ import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
+import { conjuncts, expr, job as workflowJob, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
@@ -1113,17 +1114,20 @@ test('Debrief runs its installers and real-app smoke tests only on main, debrief
   for (const job of ['tauri-smoke', 'bundle']) {
     // Full runs only; a since_run rerun of failures runs it only when it is one of the jobs that rerun (plan_since.rs).
     const gate = `contains(fromJSON(needs.plan.outputs.rerun_jobs || '["${job}"]'), '${job}')`;
-    assert.ok(jobBlock(yml, job).includes(`\n    if: needs.plan.outputs.run == 'true' && needs.plan.outputs.full == 'true' && ${gate}\n`), `${job}: full runs only`);
+    const parts = conjuncts(workflowJob(loadWorkflow('debrief.yml'), job).if);
+    for (const want of ["needs.plan.outputs.run == 'true'", "needs.plan.outputs.full == 'true'", gate]) assert.ok(parts.includes(want), `${job}: full runs only (${want}); its if has: ${parts.join(' && ')}`);
   }
   // The release needs them, and a tag run is always a full run.
-  assert.match(jobBlock(yml, 'release'), /needs: \[[^\]]*\bbundle\b[^\]]*\btauri-smoke\b/);
+  assert.ok(['bundle', 'tauri-smoke'].every((n) => needsOf(workflowJob(loadWorkflow('debrief.yml'), 'release')).includes(n)));
 });
 
 test('Debrief\'s end-to-end tests run sharded on the image\'s browsers with kept caches, WebKit only on full runs', () => {
   const block = jobBlock(debriefYml(), 'e2e');
   // The shards come from the plan job: every shard, or the failed ones in a since_run rerun of failures.
-  assert.match(block, /include: \$\{\{ fromJSON\(needs\.plan\.outputs\.e2e_shards\) \}\}/);
-  const shards = JSON.parse(jobBlock(debriefYml(), 'plan').match(/e2e_shards=(\[[^\]]*\])/)?.[1] ?? '[]').map((l) => l.shard);
+  const wf = loadWorkflow('debrief.yml');
+  assert.equal(expr(workflowJob(wf, 'e2e').strategy.matrix.include), 'fromJSON(needs.plan.outputs.e2e_shards)');
+  const planRun = stepsOf(workflowJob(wf, 'plan')).map((st) => st.run ?? '').join('\n');
+  const shards = JSON.parse(planRun.match(/e2e_shards=(\[[^\]]*\])/)?.[1] ?? '[]').map((l) => l.shard);
   assert.ok(shards.length >= 2, 'sharded');
   assert.deepEqual(shards, shards.map((_, i) => i + 1));
   assert.match(block, new RegExp(`--shard=\\$\\{\\{ matrix\\.shard \\}\\}/${shards.length} `), 'every shard runs its part');
