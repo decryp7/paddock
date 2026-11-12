@@ -274,6 +274,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^icons/"), &["icons"]),
         (re(r"^ci-image/"), &["ci-image", "ui"]),
         (re(r"^(renovate/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)"), &["tools"]),
+        (re(r"^\.gitleaks\.toml$"), &["conformance"]),
         (re(r"^wiki-lint\.json$"), &["tools"]),
     ]
 });

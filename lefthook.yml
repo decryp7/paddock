@@ -51,7 +51,7 @@ pre-commit:
     pitwall-eslint:
       root: "apps/pitwall/app/"
       glob: "*.{ts,html}"
-      run: npx eslint --max-warnings 0 {staged_files}
+      run: npx eslint --max-warnings 0 --no-warn-ignored {staged_files}
     spotter-rustfmt:
       root: "apps/spotter/"
       glob: "*.rs"

@@ -6,7 +6,7 @@ export const FIXTURES: Record<string, unknown[]> = {
     { heading: 'Delete 3 unused models?', message: 'Qwen3.5 9B, Gemma 4 12B Instruct with a rather long name, Phi 5 mini — 18.4 GB in total. You can download them again later. '.repeat(3), confirm: { label: 'Delete models', destructive: true } },
   ],
   'pw.mcp-key': [{ app: 'Dyno' }],
-  'pw.key-secret': [{ appName: 'Raycast', secret: 'pw_Xk7fQ2mR9vLc4Tn8bJ1wHs6pYd3Ge0Ua5Zi2Ko9Nq4Fr', prefix: 'pw_Xk7fQ2mR' }, { appName: 'A rather long application name for testing', secret: 'pw_Xk7fQ2mR9vLc4Tn8bJ1wHs6pYd3Ge0Ua5Zi2Ko9Nq4Fr', prefix: 'pw_Xk7fQ2mR' }],
+  'pw.key-secret': [{ appName: 'Raycast', secret: 'pw_EXAMPLE_NOT_A_REAL_KEY_000000000000000000000', prefix: 'pw_EXAMPLE_' }, { appName: 'A rather long application name for testing', secret: 'pw_EXAMPLE_NOT_A_REAL_KEY_000000000000000000000', prefix: 'pw_EXAMPLE_' }],
   'pw.service-consent': [{ platform: 'macos' }, { platform: 'windows' }, { platform: 'linux' }],
 };
 

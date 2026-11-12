@@ -14,7 +14,7 @@ const ALL = DIALOGS as readonly DialogDef[];
 /** What each dialog is opened with (the e2e fixtures use the same shapes). */
 export const INPUTS = {
   'pd.confirm': { heading: 'Delete Qwen3.5 9B?', message: 'qwen3.5-9b-q4_k_m.gguf (5.6 GB) is removed from disk. You can download it again later.', confirm: { label: 'Delete model', destructive: true } },
-  'pw.key-secret': { appName: 'Raycast', secret: 'pw_live_8f3a9c2e7b1d4f6a0c5e9b2d7f1a3c8e', prefix: 'pw_live_8f3a' },
+  'pw.key-secret': { appName: 'Raycast', secret: 'pw_live_EXAMPLE_NOT_A_REAL_KEY_000000000', prefix: 'pw_live_EXAM' },
   'pw.service-consent': { platform: 'macos' },
   'pw.mcp-key': { app: 'Dyno' },
 };

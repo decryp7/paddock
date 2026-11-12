@@ -42,9 +42,9 @@ describe('CreateAppDialog (pw.create-app)', () => {
 
 describe('KeySecretDialog (pw.key-secret)', () => {
   /** The shape of a real key: `pw_` and 43 characters (`pitwall-core` keys.rs). */
-  const SECRET = 'pw_Xk7fQ2mR9vLc4Tn8bJ1wHs6pYd3Ge0Ua5Zi2Ko9Nq4Fr';
+  const SECRET = 'pw_EXAMPLE_NOT_A_REAL_KEY_000000000000000000000';
   const open = async () => {
-    const d = await renderFramed(KeySecretDialog, { id: KEY_SECRET_DIALOG_ID, kind: 'decision', modality: 'modal', requiredChoice: true, inputs: { appName: 'Raycast', secret: SECRET, prefix: 'pw_live_8f3a' } });
+    const d = await renderFramed(KeySecretDialog, { id: KEY_SECRET_DIALOG_ID, kind: 'decision', modality: 'modal', requiredChoice: true, inputs: { appName: 'Raycast', secret: SECRET, prefix: 'pw_live_EXAM' } });
     registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
     return d;
   };

@@ -356,6 +356,22 @@ jobs:
       - uses: ./.gitea/actions/sccache-stats
         if: always()
 
+  # Secret scan (.gitea/actions/gitleaks): the tree and the commits this branch adds on top of origin/main. It runs on every change,
+  # whatever the plan reaches, because a secret is a leak wherever it is; .gitleaks.toml lists the known fixtures, one entry each.
+  gitleaks:
+    name: gitleaks (secret scan)
+    needs: [plan]
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["gitleaks"]'), 'gitleaks') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The history scan reads origin/main..HEAD.
+          fetch-depth: 0
+      - uses: ./.gitea/actions/gitleaks
+
   # Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Its own job, planned on its inputs
   # (every Cargo.toml and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's
   # code; scripts/affected.mjs C99_INPUT), because it needs cargo and the registry (`cargo fetch`, `cargo tree` for both Apple

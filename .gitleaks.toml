@@ -1,0 +1,304 @@
+# gitleaks configuration (.gitea/actions/gitleaks, the `gitleaks` job of ci.yml). The default rules stay on. Each entry below allows one known finding: the
+# file AND the exact value (a regex on the secret) AND the rule (condition = "AND"), each with its reason. A new value in the same
+# file, or the same value in another file, is still a leak until it is shown to be a fixture and gets an entry of its own.
+title = "paddock"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "a Cargo.lock package name next to a checksum, matched by the entropy rule; the lock holds no secrets"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/Cargo\.lock$''']
+regexes = [
+  '''^ed25519-compact$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/app/src-tauri/src/activity/report\.rs$''']
+regexes = [
+  '''^abcd1234efgh$''',
+]
+
+[[allowlists]]
+description = "the word key or token in a name (a keybinding, storage key or key id), not a secret"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/app/src/app/diagnostics/diagnostics\.ids\.ts$''']
+regexes = [
+  '''^Mod\+Shift\+F12$''',
+]
+
+[[allowlists]]
+description = "the word key or token in a name (a keybinding, storage key or key id), not a secret"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/app/src/app/palette/palette-recent\.ts$''']
+regexes = [
+  '''^debrief\.palette\.recent\.v1$''',
+]
+
+[[allowlists]]
+description = "the fixed RFC 6455 sample Sec-WebSocket-Key in a fake handshake, not a secret"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/crates/chromium-driver/src/fake\.rs$''']
+regexes = [
+  '''^dGhlIHNhbXBsZSBub25jZQ==$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["jwt"]
+paths = ['''^apps/debrief/crates/debrief-ai/src/web/privacy\.rs$''']
+regexes = [
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.abcdefghijk$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["stripe-access-token"]
+paths = ['''^apps/debrief/crates/debrief-ai/src/web/privacy\.rs$''']
+regexes = [
+  '''^sk_live_abcdef1234567890abcdef$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/crates/debrief-collect/tests/it/plan_redact\.rs$''']
+regexes = [
+  '''^sk-1234567890abcd$''',
+  '''^ABCDEFGH12345$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/crates/debrief-core/src/redact/tests\.rs$''']
+regexes = [
+  '''^abcd1234efgh$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/crates/debrief-ipc/src/child_log\.rs$''']
+regexes = [
+  '''^0123456789abcdef0123456789abcdef0123456789abcdef$''',
+]
+
+[[allowlists]]
+description = "the word key or token in a name (a keybinding, storage key or key id), not a secret"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/crates/debrief-plugin-package/src/manifest\.rs$''']
+regexes = [
+  '''^3f2a9c0d1e7b4a55$''',
+]
+
+[[allowlists]]
+description = "a Cargo.lock package name next to a checksum, matched by the entropy rule; the lock holds no secrets"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/fuzz/Cargo\.lock$''']
+regexes = [
+  '''^ed25519-compact$''',
+]
+
+[[allowlists]]
+description = "ADR prose about a network logon token; no secret value"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/dyno/docs/adr/0033-no-test-fake-in-a-release-build\.md$''']
+regexes = [
+  '''^wp0-collect\.ps1$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/pitcrew/crates/pitcrew-core/src/redact\.rs$''']
+regexes = [
+  '''^0123456789abcdef0123456789abcdef01234567$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/paddock-diag/src/secrets\.rs$''']
+regexes = [
+  '''^abc123def456==$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/paddock-diag/tests/it/hostile\.rs$''']
+regexes = [
+  '''^pw_abc123def456$''',
+  '''^pmk_Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MEFCQ0RFRg$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["private-key"]
+paths = ['''^crates/paddock-diag/tests/it/hostile\.rs$''']
+regexes = [
+  '''^-----BEGIN OPENSSH PRIVATE KEY----- b3BlbnNzaC1rZXktdjEAAAAA",
+        "b3BlbnNzaC1rZXk",
+        Removed,
+    \),
+    \(
+        "Gitea 40-hex token",
+        "0123456789abcdef0123456789abcdef01234567",
+        "0123456789abcdef",
+        Removed,
+    \),
+    \(
+        "runner registration token",
+        "--registration-token Ab12Cd34Ef56",
+        "Ab12Cd34Ef56",
+        Removed,
+    \),
+    \(
+        "x-api-key header",
+        "x-api-key: invented123",
+        "invented123",
+        Removed,
+    \),
+    \(
+        "feed URL apikey param",
+        "https://feeds\.example\.com/f\.xml\?apikey=invented456&sig=zzzsig",
+        "invented456",
+        Removed,
+    \),
+    \(
+        "feed URL sig param",
+        "https://feeds\.example\.com/f\.xml\?apikey=invented456&sig=zzzsig",
+        "zzzsig",
+        Removed,
+    \),
+    \(
+        "feed URL path \(private feed name\)",
+        "https://feeds\.example\.com/private/alice-watchlist\.xml",
+        "alice-watchlist",
+        Left\(NAMES\),
+    \),
+    \("pass= form", "login pass=hunter2", "hunter2", Removed\),
+    \(
+        "client_secret",
+        "client_secret=invented789",
+        "invented789",
+        Removed,
+    \),
+    \(
+        "non-http URL credentials",
+        "postgres://u:hunter3@db/x",
+        "hunter3",
+        Removed,
+    \),
+    \(
+        "second cookie value",
+        "Cookie: sessionid=abc123; csrftoken=def456",
+        "def456",
+        Removed,
+    \),
+    \(
+        "password with a space",
+        "password: correct horse",
+        "horse",
+        Removed,
+    \),
+    \(
+        "imported log line: user",
+        "2026-11-05 ERROR user jdoe failed login",
+        "jdoe",
+        Left\(CONTENT\),
+    \),
+    \(
+        "imported log line: card",
+        "charge card 4111 1111 1111 1111 refused",
+        "4111 1111",
+        Removed,
+    \),
+    \(
+        "imported log line: SSN",
+        "ssn 078-05-1120 rejected",
+        "078-05-1120",
+        Left\(CONTENT\),
+    \),
+    \(
+        "window title",
+        "Window title: Merger plan - Confidential\.docx",
+        "Merger plan",
+        Left\(CONTENT\),
+    \),
+    \(
+        "process command line",
+        "/opt/acme/bin/backup --session-key abcdef012345",
+        "abcdef012345",
+        Removed,
+    \),
+    \(
+        "PEM block over lines",
+        "-----BEGIN RSA PRIVATE KEY-----$''',
+]
+
+[[allowlists]]
+description = "the word key or token in a name (a keybinding, storage key or key id), not a secret"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^crates/paddock-plugin-package/src/manifest\.rs$''']
+regexes = [
+  '''^3f2a9c0d1e7b4a55$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["gitlab-pat"]
+paths = ['''^tools/heavy/tests/it/ported\.rs$''']
+regexes = [
+  '''^glpat-abcdefghijklmnopqrst$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["stripe-access-token"]
+paths = ['''^tools/heavy/tests/it/ported\.rs$''']
+regexes = [
+  '''^sk_live_abcdefghijklmnopqrstuvwx$''',
+]
+
+[[allowlists]]
+description = "the word key or token in a name (a keybinding, storage key or key id), not a secret"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^ui/projects/paddock-ui/workbench/palette/src/recent\.ts$''']
+regexes = [
+  '''^paddock\.palette\.recent\.v1$''',
+]
+
+[[allowlists]]
+description = "an invented value in a redaction test: the code under test must hide it"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''^apps/debrief/crates/debrief-ai/src/web/privacy\.rs$''']
+regexes = [
+  '''^sk_live_abcdef1234567890abcdef$''',
+]

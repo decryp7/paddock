@@ -356,6 +356,7 @@ const OWNERS = [
   [/^icons\//, ['icons']],
   [/^ci-image\//, ['ci-image', 'ui']], // scripts/ci-image.test.mjs checks the image against the lock
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
+  [/^\.gitleaks\.toml$/, ['conformance']], // the secret scan's allow-list: the conformance job runs the scan
   [/^wiki-lint\.json$/, ['tools']], // the settings of tools/wiki, which lints docs/wiki (ER-30)
 ];
 
