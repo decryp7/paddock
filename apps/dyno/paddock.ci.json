@@ -30,6 +30,7 @@
     "node --test scripts/check-release-notes.test.mjs",
     "node --test scripts/check-pe-subsystem.test.mjs",
     "node --test scripts/check-logon-entry.test.mjs",
+    "node --test docs/diagrams/src/*.test.mjs",
     "node scripts/check-capabilities.mjs",
     "node scripts/check-release-notes.mjs",
     "cargo test --locked -p dyno-agent --test helper_wiring"

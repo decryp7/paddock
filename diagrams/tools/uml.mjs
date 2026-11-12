@@ -21,6 +21,7 @@ export function dot(d, id, x, y, kind = 'start') {
 
 /** UML class box: header (with optional stereotype), attribute and operation compartments in monospace. Returns its height. */
 export function cls(d, id, x, y, w, { name, stereotype, attrs = [], ops = [], role = 'accent' }) {
+  (d.classes ??= []).push({ id, name, stereotype, attrs, ops });
   const lh = 16;
   const head = stereotype ? 48 : 32;
   const ha = attrs.length ? attrs.length * lh + 16 : 0;
@@ -59,6 +60,7 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48, sel
   const S = {
     get y() { return y; },
     msg(a, b, label, { reply = false } = {}) {
+      (d.messages ??= []).push(label);
       const xa = px(idx[a]), xb = px(idx[b]);
       // one line unless it is very long; the lifelines break around the text
       const lines = tw(label, 12) > 520 ? wrap(label, 12, 520) : [label];
@@ -72,6 +74,7 @@ export function sequence(d, parts, { top = 144, pw = 160, gap = 40, x0 = 48, sel
     },
     /** A message to itself: the loop and its text go right (left on the last lifeline with `selfLeftOnLast`). */
     self(p, label, maxw) {
+      (d.messages ??= []).push(label);
       const slack = maxw === undefined ? 8 : 24; // a text given its own width gets room so the browser never re-wraps it
       maxw ??= pw + gap - 44;
       const x = px(idx[p]);

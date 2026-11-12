@@ -66,7 +66,7 @@ seq('uml-seq-history-rollup', {
 seq('uml-seq-live-update', {
   title: 'Live update push',
   desc: 'The app subscribes once; the sampler measures at adaptive intervals and the agent pushes each LiveUpdate to every subscriber. A slow subscriber loses frames.',
-  parts: [['ui', 'Angular UI', 'LiveStore', 'ui'], ['sh', 'Tauri shell', 'app/src-tauri', 'accent'], ['sv', 'Agent server', 'dyno-ipc', 'accent'], ['sm', 'Sampler', 'agent thread', 'accent'], ['co', 'dyno-core', 'pure', 'core'], ['os', 'OS adapters', 'dyno-platform', 'accent']],
+  parts: [['ui', 'Angular UI', 'LiveStore', 'ui'], ['sh', 'Tauri shell', 'app/src-tauri', 'accent'], ['sv', 'Agent server', 'paddock-ipc', 'accent'], ['sm', 'Sampler', 'agent thread', 'accent'], ['co', 'dyno-core', 'pure', 'core'], ['os', 'OS adapters', 'dyno-platform', 'accent']],
   script: [
     ['m', 'ui', 'sh', '`subscribe(processes)`'],
     ['m', 'sh', 'sv', '`Request::Subscribe { detail }`'],

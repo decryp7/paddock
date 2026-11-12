@@ -32,7 +32,7 @@ classes('uml-class-serving', {
     ['po', 2, 1, { name: 'Policy', attrs: ['idle_unload, deep_idle: Millis', 'release_context_first: bool', 'pressure_available_percent: u8', 'min_free, max_hot, hot_cap', 'yield_to_foreground: bool'], ops: ['preset(Preset) → Policy', '  // memory::plan_release, plan_load'], role: 'core' }],
     ['pr', 3, 1, { name: 'Priority', stereotype: 'enum', attrs: ['Interactive', 'Background', 'Batch'], role: 'core' }],
     ['ps', 2, 2, { name: 'memory::Preset', stereotype: 'enum', attrs: ['LowMemory', 'Balanced', 'Performance', 'Custom'], role: 'core' }],
-    ['cp', 0, 2, { name: 'cache (policy)', attrs: ['key: SHA-256 of fingerprint + request', 'ttl: 1 h … 90 d | never', 'max_bytes: 256 MiB | 512 MiB', 'affinity: conversation key → slot'], ops: ['eligible(req, app, preset) → bool', 'expired(entry, now) → bool', 'victims(entries, cap) → Vec<Key>'], role: 'core' }],
+    ['cp', 0, 2, { name: 'cache (policy)', attrs: ['key: SHA-256 of fingerprint + request', 'ttl: 1 h … 90 d | never', 'max_bytes: 256 MiB | 512 MiB', 'affinity: conversation key → slot'], ops: ['cacheable(req) → bool', 'bypass(cache_control) → bool', 'expired(stored, used, now) → bool'], role: 'core' }],
     ['cs', 1, 2, { name: 'CacheStore', attrs: ['memory: LRU map', 'disk: cache.sqlite (WAL)', 'writer: thread'], ops: ['get(key, now) → Option<Value>', 'put(key, value, meta)', 'sweep(now, 5000)', 'clear(scope), info()'] }],
   ],
   links: [['al', 'R', 'sv', 'L', 'resolves', imp], ['sv', 'R', 'sc', 'L', '1', comp], ['sc', 'R', 'jb', 'L', '0..*', comp], ['jb', 'B', 'pr', 'T', 'priority', { arrow: 'open' }], ['sv', 'B', 'hm', 'T', '0..*', comp], ['hm', 'L', 'sl', 'R', 'slots', { arrow: 'open' }], ['hm', 'R', 'po', 'L', 'judged by', imp], ['po', 'B', 'ps', 'T', 'from', { arrow: 'open' }], ['cs', 'L', 'cp', 'R', 'decided by', imp]],
@@ -60,7 +60,7 @@ classes('uml-class-access', {
   title: 'Domain model — apps, keys and usage', desc: 'Who may call Pitwall and what it has used: apps own keys and permissions; AppState holds the usage store, which keeps hourly and daily buckets per app.', cols: 4,
   items: [
     ['as', 0, 0, { name: 'AppState', attrs: ['auth: Auth', 'usage: Usage', 'serving: Serving', 'updates: Updates'], ops: ['start_chat(Principal, …) → Run', 'save_usage()  // usage.json'] }],
-    ['au', 1, 0, { name: 'Auth', attrs: ['apps: Vec<AppRecord> (max 64)', 'pending: pairing requests (max 8)', 'admin: String (admin.key)', 'rates: per-app window'], ops: ['authenticate(credential, …)', '  → Principal', 'admit(app, per_min, now)', 'request_, decide_, poll_pairing'] }],
+    ['au', 1, 0, { name: 'Auth', attrs: ['apps: Vec<AppRecord> (max 64)', 'pending: pairing requests (max 8)', 'admin: String (admin.key)', 'rates: per-app window'], ops: ['authenticate(credential, …)', '  → Principal', 'admit(app, per_min, now)', 'request_pairing, decide_pairing', 'poll_pairing'] }],
     ['ar', 2, 0, { name: 'AppRecord', attrs: ['id: AppId, name', 'suite: bool', 'keys: Vec<StoredKey>', 'permissions: AppPermissions', 'last_seen_at'], role: 'core' }],
     ['sk', 3, 0, { name: 'StoredKey', attrs: ['id, shown (pw_3f9a1c…)', 'sha256: hex of the secret', 'created_at, last_used_at'], ops: ['keys::matches(secret, key)'], role: 'core' }],
     ['uh', 0, 1, { name: 'Usage', attrs: ['hours: Buckets (kept 7 days)', 'days: Buckets (kept 90 days)', 'per bucket: Map<app, Counters>'], ops: ['record(&UsageEvent)', 'series(range, now, app?) → UsageSeries', 'budget_use(at, app) → BudgetUse', 'restore(json, now), to_json()'], role: 'core' }],

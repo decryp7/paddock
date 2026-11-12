@@ -52,7 +52,7 @@ const Y = 144;
   d.node('bg', c0, r(2), CW, bgH, 'accent', BG);
   d.node('views', c0, vwY, CW, vwH, 'accent', VW);
   d.node('bproc', ex, r(1), 216, NH, 'process', { name: 'dyno-bench', tech: 'child process', desc: 'CPU, memory and disk tests.' });
-  d.node('plug', ex, r(2), 216, NH, 'plugin', { name: 'Plugins', tech: 'out of process', desc: 'Vendor sensors, over dyno-ipc.' });
+  d.node('plug', ex, r(2), 216, NH, 'plugin', { name: 'Plugins', tech: 'out of process', desc: 'Vendor sensors, over paddock-ipc.' });
   hub(d, 'agent', 'L', 'cli', 'R', { rev: true, label: 'Runs' });
   link(d, 'cli', 'B', 'service', 'T', { label: 'Install' });
   link(d, 'service', 'L', 'sm', 'R', {});
