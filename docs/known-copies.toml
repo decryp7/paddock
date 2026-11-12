@@ -1051,6 +1051,41 @@ adr = "docs/adr/0025-ci-job-isolation.md"
   note = "The shell kit runs one release in parallel with `dev ci isolation` (plan decision D5, `PADDOCK_CI_KIT=shell` as the fallback); `conformance/test/job-isolation.test.mjs` runs the same cases against both (ISOLATION_CMD). The retirement PR after the next app tag whose release run went through the Rust path green deletes the scripts, that switch and this entry; the date follows that point (a paddock tag, as no app tag fits `owner = paddock`)."
 
 # =====================================================================================================================
+# CI kit: setup-rust's compile cache (docs/plans/ci-in-rust.md, step 1)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "ci-setup-rust"
+title = "A CI job's sccache: the pinned install, the backend, the slot's port and folder, a fresh server, RUSTC_WRAPPER"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_setup_rust.rs"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = [".gitea/actions/setup-rust/action.yml"]
+  symbols = ["text:sccache"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The action's shell steps (Install sccache, sccache, Linux dependencies for Tauri) stay for release, rule 54 and tag runs until the release-path lane (plan step 5), which deletes them and the Implementation step after the app tags; tools/paddock-dev/tests/it/setup_rust.rs runs both on the same inputs. A paddock tag, as no app tag fits owner = paddock."
+
+
+[[mechanism]]
+id = "ci-kit-shell"
+title = "A CI kit step in two implementations: build-jobs and job-isolation in Rust, and the shell scripts the release path keeps"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_build_jobs.rs", "tools/paddock-dev/src/ci_isolation/mod.rs"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/build-jobs.sh", "conformance/ci/job-isolation.sh", "conformance/ci/kit.sh"]
+  symbols = ["text:build-jobs", "text:job-isolation"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh picks the implementation by the same rule as setup-rust's Implementation step) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/build_jobs.rs and conformance/test/job-isolation.test.mjs (ISOLATION_CMD) run both on the same inputs."
+
+# =====================================================================================================================
 # CI run readers (RT-8)
 # =====================================================================================================================
 

@@ -23,10 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    env:
+      # A release job (v* tag): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
+      PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       - uses: actions/setup-node@v4
@@ -59,10 +62,13 @@ jobs:
       packages: write
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    env:
+      # A release job (v* tag): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
+      PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (conformance/ci/build-jobs.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       - uses: actions/setup-node@v4

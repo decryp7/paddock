@@ -495,6 +495,23 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// How long one planner run of the history comparison may take: a stall fails the test with the command named, never hangs it.
+const HISTORY_RUN_LIMIT: Duration = Duration::from_secs(180);
+
+/// A child of the history comparison, bounded (the whole tree is ended at the limit): its standard output, or a failed test.
+fn bounded(cmd: Command, what: &str, base: &str, head: &str) -> Vec<u8> {
+    let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(HISTORY_RUN_LIMIT))
+        .unwrap_or_else(|e| panic!("{what} {base}..{head} could not run: {e}"));
+    match out.outcome {
+        paddock_proc::Outcome::Exited(s) if s.success() => out.stdout,
+        paddock_proc::Outcome::Exited(s) => panic!("{what} {base}..{head} failed ({s}): {}", out.stderr_text()),
+        other => panic!(
+            "{what} {base}..{head} did not finish within {} s ({other:?}): a stall, not a plan",
+            HISTORY_RUN_LIMIT.as_secs()
+        ),
+    }
+}
+
 /// Pairs of first-parent commits of this working tree: the range mode on real history, the script as the oracle.
 #[test]
 fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history() {
@@ -521,22 +538,17 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
     let mut narrowed = 0;
     for i in (0..shas.len() - 6).step_by(6) {
         let (head, base) = (&shas[i], &shas[i + 5]);
-        let script = Command::new("node")
-            .current_dir(repo_root())
-            .args(["scripts/affected.mjs", base, head, "--explain"])
-            .output()
-            .unwrap();
-        assert!(script.status.success(), "{}", String::from_utf8_lossy(&script.stderr));
-        let ours = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
-            .current_dir(repo_root())
-            .args(["plan", base, head, "--explain"])
-            .output()
-            .unwrap();
-        assert!(ours.status.success(), "{}", String::from_utf8_lossy(&ours.stderr));
-        let got = canonical(serde_json::from_slice(&ours.stdout).unwrap());
+        let mut node = Command::new("node");
+        node.current_dir(repo_root())
+            .args(["scripts/affected.mjs", base, head, "--explain"]);
+        let script = bounded(node, "node scripts/affected.mjs", base, head);
+        let mut plan = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        plan.current_dir(repo_root()).args(["plan", base, head, "--explain"]);
+        let ours = bounded(plan, "paddock-dev plan", base, head);
+        let got = canonical(serde_json::from_slice(&ours).unwrap());
         assert_eq!(
             got,
-            canonical(serde_json::from_slice(&script.stdout).unwrap()),
+            canonical(serde_json::from_slice(&script).unwrap()),
             "different plan for {base}..{head}"
         );
         narrowed += usize::from(got["all"] == false);

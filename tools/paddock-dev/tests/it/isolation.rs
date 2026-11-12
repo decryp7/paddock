@@ -2,6 +2,7 @@
 //! disk sweep, with a fake HOME (the CI home is its `.paddock-ci`) and a fake runner job folder, all under a scratch folder
 //! (rule 7: never the machine's CI home). Unix only: the script runs under Git bash on Windows, where the CI host jobs
 //! themselves exercise it on every run.
+// windows-twin: none: it runs the shell script, which the Windows host jobs exercise under Git bash on every run
 #![cfg(unix)]
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 

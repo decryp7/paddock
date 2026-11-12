@@ -2,6 +2,7 @@
 //! a kept folder, release, and the sweep, plus the layouts of the ADR 0025 amendment of 2026-11-10 (`{src}` and retired layouts),
 //! which the shell script does not know. The parity cases against the script live in conformance/test/job-isolation.test.mjs
 //! (`ISOLATION_CMD=<this binary>`). Unix only, like isolation.rs: the Windows host jobs run the real thing on every run.
+// windows-twin: ci_isolation_windows.rs
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

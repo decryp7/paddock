@@ -1076,3 +1076,21 @@ All are dominated by process start. Not measured: a security-key (`sk-ssh-ed2551
 device was used, by design), an in-process Rust verifier, and the runners. At these rates 200 approval commits checked
 with one `git verify-commit` each cost 4.4 to 10.3 s (200 x 21.9 to 51.5 ms); a verifier that checks each distinct commit
 once is bounded by the number of approval commits, and the history walk adds about 50 ms per record.
+
+## Kit shim default (2026-11-12)
+
+`conformance/ci/kit.sh` gives the tool's own first build (before `./dev ci build-jobs` has written the job's real share) a default of
+4 build jobs (`CARGO_BUILD_JOBS`). The cost on Linux, the one class that left cargo at every core before: a cold `cargo build
+--release --locked` of `tools/paddock-dev` (what `./dev` runs when it can neither find nor download its binary) in the paddock-ci
+image, `docker run --rm --cpus 6 --memory 12g`, linux/amd64 emulated on an arm64 Mac (so the absolute times are slow; the ratio is
+the finding), an empty target folder each, one run each:
+
+| CARGO_BUILD_JOBS | wall time |
+| --- | --- |
+| 4 (the shim's default) | 131 s |
+| 6 (every core of the container) | 96 s |
+
+So the default costs about 35 s (36 %) on a 6-core container, and only on a cold build: a job with the read credential downloads
+the prebuilt tool (1-2 s) or finds it in the kept folder, and never builds. The default is kept because a build before `build-jobs`
+has no share to go by, and on the shared Mac 4 is the share (ER-24). Not measured: a 16-core Linux runner (the cost there is larger
+by the same ratio, bounded by the tool's compile graph).

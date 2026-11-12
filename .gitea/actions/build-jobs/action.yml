@@ -1,5 +1,5 @@
 name: build-jobs
-description: "CARGO_BUILD_JOBS (and NEXTEST_TEST_THREADS, the job's core share, or the runner's PADDOCK_CI_TEST_THREADS) for the job: the smaller of the host's cores and RAM divided by the jobs the host runs at once (runner.envs PADDOCK_CI_JOBS_PER_HOST, PADDOCK_CI_RESERVED_CORES, PADDOCK_CI_RESERVED_RAM_MB, else the runner class's known layout; Linux keeps cargo's default until its share is measured), or the runner's PADDOCK_CI_BUILD_JOBS (conformance/ci/build-jobs.sh, the one implementation). An early step of a job (after Git bash on Windows, before job-isolation, which builds paddock-dev); setup-rust runs it too when no earlier step set CARGO_BUILD_JOBS."
+description: "CARGO_BUILD_JOBS (and NEXTEST_TEST_THREADS, the job's core share, or the runner's PADDOCK_CI_TEST_THREADS) for the job: the smaller of the host's cores and RAM divided by the jobs the host runs at once (runner.envs PADDOCK_CI_JOBS_PER_HOST, PADDOCK_CI_RESERVED_CORES, PADDOCK_CI_RESERVED_RAM_MB, else the runner class's known layout; Linux keeps cargo's default until its share is measured), or the runner's PADDOCK_CI_BUILD_JOBS (`./dev ci build-jobs`, through conformance/ci/kit.sh: a tag run and a run that never downloads the tool keep conformance/ci/build-jobs.sh until the release-path lane, and tools/paddock-dev/tests/it/build_jobs.rs holds the two equal). An early step of a job (after Git bash on Windows, before job-isolation, which builds paddock-dev); setup-rust runs it too when no earlier step set CARGO_BUILD_JOBS."
 inputs:
   split:
     description: "How many builds the job runs at once (cargo mutants --jobs N): each gets 1/split of the share."
@@ -11,4 +11,4 @@ runs:
       shell: bash
       env:
         SPLIT: ${{ inputs.split }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/build-jobs.sh" "$SPLIT"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" build-jobs "$SPLIT"

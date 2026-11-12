@@ -53,6 +53,18 @@ cleanup removes a locked one. Run it from any checkout of the repository (or pas
 - Tests: `cargo test --test it worktree` builds throw-away repositories (Unix). `WORKTREE_SH=<engineering-rules>/scripts/worktree.sh`
   adds the oracle comparison with `worktree.sh` (otherwise those tests print `not measured`).
 
+## CI steps in Rust (docs/plans/ci-in-rust.md)
+
+- `ci setup-rust [--sccache-backend local|auto|redis] [--sccache-redis-db <n>] [--tauri-linux-deps true|false]` is the setup-rust
+  action after its toolchain: installs the pinned sccache (checksum-verified) when the runner lacks it, configures it for the job
+  (slot port and folder on a host, the `/sccache` mount in a container, or Redis from `PADDOCK_SCCACHE_REDIS_ENDPOINT`), starts a
+  fresh server and writes `RUSTC_WRAPPER=sccache` and its settings to `$GITHUB_ENV`; with the flag, the Tauri Linux libraries.
+  A release, rule 54 or tag run still takes the action's shell steps until the release-path lane. `tests/it/setup_rust.rs` runs
+  the action's shell and this command on the same inputs and compares what reaches the job.
+- Third-party programs run through `src/ci_tool.rs` (`ToolCall`): the exact argument vector, secrets set for that program only
+  and masked in every printed line, a timeout, a `run:`/`ran:` line pair (exit code with the NTSTATUS on Windows), the stderr tail
+  of a failed captured run, and one `::error::` line with the next step from the caller.
+
 ## Not ported yet (R0b gaps, listed on purpose)
 
 `dev plan` is the port of `scripts/affected.mjs` (`--ci`, `--app`, the matrix legs and the commit range; its recorded cases are in

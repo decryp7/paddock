@@ -282,7 +282,7 @@ jobs:
           PADDOCK_WEBKIT: "1"
         run: |
           # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
-          port=$(bash ../conformance/ci/job-isolation.sh port webkit)
+          port=$(bash ../conformance/ci/kit.sh isolation port webkit)
           export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
 
@@ -425,6 +425,9 @@ jobs:
         working-directory: tools/wiki
         shell: bash
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       CARGO_TERM_COLOR: always
     steps:
       # The whole history: the lint reads the rules on origin/main and on the open rule branches (origin/docs/*).
@@ -547,6 +550,9 @@ jobs:
         working-directory: tools/heavy
         shell: bash
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
@@ -640,6 +646,9 @@ jobs:
       run:
         working-directory: crates
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
       # The job runs as root in the container, where Chromium refuses to start with its sandbox (the real-browser test of
       # paddock-chromium); the driver drops the sandbox only for root AND with this opt-in.
       PADDOCK_BROWSER_NO_SANDBOX: "1"
@@ -758,7 +767,7 @@ jobs:
         if: runner.os != 'Linux'
         working-directory: .
         run: |
-          dir="$(bash conformance/ci/job-isolation.sh path browser paddock)"
+          dir="$(bash conformance/ci/kit.sh isolation path browser paddock)"
           if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
           echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
@@ -993,7 +1002,7 @@ jobs:
         env:
           APP: ${{ matrix.app }}
         run: |
-          dir="$(bash conformance/ci/job-isolation.sh path browser "$APP")"
+          dir="$(bash conformance/ci/kit.sh isolation path browser "$APP")"
           if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
           echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 

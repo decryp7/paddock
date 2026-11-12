@@ -56,7 +56,7 @@ runs:
         # The job slot's own copy (job-isolation: src/<name>-<slot>), so a concurrent job of the same name never moves or
         # cleans this one. No slot (the job-isolation action did not run): build in place, which only costs cache hits.
         # Its stderr (a migration notice, an error) goes to the log; only stdout is the path.
-        resolve_stable() { bash "${{ github.action_path }}/../../../conformance/ci/job-isolation.sh" path src "$folder"; }
+        resolve_stable() { bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" isolation path src "$folder"; }
         if ! bounded "resolve the job slot's kept folder" resolve_stable; then
           cat "$scratch/err" >&2
           echo "::warning::stable-workspace: no kept folder of this job's slot (see the message above); building from the work folder."

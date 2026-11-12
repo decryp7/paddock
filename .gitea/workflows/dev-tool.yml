@@ -53,6 +53,8 @@ jobs:
       run:
         shell: bash
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): a tag run builds the tool from source (the token is beside it).
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +92,8 @@ jobs:
       run:
         shell: bash
     env:
+      # setup-rust runs ./dev (docs/plans/ci-in-rust.md): a tag run builds the tool from source (the token is beside it).
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     steps:
       - uses: actions/checkout@v4

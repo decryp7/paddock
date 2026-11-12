@@ -314,6 +314,63 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
     Ok(output)
 }
 
+/// Where the output of a [`run_waited`] run goes: no pipe is read, so a program that leaves a daemon behind (which would hold
+/// a pipe open for its whole life) or a long one whose output a person watches can still be bounded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Sink {
+    /// This process's own standard output and error (a CI step's log shows every line as it comes).
+    Inherit,
+    /// Both streams into this file, created or truncated (the caller reads it afterwards).
+    File(std::path::PathBuf),
+}
+
+/// Runs `cmd` to completion with a timeout, its output going to `sink`, standard input closed. The child leads its own
+/// process group (Unix); at the timeout its whole tree is ended by identity (ADR 0033) and the outcome is
+/// [`Outcome::TimedOut`]. A process the program leaves behind after it exited on its own (a server it started) is not
+/// touched. `Err` only when it could not be started or waited for.
+pub fn run_waited(mut cmd: Command, timeout: Duration, sink: Sink) -> Result<Outcome, RunError> {
+    let name = program_name(&cmd);
+    cmd.stdin(Stdio::null());
+    if let Sink::File(path) = &sink {
+        let file = std::fs::File::create(path).map_err(|e| RunError::Spawn(name.clone(), e))?;
+        let copy = file
+            .try_clone()
+            .map_err(|e| RunError::Spawn(name.clone(), e))?;
+        cmd.stdout(file).stderr(copy);
+    }
+    crate::sys::own_group(&mut cmd);
+    let mut child = cmd.spawn().map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => RunError::NotFound(name.clone()),
+        std::io::ErrorKind::PermissionDenied => RunError::PermissionDenied(name.clone()),
+        _ => RunError::Spawn(name.clone(), e),
+    })?;
+    // Taken before the waiter can reap the child, so a timeout ends this tree and never a successor of its pid.
+    let root = ProcessId::of(child.id());
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        // silent: the receiver is gone once the run has ended, and nothing waits for the event then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
+        let _ = tx.send(child.wait());
+    });
+    let started = Instant::now();
+    let status = match rx.recv_timeout(timeout) {
+        Ok(status) => status,
+        Err(_) => {
+            if let Some(r) = root {
+                kill_tree(r);
+            }
+            // The tree is gone; its exit comes at once. A wait failure here still means the run timed out.
+            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
+            let _ = rx.recv_timeout(PIPE_GRACE);
+            log::warn!(Tool = name.as_str(), Ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX); "tool.run timed out");
+            return Ok(Outcome::TimedOut);
+        }
+    };
+    let status = status.map_err(|e| RunError::Wait(name.clone(), e))?;
+    log::debug!(Tool = name.as_str(), Ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), Exit = status.code().unwrap_or(-1); "tool.run");
+    Ok(Outcome::Exited(status))
+}
+
 /// The `tool.run` line (ER-27): the program's name (never its arguments, which can hold paths and secrets) and how many there were,
 /// how it ended (exit code, timeout or output cap), how long it took, and the last of its error output when it did not succeed. A run
 /// that succeeded is a debug line (tools run on every poll); one that did not is a warning.
@@ -451,6 +508,59 @@ fn describe_run(output: &Output) -> (String, String) {
         .rev()
         .collect();
     (how, tail)
+}
+
+#[cfg(all(test, unix))]
+mod waited_tests {
+    use super::*;
+    use crate::command;
+
+    #[test]
+    fn a_waited_run_reports_its_exit_and_writes_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("out.txt");
+        let mut cmd = command("sh");
+        cmd.args(["-c", "echo out; echo err >&2; exit 3"]);
+        let outcome = run_waited(cmd, Duration::from_secs(30), Sink::File(file.clone())).unwrap();
+        assert!(matches!(outcome, Outcome::Exited(s) if s.code() == Some(3)));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "out\nerr\n");
+        let mut ok = command("true");
+        ok.arg("x");
+        assert!(
+            matches!(run_waited(ok, Duration::from_secs(30), Sink::Inherit).unwrap(), Outcome::Exited(s) if s.success())
+        );
+        let missing = run_waited(
+            command("/nonexistent/dir/paddock-no-such-program"),
+            Duration::from_secs(1),
+            Sink::Inherit,
+        );
+        assert!(matches!(missing, Err(RunError::NotFound(_))), "{missing:?}");
+    }
+
+    #[test]
+    fn a_timeout_ends_the_whole_tree_grandchildren_included() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("grandchild.pid");
+        let mut cmd = command("sh");
+        cmd.arg("-c").arg(format!(
+            "sleep 60 & echo $! > '{}'; wait",
+            pid_file.display()
+        ));
+        // The run is bounded by the timeout under test; the grandchild has written its pid long before (a shell fork).
+        let outcome = run_waited(cmd, Duration::from_millis(500), Sink::Inherit).unwrap();
+        assert_eq!(outcome, Outcome::TimedOut);
+        let pid: u32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // Ended processes are reaped by init: wait for that condition, bounded.
+        paddock_testkit::wait_until_within(
+            "the grandchild to be gone after the timeout",
+            Duration::from_secs(10),
+            || !crate::is_alive(pid),
+        );
+    }
 }
 
 #[cfg(test)]

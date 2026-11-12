@@ -17,7 +17,7 @@ runs:
         NAME: ${{ inputs.name }}
       run: |
         set -euo pipefail
-        iso="${{ github.action_path }}/../../../conformance/ci/job-isolation.sh"
+        iso="${{ github.action_path }}/../../../conformance/ci/kit.sh"
         folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
         if [ "$RUNNER_OS" = Linux ]; then
           mount="${PADDOCK_CI_MOUNT:-/sccache}"
@@ -27,9 +27,9 @@ runs:
           mkdir -p "$npm_cache"
         else
           # The host's kept folders (job-isolation): npm's cache and the Angular cache are the job slot's own.
-          npm_cache="$(bash "$iso" path npm)"
+          npm_cache="$(bash "$iso" isolation path npm)"
           ng_cache=""
-          if [ -n "$ANGULAR_DIR" ]; then ng_cache="$(bash "$iso" path angular "$folder")"; fi
+          if [ -n "$ANGULAR_DIR" ]; then ng_cache="$(bash "$iso" isolation path angular "$folder")"; fi
         fi
         if [ "$RUNNER_OS" = Windows ]; then echo "npm_config_cache=$(cygpath -w "$npm_cache")" >> "$GITHUB_ENV"; else echo "npm_config_cache=$npm_cache" >> "$GITHUB_ENV"; fi
         echo "node-caches: npm $npm_cache"
