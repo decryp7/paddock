@@ -1,6 +1,6 @@
 use crate::{
-    check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation, slots, wait,
-    worktree,
+    brief_check, check, ci_isolation, ci_runs, gates, hook, input_hash, ipc_endpoints, merge_check, plan, plan_cmd, release_isolation,
+    slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -33,6 +33,11 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
+    /// Briefs to agents: check one for the required fields and the known-bad patterns (docs/agents/brief-template.md).
+    Brief {
+        #[command(subcommand)]
+        command: brief_check::BriefCommand,
+    },
     /// C100 and the gate register (ADR 0060): is every check run somewhere?
     Gates {
         #[command(subcommand)]
@@ -397,6 +402,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::Timings(a),
         } => ci_runs::timings(&a),
         Command::Wait(a) => wait::command(&a),
+        Command::Brief { command } => brief_check::command(command),
         Command::Gates {
             command: GatesCommand::Model(a),
         } => gates::command::model(a.root.as_deref()),

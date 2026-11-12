@@ -20,11 +20,13 @@
 //!   command in [`plan_cmd`]. Oracle-tested against the script until it is retired (ADR 0022 R4). `plan --since-run <run>`
 //!   reruns only what failed in a finished run ([`plan_since`]).
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
+//! - `brief check`: the fields and known-bad patterns of a brief to an agent ([`brief_check`], docs/agents/brief-template.md).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod brief_check;
 pub mod check;
 pub mod ci_isolation;
 pub mod ci_runs;
