@@ -63,11 +63,12 @@ impl OsRegistry {
         OsRegistry { base: Base::Real }
     }
 
-    /// Reads from a temporary tree under `HKCU\<subkey>` instead (the Windows-runner test, ADR 0033 section 5).
+    /// Reads from a temporary tree `HKCU\Software\<name>` instead (the Windows-runner test, ADR 0033 section 5): the tree the
+    /// test's `own_tree` makes and the sweep removes.
     #[cfg(test)]
-    fn under_hkcu(subkey: &str) -> Self {
+    fn under_hkcu(name: &str) -> Self {
         OsRegistry {
-            base: Base::Temp(subkey.to_string()),
+            base: Base::Temp(format!(r"Software\{name}")),
         }
     }
 
