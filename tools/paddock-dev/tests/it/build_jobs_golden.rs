@@ -181,6 +181,14 @@ fn os_total_memory_mb() -> u64 {
             .and_then(|r| r.trim().strip_suffix("kB"))
             .and_then(|n| n.trim().parse::<u64>().ok())
             .expect("MemTotal in /proc/meminfo");
-        kb / 1024
+        let total = kb / 1024;
+        // A container's memory limit (cgroup v2 `memory.max`, a number when one is set) is what build-jobs reads first.
+        match std::fs::read_to_string("/sys/fs/cgroup/memory.max")
+            .ok()
+            .and_then(|m| m.trim().parse::<u128>().ok())
+        {
+            Some(bytes) => total.min(u64::try_from(bytes / 1_048_576).unwrap_or(u64::MAX)),
+            None => total,
+        }
     }
 }

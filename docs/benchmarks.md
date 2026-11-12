@@ -1043,3 +1043,29 @@ So the default costs about 35 s (36 %) on a 6-core container, and only on a cold
 the prebuilt tool (1-2 s) or finds it in the kept folder, and never builds. The default is kept because a build before `build-jobs`
 has no share to go by, and on the shared Mac 4 is the share (ER-24). Not measured: a 16-core Linux runner (the cost there is larger
 by the same ratio, bounded by the tool's compile graph).
+
+## `./dev check --pre-push` run times (2026-11-12, feat/ci-in-rust-wp2)
+
+One run of `./dev check --pre-push --base origin/main` on the branch's tree (66 changed files: the shared crate `paddock-proc`, paddock-dev,
+workflows, docs), so the plan reaches every app. Machine: the shared Mac mini (arm64) at a 1-minute load of 25 (one gate at a time, as
+`workers()` chooses from a load of 20 or more), `CARGO_BUILD_JOBS=2`, every compile through `heavy.sh`, warm build folders, Docker not
+asked for (see below). The gate's budget is 15 minutes; one run each, so these are what happened, not a distribution.
+
+| Gate | Seconds |
+| --- | ---: |
+| fmt, one per workspace (13 workspaces) | 1.4 to 6.5 each |
+| lockfile `cargo metadata --locked`, one per workspace | 0.1 to 0.6 each |
+| conformance (ci.yml's line) | 7.6 |
+| commit-lint | 0.1 |
+| Pitwall script tests, Pitwall `cargo deny` | 0.5, 1.9 |
+| C102 `ipc-endpoints` | 4.3 |
+| host Clippy `apps/pitcrew` | 285.8 |
+| host Clippy `apps/dyno` | 173.6 |
+| host Clippy `apps/debrief` | 395.5 |
+
+Result: 30 gates passed in about 14 minutes; 12 were "not measured" because the budget ran out (Clippy of Pitwall, the demos, Spotter,
+`crates`, `tools/*`, the Windows Clippy of `crates`, Dyno and Pitwall, and the Linux Clippy). Exit 6. So: a change to a shared crate on a
+loaded machine does not fit in 15 minutes when the gates run one at a time; the cheap gates (about 30 s together) finish at once, and
+the host Clippy of each app is the cost. Not measured: the same run on a quiet machine (three gates at a time), the Windows Clippy and
+the Linux Clippy times (neither ran), and the cost of a change that reaches one workspace. Test durations of paddock-dev under
+`cargo nextest run`: 863 tests in 115 s at a load of 18 to 25 (the same tests took over 23 minutes in one `cargo test` run that hung).

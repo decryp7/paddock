@@ -3,7 +3,7 @@
 //!
 //! Extension point for the per-commit gate (`./dev check --commits`, ADR 0038's 2026-11-08 amendment, X-3 in
 //! docs/plans/ci-in-rust.md; it needs the user's yes and is not built): it calls [`plan_gates`] once per commit with that commit's
-//! files and `range: None`, in a worktree of its own. Nothing in this file depends on the push as a whole.
+//! files and no ranges, in a worktree of its own. Nothing in this file depends on the push as a whole.
 
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -102,8 +102,8 @@ pub struct Facts {
 pub struct Change {
     /// Repository-relative files: committed since the merge base, modified and untracked.
     pub files: Vec<String>,
-    /// The commit range to lint (`origin/main..HEAD`), or none when there is no commit of its own.
-    pub range: Option<String>,
+    /// The commit ranges to lint (`<merge base>..<pushed commit>`, one per pushed ref); none when there is no commit of its own.
+    pub ranges: Vec<String>,
 }
 
 /// Workspaces whose lints are not a push gate: they have a CI job of their own that is not part of a branch run.
@@ -215,7 +215,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
     }
     out.push(linux_clippy(change, facts));
     out.push(conformance(plan, facts));
-    out.push(commit_lint(change));
+    out.extend(commit_lint(change));
     if plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall")) {
         let mut args = vec!["--test".to_string()];
         args.extend(facts.pitwall_tests.iter().cloned());
@@ -276,10 +276,11 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
 
 fn linux_clippy(change: &Change, facts: &Facts) -> Planned {
     let id = "clippy-linux crates".to_string();
-    if !change.files.iter().any(|f| f.starts_with("crates/") || f.starts_with(".cargo/")) {
+    let reaches = |f: &String| (f.starts_with("crates/") || f.starts_with(".cargo/")) && !docs_only(f);
+    if !change.files.iter().any(reaches) {
         return Planned::Skip {
             id,
-            reason: "nothing under crates/ or .cargo/ changed".into(),
+            reason: "nothing but documentation, or nothing at all, changed under crates/ or .cargo/".into(),
         };
     }
     let image = match &facts.image {
@@ -344,20 +345,65 @@ fn conformance(plan: &Value, facts: &Facts) -> Planned {
     }
 }
 
-fn commit_lint(change: &Change) -> Planned {
-    let id = "commit-lint".to_string();
-    match &change.range {
-        None => Planned::Skip {
-            id,
+fn commit_lint(change: &Change) -> Vec<Planned> {
+    if change.ranges.is_empty() {
+        return vec![Planned::Skip {
+            id: "commit-lint".into(),
             reason: "no commit of its own since the base".into(),
-        },
-        Some(range) => Planned::Run(gate(
-            id,
-            "",
-            "node",
-            &["conformance/bin/paddock-conformance.mjs", "commit-lint", "--range", range],
-            0,
-            "reword the commit it names (a Conventional Commit subject of at most 100 characters; no trailers the rules forbid)".into(),
-        )),
+        }];
     }
+    change
+        .ranges
+        .iter()
+        .map(|range| {
+            let id = if change.ranges.len() == 1 {
+                "commit-lint".to_string()
+            } else {
+                format!("commit-lint {range}")
+            };
+            Planned::Run(gate(
+                id,
+                "",
+                "node",
+                &["conformance/bin/paddock-conformance.mjs", "commit-lint", "--range", range],
+                0,
+                "reword the commit it names (a Conventional Commit subject of at most 100 characters; no trailers the rules forbid)".into(),
+            ))
+        })
+        .collect()
 }
+
+/// A file that cannot change what Clippy says: documentation next to the code.
+fn docs_only(path: &str) -> bool {
+    [".md", ".txt", ".adoc"].iter().any(|e| path.ends_with(e))
+}
+
+/// What CI runs on a branch that the push gate does not, with the reason; printed with every run (ADR 0038 §3: the gate prints
+/// the difference). Each line is a gap to close by a work package or a decision, not a promise that CI will not find it.
+pub const NOT_RUN: &[(&str, &str)] = &[
+    (
+        "cargo hakari verify (workspace hack)",
+        "needs the CI image's pinned cargo-hakari; WP-3 moves it into the contract",
+    ),
+    (
+        "cargo machete (unused dependencies)",
+        "needs the CI image's pinned cargo-machete; WP-3",
+    ),
+    (
+        "cargo deny outside Pitwall",
+        "each workspace's deny.toml is checked by CI only; WP-3",
+    ),
+    ("wiki lint (tools/wiki)", "runs in CI's paddock-dev job against the ER text"),
+    (
+        "lint and type-check of touched TypeScript (eslint, tsc)",
+        "per-project commands live in YAML until WP-3's contracts",
+    ),
+    (
+        "Linux Clippy of the apps' workspaces",
+        "only the shared crates run in the CI image here; the apps' Linux legs are CI's",
+    ),
+    (
+        "tests (nextest, vitest, Playwright)",
+        "slower local checks run beside CI after dispatch (ER-9), not in the push gate",
+    ),
+];

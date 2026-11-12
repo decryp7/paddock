@@ -84,4 +84,6 @@ commit-msg:
 pre-push:
   commands:
     pre-push:
-      run: ./dev check --pre-push
+      # git's pre-push lines on standard input: the gate checks exactly the commits being pushed (a dirty tree is only noted).
+      use_stdin: true
+      run: ./dev check --pre-push --refs-from-stdin

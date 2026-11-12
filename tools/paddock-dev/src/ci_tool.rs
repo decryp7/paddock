@@ -17,7 +17,7 @@
 //! timeout; and the duration). The caller decides what a failure means and prints exactly one `::error::` line for it with
 //! [`error_line`]: the cause, then `Next step:`.
 
-use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded, run_waited};
+use paddock_proc::{KEPT_ENV, Limits, Outcome, RunError, Sink, command, run_bounded, run_waited_cancellable};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::io::Write;
@@ -83,6 +83,7 @@ pub struct ToolCall {
     timeout: Duration,
     output: Output,
     cwd: Option<PathBuf>,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 /// How a run ended.
@@ -110,6 +111,7 @@ impl ToolCall {
             timeout: Duration::from_secs(120),
             output: Output::Capture,
             cwd: None,
+            cancel: None,
         }
     }
 
@@ -164,6 +166,13 @@ impl ToolCall {
     /// Runs the program in this folder (default: the caller's).
     pub fn cwd(mut self, dir: impl Into<PathBuf>) -> ToolCall {
         self.cwd = Some(dir.into());
+        self
+    }
+
+    /// Ends the program's whole tree when this flag is set (a Ctrl+C or SIGTERM of the caller); `how` is then `cancelled`. Only for
+    /// [`Output::Stream`] and [`Output::File`] runs.
+    pub fn cancel_on(mut self, flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> ToolCall {
+        self.cancel = Some(flag);
         self
     }
 
@@ -261,10 +270,13 @@ impl ToolCall {
 
     /// Streamed or file output, through `paddock_proc::run_waited` (bounded, the whole tree ended at the timeout).
     fn run_to(&self, cmd: std::process::Command, sink: Sink, file: Option<&PathBuf>) -> Result<Ran, String> {
-        let outcome = run_waited(cmd, self.timeout, sink).map_err(|e| self.not_started(e))?;
+        let idle = std::sync::atomic::AtomicBool::new(false);
+        let flag: &std::sync::atomic::AtomicBool = self.cancel.as_deref().unwrap_or(&idle);
+        let (outcome, cancelled) = run_waited_cancellable(cmd, self.timeout, sink, flag).map_err(|e| self.not_started(e))?;
         let text = file.and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
         let (success, how) = match outcome {
             Outcome::Exited(s) => (s.success(), describe_status(s)),
+            Outcome::TimedOut if cancelled => (false, "cancelled".to_string()),
             Outcome::TimedOut => (false, self.timed_out()),
             Outcome::OutputCap => (false, "stopped at the output cap".to_string()),
         };

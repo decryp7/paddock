@@ -39,6 +39,8 @@ toml = { version = "1", default-features = false, features = ["parse", "serde"] 
 [target.'cfg(unix)'.dependencies]
 # fds.rs: the holder closes the descriptors it inherited.
 libc = "0.2"
+# pre_push: SIGINT and SIGTERM set a flag that ends the running gates' process trees (as tools/heavy does).
+signal-hook = { version = "0.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 # fds.rs: the standard handles are made non-inheritable before the holder starts; release_isolation: the file index.

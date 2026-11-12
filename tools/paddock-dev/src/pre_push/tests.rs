@@ -1,12 +1,14 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
-use super::exec::{Done, Exec, Verdict, decide, run_all};
+use super::exec::{Done, Exec, RunOpts, Verdict, decide, run_all, run_all_with};
 use super::gates::{Change, Facts, Gate, Need, Planned, plan_gates};
-use super::render;
+use super::{accept_not_measured, parse_refs, render};
 use paddock_cli::Exit;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::time::Duration;
 
 fn plan() -> serde_json::Value {
     json!({
@@ -38,7 +40,7 @@ fn facts() -> Facts {
 fn change(files: &[&str]) -> Change {
     Change {
         files: files.iter().map(|f| f.to_string()).collect(),
-        range: Some("abc..HEAD".into()),
+        ranges: vec!["abc..HEAD".into()],
     }
 }
 
@@ -115,7 +117,7 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
     let docs = json!({"conformance": false, "apps": [], "packages": {}});
     let c = Change {
         files: vec!["docs/x.md".into()],
-        range: None,
+        ranges: vec![],
     };
     let planned = plan_gates(&docs, &c, &facts());
     assert!(ids(&planned).is_empty(), "{:?}", ids(&planned));
@@ -153,6 +155,9 @@ struct Fake {
     no_docker: bool,
     no_tools: Vec<String>,
     fail: Vec<String>,
+    unstartable: Vec<String>,
+    panics: Vec<String>,
+    cut_short: Vec<String>,
     ran: Mutex<Vec<String>>,
 }
 
@@ -163,13 +168,26 @@ impl Exec for Fake {
     fn docker_up(&self) -> bool {
         !self.no_docker
     }
-    fn run(&self, g: &Gate) -> Result<Done, String> {
+    fn run(&self, g: &Gate, _left: Duration) -> Result<Done, String> {
         self.ran.lock().unwrap().push(g.id.clone());
+        assert!(!self.panics.contains(&g.id), "a runner bug");
+        if self.unstartable.contains(&g.id) {
+            return Err(format!("{} is not installed on this runner", g.program));
+        }
+        if self.cut_short.contains(&g.id) {
+            return Ok(Done {
+                success: false,
+                how: "timed out after 900 s".into(),
+                tail: String::new(),
+                log: Some("/logs/x.log".into()),
+            });
+        }
         let fail = self.fail.iter().any(|f| f == &g.id);
         Ok(Done {
             success: !fail,
             how: if fail { "exit 1".into() } else { "exit 0".into() },
             tail: if fail { "error: boom".into() } else { String::new() },
+            log: None,
         })
     }
 }
@@ -285,17 +303,18 @@ fn a_docker_failure_names_its_cause() {
         fn docker_up(&self) -> bool {
             true
         }
-        fn run(&self, _: &Gate) -> Result<Done, String> {
+        fn run(&self, _: &Gate, _: Duration) -> Result<Done, String> {
             Ok(Done {
                 success: false,
                 how: "exit 137".into(),
                 tail: String::new(),
+                log: None,
             })
         }
     }
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
     let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy-linux crates").unwrap();
-    assert!(matches!(decide(g, &Oom), Verdict::Failed { next, .. } if next.contains("PADDOCK_LINUX_MEMORY")));
+    assert!(matches!(decide(g, &Oom, Duration::from_secs(60)), Verdict::Failed { next, .. } if next.contains("PADDOCK_LINUX_MEMORY")));
 }
 
 #[test]
@@ -308,4 +327,208 @@ fn only_the_ci_line_of_this_repository_is_read() {
         "{args:?}"
     );
     assert!(ci.contains(&args.join(" ")));
+}
+
+fn crates_gates() -> Vec<Planned> {
+    plan_gates(&plan(), &change(&["crates/a.rs"]), &facts())
+}
+
+#[test]
+fn a_gate_that_cannot_start_is_not_measured_never_passed() {
+    let rows = run_all(
+        &crates_gates(),
+        &Fake {
+            unstartable: vec!["fmt crates".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("not installed")));
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+}
+
+#[test]
+fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
+    let fake = Fake {
+        panics: vec!["fmt crates".into()],
+        ..Fake::default()
+    };
+    let rows = run_all(&crates_gates(), &fake, 2);
+    let v = verdicts(&rows);
+    assert!(matches!(&v["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("crashed")));
+    assert!(matches!(&v["fmt apps/dyno"], Verdict::Passed { .. }), "the other gates still ran");
+    // With a budget of nothing nothing starts: every gate that would run is not measured, none passes.
+    let fake = Fake::default();
+    let rows = run_all_with(
+        &crates_gates(),
+        &fake,
+        &RunOpts {
+            workers: 2,
+            budget: Duration::ZERO,
+            stop: &AtomicBool::new(false),
+        },
+    );
+    assert!(fake.ran.lock().unwrap().is_empty());
+    for (id, v) in &rows {
+        assert!(!matches!(v, Verdict::Passed { .. } | Verdict::Failed { .. }), "{id}: {v:?}");
+    }
+    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("budget")));
+    // A signal stops the rest the same way.
+    let fake = Fake::default();
+    let rows = run_all_with(
+        &crates_gates(),
+        &fake,
+        &RunOpts {
+            workers: 1,
+            budget: Duration::from_secs(60),
+            stop: &AtomicBool::new(true),
+        },
+    );
+    assert!(fake.ran.lock().unwrap().is_empty());
+    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("interrupted")));
+}
+
+#[test]
+fn a_timeout_is_not_measured_and_does_not_tell_you_to_fix_lints() {
+    let rows = run_all(
+        &crates_gates(),
+        &Fake {
+            cut_short: vec!["clippy crates".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    let Verdict::NotMeasured { reason, next } = &verdicts(&rows)["clippy crates"] else {
+        panic!("{rows:?}")
+    };
+    assert!(
+        reason.contains("timed out")
+            && reason.contains("/logs/x.log")
+            && next.contains("re-run it alone")
+            && !next.contains("fix the lints"),
+        "{reason} {next}"
+    );
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+}
+
+#[test]
+fn the_worst_finding_decides_the_exit_code_7_then_5_then_6() {
+    let nm = Verdict::NotMeasured {
+        reason: "r".into(),
+        next: "n".into(),
+    };
+    let failed = Verdict::Failed {
+        cause: "c".into(),
+        tail: String::new(),
+        next: "n".into(),
+        secs: 1.0,
+    };
+    let broken = Verdict::Broken {
+        cause: "c".into(),
+        next: "n".into(),
+    };
+    let row = |id: &str, v: &Verdict| (id.to_string(), v.clone());
+    let all = [row("a", &nm), row("b", &failed), row("c", &broken)];
+    assert_eq!(render("h", &all).exit, Exit::CheckBroken);
+    assert_eq!(render("h", &all[..2]).exit, Exit::Findings);
+    assert_eq!(render("h", &all[..1]).exit, Exit::NotMeasured);
+    assert_eq!(render("h", &[row("x", &Verdict::Passed { secs: 0.1 })]).exit, Exit::Ok);
+}
+
+#[test]
+fn the_cargo_folder_alone_reaches_linux_clippy_but_documentation_does_not() {
+    let reached = |files: &[&str]| ids(&plan_gates(&plan(), &change(files), &facts())).contains(&"clippy-linux crates".to_string());
+    assert!(reached(&[".cargo/config.toml"]), ".cargo/ is a trigger on its own");
+    assert!(reached(&["crates/paddock-proc/src/a.rs"]));
+    assert!(
+        !reached(&["crates/paddock-proc/README.md", "crates/CHANGELOG.md"]),
+        "documentation next to the code cannot change Clippy"
+    );
+    assert!(!reached(&["apps/dyno/src/a.rs"]));
+}
+
+#[test]
+fn pitwalls_deny_needs_cargo_deny_and_an_empty_script_list_is_a_broken_check() {
+    let planned = crates_gates();
+    let deny = run_gates(&planned).into_iter().find(|g| g.id == "pitwall-deny").unwrap();
+    assert_eq!(deny.need, Need::Tool("cargo-deny".into()));
+    let rows = run_all(
+        &planned,
+        &Fake {
+            no_tools: vec!["cargo-deny".into()],
+            ..Fake::default()
+        },
+        2,
+    );
+    assert!(matches!(&verdicts(&rows)["pitwall-deny"], Verdict::NotMeasured { reason, .. } if reason.contains("cargo-deny")));
+    let mut f = facts();
+    f.pitwall_tests.clear();
+    let planned = plan_gates(&plan(), &change(&["apps/pitwall/a.rs"]), &f);
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Broken { id, .. } if id == "pitwall-scripts"))
+    );
+    assert!(!ids(&planned).contains(&"pitwall-scripts".to_string()));
+}
+
+#[test]
+fn the_table_names_what_ci_runs_that_this_gate_does_not() {
+    let report = render("h", &run_all(&crates_gates(), &Fake::default(), 2));
+    for what in [
+        "hakari",
+        "machete",
+        "cargo deny outside Pitwall",
+        "wiki lint",
+        "TypeScript",
+        "Linux Clippy of the apps",
+    ] {
+        assert!(report.text.contains(what), "{what} missing:\n{}", report.text);
+    }
+}
+
+#[test]
+fn a_named_not_measured_gate_may_pass_and_the_use_is_logged() {
+    let state = tempfile::tempdir().unwrap();
+    let mut rows = run_all(
+        &crates_gates(),
+        &Fake {
+            no_docker: true,
+            ..Fake::default()
+        },
+        2,
+    );
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+    // A name that is not the gate's accepts nothing.
+    accept_not_measured(&mut rows, &["clippy".into()], state.path());
+    assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
+    accept_not_measured(&mut rows, &["clippy-linux".into()], state.path());
+    let report = render("h", &rows);
+    assert_eq!(report.exit, Exit::Ok);
+    assert!(report.text.contains("ACCEPTED      clippy-linux crates") && report.text.contains("logged"));
+    let log = std::fs::read_to_string(state.path().join("overrides.log")).unwrap();
+    assert!(log.contains("gate=clippy-linux crates") && log.contains("Docker"), "{log}");
+}
+
+#[test]
+fn the_pushed_commits_are_read_from_gits_pre_push_lines() {
+    let zero = "0".repeat(40);
+    let input = format!(
+        "refs/heads/a aaa111 refs/heads/a {zero}\nrefs/heads/gone {zero} refs/heads/gone bbb222\nrefs/heads/c ccc333 refs/heads/c ddd444\n"
+    );
+    assert_eq!(parse_refs(&input), ["aaa111", "ccc333"], "a deletion pushes no commit");
+    assert!(parse_refs("").is_empty());
+}
+
+#[test]
+fn several_pushed_ranges_are_linted_each() {
+    let c = Change {
+        files: vec!["crates/a.rs".into()],
+        ranges: vec!["m1..a".into(), "m2..b".into()],
+    };
+    let got = ids(&plan_gates(&plan(), &c, &facts()));
+    assert!(
+        got.contains(&"commit-lint m1..a".to_string()) && got.contains(&"commit-lint m2..b".to_string()),
+        "{got:?}"
+    );
 }

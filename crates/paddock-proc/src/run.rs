@@ -13,6 +13,7 @@ use crate::identity::ProcessId;
 use crate::tree::kill_tree;
 use std::io::Read;
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -328,7 +329,18 @@ pub enum Sink {
 /// process group (Unix); at the timeout its whole tree is ended by identity (ADR 0033) and the outcome is
 /// [`Outcome::TimedOut`]. A process the program leaves behind after it exited on its own (a server it started) is not
 /// touched. `Err` only when it could not be started or waited for.
-pub fn run_waited(mut cmd: Command, timeout: Duration, sink: Sink) -> Result<Outcome, RunError> {
+pub fn run_waited(cmd: Command, timeout: Duration, sink: Sink) -> Result<Outcome, RunError> {
+    run_waited_cancellable(cmd, timeout, sink, &AtomicBool::new(false)).map(|(outcome, _)| outcome)
+}
+
+/// [`run_waited`] that also ends the tree, by identity, when `cancel` is set (a person's Ctrl+C, a total time budget of the
+/// caller): the outcome is then [`Outcome::TimedOut`] and the second value is `true`. The flag is looked at every 100 ms.
+pub fn run_waited_cancellable(
+    mut cmd: Command,
+    timeout: Duration,
+    sink: Sink,
+    cancel: &AtomicBool,
+) -> Result<(Outcome, bool), RunError> {
     let name = program_name(&cmd);
     cmd.stdin(Stdio::null());
     if let Sink::File(path) = &sink {
@@ -353,22 +365,27 @@ pub fn run_waited(mut cmd: Command, timeout: Duration, sink: Sink) -> Result<Out
         let _ = tx.send(child.wait());
     });
     let started = Instant::now();
-    let status = match rx.recv_timeout(timeout) {
-        Ok(status) => status,
-        Err(_) => {
-            if let Some(r) = root {
-                kill_tree(r);
+    let status = loop {
+        let left = timeout.saturating_sub(started.elapsed());
+        let cancelled = cancel.load(Ordering::SeqCst);
+        match rx.recv_timeout(left.min(Duration::from_millis(100))) {
+            Ok(status) => break status,
+            Err(RecvTimeoutError::Timeout) if !cancelled && !left.is_zero() => {}
+            Err(_) => {
+                if let Some(r) = root {
+                    kill_tree(r);
+                }
+                // The tree is gone; its exit comes at once. A wait failure here still means the run timed out.
+                #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
+                let _ = rx.recv_timeout(PIPE_GRACE);
+                log::warn!(Tool = name.as_str(), Ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX); "tool.run timed out");
+                return Ok((Outcome::TimedOut, cancelled));
             }
-            // The tree is gone; its exit comes at once. A wait failure here still means the run timed out.
-            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
-            let _ = rx.recv_timeout(PIPE_GRACE);
-            log::warn!(Tool = name.as_str(), Ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX); "tool.run timed out");
-            return Ok(Outcome::TimedOut);
         }
     };
     let status = status.map_err(|e| RunError::Wait(name.clone(), e))?;
     log::debug!(Tool = name.as_str(), Ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX), Exit = status.code().unwrap_or(-1); "tool.run");
-    Ok(Outcome::Exited(status))
+    Ok((Outcome::Exited(status), false))
 }
 
 /// The `tool.run` line (ER-27): the program's name (never its arguments, which can hold paths and secrets) and how many there were,
@@ -535,6 +552,50 @@ mod waited_tests {
             Sink::Inherit,
         );
         assert!(matches!(missing, Err(RunError::NotFound(_))), "{missing:?}");
+    }
+
+    #[test]
+    fn a_cancel_flag_ends_the_whole_tree_long_before_the_timeout() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("grandchild.pid");
+        let mut cmd = command("sh");
+        cmd.arg("-c").arg(format!(
+            "sleep 60 & echo $! > '{}'; wait",
+            pid_file.display()
+        ));
+        let cancel = AtomicBool::new(false);
+        let started = Instant::now();
+        let (outcome, cancelled) = std::thread::scope(|s| {
+            let run = s.spawn(|| {
+                run_waited_cancellable(cmd, Duration::from_secs(600), Sink::Inherit, &cancel)
+                    .unwrap()
+            });
+            paddock_testkit::wait_until_within(
+                "the grandchild's pid",
+                Duration::from_secs(10),
+                || {
+                    std::fs::read_to_string(&pid_file)
+                        .is_ok_and(|t| t.trim().parse::<u32>().is_ok())
+                },
+            );
+            cancel.store(true, Ordering::SeqCst);
+            run.join().unwrap()
+        });
+        assert_eq!((outcome, cancelled), (Outcome::TimedOut, true));
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "not stopped by the flag"
+        );
+        let pid: u32 = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        paddock_testkit::wait_until_within(
+            "the grandchild to be gone",
+            Duration::from_secs(10),
+            || !crate::is_alive(pid),
+        );
     }
 
     #[test]

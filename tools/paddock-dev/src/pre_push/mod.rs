@@ -6,8 +6,11 @@
 //! - [`exec`]: running them, with a fake for tests.
 //!
 //! One table at the end: what ran, what was skipped and why, what could not be measured (ER-33: never a pass), and for each
-//! failure one line with its cause and the next step. Exit 0 all passed or skipped; 5 something failed; 6 only "not measured";
-//! 7 a check is broken (beats the others).
+//! failure one line with its cause and the next step. Exit 0 all passed, accepted or skipped; 5 something failed; 6 only "not
+//! measured" (a gate that could not run, was cut off by the 15-minute budget or by a timeout blocks the push); 7 a check is broken
+//! (beats 5 and 6); 130 the person stopped it. The gates the table does not run but CI does are listed under it ([`gates::NOT_RUN`]).
+//! One named override exists so nobody reaches for `LEFTHOOK=0`: `PADDOCK_ACCEPT_NOT_MEASURED=<gate words>` (or
+//! `--accept-not-measured`) lets a not-measured gate pass the push, and every use is logged next to the gate logs.
 
 pub mod ci_line;
 pub mod exec;
@@ -16,13 +19,15 @@ pub mod gates;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{RealExec, Verdict, parse_load, run_all, workers};
+use exec::{BUDGET, RealExec, RunOpts, Verdict, parse_load, run_all_with, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_repo_graph::GitHistory;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// The arguments of `./dev check --pre-push`.
@@ -43,6 +48,14 @@ pub struct PrePushArgs {
     /// Take these repository-relative files as the change instead of asking git.
     #[arg(long, value_delimiter = ',')]
     pub files: Vec<String>,
+    /// Read the refs being pushed from standard input (git's pre-push format: `<local ref> <local sha> <remote ref> <remote sha>`
+    /// per line) and check exactly those commits, not the working tree. The hook passes it.
+    #[arg(long)]
+    pub refs_from_stdin: bool,
+    /// Let these gates (first word of their row) be "not measured" without blocking the push; each use is logged. Also read from
+    /// PADDOCK_ACCEPT_NOT_MEASURED (comma separated).
+    #[arg(long, value_delimiter = ',')]
+    pub accept_not_measured: Vec<String>,
 }
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -59,12 +72,33 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         }
     };
     let env: HashMap<String, String> = std::env::vars().collect();
+    let mut accept = args.accept_not_measured.clone();
+    accept.extend(
+        env.get("PADDOCK_ACCEPT_NOT_MEASURED")
+            .map(|v| {
+                v.split(',')
+                    .map(|w| w.trim().to_string())
+                    .filter(|w| !w.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default(),
+    );
+    let stop = Arc::new(AtomicBool::new(false));
+    stop_on_signals(&stop);
+    let state = state_dir(&root);
     let real = RealExec {
         root: root.clone(),
         env: env.clone(),
+        logs: state.join("logs"),
+        stop: Arc::clone(&stop),
     };
-    let change = discover(&root, &args.base, &args.files)?;
-    if change.files.is_empty() && change.range.is_none() {
+    let pushed = if args.refs_from_stdin {
+        parse_refs(&read_stdin())
+    } else {
+        Vec::new()
+    };
+    let (change, mut notes) = discover(&root, &args.base, &args.files, &pushed)?;
+    if change.files.is_empty() && change.ranges.is_empty() {
         return Ok(Report::new(
             json!({"gates": [], "changed": 0}),
             format!("pre-push: nothing changed since {}; nothing to check.", args.base),
@@ -99,20 +133,100 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     }
     let load = uptime_load(&real);
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
-    let mut head = format!(
-        "pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {})",
+    if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
+        notes.push("PADDOCK_HEAVY is not set and no heavy.sh or heavy is on PATH: compiles run without the machine-wide slot (CARGO_BUILD_JOBS=2 still applies)".into());
+    }
+    let head = format!(
+        "pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
         change.files.len(),
         args.base,
         n,
-        load.map_or("unknown".to_string(), |l| format!("{l:.1}"))
+        load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
+        BUDGET.as_secs() / 60,
+        real.logs.display(),
+        notes.iter().map(|n| format!("pre-push: {n}")).collect::<Vec<_>>().join("\n")
     );
-    if env.get("PADDOCK_HEAVY").is_none_or(|h| h.trim().is_empty()) {
-        head.push_str(
-            "\npre-push: PADDOCK_HEAVY is not set: compiles run without the machine-wide slot (CARGO_BUILD_JOBS=2 still applies)",
-        );
+    let mut rows = run_all_with(
+        &planned,
+        &real,
+        &RunOpts {
+            workers: n,
+            budget: BUDGET,
+            stop: &stop,
+        },
+    );
+    accept_not_measured(&mut rows, &accept, &state);
+    let mut report = render(head.trim_end(), &rows);
+    if stop.load(Ordering::SeqCst) {
+        report = report.with_exit(Exit::Interrupted);
     }
-    let rows = run_all(&planned, &real, n);
-    Ok(render(&head, &rows))
+    Ok(report)
+}
+
+#[cfg(unix)]
+fn stop_on_signals(stop: &Arc<AtomicBool>) {
+    use signal_hook::consts::{SIGINT, SIGTERM};
+    for sig in [SIGINT, SIGTERM] {
+        let _ = signal_hook::flag::register(sig, Arc::clone(stop));
+    }
+}
+
+/// Windows: Ctrl+C reaches the whole console group, including the gates, so nothing is forwarded.
+#[cfg(not(unix))]
+fn stop_on_signals(_stop: &Arc<AtomicBool>) {}
+
+/// The folder for this checkout's gate logs and override log: `<git common dir>/paddock-pre-push`.
+fn state_dir(root: &Path) -> PathBuf {
+    git_text(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .map(|t| PathBuf::from(t.trim()))
+        .unwrap_or_else(|| root.join(".git"))
+        .join("paddock-pre-push")
+}
+
+fn read_stdin() -> String {
+    use std::io::Read;
+    let mut text = String::new();
+    let _ = std::io::stdin().read_to_string(&mut text);
+    text
+}
+
+/// The commits a push sends, from git's pre-push input: the local sha of every ref that is not a deletion.
+pub fn parse_refs(input: &str) -> Vec<String> {
+    let mut shas: Vec<String> = input
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .filter(|sha| sha.chars().any(|c| c != '0'))
+        .map(str::to_string)
+        .collect();
+    shas.dedup();
+    shas
+}
+
+/// Turns the not-measured rows a person named into accepted ones and logs each use: when, who, which gate and why.
+pub fn accept_not_measured(rows: &mut [(String, Verdict)], accept: &[String], state: &Path) {
+    for (id, v) in rows.iter_mut() {
+        let word = id.split(' ').next().unwrap_or(id);
+        let Verdict::NotMeasured { reason, .. } = v else { continue };
+        if !accept.iter().any(|a| a == word || a == id) {
+            continue;
+        }
+        let line = format!(
+            "{} user={} gate={id} reason={reason}\n",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+            std::env::var("USER").unwrap_or_default()
+        );
+        let _ = std::fs::create_dir_all(state);
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(state.join("overrides.log"))
+        {
+            let _ = std::io::Write::write_all(&mut f, line.as_bytes());
+        }
+        *v = Verdict::Accepted { reason: reason.clone() };
+    }
 }
 
 fn dry_run(planned: &[gates::Planned]) -> Report {
@@ -137,10 +251,11 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
     Report::new(json!({ "dry_run": true, "gates": data }), text)
 }
 
-/// The table, one line per row, and the exit code (see the module doc). A failure's line carries its cause and next step.
+/// The table, one line per row, then what CI runs that this gate does not, and the exit code (see the module doc). A failure's line
+/// carries its cause and next step.
 pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
     let mut text = format!("{head}\n");
-    let (mut ok, mut fail, mut skip, mut unmeasured, mut broken) = (0, 0, 0, 0, 0);
+    let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
     let mut data = Vec::new();
     for (id, v) in rows {
         let (line, kind) = match v {
@@ -155,6 +270,13 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
             Verdict::NotMeasured { reason, next } => {
                 unmeasured += 1;
                 (format!("NOT MEASURED  {id:<34} {reason}. Next: {next}"), "not measured")
+            }
+            Verdict::Accepted { reason } => {
+                accepted += 1;
+                (
+                    format!("ACCEPTED      {id:<34} not measured ({reason}); named in PADDOCK_ACCEPT_NOT_MEASURED, logged"),
+                    "accepted",
+                )
             }
             Verdict::Failed { cause, tail, next, secs } => {
                 fail += 1;
@@ -177,14 +299,19 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
         text.push('\n');
         data.push(json!({"id": id, "verdict": kind}));
     }
+    text.push_str("CI also runs, and this gate does not:\n");
+    for (what, why) in gates::NOT_RUN {
+        text.push_str(&format!("  - {what}: {why}\n"));
+    }
     text.push_str(&format!(
-        "pre-push: {ok} passed, {fail} failed, {unmeasured} not measured, {broken} broken, {skip} skipped. {}",
+        "pre-push: {ok} passed, {fail} failed, {unmeasured} not measured, {accepted} accepted, {broken} broken, {skip} skipped. {}",
         if fail + unmeasured + broken == 0 {
             "Safe to push."
         } else {
             "Not proven: do not push."
         }
     ));
+    // 7 beats 5 and 6, and 5 beats 6: the worst finding decides.
     let exit = if broken > 0 {
         Exit::CheckBroken
     } else if fail > 0 {
@@ -194,23 +321,18 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
     } else {
         Exit::Ok
     };
+    let not_run: Vec<&str> = gates::NOT_RUN.iter().map(|(w, _)| *w).collect();
     Report::new(
-        json!({ "gates": data, "passed": ok, "failed": fail, "not_measured": unmeasured, "broken": broken, "skipped": skip }),
+        json!({ "gates": data, "passed": ok, "failed": fail, "not_measured": unmeasured, "accepted": accepted, "broken": broken, "skipped": skip, "ci_only": not_run }),
         text,
     )
     .with_exit(exit)
 }
 
-/// The change: files since the merge base (committed, modified, untracked), and the commits to lint.
-fn discover(root: &Path, base: &str, files: &[String]) -> Result<Change, CliError> {
-    let mb = git_text(root, &["merge-base", base, "HEAD"])
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| {
-            CliError::failure(format!("There is no merge base of {base} and HEAD.")).with_hint(format!(
-                "Run `git fetch origin` or pass --base <ref> (this check measures the push from {base})."
-            ))
-        })?;
+/// The change and notes for the header. Without pushed refs: files since the merge base (committed, modified, untracked) and the
+/// range to HEAD. With them: the files and range of exactly those commits, and a note when the tree is dirty (dirty files are not
+/// pushed, so they are not checked).
+fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Result<(Change, Vec<String>), CliError> {
     let lines = |t: Option<String>| {
         t.unwrap_or_default()
             .lines()
@@ -218,24 +340,65 @@ fn discover(root: &Path, base: &str, files: &[String]) -> Result<Change, CliErro
             .map(str::to_string)
             .collect::<Vec<_>>()
     };
-    let mut changed = if files.is_empty() {
-        let tracked = git_text(root, &["diff", "--name-only", &mb])
-            .ok_or_else(|| CliError::failure(format!("git diff against {mb} failed.")).with_hint("Run it by hand to see why."))?;
-        let mut all = lines(Some(tracked));
-        all.extend(lines(git_text(root, &["ls-files", "--others", "--exclude-standard"])));
-        all
-    } else {
-        files.to_vec()
+    let merge_base = |tip: &str| {
+        git_text(root, &["merge-base", base, tip])
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| {
+                CliError::failure(format!("There is no merge base of {base} and {tip}.")).with_hint(format!(
+                    "Run `git fetch origin` or pass --base <ref> (this check measures the push from {base})."
+                ))
+            })
     };
+    let count = |mb: &str, tip: &str| {
+        git_text(root, &["rev-list", "--count", &format!("{mb}..{tip}")])
+            .and_then(|t| t.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+    let mut notes = Vec::new();
+    let dirty = lines(git_text(root, &["status", "--porcelain"]));
+    let mut changed: Vec<String> = Vec::new();
+    let mut ranges = Vec::new();
+    if !pushed.is_empty() {
+        for tip in pushed {
+            let mb = merge_base(tip)?;
+            let diff = git_text(root, &["diff", "--name-only", &mb, tip])
+                .ok_or_else(|| CliError::failure(format!("git diff {mb} {tip} failed.")).with_hint("Run it by hand to see why."))?;
+            changed.extend(lines(Some(diff)));
+            if count(&mb, tip) > 0 {
+                ranges.push(format!("{mb}..{tip}"));
+            }
+        }
+        if !dirty.is_empty() {
+            notes.push(format!(
+                "the working tree has {} uncommitted change(s); they are not pushed and not checked",
+                dirty.len()
+            ));
+        }
+    } else {
+        let mb = merge_base("HEAD")?;
+        if files.is_empty() {
+            let tracked = git_text(root, &["diff", "--name-only", &mb])
+                .ok_or_else(|| CliError::failure(format!("git diff against {mb} failed.")).with_hint("Run it by hand to see why."))?;
+            changed.extend(lines(Some(tracked)));
+            changed.extend(lines(git_text(root, &["ls-files", "--others", "--exclude-standard"])));
+            if !dirty.is_empty() {
+                notes.push(format!(
+                    "the working tree has {} uncommitted change(s); they are checked here but a push does not send them",
+                    dirty.len()
+                ));
+            }
+        } else {
+            changed.extend(files.iter().cloned());
+        }
+        if count(&mb, "HEAD") > 0 {
+            ranges.push(format!("{mb}..HEAD"));
+        }
+    }
     changed.sort();
     changed.dedup();
-    let count = git_text(root, &["rev-list", "--count", &format!("{mb}..HEAD")])
-        .and_then(|t| t.trim().parse::<u32>().ok())
-        .unwrap_or(0);
-    Ok(Change {
-        files: changed,
-        range: (count > 0).then(|| format!("{mb}..HEAD")),
-    })
+    ranges.dedup();
+    Ok((Change { files: changed, ranges }, notes))
 }
 
 /// What the repository says that the plan does not: ci.yml's conformance line, the apps that lint Windows, the CI image.

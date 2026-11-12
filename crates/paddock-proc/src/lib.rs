@@ -88,6 +88,7 @@ pub use login::{
 };
 pub use run::{
     DEFAULT_MAX_OUTPUT, Limits, Outcome, Output, RunError, Sink, run_bounded, run_waited,
+    run_waited_cancellable,
 };
 pub use runstate::{RunState, run_state};
 pub use stall::{StallAction, StallCause, StallReport};
