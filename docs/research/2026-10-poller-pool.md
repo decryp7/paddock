@@ -240,7 +240,7 @@ watch) is its own process (B). The demos run the shared-crate threads listed nex
 | A | `crates/paddock-metrics/src/sampler.rs:29` | `Sampler::sample` | no driver | 0 | the pool drives it | – |
 | A | `crates/paddock-files/src/open.rs:326,337` | opener reaper | 20 ms until deadline | 1 per open | child wait + deadline | 50/s per open |
 | B | `paddock-live/src/runner.rs:113`, `paddock-ipc/src/link/client.rs:308`, `paddock-pitwall/src/retry.rs:89,142` | reconnect / retry back-off | back-off | caller | stay (retry is not periodic); `retry.rs`'s `ThreadSleeper` (50 ms slices) duplicates `Clock::wait` | 20/s while waiting |
-| B | `paddock-panels/src/tauri/native.rs:80`, `paddock-service/src/native.rs:438` | drag cursor tracker; SCM host loop | real-time / other process | stay | – |
+| B | `paddock-panels/src/tauri/native.rs:80`, `paddock-service/src/native.rs:438` | drag cursor tracker; SCM host loop | real-time / other process | stay | – | |
 | E | `paddock-guard/src/guard.rs:154` | **timer thread per guarded call** | one-shot | 1 per plugin call | scheduler one-shot | a spawn per call |
 | E | `paddock-chromium/src/launch.rs:642`, `paddock-ipc/src/handshake.rs:91`, `paddock-window/src/tauri/{lifecycle.rs:57,popover.rs:303}` | one-shot watchdogs and fades | one-shot | 1 per event | `after(deadline)` | a spawn each |
 | E | `paddock-health/src/notify/writer.rs:54`, `paddock-startup/src/session.rs:286`, `paddock-live/src/tauri.rs:115` | idle-blocked writers / per-channel emitters | event | 1 each | one-shot + worker; one multiplexed emitter | memory only |

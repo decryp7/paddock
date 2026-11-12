@@ -397,7 +397,7 @@ only from `paddock` (§4); treat any later problem as a forward fix, not a rollb
 | One red app blocks everyone's `main` | Matrix legs are per app; a red leg blocks only pushes that affect that app (rule 4 still applies to whoever broke it) |
 | CI load: a shell change runs every app | sccache warm cache; the apps' tests run in parallel matrix legs within rule-41 limits; WebKit only nightly and on release |
 | Checkout and agent disk use | Sparse checkouts, shared object store, per-app target dirs cleaned by `clean-build-dirs`; no LFS needed |
-| Lost history or tags | filter-repo on a fresh clone, compare `git log --oneline | wc -l` and tag lists before and after; old repos stay |
+| Lost history or tags | filter-repo on a fresh clone, compare `git log --oneline \| wc -l` and tag lists before and after; old repos stay |
 | Old commit hashes in issues and docs no longer resolve in `paddock` | Old repos stay readable; import merge names the last old hash; a `docs/history.md` table maps repo to import commit |
 | Debrief 1.1 or another release in flight during the move | Migration starts only after 0.3.0 and with no release in progress; one app at a time; its release waits for its own import step |
 | Gitea features not as assumed (CODEOWNERS, artifact v4) | Step 0 checked CODEOWNERS (supported, regex patterns); artifact v4 is checked in step 2 |
