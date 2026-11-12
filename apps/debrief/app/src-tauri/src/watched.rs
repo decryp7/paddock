@@ -469,14 +469,13 @@ mod tests {
         assert!(ipc(&main, "add_watched_folder", json!({ "path": "/definitely/not/granted" })).is_err());
 
         // The poller imports the settled file into the window's store.
-        let started = Instant::now();
-        let imported = loop {
-            let now = ipc(&main, "watched_folders", json!({})).unwrap();
-            if now[0]["importedFiles"].as_u64().unwrap_or(0) > 0 || started.elapsed() > Duration::from_secs(40) {
-                break now[0]["importedFiles"].as_u64().unwrap_or(0);
-            }
-            std::thread::sleep(Duration::from_millis(300));
+        let imported_files = || {
+            ipc(&main, "watched_folders", json!({})).unwrap()[0]["importedFiles"]
+                .as_u64()
+                .unwrap_or(0)
         };
+        paddock_testkit::wait_until("the settled file to be imported", || imported_files() > 0);
+        let imported = imported_files();
         assert_eq!(imported, 1, "the file settled and was imported");
         let summary = ipc(&main, "workspace_summary", json!({})).unwrap();
         assert_eq!(summary["total"], 2);
@@ -512,15 +511,13 @@ mod tests {
             .unwrap();
         }
         ipc(&main, "add_watched_folder", json!({ "path": dir.0.to_string_lossy() })).unwrap();
-        let started = Instant::now();
-        loop {
-            let now = ipc(&main, "watched_folders", json!({})).unwrap();
-            if now[0]["importedFiles"].as_u64().unwrap_or(0) >= 6 || started.elapsed() > Duration::from_secs(60) {
-                assert_eq!(now[0]["importedFiles"], 6);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(300));
-        }
+        let imported_files = || {
+            ipc(&main, "watched_folders", json!({})).unwrap()[0]["importedFiles"]
+                .as_u64()
+                .unwrap_or(0)
+        };
+        paddock_testkit::wait_until("all six files to be imported", || imported_files() >= 6);
+        assert_eq!(imported_files(), 6);
         let mine: Vec<usize> = BATCHES
             .lock()
             .unwrap()

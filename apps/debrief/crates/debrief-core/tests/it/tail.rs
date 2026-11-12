@@ -1065,15 +1065,9 @@ impl WatcherFactory for FakeFactory {
     }
 }
 
-fn wait_until(mut f: impl FnMut() -> bool) -> bool {
-    let end = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < end {
-        if f() {
-            return true;
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    false
+/// Waits for the condition on the kit's clock (a hang guard, never a verdict by time); true so the call sites keep their asserts.
+fn wait_until(f: impl FnMut() -> bool) -> bool {
+    paddock_testkit::poll_until_within(paddock_testkit::HANG_GUARD, f)
 }
 
 #[test]

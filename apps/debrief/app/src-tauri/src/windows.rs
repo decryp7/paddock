@@ -414,14 +414,15 @@ pub(crate) mod tests {
         let windows = Arc::new(Windows::new(Box::new(move |label| {
             if label == "slow" {
                 let _ = entered.send(());
-                let _ = released.lock().unwrap().recv_timeout(std::time::Duration::from_secs(10));
+                // Held until the test lets go (or ends: the sender is dropped).
+                let _ = released.lock().unwrap().recv();
             }
             inner(label)
         })));
         windows.get_or_create(MAIN).unwrap();
         let w = windows.clone();
         let slow = std::thread::spawn(move || w.get_or_create("slow").map(|s| s.label().to_string()));
-        building.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        paddock_testkit::wait_for("the slow window to be building", || building.try_recv().ok());
         let started = std::time::Instant::now();
         assert!(windows.get(MAIN).is_some());
         assert_eq!(windows.all().len(), 1);
@@ -544,7 +545,7 @@ pub(crate) mod tests {
         })
         .unwrap();
         w.publish(debrief_core::events::SnapshotTaken { id: "snap-1".into() });
-        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), "snap-1");
+        assert_eq!(paddock_testkit::wait_for("the snapshot event", || rx.try_recv().ok()), "snap-1");
         let m = w.event_metrics();
         assert_eq!(m.len(), 1);
         assert_eq!(m[0].plugin, "test.listener");

@@ -103,13 +103,7 @@ fn the_background_repair_ends_with_the_service_back() {
     h.set_repair(STORE, Arc::new(|| Ok(())));
     h.store_failed(StoreFailure::Crashed, "x");
     h.repair("store").unwrap();
-    for _ in 0..200 {
-        if h.state(STORE) == Some(ServiceState::Ok) {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    panic!("the repair did not finish");
+    paddock_testkit::wait_until("the repair to finish", || h.state(STORE) == Some(ServiceState::Ok));
 }
 
 #[test]

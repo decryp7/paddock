@@ -109,7 +109,9 @@ mod tests {
         assert!(!a.started());
         a.start();
         a.start();
-        let mut names: Vec<_> = (0..2).map(|_| rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap()).collect();
+        let mut names: Vec<_> = (0..2)
+            .map(|_| paddock_testkit::wait_for("an after-paint task to run", || rx.try_recv().ok()).unwrap())
+            .collect();
         names.sort();
         assert_eq!(names, vec!["after-paint-one", "after-paint-two"]);
         assert!(rx.recv_timeout(Duration::from_millis(50)).is_err(), "each task ran once");
@@ -121,7 +123,7 @@ mod tests {
         a.start();
         let (tx, rx) = mpsc::channel();
         a.later("late", move || tx.send(()).unwrap());
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        paddock_testkit::wait_for("the late task to run", || rx.try_recv().ok());
     }
 
     #[test]
@@ -145,6 +147,6 @@ mod tests {
             "another window's paint does not count"
         );
         ready(crate::windows::MAIN);
-        rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        paddock_testkit::wait_for("the probe task to run once the main window is ready", || rx.try_recv().ok());
     }
 }

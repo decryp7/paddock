@@ -1487,10 +1487,7 @@ mod plugin_processes_tests {
         .join()
         .unwrap();
         assert!(during > 0, "the import started plugin processes");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        while children() > 0 && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+        paddock_testkit::wait_until("the plugin processes to end", || children() == 0);
         assert_eq!(children(), 0, "plugin processes outlived the test thread that started them");
     }
 

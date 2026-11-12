@@ -1242,7 +1242,7 @@ mod tests {
             })
             .unwrap();
         publish_snapshot_taken(app.handle(), "snap-42");
-        assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), "snap-42");
+        assert_eq!(paddock_testkit::wait_for("the snapshot event", || rx.try_recv().ok()), "snap-42");
         // Without window state (e.g. very early at startup) nothing happens.
         publish_snapshot_taken(tauri::test::mock_app().handle(), "x");
     }

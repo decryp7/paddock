@@ -331,9 +331,7 @@ fn an_interrupted_download_resumes_only_the_missing_ranges() {
     let first = Arc::new(first);
     let f2 = first.clone();
     let h = std::thread::spawn(move || download(&*f2, &d2, opts(), &p2));
-    while p.snapshot().bytes < (SIZE as u64) / 2 {
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    paddock_testkit::wait_until("half of the download", || p.snapshot().bytes >= (SIZE as u64) / 2);
     p.cancel();
     assert!(matches!(h.join().unwrap(), Err(AiError::Cancelled)));
     let had = p.snapshot().bytes;

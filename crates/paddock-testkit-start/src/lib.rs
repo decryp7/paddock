@@ -169,6 +169,21 @@ impl Logged {
         })
     }
 
+    /// [`Logged::spawn`] after the program's first start was paid ([`warm_first_start`] with `warm_args`, `--version` by
+    /// convention): the OS's check of a fresh binary is then not charged to the start the test waits on. The program must end
+    /// on its own with `warm_args` (a program that serves forever would block here), so this is a choice, never the default.
+    ///
+    /// # Errors
+    /// As [`Logged::spawn`]; a program that fails its warm-up panics, as [`warm_first_start`] does.
+    pub fn spawn_warmed(
+        cmd: &mut Command,
+        stderr: &Path,
+        warm_args: &[&str],
+    ) -> std::io::Result<Logged> {
+        warm_first_start(Path::new(cmd.get_program()), warm_args);
+        Logged::spawn(cmd, stderr)
+    }
+
     /// The child, for what the test does with it (its pid, its standard output, a kill).
     pub fn child(&mut self) -> &mut Child {
         &mut self.child

@@ -650,11 +650,9 @@ mod tests {
         assert!([1, 0].contains(&report.appended), "{report:?}");
         emit_report(app.handle(), "main", &report);
         emit_report(app.handle(), "main", &TailReport::default());
-        // Generous: a loaded CI runner can stall this test for many seconds.
-        let deadline = std::time::Instant::now() + Duration::from_secs(90);
-        while crate::test_support::store_summary(&st()).total < 2 && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        paddock_testkit::wait_until("the second event to reach the store", || {
+            crate::test_support::store_summary(&st()).total >= 2
+        });
         assert_eq!(block(workspace_summary(st())).unwrap().json()["total"], 2);
         // The store lists the followed file with where it was last read; the session's watcher mode is shown.
         let status = block(tail_status(st())).unwrap();
@@ -694,10 +692,9 @@ mod tests {
         // The follow-up flush thread may deliver the held line before this refresh does; either way it arrives once.
         let report = apply_changes(&st(), &[]);
         assert!([0, 1].contains(&report.appended), "{report:?}");
-        let deadline = std::time::Instant::now() + Duration::from_secs(90);
-        while crate::test_support::store_summary(&st()).total < 3 && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        paddock_testkit::wait_until("the third event to reach the store", || {
+            crate::test_support::store_summary(&st()).total >= 3
+        });
         assert_eq!(crate::test_support::store_summary(&st()).total, 3);
         // A throttled annotator (at most one run a second) asks for another refresh: do what the follow-up flush does
         // until nothing is wanted, within a bound.
@@ -866,10 +863,7 @@ mod tests {
         drop(main);
         crate::window_manager::destroyed(app.handle(), "main");
         // A batch the watcher had in flight (the store re-reading the file) finishes, then lets go.
-        let deadline = std::time::Instant::now() + Duration::from_secs(20);
-        while weak.upgrade().is_some() && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        paddock_testkit::wait_until("the last reference to the window state to go", || weak.upgrade().is_none());
         assert!(weak.upgrade().is_none());
     }
 
@@ -955,10 +949,9 @@ mod tests {
         std::thread::sleep(Duration::from_millis(300));
         let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
         std::io::Write::write_all(&mut f, b"2026-10-14 10:00:01 INFO second\n").unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(90);
-        while crate::test_support::store_summary(&st()).total < 2 && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        paddock_testkit::wait_until("the appended event to reach the store", || {
+            crate::test_support::store_summary(&st()).total >= 2
+        });
         assert_eq!(crate::test_support::store_summary(&st()).total, 2);
         block(set_live(app.handle().clone(), st(), false, None)).unwrap();
     }

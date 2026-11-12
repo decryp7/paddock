@@ -2,11 +2,7 @@ use super::*;
 use std::time::{Duration, Instant};
 
 fn wait_until(what: &str, f: impl Fn() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !f() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    paddock_testkit::wait_until(what, f);
 }
 
 #[derive(Debug)]

@@ -537,13 +537,12 @@ mod tests {
             let text = std::fs::read(&log_file).unwrap_or_default();
             String::from_utf8_lossy(&text[before.min(text.len())..]).into_owned()
         };
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut written = read();
-        while !written.contains("IPC run_query from main") && std::time::Instant::now() < deadline {
-            std::thread::sleep(std::time::Duration::from_millis(50));
+        paddock_testkit::wait_until("the IPC line to be written", || {
             log::logger().flush();
             written = read();
-        }
+            written.contains("IPC run_query from main")
+        });
         assert!(
             written.contains("IPC run_query from main"),
             "the commands were logged to the file: {written}"
