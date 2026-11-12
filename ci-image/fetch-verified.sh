@@ -22,7 +22,11 @@ if [ "${#want}" -ne 64 ]; then
 fi
 
 mkdir -p "$(dirname "$dest")"
-curl -fsSL --retry 3 --retry-delay 2 -o "$dest" "$url" || { rm -f "$dest"; echo "fetch-verified: download failed: $url" >&2; exit 1; }
+# Bounded (ER-27 and the family's "external tools run with timeouts"): 20 s to connect, 10 minutes in all, at most 400 MB.
+started=$SECONDS
+curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 --max-time 600 --max-filesize 419430400 -o "$dest" "$url" \
+  || { rc=$?; rm -f "$dest"; echo "fetch-verified: download failed (curl exit $rc after $((SECONDS - started)) s; 28 = timed out, 63 = larger than 400 MB): $url" >&2; exit 1; }
+echo "fetch-verified: downloaded $(wc -c < "$dest" | tr -d ' ') bytes in $((SECONDS - started)) s: $url" >&2
 
 if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$dest" | cut -d' ' -f1); else got=$(shasum -a 256 "$dest" | cut -d' ' -f1); fi
 if [ "$got" != "$want" ]; then

@@ -355,7 +355,7 @@ const OWNERS = [
   // The scripts' tests run in the ui job (`npm run test:scripts`) and in the tools job.
   [/^scripts\//, ['tools', 'ui']],
   [/^icons\//, ['icons']],
-  [/^ci-image\//, ['ci-image', 'ui']], // scripts/ci-image.test.mjs checks the image against the lock
+  [/^ci-image\//, ['ci-image', 'ui', 'tools']], // scripts/ci-image.test.mjs checks the image against the lock; the tools job's SVG drift check runs the pinned draw.io
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
   [/^wiki-lint\.json$/, ['tools']], // the settings of tools/wiki, which lints docs/wiki (ER-30)
 ];

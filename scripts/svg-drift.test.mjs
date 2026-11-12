@@ -142,12 +142,25 @@ describe('the check on a repository', () => {
     assert.equal(none, 1);
   });
 
-  test('a repository where no source has an export checked nothing, which is a failure', () => {
+  test('a source whose SVGs are nowhere is an error, "not measured", never a note', () => {
     const r = repo('nothing');
     spawnSync('git', ['rm', '-rq', 'apps/x/docs/diagrams/svg'], { cwd: r.root });
     const { code, out } = check(r);
     assert.equal(code, 1);
+    assert.match(out, /::error file=apps\/x\/docs\/diagrams\/a\.drawio::.*not measured/);
     assert.match(out, /saw nothing/);
+  });
+
+  test('a folder that keeps its SVGs elsewhere is read from the declared table (the Sighter layout)', () => {
+    const r = repo('sighter');
+    const from = join(r.root, 'apps/x/docs/diagrams'), to = join(r.root, 'apps/sighter/docs');
+    mkdirSync(join(to, 'images/diagrams'), { recursive: true });
+    spawnSync('git', ['mv', from, join(to, 'diagrams')], { cwd: r.root });
+    mkdirSync(join(to, 'images/diagrams'), { recursive: true });
+    spawnSync('git', ['mv', join(to, 'diagrams/svg'), join(to, 'images/diagrams/svg')], { cwd: r.root });
+    assert.equal(check(r).code, 0);
+    writeFileSync(join(to, 'images/diagrams/svg/a.svg'), readFileSync(join(to, 'images/diagrams/svg/a.svg'), 'utf8').replace('#aabbcc', '#aabbcd'));
+    assert.equal(check(r).code, 1);
   });
 
   test('the scratch export is removed', () => {
@@ -176,10 +189,54 @@ describe('normalising and comparing', () => {
     assert.match(differs(normalise(a), normalise(b.replace('a: b', 'a: c'))), /markup differs/);
   });
 
-  test('numbers under 8 (stroke width, opacity) must be equal, larger ones may differ by the tolerance', () => {
-    assert.equal(differs('<rect width="120" stroke-width="1"/>', '<rect width="130" stroke-width="1"/>'), null);
-    assert.match(differs('<rect width="120" stroke-width="1"/>', '<rect width="130" stroke-width="2"/>'), /number 2/);
-    assert.match(differs('<rect width="120"/>', '<rect width="150"/>'), /number 1/);
+  const box = (x, w, extra = '') => `<svg width="300px" height="90px" viewBox="0 0 300 90"><rect x="${x}" y="20" width="${w}" height="40" ${extra}/><rect x="${x + 150}" y="20" width="60" height="40"/></svg>`;
+  const label = (size) => `<svg width="300px"><span style="font-size:${size}px">Save</span></svg>`;
+
+  test('a font size is compared exactly: 12 to 24, and 12 to 13', () => {
+    assert.match(differs(label(24), label(12)), /not an x coordinate/);
+    assert.match(differs(label(13), label(12)), /not an x coordinate/);
+    assert.equal(differs(label(12), label(12)), null);
+  });
+
+  test('a box resized by a few pixels is drift, even where a sideways shift of the whole drawing is allowed', () => {
+    assert.match(differs(box(16, 114), box(16, 100)), /not an x coordinate/);
+    assert.match(differs(box(16, 101), box(16, 100)), /not an x coordinate/);
+    // the same drawing shifted by 5, with one box also 5 wider: still drift
+    assert.match(differs(box(21, 105), box(16, 100)), /not an x coordinate/);
+  });
+
+  test('one box moved is drift: by 14 (over the tolerance), and by 5 while the others stay put', () => {
+    assert.match(differs(box(30, 100), box(16, 100)), /more than 12|one box moved/);
+    const moved = '<svg width="300px"><rect x="21" y="1" width="9"/><rect x="100" y="1" width="9"/></svg>';
+    const still = '<svg width="300px"><rect x="16" y="1" width="9"/><rect x="100" y="1" width="9"/></svg>';
+    assert.match(differs(moved, still), /one box moved/);
+  });
+
+  test('a y coordinate moved is drift, also in a shifted drawing', () => {
+    const a = '<svg width="3px"><rect x="21" y="25" width="9"/></svg>';
+    const b = '<svg width="3px"><rect x="16" y="20" width="9"/></svg>';
+    assert.match(differs(a, b), /not an x coordinate/);
+  });
+
+  test('the host shift is allowed: every x coordinate by the same few pixels, root size within 12, nothing else', () => {
+    const shifted = '<svg width="312px" height="90px" viewBox="0 0 312 90"><rect x="21" y="20" width="60"/><rect x="171" y="20" width="60"/></svg>';
+    const base = '<svg width="300px" height="90px" viewBox="0 0 300 90"><rect x="16" y="20" width="60"/><rect x="166" y="20" width="60"/></svg>';
+    assert.equal(differs(shifted, base), null);
+    assert.match(differs(shifted.replace('312px', '313px'), base), /root size/);
+    const far = '<svg width="300px" height="90px" viewBox="0 0 300 90"><rect x="29" y="20" width="60"/><rect x="179" y="20" width="60"/></svg>';
+    assert.match(differs(far, base), /more than 12/);
+  });
+
+  test('path coordinates: x follows the shift, y and arc radii do not', () => {
+    const path = (x, y) => `<svg width="9px"><path d="M ${x} ${y} L ${x + 40} ${y} Q ${x + 50} ${y} ${x + 50} ${y + 8} A 5 5 0 0 1 ${x + 60} ${y + 20}"/><rect x="${x}" y="1"/></svg>`;
+    assert.equal(differs(path(21, 30), path(16, 30)), null);
+    assert.match(differs(path(21, 31), path(16, 30)), /not an x coordinate/);
+    assert.match(differs(path(16, 30).replace('A 5 5', 'A 6 5'), path(16, 30)), /not an x coordinate/);
+  });
+
+  test('a percentage position is not a coordinate', () => {
+    assert.match(differs('<svg width="9px"><text x="50%"/><rect x="21"/></svg>', '<svg width="9px"><text x="40%"/><rect x="16"/></svg>'), /not an x coordinate/);
+    assert.equal(differs('<svg width="9px"><text x="50%"/><rect x="21"/></svg>', '<svg width="9px"><text x="50%"/><rect x="16"/></svg>'), null);
   });
 
   test('colours are text, never numbers', () => {
@@ -196,15 +253,18 @@ describe('normalising and comparing', () => {
 describe('layout', () => {
   const files = new Set(['apps/x/docs/diagrams/a.drawio', 'apps/x/docs/diagrams/svg/a.svg', 'apps/x/scripts/export-diagrams.sh', 'diagrams/templates/t.drawio']);
 
-  test('a source is paired with <dir>/svg/<name>.svg, the family drawings with docs/images, templates with nothing', () => {
-    assert.equal(committedSvg('apps/x/docs/diagrams/a.drawio', files), 'apps/x/docs/diagrams/svg/a.svg');
-    assert.equal(committedSvg('docs/images/src/drawio/paddock-handoffs.drawio', files), 'docs/images/paddock-handoffs.svg');
-    assert.equal(committedSvg('diagrams/templates/t.drawio', files), null);
+  test('a source is paired with <dir>/svg/<name>.svg, a declared folder with its table entry, templates with nothing', () => {
+    assert.equal(committedSvg('apps/x/docs/diagrams/a.drawio'), 'apps/x/docs/diagrams/svg/a.svg');
+    assert.equal(committedSvg('docs/images/src/drawio/paddock-handoffs.drawio'), 'docs/images/paddock-handoffs.svg');
+    assert.equal(committedSvg('apps/sighter/docs/diagrams/uml-seq-locate.drawio'), 'apps/sighter/docs/images/diagrams/svg/uml-seq-locate.svg');
+    assert.equal(committedSvg('diagrams/templates/t.drawio'), null);
   });
 
   test('the regeneration command is the app copy of the export script when there is one', () => {
     assert.equal(regenerate('apps/x/docs/diagrams/a.drawio', files), '(cd apps/x && scripts/export-diagrams.sh docs/diagrams docs/diagrams a)');
     assert.equal(regenerate('docs/images/src/drawio/p.drawio', files), 'node docs/images/src/integrations.mjs');
+    const sighter = new Set([...files, 'apps/sighter/scripts/export-diagrams.sh']);
+    assert.equal(regenerate('apps/sighter/docs/diagrams/q.drawio', sighter), '(cd apps/sighter && scripts/export-diagrams.sh docs/diagrams docs/images/diagrams q)');
   });
 });
 

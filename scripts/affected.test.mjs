@@ -267,6 +267,7 @@ describe('the graph of this tree', () => {
     assert.deepEqual([s.tools, s.ui, s.crates], [true, true, false]);
     const i = run('ci-image/Dockerfile');
     assert.deepEqual([i.ciImage, i.ui, i.apps], [true, true, []]);
+    assert.equal(i.tools, true, 'a draw.io bump in the image runs the SVG drift check (tools job)');
   });
 
   test('the developer tool is its own project: its folder and the ./dev wrapper mark it, and the shared crates it uses reach it', () => {

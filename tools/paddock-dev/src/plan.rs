@@ -276,7 +276,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^(tools|templates)/"), &["tools"]),
         (re(r"^scripts/"), &["tools", "ui"]),
         (re(r"^icons/"), &["icons"]),
-        (re(r"^ci-image/"), &["ci-image", "ui"]),
+        (re(r"^ci-image/"), &["ci-image", "ui", "tools"]),
         (re(r"^(renovate/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)"), &["tools"]),
         (re(r"^wiki-lint\.json$"), &["tools"]),
     ]
@@ -1110,6 +1110,8 @@ mod tests {
                 "{f}"
             );
         }
+        // a draw.io bump in the CI image runs that check too
+        assert_eq!(plan(&["ci-image/Dockerfile"])["tools"], true);
         let asset = plan(&["apps/dyno/app/src/assets/svg/logo.svg"]);
         assert_eq!((&asset["tools"], &asset["apps"]), (&json!(false), &json!(["dyno"])));
         assert_eq!(plan(&["apps/dyno/CHANGELOG.md"])["apps"], json!(["dyno"]));

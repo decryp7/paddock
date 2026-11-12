@@ -22,8 +22,9 @@ The shared way to draw Debrief, Pitcrew, Pitwall, Dyno and Spotter diagrams. The
 4. Look at the PNG and a dark render before you commit.
 5. Never edit an exported SVG by hand (ER-40). CI re-exports every `.drawio` with the pinned draw.io (`ci-image/Dockerfile`,
    `DRAWIO_VERSION`) and fails on a difference: `node scripts/svg-drift.mjs` runs the same check where draw.io is installed
-   (`DRAWIO=<path>` to point at it). It ignores what depends on the host's fonts (the fallback text lines, a few pixels of canvas
-   size) and nothing else; `scripts/svg-drift.mjs` lists exactly what it normalises. A SVG is expected at `<dir>/svg/<name>.svg`.
+   (`DRAWIO=<path>` to point at it). It ignores what depends on the host's fonts (the fallback text's wrapping, up to 12 px of root size and a sideways
+   shift of the whole drawing) and nothing else; `scripts/svg-drift.mjs` lists exactly what it normalises. A SVG is expected at `<dir>/svg/<name>.svg`, or where `EXPORT_DIRS` in the script says (Sighter's);
+   a source whose SVG is nowhere fails as "not measured".
 
 ## Load the shape library
 
