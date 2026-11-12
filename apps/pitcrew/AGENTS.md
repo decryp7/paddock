@@ -4,7 +4,7 @@ Pitcrew is a runner manager for Gitea and Forgejo: a Rust core (`crates/pitcrew-
 (`crates/pitcrew-service`), a Tauri 2 shell (`app/src-tauri`) and an Angular UI (`app/src`). See README.md for what it
 does and `docs/adr/` for why it is built this way.
 
-<!-- paddock:block rules rev=0aaf3ea1 -->
+<!-- paddock:block rules rev=f499be02 -->
 ## Paddock rules (binding)
 
 The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/rules.md) (the source; update there first). Where an older rule in this file disagrees, these win.
@@ -37,9 +37,12 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
    out of resources, the agent stops and reports instead of fixing it (2026-11-11; ER-14). *Why (added 2026-11-11):* an
    uncapped test container ran OrbStack's VM out of memory; the agent then restarted OrbStack, which also restarts every
    container of the user's, and Docker was down for about 15 minutes.
+    Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture; a check fails on real-looking values (ER-14; 2026-11-12). Paddock's planned check C110 does this.
 8. **Every lesson goes into [lessons.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
+    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; running conformance on every change is planned (ER-41).
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.
+    A tag or landing counts only a complete CI run on that exact commit, not a skipped run, a failed-only rerun or an in-place retry; `./dev ci verdict` is the one reader (planned; ER-15; 2026-11-12).
 
 ### Long operations and performance
 10. **Every operation runs on a background thread or worker pool,** never on the UI thread, the Tauri main thread or an
@@ -121,12 +124,14 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     an earlier approval), never ending a turn with an unproposed class (ER-21; hook `.claude/hooks/recurring-guard.sh` planned).
     Hooks that judge an agent's text (the recurring guard, hook `.claude/hooks/recurring-guard.sh` planned, advisory) only warn; hooks
     that guard state (the cd guard, safe-remove) still block (user, 2026-11-12).
+    A gate's "passed" is a value only the check can produce, and its tests show both a deleted check and a skipped gate fail (PRINCIPLES.md, robustness; 2026-11-12).
 
 ### Throughput (user, 2026-10-24)
 41. **Scale parallel work to the machine.** The coordinator watches load and free disk continuously and keeps the
     machine busy but not overloaded: start more agents when load stays low, hold or stop starting them when it stays
     high (Mac mini, 14 cores: aim for a 1-minute load of about 6–16, at most ~5 heavy jobs, `CARGO_BUILD_JOBS=2` each),
     use the shared build cache (`sccache`) and copy-on-write target folders, and never let tests crowd out a release.
+    Only one train's CI runs at a time on each shared runner class; `./dev ci dispatch` waits while it is busy (planned; ER-24; 2026-11-12).
 
 ### Sharing (user, 2026-10-24)
 42. **Share first.** Before building anything in an app, check Paddock's shared crates and packages (crates/README.md,
@@ -221,9 +226,11 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     "rerun failed jobs" on the same commit (`POST /api/v1/repos/{owner}/{repo}/actions/runs/{run}/rerun-failed-jobs`) only to
     retry a suspected flake, never to turn red green (ER-12). When every round is green, run the full affected plan against
     main once on the final tree (ER-8); that run catches anything a fix broke elsewhere. Then land. Nothing lands without that
-    full green run. The planner is getting a mode for this (`./dev plan --since-run <id>` lists the failed jobs and tests of
-    a run, a train-3 item); until it exists, the coordinator builds that list by hand.
+    full green run. `ci.yml` and `debrief.yml` take this as the dispatch input `since_run` = the failed run's number (`./dev
+    plan --since-run <id>` shows the plan; a full `debrief.yml` run's failures also need `bundles: true`); the full run before
+    landing (ER-10) is a plain dispatch without `since_run`.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
+    (j) Every merge into a train or integration branch runs at merge time the checks that fail only on combined code (workspace-hack, publish dry run, conformance), not first in the full run (ER-8; 2026-11-12).
 
 ### Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
@@ -353,11 +360,35 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     helper already checks the caller per connection. The user chose "warn and accept" for click-to-elevate and a caller
     check for no-click paths.
 
+### Release builds (user, 2026-11-10 and 2026-11-12; ADR 0085)
+78. **A tag run reads no state that a non-tag run can write.** It builds from folders it creates, without a compile cache,
+    with signing keys only after the install step, and with bundler tools fetched from pinned URLs and SHA-256 values; a
+    check fails it otherwise. The real updater key reaches a step only on the app's release tag (`refs/tags/<app>-v`), and
+    inside it `tauri build` only, in its environment, never in a command line, `npm ci`, a prepare command or the app's
+    `beforeBuildCommand`; a dispatch, nightly or branch run signs with a throw-away key made in the job, and a tag never
+    does. Enforced today, and nothing more:
+    (a) `conformance/ci/updater-key.sh`: in CI it fails a private key on a run that is not a tag, and a tag that has the
+    public key but no private key; it hands the key to `tauri build` by `export` and `exec` only.
+    (b) `conformance/test/updater-key-tags.test.mjs`: every workflow step gates the key with the release tag prefix, Debrief's
+    bundle step takes the key before any `npm ci`, and the bundle jobs of `app-release.yml` and `debrief.yml` skip the kept
+    npm and Angular caches and Debrief's kept Windows `node_modules` on a tag (`conformance/ci/tag-node-caches.sh`).
+    (c) `conformance/ci/before-build.mjs`: the `beforeBuildCommand` runs before `tauri build` without the key, and `tauri build`
+    gets it emptied; a `beforeBundleCommand` is refused.
+    (d) `conformance/ci/tauri-tools.mjs`: every tool Tauri would download for an NSIS or AppImage bundle is pinned, a tag
+    reads no kept tool cache, and `check` fails a tag on any unpinned or changed file in `<build folder>/.tauri`.
+    (e) `conformance/release/updater-key-check.mjs` (every `.sig` verifies against the build's one public key) and, on a tag,
+    `check-per-machine-installer.mjs` (`paddock-setup.exe`'s `key_fingerprint` is that key).
+    Not yet enforced: the build folder, `CARGO_HOME`, the compile cache, the kept clone of a host runner and cargo build
+    scripts that still run with the key inside `tauri build`; they follow with release mode (ADR 0085 WP-1 to WP-3).
+    *Why:* on 2026-11-10 synthetic experiments showed that a branch run can poison what a later tag run reads (an sccache
+    entry, a kept build folder, the cargo registry), and every rule 54 dispatch had given the updater key to `npm ci`
+    (`tauri-bundle.sh:55`), so every install script of every branch could read the key that signs updates.
+
 ### Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
-- **Rule 2:** every agent works in its own git worktree of `paddock` (sparse to its app where possible:
-  `git sparse-checkout set --cone crates ui scripts docs apps/<app>`), with its own `CARGO_TARGET_DIR` per app and its own
-  e2e port; the main checkout stays on `main` for the coordinator.
+- **Rule 2:** every agent works in its own git worktree of `paddock` (a full checkout: `./dev worktree add --profile gates`,
+  the default; sparse only for a `--detach` review copy), with its own `CARGO_TARGET_DIR` per app and its own e2e port; the
+  main checkout stays on `main` for the coordinator.
 - **Rule 3:** the affected tests are what `scripts/affected.mjs` selects, plus the touched specs; otherwise unchanged
   (Playwright in Chromium only in a branch; the full suite, Chromium and WebKit, once on the combined result before a
   local build or release, plus CI).
@@ -459,7 +490,7 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
 - **Every robustness behaviour has a test that triggers the failure** (crashing or hanging runners, corrupt config,
   checksum mismatch, failed swap, failed roll-back, missing tools).
 
-<!-- paddock:block working-in-parallel rev=458b77ad -->
+<!-- paddock:block working-in-parallel rev=0507b1ce -->
 ## Working in parallel (agents)
 
 - Each task owns an explicit set of files; don't edit outside it. Shared integration points (`lib.rs` files, the
@@ -467,6 +498,9 @@ Pitcrew runs privileged (a Windows service as LocalSystem), downloads executable
   declared line.
 - Don't run `cargo fmt --all` / `cargo clippy --fix` across the workspace while others are editing; format your own
   files (`rustfmt <files>`). Use a private `CARGO_TARGET_DIR`.
+- Before committing, check the subject: `node conformance/bin/paddock-conformance.mjs commit-lint --subject "<subject>"` (at
+  most 100 characters; detail goes in the body). A rejected commit commits nothing and leaves your staged files as they are:
+  shorten the subject and commit again, never amend an earlier commit.
 - Commit only complete, owned work. Never commit a workspace `Cargo.toml` listing crates whose sources aren't
   committed. After committing, verify the committed tree in isolation (`git archive HEAD`, then build and test) before
   pushing larger changes.

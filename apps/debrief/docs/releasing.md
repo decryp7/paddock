@@ -151,7 +151,7 @@ from the built `.app` and the DMG copy, so a load failure fails the job.
 
 The apps are not signed or notarized: updates are protected by the family update key, and paid certificates would be needed to remove the OS warnings (decision 2026-11-05). The release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
 
-<!-- paddock:block releasing rev=8ad0c1a8 -->
+<!-- paddock:block releasing rev=b41eea16 -->
 ## Releasing from a tag
 
 Releases are made by CI from the tag `debrief-vX.Y.Z`, never from a workstation (rule 9). A local build for you to try is
@@ -163,7 +163,13 @@ fine; it is never published.
 2. Before tagging (rule 25): `cargo deny check advisories`, one CI build with bundles (the workflow's manual run), the
    icon check, signing secrets stripped of whitespace, and the release notes' "First launch" section (until the apps are
    signed).
-3. Tag the commit (`git tag debrief-vX.Y.Z`, never a `[skip ci]` commit) and push the tag. The tag workflow runs the gates
+3. Request the tag, never push it: run the `tag` workflow (`.gitea/workflows/tag.yml`, `workflow_dispatch` with `tag` =
+   `debrief-vX.Y.Z` and `sha` = the full commit id; API: `POST /api/v1/repos/decryp7/paddock/actions/workflows/tag.yml/dispatches`
+   with `{"ref":"main","inputs":{"tag":"...","sha":"..."}}`). It checks that the commit is on origin, is not `[skip ci]`, that
+   the tag is new, that the version matches and that the app's workflow is green on exactly that commit, then the release
+   bot pushes an annotated tag. Tag protection refuses any other pusher. This is a guard rail against mistakes, not a security boundary: any repo writer can
+   dispatch from their own ref and repo secrets reach non-fork runs (single-user setup, ER-37). Only a full CI run counts (a
+   push to main, or a run whose plan job logged `plan mode: full=true`), and the commit must be on `main` or `release/*`. The tag workflow runs the gates
    again, builds the installers on all platforms, verifies the macOS bundle (`codesign --verify --deep --strict` on the .app
    and the DMG), publishes the release with its notes and `latest.json`.
 4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.
