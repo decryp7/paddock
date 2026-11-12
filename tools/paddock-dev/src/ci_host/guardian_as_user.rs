@@ -10,8 +10,9 @@
 //!
 //! Everything that starts a program, asks who runs it or changes an owner sits behind [`Machine`], so the root path (which a test cannot
 //! take: it would need `sudo`) is tested with a fake that records the command lines. Both programs run with a limit (ER-32): the build
-//! `PADDOCK_GUARDIAN_BUILD_TIMEOUT` seconds (default 1800), each test run `PADDOCK_GUARDIAN_TEST_TIMEOUT` (default 900); neither limit
-//! is measured against a run yet (the shell had none), they only end a hang.
+//! `PADDOCK_GUARDIAN_BUILD_TIMEOUT` seconds (default 600), each test run `PADDOCK_GUARDIAN_TEST_TIMEOUT` (default 300). The basis is
+//! the Linux crates job's recent runs: 193 s p90 for the whole job, 5 s median for this step (docs/benchmarks.md, "Orphan guardian
+//! step"); the shell had no limit, so these only end a hang.
 
 use super::Step;
 use crate::ci_tool::{Output, Ran, ToolCall};
@@ -79,6 +80,30 @@ impl Machine for Real<'_> {
             Err("changing an owner is not done on this OS".to_string())
         }
     }
+}
+
+/// What the build and the tests may see besides the base list: the gates' list (`pre_push::exec::PASS`: the toolchain, the compile cache,
+/// the temp folder), without its `PADDOCK_*` (the job's `PADDOCK_DEV_TOKEN` matches it, and no program here needs it), plus what this step
+/// reads: the image's `DUCKDB_*` and `CHROMIUM_TEST_PATH` (the owner-killed test starts a real browser), the sandbox opt-in of the job
+/// (the container runs as root) and the settings of the step itself, `RUSTDOCFLAGS` and `RUSTC_WORKSPACE_WRAPPER` as cargo's cache key
+/// reads them.
+pub fn child_pass() -> Vec<&'static str> {
+    const EXTRA: &[&str] = &[
+        "DUCKDB_*",
+        "CHROMIUM_TEST_PATH",
+        "RUSTDOCFLAGS",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "PADDOCK_BROWSER_NO_SANDBOX",
+        "PADDOCK_TEST_UID",
+        "PADDOCK_PROC_*",
+        "PADDOCK_CI_*",
+    ];
+    crate::pre_push::exec::PASS
+        .iter()
+        .copied()
+        .filter(|n| *n != "PADDOCK_*")
+        .chain(EXTRA.iter().copied())
+        .collect()
 }
 
 /// The test binary of a unit-test target in cargo's `--no-run` output: the last `Executable unittests src/lib.rs (<path>/<crate>-<hash>)`.
@@ -204,8 +229,8 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
     let mut log = Vec::new();
     let build = ToolCall::new("cargo")
         .args(["test", "--no-run", "--all-features", "-p", "paddock-proc", "-p", "paddock-chromium"])
-        .pass(crate::pre_push::exec::PASS.iter().copied())
-        .timeout(seconds(env, "PADDOCK_GUARDIAN_BUILD_TIMEOUT", 1800))
+        .pass(child_pass())
+        .timeout(seconds(env, "PADDOCK_GUARDIAN_BUILD_TIMEOUT", 600))
         .output(Output::File(build_log.clone()));
     let ran = machine.run(&build, &mut log);
     flush(&mut step, &mut log);
@@ -265,8 +290,8 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
         let started = Instant::now();
         let call = ToolCall::new(argv[0].clone())
             .args(argv[1..].iter().cloned())
-            .pass(crate::pre_push::exec::PASS.iter().copied())
-            .timeout(seconds(env, "PADDOCK_GUARDIAN_TEST_TIMEOUT", 900))
+            .pass(child_pass())
+            .timeout(seconds(env, "PADDOCK_GUARDIAN_TEST_TIMEOUT", 300))
             .output(Output::Stream);
         let mut log = Vec::new();
         let ran = machine.run(&call, &mut log);
@@ -390,6 +415,50 @@ mod tests {
             String::from_utf8(out).unwrap(),
             std::fs::read_to_string(dir.path().join("summary")).unwrap_or_default(),
         )
+    }
+
+    #[test]
+    fn the_build_and_the_tests_get_the_toolchain_cache_and_image_variables_and_no_token() {
+        let wanted = [
+            "PATH",
+            "HOME",
+            "CARGO_HOME",
+            "CARGO_TARGET_DIR",
+            "CARGO_BUILD_JOBS",
+            "CARGO_INCREMENTAL",
+            "RUSTUP_HOME",
+            "RUSTUP_TOOLCHAIN",
+            "RUSTFLAGS",
+            "RUSTDOCFLAGS",
+            "RUSTC_WRAPPER",
+            "SCCACHE_SERVER_PORT",
+            "SCCACHE_REDIS_ENDPOINT",
+            "TMPDIR",
+            "DUCKDB_LIB_DIR",
+            "DUCKDB_INCLUDE_DIR",
+            "CHROMIUM_TEST_PATH",
+            "PADDOCK_BROWSER_NO_SANDBOX",
+            "PADDOCK_TEST_UID",
+            "PADDOCK_PROC_GUARDIAN_LOG",
+        ];
+        let secrets = ["GITHUB_TOKEN", "PADDOCK_DEV_TOKEN", "BUILD_INPUTS_TOKEN", "ACTIONS_RUNTIME_TOKEN"];
+        let parent: HashMap<String, String> = wanted
+            .iter()
+            .chain(secrets.iter())
+            .map(|k| (k.to_string(), "v".to_string()))
+            .collect();
+        let kept: Vec<String> = ToolCall::new("x")
+            .pass(child_pass())
+            .child_env(&parent)
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        for k in wanted {
+            assert!(kept.iter().any(|x| x == k), "{k} reaches cargo and the tests: {kept:?}");
+        }
+        for k in secrets {
+            assert!(!kept.iter().any(|x| x == k), "{k} never reaches them: {kept:?}");
+        }
     }
 
     #[test]

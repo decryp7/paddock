@@ -1415,8 +1415,7 @@ fn guardian() -> Step {
     }
 }
 
-/// bash before 4.4 (macOS ships 3.2) fails `"${as_user[@]}"` of an empty array under `set -u`: the script is for the Linux image (bash 5),
-/// so on such a bash only the Rust side runs, the shell side is NOT MEASURED here (printed), and the Linux leg of the job runs the parity.
+/// bash before 4.4 (macOS ships 3.2) fails `"${as_user[@]}"` of an empty array under `set -u`: the script is for the Linux image (bash 5).
 fn bash_too_old_for_the_script() -> bool {
     let out = paddock_proc::command("bash")
         .args(["-c", "echo $((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1]))"])
@@ -1425,21 +1424,43 @@ fn bash_too_old_for_the_script() -> bool {
     String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().unwrap_or(0) < 404
 }
 
-fn guardian_same(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
-    if !bash_too_old_for_the_script() {
-        return same(setup, step);
-    }
-    eprintln!("NOT MEASURED: guardian-as-user.sh on bash < 4.4 (empty-array expansion under set -u); the Rust side alone is checked here");
+/// The Rust command alone on a fixture (the checks of its own output).
+fn guardian_rust(setup: &dyn Fn(&Fx)) -> Seen {
     let fx = fixture();
     setup(&fx);
-    run_one(&fx, step, true)
+    run_one(&fx, &guardian(), true)
+}
+
+fn guardian_broken_build(fx: &Fx) {
+    guardian_machine(fx, 0);
+    fx.shim("cargo", "echo 'error[E0425]: nothing here' >&2; exit 101");
+}
+
+/// The script against the command on the same three fixtures. On a bash older than 4.4 the shell side cannot run, so the case is not
+/// measured: it returns early with the reason printed (an env-gated test in the gate register, like the repo's other environment-gated
+/// tests) unless `PADDOCK_REQUIRE_SHELL_PARITY` is set, which turns "not measured" into a failure (a Linux leg sets it).
+#[test]
+fn guardian_as_user_matches_the_shell() {
+    if bash_too_old_for_the_script() {
+        assert!(
+            std::env::var_os("PADDOCK_REQUIRE_SHELL_PARITY").is_none(),
+            "NOT MEASURED: bash is older than 4.4 and PADDOCK_REQUIRE_SHELL_PARITY demands the shell side"
+        );
+        eprintln!(
+            "NOT MEASURED: guardian-as-user.sh parity (bash < 4.4: empty-array expansion under set -u); set PADDOCK_REQUIRE_SHELL_PARITY=1 to fail instead"
+        );
+        return;
+    }
+    same(&|fx| guardian_machine(fx, 0), &guardian());
+    same(&|fx| guardian_machine(fx, 3), &guardian());
+    same(&guardian_broken_build, &guardian());
 }
 
 #[test]
 fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the_calling_user() {
     // Run by a user (the test is not root: no setpriv, no sudo, ER-14), the tests run directly; the root path is the unit tests' (a fake
     // machine records the setpriv command line).
-    let seen = guardian_same(&|fx| guardian_machine(fx, 0), &guardian());
+    let seen = guardian_rust(&|fx| guardian_machine(fx, 0));
     assert_eq!(seen.code, 0, "{seen:?}");
     assert!(
         seen.stdout.contains("Building the paddock-proc and paddock-chromium unit tests"),
@@ -1459,7 +1480,7 @@ fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the
         "{seen:?}"
     );
     // A failing test: its guardian log, one error line with the command, the summary row.
-    let red = guardian_same(&|fx| guardian_machine(fx, 3), &guardian());
+    let red = guardian_rust(&|fx| guardian_machine(fx, 3));
     assert_eq!(red.code, 1, "{red:?}");
     assert!(red.stdout.contains("The guardian's log:\nguardian said no"), "{red:?}");
     assert_eq!(red.stdout.lines().filter(|l| l.starts_with("::error::")).count(), 1, "{red:?}");
@@ -1469,13 +1490,7 @@ fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the
     );
     assert!(red.github_path.contains("failed (exit 3)"), "{red:?}");
     // A build that fails: its last lines, then one error line.
-    let broken = guardian_same(
-        &|fx| {
-            guardian_machine(fx, 0);
-            fx.shim("cargo", "echo 'error[E0425]: nothing here' >&2; exit 101");
-        },
-        &guardian(),
-    );
+    let broken = guardian_rust(&guardian_broken_build);
     assert_eq!(broken.code, 1);
     assert!(broken.stdout.contains("error[E0425]: nothing here"), "{broken:?}");
     assert!(

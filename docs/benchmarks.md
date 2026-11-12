@@ -1164,3 +1164,11 @@ above (every app linted, one gate at a time at a load of 25) took over 14 minute
 to workspaces with their own changes is what makes a shared-crate push fit the 15 minute budget. Not measured: the same run at a
 load of 25 or more (the load was 11 at the start; with one gate at a time the three Clippy runs would add up to about 5 minutes
 at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).
+
+## Orphan guardian step, Linux crates job (2026-11-13, feat/ci-in-rust-wp5)
+
+- **Command:** `./dev ci timings --json --limit 15 --no-logs` (Gitea API, no token printed), the `ci.yml (push)` section, job `crates (fmt, workspace hack, unused deps, coverage, deny)`, which runs `./dev ci guardian-as-user` (the shell script before)
+- **Corpus:** 7 successful push runs of ci.yml, all on 2026-11-12, runner d-gtr9 (Linux)
+- **Numbers:** the whole job: 2 m 13 s median, 3 m 13 s p90 (193 s). The step "Orphan guardian as a user (Linux)": 5 s median (it is in the job's biggest steps; its build is a cache hit after the workspace tests, its two test runs take about a second each). The coverage step, the largest, is 86 s.
+- **Decision:** the two bounds are new (the shell had none, ER-32), not raised. Build: `PADDOCK_GUARDIAN_BUILD_TIMEOUT` default 600 s, about three times the p90 of the whole job, so a cold compile cache still fits and a hang ends. Test run: `PADDOCK_GUARDIAN_TEST_TIMEOUT` default 300 s, 60 times the step's median. Both only end a hang.
+- **Not measured:** a cold-cache run of the build (the job's runs all had a warm sccache); the step's maximum (the summary gives medians and p90 of jobs only).
