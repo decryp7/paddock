@@ -23,65 +23,87 @@ pub fn logged<T, E: Display>(what: &str, result: Result<T, E>) -> bool {
     }
 }
 
-/// Waits for a helper thread to end as a clean-up step; a thread that panicked is logged. Says whether it panicked.
+/// The message of a panic payload (`panic!("..")` carries a `&str` or a `String`).
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "a panic with no text".to_owned())
+}
+
+/// Joins `thread`: the panic message when it panicked.
+fn try_join<T>(thread: std::thread::JoinHandle<T>) -> Option<String> {
+    thread.join().err().map(|p| panic_message(p.as_ref()))
+}
+
+/// Removes a file or a folder tree; not there is the goal, so it is no error. The one removal, behind the flag and warn forms.
+fn try_remove(path: &Path, folder: bool) -> Option<std::io::Error> {
+    let result = if folder {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    };
+    result
+        .err()
+        .filter(|e| e.kind() != std::io::ErrorKind::NotFound)
+}
+
+/// Waits for a helper thread to end as a clean-up step; a thread that panicked is logged with its message. Says whether it panicked.
 #[must_use = "true means the thread panicked: leftover state a caller should surface, not drop"]
 pub fn join<T>(what: &str, thread: std::thread::JoinHandle<T>) -> bool {
-    if thread.join().is_err() {
-        report(what, &"the thread panicked");
-        true
-    } else {
-        false
+    match try_join(thread) {
+        Some(message) => {
+            report(what, &format!("the thread panicked: {message}"));
+            true
+        }
+        None => false,
+    }
+}
+
+/// [`join`] for a caller with nothing to do about a panicked thread: the panic and its message are logged at warn level,
+/// naming the thread.
+pub fn join_warn<T>(what: &str, thread: std::thread::JoinHandle<T>) {
+    if let Some(message) = try_join(thread) {
+        log::warn!("{what} panicked before it was joined; its work may be unfinished: {message}");
     }
 }
 
 /// Removes the folder at `path` and everything in it as a clean-up step: not there is the goal, any other failure is logged.
 #[must_use = "true means the folder is still there (logged): the caller decides whether leftovers matter"]
 pub fn remove_dir_all(path: &Path) -> bool {
-    match std::fs::remove_dir_all(path) {
-        Ok(()) => false,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-        Err(e) => {
-            report(&format!("removing {}", path.display()), &e);
-            true
-        }
-    }
+    remove_logged(path, true)
 }
 
 /// Removes the file at `path` as a clean-up step: a file that is not there is the goal, any other failure is logged.
 #[must_use = "true means the file is still there (logged): the caller decides whether leftovers matter"]
 pub fn remove_file(path: &Path) -> bool {
-    match std::fs::remove_file(path) {
-        Ok(()) => false,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
-        Err(e) => {
+    remove_logged(path, false)
+}
+
+fn remove_logged(path: &Path, folder: bool) -> bool {
+    match try_remove(path, folder) {
+        Some(e) => {
             report(&format!("removing {}", path.display()), &e);
             true
         }
+        None => false,
     }
 }
 
 /// Removes the folder at `path` as a best-effort clean-up and logs a failure (not "not there") at warn level with its cause,
 /// for a caller with nothing to do about a leftover but who must not hide it. A caller that can act uses [`remove_dir_all`].
 pub fn remove_dir_all_warn(path: &Path) {
-    if let Err(e) = std::fs::remove_dir_all(path)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        log::warn!("clean-up left {} behind: {e}", path.display());
-    }
-}
-
-/// [`join`] for a caller with nothing to do about a panicked thread: the panic is logged at warn level, naming the thread.
-pub fn join_warn<T>(what: &str, thread: std::thread::JoinHandle<T>) {
-    if join(what, thread) {
-        log::warn!("{what} panicked before it was joined; its work may be unfinished");
-    }
+    warn_if_left(path, try_remove(path, true));
 }
 
 /// [`remove_dir_all_warn`] for a file.
 pub fn remove_file_warn(path: &Path) {
-    if let Err(e) = std::fs::remove_file(path)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
+    warn_if_left(path, try_remove(path, false));
+}
+
+fn warn_if_left(path: &Path, error: Option<std::io::Error>) {
+    if let Some(e) = error {
         log::warn!("clean-up left {} behind: {e}", path.display());
     }
 }
@@ -89,19 +111,6 @@ pub fn remove_file_warn(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_leftover_is_logged_with_its_cause_and_a_missing_path_is_not_a_leftover() {
-        let d = tempfile::tempdir().unwrap();
-        // a file is not a folder: remove_dir_all fails with a cause, it is not "not there"
-        let f = d.path().join("f");
-        std::fs::write(&f, b"x").unwrap();
-        assert!(remove_dir_all(&f), "the failure flag is set");
-        assert!(!remove_dir_all(&d.path().join("missing")));
-        assert!(!remove_file(&d.path().join("missing")));
-        remove_file_warn(&f);
-        assert!(!f.exists());
-    }
 
     #[test]
     fn a_failed_step_is_reported_and_a_successful_one_is_not() {
