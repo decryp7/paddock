@@ -332,9 +332,6 @@ jobs:
         working-directory: .
         run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98 --strict C36
 
-      # Secret scan of the tree with the pinned gitleaks; .gitleaks.toml lists the known test fixtures, each with a reason.
-      - uses: ./.gitea/actions/gitleaks
-
       # ADR 0060, C100: every check the repository defines is run by a reachable CI line, or registered in docs/gates.toml with a
       # reason, an owner and a review date. Rollback: `./dev gates check --warn`. The nightly has a job of its own (nightly.yml).
       - uses: ./.gitea/actions/setup-rust
@@ -344,6 +341,22 @@ jobs:
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
+
+  # Secret scan (.gitea/actions/gitleaks): the tree and the commits this branch adds on top of origin/main. It runs on every change,
+  # whatever the plan reaches, because a secret is a leak wherever it is; .gitleaks.toml lists the known fixtures, one entry each.
+  gitleaks:
+    name: gitleaks (secret scan)
+    needs: [plan]
+    if: ${{ contains(fromJSON(needs.plan.outputs.rerun_jobs || '["gitleaks"]'), 'gitleaks') }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The history scan reads origin/main..HEAD.
+          fetch-depth: 0
+      - uses: ./.gitea/actions/gitleaks
 
   # Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. Its own job, planned on its inputs
   # (every Cargo.toml and Cargo.lock under apps/ and crates/, the scanned sources, capabilities, paddock.ci.json, the check's

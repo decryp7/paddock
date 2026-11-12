@@ -1,5 +1,5 @@
 name: gitleaks
-description: "Secret scan of the checked-out tree with the pinned gitleaks (checksum-verified release, .gitleaks.toml at the repository root). Fails with one ::error:: per finding (file:line and rule, never the value)."
+description: "Secret scan of the checked-out tree and of the branch's commits since origin/main with the pinned gitleaks (checksum-verified release, .gitleaks.toml at the repository root). Fails with one ::error:: per finding (file:line and rule, never the value)."
 runs:
   using: composite
   steps:
@@ -23,9 +23,27 @@ runs:
         [ "$GOT" = "$SUM" ] || { echo "::error::gitleaks $VERSION checksum mismatch for $F (got $GOT); fix the pin in .gitea/actions/gitleaks/action.yml"; exit 1; }
         tar -xzf "$dl/$F" -C "$dl" gitleaks
         echo "gitleaks $("$dl/gitleaks" version) scanning $(pwd)"
-        # --redact=100 keeps every secret value out of the log; the report only names file, line and rule.
-        if ! "$dl/gitleaks" dir . --config .gitleaks.toml --redact=100 --no-banner --exit-code 1 -f json -r "$dl/report.json"; then
-          node -e 'for (const f of JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) console.log(`::error file=${f.File},line=${f.StartLine}::gitleaks rule ${f.RuleID}: not a known test fixture? remove it and rotate the secret, or add a reasoned entry to .gitleaks.toml`)' "$dl/report.json" || true
-          exit 1
+        bad=0
+        # Two scans: the tree as checked out, and every commit the branch adds on top of origin/main, so a secret that a
+        # branch adds and later removes is still found. --redact=100 keeps every value out of the log: findings name file, line, rule.
+        scan() {
+          local name="$1"; shift
+          local rc=0
+          "$dl/gitleaks" "$@" --config .gitleaks.toml --redact=100 --no-banner --exit-code 1 -f json -r "$dl/$name.json" || rc=$?
+          if [ "$rc" -eq 0 ]; then echo "gitleaks $name: no leaks"; return 0; fi
+          if [ ! -s "$dl/$name.json" ]; then
+            echo "::error::gitleaks $name exited $rc and wrote no report; read its output above (a bad .gitleaks.toml or a missing origin/main), then rerun"
+          else
+            node -e 'for (const f of JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))) console.log(`::error file=${f.File},line=${f.StartLine}::gitleaks rule ${f.RuleID} (${process.argv[2]}, commit ${String(f.Commit || "-").slice(0, 10)}): not a known test fixture? remove it and rotate the secret, or add a reasoned entry to .gitleaks.toml`)' "$dl/$name.json" "$name" || echo "::error::gitleaks $name found leaks but its report could not be read"
+          fi
+          return 1
+        }
+        scan tree dir . || bad=1
+        if git rev-parse --verify -q origin/main >/dev/null; then
+          scan history git . --log-opts="origin/main..HEAD" || bad=1
+        else
+          echo "::error::origin/main is not fetched, so the branch's commits cannot be scanned; check out with fetch-depth: 0"
+          bad=1
         fi
+        [ "$bad" -eq 0 ] || exit 1
         echo "gitleaks: no leaks"
