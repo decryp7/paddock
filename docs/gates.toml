@@ -581,6 +581,16 @@ review_by = 2027-01-10
 approved = "coordinator"
 
 [[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/bench_waits.rs"
+tests = ["what_the_wait_logs_cost_a_store_call"]
+gate = "measurement"
+reason = "env-gated (DEBRIEF_BENCH_WAITS=<calls>): measures what the wait phase logs cost a store call, run by hand with --release --nocapture; its results block is in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-12
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/debrief/crates/debrief-plugins/tests/it/perf_plugins.rs"
 tests = ["idle_plugins"]
 gate = "not-gated"

@@ -1349,7 +1349,7 @@ a pass over the source's catalogue rows for the update join; never the source's 
 Every store call now opens a few watches (`DuckStore::conn()`: one for the borrow of the connection, more only when a lock is
 contended), so the cost of one watch and its effect on a call were measured, before (`origin/main`, b519fd27a) and after
 (branch `fix/debrief-store-phase-logs`, with the review fixes: a registry in 16 shards, no allocation for a static label, a
-`Thread` handle in place of a name). The test is `tests/bench_waits.rs` of `debrief-store-duck` (`DEBRIEF_BENCH_WAITS=300`,
+`Thread` handle in place of a name). The test is `what_the_wait_logs_cost_a_store_call` in `tests/bench_waits.rs` of `debrief-store-duck` (`DEBRIEF_BENCH_WAITS=300`,
 the samples store of about 28k events, debug build, Mac mini, load about 22 throughout because other agents were building, so
 the noise is larger than the effect; two "after" runs, one "before" run).
 
