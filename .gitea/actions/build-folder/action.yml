@@ -14,4 +14,4 @@ runs:
       env:
         WORKSPACE: ${{ inputs.workspace }}
         NAME: ${{ inputs.name }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/build-folder.sh" "$WORKSPACE" "$NAME"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host build-folder "$WORKSPACE" "$NAME"

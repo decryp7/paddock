@@ -1085,6 +1085,30 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   delete_by = "v0.5.0"
   note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh picks the implementation by the same rule as setup-rust's Implementation step) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/build_jobs.rs and conformance/test/job-isolation.test.mjs (ISOLATION_CMD) run both on the same inputs."
 
+[[mechanism]]
+id = "ci-host-steps"
+title = "The host-runner steps of the CI kit in two implementations: stable-workspace, node-caches, host-tools, sccache-stats, build-folder, the prune steps and host-cleanup in Rust, and the shell the release path keeps"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_host/mod.rs"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = [
+    "conformance/ci/host/stable-workspace.sh",
+    "conformance/ci/host/node-caches.sh",
+    "conformance/ci/host/host-tools.sh",
+    "conformance/ci/host/sccache-stats.sh",
+    "conformance/ci/build-folder.sh",
+    "tools/prune-build-folders.sh",
+    "tools/prune-ci-build-folder.sh",
+    "tools/host-cleanup.sh",
+  ]
+  symbols = ["text:kit.sh", "text:prune", "text:host-cleanup"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh `host <step>` picks the implementation by the rule of the other kit steps) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/host_steps.rs runs both on the same inputs, and conformance/test/ci-actions.test.mjs and tools/test/prune-and-cleanup.test.mjs keep the scripts' own cases. host-tools' pin is held equal by a unit test of ci_host/host_tools.rs."
+
 # =====================================================================================================================
 # CI run readers (RT-8)
 # =====================================================================================================================
