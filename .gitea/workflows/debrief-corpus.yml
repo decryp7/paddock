@@ -91,7 +91,9 @@ jobs:
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
+      # RUSTUP_TOOLCHAIN outranks the file, so the image's own toolchain is used as it is (no network).
+      - run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
 
       - uses: actions/cache@v4
         with:

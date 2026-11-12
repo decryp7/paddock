@@ -140,6 +140,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         if: runner.os == 'Windows'
 
+      # The Linux leg runs in the garage image (only `stable`): use it as it is, instead of downloading the pinned version
+      # named by rust-toolchain.toml on every run (RUSTUP_TOOLCHAIN outranks the file).
+      - if: runner.os == 'Linux'
+        run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
+
       - name: Toolchain present
         run: rustc --version && cargo --version && node --version
 

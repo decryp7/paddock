@@ -292,6 +292,15 @@ test('the dated-nightly fuzz workflow that bypasses setup-rust exports RUSTUP_TO
   assert.match(text, /echo "RUSTUP_TOOLCHAIN=\$FUZZ_TOOLCHAIN" >> "\$GITHUB_ENV"/);
 });
 
+// rust-toolchain.toml outranks the `rustup default` that dtolnay/rust-toolchain sets, and names a version the garage image does not have
+// (it would be downloaded on every run). A workflow that sets up Rust that way states which toolchain runs: RUSTUP_TOOLCHAIN.
+test('every workflow that uses dtolnay/rust-toolchain also sets RUSTUP_TOOLCHAIN (the repo pins a toolchain file)', () => {
+  const bad = readdirSync(WORKFLOWS)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .filter((f) => /dtolnay\/rust-toolchain/.test(read(join(WORKFLOWS, f))) && !/RUSTUP_TOOLCHAIN/.test(read(join(WORKFLOWS, f))));
+  assert.deepEqual(bad, [], 'set RUSTUP_TOOLCHAIN (`stable` for the garage image, the dated nightly for fuzzing) after dtolnay/rust-toolchain, or use setup-rust');
+});
+
 test('a failed toolchain install fails the step with a message that names the cause, never a bare exit code', () => {
   const crashed = runToolchainStep({}, { installRc: 127 });
   assert.equal(crashed.status, 1, crashed.out);
