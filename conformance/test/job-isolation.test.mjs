@@ -448,7 +448,7 @@ test('the declared port blocks never overlap each other or an end-to-end port, f
 // ---- The contract over every workflow: a host job takes a slot before any kept folder and gives it back last. ----
 
 const WORKFLOWS = join(PADDOCK, '.gitea', 'workflows');
-const KEPT = /actions\/(stable-workspace|kept-clone|build-folder|node-caches|setup-rust|host-tools|host-cleanup|prune-build-folder)\b|job-isolation\.sh path/;
+const KEPT = /actions\/(stable-workspace|kept-clone|build-folder|node-caches|setup-rust|host-tools|host-cleanup|prune-build-folder)\b|(?:job-isolation\.sh|kit\.sh isolation) path/;
 const files = spawnSync('git', ['ls-files', '.gitea/workflows/*.yml'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
 
 test('every job that may run on a host and uses a kept folder takes a slot first (after Git bash on Windows) and releases it as its last step, always', () => {
@@ -476,7 +476,7 @@ test('every job that may run on a host and uses a kept folder takes a slot first
 function ciFiles() {
   const listed = spawnSync('git', ['ls-files', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'conformance/ci/*.sh', 'conformance/ci/*.mjs', 'tools/*.sh', 'apps/*/scripts/ci/*'], { cwd: PADDOCK, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
-  return listed.stdout.split('\n').filter((f) => f && !f.endsWith('.test.mjs') && !['conformance/ci/ci-home.sh', 'conformance/ci/job-isolation.sh'].includes(f));
+  return listed.stdout.split('\n').filter((f) => f && !f.endsWith('.test.mjs') && !['conformance/ci/ci-home.sh', 'conformance/ci/job-isolation.sh', 'conformance/ci/kit.sh'].includes(f));
 }
 
 test('no workflow, action or CI script builds a path in the CI home except through job-isolation.sh (so isolation cannot be bypassed)', () => {
@@ -494,8 +494,8 @@ test('every kind a CI file asks for is in kept-folders.txt, and every kind there
   const kinds = new Set(read(TABLE).split('\n').filter((l) => l.trim() && !l.startsWith('#')).map((l) => l.trim().split(/\s+/)[0]));
   const used = new Set();
   for (const f of ciFiles()) {
-    for (const m of read(join(PADDOCK, f)).matchAll(/job-isolation\.sh"? path ([a-z-]+)/g)) used.add(m[1]);
-    for (const m of read(join(PADDOCK, f)).matchAll(/"\$(?:iso|isolation)" path ([a-z-]+)/g)) used.add(m[1]);
+    for (const m of read(join(PADDOCK, f)).matchAll(/(?:job-isolation\.sh|kit\.sh)"? (?:isolation )?path ([a-z-]+)/g)) used.add(m[1]);
+    for (const m of read(join(PADDOCK, f)).matchAll(/"\$(?:iso|isolation)" (?:isolation )?path ([a-z-]+)/g)) used.add(m[1]);
   }
   for (const k of used) assert.ok(kinds.has(k), `${k} is asked for but not declared`);
   for (const k of kinds) assert.ok(used.has(k), `${k} is declared but nothing uses it`);
@@ -543,7 +543,7 @@ test('value commands print only their value on stdout (messages go to stderr), a
   assert.match(swept.stderr, /job-isolation: removed target-x-app-s7 \(slot s7 is above the 4 kept slots\)/);
   const found = [];
   for (const f of spawnSync('git', ['ls-files', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'conformance/ci/*.sh', 'tools/*.sh', 'apps/*/scripts/ci/*'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean)) {
-    for (const l of read(join(PADDOCK, f)).split('\n')) if (/\$\([^)]*job-isolation\.sh[^)]*2>&1/.test(l)) found.push(`${f}: ${l.trim()}`);
+    for (const l of read(join(PADDOCK, f)).split('\n')) if (/\$\([^)]*(?:job-isolation|kit)\.sh[^)]*2>&1/.test(l)) found.push(`${f}: ${l.trim()}`);
   }
   assert.deepEqual(found, [], 'never fold the script\'s stderr into a captured value');
 });
@@ -635,8 +635,12 @@ const wiringProblems = (text) => {
 };
 
 test('the job-isolation action, once it runs the Rust path, releases with the pinned tool and builds it under the CI home (with a positive control)', () => {
+  // The action runs conformance/ci/kit.sh, which runs the Rust path (acquire, release, the tools folder) off the release path.
   const action = read(join(PADDOCK, '.gitea', 'actions', 'job-isolation', 'action.yml'));
-  assert.deepEqual(wiringProblems(action), [], 'the action is wired as the amendment addendum says');
+  assert.match(action, /conformance\/ci\/kit\.sh" isolation "\$MODE"/, 'the action runs the kit shim');
+  const kit = read(join(PADDOCK, 'conformance', 'ci', 'kit.sh'));
+  assert.match(kit, /ci isolation/, 'the shim runs the Rust path (else the wiring check below would pass on nothing)');
+  assert.deepEqual(wiringProblems(kit), [], 'the shim is wired as the amendment addendum says');
   // Positive controls: a switched action without the pieces is caught, a complete one passes.
   assert.equal(wiringProblems('run: ./dev ci isolation "$MODE"').length, 3);
   assert.equal(wiringProblems('run: |\n  tools="$(./dev ci isolation path tools)"\n  PADDOCK_DEV_HOME="$tools/paddock-dev" PADDOCK_DEV_TARGET_DIR="$tools/target" "$PADDOCK_DEV" ci isolation release').length, 0);

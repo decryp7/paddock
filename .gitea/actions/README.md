@@ -93,7 +93,8 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
 
 Any number of jobs may run on one host at once: Pitcrew's pool of capacity-1 runners (Pitcrew ADR 0021: `mac-1` ...
 `mac-N`, each its own runner folder and `.runner`), all running as one user and so sharing **one CI home**. No job may
-touch another's folders, processes or ports; the job's slot derives its folders and ports. `conformance/ci/job-isolation.sh`
+touch another's folders, processes or ports; the job's slot derives its folders and ports. `./dev ci isolation` (run through
+`conformance/ci/kit.sh isolation`, which keeps `conformance/ci/job-isolation.sh` for tag and release runs until the release-path lane)
 is the one way to them; a conformance test (`conformance/test/job-isolation.test.mjs`) fails when a workflow, action or CI
 script spells a CI-home path itself, or when a host job does not take and release a slot. Do not raise a runner's
 `capacity` instead: add runners to the pool.
@@ -119,11 +120,11 @@ Windows runner's `runner.timeout` is not verified. Linux jobs run in a container
 | Test temp folders, the clean-up's temp sweep, `{tmp}` process patterns | the job's `$RUNNER_TEMP` (acquire sets `TMPDIR`, and `TMP`/`TEMP` on Windows, and `PADDOCK_JOB_TEMP` to it through `conformance/ci/job-tmpdir.sh`, and a short socket folder `PADDOCK_SOCKET_BASE` that release removes) | it need not outlive the job; the runner gives each job its own and deletes it after |
 | Build folder (`target`), stable checkout (`src`), Angular cache, npm's cache, test browser, libduckdb, Debrief's Windows `node_modules`, sccache's disk cache | kept folders of the job's **slot**: `<ci-home>/<layout>-s<n>` (process patterns name one as `[/\\]<kept folder name>-{slot}`, at the end of the pattern; `{slot}` becomes `s<n>([^0-9]\|$)`) | a stable absolute path keeps them warm (cargo fingerprints and sccache keys hold absolute paths); one slot per concurrent job means no two jobs write one. sccache's local storage takes one server at a time ([docs/Local.md](https://github.com/mozilla/sccache/blob/main/docs/Local.md): "Multiple concurrent servers will race and cause spurious build failures"), so each slot has its own, sized `PADDOCK_CI_SCCACHE_GB` (40) / `PADDOCK_CI_SLOTS` |
 | pinned tools, the paddock-dev binary | **shared** kept folders | safe for concurrent writers (renamed into place) |
-| sccache server port, the WebKit job's ports | `job-isolation.sh port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
+| sccache server port, the WebKit job's ports | `kit.sh isolation port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
 | Tart VMs (service-smoke) | a host-wide VM slot under `TART_HOME` (`tools/macos-vm-smoke.sh`), VM names with the job's `PADDOCK_VM_PREFIX` | one VM at a time on the Mac (two at most, macOS's limit); the leftover check sees only the job's own VMs |
 
 The kept folders are declared once, in `conformance/ci/kept-folders.txt` (kind, layout, `slot` or `shared`). A new cache is
-one line there and `bash conformance/ci/job-isolation.sh path <kind> [<name>]` where it is used.
+one line there and `bash conformance/ci/kit.sh isolation path <kind> [<name>]` where it is used.
 
 **Slots.** The `job-isolation` action (`acquire`, the first bash step of a host job: after Git bash on Windows, before
 `stable-workspace`, `build-folder` and any kept folder) runs `./dev ci slot acquire` (ADR 0022's `paddock-dev`, built once

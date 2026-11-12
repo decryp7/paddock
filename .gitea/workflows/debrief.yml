@@ -313,7 +313,7 @@ jobs:
         run: |
           # Outside the checkout, which stable-workspace moves: the job slot's kept folder (the installer stamps the pinned
           # version in it).
-          dir="$(bash ../../conformance/ci/job-isolation.sh path browser debrief)"
+          dir="$(bash ../../conformance/ci/kit.sh isolation path browser debrief)"
           echo "DEBRIEF_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: libduckdb
@@ -643,7 +643,7 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: .
         run: |
-          dir="$(bash conformance/ci/job-isolation.sh path npm)"
+          dir="$(bash conformance/ci/kit.sh isolation path npm)"
           echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
       # Host runners: the same checkout path every run, so sccache hits the workspace crates.
@@ -904,7 +904,7 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: .
         run: |
-          dir="$(bash conformance/ci/job-isolation.sh path npm)"
+          dir="$(bash conformance/ci/kit.sh isolation path npm)"
           echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
       # Host runners: the same checkout path every run, so sccache hits the workspace crates.
@@ -1117,6 +1117,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
+    env:
+      # A release job: ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
+      PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
         with:

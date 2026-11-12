@@ -1069,6 +1069,22 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   delete_by = "v0.5.0"
   note = "The action's shell steps (Install sccache, sccache, Linux dependencies for Tauri) stay for release, rule 54 and tag runs until the release-path lane (plan step 5), which deletes them and the Implementation step after the app tags; tools/paddock-dev/tests/it/setup_rust.rs runs both on the same inputs. A paddock tag, as no app tag fits owner = paddock."
 
+
+[[mechanism]]
+id = "ci-kit-shell"
+title = "A CI kit step in two implementations: build-jobs and job-isolation in Rust, and the shell scripts the release path keeps"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_build_jobs.rs", "tools/paddock-dev/src/ci_isolation/mod.rs"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/build-jobs.sh", "conformance/ci/job-isolation.sh", "conformance/ci/kit.sh"]
+  symbols = ["text:build-jobs", "text:job-isolation"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh picks the implementation by the same rule as setup-rust's Implementation step) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/build_jobs.rs and conformance/test/job-isolation.test.mjs (ISOLATION_CMD) run both on the same inputs."
+
 # =====================================================================================================================
 # CI run readers (RT-8)
 # =====================================================================================================================

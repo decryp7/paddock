@@ -309,3 +309,22 @@ fn a_token_of_the_job_never_reaches_a_probe() {
     assert!(calls.contains("nproc"), "the probe ran: {calls:?}");
     assert!(!calls.contains("tok-secret"), "the probe saw the token: {calls:?}");
 }
+
+/// A Windows runner (Rust only: the shell's Git bash has no Unix stand-in): `$GITHUB_ENV` arrives as a Git-bash path (`/c/x`) and
+/// is read as the drive path it names, as `PADDOCK_CI_ASSUME_WINDOWS=1` says for any OS; the class values are the Windows ones.
+#[test]
+fn on_a_windows_host_github_env_is_read_as_a_drive_path() {
+    let s = Scratch::new();
+    s.reset();
+    let mut vars = host("Windows", "16", "32768");
+    vars.push(("PADDOCK_CI_ASSUME_WINDOWS", "1"));
+    vars.push(("GITHUB_ENV", "/c/paddock-build-jobs-test-no-such-folder/env"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.args(["ci", "build-jobs"]).current_dir(repo());
+    let out = cmd.env_clear().envs(s.base_env(&vars, false)).output().unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(1), "{stdout}");
+    assert!(stdout.contains("C:/paddock-build-jobs-test-no-such-folder/env"), "the drive path is what it tried: {stdout}");
+    assert!(stdout.contains(" Next step: "), "{stdout}");
+    assert_eq!(stdout.lines().filter(|l| l.starts_with("::error::")).count(), 1, "one error line: {stdout}");
+}

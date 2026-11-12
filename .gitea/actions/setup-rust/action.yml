@@ -1,5 +1,5 @@
 name: setup-rust
-description: "CARGO_BUILD_JOBS for the runner (build-jobs) when no earlier step set it, the Rust toolchain with components and targets (both here, before ./dev), then `./dev ci setup-rust`: sccache (installed, checksum-verified, when the runner has none) on the local disk or the shared Redis backend, and the Tauri Linux libraries on request. A release, rule 54 or tag run keeps the shell steps until the release-path lane (docs/plans/ci-in-rust.md)."
+description: "The Rust toolchain with components and targets (here, before ./dev), CARGO_BUILD_JOBS for the runner (`./dev ci build-jobs`) when no earlier step set it, then `./dev ci setup-rust`: sccache (installed, checksum-verified, when the runner has none) on the local disk or the shared Redis backend, and the Tauri Linux libraries on request. A release, rule 54 or tag run keeps the shell steps until the release-path lane (docs/plans/ci-in-rust.md)."
 inputs:
   toolchain:
     description: Toolchain channel or version.
@@ -25,11 +25,6 @@ inputs:
 runs:
   using: composite
   steps:
-    # Every Rust job gets its runner's share of the host's cores, also when no build-jobs step ran before this one.
-    - name: Build jobs for this runner
-      shell: bash
-      run: |
-        if [ -z "${CARGO_BUILD_JOBS:-}" ]; then bash "${{ github.action_path }}/../../../conformance/ci/build-jobs.sh"; else echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; fi
     - name: Rust toolchain
       shell: bash
       env:
@@ -69,6 +64,12 @@ runs:
         rustup default "$TOOLCHAIN"
         rustc --version
         cargo --version
+    # Every Rust job gets its runner's share of the host's cores, also when no build-jobs step ran before this one. It comes after
+    # the toolchain: `./dev ci build-jobs` needs rustc (the shell script on the release path does not).
+    - name: Build jobs for this runner
+      shell: bash
+      run: |
+        if [ -z "${CARGO_BUILD_JOBS:-}" ]; then bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" build-jobs; else echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; fi
     # Everything after the toolchain is `./dev ci setup-rust` (tools/paddock-dev/src/ci_setup_rust.rs). The two steps above stay
     # here: ./dev needs rustc to hash and build itself, and the job's later ./dev calls must see the same compiler.
     # Until the release-path lane (docs/plans/ci-in-rust.md, step 5), a run that never downloads ./dev (a release or rule 54

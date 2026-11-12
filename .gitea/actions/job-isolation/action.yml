@@ -1,5 +1,5 @@
 name: job-isolation
-description: "Job isolation on a host runner (README, Job isolation): `acquire` (the first bash step, before stable-workspace, build-folder and every kept folder) takes a free job slot of the host (an OS file lock held by `./dev ci slot`) and, through conformance/ci/job-tmpdir.sh, points TMPDIR (TMP and TEMP on Windows) and PADDOCK_JOB_TEMP at the runner's own per-job temp folder and makes the job's short socket folder PADDOCK_SOCKET_BASE (Unix), after sweeping those of killed jobs; `release` (the last step, if: always()) removes the socket folder, gives the slot back and fails when its holder died during the job. Sets PADDOCK_CI_SLOT, PADDOCK_CI_SLOT_TOKEN, PADDOCK_JOB_TEMP, TMPDIR and PADDOCK_SOCKET_BASE. Does nothing in a Linux container (one job per Linux host; ADR 0025)."
+description: "Job isolation on a host runner (README, Job isolation): `acquire` (the first bash step, before stable-workspace, build-folder and every kept folder) takes a free job slot of the host (an OS file lock held by `./dev ci slot`) and, through the job-tmpdir step of `./dev ci isolation` (conformance/ci/kit.sh runs it; a tag run keeps conformance/ci/job-isolation.sh), points TMPDIR (TMP and TEMP on Windows) and PADDOCK_JOB_TEMP at the runner's own per-job temp folder and makes the job's short socket folder PADDOCK_SOCKET_BASE (Unix), after sweeping those of killed jobs; `release` (the last step, if: always()) removes the socket folder, gives the slot back and fails when its holder died during the job. Sets PADDOCK_CI_SLOT, PADDOCK_CI_SLOT_TOKEN, PADDOCK_JOB_TEMP, TMPDIR and PADDOCK_SOCKET_BASE. Does nothing in a Linux container (one job per Linux host; ADR 0025)."
 inputs:
   mode:
     description: "'acquire' or 'release'."
@@ -10,4 +10,4 @@ runs:
     - shell: bash
       env:
         MODE: ${{ inputs.mode }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/job-isolation.sh" "$MODE"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" isolation "$MODE"

@@ -30,6 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    env:
+      # A release job (tag, or the dispatch that builds bundles: rule 54): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
+      PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
 
@@ -121,7 +124,7 @@ jobs:
       - name: Kept build folder (Windows)
         if: runner.os == 'Windows'
         run: |
-          dir="$(bash conformance/ci/job-isolation.sh path target shell-demo)"
+          dir="$(bash conformance/ci/kit.sh isolation path target shell-demo)"
           echo "CARGO_TARGET_DIR=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
       - uses: actions/setup-node@v4
