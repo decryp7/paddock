@@ -46,6 +46,9 @@ pub use catalogue::RowStats;
 pub use compact::Compaction;
 pub use fts::WriterBudget;
 pub use schema::FORMAT_VERSION;
+pub use shutdown::{
+    live_store_threads, main_thread_drain_armed, stop_store_threads, stop_store_threads_when_this_thread_ends, StoreThreadsGuard,
+};
 
 use debrief_core::api::{UnrecognizedFile, WorkspaceState};
 use debrief_core::batch::{EventId, EventSchema, SourceId};

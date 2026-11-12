@@ -13,16 +13,12 @@ use std::time::Duration;
 
 #[cfg(unix)]
 fn probe_spec(dir: &std::path::Path) -> ChildSpec {
-    warm();
+    crate::warm();
     let mut s = SpawnSpec::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"), "the fake child");
     s.args = vec![format!("--exit-probe={}", dir.display())];
     s.endpoint_prefix = "debrief-test".into();
     s.connect_window = paddock_testkit::HANG_GUARD;
     ChildSpec::new(s)
-}
-
-fn warm() {
-    paddock_testkit::start::warm_first_start(std::path::Path::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child")), &["--version"]);
 }
 
 fn size(path: &std::path::Path) -> u64 {
@@ -74,7 +70,7 @@ fn two_exits_never_run_the_handlers_together() {
 /// for up to its stop budget, and a 150 ms grace killed it in the middle (`process::KILL_GRACE` covers the budget now).
 #[test]
 fn a_child_that_needs_time_to_finish_is_not_killed_in_the_middle() {
-    warm();
+    crate::warm();
     let dir = tempfile::tempdir().unwrap();
     let mut s = SpawnSpec::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"), "the fake child");
     s.args = vec![format!("--slow-exit={}", dir.path().display())];

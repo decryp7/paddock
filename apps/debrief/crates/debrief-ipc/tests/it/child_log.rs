@@ -6,14 +6,8 @@ use debrief_ipc::peer::NoCalls;
 use debrief_ipc::process::{ChildProcess, SpawnSpec};
 use std::sync::Arc;
 
-/// The fake child's first start (a fresh binary the OS has not run yet) is paid here, before a test starts it with a bound it
-/// cannot remove (a child that exits at once must be seen exiting within the OS's publication window).
-fn warm() {
-    paddock_testkit::start::warm_first_start(std::path::Path::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child")), &["--version"]);
-}
-
 fn spec(args: &[&str], log: &str) -> SpawnSpec {
-    warm();
+    crate::warm();
     let mut s = SpawnSpec::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"), "the fake child");
     s.args = args.iter().map(|a| a.to_string()).collect();
     s.endpoint_prefix = "debrief-test".into();
@@ -109,7 +103,9 @@ fn a_child_that_crashed_before_debrief_stops_it_stays_a_crash() {
 fn a_child_whose_connection_broke_is_recorded_by_its_own_exit() {
     debrief_ipc::process::hold_exit_reader("capture-broken");
     let p = ChildProcess::spawn(&spec(&["--exit-now"], "capture-broken")).unwrap();
-    // At once: the crash has usually not been published by the OS yet.
+    // The held reader recorded nothing: the exit is the OS's to publish. Wait until the child has ended, then stop it, as
+    // the supervisor does once a call failed; no warm-up or luck decides whether the crash is already published.
+    paddock_testkit::wait_until("the child to exit on its own", || p.try_exit().is_some());
     p.kill_after_failure();
     let st = p.log().unwrap().status();
     assert_eq!(

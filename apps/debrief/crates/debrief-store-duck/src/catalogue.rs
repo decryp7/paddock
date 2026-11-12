@@ -553,7 +553,20 @@ impl CatalogueService {
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
+        let for_exit = shared.clone();
+        // Listed before it starts, so the exit drain and the tests' guard always see it; the thread drops it last.
+        let alive = crate::shutdown::register_thread(
+            "debrief-catalogue",
+            Arc::new(move || {
+                for_exit.stop.store(true, Ordering::SeqCst);
+                for_exit.gate.news();
+                for_exit.changes.bump();
+                *lock(&for_exit.wake.0) = true;
+                for_exit.wake.1.notify_all();
+            }),
+        );
         let handle = std::thread::Builder::new().name("debrief-catalogue".into()).spawn(move || {
+            let _alive = alive;
             run(&s, &conn, &write_lock);
             if crate::shutdown::down() {
                 // `run` returns at exit too. Dropping the connection then would call duckdb_disconnect (and

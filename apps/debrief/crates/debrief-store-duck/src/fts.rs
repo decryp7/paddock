@@ -594,9 +594,21 @@ impl FtsService {
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
         let store_dir = dir.to_path_buf();
-        let handle = std::thread::Builder::new()
-            .name("debrief-fts".into())
-            .spawn(move || run(&s, &store_dir, &conn, &write_lock, epoch))?;
+        let for_exit = shared.clone();
+        // Listed before it starts, so the exit drain and the tests' guard always see it; the thread drops it last.
+        let alive = crate::shutdown::register_thread(
+            "debrief-fts",
+            Arc::new(move || {
+                for_exit.stop.store(true, Ordering::SeqCst);
+                for_exit.gate.news();
+                *crate::lock(&for_exit.wake.0) = true;
+                for_exit.wake.1.notify_all();
+            }),
+        );
+        let handle = std::thread::Builder::new().name("debrief-fts".into()).spawn(move || {
+            let _alive = alive;
+            run(&s, &store_dir, &conn, &write_lock, epoch)
+        })?;
         Ok(FtsService {
             shared,
             epoch,

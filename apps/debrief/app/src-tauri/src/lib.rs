@@ -1344,6 +1344,8 @@ pub(crate) mod test_support {
     }
 
     fn manage(app: tauri::App<MockRuntime>, profile_dir: Option<PathBuf>) -> tauri::App<MockRuntime> {
+        // No store thread outlives the test (CI 6734 and 7997): they are stopped and joined when the test thread ends.
+        debrief_store_duck::stop_store_threads_when_this_thread_ends();
         manage_in(app, profile_dir, false)
     }
 
@@ -1389,6 +1391,17 @@ pub(crate) mod test_support {
         browser::manage_state(app.handle(), std::sync::Arc::default());
         app_context::install(app.handle(), app_context::AppContext::for_tests());
         app
+    }
+
+    /// The exit drain of the main thread (CI 7997) is armed in this binary: its initializer was kept by the linker, so
+    /// the debrief-app test process, like the app, drains the store's statements before DuckDB's statics are destroyed.
+    #[test]
+    fn the_exit_drain_is_armed_in_the_app_binary() {
+        assert_ne!(
+            debrief_store_duck::main_thread_drain_armed(),
+            Some(false),
+            "the load-time initializer was dropped from the link"
+        );
     }
 
     /// An app like the real one (managed state, window events), without windows.

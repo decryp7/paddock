@@ -12,14 +12,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// The fake child's first start (a fresh binary the OS has not run yet) is paid here, before a test starts it with a bound it
-/// cannot remove (a child that exits at once must be seen exiting within the OS's publication window).
-fn warm() {
-    paddock_testkit::start::warm_first_start(std::path::Path::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child")), &["--version"]);
-}
-
 fn spec(args: &[&str]) -> ChildSpec {
-    warm();
+    crate::warm();
     let mut s = SpawnSpec::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"), "the fake child");
     s.args = args.iter().map(|a| a.to_string()).collect();
     s.endpoint_prefix = "debrief-test".into();

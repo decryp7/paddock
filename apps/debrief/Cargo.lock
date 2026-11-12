@@ -1893,6 +1893,7 @@ dependencies = [
  "log",
  "paddock-proc",
  "paddock-testkit",
+ "paddock-testkit-start",
  "postcard",
  "proptest",
  "serde",
