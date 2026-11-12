@@ -28,7 +28,8 @@
    "apps/z/app/src-tauri/tauri.conf.json"
   ],
   "conformance": [
-   "C91 reads apps/z/app/src-tauri/tauri.conf.json"
+   "C91 reads apps/z/app/src-tauri/tauri.conf.json",
+   "conformance always runs"
   ]
  }
 }

@@ -701,6 +701,8 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         st.kind(p.as_deref(), if d.ends_with("src-tauri") { "all" } else { "ui" });
     }
 
+    // The conformance job is in every plan, whatever changed (user decision 2026-11-12); mirrors `affected` in scripts/affected.mjs.
+    st.mark(Some("conformance".to_string()), "conformance always runs".to_string());
     let has = |p: &str| st.why.contains_key(p);
     let mut packages: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for d in &crates {
@@ -940,6 +942,14 @@ mod tests {
         }
     }
 
+    /// Whether conformance is marked for a reason of the change: it is in every plan (user decision 2026-11-12), so the plain
+    /// `conformance` flag no longer tells.
+    fn because(p: &Value) -> bool {
+        p["why"]["conformance"]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|x| x != "conformance always runs"))
+    }
+
     fn plan(files: &[&str]) -> Value {
         let files: Vec<String> = files.iter().map(|s| s.to_string()).collect();
         affected(
@@ -951,6 +961,27 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn conformance_is_in_every_plan() {
+        for files in [
+            vec!["apps/dyno/app/src-tauri/src/lib.rs"],
+            vec![".gitea/workflows/dyno.yml"],
+            vec!["apps/dyno/app/src/app/x.spec.ts"],
+            vec!["docs/plans/x.md"],
+            vec![],
+        ] {
+            let p = plan(&files);
+            assert_eq!(p["conformance"], true, "{files:?}");
+            assert!(
+                p["why"]["conformance"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("conformance always runs")),
+                "{files:?}"
+            );
+        }
     }
 
     #[test]
@@ -1041,7 +1072,7 @@ mod tests {
                 (json!(false), json!(false), json!(true), json!(true)),
                 "{f}"
             );
-            assert_eq!(p["conformance"], json!(f.starts_with("lint/")), "{f}");
+            assert_eq!(because(&p), f.starts_with("lint/"), "{f}");
             assert_eq!(p["kinds"], json!({"dyno": ["rust"]}), "{f}");
         }
     }
@@ -1166,15 +1197,18 @@ mod tests {
             let p = guard_plan("crates/paddock-cli/src/lib.rs", b, a);
             assert_eq!(
                 p["why"]["conformance"],
-                json!(["C100: an ignore attribute or an environment guard changed in crates/paddock-cli/src/lib.rs"])
+                json!([
+                    "C100: an ignore attribute or an environment guard changed in crates/paddock-cli/src/lib.rs",
+                    "conformance always runs"
+                ])
             );
         }
         let same = guard_plan("crates/paddock-cli/src/lib.rs", Some(before), Some(before));
-        assert_eq!(same["conformance"], json!(false));
+        assert!(!because(&same));
         let other = guard_plan("crates/paddock-cli/README.txt", Some(before), Some(moved));
-        assert_eq!(other["conformance"], json!(false));
+        assert!(!because(&other));
         let nm = guard_plan("ui/node_modules/x/a.ts", Some(before), Some(moved));
-        assert_eq!(nm["conformance"], json!(false));
+        assert!(!because(&nm));
     }
 
     #[test]
@@ -1677,7 +1711,12 @@ mod tests {
         ] {
             assert_eq!(plan(&[f])["conformance"], true, "{f}");
         }
-        assert_eq!(plan(&["apps/dyno/app/src-tauri/src/lib.rs"])["conformance"], false);
+        assert!(!because(&plan(&["apps/dyno/app/src-tauri/src/lib.rs"])));
+        assert_eq!(
+            plan(&["apps/dyno/app/src-tauri/src/lib.rs"])["conformance"],
+            true,
+            "but it is planned: conformance always runs"
+        );
         for f in ["ui/projects/paddock-e2e/src/env.ts", "ui/projects/paddock-e2e/src/build-guard.ts"] {
             assert_eq!(plan(&[f])["apps"], json!(["debrief", "dyno"]), "{f}");
         }

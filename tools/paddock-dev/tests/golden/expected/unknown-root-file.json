@@ -47,7 +47,8 @@
    "unknown root file Mystery"
   ],
   "conformance": [
-   "unknown root file Mystery"
+   "unknown root file Mystery",
+   "conformance always runs"
   ],
   "crates": [
    "unknown root file Mystery"

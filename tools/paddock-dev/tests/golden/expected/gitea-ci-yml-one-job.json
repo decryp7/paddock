@@ -15,7 +15,8 @@
  "packages": {},
  "why": {
   "conformance": [
-   "ci files .gitea/workflows/ci.yml"
+   "ci files .gitea/workflows/ci.yml",
+   "conformance always runs"
   ],
   "ui": [
    ".gitea/workflows/ci.yml, job ui"
