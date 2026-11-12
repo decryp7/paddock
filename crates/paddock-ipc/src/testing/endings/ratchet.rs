@@ -117,6 +117,8 @@ impl Ratchet {
                 "blocks_tag",
                 "os",
                 "note",
+                // The app a report-only row belongs to: `./dev check ipc-endpoints` (C102) reads it; the ending tests do not.
+                "app",
             ]
             .contains(&key)
             {

@@ -134,6 +134,13 @@ note = "why"
         Ratchet::parse("[[ratchet]]\nbogus = \"x\"\n").is_err(),
         "an unknown key is refused"
     );
+    // A report-only row names its app (`./dev check ipc-endpoints`, C102, reads it): the ratchet reader accepts the key.
+    let app_row = "[[ratchet]]\ninstance = \"I4\"\nendpoint = \"ipc-host\"\nscenario = \"silent-client\"\nfault = \"no-reason\"\nblocks_tag = \"report-only\"\napp = \"dyno\"\n";
+    assert!(
+        Ratchet::parse(app_row).is_ok(),
+        "{:?}",
+        Ratchet::parse(app_row).err()
+    );
 }
 
 /// The ending test of the register's `ipc-host` entry (and of the listener primitives it stands on).
