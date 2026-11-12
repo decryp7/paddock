@@ -1,0 +1,390 @@
+{
+ "_comment": "Known raw-pid liveness sites of C53 (ADR 0033, rule 53), by file and hash of the normalised line (line is for reading only). May only shrink; ask a paddock_proc::ProcessId instead and delete the entry.",
+ "sites": [
+  {
+   "file": "apps/debrief/app/src-tauri/src/engine/mod.rs",
+   "line": 446,
+   "hash": "47706c5a2530c14a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/health/commands/tests.rs",
+   "line": 198,
+   "hash": "47706c5a2530c14a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/health/commands/tests.rs",
+   "line": 210,
+   "hash": "47706c5a2530c14a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 224,
+   "hash": "3c3dbe2e4f732c83"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
+   "line": 232,
+   "hash": "f027b71c43d6f655"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/storage.rs",
+   "line": 242,
+   "hash": "47706c5a2530c14a"
+  },
+  {
+   "file": "apps/debrief/app/src-tauri/src/system.rs",
+   "line": 103,
+   "hash": "84f8f71c7c1af130"
+  },
+  {
+   "file": "apps/debrief/crates/chromium-driver/src/process.rs",
+   "line": 71,
+   "hash": "2a5f9a3be531c990"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-agent/src/lock.rs",
+   "line": 68,
+   "hash": "7c1f23a4fae35f77"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ai/src/engine/pitwall/discovery.rs",
+   "line": 215,
+   "hash": "7c1f23a4fae35f77"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-core/tests/it/regress_1_2.rs",
+   "line": 36,
+   "hash": "b413c3b10aa3c5c7"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-etw/src/session.rs",
+   "line": 160,
+   "hash": "d45e75ef1393fcc6"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-etw/src/session.rs",
+   "line": 176,
+   "hash": "d45e75ef1393fcc6"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/process.rs",
+   "line": 754,
+   "hash": "baa8b265a7effed8"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-ipc/src/process.rs",
+   "line": 801,
+   "hash": "c04a812889e4e4dd"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dotnet/src/process.rs",
+   "line": 199,
+   "hash": "6c0fc04d3122acaf"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-dumps/src/capture.rs",
+   "line": 199,
+   "hash": "b5052d40795faf28"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/src/etw.rs",
+   "line": 121,
+   "hash": "1fbd0ed04ef52332"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/src/process.rs",
+   "line": 97,
+   "hash": "e1199e1b78e8d9de"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/src/process.rs",
+   "line": 100,
+   "hash": "d2b8298f51554c22"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-plugin-native/src/sampling/live.rs",
+   "line": 168,
+   "hash": "9af1c96dab4caa97"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 410,
+   "hash": "47706c5a2530c14a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 483,
+   "hash": "47706c5a2530c14a"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-symbols/tests/it/dbghelp.rs",
+   "line": 85,
+   "hash": "f974098012399cd7"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/tray_platform.rs",
+   "line": 152,
+   "hash": "ff8de6ea64d31b18"
+  },
+  {
+   "file": "apps/dyno/app/src-tauri/src/tray_start.rs",
+   "line": 102,
+   "hash": "76beb7ba7d2384cd"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-agent/src/cli.rs",
+   "line": 415,
+   "hash": "ddb291ce95b2cae7"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/helper_holders.rs",
+   "line": 92,
+   "hash": "b51a490e2f6996ea"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/process.rs",
+   "line": 432,
+   "hash": "0d7b138dae16f8b0"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/processes.rs",
+   "line": 356,
+   "hash": "f74be927529d7e92"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/unix_proc.rs",
+   "line": 49,
+   "hash": "b51a490e2f6996ea"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/windows/traffic.rs",
+   "line": 81,
+   "hash": "096422e77688e10f"
+  },
+  {
+   "file": "apps/dyno/crates/dyno-platform/src/windows/traffic.rs",
+   "line": 90,
+   "hash": "486df06dd4cb37de"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+   "line": 108,
+   "hash": "8005f1a1b30cd8b4"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+   "line": 122,
+   "hash": "ecca17297a744148"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+   "line": 143,
+   "hash": "3c3dbe2e4f732c83"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+   "line": 150,
+   "hash": "f027b71c43d6f655"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+   "line": 157,
+   "hash": "6f233d14631e64b9"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/probe.rs",
+   "line": 213,
+   "hash": "16699d3f68c8d146"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/process.rs",
+   "line": 374,
+   "hash": "87cf7401d9f57119"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/process.rs",
+   "line": 431,
+   "hash": "285787c6f6940233"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/src/supervisor.rs",
+   "line": 2044,
+   "hash": "e14e05f971434a89"
+  },
+  {
+   "file": "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs",
+   "line": 191,
+   "hash": "16699d3f68c8d146"
+  },
+  {
+   "file": "apps/pitwall/crates/pitwall-server/src/system.rs",
+   "line": 136,
+   "hash": "47706c5a2530c14a"
+  },
+  {
+   "file": "crates/paddock-chromium/src/launch.rs",
+   "line": 447,
+   "hash": "8d664b6e43f512f9"
+  },
+  {
+   "file": "crates/paddock-chromium/src/launch/tests.rs",
+   "line": 334,
+   "hash": "f038ffd7a7b2c171"
+  },
+  {
+   "file": "crates/paddock-chromium/tests/it/real_browser.rs",
+   "line": 515,
+   "hash": "cf091e6760d33651"
+  },
+  {
+   "file": "crates/paddock-ipc/tests/it/child.rs",
+   "line": 21,
+   "hash": "7f50e4038b5e6dcd"
+  },
+  {
+   "file": "crates/paddock-proc/src/installed/native.rs",
+   "line": 183,
+   "hash": "e86dee17ac4d9116"
+  },
+  {
+   "file": "crates/paddock-proc/src/installed/native.rs",
+   "line": 368,
+   "hash": "6fcff80839eb5410"
+  },
+  {
+   "file": "crates/paddock-proc/src/supervised.rs",
+   "line": 620,
+   "hash": "308d5ffe76f06a68"
+  },
+  {
+   "file": "crates/paddock-proc/src/supervised.rs",
+   "line": 667,
+   "hash": "cef5ad846972de45"
+  },
+  {
+   "file": "crates/paddock-proc/src/testchild.rs",
+   "line": 179,
+   "hash": "c5cbe73b676f117a"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 308,
+   "hash": "47b1678574d082b6"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 314,
+   "hash": "eadc3ccb460f3121"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 338,
+   "hash": "3c3dbe2e4f732c83"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 781,
+   "hash": "61e7f8d799a1d659"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 798,
+   "hash": "61e7f8d799a1d659"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 807,
+   "hash": "5bf6fa0c5156c473"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 826,
+   "hash": "8a067e42adbf609e"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 840,
+   "hash": "e67051af6cd450c9"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 967,
+   "hash": "9fb35627705ea408"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 968,
+   "hash": "ec452942fcc0aafb"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 999,
+   "hash": "1a75df762c593087"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 1044,
+   "hash": "5c75568cac5aebb2"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 1076,
+   "hash": "5cf4327a1ee25137"
+  },
+  {
+   "file": "crates/paddock-proc/src/tree.rs",
+   "line": 1076,
+   "hash": "5cf4327a1ee25137"
+  },
+  {
+   "file": "crates/paddock-proc/src/usage.rs",
+   "line": 378,
+   "hash": "3c3dbe2e4f732c83"
+  },
+  {
+   "file": "crates/paddock-proc/src/usage.rs",
+   "line": 1325,
+   "hash": "1764050fba2d931f"
+  },
+  {
+   "file": "crates/paddock-proc/tests/it/run_state.rs",
+   "line": 28,
+   "hash": "91cc35694da2bde7"
+  },
+  {
+   "file": "crates/paddock-setup/src/native/facts.rs",
+   "line": 34,
+   "hash": "61f557b49b1a6bf9"
+  },
+  {
+   "file": "crates/paddock-setup/src/native/hold.rs",
+   "line": 56,
+   "hash": "ec8cc479cdd2bdbd"
+  },
+  {
+   "file": "crates/paddock-startup/src/lifecycle.rs",
+   "line": 83,
+   "hash": "3c3dbe2e4f732c83"
+  },
+  {
+   "file": "crates/paddock-startup/src/lifecycle.rs",
+   "line": 96,
+   "hash": "ee768c80f322b855"
+  },
+  {
+   "file": "tools/heavy/src/probe.rs",
+   "line": 17,
+   "hash": "39d9704acaf0a279"
+  },
+  {
+   "file": "tools/heavy/src/probe.rs",
+   "line": 26,
+   "hash": "e9226d6cfecaa06b"
+  },
+  {
+   "file": "tools/heavy/src/procs.rs",
+   "line": 68,
+   "hash": "0605b5ab273f8fba"
+  }
+ ]
+}

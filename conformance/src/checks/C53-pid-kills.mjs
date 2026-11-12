@@ -15,10 +15,23 @@
 // - open follow-ups: a comment or `#[expect]` reason naming `ADR 0033 WP-<n>` marks a known site (a bare-pid kill waived
 //   for Clippy, or a walk that follows parent pids without start times). Each needs a dated waiver in
 //   paddock.waivers.toml, so the follow-up cannot be forgotten.
+// Liveness (user 2026-11-12, same rule, a baseline instead of an error for the sites that exist): asking whether a RAW pid
+// is alive has the same reuse problem as ending it (the answer can be about another program), in tests as much as in product
+// code: `paddock_proc::is_alive(pid)` / `may_be_alive(pid)` / `presence(pid)` (also bare, in a file that imports them, and
+// `crate::` inside paddock-proc), `kill(pid, 0)`, `OpenProcess(` and sysinfo's `Pid::from_u32(` lookups. Ask a
+// `paddock_proc::ProcessId` (pid plus start time) instead: `id.is_alive()`, `id.presence()`. Existing sites sit in
+// `conformance/baselines/C53.json` (file + hash of the normalised line; it may only shrink, the same helpers as C71's baseline);
+// a new site needs a `// conformance: pid-liveness — <reason>` (for example: the pid came from a handle this process owns).
 // Limits: a pid passed to another program by other means (a script file, a shell string built at run time) is not seen.
 // A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above.
-import { error } from '../finding.mjs';
+import { error, warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
+import { againstBaseline, baselineGrowth, lineHash } from './C71-test-timing.mjs';
+
+export const LIVENESS_BASELINE = 'conformance/baselines/C53.json';
+const LIVENESS_WAIVER = /conformance:\s*pid-liveness\s*[—–-]+\s*(\S.{2,})/;
+const BARE_LIVENESS_WAIVER = /conformance:\s*pid-liveness/;
+const LIVENESS_NAMES = 'is_alive|may_be_alive|presence';
 
 const WAIVER = /conformance:\s*pid-kill\s*[—–-]+\s*(\S.{2,})/;
 const BARE_WAIVER = /conformance:\s*pid-kill/;
@@ -69,6 +82,40 @@ export function pidKills(text) {
     });
 }
 
+/**
+ * The raw-pid liveness checks in one Rust source: [{ line, what, waived }]. `file` decides what counts: the one implementation is
+ * skipped, and a bare `is_alive(pid)` is the pid function only inside paddock-proc or where the file imports it from there.
+ */
+export function pidLiveness(text, file = '') {
+  if (IMPLEMENTATION.has(file)) return [];
+  const masked = maskRust(text);
+  const lines = text.split('\n');
+  const hits = [];
+  const add = (re, what, ok = () => true) => {
+    for (const m of masked.matchAll(re)) if (ok(m)) hits.push({ index: m.index, what: what(m) });
+  };
+  add(new RegExp(`\\bpaddock_proc::(${LIVENESS_NAMES})\\s*\\(`, 'g'), (m) => `asks \`paddock_proc::${m[1]}\` about a raw pid`);
+  const inProc = file.startsWith('crates/paddock-proc/');
+  add(new RegExp(`\\bcrate::(${LIVENESS_NAMES})\\s*\\(`, 'g'), (m) => `asks \`${m[1]}\` about a raw pid`, () => inProc);
+  const imported = new Set([...masked.matchAll(/\buse\s+paddock_proc::(?:\{([^}]*)\}|(\w+))/g)].flatMap((m) => (m[1] ?? m[2]).split(',').map((n) => n.trim())));
+  add(
+    new RegExp(`(?<![\\w.:])(${LIVENESS_NAMES})\\s*\\(`, 'g'),
+    (m) => `asks \`${m[1]}\` about a raw pid`,
+    (m) => (inProc || imported.has(m[1])) && !/\bfn\s+$/.test(masked.slice(Math.max(0, m.index - 12), m.index)),
+  );
+  add(/\bkill\s*\([^;\n]*?,\s*0\s*\)/g, () => 'checks a raw pid with `kill(pid, 0)`', (m) => !/\.\s*$/.test(masked.slice(Math.max(0, m.index - 2), m.index)));
+  add(/\bOpenProcess\s*\(/g, () => 'opens a process by its raw pid with `OpenProcess`');
+  add(/\bPid::from(?:_u32|_usize)?\s*\(/g, () => 'looks a raw pid up in sysinfo');
+  return hits
+    .sort((a, b) => a.index - b.index)
+    .map(({ index, what }) => {
+      const line = lineAt(masked, index);
+      const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
+      const waived = LIVENESS_WAIVER.test(near) ? 'reason' : BARE_LIVENESS_WAIVER.test(near) ? 'no-reason' : undefined;
+      return { line, what, waived, text: lines[line - 1] ?? '' };
+    });
+}
+
 export default {
   id: 'C53',
   scope: 'both',
@@ -91,6 +138,34 @@ export default {
         else out.push(error('C53', 53, f, k.line, `${k.what}: the pid may belong to another process by now`, fix));
       }
     }
+    out.push(...livenessFindings(ctx));
     return out;
   },
 };
+
+function livenessFindings(ctx) {
+  const out = [];
+  const fix = 'Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`.';
+  const sites = [];
+  for (const f of ctx.files()) {
+    if (!f.endsWith('.rs') || /^apps\/[^/]+\/vendor\//.test(f)) continue;
+    const text = ctx.read(f);
+    if (!text || !/is_alive|may_be_alive|presence|kill|OpenProcess|Pid::from/.test(text)) continue;
+    for (const k of pidLiveness(text, f)) {
+      if (k.waived === 'reason') continue;
+      if (k.waived === 'no-reason') out.push(error('C53', 53, f, k.line, 'the pid-liveness waiver gives no reason', 'Write `// conformance: pid-liveness — <why this pid cannot have been handed on>`.'));
+      else sites.push({ file: f, line: k.line, what: k.what, hash: lineHash(k.text) });
+    }
+  }
+  const raw = ctx.read(LIVENESS_BASELINE);
+  const entries = raw ? (JSON.parse(raw).sites ?? []) : [];
+  const { fresh, stale } = againstBaseline(sites, entries);
+  for (const s of fresh) out.push(error('C53', 53, s.file, s.line, `${s.what}: the pid may belong to another process by now`, fix));
+  for (const e of stale) out.push(warn('C53', 53, e.file, e.line ?? 1, `${LIVENESS_BASELINE} lists a liveness site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry.'));
+  if (entries.length) {
+    const g = baselineGrowth(ctx, entries, LIVENESS_BASELINE);
+    if (g.reason) out.push(warn('C53', 53, LIVENESS_BASELINE, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
+    else if (g.added.length) out.push(error('C53', 53, LIVENESS_BASELINE, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and fix the sites through a ProcessId. Growing the baseline needs the user\'s approval.'));
+  }
+  return out;
+}
