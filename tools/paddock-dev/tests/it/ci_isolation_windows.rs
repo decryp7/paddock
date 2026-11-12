@@ -31,7 +31,7 @@ fn text(b: &[u8]) -> String {
 
 fn scratch() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let d = tempfile::tempdir().unwrap();
-    let home = d.path().canonicalize().unwrap().join("ci");
+    let home = paddock_env::winpath::real(d.path()).unwrap().join("ci");
     let tables = d.path().join("tables");
     std::fs::create_dir_all(&home).unwrap();
     std::fs::create_dir_all(&tables).unwrap();
