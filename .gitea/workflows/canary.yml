@@ -18,6 +18,10 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
 jobs:
   app:
     name: canary (${{ matrix.app }})

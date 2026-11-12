@@ -138,5 +138,49 @@ fn the_real_probes_find_this_hosts_cores_and_memory() {
     let (cores, rest) = rest.split_once(" cores, ").unwrap_or_else(|| panic!("{line}"));
     let (mb, _) = rest.split_once(" MB of RAM").unwrap_or_else(|| panic!("no RAM found: {line}"));
     assert!(cores.parse::<u32>().is_ok_and(|n| n >= 1), "cores: {line}");
-    assert!(mb.parse::<u64>().is_ok_and(|n| n >= 256), "RAM: {line}");
+    let mb = mb.parse::<u64>().unwrap_or_else(|_| panic!("RAM: {line}"));
+    assert!(mb >= 256, "RAM: {line}");
+    // The number is the machine's, not just any number: within 5% of what the OS itself reports (MemTotal, `hw.memsize`, the CIM
+    // class `Win32_ComputerSystem`; Windows keeps some physical memory reserved, so it never reads above the total).
+    let expected = os_total_memory_mb();
+    let low = expected * 95 / 100;
+    assert!(
+        (low..=expected * 105 / 100).contains(&mb),
+        "this host reports {expected} MB; build-jobs read {mb} MB ({line})"
+    );
+}
+
+/// The host's total physical memory in MB, asked of the OS by another route than the tool's probe.
+fn os_total_memory_mb() -> u64 {
+    #[allow(clippy::disallowed_methods)]
+    let ask = |program: &str, args: &[&str]| -> String {
+        let out = std::process::Command::new(program)
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| panic!("{program}: {e}"));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    if cfg!(windows) {
+        let bytes = ask(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+            ],
+        );
+        bytes.parse::<u64>().unwrap_or_else(|_| panic!("TotalPhysicalMemory: {bytes:?}")) / (1024 * 1024)
+    } else if cfg!(target_os = "macos") {
+        let bytes = ask("sysctl", &["-n", "hw.memsize"]);
+        bytes.parse::<u64>().unwrap_or_else(|_| panic!("hw.memsize: {bytes:?}")) / (1024 * 1024)
+    } else {
+        let meminfo = std::fs::read_to_string("/proc/meminfo").expect("/proc/meminfo");
+        let kb = meminfo
+            .lines()
+            .find_map(|l| l.strip_prefix("MemTotal:"))
+            .and_then(|r| r.trim().strip_suffix("kB"))
+            .and_then(|n| n.trim().parse::<u64>().ok())
+            .expect("MemTotal in /proc/meminfo");
+        kb / 1024
+    }
 }

@@ -38,6 +38,8 @@ on:
         default: false
 
 env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
   # Line tables only (file:line in backtraces, no variable info): smaller debug builds and caches and much less
   # memory when linking the test binaries. The test profile inherits this from dev.

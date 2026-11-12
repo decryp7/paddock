@@ -294,6 +294,40 @@ test('every job of a tag-triggered workflow that uses build-jobs, job-isolation 
   assert.deepEqual(missing, [], 'these jobs run the kit without PADDOCK_DEV_DOWNLOAD set by the tag rule in the job env');
 });
 
+/** The workflows whose steps call conformance/ci/kit.sh, directly or through an action (followed through actions that use actions). */
+export function kitCallers(actions, workflows) {
+  const kit = new Set(Object.keys(actions).filter((n) => /kit\.sh/.test(actions[n].replace(/#.*$/gm, ''))));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [n, text] of Object.entries(actions)) {
+      if (!kit.has(n) && [...kit].some((k) => text.includes(`actions/${k}`))) {
+        kit.add(n);
+        grew = true;
+      }
+    }
+  }
+  return Object.entries(workflows)
+    .filter(([, text]) => /kit\.sh/.test(text.replace(/#.*$/gm, '')) || [...kit].some((k) => new RegExp(`actions/${k}\\b`).test(text)))
+    .map(([name]) => name);
+}
+
+// docs/plans/ci-in-rust.md, WP-1 review: the fallback switch (PADDOCK_CI_KIT=shell, a repository variable) only works if a step can
+// see it. The workflow-level env hands the variable to every step of every job, including the steps of the composite actions.
+test('every workflow with a step that calls kit.sh (directly or through an action) hands it ${{ vars.PADDOCK_CI_KIT }}', () => {
+  const actions = Object.fromEntries(names.map((n) => [n, read(join(ACTIONS, n, 'action.yml'))]));
+  const workflows = Object.fromEntries(readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).map((f) => [f, read(join(WORKFLOWS, f))]));
+  const callers = kitCallers(actions, workflows);
+  assert.ok(callers.length >= 10 && callers.includes('ci.yml') && callers.includes('debrief.yml'), `the callers are found (${callers})`);
+  const missing = callers.filter((f) => !/^env:\n(?:(?:  .*)?\n)*?  PADDOCK_CI_KIT: \$\{\{ vars\.PADDOCK_CI_KIT \}\}/m.test(workflows[f]));
+  assert.deepEqual(missing, [], 'these workflows lack `PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}` in their top-level env');
+});
+
+test('the kit-caller finder follows actions that use actions and sees a workflow that only uses one', () => {
+  const actions = { a: 'run: bash conformance/ci/kit.sh x', b: 'uses: ./.gitea/actions/a', c: 'run: echo' };
+  const workflows = { 'x.yml': 'uses: ./.gitea/actions/b', 'y.yml': 'uses: ./.gitea/actions/c', 'z.yml': '# kit.sh in a comment only', 'w.yml': 'run: bash conformance/ci/kit.sh which' };
+  assert.deepEqual(kitCallers(actions, workflows).sort(), ['w.yml', 'x.yml']);
+});
+
 test('setup-rust installs a pinned, checksum-verified sccache when the runner has none, for every supported OS and architecture', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const install = text.slice(text.indexOf('- name: Install sccache'), text.indexOf('- name: sccache\n'));

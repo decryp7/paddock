@@ -54,6 +54,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
+env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
+
 jobs:
   # Which projects this run tests. The script's own tests run first: a wrong plan would hide failures.
   plan:

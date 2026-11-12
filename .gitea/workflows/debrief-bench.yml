@@ -19,6 +19,8 @@ on:
   workflow_dispatch:
 
 env:
+  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
+  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
 
 # A newer push to the same branch (or pull request) supersedes the run still going; tags have their own ref,
