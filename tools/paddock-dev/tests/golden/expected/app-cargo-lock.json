@@ -3,7 +3,7 @@
  "crates": false,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "c99": true,
  "tools": false,
  "icons": false,
@@ -29,6 +29,9 @@
   ],
   "c99": [
    "C99 reads apps/z/app/src-tauri/Cargo.lock"
+  ],
+  "conformance": [
+   "conformance always runs"
   ]
  }
 }

@@ -3,7 +3,7 @@
  "crates": false,
  "ui": true,
  "eslint": true,
- "conformance": false,
+ "conformance": true,
  "c99": false,
  "tools": false,
  "icons": false,
@@ -37,6 +37,9 @@
   ],
   "app:z": [
    "npm apps/z/app/src-tauri"
+  ],
+  "conformance": [
+   "conformance always runs"
   ],
   "eslint": [
    "eslint/src/index.cjs"
