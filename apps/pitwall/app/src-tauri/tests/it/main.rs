@@ -4,3 +4,4 @@
 mod release_features;
 mod shell;
 mod sidecar_placeholders;
+mod speech_capture;

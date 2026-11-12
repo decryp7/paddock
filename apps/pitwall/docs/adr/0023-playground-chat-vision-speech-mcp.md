@@ -164,16 +164,37 @@ the text above:
 
 ### 5. Speech input
 
+**Decided after WP-6 (user, 2026-11-11 and 2026-11-12; amended 2026-11-12). This replaces the engine, the flow and the sizes
+below where they differ; the options table is kept for the record.**
+
+- **Engine B: whisper.cpp's `whisper-server` with Whisper small Q8_0** (`ggml-small-q8_0.bin`, 264 MB on disk, about
+  0.55–0.6 GB resident; 0.95 GB committed on Windows), not Qwen3-ASR on llama.cpp (option A, 1.02 GB with its projector,
+  1.1–1.25 GB of memory). Measured in the [speech note](../research/speech-spike-2026-11-11.md), recorded in
+  `performance.md`. whisper.cpp is a second engine for speech to text only ([ADR 0020 amendment
+  2026-11-12](0020-llama-cpp-is-the-only-engine.md)).
+- **Delivery (W1, 2026-11-12): download a pinned whisper.cpp release**, in the shape of Pitwall's llama.cpp catalog (each
+  asset's size and SHA-256 pinned), on first use as a job with progress and Cancel. Where a platform has no official release
+  binary (macOS: whisper.cpp publishes only an xcframework), the user is asked then. Pitwall does not build whisper-server
+  itself (the note's earlier recommendation, option (b), is withdrawn).
+- **A click toggle, not press-and-hold:** click or the shortcut starts and stops, Esc discards, the text goes into the
+  composer to edit, nothing is sent by voice. **English only.** A clip is capped at **5 minutes**.
+- `Part::Audio` stays, for **models that hear** (D5): a recorded or attached clip sent to a llama.cpp model whose projector
+  has an audio encoder. It is not used for dictation, which goes to whisper-server as a WAV file.
+- WP-7 is re-sized to **9.5–13.5 agent-days** (judged, not measured): the note's estimate for the download (its option (a),
+  10.5–15, section 7.8) less our own macOS build, which the user's "ask then" replaces, and the VC++ runtime files, which the
+  x64 installer now brings (`ff40d2a9f`). A macOS answer that asks for a build adds to it. See the WP-7 row below.
+
 **Scope.** In: speech to text in the composer, and sending a recorded or attached audio clip to a model that hears. Out: TTS
 and spoken replies (not asked for; llama.cpp's multimodal path takes audio in, and speech output models use their own runners
 per Liquid's docs). Out: live partial transcripts in 1.1.
 
-**The flow is push-to-talk.** Press or hold the mic button (with a shortcut), speak, release. Rust transcribes. The text
+**The flow is a click toggle** (decided 2026-11-11; this paragraph first said press or hold). Click the mic button or press
+the shortcut, speak, click again; Esc discards. Rust transcribes. The text
 lands in the composer to read and edit; nothing is sent by voice alone. A clip is capped at 5 minutes (16 kHz mono PCM16 is
 9.6 MB, which fits the request limit). Live needs a streaming path the pinned engine does not document (below) and adds a hot
 microphone state (judgement: not worth it for 1.1).
 
-**Engine: llama.cpp itself, unless WP-6 says otherwise.** This is the finding that changes the shape of the work: the pinned
+**Engine, as weighed before WP-6 (kept for the record; the user chose B, above).** This is the finding that changes the shape of the work: the pinned
 llama.cpp (`b11669`) lists `ggml-org/Qwen3-ASR-0.6B-GGUF` and `1.7B`, Voxtral and Ultravox in `docs/multimodal.md`, and its
 server takes `input_audio` on `/v1/chat/completions`. So speech input needs **no new engine, no new binary and no new
 delivery path**, and ADR 0020 stands.
@@ -202,7 +223,8 @@ already reads, and a `clip.has_audio_encoder` projector, once `parse_projector` 
 go through miniaudio's formats (mp3, wav, flac per the README).
 
 **Server.** A shared transcribe path in the core serves `/mgmt/v1/transcribe` and replaces the 501 on
-`/v1/audio/transcriptions` (`Capability::Transcription` and `JobKind::Transcription` already exist). `capabilities.json` gets
+`/v1/audio/transcriptions` (`Capability::Transcription` and `JobKind::Transcription` already exist); since the amendment it
+sends a WAV clip to whisper-server through the `Transcriber` port. For models that hear, `capabilities.json` gets
 `audio`, with its floor checked against llama.cpp's history as ADR 0018 requires. Pitwall sends audio inline and refuses a
 URL: llama.cpp's `input_audio.url` and `--media-path` accept remote URLs and local paths, and Pitwall never sets
 `--media-path` nor forwards a URL, as for images. A test pins that `--tools` (llama.cpp's own file and shell tools) is never
@@ -435,7 +457,7 @@ the PoC.
 | 4b | UI: attachments, mic, context meter, "Still working" on `paddock-jobs::patience`, layout at 900 to 1440, a11y, e2e, screenshots for review | app + shared | 2.5–4 | 4a, 2b; Debrief 2.6c for the quiet-spell note | |
 | 5 | Images: picker, paste, drop, decode, downscale to `max_image_pixels`, gating, fixtures; real-model test | app | 2–3 | 3b, 4b | |
 | 6 | Speech spike: the Decision 5 comparison on real hardware (night window); capability test against the catalog; `performance.md`; **the user sees the result** | app (measure) | 1–2 | | |
-| 7 | Speech: capture port and `cpal` on three OS (CoreAudio, WASAPI, ALSA with `libasound2-dev` and the `.deb` dependency), OS permissions and Repair on each (`NSMicrophoneUsageDescription`, the Windows privacy switch, Linux devices), transcribe path in core and server, `Part::Audio`, `parse_projector` taking audio-only projectors, capability with its llama.cpp floor (ADR 0018), catalog entry, first-use download as a job with progress and Cancel, push-to-talk. Re-sized from 4–6.5 | app | 6–9 (+3–4 if the helper) | 1, 4b, 6 | |
+| 7 | Speech (amended 2026-11-12): capture port and `cpal` on three OS (CoreAudio, WASAPI, ALSA with `libasound2-dev` and the `.deb` dependency), OS permissions and Repair on each (`NSMicrophoneUsageDescription`, the Windows privacy switch, Linux devices), transcribe path in core and server to **whisper.cpp's whisper-server** (a second engine for speech only, ADR 0020 amendment), its **pinned release downloaded on first use** with the Whisper small Q8_0 model as a job with progress and Cancel (the user asked where a platform has no release binary), a **click toggle** with Esc to discard, English only, a 5-minute cap. For models that hear: `Part::Audio`, `parse_projector` taking audio-only projectors, the `audio` capability with its llama.cpp floor (ADR 0018). Re-sized from 6–9 (and 4–6.5 before) after WP-6 | app | 9.5–13.5 | 1, 4b, 6 | |
 | 8 | `paddock_mcp::client`: `Connection` (ids, one read loop, paged `tools/list`, cancel, line limit, typed errors); `connect_loopback` moved out of `bridge::run`, which then uses it. Smaller than revision 1's 2.5–4: discovery, the pid check and the handshake exist | shared | **1.5–2.5** | | yes |
 | 9a | Host, first half: Connected apps entry for Dyno, key dialog (OS window), key storage (Decision 7 step 3), MCP-to-tool adapter, approvals with the hash and D2, one `pitwall_chat` log line per call, the injection test (Testing) | app | **2.5–3.5** | 2a, 8, merged base | yes |
 | 9b | Host, second half: per-chat tool chooser, remembered approvals listed and revoked, reconnect and back-off, "Dyno isn't open" with Open Dyno, result and definition limits, the tool-cost measurement | app | 1.5–2.5 | 9a | |
@@ -459,7 +481,7 @@ The user accepted D2 to D8 as recommended on 2026-11-05. The sections above foll
 |---|---|---|
 | D2 | Action tools (`wake_device`, `keep_awake`): remember after the first yes, like read tools, or ask every call? | Ask every call |
 | D3 | Chats saved by default? | Yes, on this computer, with "Don't save this chat" and a default switch |
-| D4 | Speech engine: llama.cpp's own speech models (805 MB, no new engine), or whisper.cpp or sherpa-onnx? | llama.cpp first; a 1 to 2 day test on real hardware decides, and the user sees the numbers |
+| D4 | Speech engine: llama.cpp's own speech models (805 MB, no new engine), or whisper.cpp or sherpa-onnx? | llama.cpp first; a 1 to 2 day test on real hardware decides, and the user sees the numbers. **After WP-6 (2026-11-11): Whisper small Q8_0 on whisper.cpp; delivered as a downloaded pinned release (W1, 2026-11-12)** |
 | D5 | Speech in 1.1: push-to-talk that fills the composer, plus audio clips for models that hear; no live transcript, no spoken replies? | Yes |
 | D6 | Models without tool support: hide tools, or try a prompted fallback? | Disable tools with an explanation |
 | D7 | Third-party MCP servers in 1.1? | Family apps first. User-added stdio last and cuttable. Nothing remote |
@@ -469,7 +491,8 @@ The user accepted D2 to D8 as recommended on 2026-11-05. The sections above foll
 D1 (Dyno has no MCP listener) was not part of that acceptance and is overtaken: the listener was built for Dyno 1.1.0 (Dyno
 ADR 0032 amendments, 2026-11-05; at `origin/dyno/1.1.0-rc` `96c2a16ae`, Decision 7).
 
-Later, not open now: the user sees WP-6's result (D4), which may reopen the 805 MB model against a smaller engine.
+Later, not open now: the user sees WP-6's result (D4), which may reopen the 805 MB model against a smaller engine. Done
+2026-11-11: the user saw it and chose Whisper small Q8_0 on whisper.cpp (Decision 5, amended 2026-11-12).
 
 Decided on 2026-11-07 (user): the pasted key on macOS is kept in an owner-only file (Decision 7 step 3). ADR 0057's own
 decisions D1 to D5 are still open; the plan lists them.
@@ -533,7 +556,7 @@ Found by the independent security review of the chat host (WP-11); each is a gap
   it.
 - A microphone permission enters the family, with a likely re-prompt per update on ad-hoc macOS builds until signing arrives.
 - Saved chats are a new store of private text on disk, kept out of bundles and logs by test.
-- An 805 MB model for speech is heavy next to Whisper tiny or base. WP-6 may change the default if small and fast matters
+- (Superseded 2026-11-11: Whisper small Q8_0, 264 MB, was chosen.) An 805 MB model for speech is heavy next to Whisper tiny or base. WP-6 may change the default if small and fast matters
   more than languages.
 - Large scope: this is more work than everything else left in 1.1 together.
 
@@ -561,3 +584,16 @@ Found by the independent security review of the chat host (WP-11); each is a gap
   [wry#1195](https://github.com/tauri-apps/wry/issues/1195).
 - Not verified at the source: Apple's audio-input entitlement page returned only its title, and Microsoft's WebView2
   permissions page returned 404. Both rows in Decision 5 are to be proved on the machines.
+
+## Amendment 2026-11-12: speech on whisper.cpp
+
+The user chose engine B after WP-6 (2026-11-11) and the delivery W1 (2026-11-12, coordinator's message): Decision 5, D4,
+the WP-7 row and the Consequences are amended in place above, each marked with its date. What changed: whisper.cpp's
+whisper-server with Whisper small Q8_0 instead of llama.cpp's Qwen3-ASR; a downloaded pinned release, as llama.cpp's builds
+are (the user asked where no release binary exists); a click toggle with Esc to discard instead of press-and-hold; English
+only; WP-7 at 9.5–13.5 agent-days. Unchanged: the 5-minute cap, capture through `cpal` in the app, `Part::Audio` for models
+that hear, no live transcript and no spoken replies (D5). The first WP-7 slices (capture port, macOS capture, the pure
+transcribe path and the server's `Transcriber` port) are on `feat/pitwall-speech`.
+
+Evidence read (ADR 0091): `origin/train/2026-11-11-5` `607bb7928`, `origin/feat/pitwall-speech` `cbf37f568`,
+`origin/docs/pitwall-speech-spike` `70835aae7` (merged into `feat/pitwall-speech`).

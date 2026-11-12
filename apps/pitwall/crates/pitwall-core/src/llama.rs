@@ -105,13 +105,15 @@ pub fn chat_body(req: &ChatRequest, alias: &str, slot: Option<u32>) -> Value {
                 Role::Assistant => "assistant",
                 Role::Tool => "tool",
             };
-            let content = if m.images().next().is_some() {
+            let content = if m.images().next().is_some() || m.audio().next().is_some() {
                 Value::Array(
                     m.parts
                         .iter()
                         .map(|p| match p {
                             Part::Text(t) => json!({"type": "text", "text": t}),
                             Part::Image(i) => json!({"type": "image_url", "image_url": {"url": i.data_url()}}),
+                            // Inline data only; never `url` (llama-server would fetch it) and never `--media-path`.
+                            Part::Audio(a) => json!({"type": "input_audio", "input_audio": {"data": a.data, "format": a.format.as_str()}}),
                         })
                         .collect(),
                 )
@@ -427,6 +429,26 @@ mod tests {
         assert_eq!(pos("--parallel").as_deref(), Some("4"));
         // llama-server hands each slot ctx-size / parallel tokens: the context per slot is what was asked for.
         assert_eq!(32_768 / 4, 8192);
+    }
+
+    #[test]
+    fn an_audio_clip_is_sent_inline_as_input_audio() {
+        let a = crate::chat::Audio::from_base64(crate::chat::AudioFormat::Mp3, "SUQz").unwrap();
+        let req = ChatRequest {
+            messages: vec![Message {
+                role: Role::User,
+                parts: vec![Part::Text("what".into()), Part::Audio(a)],
+                tool_calls: vec![],
+                tool_call_id: None,
+            }],
+            ..Default::default()
+        };
+        let b = chat_body(&req, "alias", None);
+        assert_eq!(
+            b["messages"][0]["content"][1],
+            json!({"type": "input_audio", "input_audio": {"data": "SUQz", "format": "mp3"}})
+        );
+        assert_eq!(b["messages"][0]["content"][0]["text"], "what");
     }
 
     #[test]

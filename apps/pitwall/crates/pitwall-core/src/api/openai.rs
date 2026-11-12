@@ -4,8 +4,8 @@
 
 use super::{model_ref, object, opt, opt_f32, opt_u32, stops, ApiError, ModelEntry};
 use crate::chat::{
-    ChatEvent, ChatOutput, ChatRequest, EmbedOutput, EmbedRequest, Finish, Image, Message, ModelRef, OutputFormat, Part, Role, Tool,
-    ToolCall, ToolChoice,
+    Audio, AudioFormat, ChatEvent, ChatOutput, ChatRequest, EmbedOutput, EmbedRequest, Finish, Image, Message, ModelRef, OutputFormat,
+    Part, Role, Tool, ToolCall, ToolChoice,
 };
 use serde_json::{json, Map, Value};
 
@@ -19,8 +19,32 @@ fn role(s: &str) -> Result<Role, ApiError> {
     }
 }
 
+/// An `input_audio` part: `{"input_audio": {"data": "<base64>", "format": "wav" | "mp3"}}`. A URL is refused: Pitwall never
+/// fetches what a request names (ADR 0001).
+fn input_audio(p: &Value) -> Result<Audio, ApiError> {
+    let a = p
+        .get("input_audio")
+        .and_then(Value::as_object)
+        .ok_or_else(|| ApiError::invalid("an audio part has no `input_audio` object"))?;
+    if a.contains_key("url") {
+        return Err(ApiError::invalid(
+            "audio must be inline base64 `data` (Pitwall never fetches remote content)",
+        ));
+    }
+    let format = a
+        .get("format")
+        .and_then(Value::as_str)
+        .and_then(AudioFormat::parse)
+        .ok_or_else(|| ApiError::invalid("an audio part's `format` must be \"wav\" or \"mp3\""))?;
+    let data = a
+        .get("data")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ApiError::invalid("an audio part has no `data`"))?;
+    Ok(Audio::from_base64(format, data)?)
+}
+
 /// Message content: a string or an array of parts (`text` / `input_text` / `output_text`, `image_url` /
-/// `input_image`). Remote image URLs are refused.
+/// `input_image`, `input_audio`). Remote image and audio URLs are refused.
 fn parts(v: &Value) -> Result<Vec<Part>, ApiError> {
     match v {
         Value::Null => Ok(vec![]),
@@ -43,6 +67,7 @@ fn parts(v: &Value) -> Result<Vec<Part>, ApiError> {
                             .ok_or_else(|| ApiError::invalid("an image part has no `image_url`"))?;
                         Ok(Part::Image(Image::from_data_url(url)?))
                     }
+                    "input_audio" => Ok(Part::Audio(input_audio(p)?)),
                     other => Err(ApiError::new(
                         super::ErrorKind::NotAvailable,
                         format!("content parts of type {other:?} are not supported"),
@@ -524,6 +549,18 @@ mod tests {
     use crate::chat::{Timings, Usage};
 
     #[test]
+    fn parses_an_inline_audio_part() {
+        let v = json!({"model": "m", "messages": [{"role": "user", "content": [
+            {"type": "text", "text": "what is said?"},
+            {"type": "input_audio", "input_audio": {"data": "UklGRiQAAABXQVZF", "format": "wav"}},
+        ]}]});
+        let r = parse_chat(&v).unwrap();
+        assert!(r.has_audio() && !r.has_images());
+        let a = r.messages[0].audio().next().unwrap();
+        assert_eq!((a.format, a.data.as_str()), (AudioFormat::Wav, "UklGRiQAAABXQVZF"));
+    }
+
+    #[test]
     fn parses_the_sdk_chat_request() {
         let v = json!({
             "model": "qwen3-8b",
@@ -577,6 +614,26 @@ mod tests {
             ),
             (
                 json!({"messages": [{"role": "user", "content": [{"type": "input_audio"}]}]}),
+                "no `input_audio` object",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"url": "https://x/a.wav", "format": "wav"}}]}]}),
+                "never fetches",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "AAAA", "format": "m4a"}}]}]}),
+                "\"wav\" or \"mp3\"",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"format": "wav"}}]}]}),
+                "no `data`",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "input_audio", "input_audio": {"data": "***", "format": "wav"}}]}]}),
+                "not valid base64",
+            ),
+            (
+                json!({"messages": [{"role": "user", "content": [{"type": "video_url"}]}]}),
                 "not supported",
             ),
             (

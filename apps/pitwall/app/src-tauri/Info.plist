@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged by Tauri into the bundle's Info.plist (ADR 0023 Decision 5): the reason macOS shows when Pitwall first asks for the
+	     microphone. Without it macOS ends the app when it opens the device. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pitwall listens only while you record a message in the Playground, to turn what you speak into text on this computer. Audio never leaves your Mac.</string>
+</dict>
+</plist>
