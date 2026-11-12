@@ -119,3 +119,12 @@ test('C53 through the runner: a baseline that grew against the merge base is an 
   const f = await findingsOf('C53', root, { options: { git } });
   assert.ok(f.some((x) => x.severity === 'error' && x.file === LIVENESS_BASELINE && /grew/.test(x.message)));
 });
+
+test('C53 through the runner: an invalid liveness baseline fails closed with one error naming the file', async () => {
+  const src = 'fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid)\n}\n';
+  for (const bad of ['{ not json', '{"sites": 3}', '[]']) {
+    const f = await findingsOf('C53', makeApp({ 'crates/a/src/k.rs': src, [LIVENESS_BASELINE]: bad }));
+    assert.deepEqual(f.map((x) => [x.file, x.severity]), [[LIVENESS_BASELINE, 'error']], bad);
+    assert.match(f[0].message, /is not JSON with a `sites` list/);
+  }
+});

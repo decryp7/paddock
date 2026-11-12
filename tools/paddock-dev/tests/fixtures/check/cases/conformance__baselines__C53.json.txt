@@ -1,0 +1,6 @@
+{
+ "sites": [
+  { "file": "crates/a/src/c53_liveness_bad.rs", "line": 5, "hash": "2a3b33e2b557b50a" },
+  { "file": "crates/a/src/gone.rs", "line": 3, "hash": "0123456789abcdef" }
+ ]
+}

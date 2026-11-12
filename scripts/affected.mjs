@@ -91,6 +91,8 @@ export const GLOBAL = [
 
 /** The planner and its tests: besides the scripts' owners, the `dev` tool's golden test runs them as its oracle. */
 export const PLANNER_FILES = /^scripts\/affected(\.test)?\.mjs$/;
+/** The JS conformance runner and what it reads: tools/paddock-dev's parity tests run it over fixtures and the live tree (C39, C53). */
+export const PARITY_INPUT = /^conformance\/(src|bin|baselines)\/.+\.(mjs|json)$/;
 
 /** Inputs of the Rust builds only (cargo registry and linker config, the shared clippy and workspace lint presets). */
 export const RUST_INPUTS = [/^\.cargo\//, /^lint\//];
@@ -678,6 +680,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       markTargets(hit);
       continue;
     }
+    if (PARITY_INPUT.test(f)) mark('paddock-dev', `its parity tests run the JS conformance runner on ${f} (tools/paddock-dev/tests/it/check.rs)`);
     if (TRACED_SCRIPT.test(f)) {
       // The shared actions' scripts: conformance, every app's gates (below), and the jobs of the actions that run the script.
       const hit = gitea ? giteaTargets(f, gitea) : null;

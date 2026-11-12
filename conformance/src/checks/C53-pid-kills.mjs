@@ -170,7 +170,18 @@ function livenessFindings(ctx) {
     }
   }
   const raw = ctx.read(LIVENESS_BASELINE);
-  const entries = raw ? (JSON.parse(raw).sites ?? []) : [];
+  let entries = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed?.sites)) throw new Error('no sites list');
+      entries = parsed.sites;
+    } catch {
+      // Fail closed with one error: the same on the Rust host (tools/paddock-dev/src/check/c53_liveness.rs).
+      out.push(error('C53', 53, LIVENESS_BASELINE, 1, `${LIVENESS_BASELINE} is not JSON with a \`sites\` list: the liveness baseline cannot be read`, 'Restore the file from git (`git checkout origin/main -- conformance/baselines/C53.json`); never rewrite it by hand to add entries.'));
+      return out;
+    }
+  }
   const { fresh, stale } = againstBaseline(sites, entries);
   for (const s of fresh) out.push(error('C53', 53, s.file, s.line, `${s.what}: the pid may belong to another process by now`, fix));
   for (const e of stale) out.push(warn('C53', 53, e.file, e.line ?? 1, `${LIVENESS_BASELINE} lists a liveness site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry.'));

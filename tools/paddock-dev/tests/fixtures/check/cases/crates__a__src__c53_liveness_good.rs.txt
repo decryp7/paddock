@@ -1,0 +1,26 @@
+use paddock_proc::ProcessId;
+
+fn a(id: ProcessId) -> bool {
+    id.is_alive() && id.presence() == Presence::Running
+}
+
+fn b(pid: i32) {
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    let me = sysinfo::Pid::from_u32(std::process::id());
+    let you = Pid::from_u32(process::id());
+}
+
+pub fn is_alive(pid: u32) -> bool {
+    false
+}
+
+fn c(app: &App) {
+    let seen = presence(app);
+    // paddock_proc::is_alive(pid) and kill(pid, 0)
+    let s = "OpenProcess(x, 0, pid)";
+}
+
+fn d(pid: u32) -> bool {
+    // conformance: pid-liveness — the pid came from a child handle this process owns
+    paddock_proc::is_alive(pid)
+}

@@ -168,6 +168,10 @@ const SAMPLES: &[&[&str]] = &[
     &["apps/dyno/app/src-tauri/capabilities/default.json"],
     &["apps/pitwall/paddock.ci.json"],
     &["conformance/src/checks/C99-no-keychain.mjs"],
+    // The JS runner and its baselines are what the parity tests run: they mark paddock-dev.
+    &["conformance/src/checks/C53-pid-kills.mjs"],
+    &["conformance/baselines/C53.json"],
+    &["conformance/src/util/fs.mjs"],
     &["diagrams/paddock.xml"],
     // An app's Cargo.toml and capabilities are read by conformance C48.
     &["apps/dyno/app/src-tauri/Cargo.toml"],

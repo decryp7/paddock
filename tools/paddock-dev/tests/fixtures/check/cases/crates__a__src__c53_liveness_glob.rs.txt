@@ -1,0 +1,5 @@
+use paddock_proc::*;
+
+fn a(pid: u32) -> bool {
+    may_be_alive(pid)
+}
