@@ -327,6 +327,7 @@ mod tests {
             status: status.into(),
             conclusion: String::new(),
             head_sha: "h".into(),
+            head_branch: String::new(),
             created_at: created.into(),
             run_attempt: 1,
         }

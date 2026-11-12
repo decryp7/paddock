@@ -105,18 +105,28 @@ pub fn app_output_names() -> Vec<String> {
     out
 }
 
+/// The mode a plan job's log states with the [`MODE_LINE`]: `None` when it has no such line, `Err` for a value other than
+/// `true` or `false`. The one reader of the marker (`read_full` and `ci verdict` both use it).
+pub fn read_marker(log: &str) -> Option<Result<bool, String>> {
+    let v = log
+        .lines()
+        .map(plain)
+        .find_map(|l| l.trim().strip_prefix(MODE_LINE).map(|v| v.trim().to_string()))?;
+    Some(match v.as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        other => Err(format!("the plan job logged an unknown mode {other:?}")),
+    })
+}
+
 /// Whether an app workflow's run was full, from its plan job's log: the [`MODE_LINE`] its Decide step prints; for a run from
 /// before that line, a schedule or a push is full and a manual run says so in the runner's `Inputs` group (`bundles: true`).
 /// An error when none of these tells it: the rerun then plans everything.
 pub fn read_full(a: &AppWorkflow, event: &str, plan_log: Result<&str, &str>) -> Result<bool, String> {
     let log = plan_log.map_err(|e| format!("the plan job's log could not be read ({e})"))?;
     let lines: Vec<String> = log.lines().map(plain).collect();
-    if let Some(v) = lines.iter().find_map(|l| l.trim().strip_prefix(MODE_LINE)) {
-        return match v.trim() {
-            "true" => Ok(true),
-            "false" => Ok(false),
-            other => Err(format!("the plan job logged an unknown mode {other:?}")),
-        };
+    if let Some(mode) = read_marker(log) {
+        return mode;
     }
     match event {
         "schedule" | "push" => return Ok(true),
