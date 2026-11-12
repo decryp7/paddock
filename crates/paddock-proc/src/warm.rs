@@ -37,6 +37,10 @@ struct Identity {
     file: (u64, u64),
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a memo key compared only with other keys made here, never shown or passed to a program; paddock-proc has no paddock-env dependency yet: until WP-P2 (row 12) of the ADR 0021 amendment 2026-11-11"
+)]
 fn identity_of(exe: &OsStr) -> Option<Identity> {
     let path = std::fs::canonicalize(exe).ok()?;
     let meta = std::fs::metadata(&path).ok()?;
