@@ -42,7 +42,7 @@
       "description": "Rust patch updates one PR per Cargo workspace (crates/, each app), so each lands through that workspace's gates",
       "matchManagers": ["cargo"],
       "matchUpdateTypes": ["patch"],
-      "matchPackageNames": ["*", "!tauri", "!tauri-build", "!tauri-utils", "!/^tauri-plugin-/", "!/^tauri-runtime/"],
+      "matchPackageNames": ["!tauri", "!tauri-build", "!tauri-utils", "!/^tauri-plugin-/", "!/^tauri-runtime/"],
       "groupName": "rust patch updates",
       "groupSlug": "rust-patch",
       "additionalBranchPrefix": "{{packageFileDir}}-"
