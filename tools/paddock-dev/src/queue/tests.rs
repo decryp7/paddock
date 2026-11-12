@@ -124,6 +124,12 @@ impl Train for TestTrain {
     fn build(&mut self, m: &str, p: &[Pull], k: &Marker) -> Result<Built, String> {
         self.inner.build(m, p, k)
     }
+    fn pr_files(&mut self, m: &str, h: &str) -> Result<Vec<String>, String> {
+        self.inner.pr_files(m, h)
+    }
+    fn verify_train(&mut self, b: Option<&str>, h: &str, p: &[(u64, String)]) -> Result<Option<String>, String> {
+        self.inner.verify_train(b, h, p)
+    }
     fn affected(&mut self, _main: &str, head: &str) -> Result<BTreeSet<String>, String> {
         Ok(self.reach.get(head).cloned().unwrap_or_default())
     }
@@ -209,8 +215,8 @@ impl Ledger for Hooked<'_> {
     fn comment(&mut self, n: u64, t: &str) -> Result<(), String> {
         self.inner.comment(n, t)
     }
-    fn approved_head(&mut self, n: u64, h: &str) -> Result<bool, String> {
-        self.inner.approved_head(n, h)
+    fn approved_head(&mut self, pr: &Pull) -> Result<bool, String> {
+        self.inner.approved_head(pr)
     }
     fn closed_held(&mut self) -> Result<Vec<u64>, String> {
         self.inner.closed_held()
@@ -232,6 +238,8 @@ struct World {
     on_read: Option<fn(usize, &mut Vec<Pull>)>,
     /// Run the tick on a real `GitTrain::open` (its own clone under this folder) instead of the table-driven one.
     real_train: Option<PathBuf>,
+    /// The planner of the real train.
+    planner: real::PlannerFn,
 }
 
 impl World {
@@ -251,6 +259,7 @@ impl World {
             merge_check: None,
             on_read: None,
             real_train: None,
+            planner: no_reach,
         }
     }
 
@@ -268,7 +277,7 @@ impl World {
     fn approve(&mut self, number: u64, head: &str) {
         self.gitea.reviews.push((
             number,
-            serde_json::json!({"id": self.gitea.reviews.len() + 1, "user": {"login": "reviewer"}, "state": "APPROVED", "commit_id": head, "dismissed": false, "official": true}),
+            serde_json::json!({"id": self.gitea.reviews.len() + 1, "user": {"login": "review-bot"}, "state": "APPROVED", "commit_id": head, "dismissed": false, "official": true}),
         ));
     }
 
@@ -289,6 +298,10 @@ impl World {
             .filter(|(n, _)| *n == number)
             .map(|(_, t)| t.clone())
             .collect()
+    }
+
+    fn main(&self) -> String {
+        self.repos.origin_ref("refs/heads/main")
     }
 
     fn train_head(&self) -> String {
@@ -327,7 +340,7 @@ impl World {
             };
             let mut real = self.real_train.as_ref().map(|scratch| {
                 let mut g = GitTrain::open(self.repos.origin.to_str().unwrap(), scratch, None, false, true).unwrap();
-                g.planner = no_reach;
+                g.planner = self.planner;
                 g
             });
             let train: &mut dyn Train = match real.as_mut() {
@@ -381,7 +394,7 @@ fn one_green_pull_request_is_built_dispatched_and_landed() {
     assert_eq!(w.train_head(), head, "the train branch is pushed");
     // The next tick dispatches the affected run against main.
     assert!(matches!(w.tick(), Tick::Dispatched { .. }));
-    assert_eq!(w.ci.dispatched, vec![vec![("base".to_string(), "origin/main".to_string())]]);
+    assert_eq!(w.ci.dispatched, vec![vec![("base".to_string(), w.main())]]);
     // The run is going: wait.
     w.run(&head, 8001, RunState::Running);
     assert_eq!(w.tick(), Tick::Waiting(8001));
@@ -444,6 +457,7 @@ fn two_pull_requests_one_breaks_it_is_dropped_with_a_comment_and_the_other_retri
         vec![Failure {
             what: "crate (ubuntu-latest): x tests::it_breaks".into(),
             projects: set(&["x"]),
+            files: vec![],
             blame: Blame::New,
         }],
     );
@@ -468,10 +482,7 @@ fn two_pull_requests_one_breaks_it_is_dropped_with_a_comment_and_the_other_retri
     assert!(matches!(w.tick(), Tick::Dispatched { .. }));
     assert_eq!(
         w.ci.dispatched.last().unwrap(),
-        &vec![
-            ("base".to_string(), "origin/main".to_string()),
-            ("since_run".to_string(), "8001".to_string())
-        ]
+        &vec![("base".to_string(), w.main()), ("since_run".to_string(), "8001".to_string())]
     );
     w.run(&new_head, 8002, RunState::Success);
     w.ci.verdicts
@@ -502,11 +513,13 @@ fn several_suspects_are_all_dropped_and_a_failure_that_also_fails_on_main_blames
             Failure {
                 what: "x t".into(),
                 projects: set(&["x"]),
+                files: vec![],
                 blame: Blame::New,
             },
             Failure {
                 what: "ui main-red".into(),
                 projects: set(&["ui"]),
+                files: vec![],
                 blame: Blame::OnMain,
             },
         ],
@@ -529,6 +542,7 @@ fn several_suspects_are_all_dropped_and_a_failure_that_also_fails_on_main_blames
         vec![Failure {
             what: "x t".into(),
             projects: set(&["x"]),
+            files: vec![],
             blame: Blame::OnMain,
         }],
     );
@@ -710,6 +724,7 @@ fn failure(what: &str, projects: &[&str], blame: Blame) -> Failure {
     Failure {
         what: what.into(),
         projects: set(projects),
+        files: vec![],
         blame,
     }
 }
@@ -776,9 +791,9 @@ fn a_hand_set_in_train_label_never_joins_a_train() {
 }
 
 #[test]
-fn only_an_official_approval_of_the_exact_head_counts_and_a_later_change_request_or_dismissal_ends_it() {
+fn only_review_bots_official_approval_of_the_exact_head_counts_and_a_later_change_request_or_dismissal_ends_it() {
     use crate::pr::gitea::{Review, approved_at};
-    let ex: &[&str] = &["queue-bot", "release-bot"];
+    let allowed: &[&str] = &["review-bot"];
     let r = |id: u64, who: &str, state: &str, commit: &str, dismissed: bool, official: bool| Review {
         id,
         reviewer: who.into(),
@@ -787,49 +802,66 @@ fn only_an_official_approval_of_the_exact_head_counts_and_a_later_change_request
         dismissed,
         official,
     };
-    let ok = |reviews: &[Review]| approved_at(reviews, "h1", ex);
-    assert!(ok(&[r(1, "a", "APPROVED", "h1", false, true)]));
-    assert!(!ok(&[r(1, "a", "APPROVED", "h0", false, true)]), "an approval of an older head");
-    assert!(!ok(&[r(1, "a", "APPROVED", "h1", true, true)]), "dismissed");
-    assert!(!ok(&[r(1, "a", "COMMENT", "h1", false, true)]), "a comment is not an approval");
+    let ok = |reviews: &[Review]| approved_at(reviews, "h1", allowed);
+    let bot = "review-bot";
+    assert!(ok(&[r(1, bot, "APPROVED", "h1", false, true)]));
+    assert!(!ok(&[r(1, bot, "APPROVED", "h0", false, true)]), "an approval of an older head");
+    assert!(!ok(&[r(1, bot, "APPROVED", "h1", true, true)]), "dismissed");
+    assert!(!ok(&[r(1, bot, "COMMENT", "h1", false, true)]), "a comment is not an approval");
     assert!(
-        !ok(&[r(1, "a", "APPROVED", "h1", false, false)]),
+        !ok(&[r(1, bot, "APPROVED", "h1", false, false)]),
         "an unofficial review is advice, not an approval"
     );
-    assert!(
-        !ok(&[r(1, "queue-bot", "APPROVED", "h1", false, true)]),
-        "the queue's own account cannot approve"
-    );
-    assert!(!ok(&[r(1, "release-bot", "APPROVED", "h1", false, true)]), "nor the release bot");
-    assert!(
-        !ok(&[
-            r(1, "a", "APPROVED", "h1", false, true),
-            r(2, "a", "REQUEST_CHANGES", "h1", false, true)
-        ]),
-        "the reviewer changed their mind"
-    );
+    for who in ["someone", "a-maintainer", "queue-bot", "release-bot", "author"] {
+        assert!(
+            !ok(&[r(1, who, "APPROVED", "h1", false, true)]),
+            "{who}'s official approval is not review-bot's"
+        );
+    }
     assert!(
         !ok(&[
-            r(1, "a", "APPROVED", "h1", false, true),
-            r(2, "b", "REQUEST_CHANGES", "h1", false, true)
+            r(1, bot, "APPROVED", "h1", false, true),
+            r(2, bot, "REQUEST_CHANGES", "h1", false, true)
         ]),
-        "another reviewer asks for changes"
+        "review-bot changed its mind"
     );
     // The server may list them in any order: the id says which is later.
     assert!(ok(&[
-        r(2, "a", "APPROVED", "h1", false, true),
-        r(1, "a", "REQUEST_CHANGES", "h1", false, true)
+        r(2, bot, "APPROVED", "h1", false, true),
+        r(1, bot, "REQUEST_CHANGES", "h1", false, true)
     ]));
     assert!(!ok(&[
-        r(2, "a", "REQUEST_CHANGES", "h1", false, true),
-        r(1, "a", "APPROVED", "h1", false, true)
+        r(2, bot, "REQUEST_CHANGES", "h1", false, true),
+        r(1, bot, "APPROVED", "h1", false, true)
     ]));
-    // An unofficial or bot request for changes does not veto an official approval.
+    // Nobody else's review vetoes or approves.
     assert!(ok(&[
-        r(1, "a", "APPROVED", "h1", false, true),
-        r(2, "c", "REQUEST_CHANGES", "h1", false, false)
+        r(1, bot, "APPROVED", "h1", false, true),
+        r(2, "c", "REQUEST_CHANGES", "h1", false, true)
     ]));
-    assert!(!ok(&[]) && !approved_at(&[r(1, "a", "APPROVED", "", false, true)], "", ex));
+    assert!(!ok(&[]) && !approved_at(&[r(1, bot, "APPROVED", "", false, true)], "", allowed));
+}
+
+#[test]
+fn an_approval_by_any_other_account_gets_no_pull_request_into_a_train() {
+    for who in ["a-maintainer", "queue-bot", "release-bot", "author"] {
+        let mut w = World::new();
+        w.approved(1, "crates/x/a.rs", &["x"]);
+        for (_, r) in w.gitea.reviews.iter_mut() {
+            r["user"]["login"] = serde_json::json!(who);
+        }
+        assert!(matches!(w.tick(), Tick::Idle(_)), "{who}");
+        assert_eq!(w.labels_of(1), vec!["state/built"], "{who}");
+    }
+}
+
+#[test]
+fn review_bots_approval_does_not_count_on_a_pull_request_review_bot_opened() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    w.gitea.pulls.iter_mut().find(|p| p["number"] == 1).unwrap()["user"]["login"] = serde_json::json!("review-bot");
+    assert!(matches!(w.tick(), Tick::Idle(_)));
+    assert_eq!(w.labels_of(1), vec!["state/built"]);
 }
 
 #[test]
@@ -913,10 +945,7 @@ fn a_failure_in_an_app_workflow_drops_its_suspect_and_the_retry_reruns_only_that
     assert!(w.comments_of(1).join("\n").contains("debrief.yml"));
     // On the new head ci.yml runs affected (no since_run: its run was green), debrief.yml reruns the failed run.
     assert!(matches!(w.tick(), Tick::Dispatched { .. }));
-    assert_eq!(
-        w.ci.dispatched.last().unwrap(),
-        &vec![("base".to_string(), "origin/main".to_string())]
-    );
+    assert_eq!(w.ci.dispatched.last().unwrap(), &vec![("base".to_string(), w.main())]);
     w.green("ci.yml", &new, 8003);
     assert!(matches!(w.tick(), Tick::Dispatched { .. }));
     assert_eq!(
@@ -927,11 +956,14 @@ fn a_failure_in_an_app_workflow_drops_its_suspect_and_the_retry_reruns_only_that
 
 #[test]
 fn the_inputs_of_each_workflow_are_the_ones_it_declares() {
-    assert_eq!(inputs_for("ci.yml", false, None), vec![("base".into(), "origin/main".into())]);
-    assert_eq!(inputs_for("ci.yml", true, None), Vec::<(String, String)>::new());
-    assert_eq!(inputs_for("debrief.yml", false, None), Vec::<(String, String)>::new());
-    assert_eq!(inputs_for("debrief.yml", true, None), vec![("bundles".into(), "true".into())]);
-    assert_eq!(inputs_for("debrief.yml", false, Some(5)), vec![("since_run".into(), "5".into())]);
+    assert_eq!(inputs_for("ci.yml", false, None, "M"), vec![("base".into(), "M".into())]);
+    assert_eq!(inputs_for("ci.yml", true, None, "M"), Vec::<(String, String)>::new());
+    assert_eq!(inputs_for("debrief.yml", false, None, "M"), Vec::<(String, String)>::new());
+    assert_eq!(inputs_for("debrief.yml", true, None, "M"), vec![("bundles".into(), "true".into())]);
+    assert_eq!(
+        inputs_for("debrief.yml", false, Some(5), "M"),
+        vec![("since_run".into(), "5".into())]
+    );
 }
 
 // ---- the token stays away from PR code -------------------------------------------------------------------------------------------
@@ -1262,6 +1294,17 @@ fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
         false,
     );
     put(
+        "Cargo.toml",
+        "[package]\nname = \"trap\"\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n",
+        false,
+    );
+    put("src/lib.rs", "", false);
+    put(
+        "build.rs",
+        &format!("fn main() {{ std::fs::write(\"{}\", \"x\").unwrap(); }}\n", sentinel.display()),
+        false,
+    );
+    put(
         "crates/x/build.rs",
         &format!("fn main() {{ std::fs::write(\"{}\", \"x\").unwrap(); }}\n", sentinel.display()),
         false,
@@ -1462,6 +1505,9 @@ fn a_held_tick_does_not_exit_zero() {
 fn reaches_debrief(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({"apps": ["debrief"], "crates": false}))
 }
+fn reaches_evilapp(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({"apps": ["evilapp"]}))
+}
 fn reaches_nothing(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({"apps": [], "crates": true}))
 }
@@ -1490,6 +1536,7 @@ fn the_reached_workflows_come_from_the_apps_paddock_ci_json_on_main_and_the_plan
     git(&w.repos.author, &["checkout", "--quiet", "-B", "evil", "main"]);
     put("apps/debrief/paddock.ci.json", "{\"workflow\": \"evil.yml\"}");
     put("apps/demo/paddock.ci.json", "{\"workflow\": \"demo.yml\"}");
+    put("apps/evilapp/paddock.ci.json", "{\"workflow\": \"evilapp.yml\"}");
     git(&w.repos.author, &["add", "-A"]);
     git(&w.repos.author, &["commit", "--quiet", "-m", "feat: evil"]);
     git(&w.repos.author, &["push", "--quiet", "origin", "evil"]);
@@ -1499,6 +1546,12 @@ fn the_reached_workflows_come_from_the_apps_paddock_ci_json_on_main_and_the_plan
     let (main, evil) = (g.main_head().unwrap(), w.repos.origin_ref("refs/heads/evil"));
     g.planner = reaches_debrief;
     assert_eq!(g.reached_workflows(&main, &evil).unwrap(), vec!["ci.yml", "debrief.yml"]);
+    g.planner = reaches_evilapp;
+    assert_eq!(
+        g.reached_workflows(&main, &evil).unwrap(),
+        vec!["ci.yml"],
+        "an app that exists only in the pull request is not read from the pull request"
+    );
     g.planner = reaches_nothing;
     assert_eq!(g.reached_workflows(&main, &evil).unwrap(), vec!["ci.yml"]);
     g.planner = reaches_everything;
@@ -1678,10 +1731,10 @@ fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a
     let gates = job_block(ci, "train-gates");
     for needle in [
         "./dev gates check",
-        "paddock-conformance.mjs --app paddock",
+        "paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS",
         "cargo hakari generate --diff",
         "cargo metadata --locked --format-version 1",
-        "node scripts/publish.mjs --skip-build --offline",
+        "node scripts/publish.mjs --offline",
         "github.event.inputs.base != ''",
         "needs: [plan]",
     ] {
@@ -1691,16 +1744,466 @@ fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a
         !gates.contains("secrets.") && !gates.to_lowercase().contains("token"),
         "the gates job holds no token"
     );
-    // The conformance line is the conformance job's, word for word.
-    let line = |block: &str| {
-        block
-            .lines()
-            .find(|l| l.contains("paddock-conformance.mjs --app paddock"))
-            .map(|l| l.trim().to_string())
-    };
-    assert_eq!(line(&gates), line(&job_block(ci, "conformance")));
+    // The conformance line is in one place, read by both jobs that run it.
+    assert_eq!(ci.matches("--only C06").count(), 1, "the conformance arguments are written once");
+    assert!(job_block(ci, "conformance").contains("paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"));
+    assert!(ci.contains("\nenv:\n  PADDOCK_CONFORMANCE_ARGS: \"--app paddock"));
     // The commit lint is the commits job, which runs on every dispatch.
     assert!(job_block(ci, "commits").contains("commit-lint"));
     // The planner's table knows the job, so a rerun of its failure plans it.
     assert!(crate::plan_gitea::CI_JOBS.iter().any(|(j, _)| *j == "train-gates"));
+}
+
+#[test]
+fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
+    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let top = ci.split("\njobs:\n").next().unwrap();
+    assert!(
+        top.contains("\npermissions:\n  contents: read\n  actions: read\n"),
+        "workflow-level read-only permissions"
+    );
+    let checkouts = ci.matches("uses: actions/checkout@v4").count();
+    assert!(checkouts > 0);
+    assert_eq!(
+        ci.matches("persist-credentials: false").count(),
+        checkouts,
+        "every checkout drops its credentials, as tag.yml's does"
+    );
+}
+
+/// The shell of a step: the `run:` text of the step named `name` in a job block.
+fn step_run(block: &str, name: &str) -> String {
+    let at = block.find(&format!("- name: {name}")).unwrap_or_else(|| panic!("no step {name}"));
+    let rest = &block[at..];
+    let run = rest.find("run:").unwrap_or_else(|| panic!("step {name} has no run"));
+    let body = &rest[run + 4..];
+    let end = body.find("\n      - ").unwrap_or(body.len());
+    let text = &body[..end];
+    // `run: |` blocks: strip the indentation; a one-liner is the rest of the line.
+    if let Some(block) = text.trim_start().strip_prefix('|') {
+        block.lines().map(|l| l.trim_start_matches(' ')).collect::<Vec<_>>().join("\n")
+    } else {
+        text.trim().to_string()
+    }
+}
+
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+}
+
+#[test]
+fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_no_fixture() {
+    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let script = step_run(
+        &job_block(ci, "train-gates"),
+        "Lockfiles are current (cargo metadata of every workspace)",
+    );
+    // The real loop, on the real repository, with a cargo that only says where it was run.
+    let shim = tempfile::tempdir().unwrap();
+    let log = shim.path().join("visited");
+    let cargo = shim.path().join("cargo");
+    std::fs::write(&cargo, format!("#!/bin/sh\npwd >> '{}'\nexit 0\n", log.display())).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = format!("{}:{}", shim.path().display(), std::env::var("PATH").unwrap_or_default());
+    let out = paddock_proc::command("sh")
+        .args(["-ec", &script])
+        .current_dir(repo_root())
+        .env("PATH", path)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let visited = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        visited.lines().any(|l| l.ends_with("/crates")) && visited.lines().any(|l| l.ends_with("/tools/paddock-dev")),
+        "{visited}"
+    );
+    assert!(
+        !visited.contains("tests/golden/fixture"),
+        "the golden fixture is a repository inside the repository, not a workspace:\n{visited}"
+    );
+    // And every folder it visits is one `cargo metadata` can resolve, not a fixture a test makes.
+    for l in visited.lines() {
+        assert!(Path::new(l).join("Cargo.toml").exists(), "{l} has no Cargo.toml");
+    }
+}
+
+#[test]
+fn the_publish_dry_run_of_the_train_gates_installs_and_builds_what_it_needs() {
+    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let gates = job_block(ci, "train-gates");
+    let publish = gates.find("node scripts/publish.mjs").expect("a publish dry run");
+    assert!(
+        !gates[publish..].lines().next().unwrap().contains("--skip-build"),
+        "there is no ui/dist here: --skip-build would fail"
+    );
+    let install = gates.find("run: npm ci").expect("npm ci");
+    assert!(install < publish, "the packages are installed before the dry run builds them");
+    // The script accepts exactly the arguments the step gives it.
+    let script = std::fs::read_to_string(repo_root().join("scripts/publish.mjs")).unwrap();
+    assert!(script.contains("'--offline'") && script.contains("'--skip-build'"));
+}
+
+#[test]
+fn the_commits_job_lints_a_real_train_with_the_base_the_tick_dispatches() {
+    use crate::plan_ci::{LintInput, commit_lint_range};
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    w.approved(2, "ui/b.ts", &["ui"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!() };
+    assert!(matches!(w.tick(), Tick::Dispatched { .. }));
+    let base = w.ci.dispatched[0]
+        .iter()
+        .find(|(k, _)| k == "base")
+        .map(|(_, v)| v.clone())
+        .unwrap();
+    let known = |_: &str| true;
+    let input = |base: &str, sha: &str| {
+        commit_lint_range(
+            &LintInput {
+                event: "workflow_dispatch",
+                reference: "refs/heads/train/queue",
+                before: "",
+                sha: Some(sha),
+                base,
+                base_ref: "",
+                app: "",
+            },
+            &known,
+        )
+    };
+    // What the job asks `./dev plan --commit-range` with the dispatched value: a range, which the real lint accepts.
+    let range = input(&base, &head).unwrap().expect("a train's dispatch is linted");
+    assert_eq!(range.range, format!("{base}..{head}"));
+    git(&w.repos.queue, &["fetch", "--quiet", "origin"]);
+    let lint = repo_root().join("conformance/bin/paddock-conformance.mjs");
+    let out = paddock_proc::command("node")
+        .arg(&lint)
+        .args(["commit-lint", "--range", &range.range])
+        .current_dir(&w.repos.queue)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "the commit lint of a real train failed:\n{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    // The old input was a ref name, which the range refuses: every train run went red on it.
+    assert!(input("origin/main", &head).is_err());
+}
+
+// ---- a train is a train only when its structure says so -------------------------------------------------------------------------------
+
+/// A branch pushed over `train/queue` by hand: the given merges (second parent, an extra file put into the merge), then a marker
+/// commit (an extra file put into it) and, optionally, one more commit on top that copies the marker's message.
+fn forge(w: &World, merges: &[(&str, Option<&str>)], prs: &str, marker_file: Option<&str>, on_top: Option<&str>) -> String {
+    let a = &w.repos.author;
+    git(a, &["fetch", "--quiet", "origin"]);
+    git(a, &["checkout", "--quiet", "-B", "forged", "origin/main"]);
+    let put = |file: &str| {
+        std::fs::write(a.join(file), "evil\n").unwrap();
+        git(a, &["add", file]);
+    };
+    for (sha, extra) in merges {
+        git(a, &["merge", "--no-ff", "--no-commit", "--quiet", sha]);
+        if let Some(f) = extra {
+            put(f);
+        }
+        git(a, &["commit", "--quiet", "-m", "Merge forged"]);
+    }
+    let message = format!("Queue-Prs: {prs}\nQueue-Round: 1");
+    if let Some(f) = marker_file {
+        put(f);
+    }
+    git(
+        a,
+        &[
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "chore(queue): train round 1",
+            "-m",
+            &message,
+        ],
+    );
+    if let Some(f) = on_top {
+        put(f);
+        git(a, &["commit", "--quiet", "-m", "chore(queue): train round 1", "-m", &message]);
+    }
+    git(a, &["push", "--quiet", "--force", "origin", "forged:refs/heads/train/queue"]);
+    git(a, &["rev-parse", "HEAD"])
+}
+
+fn forged_train_is_rebuilt_not_landed(make: impl FnOnce(&World, &str) -> String, what: &str) {
+    let mut w = World::new();
+    let pr_head = w.approved(1, "crates/x/a.rs", &["x"]);
+    let Tick::Built { head, .. } = w.tick() else { panic!("built") };
+    let forged = make(&w, &pr_head);
+    assert_ne!(forged, head);
+    w.green("ci.yml", &forged, 9001);
+    let before = w.main();
+    let t = w.tick();
+    assert!(
+        matches!(t, Tick::Built { .. }),
+        "{what}: the forged head must be rebuilt, got {t:?}"
+    );
+    assert_eq!(w.main(), before, "{what}: nothing landed");
+    assert_ne!(w.train_head(), forged, "{what}: the forged branch was replaced");
+    assert_eq!(w.labels_of(1), vec!["state/in-train"]);
+}
+
+#[test]
+fn a_train_branch_pushed_by_hand_is_rebuilt_whatever_its_marker_says() {
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            // The reviewer's attack: the real train plus evil.txt, with the marker's own message.
+            let _ = pr;
+            let legit = w.train_head();
+            let a = &w.repos.author;
+            git(a, &["fetch", "--quiet", "origin"]);
+            git(a, &["checkout", "--quiet", "-B", "forged", &legit]);
+            let message = git(a, &["log", "-1", "--format=%B"]);
+            std::fs::write(a.join("evil.txt"), "evil\n").unwrap();
+            git(a, &["add", "evil.txt"]);
+            git(a, &["commit", "--quiet", "-m", &message]);
+            git(a, &["push", "--quiet", "--force", "origin", "forged:refs/heads/train/queue"]);
+            git(a, &["rev-parse", "HEAD"])
+        },
+        "a commit on top of the real train",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| forge(w, &[(pr, None)], "1", Some("evil.txt"), None),
+        "the marker commit changes the tree",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| forge(w, &[(pr, Some("evil.txt"))], "1", None, None),
+        "a merge that is not what merging gives",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            // A descendant of the approved head (not the approved head) is merged.
+            let a = &w.repos.author;
+            git(a, &["checkout", "--quiet", "-B", "descendant", pr]);
+            std::fs::write(a.join("sneaky.txt"), "x\n").unwrap();
+            git(a, &["add", "."]);
+            git(a, &["commit", "--quiet", "-m", "feat: sneaky"]);
+            let sneaky = git(a, &["rev-parse", "HEAD"]);
+            forge(w, &[(&sneaky, None)], "1", None, None)
+        },
+        "a merge of a commit that is not the approved head",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            let other = w.repos.branch("other", "docs/other.md");
+            forge(w, &[(pr, None), (&other, None)], "1", None, None)
+        },
+        "an extra merge the marker does not list",
+    );
+    forged_train_is_rebuilt_not_landed(
+        |w, pr| {
+            // No merge commit at all: the pull request's head fast-forwarded, then the marker.
+            let a = &w.repos.author;
+            git(a, &["fetch", "--quiet", "origin"]);
+            git(a, &["checkout", "--quiet", "-B", "forged", pr]);
+            git(
+                a,
+                &[
+                    "commit",
+                    "--quiet",
+                    "--allow-empty",
+                    "-m",
+                    "chore(queue): train round 1",
+                    "-m",
+                    "Queue-Prs: 1\nQueue-Round: 1",
+                ],
+            );
+            git(a, &["push", "--quiet", "--force", "origin", "forged:refs/heads/train/queue"]);
+            git(a, &["rev-parse", "HEAD"])
+        },
+        "no --no-ff merge",
+    );
+}
+
+#[test]
+fn a_train_built_by_hand_exactly_the_way_the_queue_builds_one_is_accepted() {
+    let mut w = World::new();
+    let pr_head = w.approved(1, "crates/x/a.rs", &["x"]);
+    w.tick();
+    let hand = forge(&w, &[(&pr_head, None)], "1", None, None);
+    w.run(&hand, 9002, RunState::Running);
+    assert_eq!(w.tick(), Tick::Waiting(9002), "a structurally right train is judged, not rebuilt");
+}
+
+#[test]
+fn a_forged_marker_on_a_commit_main_already_has_does_not_label_pull_requests_landed() {
+    let mut w = World::new();
+    let pr_head = w.approved(1, "crates/x/a.rs", &["x"]);
+    w.tick();
+    // A forged train (the marker on top of an extra commit) lands on main by someone's push; the queue must not call it its own.
+    let forged = forge(&w, &[(&pr_head, None)], "1", None, Some("evil.txt"));
+    git(
+        &w.repos.author,
+        &["push", "--quiet", "origin", &format!("{forged}:refs/heads/main")],
+    );
+    let t = w.tick();
+    assert!(!matches!(t, Tick::Landed { .. }), "{t:?}");
+    assert!(!w.labels_of(1).contains(&"state/landed".to_string()));
+}
+
+// ---- self approval ----------------------------------------------------------------------------------------------------------------
+
+// ---- the window's message ---------------------------------------------------------------------------------------------------------
+
+#[test]
+fn an_unread_hour_says_the_clock_not_a_tool() {
+    let mut w = World::new();
+    w.approved(1, "crates/x/a.rs", &["x"]);
+    w.tick();
+    let t = w.tick_hour(None);
+    assert!(
+        matches!(&t, Tick::Stuck { why, .. } if why.contains("system clock") && !why.contains("date")),
+        "{t:?}"
+    );
+}
+
+// ---- gate jobs map to pull requests by the files they name -----------------------------------------------------------------------
+
+#[test]
+fn a_gate_job_failure_is_mapped_to_the_pull_requests_that_change_its_files_and_stops_when_none_does() {
+    let gate = |files: &[&str]| Failure {
+        what: "train gates (...): the job failed outside any test".into(),
+        projects: set(&["traingate"]),
+        files: files.iter().map(|s| s.to_string()).collect(),
+        blame: Blame::New,
+    };
+    let mut w = World::new();
+    let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"]), (2, "ui/b.ts", &["ui"])]);
+    w.run(&head, 9300, RunState::Failed("failure".into()));
+    w.ci.failures.insert(9300, vec![gate(&["ui/b.ts"])]);
+    let Tick::Dropped { dropped, .. } = w.tick() else { panic!() };
+    assert_eq!(dropped, vec![2], "only the pull request that changes the named file");
+    let mut w = World::new();
+    let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"]), (2, "ui/b.ts", &["ui"])]);
+    w.run(&head, 9301, RunState::Failed("failure".into()));
+    w.ci.failures.insert(9301, vec![gate(&["docs/elsewhere.md"])]);
+    assert!(
+        matches!(w.tick(), Tick::Stuck { measured: true, .. }),
+        "no pull request changes that file: the queue stops"
+    );
+    assert_eq!(w.labels_of(1), vec!["state/in-train"]);
+    assert_eq!(w.labels_of(2), vec!["state/in-train"]);
+}
+
+#[test]
+fn the_files_a_gate_log_names_are_read_from_it() {
+    let text = "error[C99]: crates/x/src/lib.rs:12: bad\n  --> ui/projects/a.ts:3:4\nsee `docs/rules.md` and (apps/dyno/x.rs) not a/b\nreadme.md and 1.2.3\n";
+    assert_eq!(
+        real::files_named(text),
+        vec!["crates/x/src/lib.rs", "ui/projects/a.ts", "docs/rules.md", "apps/dyno/x.rs"]
+    );
+}
+
+// ---- children carry no token ------------------------------------------------------------------------------------------------------
+
+#[test]
+fn the_planner_child_runs_in_the_trusted_checkout_without_the_token() {
+    let parent: Vec<String> = ["PATH", "GITEA_TOKEN", "QUEUE_BOT_TOKEN", "CARGO_REGISTRY_TOKEN"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let c = real::planner_command(Path::new("/x/dev"), Path::new("/x/trusted"), "m", "h", &parent);
+    assert_eq!(c.get_current_dir(), Some(Path::new("/x/trusted")));
+    assert_eq!(
+        c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(),
+        ["plan", "m", "h"]
+    );
+    let envs: BTreeMap<String, Option<String>> = c
+        .get_envs()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+        .collect();
+    for gone in ["GITEA_TOKEN", "QUEUE_BOT_TOKEN", "CARGO_REGISTRY_TOKEN"] {
+        assert_eq!(envs.get(gone), Some(&None), "{gone}");
+    }
+}
+
+#[test]
+fn the_merge_checks_git_children_have_hooks_off_and_no_token() {
+    let root = tempfile::tempdir().unwrap();
+    let g = crate::merge_check::git::Git::new(root.path());
+    let parent: Vec<String> = ["GITEA_TOKEN", "QUEUE_BOT_TOKEN", "SOME_SECRET"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let c = g.command_for(&["log"], &parent);
+    let args: Vec<String> = c.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+    assert!(args.iter().any(|a| a == "core.hooksPath=/dev/null"), "{args:?}");
+    let envs: BTreeMap<String, Option<String>> = c
+        .get_envs()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned())))
+        .collect();
+    for gone in ["GITEA_TOKEN", "QUEUE_BOT_TOKEN", "SOME_SECRET"] {
+        assert_eq!(envs.get(gone), Some(&None), "{gone}");
+    }
+}
+
+// ---- the planner never runs in the merge clone ------------------------------------------------------------------------------------
+
+static PLANNER_DIRS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// The most dangerous thing a planner can do: `cargo check` (it runs build scripts, wrappers and toolchain files) in the folder
+/// it is given. Run in a pull request's tree it would execute the pull request.
+fn cargo_planner(trusted: &Path, _main: &str, _head: &str) -> Result<serde_json::Value, String> {
+    PLANNER_DIRS.lock().unwrap().push(trusted.to_path_buf());
+    let _ = paddock_proc::command("cargo")
+        .args(["check", "--offline", "--quiet"])
+        .current_dir(trusted)
+        .output();
+    Ok(serde_json::json!({"all": false}))
+}
+
+#[test]
+fn the_planner_runs_cargo_only_in_the_checkout_of_main_never_in_the_merge_clone() {
+    let mut w = World::new();
+    let sentinel_dir = tempfile::tempdir().unwrap();
+    let sentinel = sentinel_dir.path().join("sentinel");
+    let head = booby_trapped(&w, "feat/pr1", &sentinel);
+    w.gitea.pull(1, "feat/pr1", &head, "open", None, &["state/approved"]);
+    w.approve(1, &head);
+    // Positive control: cargo check in the pull request's own tree runs its build script and its toolchain wrapper.
+    git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
+    let _ = paddock_proc::command("cargo")
+        .args(["check", "--offline", "--quiet"])
+        .current_dir(&w.repos.author)
+        .output();
+    assert!(sentinel.exists(), "cargo check in a pull request's tree executes it (the control)");
+    std::fs::remove_file(&sentinel).unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    w.real_train = Some(scratch.path().to_path_buf());
+    w.planner = cargo_planner;
+    let Tick::Built { head: train, .. } = w.tick() else {
+        panic!("built")
+    };
+    assert!(
+        matches!(w.tick(), Tick::Dispatched { .. }),
+        "dispatching asks the planner for the workflows"
+    );
+    w.green("ci.yml", &train, 7100);
+    assert!(matches!(w.tick(), Tick::Landed { .. }));
+    let ran_in: Vec<PathBuf> = PLANNER_DIRS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|d| d.starts_with(scratch.path()))
+        .cloned()
+        .collect();
+    assert!(!ran_in.is_empty(), "the planner was asked");
+    for d in &ran_in {
+        assert_eq!(d, &scratch.path().join("trusted"), "the planner runs in the checkout of main only");
+    }
+    assert!(!sentinel.exists(), "cargo never ran a pull request's code");
 }

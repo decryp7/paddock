@@ -170,7 +170,7 @@ fn numbers(prs: &[&Pull]) -> Vec<u64> {
 fn window_guard(env: &Env) -> Option<Tick> {
     match env.hour {
         None => Some(Tick::Stuck {
-            why: "the hour (Asia/Singapore) could not be read, so the backup window is not measured: nothing is dispatched or landed. Next step: fix `date` on the runner, the next tick asks again".into(),
+            why: "the hour (Asia/Singapore) could not be read, so the backup window is not measured: nothing is dispatched or landed. Next step: the system clock could not be read, the next tick asks again".into(),
             measured: false,
         }),
         Some(h) if WINDOW.contains(&h) => Some(Tick::Window),
@@ -199,7 +199,7 @@ fn admit(p: &mut Ports, pr: &Pull) -> Result<bool, String> {
         )?;
         return Ok(false);
     }
-    if !p.ledger.approved_head(pr.number, &pr.head)? {
+    if !p.ledger.approved_head(pr)? {
         send_back(
             p,
             pr.number,
@@ -293,8 +293,16 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
         && m.prs == want
         && p.train.contains(h, &main)?
     {
-        // Pushed to main, then the tick ended before the labels: finish the landing.
-        return finish_landing(p, h, in_train);
+        // Pushed to main, then the tick ended before the labels: finish the landing, when the head is the train the queue built
+        // (a forged marker on an old commit must not label pull requests landed).
+        let prs: Vec<(u64, String)> = in_train.iter().map(|x| (x.number, x.head.clone())).collect();
+        let mut in_main = true;
+        for (_, ph) in &prs {
+            in_main &= p.train.contains(ph, &main)?;
+        }
+        if in_main && p.train.verify_train(None, h, &prs)?.is_none() {
+            return finish_landing(p, h, in_train);
+        }
     }
     let valid = match (&head, &marker) {
         (Some(h), Some(m)) if m.prs == want && p.train.contains(&main, h)? => {
@@ -306,6 +314,16 @@ fn resume(p: &mut Ports, env: &Env, in_train: &[&Pull]) -> Result<Tick, String> 
         }
         _ => false,
     };
+    // A branch anyone with write access can push to is not a train until its structure says so: one --no-ff merge per pull request
+    // at its approved head, each merge exactly what merging its parents gives, then the marker commit on an unchanged tree.
+    let (mut valid, mut marker) = (valid, marker);
+    if valid && let Some(h) = &head {
+        let prs: Vec<(u64, String)> = in_train.iter().map(|x| (x.number, x.head.clone())).collect();
+        if p.train.verify_train(Some(&main), h, &prs)?.is_some() {
+            valid = false;
+            marker = None; // what a forged head says is not evidence of anything
+        }
+    }
     if !valid {
         return rebuild_stale(p, in_train, head, marker, &main);
     }
@@ -420,11 +438,12 @@ fn drop_pr(p: &mut Ports, number: u64, why: &str) -> Result<(), String> {
 /// The inputs of a dispatch of `workflow`: the affected run against main, or the full run (ER-8); a rerun of failures adds
 /// `since_run` when the failed run was of this workflow. ci.yml takes `base`; an app workflow plans against main itself and takes
 /// `bundles` for its full run.
-pub fn inputs_for(workflow: &str, full: bool, since: Option<u64>) -> Vec<(String, String)> {
+pub fn inputs_for(workflow: &str, full: bool, since: Option<u64>, main: &str) -> Vec<(String, String)> {
     let mut v: Vec<(String, String)> = Vec::new();
     if workflow == "ci.yml" {
         if !full {
-            v.push(("base".into(), "origin/main".into()));
+            // A commit id, never a ref name: the commit lint and the plan resolve `base` as one.
+            v.push(("base".into(), main.to_string()));
             v.extend(since.map(|r| ("since_run".to_string(), r.to_string())));
         }
     } else if full {
@@ -454,7 +473,7 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
         let runs = p.ci.runs(&wf, head)?;
         let since = marker.since_workflow.as_deref().filter(|w| *w == wf).and(marker.since_run);
         let Some(newest) = runs.first() else {
-            return dispatch(p, env, head, &wf, inputs_for(&wf, false, since));
+            return dispatch(p, env, head, &wf, inputs_for(&wf, false, since, main));
         };
         match &newest.state {
             RunState::Running => return Ok(Tick::Waiting(newest.id)),
@@ -480,7 +499,7 @@ fn judge(p: &mut Ports, env: &Env, in_train: &[&Pull], head: &str, marker: &Mark
                             measured: true,
                         });
                     }
-                    return dispatch(p, env, head, &wf, inputs_for(&wf, true, None));
+                    return dispatch(p, env, head, &wf, inputs_for(&wf, true, None, main));
                 }
             },
             RunState::Failed(how) => {
@@ -552,17 +571,23 @@ fn failed_run(
     let (mut precise, mut wild): (Vec<(&Pull, Vec<&Failure>)>, Vec<&Pull>) = (Vec::new(), Vec::new());
     for pr in in_train {
         let reach = p.train.affected(main, &pr.head)?;
-        if reach.contains("*") {
-            wild.push(pr);
-            continue;
-        }
+        // A gate job (train gates, commit messages) fails on files, not on a project: its log's paths map it to the pull requests
+        // that change those files.
+        let changed: Vec<String> = if blamed.iter().any(|f| !f.files.is_empty()) {
+            p.train.pr_files(main, &pr.head)?
+        } else {
+            Vec::new()
+        };
+        let by_file = |f: &Failure| f.files.iter().any(|x| changed.contains(x));
         let hit: Vec<&Failure> = blamed
             .iter()
             .copied()
-            .filter(|f| f.projects.iter().any(|x| reach.contains(x)))
+            .filter(|f| by_file(f) || (!reach.contains("*") && f.projects.iter().any(|x| reach.contains(x))))
             .collect();
         if !hit.is_empty() {
             precise.push((pr, hit));
+        } else if reach.contains("*") {
+            wild.push(pr);
         }
     }
     if precise.is_empty() {

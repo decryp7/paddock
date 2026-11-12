@@ -123,13 +123,16 @@ impl Ledger for GiteaLedger<'_> {
         self.api.comment(number, text)
     }
 
-    fn approved_head(&mut self, number: u64, head: &str) -> Result<bool, String> {
-        Ok(approved_at(&self.api.reviews(number)?, head, APPROVAL_EXCLUDED))
+    fn approved_head(&mut self, pr: &Pull) -> Result<bool, String> {
+        // Never the pull request's own author, even if review-bot opened it.
+        let allowed: Vec<&str> = APPROVERS.iter().copied().filter(|a| *a != pr.author).collect();
+        Ok(approved_at(&self.api.reviews(pr.number)?, &pr.head, &allowed))
     }
 }
 
-/// Accounts whose reviews never count as an approval: the bots that run the queue and the releases.
-pub const APPROVAL_EXCLUDED: &[&str] = &["queue-bot", "release-bot"];
+/// The accounts whose approvals count: review-bot alone (its approvals are the official ones, main's approvals whitelist). Reviewer
+/// agents post an approval through it after a passing review round; the queue's and the release bots never approve.
+pub const APPROVERS: &[&str] = &["review-bot"];
 
 /// How triage's answer for a failed test counts for blame: flaky is still red (ER-12), so it is blamed, unless the same test also
 /// failed on the baseline run (then it is main's).
@@ -347,13 +350,20 @@ impl GitTrain {
 
 const IDENT: [&str; 4] = ["-c", "user.name=queue-bot", "-c", "user.email=queue-bot@dev.decryptology.net"];
 
+/// The planner child: `plan <main> <head>` in `trusted`, without the queue's token (`parent`: the names of this process's
+/// environment).
+pub fn planner_command(me: &Path, trusted: &Path, main: &str, head: &str, parent: &[String]) -> std::process::Command {
+    let mut c = paddock_proc::command(me);
+    c.args(["plan", main, head]).current_dir(trusted);
+    scrub(&mut c, parent);
+    c
+}
+
 /// The planner as a child of this tool in `trusted` (a checkout of main), without the queue's token.
 pub fn run_planner(trusted: &Path, main: &str, head: &str) -> Result<serde_json::Value, String> {
     let me = std::env::current_exe().map_err(|e| format!("cannot find this program: {e}"))?;
-    let mut c = paddock_proc::command(me);
-    c.args(["plan", main, head]).current_dir(trusted);
     let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
-    scrub(&mut c, &parent);
+    let mut c = planner_command(&me, trusted, main, head, &parent);
     let out = c.output().map_err(|e| format!("cannot start the planner: {e}"))?;
     if !out.status.success() {
         return Err(format!(
@@ -365,6 +375,29 @@ pub fn run_planner(trusted: &Path, main: &str, head: &str) -> Result<serde_json:
 }
 
 pub use crate::child_env::scrub;
+
+fn short_id(sha: &str) -> &str {
+    sha.get(..10).unwrap_or(sha)
+}
+
+/// The repository files a gate's log names (`crates/x/src/lib.rs:12`, `ui/a.ts`), in order of first mention, at most 50.
+pub fn files_named(text: &str) -> Vec<String> {
+    static PATH: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        #[allow(clippy::expect_used)]
+        regex::Regex::new(r"(?:^|[\s'\x22`(\[=:])((?:[A-Za-z0-9_.@-]+/)+[A-Za-z0-9_.@-]+\.[A-Za-z0-9]{1,6})").expect("a valid pattern")
+    });
+    let mut out: Vec<String> = Vec::new();
+    for m in PATH.captures_iter(text) {
+        let f = m[1].trim_start_matches("./").to_string();
+        if !out.contains(&f) {
+            out.push(f);
+        }
+        if out.len() == 50 {
+            break;
+        }
+    }
+    out
+}
 
 /// `(app, workflow)` of every app whose `paddock.ci.json` names its own workflow, as `main` has it.
 pub fn app_workflows(ls_tree: &str, show: &mut dyn FnMut(&str) -> Option<String>) -> BTreeMap<String, String> {
@@ -526,6 +559,79 @@ impl Train for GitTrain {
         Ok(Built { head, merged, dropped })
     }
 
+    fn pr_files(&mut self, main: &str, head: &str) -> Result<Vec<String>, String> {
+        Ok(self
+            .ok(&["diff", "--name-only", &format!("{main}...{head}")])?
+            .lines()
+            .map(str::to_string)
+            .collect())
+    }
+
+    fn verify_train(&mut self, base: Option<&str>, head: &str, prs: &[(u64, String)]) -> Result<Option<String>, String> {
+        let n = prs.len();
+        if n == 0 {
+            return Ok(Some("it merges no pull request".into()));
+        }
+        let base = match base {
+            Some(b) => b.to_string(),
+            None => match self.git(&["rev-parse", "--verify", "--quiet", &format!("{head}~{}", n + 1)])? {
+                (true, out) => out.trim().to_string(),
+                _ => return Ok(Some("its first-parent chain is shorter than its marker says".into())),
+            },
+        };
+        let chain: Vec<String> = self
+            .ok(&["rev-list", "--first-parent", &format!("{base}..{head}")])?
+            .lines()
+            .map(str::to_string)
+            .collect();
+        if chain.len() != n + 1 {
+            return Ok(Some(format!(
+                "its first-parent chain from {} has {} commits, a train of {n} has {}",
+                short_id(&base),
+                chain.len(),
+                n + 1
+            )));
+        }
+        let parents = |g: &GitTrain, c: &str| -> Result<Vec<String>, String> {
+            Ok(g.ok(&["rev-list", "--parents", "-n", "1", c])?
+                .split_whitespace()
+                .skip(1)
+                .map(str::to_string)
+                .collect())
+        };
+        let tree =
+            |g: &GitTrain, c: &str| -> Result<String, String> { Ok(g.ok(&["rev-parse", &format!("{c}^{{tree}}")])?.trim().to_string()) };
+        let mut prev = base;
+        for (i, (number, approved)) in prs.iter().enumerate() {
+            let c = &chain[n - i]; // oldest merge first
+            let ps = parents(self, c)?;
+            if ps.len() != 2 || ps[0] != prev || ps[1] != *approved {
+                return Ok(Some(format!(
+                    "commit {} is not a --no-ff merge of #{number}'s approved head {} onto the train so far",
+                    short_id(c),
+                    short_id(approved)
+                )));
+            }
+            let (ok, out) = self.git(&["merge-tree", "--write-tree", "--no-messages", &ps[0], &ps[1]])?;
+            if !ok || out.lines().next().map(str::trim) != Some(tree(self, c)?.as_str()) {
+                return Ok(Some(format!(
+                    "the tree of the merge of #{number} ({}) is not what merging its parents gives",
+                    short_id(c)
+                )));
+            }
+            prev = c.clone();
+        }
+        let marker = &chain[0];
+        let ps = parents(self, marker)?;
+        if ps.len() != 1 || ps[0] != prev || tree(self, marker)? != tree(self, &prev)? {
+            return Ok(Some(format!(
+                "the marker commit {} does not sit on the last merge with an unchanged tree",
+                short_id(marker)
+            )));
+        }
+        Ok(None)
+    }
+
     fn affected(&mut self, main: &str, head: &str) -> Result<BTreeSet<String>, String> {
         let trusted = self.trusted_main(main)?;
         Ok(projects_of_plan(&(self.planner)(&trusted, main, head)?))
@@ -641,17 +747,36 @@ impl Ci for GiteaCi<'_> {
     }
 
     fn failures(&mut self, run: u64) -> Result<Vec<Failure>, String> {
-        let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
-        let req = triage::Request {
-            run,
-            against: None,
-            app: None,
-            days: 14,
-            history: true,
-            repo: self.repo.clone(),
-            now_secs: time::now_secs(),
+        let report = {
+            let mut c = Client::new(self.http, &self.server, &self.repo, &self.token);
+            let req = triage::Request {
+                run,
+                against: None,
+                app: None,
+                days: 14,
+                history: true,
+                repo: self.repo.clone(),
+                now_secs: time::now_secs(),
+            };
+            triage::collect(&mut c, &req, &mut |l| eprintln!("{l}"))?
         };
-        let report = triage::collect(&mut c, &req, &mut |l| eprintln!("{l}"))?;
+        // The gate jobs (train gates, commit messages) fail on files: read their logs for the paths.
+        let is_gate = |job: &str| job.starts_with("train gates") || job.starts_with("commit messages");
+        let mut files: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        if report.rows.iter().any(|r| is_gate(&r.job)) {
+            let mut runs = crate::plan_since::GiteaRuns::new(self.http, &self.server, &self.repo, self.token.clone());
+            let jobs = runs.jobs(run).unwrap_or_default();
+            for r in report.rows.iter().filter(|r| is_gate(&r.job)) {
+                if let Some(j) = jobs.iter().find(|j| j.name == r.job)
+                    && let Ok(log) = runs.log(j.id)
+                {
+                    files.insert(
+                        r.job.clone(),
+                        files_named(&log.lines().map(crate::log_text::plain).collect::<Vec<_>>().join("\n")),
+                    );
+                }
+            }
+        }
         Ok(report
             .rows
             .iter()
@@ -666,6 +791,7 @@ impl Ci for GiteaCi<'_> {
                     }
                 ),
                 projects: projects_of_row(&r.job, &r.test),
+                files: files.get(&r.job).cloned().unwrap_or_default(),
                 blame: blame_of(&r.status),
             })
             .collect())

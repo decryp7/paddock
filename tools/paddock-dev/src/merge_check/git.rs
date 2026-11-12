@@ -77,7 +77,9 @@ impl<'a> Git<'a> {
         })
     }
 
-    fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
+    /// The git child of one call: stable output, hooks off, and none of the queue's credentials (`parent`: the names of this
+    /// process's environment) - the merge check reads a merged tree that holds pull request code.
+    pub(crate) fn command_for(&self, args: &[&str], parent: &[String]) -> std::process::Command {
         let mut cmd = command("git");
         // Stable, parseable output whatever the user's git config says.
         cmd.arg("-C")
@@ -92,9 +94,13 @@ impl<'a> Git<'a> {
             ])
             .args(["-c", "core.hooksPath=/dev/null"])
             .args(args);
-        // The merge check reads a merged tree that holds pull request code: no credentials in this child (queue).
+        crate::child_env::scrub(&mut cmd, parent);
+        cmd
+    }
+
+    fn run(&self, args: &[&str], status_1_is_empty: bool) -> Result<Vec<u8>, String> {
         let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
-        crate::child_env::scrub(&mut cmd, &parent);
+        let cmd = self.command_for(args, &parent);
         let shown = args.join(" ");
         let out =
             run_bounded(cmd, Limits::new(TIMEOUT).max_output(self.max_output)).map_err(|e| format!("git {shown} could not run: {e}"))?;

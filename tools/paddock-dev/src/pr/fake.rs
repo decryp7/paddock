@@ -63,7 +63,7 @@ impl FakeGitea {
         self.pulls.push(json!({
             "number": number, "title": format!("WIP: {branch}"), "state": state, "draft": true,
             "merged": merged.is_some(), "merge_commit_sha": merged,
-            "head": {"ref": branch, "sha": head}, "base": {"ref": "main"}, "labels": labels,
+            "head": {"ref": branch, "sha": head}, "base": {"ref": "main"}, "labels": labels, "user": {"login": "author"},
             "html_url": format!("https://gitea.invalid/o/r/pulls/{number}"),
         }));
     }

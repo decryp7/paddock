@@ -156,11 +156,24 @@ state in the PR labels and the train branch, so a tick can stop anywhere and the
 
 ## Landing prerequisites
 
-`./dev ci verdict` counts a run only with the plan job's `plan verdict: complete=` line, which ci.yml and debrief.yml print after
-the plan decides: `fix/ci-verdict-reader-review` (177b0663c) must be on main before the queue lands anything, or every verdict is
-red or not measured. Approval is an official Gitea review of the current head by an account that is neither queue-bot nor
-release-bot; a train whose run fails only in tests that also fail on main is `queue/blocked` (not triaged again) until main moves
-or another pull request is approved.
+- **Verdicts.** `./dev ci verdict` counts a run only with the plan job's `plan verdict: complete=` line, which ci.yml and
+  debrief.yml print after the plan decides: `fix/ci-verdict-reader-review` (177b0663c) must be on main before the queue lands
+  anything, or every verdict is red or not measured.
+- **Approval.** The queue accepts an approval only from `review-bot`: an official, undismissed, approving Gitea review of the
+  pull request's current head, never from the pull request's own author, queue-bot or release-bot. Reviewer agents post their
+  approval through review-bot after a passing review round. Main's protection rule has `enable_approvals_whitelist=true` with
+  `[review-bot]` (so its approvals are official), `required_approvals` 0, normal push allowed, force-push off; review-bot has
+  Write on paddock and its token is the secret `REVIEW_BOT_TOKEN`.
+- **The train branch.** `train/queue` is protected: push by queue-bot only, no force-push. The tick still checks the branch
+  before it trusts it: the first-parent chain from main is exactly one `--no-ff` merge per marker pull request, each merge's
+  second parent is that pull request's approved head and its tree is what merging its parents gives, then one marker commit on
+  an unchanged tree; any other head is rebuilt, never landed.
+- **Labels.** `queue/hold` and `queue/blocked` exist on the server (`./dev pr sync`).
+- **Workflow files.** ci.yml is read-only (`permissions: contents: read, actions: read`) and its checkouts keep no credentials
+  (`persist-credentials: false`), as tag.yml's do. A train is dispatched with `base` set to main's commit id, never a ref name:
+  the commit lint and the plan resolve it as one.
+- **A blocked train.** One whose run fails only in tests that also fail on main is `queue/blocked` (not triaged again) until main
+  moves or another pull request is approved.
 
 ## Common practice (ER-37)
 

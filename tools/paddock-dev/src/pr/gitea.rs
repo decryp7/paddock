@@ -54,6 +54,8 @@ pub struct Pull {
     pub head: String,
     /// The base branch.
     pub base: String,
+    /// The login of the account that opened it (its own reviews never approve it).
+    pub author: String,
     /// Its labels' names.
     pub labels: Vec<String>,
     /// Its web page.
@@ -73,6 +75,7 @@ impl Pull {
             branch: s(&v["head"]["ref"]),
             head: s(&v["head"]["sha"]),
             base: s(&v["base"]["ref"]),
+            author: s(&v["user"]["login"]),
             labels: v["labels"]
                 .as_array()
                 .map(|a| a.iter().filter_map(|l| l["name"].as_str().map(str::to_string)).collect())
@@ -100,13 +103,14 @@ pub struct Review {
     pub official: bool,
 }
 
-/// Whether the reviews approve exactly `head`: counting only official reviews of accounts not in `excluded` (the queue's own
-/// bots), in id order, some reviewer's last decisive (approving or requesting changes, not dismissed) review is an approval made
-/// on `head`, and no reviewer's last decisive review requests changes.
-pub fn approved_at(reviews: &[Review], head: &str, excluded: &[&str]) -> bool {
+/// Whether the reviews approve exactly `head`: counting only official, undismissed reviews of the accounts in `allowed` (the
+/// queue accepts review-bot's alone: reviewer agents post their approval through it after a passing review round), in id order,
+/// some reviewer's last decisive (approving or requesting changes) review is an approval made on `head`, and no allowed
+/// reviewer's last decisive review requests changes.
+pub fn approved_at(reviews: &[Review], head: &str, allowed: &[&str]) -> bool {
     let mut sorted: Vec<&Review> = reviews
         .iter()
-        .filter(|r| r.official && !r.dismissed && !excluded.contains(&r.reviewer.as_str()))
+        .filter(|r| r.official && !r.dismissed && allowed.contains(&r.reviewer.as_str()))
         .filter(|r| matches!(r.state.as_str(), "APPROVED" | "REQUEST_CHANGES"))
         .collect();
     sorted.sort_by_key(|r| r.id);

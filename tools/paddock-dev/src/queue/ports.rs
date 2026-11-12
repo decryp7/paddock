@@ -63,9 +63,10 @@ pub trait Ledger {
     fn comment(&mut self, number: u64, text: &str) -> Result<(), String>;
     /// The numbers of closed pull requests that still carry `queue/hold` (a hold must not outlive its pull request).
     fn closed_held(&mut self) -> Result<Vec<u64>, String>;
-    /// Whether an approving review of the pull request exists for exactly this head commit (a Gitea review in the APPROVED
+    /// Whether an approving review of the pull request exists for exactly its head commit, from an account that is not the pull
+    /// request's author (a review of one's own pull request is no review) (a Gitea review in the APPROVED
     /// state, not dismissed, whose `commit_id` is `head`). A label alone is not an approval: anyone with write access can set it.
-    fn approved_head(&mut self, number: u64, head: &str) -> Result<bool, String>;
+    fn approved_head(&mut self, pr: &Pull) -> Result<bool, String>;
 }
 
 /// The queue's working copy of the repository.
@@ -83,6 +84,13 @@ pub trait Train {
     /// Builds the train from `main`: merges each pull request with `--no-ff` in order, checks every merge (`./dev merge check`)
     /// and drops a conflict or a finding at once, then adds the marker commit. The result is checked out.
     fn build(&mut self, main: &str, prs: &[Pull], marker: &Marker) -> Result<Built, String>;
+    /// The files a pull request changes against `main`.
+    fn pr_files(&mut self, main: &str, head: &str) -> Result<Vec<String>, String>;
+    /// Whether `head` is a train built the way the queue builds one: the first-parent chain from `base` is one `--no-ff` merge per
+    /// pull request of `prs` (number, approved head), in order, each merge's second parent is that head and its tree is what
+    /// merging its parents gives, then one marker commit with its parent's tree. `Some(reason)` when it is not. A branch anyone
+    /// can push to is not a train until this says so.
+    fn verify_train(&mut self, base: Option<&str>, head: &str, prs: &[(u64, String)]) -> Result<Option<String>, String>;
     /// The projects a pull request reaches (the planner's answer for `main`..`head`, run from a checkout of `main`, never of the
     /// pull request), normalised.
     fn affected(&mut self, main: &str, head: &str) -> Result<BTreeSet<String>, String>;
@@ -135,6 +143,8 @@ pub struct Failure {
     pub what: String,
     /// The projects it belongs to, normalised like [`Train::affected`].
     pub projects: BTreeSet<String>,
+    /// Files its job log names (a gate job that fails on a file), to map it to the pull requests that change them.
+    pub files: Vec<String>,
     /// The triage answer.
     pub blame: Blame,
 }

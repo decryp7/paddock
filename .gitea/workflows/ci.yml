@@ -51,6 +51,15 @@ on:
       BUILD_INPUTS_TOKEN:
         required: false
 
+# Read-only: no job of this workflow writes to the repository or the Actions state (a train's run holds no token that could).
+permissions:
+  contents: read
+  actions: read
+
+# The conformance checks Paddock runs on itself: one line, read by the conformance job and by the train-gates job.
+env:
+  PADDOCK_CONFORMANCE_ARGS: "--app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C110 --strict C36"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
@@ -86,6 +95,7 @@ jobs:
       # The whole history: the base (a merge base, the last green commit of main) can be any older commit.
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # ADR 0060: C100 cannot be the only guard of its own wiring (a change that deletes the line deletes the check too), so a plain
@@ -149,6 +159,8 @@ jobs:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Every listen site is registered
         run: ./dev check ipc-endpoints
@@ -165,6 +177,8 @@ jobs:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.gitea/actions/node-caches
 
@@ -227,6 +241,8 @@ jobs:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Playwright's browsers and Chrome for Testing are baked into the image (ci-image/): nothing is downloaded per job.
       - uses: ./.gitea/actions/node-caches
@@ -262,6 +278,8 @@ jobs:
         working-directory: ui
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
       - uses: ./.gitea/actions/build-jobs
@@ -319,6 +337,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           # C100 reads the register's history (the Gates-date trailers) and the base revision.
           fetch-depth: 0
 
@@ -340,7 +359,7 @@ jobs:
       # the checkout above has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C110 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS
 
       # ADR 0060, C100: every check the repository defines is run by a reachable CI line, or registered in docs/gates.toml with a
       # reason, an owner and a review date. Rollback: `./dev gates check --warn`. The nightly has a job of its own (nightly.yml).
@@ -365,6 +384,8 @@ jobs:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.gitea/actions/keychain
 
@@ -379,6 +400,8 @@ jobs:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Tools
         run: node --test tools/test/*.test.mjs
@@ -407,6 +430,8 @@ jobs:
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # CARGO_BUILD_JOBS: this runner's share of the host's cores (the tests build and run ./dev).
       - uses: ./.gitea/actions/build-jobs
@@ -440,11 +465,14 @@ jobs:
       # The whole history: the lint reads the rules on origin/main and on the open rule branches (origin/docs/*).
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       # The engineering rules, one more rules source for the copied-text check. Optional: when the runner's token cannot read
       # that repository the step fails softly and the lint skips the missing file.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         continue-on-error: true
         with:
           repository: decryp7/engineering-rules
@@ -560,6 +588,8 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.gitea/actions/build-jobs
 
@@ -602,6 +632,8 @@ jobs:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.gitea/actions/node-caches
 
@@ -628,6 +660,8 @@ jobs:
         working-directory: eslint
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: ./.gitea/actions/node-caches
         with:
@@ -655,6 +689,8 @@ jobs:
       PADDOCK_BROWSER_NO_SANDBOX: "1"
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: ./.gitea/actions/setup-rust
       - run: cargo fmt --all --check
 
@@ -732,9 +768,13 @@ jobs:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         if: runner.os == 'Linux'
 
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         if: runner.os != 'Linux'
         with:
           sparse-checkout: |
@@ -897,6 +937,7 @@ jobs:
       # Full history so the range from the base can be read.
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Lint the commit messages
@@ -935,6 +976,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
       - uses: ./.gitea/actions/setup-rust
 
@@ -942,7 +984,7 @@ jobs:
         run: ./dev gates check
 
       - name: Paddock conformance (the line of the conformance job)
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C110 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS
 
       - name: Workspace hack up to date
         working-directory: crates
@@ -950,14 +992,19 @@ jobs:
 
       - name: Lockfiles are current (cargo metadata of every workspace)
         run: |
-          for lock in $(git ls-files '*Cargo.lock'); do
+          # The golden fixture of paddock-dev is a repository inside the repository, not a workspace of ours.
+          for lock in $(git ls-files '*Cargo.lock' | grep -v '^tools/paddock-dev/tests/golden/fixture/'); do
             dir=$(dirname "$lock")
             (cd "$dir" && cargo metadata --locked --format-version 1 > /dev/null) || {
               echo "::error::$lock is stale or the workspace does not resolve (a dependency cycle or a merge of two lockfiles). Next step: cargo update -w in $dir and commit it"; exit 1; }
           done
 
+      # The dry run builds the npm packages itself (no --skip-build: there is no ui/dist here), so the packages are installed first.
+      - name: Install npm packages
+        run: npm ci
+
       - name: Publish dry run (a dependency cycle only the merged tree has)
-        run: node scripts/publish.mjs --skip-build --offline
+        run: node scripts/publish.mjs --offline
 
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -991,9 +1038,13 @@ jobs:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         if: runner.os == 'Linux'
 
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         if: runner.os != 'Linux'
         with:
           sparse-checkout: |
@@ -1163,11 +1214,15 @@ jobs:
       # Linux: the whole tree in the container. Hosts: only the bootstrap folders (the actions, their scripts, paddock-dev's inputs)
       # as a partial clone; the kept-clone step below brings the slot's own clone to this commit (conformance/ci/checkout-profiles.txt).
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         if: runner.os == 'Linux'
         with:
           fetch-depth: 0
 
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
         if: runner.os != 'Linux'
         with:
           sparse-checkout: |
