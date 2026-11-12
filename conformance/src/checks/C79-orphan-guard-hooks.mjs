@@ -3,7 +3,8 @@
 // a binary without the call never starts one (it logs that the guard is off), so if it is killed its children's trees
 // run on (a headless browser left by a killed test process on CI ran for 2.5 h).
 // Which binaries: every `src/main.rs`, `src/bin/*.rs`, `src/bin/*/main.rs` and `[[bin]] path` of a package whose
-// dependency closure in its workspace's Cargo.lock reaches `paddock-proc`. The call must be the first statement of
+// dependency closure in its workspace's Cargo.lock reaches `paddock-proc` through a dependency that is not dev-only (a binary
+// never links its dev-dependencies). The call must be the first statement of
 // `fn main` (comments do not count): the guardian must start before the app does anything else. Test binaries (whose `main` is the harness) opt in with
 // `enable_in_test_binary` and are not checked here. ADOPTING lists the mains that do not call it yet; it may only shrink:
 // a main missing from it is an error, a listed one is a warning, and a listed one that calls it already is an error until
@@ -99,12 +100,33 @@ export function lockGraph(text) {
   return graph;
 }
 
-/** Whether `name` reaches `target` in `graph`. */
-export function reaches(graph, name, target = 'paddock-proc', seen = new Set()) {
+/** The dependencies a manifest names only as dev-dependencies (`[dev-dependencies]`, `[target.'…'.dev-dependencies]`):
+ * a binary never links them, so a path to paddock-proc through them alone is not one its `main` can take. */
+export function devOnly(manifest) {
+  const dev = new Set();
+  const normal = new Set();
+  let into = null;
+  for (const line of manifest.split(/\r?\n/)) {
+    const section = /^\s*\[([^\]]+)\]\s*$/.exec(line);
+    if (section) {
+      const name = section[1].trim();
+      into = /(^|\.)dev-dependencies$/.test(name) ? dev : /(^|\.)(build-)?dependencies$/.test(name) ? normal : null;
+      continue;
+    }
+    const key = /^\s*([A-Za-z0-9_-]+)\s*(?:\.|=)/.exec(line);
+    if (into && key) into.add(key[1]);
+  }
+  return new Set([...dev].filter((d) => !normal.has(d)));
+}
+
+/** Whether `name` reaches `target` in `graph`, leaving out the edges `skip` names for a package (its dev-only dependencies:
+ * the lock lists a workspace member's dev-dependencies with its normal ones). */
+export function reaches(graph, name, target = 'paddock-proc', seen = new Set(), skip = new Map()) {
   if (name === target) return true;
   if (seen.has(name)) return false;
   seen.add(name);
-  return (graph[name] ?? []).some((d) => reaches(graph, d, target, seen));
+  const left = skip.get(name);
+  return (graph[name] ?? []).some((d) => !left?.has(d) && reaches(graph, d, target, seen, skip));
 }
 
 const dirOf = (p) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
@@ -118,6 +140,17 @@ export function binPaths(manifest) {
     .filter((p) => p !== undefined);
 }
 
+/** `{ package name: its dev-only dependencies }` for the workspace members whose manifests are under `root`. */
+function memberDevOnly(files, read, root) {
+  const out = new Map();
+  for (const m of files.filter((f) => f.endsWith('Cargo.toml') && (root === '' || f.startsWith(`${root}/`)))) {
+    const text = read(m) ?? '';
+    const name = /^\[package\][\s\S]*?^name\s*=\s*"([^"]+)"/m.exec(text)?.[1];
+    if (name) out.set(name, devOnly(text));
+  }
+  return out;
+}
+
 /** The mains (paths) that must call the guardian: [{ file, hooked }]. `read(path)` gives a file's text or null. */
 export function guardedMains(files, read) {
   const have = new Set(files);
@@ -129,6 +162,7 @@ export function guardedMains(files, read) {
     }
   };
   const graphs = new Map();
+  const devs = new Map();
   const out = [];
   // Mains by convention, then those a manifest names with `[[bin]] path`.
   const named = files
@@ -144,7 +178,9 @@ export function guardedMains(files, read) {
     const lock = manifest && nearest(dirOf(manifest), 'Cargo.lock');
     if (!pkg || !lock) continue;
     if (!graphs.has(lock)) graphs.set(lock, lockGraph(read(lock) ?? ''));
-    if (pkg === 'paddock-proc' || !reaches(graphs.get(lock), pkg)) continue;
+    if (pkg === 'paddock-proc') continue;
+    if (!devs.has(lock)) devs.set(lock, memberDevOnly(files, read, dirOf(lock)));
+    if (!reaches(graphs.get(lock), pkg, 'paddock-proc', new Set(), devs.get(lock))) continue;
     const state = mainState(read(f) ?? '');
     out.push({ file: f, hooked: state === 'hooked', wrapped: state === 'wrapped' });
   }
