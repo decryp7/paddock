@@ -1889,6 +1889,7 @@ dependencies = [
  "libc",
  "log",
  "paddock-proc",
+ "paddock-testkit",
  "postcard",
  "proptest",
  "serde",
