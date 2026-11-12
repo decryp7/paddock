@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# The shell copy of `dev ci stable-workspace` (docs/plans/ci-in-rust.md, WP-4): moves the checkout to the job slot's kept folder and
+# leaves a link at the old path. Run through conformance/ci/kit.sh (`kit.sh host stable-workspace <name>`), which uses the Rust command
+# except on a tag run, a run that never downloads the tool and a machine without rustc; the two are held equal by
+# tools/paddock-dev/tests/it/host_steps.rs. Deleted with the release-path lane (WP-11). Input: NAME (the kept folder's name).
+here=$(cd "$(dirname "$0")" && pwd)
+set -euo pipefail
+# The Linux jobs run in a container with a fixed workspace already.
+if [ "$RUNNER_OS" = Linux ]; then exit 0; fi
+if [ -L "$GITHUB_WORKSPACE" ]; then echo "stable-workspace: already linked"; exit 0; fi
+
+# Every step that can touch the disk or git runs bounded (ER-27): a hang (a file held open by a process left from an
+# earlier job, antivirus on a large folder, git waiting on a lock) ends in one ::error:: line that names the phase,
+# after PADDOCK_STABLE_WORKSPACE_TIMEOUT seconds (default 300), instead of blocking the runner. Phases log their duration.
+limit="${PADDOCK_STABLE_WORKSPACE_TIMEOUT:-300}"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+kill_tree() {
+  local p="$1" c
+  if command -v pgrep >/dev/null 2>&1; then for c in $(pgrep -P "$p" 2>/dev/null || true); do kill_tree "$c"; done; fi
+  if [ "$RUNNER_OS" = Windows ] && command -v taskkill >/dev/null 2>&1; then
+    taskkill //F //T //PID "$(ps -p "$p" 2>/dev/null | awk 'NR == 2 { print $4 }')" >/dev/null 2>&1 || true
+  fi
+  kill -9 "$p" 2>/dev/null || true
+}
+# bounded <label> <function>: runs the function in the background with stdout in $scratch/out and stderr in
+# $scratch/err; returns its status. On a timeout it kills the process tree, prints the error and fails the step.
+bounded() {
+  local label="$1" fn="$2" start=$SECONDS pid rc=0
+  echo "stable-workspace: $label ..."
+  "$fn" > "$scratch/out" 2> "$scratch/err" &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ $((SECONDS - start)) -ge "$limit" ]; then
+      kill_tree "$pid"
+      echo "::error::stable-workspace: '$label' did not finish within ${limit} s (the step moves the checkout of ${GITHUB_WORKSPACE:-?} to a kept folder); a process left from an earlier job on this runner probably holds a file or lock there. Last output: $(tail -c 300 "$scratch/err" | tr '\r\n' '  '). Next step: list and end processes using the CI home's src folder on the runner, then re-run the job."
+      exit 1
+    fi
+    sleep 0.2
+  done
+  wait "$pid" || rc=$?
+  echo "stable-workspace: $label: $([ "$rc" = 0 ] && echo done || echo "failed (exit $rc)") in $((SECONDS - start)) s"
+  return "$rc"
+}
+
+ws=$(cd "$GITHUB_WORKSPACE" && pwd -P)
+folder=$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')
+# The job slot's own copy (job-isolation: src/<name>-<slot>), so a concurrent job of the same name never moves or
+# cleans this one. No slot (the job-isolation action did not run): build in place, which only costs cache hits.
+# Its stderr (a migration notice, an error) goes to the log; only stdout is the path.
+resolve_stable() { bash "$here/../kit.sh" isolation path src "$folder"; }
+if ! bounded "resolve the job slot's kept folder" resolve_stable; then
+  cat "$scratch/err" >&2
+  echo "::warning::stable-workspace: no kept folder of this job's slot (see the message above); building from the work folder."
+  exit 0
+fi
+cat "$scratch/err" >&2
+stable="$(cat "$scratch/out")"
+root="$(dirname "$stable")"
+# The folder later steps build from: PADDOCK_WORKSPACE, which a step uses as its working-directory (falling back to the
+# workspace when the variable is unset).
+use() {
+  local p="$1"; if [ "$RUNNER_OS" = Windows ]; then p="$(cygpath -w "$1")"; fi
+  echo "PADDOCK_WORKSPACE=$p" >> "$GITHUB_ENV"
+  echo "stable-workspace: building from $p"
+}
+# The move is a rename only on one volume. Across volumes `mv` (and a clone) copies the whole checkout, which took 7 to
+# 293 s on a loaded Mac and hit the bound nine times (runs 7706 to 7761): build in place instead, and say how to fix it.
+volume_of() { stat -c %d "$1" 2>/dev/null || stat -f %d "$1"; }
+# A volume that cannot be read is unknown, never "the same": two empty answers must not let the move run.
+same_volume() {
+  local a b
+  mkdir -p "$root" && a="$(volume_of "$ws")" && b="$(volume_of "$root")" && [ -n "$a" ] && [ "$a" = "$b" ]
+}
+if ! bounded "compare the volumes of $ws and $root" same_volume; then
+  echo "::warning::stable-workspace: the work folder $ws is on another volume than the kept folder $stable (or one could not be read: $(tail -c 300 "$scratch/err" | tr '\r\n' '  ')), so moving it would copy the whole checkout; building from the work folder (sccache misses the workspace crates). Next step: put the runner's host.workdir_parent (config.yaml) on the CI home's volume."
+  exit 0
+fi
+move_checkout() { mkdir -p "$root" && cd "$root" && rm -rf "$stable" && mv "$ws" "$stable"; }
+# Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
+# path instead and bring it to this commit (a local clone and fetch: hard links, no network), with every file
+# that is not git's removed; ignored files (no build output lives there: the build folder is elsewhere) stay.
+clone_checkout() {
+  local sha
+  sha=$(git -C "$ws" rev-parse HEAD) &&
+  if [ ! -d "$stable/.git" ]; then rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable"; fi &&
+  # The checkout is shallow: --update-shallow lets the clone take a commit whose parents it does not have.
+  git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD &&
+    [ "$(git -C "$stable" rev-parse FETCH_HEAD)" = "$sha" ] &&
+    git -C "$stable" checkout -q -f --detach "$sha" &&
+    git -C "$stable" clean -q -ffd
+}
+# An unusable move must never fail the job: it only costs the cache hits of the workspace crates (a hang does: it
+# ends the step with the error above).
+if ! bounded "move the checkout to $stable" move_checkout; then
+  why="$(cat "$scratch/err")"
+  if bounded "keep a clone of the checkout at $stable" clone_checkout; then
+    echo "stable-workspace: could not move the checkout (${why:-no message}); a clone at $stable is at $(git -C "$stable" rev-parse HEAD) instead."
+    use "$stable"
+  else
+    echo "::warning::stable-workspace: could not move the checkout to $stable (${why:-no message}) nor clone it there ($(cat "$scratch/err")); building from the work folder (sccache misses the workspace crates)."
+  fi
+  exit 0
+fi
+# Git bash's `ln -s` copies on Windows: a junction is the link that resolves to the stable folder.
+if [ "$RUNNER_OS" = Windows ]; then link() { cmd //c mklink //J "$(cygpath -w "$2")" "$(cygpath -w "$1")" >/dev/null; }; else link() { ln -s "$1" "$2"; }; fi
+link_checkout() { link "$stable" "$ws"; }
+if ! bounded "link $ws to $stable" link_checkout; then
+  mv "$stable" "$ws" || true
+  echo "::warning::stable-workspace: could not link $ws to $stable; building from the work folder."
+  exit 0
+fi
+echo "stable-workspace: $ws -> $stable"
+use "$stable"

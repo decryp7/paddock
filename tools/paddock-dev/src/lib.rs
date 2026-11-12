@@ -23,6 +23,9 @@
 //!   ([`ci_setup_rust`]), over [`ci_tool`], the wrapper contract for third-party programs a CI step runs (docs/plans/ci-in-rust.md);
 //! - `ci build-jobs [<split>]`: CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for a job, the port of `conformance/ci/build-jobs.sh`
 //!   ([`ci_build_jobs`]).
+//! - `ci stable-workspace|node-caches|host-tools|sccache-stats|build-folder|prune-build-folder|prune-folder|prune-agent-builds|
+//!   host-cleanup`: the host-runner steps of the kit, the ports of the actions of the same names and of `build-folder.sh`, the prune
+//!   scripts and `host-cleanup.sh` ([`ci_host`], docs/plans/ci-in-rust.md WP-4). Every deletion goes through its guarded remove.
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
@@ -31,6 +34,7 @@
 
 pub mod check;
 pub mod ci_build_jobs;
+pub mod ci_host;
 pub mod ci_isolation;
 pub mod ci_runs;
 pub mod ci_setup_rust;
