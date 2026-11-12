@@ -291,7 +291,7 @@ and certificate variables), where the shell passed everything on, tokens include
 
 `./dev ci build-jobs` replaces `conformance/ci/build-jobs.sh` and `./dev ci isolation` replaces `conformance/ci/job-isolation.sh` in
 the actions and workflows. One shim, `conformance/ci/kit.sh`, picks the implementation by setup-rust's rule (a tag run, or
-`PADDOCK_DEV_DOWNLOAD=0`, or a checkout without the tool, or no `rustc`: the shell script) and does the isolation bootstrap
+`PADDOCK_DEV_DOWNLOAD=0`, or a checkout without the tool, or no `rustc`, or `PADDOCK_CI_KIT=shell`, the fallback switch: the shell script; one `kit:` line on stderr says which and why) and does the isolation bootstrap
 (the tool fetched under the CI home's `tools` folder and pinned as `PADDOCK_DEV`, so release never builds it). Callers say
 `bash conformance/ci/kit.sh isolation path ...` and `kit.sh build-jobs`. The tool's own first build runs under a default of 4
 build jobs, the only pinned number (`./dev ci build-jobs` then writes the job's real share). setup-rust's build-jobs step moved
@@ -299,7 +299,10 @@ after its toolchain step (the tool needs `rustc`). Parity: `tools/paddock-dev/te
 code, `$GITHUB_ENV`, both output streams; two spellings differ on purpose, normalised in the test) and `job-isolation.test.mjs`
 with `ISOLATION_CMD`. Left on the shell for WP-4 and WP-5: `kept-clone.sh`, `build-folder.sh`, `tools/*.sh` and Debrief's CI scripts
 call `job-isolation.sh` themselves; the `job-tmpdir` action still runs `job-tmpdir.sh` until WP-9 deletes the family. Registered as
-`ci-kit-shell` in `docs/known-copies.toml`.
+`ci-kit-shell` in `docs/known-copies.toml`. Windows: `build_jobs_golden.rs` and `ci_isolation_windows.rs` are the twins of the
+Unix-only parity files, and a conformance test (`parity-twins.test.mjs`) requires every Unix-only file of `tests/it/` to name its twin
+or a reason. **Planned, not built:** the shrink-only baselines of section 5 (no new tooling script; counted long and OS-branching `run:`
+blocks). The 0.5 days for them stay in WP-1's estimate and move to the next WP that touches workflows.
 
 ## 9. Common practice, and the cheaper option (ER-37)
 

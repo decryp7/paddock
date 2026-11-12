@@ -5,6 +5,7 @@
 //! Rust command adds to the shell's cause (ER-27). Cases: every runner class, the runner's own variables, a split job, memory as
 //! the ceiling, wrong values, leading zeros, no core count, no GITHUB_ENV, and the probes (their order, and that no token of the
 //! job reaches them). Unix only: the Windows runner runs the real thing on every run.
+// windows-twin: build_jobs_golden.rs
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

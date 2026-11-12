@@ -5,6 +5,7 @@
 //! host runner's slots and budgets, a container with and without the `/sccache` mount, Redis, a server that does not start or
 //! answer, wrong inputs, no sccache at all, and a pinned copy already in the tool cache. Unix only: the Windows runner runs the
 //! real thing on every run (the shell's cygpath branch has no Unix stand-in).
+// windows-twin: none: waived until 2026-12-31; the shim sccache is a shell script and a Windows twin needs a compiled shim (WP-11 removes the shell steps it compares with)
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 

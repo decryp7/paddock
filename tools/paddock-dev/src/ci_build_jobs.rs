@@ -88,6 +88,10 @@ impl Host for Probes {
         if let Some(v) = env.get("PADDOCK_CI_RAM_MB").filter(|v| !v.is_empty()) {
             return v.clone();
         }
+        // Native Windows has none of the files below (the script ran under Git bash, which emulates /proc): ask the system.
+        if let Some(mb) = windows_ram_mb() {
+            return mb.to_string();
+        }
         if let Ok(max) = std::fs::read_to_string("/sys/fs/cgroup/memory.max") {
             let max = max.trim_end_matches('\n');
             if is_count(max)
@@ -117,6 +121,25 @@ impl Host for Probes {
         }
         String::new()
     }
+}
+
+/// The physical memory in MB from `GlobalMemoryStatusEx`; `None` where the call fails (and on every other OS).
+#[cfg(windows)]
+#[allow(unsafe_code)] // one FFI call with a struct of the documented size
+pub fn windows_ram_mb() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    // SAFETY: an all-zero MEMORYSTATUSEX is valid; dwLength is set to its size as the API requires.
+    let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    // SAFETY: `status` is a live, correctly sized MEMORYSTATUSEX.
+    let ok = unsafe { GlobalMemoryStatusEx(&mut status) };
+    (ok != 0 && status.ullTotalPhys > 0).then_some(status.ullTotalPhys / 1_048_576)
+}
+
+/// Not Windows: nothing to ask.
+#[cfg(not(windows))]
+pub fn windows_ram_mb() -> Option<u64> {
+    None
 }
 
 /// A whole number >= 1, written without leading zeros (`010` and `08` are refused: the shell read them as octal).
@@ -407,6 +430,18 @@ fn or_unknown<'a>(text: &'a str, unknown: &'a str) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_reports_its_physical_memory() {
+        let mb = windows_ram_mb().expect("GlobalMemoryStatusEx answers");
+        assert!(mb >= 512, "{mb} MB");
+        assert_eq!(
+            Probes.ram_mb(&HashMap::new()),
+            mb.to_string(),
+            "the probe uses it, not the Unix files"
+        );
+    }
 
     struct Fixed(&'static str, &'static str);
     impl Host for Fixed {

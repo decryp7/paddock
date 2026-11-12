@@ -245,11 +245,11 @@ test('setup-rust uses ./dev only off the release path, and never a stored tool b
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const kit = text.slice(text.indexOf('- name: Implementation\n'), text.indexOf('- name: Compile cache and Tauri libraries'));
   assert.match(kit, /id: kit\n/);
-  assert.match(kit, /refs\/tags\/\*\) kit=shell/, 'a tag run keeps the shell steps');
-  assert.match(kit, /PADDOCK_DEV_DOWNLOAD:-\}" = 0 \]; then kit=shell/, 'a run that never downloads ./dev keeps the shell steps');
+  assert.match(kit, /conformance\/ci\/kit\.sh" which/, 'the choice is kit.sh\'s (the rule exists once: a tag run, PADDOCK_DEV_DOWNLOAD=0, no tool or rustc keep the shell steps)');
   const dev = text.slice(text.indexOf('- name: Compile cache and Tauri libraries'), text.indexOf('- name: Install sccache'));
   assert.match(dev, /if: steps\.kit\.outputs\.kit == 'dev'\n/);
-  assert.match(dev, /then export PADDOCK_DEV_DOWNLOAD=0; fi\n\s+bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/dev" ci setup-rust /);
+  assert.match(dev, /then export PADDOCK_DEV_DOWNLOAD=0; fi\n(?:.*\n)*?\s+bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/dev" ci setup-rust /);
+  assert.match(dev, /if \[ -n "\$\{PADDOCK_DEV:-\}" \]; then\n\s+"\$PADDOCK_DEV" ci setup-rust /, 'the tool job-isolation pinned, not a second fetch');
   for (const step of ['Install sccache', 'sccache', 'Linux dependencies for Tauri']) {
     assert.match(text, new RegExp(`- name: ${step}\\n\\s+if: steps\\.kit\\.outputs\\.kit == 'shell'`), `${step}: only on the shell path`);
   }
@@ -272,7 +272,7 @@ test('every job that uses setup-rust sets the tag rule for ./dev (it runs ./dev 
   assert.ok(seen >= 15, `the jobs that use setup-rust are found (${seen})`);
   assert.deepEqual(missing, [], 'these jobs run setup-rust without PADDOCK_DEV_DOWNLOAD set by the tag rule in the job env');
   const kit = read(join(ACTIONS, 'setup-rust', 'action.yml'));
-  assert.match(kit, /tools\/paddock-dev\/Cargo\.toml" \]; then kit=shell; fi/, 'a checkout without the tool (another repository) keeps the shell steps');
+  assert.match(read(join(PADDOCK, 'conformance/ci/kit.sh')), /tools\/paddock-dev\/Cargo\.toml" \]; then echo "shell/, 'a checkout without the tool (another repository) keeps the shell steps');
 });
 
 // docs/plans/ci-in-rust.md, WP-1: the build-jobs and job-isolation actions (and the path and port calls of workflows) run ./dev through
@@ -1951,10 +1951,10 @@ test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and n
   const offenders = [];
   for (const f of [...new Set(files)]) {
     if (f === 'conformance/ci/build-jobs.sh') continue;
-    // The shim's one default for the tool's own first build (docs/plans/ci-in-rust.md section 5); the next lines of the test count it.
-    if (f === 'conformance/ci/kit.sh') continue;
     read(join(PADDOCK, f)).split('\n').forEach((line, i) => {
-      const code = line.replace(/^\s*(#|\/\/|rem\b).*$/i, '');
+      let code = line.replace(/^\s*(#|\/\/|rem\b).*$/i, '');
+      // The shim's one default for the tool's own first build (docs/plans/ci-in-rust.md section 5): only that exact line.
+      if (f === 'conformance/ci/kit.sh' && line.trim() === 'CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}"') code = '';
       // A number (or a number as the fallback) for CARGO_BUILD_JOBS, in bash, cmd or YAML.
       if (/CARGO_BUILD_JOBS["']?\s*(=|:)\s*["']?\d|CARGO_BUILD_JOBS:-\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
       // A fixed -j/--jobs on a cargo build or test. `cargo mutants --jobs N` is the number of mutants built at once; each

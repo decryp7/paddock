@@ -1,6 +1,7 @@
 //! `conformance/ci/dev-tool-publish.sh` (ADR 0022 R0b) uploads the tool the way Gitea's generic package store accepts it. Gitea answers
 //! HTTP 500 "request Content-Type isn't multipart/form-data" to a PUT that curl's `--data-binary` labelled as a form (run 7769).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+// windows-twin: none: it runs a shell script that only runs on Linux and macOS
 #![cfg(unix)]
 use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
 use std::collections::BTreeMap;

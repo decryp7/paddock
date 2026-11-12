@@ -42,7 +42,7 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 # fds.rs: the standard handles are made non-inheritable before the holder starts; release_isolation: the file index.
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_System_SystemInformation"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -78,13 +78,8 @@ runs:
       id: kit
       shell: bash
       run: |
-        kit=dev
-        case "${GITHUB_REF:-}" in refs/tags/*) kit=shell ;; esac
-        if [ "${PADDOCK_DEV_DOWNLOAD:-}" = 0 ]; then kit=shell; fi
-        # ./dev runs the tool of the job's own checkout: another repository using this action, or a sparse checkout without
-        # tools/, has none.
-        root=$(git rev-parse --show-toplevel 2>/dev/null || true)
-        if [ -z "$root" ] || [ ! -f "$root/tools/paddock-dev/Cargo.toml" ]; then kit=shell; fi
+        # The rule lives once, in conformance/ci/kit.sh (it prints its reason on standard error).
+        kit="$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" which)"
         echo "kit=$kit" >> "$GITHUB_OUTPUT"
         echo "setup-rust: compile cache through the $kit implementation"
     - name: Compile cache and Tauri libraries
@@ -98,7 +93,12 @@ runs:
       run: |
         # Without the read credential ./dev builds itself from source and never takes a binary from the store (ADR 0022 section 3.3).
         if [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; then export PADDOCK_DEV_DOWNLOAD=0; fi
-        bash "${{ github.action_path }}/../../../dev" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
+        # The tool job-isolation pinned for this job, else the wrapper (one tool per job, never a second fetch).
+        if [ -n "${PADDOCK_DEV:-}" ]; then
+          "$PADDOCK_DEV" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
+        else
+          bash "${{ github.action_path }}/../../../dev" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
+        fi
     - name: Install sccache
       if: steps.kit.outputs.kit == 'shell'
       shell: bash

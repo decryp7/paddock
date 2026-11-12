@@ -21,10 +21,10 @@ function checkout({ tools = true, rustc = true } = {}) {
   mkdirSync(join(root, 'bin'));
   copyFileSync(join(PADDOCK, 'conformance', 'ci', 'kit.sh'), join(root, 'conformance', 'ci', 'kit.sh'));
   const log = join(root, 'log');
-  const note = (who) => `echo "${who} $* home=\${PADDOCK_DEV_HOME:-} target=\${PADDOCK_DEV_TARGET_DIR:-} dl=\${PADDOCK_DEV_DOWNLOAD:-} jobs=\${CARGO_BUILD_JOBS:-} pinned=\${PADDOCK_DEV:-}" >> '${log}'`;
-  exe(join(root, 'dev'), `${note('dev')}\ncase "$*" in "ci isolation path tools") echo "${root}/ci-home/tools" ;; "--print-binary") echo "${root}/pinned-tool" ;; esac`);
+  const note = (who) => `echo "${who} $* home=\${PADDOCK_DEV_HOME:-} target=\${PADDOCK_DEV_TARGET_DIR:-} dl=\${PADDOCK_DEV_DOWNLOAD:-} jobs=\${CARGO_BUILD_JOBS:-} pinned=\${PADDOCK_DEV:-} wrapper=\${RUSTC_WRAPPER:-}" >> '${log}'`;
+  exe(join(root, 'dev'), `${note('dev')}\ncase "$*" in "--print-binary") echo "${root}/pinned-tool" ;; esac`);
   exe(join(root, 'pinned-tool'), note('pinned'));
-  exe(join(root, 'conformance', 'ci', 'job-isolation.sh'), note('job-isolation.sh'));
+  exe(join(root, 'conformance', 'ci', 'job-isolation.sh'), `${note('job-isolation.sh')}\ncase "$*" in "path tools") echo "${root}/ci-home/tools" ;; esac`);
   exe(join(root, 'conformance', 'ci', 'build-jobs.sh'), note('build-jobs.sh'));
   if (rustc) exe(join(root, 'bin', 'rustc'), 'exit 0');
   if (tools) {
@@ -95,7 +95,7 @@ test('build-jobs: Rust with a core limit for the tool\'s own first build, the sc
   const c = checkout();
   try {
     let r = c.run(['build-jobs', '3'], { GITHUB_TOKEN: 't' });
-    assert.match(r.log, /^dev ci build-jobs 3 .* jobs=4 /, r.log);
+    assert.match(r.log, /^dev ci build-jobs 3 .* jobs=4 /m, r.log);
     r = c.run(['build-jobs'], { CARGO_BUILD_JOBS: '7', GITHUB_TOKEN: 't' });
     assert.match(r.log, /jobs=7 /, 'a value set earlier in the job is kept for the tool\'s build');
     r = c.run(['build-jobs', '2'], { PADDOCK_DEV_DOWNLOAD: '0' });
@@ -118,23 +118,73 @@ test('a job without the read credential builds the tool from source and never do
   }
 });
 
-test('isolation acquire: the tool is fetched under the CI home\'s tools folder and pinned; release runs the pinned tool', () => {
+test('isolation acquire: the tool is fetched once, under the CI home\'s tools folder found in shell, and pinned; release runs the pinned tool', () => {
   const c = checkout();
   try {
-    let r = c.run(['isolation', 'acquire'], { GITHUB_TOKEN: 't' });
+    let r = c.run(['isolation', 'acquire'], { GITHUB_TOKEN: 't', RUSTC_WRAPPER: 'sccache' });
     assert.equal(r.status, 0, r.stderr);
     const lines = r.log.trim().split('\n');
-    assert.match(lines[0], /^dev ci isolation path tools /, 'the first call finds the tools folder');
-    assert.match(lines[1], new RegExp(`^dev --print-binary home=${c.root}/ci-home/tools/paddock-dev target=${c.root}/ci-home/tools/paddock-dev-target `), 'the tool lives under the CI home');
+    assert.match(lines[0], /^job-isolation\.sh path tools /, 'the folder is found without the tool');
+    assert.match(lines[1], new RegExp(`^dev --print-binary home=${c.root}/ci-home/tools/paddock-dev target=${c.root}/ci-home/tools/paddock-dev-target `), 'the first and only ./dev call has its home under the CI home');
     assert.match(lines[2], new RegExp(`^pinned ci isolation acquire .*pinned=${c.root}/pinned-tool`), 'acquire runs the tool it pins, with PADDOCK_DEV set');
+    assert.equal(lines.length, 3, r.log);
+    assert.ok(lines.every((l) => !/wrapper=sccache/.test(l)), 'the job\'s compiler wrapper never reaches ./dev or the tool');
     r = c.run(['isolation', 'release'], { PADDOCK_DEV: join(c.root, 'pinned-tool'), GITHUB_TOKEN: 't' });
     assert.match(r.log, /^pinned ci isolation release /, 'release runs the pinned tool: no build after the job\'s temp folder is gone');
     assert.doesNotMatch(r.log, /^dev /m);
-    r = c.run(['isolation', 'release'], { GITHUB_TOKEN: 't' });
-    assert.match(r.log, /^dev ci isolation path tools/m, 'without a pin release still builds under the CI home');
-    assert.match(r.log, /^dev ci isolation release home=.*paddock-dev target=/m);
+    r = c.run(['isolation', 'release'], { GITHUB_TOKEN: 't', RUSTC_WRAPPER: 'sccache' });
+    assert.match(r.log, /^dev ci isolation release home=.*paddock-dev target=.* wrapper=\n/m, 'without a pin release still builds under the CI home, without the wrapper');
   } finally {
     c.done();
+  }
+});
+
+test('build-jobs and value commands on a host also keep the tool under the CI home, never the runner\'s', () => {
+  const c = checkout();
+  try {
+    let r = c.run(['build-jobs'], { GITHUB_TOKEN: 't' });
+    assert.match(r.log, new RegExp(`^job-isolation\\.sh path tools`));
+    assert.match(r.log, new RegExp(`dev ci build-jobs  ?home=${c.root}/ci-home/tools/paddock-dev `), r.log);
+    r = c.run(['isolation', 'path', 'target', 'a'], { GITHUB_TOKEN: 't' });
+    assert.match(r.log, new RegExp(`^dev ci isolation path target a home=${c.root}/ci-home/tools/paddock-dev `, 'm'), r.log);
+  } finally {
+    c.done();
+  }
+});
+
+test('PADDOCK_CI_KIT=shell is the fallback switch: every step runs its script, and the choice and its reason are logged', () => {
+  const c = checkout();
+  try {
+    let r = c.run(['build-jobs', '2'], { PADDOCK_CI_KIT: 'shell' });
+    assert.match(r.log, /^build-jobs\.sh 2 /, r.log);
+    assert.match(r.stderr, /^kit: shell \(PADDOCK_CI_KIT=shell\)$/m, r.stderr);
+    r = c.run(['isolation', 'acquire'], { PADDOCK_CI_KIT: 'shell' });
+    assert.match(r.log, /^job-isolation\.sh acquire /, r.log);
+    assert.equal(c.run(['which'], { PADDOCK_CI_KIT: 'shell' }).stdout.trim(), 'shell');
+    // Every reason is named.
+    assert.match(c.run(['which'], { GITHUB_REF: 'refs/tags/v1' }).stderr, /kit: shell \(a tag run\)/);
+    assert.match(c.run(['which'], { PADDOCK_DEV_DOWNLOAD: '0' }).stderr, /kit: shell \(PADDOCK_DEV_DOWNLOAD=0/);
+    assert.match(c.run(['which']).stderr, /kit: dev \(/);
+  } finally {
+    c.done();
+  }
+});
+
+test('a checkout whose ./dev wrapper is missing, or with no rustc, keeps the shell and says why', () => {
+  const c = checkout();
+  try {
+    rmSync(join(c.root, 'dev'));
+    const r = c.run(['which']);
+    assert.equal(r.stdout.trim(), 'shell');
+    assert.match(r.stderr, /no \.\/dev wrapper/);
+  } finally {
+    c.done();
+  }
+  const d = checkout({ rustc: false });
+  try {
+    assert.match(d.run(['which']).stderr, /kit: shell \(no rustc on PATH\)/);
+  } finally {
+    d.done();
   }
 });
 

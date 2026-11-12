@@ -476,7 +476,7 @@ test('every job that may run on a host and uses a kept folder takes a slot first
 function ciFiles() {
   const listed = spawnSync('git', ['ls-files', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'conformance/ci/*.sh', 'conformance/ci/*.mjs', 'tools/*.sh', 'apps/*/scripts/ci/*'], { cwd: PADDOCK, encoding: 'utf8' });
   assert.equal(listed.status, 0, listed.stderr);
-  return listed.stdout.split('\n').filter((f) => f && !f.endsWith('.test.mjs') && !['conformance/ci/ci-home.sh', 'conformance/ci/job-isolation.sh', 'conformance/ci/kit.sh'].includes(f));
+  return listed.stdout.split('\n').filter((f) => f && !f.endsWith('.test.mjs') && !['conformance/ci/ci-home.sh', 'conformance/ci/job-isolation.sh'].includes(f));
 }
 
 test('no workflow, action or CI script builds a path in the CI home except through job-isolation.sh (so isolation cannot be bypassed)', () => {
