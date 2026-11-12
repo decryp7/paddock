@@ -89,18 +89,77 @@ if [ -z "$rustc_cmd" ] && [ -n "$configs" ]; then
 $configs
 EOF
 fi
-if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [ -z "$vv" ]; then
-  # Without a compiler the hash cannot be computed, but a binary built earlier still works.
-  newest=$(ls -t "$home/$binroot"/*/paddock-dev-*"$exe" 2>/dev/null | head -n 1)
-  if [ -n "$newest" ] && runs "$newest"; then
-    if [ "${GITHUB_ACTIONS:-}" = true ]; then
-      echo "::warning::./dev: rustc is not available on this runner, so the tool's hash cannot be computed; running the newest cached binary ($newest), which may not match this commit's inputs." >&2
-    else
-      echo "dev: rustc is not available; running the newest cached tool binary ($newest)." >&2
+# toolchain_file: the rust-toolchain(.toml) rustup reads for the tool's folder, found the way rustup finds it (the closest one above).
+toolchain_file() {
+  d=$tool
+  while :; do
+    for f in rust-toolchain.toml rust-toolchain; do
+      if [ -f "$d/$f" ]; then printf '%s\n' "$d/$f"; return 0; fi
+    done
+    parent=$(dirname "$d")
+    [ "$parent" = "$d" ] && return 1
+    d=$parent
+  done
+}
+
+# run_bounded <seconds> <command...>: runs it in the background and ends it at the limit (ER-32: no wait without a maximum). The
+# command is ended by the pid this function started, never by a name.
+run_bounded() {
+  _lim=$1
+  shift
+  "$@" &
+  _pid=$!
+  _t=0
+  while kill -0 "$_pid" 2>/dev/null; do
+    if [ "$_t" -ge "$_lim" ]; then
+      kill "$_pid" 2>/dev/null || true
+      wait "$_pid" 2>/dev/null || true
+      return 124
     fi
-    exec "$newest" "$@"
+    sleep 1
+    _t=$((_t + 1))
+  done
+  wait "$_pid"
+}
+
+# ensure_toolchain: the toolchain the repository pins (rust-toolchain.toml, with the profile and components it asks for) is installed.
+# rustup 1.28 no longer installs a pinned toolchain by itself, so a runner that has rustup but not yet that version has a `rustc` shim
+# that cannot run (run 8034: build-jobs ran ./dev before setup-rust, and the wrapper fell back to an old cached tool). Only when rustc
+# does not run, rustup exists, no compiler was named by RUSTC or a cargo config, and a toolchain file exists. Bounded by
+# PADDOCK_DEV_TOOLCHAIN_TIMEOUT (seconds, default 900), logged with its duration; a failure says the next step. Returns 0 when rustc
+# runs afterwards.
+ensure_toolchain() {
+  [ -z "${rustc_cmd:-}" ] || return 1
+  command -v rustup >/dev/null 2>&1 || return 1
+  tf=$(toolchain_file) || return 1
+  _i0=$(date +%s)
+  echo "dev: rustc does not run here; installing the toolchain $tf pins with rustup (at most ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s)." >&2
+  _rc=0
+  (cd "$tool" && run_bounded "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" rustup toolchain install >&2) || _rc=$?
+  if [ "$_rc" -ne 0 ]; then
+    echo "::error::./dev: 'rustup toolchain install' for $tf failed (exit $_rc, $(($(date +%s) - _i0)) s; 124 means the time limit). Run it by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
+    return 1
   fi
-  echo "dev: rustc was not found (${rustc_cmd:-rustc}). Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2
+  echo "dev: installed the pinned toolchain in $(($(date +%s) - _i0)) s." >&2
+  return 0
+}
+
+if [ "${1:-}" = "--ensure-toolchain" ]; then
+  # For conformance/ci/kit.sh and setup steps: succeeds when the compiler runs (installed if need be).
+  rustc_cmd=${RUSTC:-${CARGO_BUILD_RUSTC:-}}
+  (cd "$tool" && "${rustc_cmd:-rustc}" -vV >/dev/null 2>&1) && exit 0
+  ensure_toolchain && (cd "$tool" && "${rustc_cmd:-rustc}" -vV >/dev/null 2>&1) && exit 0
+  echo "::error::./dev --ensure-toolchain: no Rust compiler runs here. Install Rust with rustup (https://rustup.rs) or the toolchain rust-toolchain.toml pins, then run ./dev again." >&2
+  exit 2
+fi
+
+if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [ -z "$vv" ]; then
+  if ensure_toolchain; then vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r' || true); fi
+fi
+if [ -z "${vv:-}" ]; then
+  # Without a compiler the hash cannot be computed, and no cached binary is run in its place: it may be older than this commit's
+  # tool and lack the subcommand asked for (run 8034: it exited 2 on `ci build-jobs`). Fail closed (ER-33).
+  echo "::error::./dev: no Rust compiler runs here (${rustc_cmd:-rustc}), so the tool's hash cannot be computed and no cached paddock-dev is run in its place (it may lack this command). Install Rust with rustup (https://rustup.rs) or the toolchain rust-toolchain.toml pins (rustup toolchain install, in tools/paddock-dev), then run ./dev again; rustc was not found." >&2
   exit 2
 fi
 compiler=$(printf '%s\n' "$vv" | grep -E '^(commit-hash|release):' || true)

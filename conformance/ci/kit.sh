@@ -54,6 +54,13 @@ kit_choice() {
   echo "dev ./dev ci steps are available"
 }
 
+# The toolchain the repository pins is installed before the first ./dev or rustc call of the job (run 8034: on Windows build-jobs ran
+# before setup-rust, the pinned version was not there yet, `rustc` could not run and the wrapper fell back). `./dev --ensure-toolchain`
+# installs it with rustup when rustc does not run (bounded, logged); a machine without rustup is left to the choice below.
+if [ "${GITHUB_ACTIONS:-}" = true ] && command -v rustup >/dev/null 2>&1 && [ -f "$root/dev" ] && [ -f "$root/tools/paddock-dev/Cargo.toml" ]; then
+  bash "$root/dev" --ensure-toolchain || echo "::warning::kit.sh: the pinned Rust toolchain could not be installed (see above); steps that need Rust will fail with their own message." >&2
+fi
+
 choice=$(kit_choice)
 kit=${choice%% *}
 echo "kit: $kit (${choice#* })" >&2

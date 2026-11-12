@@ -438,9 +438,16 @@ fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is
     assert!(!f.cargo_home.path().join("target").exists(), "no second build");
 }
 
+/// A cached tool that answers `--version` and otherwise says it ran (what an old cached binary would do).
+#[cfg(unix)]
+fn cached_tool(path: &Path) {
+    write_script(path, r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#);
+}
+
 #[cfg(unix)]
 #[test]
-fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
+fn without_a_compiler_no_cached_binary_is_run_and_the_error_names_the_next_step() {
+    // Run 8034: an old cached tool without `ci build-jobs` ran in place of the one for this commit and exited 2. Fail closed (ER-33).
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let home = scratch.path().join("home");
@@ -448,63 +455,130 @@ fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
     let (code, _, err) = run_wrapper(&f, &home, &missing);
     assert_eq!(code, 2);
     assert!(err.contains("rustup") && err.contains("rustc was not found"), "{err}");
+    for root in ["bin", "bin-source"] {
+        cached_tool(&home.join(root).join("some-hash/paddock-dev-test-host"));
+    }
+    for extra in [
+        vec![],
+        vec![("GITHUB_ACTIONS", "true".to_string())],
+        vec![("PADDOCK_DEV_DOWNLOAD", "0".to_string())],
+    ] {
+        let env: Vec<_> = missing.iter().cloned().chain(extra).collect();
+        let (code, out, err) = run_wrapper(&f, &home, &env);
+        assert_eq!(code, 2, "{out}{err}");
+        assert!(!out.contains("cached ran"), "{out}");
+        assert!(
+            err.contains("::error::./dev: no Rust compiler runs here") && err.contains("rustup toolchain install"),
+            "{err}"
+        );
+    }
+}
+
+/// A Windows-shaped runner: rustup is there, its `rustc` shim cannot run until the pinned toolchain is installed, no RUSTC is set.
+/// Returns the folder of the shims and the log of the fake rustup.
+#[cfg(unix)]
+fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf) {
+    std::fs::write(
+        f.root().join("rust-toolchain.toml"),
+        "[toolchain]\nchannel = \"1.90.0\"\nprofile = \"minimal\"\ncomponents = [\"clippy\"]\n",
+    )
+    .unwrap();
+    let shims = f.cargo_home.path().join("shims");
+    let marker = f.cargo_home.path().join("installed");
+    let log = f.cargo_home.path().join("rustup.log");
     write_script(
-        &home.join("bin/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#,
+        &shims.join("rustc"),
+        &format!(
+            "[ -e '{}' ] || {{ echo \"error: toolchain '1.90.0' is not installed\" >&2; exit 1; }}\nprintf 'rustc 1.90.0\\nbinary: rustc\\ncommit-hash: aaaa\\ncommit-date: d\\nhost: test-host\\nrelease: 1.90.0\\nLLVM version: 1\\n'",
+            marker.display()
+        ),
     );
-    let (code, out, err) = run_wrapper(&f, &home, &missing);
-    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
-    assert!(err.contains("running the newest cached tool binary"), "{err}");
-    // A cached file that does not run is not used either.
-    write_script(&home.join("bin/some-hash/paddock-dev-test-host"), "exit 1");
-    assert_eq!(run_wrapper(&f, &home, &missing).0, 2);
+    write_script(
+        &shims.join("rustup"),
+        &format!(
+            "echo \"$PWD: $*\" >> '{}'\n{}",
+            log.display(),
+            rustup_body.replace("MARKER", &marker.display().to_string())
+        ),
+    );
+    (shims, log)
 }
 
 #[cfg(unix)]
 #[test]
-fn without_a_compiler_a_ci_runner_gets_a_warning_annotation_for_the_cached_binary() {
+fn a_runner_with_rustup_but_without_the_pinned_toolchain_installs_it_before_building() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
-    let home = scratch.path().join("home");
-    let env = [
-        ("RUSTC", scratch.path().join("no-such-rustc").display().to_string()),
-        ("GITHUB_ACTIONS", "true".to_string()),
-    ];
-    write_script(
-        &home.join("bin/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#,
+    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let (code, out, err) = run_wrapper(
+        &f,
+        &scratch.path().join("home"),
+        &[("GITHUB_ACTIONS", "true".to_string()), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())],
     );
-    let (code, out, err) = run_wrapper(&f, &home, &env);
-    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
-    assert!(err.contains("::warning::./dev: rustc is not available on this runner"), "{err}");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), "built-by-shim");
+    assert!(
+        err.contains("installing the toolchain") && err.contains("installed the pinned toolchain in"),
+        "{err}"
+    );
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(
+        log.contains("tools/paddock-dev: toolchain install"),
+        "rustup ran in the tool's folder, so it reads the file: {log}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn without_a_compiler_a_run_that_never_downloads_does_not_run_a_tool_from_the_shared_cache() {
+fn a_failed_or_stuck_toolchain_install_is_an_error_with_the_next_step_and_runs_no_cached_tool() {
+    for (body, timeout, want) in [("exit 1", "30", "exit 1"), ("exec sleep 30", "1", "exit 124")] {
+        let f = Fixture::new();
+        let scratch = tempfile::tempdir().unwrap();
+        let home = scratch.path().join("home");
+        cached_tool(&home.join("bin/some-hash/paddock-dev-test-host"));
+        rustup_without_toolchain(&f, body);
+        let (code, out, err) = run_wrapper(&f, &home, &[("PADDOCK_DEV_TOOLCHAIN_TIMEOUT", timeout.to_string())]);
+        assert_eq!(code, 2, "{out}{err}");
+        assert!(
+            err.contains("::error::./dev: 'rustup toolchain install'") && err.contains(want) && err.contains("by hand"),
+            "{err}"
+        );
+        assert!(!out.contains("cached ran"), "{out}");
+    }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+#[test]
+fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
     let f = Fixture::new();
-    let scratch = tempfile::tempdir().unwrap();
-    let home = scratch.path().join("home");
-    let no_rustc = scratch.path().join("no-such-rustc").display().to_string();
-    let env = [("RUSTC", no_rustc), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())];
-    // A binary only in bin/ (the shared cache, which downloads write): a release run must not run it.
-    write_script(
-        &home.join("bin/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "shared ran"; fi"#,
+    let (shims, _) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let run = || {
+        Command::new("sh")
+            .arg(f.root().join("dev"))
+            .arg("--ensure-toolchain")
+            .current_dir(f.root())
+            .env("PATH", &path)
+            .env("CARGO_HOME", f.cargo_home.path())
+            .env_remove("RUSTC")
+            .env_remove("CARGO_BUILD_RUSTC")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert_eq!(first.status.code(), Some(0), "{}", String::from_utf8_lossy(&first.stderr));
+    // Second time the compiler runs: nothing is installed again.
+    let second = run();
+    assert_eq!(second.status.code(), Some(0));
+    assert!(
+        !String::from_utf8_lossy(&second.stderr).contains("installing"),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
     );
-    let (code, out, err) = run_wrapper(&f, &home, &env);
-    assert_eq!(code, 2, "{out}{err}");
-    assert!(!out.contains("shared ran") && err.contains("rustc was not found"), "{out}{err}");
-    // One a source-only run built is its own, and in CI the fallback is an annotation.
-    write_script(
-        &home.join("bin-source/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "source ran"; fi"#,
-    );
-    let (code, out, err) = run_wrapper(&f, &home, &env);
-    assert_eq!((code, out.trim()), (0, "source ran"), "{err}");
-    let ci = [env[0].clone(), env[1].clone(), ("GITHUB_ACTIONS", "true".to_string())];
-    let (_, _, err) = run_wrapper(&f, &home, &ci);
-    assert!(err.contains("::warning::./dev: rustc is not available"), "{err}");
 }
 
 #[cfg(unix)]

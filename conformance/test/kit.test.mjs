@@ -327,3 +327,26 @@ test('a failed setup step (build-jobs, isolation acquire) marks the job aborted 
     c.done();
   }
 });
+
+test('on a CI host with rustup the pinned toolchain is ensured before the first step runs, and not without rustup or off CI', () => {
+  const c = checkout();
+  try {
+    // dev logs its arguments; the kit must call `--ensure-toolchain` first (run 8034: build-jobs ran before the pinned Rust was installed).
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    let r = c.run(['build-jobs'], { GITHUB_TOKEN: 't' });
+    const lines = r.log.trim().split('\n');
+    assert.match(lines[0], /^dev --ensure-toolchain /, r.log);
+    assert.match(r.log, /^dev ci build-jobs /m, r.log);
+    // A failed install is a warning, not the end: the step runs and fails with its own message if Rust is missing.
+    exe(join(c.root, 'dev'), 'echo "dev $*" >> "' + join(c.root, 'log') + '"; case "$1" in --ensure-toolchain) exit 2 ;; esac');
+    r = c.run(['which']);
+    assert.match(r.stderr, /::warning::kit\.sh: the pinned Rust toolchain could not be installed/, r.stderr);
+    // No rustup, or not a CI job: ./dev is not asked.
+    rmSync(join(c.root, 'bin', 'rustup'));
+    assert.doesNotMatch(c.run(['which']).log, /ensure-toolchain/);
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    assert.doesNotMatch(c.run(['which'], { GITHUB_ACTIONS: '' }).log, /ensure-toolchain/);
+  } finally {
+    c.done();
+  }
+});
