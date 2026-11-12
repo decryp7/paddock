@@ -1061,9 +1061,12 @@ test('Debrief runs its installers and real-app smoke tests only on main, debrief
   assert.match(full, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
   assert.match(full, /github\.event_name == 'workflow_dispatch' && \(inputs\.bundles == true/);
   assert.doesNotMatch(full, /pull_request/);
-  for (const job of ['tauri-smoke', 'bundle']) {
-    assert.match(jobBlock(yml, job), /^    if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, `${job}: full runs only`);
-  }
+  assert.match(jobBlock(yml, 'bundle'), /^    if: needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true'$/m, 'bundle: full runs only');
+  // The smoke runs after the bundle and the macOS Rust tests (its macOS start-up benchmark is a timing gate that must not share
+  // the runner with this run's heavy builds); a failed bundle or test leg does not skip it, a failed rust-lint does.
+  const smoke = jobBlock(yml, 'tauri-smoke');
+  assert.match(smoke, /^    if: \$\{\{ !cancelled\(\) && needs\.rust-lint\.result == 'success' && needs\.plan\.outputs\.run == 'true' && needs\.plan\.outputs\.full == 'true' \}\}$/m, 'tauri-smoke: full runs only');
+  assert.match(smoke, /^    needs: \[[^\]]*\bbundle\b[^\]]*\brust-test-macos\b[^\]]*\]$/m, 'tauri-smoke: after the bundle and the macOS Rust tests');
   // The release needs them, and a tag run is always a full run.
   assert.match(jobBlock(yml, 'release'), /needs: \[[^\]]*\bbundle\b[^\]]*\btauri-smoke\b/);
 });
