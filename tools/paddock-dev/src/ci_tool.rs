@@ -82,6 +82,7 @@ pub struct ToolCall {
     secrets: Vec<String>,
     timeout: Duration,
     output: Output,
+    cwd: Option<PathBuf>,
 }
 
 /// How a run ended.
@@ -108,6 +109,7 @@ impl ToolCall {
             secrets: Vec::new(),
             timeout: Duration::from_secs(120),
             output: Output::Capture,
+            cwd: None,
         }
     }
 
@@ -156,6 +158,12 @@ impl ToolCall {
         if !v.is_empty() {
             self.secrets.push(v);
         }
+        self
+    }
+
+    /// Runs the program in this folder (default: the caller's).
+    pub fn cwd(mut self, dir: impl Into<PathBuf>) -> ToolCall {
+        self.cwd = Some(dir.into());
         self
     }
 
@@ -216,6 +224,9 @@ impl ToolCall {
     fn build(&self, parent: &HashMap<String, String>) -> std::process::Command {
         let mut cmd = command(&self.program);
         cmd.args(&self.args).env_clear();
+        if let Some(dir) = &self.cwd {
+            cmd.current_dir(dir);
+        }
         for (k, v) in self.child_env(parent) {
             cmd.env(k, v);
         }

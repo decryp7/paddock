@@ -15,6 +15,7 @@ mod inputs;
 mod ipc_endpoints;
 mod isolation;
 mod merge_check;
+mod pre_push;
 mod release_isolation;
 mod setup_rust;
 mod slots;
