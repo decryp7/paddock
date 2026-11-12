@@ -332,7 +332,11 @@ fn only_the_ci_line_of_this_repository_is_read() {
         args.contains(&"--strict".to_string()) && args.iter().any(|a| a.starts_with("C06,")),
         "{args:?}"
     );
-    assert!(ci.contains(&args.join(" ")));
+    // The line is in ci.yml as it is, or (the env form) its script on the step and its arguments in PADDOCK_CONFORMANCE_ARGS.
+    assert!(
+        ci.contains(&args.join(" "))
+            || (ci.contains(&format!("node {} $PADDOCK_CONFORMANCE_ARGS", args[0])) && ci.contains(&args[1..].join(" ")))
+    );
 }
 
 fn crates_gates() -> Vec<Planned> {
