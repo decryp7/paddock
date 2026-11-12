@@ -21,6 +21,8 @@ pub struct RunInfo {
     pub conclusion: String,
     /// The commit it tested.
     pub head_sha: String,
+    /// The branch the run was made on (`main`); empty when the server did not say (a tag run).
+    pub head_branch: String,
     /// When it was created, as the API prints it.
     pub created_at: String,
     /// Which attempt the run is on: a rerun in Gitea is another attempt of the same run, so the run's `conclusion` is the
@@ -48,6 +50,7 @@ impl RunInfo {
             status: s("status"),
             conclusion: s("conclusion"),
             head_sha: s("head_sha"),
+            head_branch: s("head_branch"),
             created_at: s("created_at"),
             run_attempt: v["run_attempt"].as_u64().filter(|n| *n >= 1).unwrap_or(1),
         }

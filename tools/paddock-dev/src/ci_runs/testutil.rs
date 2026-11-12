@@ -10,6 +10,7 @@ pub struct Fake {
     json: HashMap<String, Value>,
     logs: HashMap<u64, Result<String, String>>,
     urls: Vec<String>,
+    errors: HashMap<String, String>,
 }
 
 impl Fake {
@@ -45,6 +46,11 @@ impl Fake {
     /// Answer `url` with `body`.
     pub fn json(&mut self, url: &str, body: Value) {
         self.json.insert(url.to_string(), body);
+    }
+
+    /// Fail `url` with `error` (a server error, not a 404).
+    pub fn error(&mut self, url: &str, error: &str) {
+        self.errors.insert(url.to_string(), error.to_string());
     }
 
     /// Forget the reply for `url` (it becomes a 404).
@@ -93,6 +99,9 @@ impl Http for Fake {
     fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
         assert!(!token.is_empty(), "the client must send its token");
         self.urls.push(url.to_string());
+        if let Some(e) = self.errors.get(url) {
+            return Err(e.clone());
+        }
         self.json
             .get(url)
             .cloned()

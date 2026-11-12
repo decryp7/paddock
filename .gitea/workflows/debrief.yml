@@ -125,7 +125,8 @@ jobs:
           PLAN_SINCE_RUN: ${{ github.event.inputs.since_run }}
           PLAN_FULL: ${{ github.event.inputs.bundles }}
           # The `full` output's expression, copied (tools/paddock-dev/tests/it/tree.rs keeps them equal): the mode line below lets a
-          # later rerun of this run's failures tell whether it was full (plan_since::read_full).
+          # later rerun of this run's failures tell whether it was full (plan_since::read_full). It is the scope only; `plan verdict:`
+          # at the end says whether the run was complete.
           PLAN_MODE_FULL: ${{ github.event_name == 'schedule' || startsWith(github.ref, 'refs/tags/debrief-v') || (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && (inputs.bundles == true || github.event.inputs.bundles == 'true')) }}
         run: |
           echo "plan mode: full=$PLAN_MODE_FULL"
@@ -147,6 +148,12 @@ jobs:
             fi
           fi
           echo "run=$run" >> "$GITHUB_OUTPUT"
+          # The line `./dev ci verdict` trusts (plan_since::COMPLETE_LINE), printed after every decision above: the plan ran its jobs,
+          # this is not a rerun of failures and the mode is full. The scope line at the top is logged before these decisions, so a
+          # run skipped for a train or an unchanged main, or a since_run dispatch, would pass for full on it.
+          complete=false
+          if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
+          echo "plan verdict: complete=$complete"
 
       # ADR 0060 3.2: the lint-adoption ratchet of Debrief (docs/gates.toml [[ratchet]] C13) must be empty before the release it names
       # (debrief-v1.2.0) or a later one is tagged. A tag run refuses at once, before anything is built. Only the ratchets of this

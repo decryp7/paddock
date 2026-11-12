@@ -45,26 +45,21 @@ function fakeGit({ skipCi = false, missing = [], tagExists = true } = {}) {
     throw new Error(`unexpected git ${a}`);
   };
 }
-const fetchOf = (runs, ok = true) => async () => ({ ok, status: ok ? 200 : 500, json: async () => ({ workflow_runs: runs }) });
-const pre = (git, runs, extra = {}) => findingsOf('C07', makeApp({ ...base(), [W]: wf('[test, bundle]') }), { options: { preflight: 'v1.2.3', git, fetch: fetchOf(runs), api: 'https://h/api/v1', repo: 'o/r', ...extra } });
+const pre = (git, runs, extra = {}) => findingsOf('C07', makeApp({ ...base(), [W]: wf('[test, bundle]') }), { options: { preflight: 'v1.2.3', git, ...extra } });
 
-test('C07 preflight good: green run for this commit, nothing missing', async () => {
-  assert.deepEqual(await pre(fakeGit(), [{ name: 'build', conclusion: 'success', head_sha: 'abc1234567890' }]), []);
+test('C07 preflight good: nothing missing', async () => {
+  assert.deepEqual(await pre(fakeGit(), []), []);
 });
 
-test('C07 preflight bad: [skip ci] tag, red run, unmerged fix branch, wrong version', async () => {
-  const f = await pre(fakeGit({ skipCi: true, missing: ['deadbeef0001', 'deadbeef0002'] }), [{ name: 'build', conclusion: 'failure', head_sha: 'abc1234567890' }], {});
+test('C07 preflight bad: [skip ci] tag, unmerged fix branch, wrong version', async () => {
+  const f = await pre(fakeGit({ skipCi: true, missing: ['deadbeef0001', 'deadbeef0002'] }), [], {});
   const m = messages(f);
   assert.match(m, /is \[skip ci\]/);
-  assert.match(m, /run "build".* is failure/);
   assert.match(m, /fix\/store-worker has 2 commit/);
-  const wrong = await findingsOf('C07', makeApp({ ...base(), [W]: wf('[test, bundle]') }), { options: { preflight: 'v1.2.4', git: fakeGit(), fetch: fetchOf([{ conclusion: 'success' }]), api: 'https://h/api/v1', repo: 'o/r' } });
+  const wrong = await findingsOf('C07', makeApp({ ...base(), [W]: wf('[test, bundle]') }), { options: { preflight: 'v1.2.4', git: fakeGit() } });
   assert.match(messages(wrong), /says 1\.2\.3, the tag says 1\.2\.4/);
 });
 
-test('C07 preflight fails closed: no run listed, API error, missing tag', async () => {
-  assert.match(messages(await pre(fakeGit(), [])), /lists no run for commit/);
-  const err = await findingsOf('C07', makeApp({ ...base(), [W]: wf('[test, bundle]') }), { options: { preflight: 'v1.2.3', git: fakeGit(), fetch: fetchOf([], false), api: 'https://h/api/v1', repo: 'o/r' } });
-  assert.match(messages(err), /cannot read the CI result/);
+test('C07 preflight fails closed: a missing tag', async () => {
   assert.match(messages(await pre(fakeGit({ tagExists: false }), [])), /does not exist in this checkout/);
 });
