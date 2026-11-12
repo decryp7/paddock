@@ -571,6 +571,20 @@ test('on Windows the sccache wrapper comes with cargo\'s legacy build-dir layout
   assert.match(mac, /^RUSTC_WRAPPER=sccache$/m, mac);
 });
 
+// The reminder for the workaround above, tied to its cause: a bump of the pinned sccache (Windows installs it through setup-rust, in
+// the shell step and in `./dev ci setup-rust`) must decide whether the opt-out can go.
+test('the sccache pin is still the release that expands cargo\'s @argfile (LEGACY_BUILD_DIR_LAYOUT)', () => {
+  const shell = read(join(ACTIONS, 'setup-rust', 'action.yml')).match(/^\s*VERSION=(\S+)$/m)?.[1];
+  const rust = read(join(PADDOCK, 'tools', 'paddock-dev', 'src', 'ci_setup_rust.rs')).match(/pub const SCCACHE_VERSION: &str = "([^"]+)";/)?.[1];
+  for (const pin of [shell, rust]) {
+    assert.equal(
+      pin,
+      '0.19.0',
+      'sccache was bumped: check whether it now passes a response file through (mozilla/sccache#2787), then remove LEGACY_BUILD_DIR_LAYOUT or update this pin.',
+    );
+  }
+});
+
 // One mechanism sets a job's build folder in every workflow: the shared build-folder action, which writes it to the Cargo
 // workspace's .cargo/ci.toml (a kept folder on a host, target/ in a container). CARGO_TARGET_DIR would put it in sccache's
 // key (every CARGO_* variable is hashed), a --config flag does not reach `tauri build`, and app copies drift (rule 43).
