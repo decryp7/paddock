@@ -103,6 +103,11 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
         [("CARGO_TARGET_DIR".to_string(), "/t/xwin".to_string())]
     );
     assert_eq!(by("clippy-windows crates").need, Need::Tool("cargo-xwin".into()));
+    assert!(
+        by("clippy-windows crates")
+            .next
+            .contains("rustup target add x86_64-pc-windows-msvc --toolchain")
+    );
     assert_eq!(by("clippy-linux crates").need, Need::Docker);
     assert!(
         by("clippy-linux crates")

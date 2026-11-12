@@ -45,7 +45,8 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   the Windows linker) from the current folder upwards.
 - **Rust version.** The root `rust-toolchain.toml` pins the exact version of the CI image (rustup reads it in every workspace;
   `setup-rust` reads it in CI). Upgrading Rust is one change: bump that file, rebuild the CI image, re-capture the
-  Rust-tool rows (ADR 0090) and reformat with the new rustfmt.
+  Rust-tool rows (ADR 0090) and reformat with the new rustfmt. The pinned toolchain starts without extra targets: for the
+  Windows lint (`cargo xwin`) run `rustup target add x86_64-pc-windows-msvc --toolchain <the channel in the file>` once.
 - **npm.** One workspace and one `package-lock.json` at the root: `npm ci` there, never in a package folder; add a
   dependency with `npm install <pkg> -w <workspace>`. Apps use `@decryp7/paddock-ui` from `ui/dist` (built with
   `npm run build -w ui`). Name styles and assets in `angular.json` by package path, never `node_modules/...`.

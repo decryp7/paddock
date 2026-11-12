@@ -227,7 +227,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
                 "cargo",
                 &args,
                 3,
-                "an import or helper used only by a unix-gated test is dead code on Windows (lessons.md, \"Windows-only assumptions in tests\"): gate it with cfg too".into(),
+                "an import or helper used only by a unix-gated test is dead code on Windows (lessons.md, \"Windows-only assumptions in tests\"): gate it with cfg too. If rustup says the target is not installed: `rustup target add x86_64-pc-windows-msvc --toolchain <the channel in rust-toolchain.toml>` (the pinned toolchain has no extra targets until you add one)".into(),
             );
             g.heavy = true;
             g.need = Need::Tool("cargo-xwin".into());

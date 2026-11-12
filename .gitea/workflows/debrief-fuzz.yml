@@ -91,6 +91,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+      # rust-toolchain.toml (the family's pin) outranks the action's `rustup default`; the environment variable outranks the file.
+      - run: echo "RUSTUP_TOOLCHAIN=$FUZZ_TOOLCHAIN" >> "$GITHUB_ENV"
 
       # One key per shard: each shard builds the same targets, so its fuzz/target is all it needs.
       - uses: actions/cache@v4
