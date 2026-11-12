@@ -2,6 +2,7 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod boot_volume;
+mod canonical_tempdir;
 mod env;
 mod golden;
 mod hostile;

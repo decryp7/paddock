@@ -3,6 +3,8 @@
 //! - [`Scratch`]: a temporary folder per test (work, home and tmp folders) whose `tmp` folder must be empty when the
 //!   test ends: code that leaves files in "the temp folder" fails the test that ran it. Replaces `std::env::temp_dir()`
 //!   in tests (clippy forbids it, `lint/clippy.toml`).
+//! - [`canonical_tempdir`]: one plain temporary folder whose path is canonical (macOS `/var` is `/private/var`), for a test
+//!   that compares it with a path the code under test resolved.
 //! - [`EnvLock`]: one process-wide lock for tests that read or write environment variables, restoring every variable it
 //!   changed, and [`EnvLock::hermetic`], which points `HOME`, `APPDATA`, the XDG folders and `TMPDIR` into a [`Scratch`].
 //! - [`golden`]: expected-output files; a difference fails with the first differing line, `PADDOCK_UPDATE_GOLDEN=1`
@@ -41,7 +43,9 @@ pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_env::winpath::{real_or_given, same};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use runner::{Call, FakeRunner, Reply};
-pub use scratch::{Leftovers, Scratch, ScratchError};
+pub use scratch::{
+    CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,
+};
 pub use wait::{
     HANG_GUARD, Progress, StallGuard, guarded, poll_for, poll_until_within, retry_within, wait_for,
     wait_for_within, wait_until, wait_until_within,
