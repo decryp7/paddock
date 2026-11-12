@@ -154,6 +154,15 @@ mod tests {
         (code, String::from_utf8(out).unwrap())
     }
 
+    /// `rel` (written with `/`) below `base`, spelled as the code under test joins it: component by component, so the separators
+    /// are the OS's own (`format!("{}/..", base.display())` mixes `\` and `/` on Windows).
+    fn under(base: &Path, rel: &str) -> String {
+        rel.split('/')
+            .fold(base.to_path_buf(), |p, part| p.join(part))
+            .display()
+            .to_string()
+    }
+
     fn setup() -> (tempfile::TempDir, HashMap<String, String>) {
         let d = crate::ci_host::canonical_tempdir();
         std::fs::create_dir_all(d.path().join("home")).unwrap();
@@ -171,8 +180,9 @@ mod tests {
         assert_eq!(code, 0, "{out}");
         let kept = d.path().join("home/.paddock-ci");
         let written = std::fs::read_to_string(d.path().join("github-env")).unwrap();
-        assert_eq!(written, format!("npm_config_cache={}/npm-s1\n", kept.display()));
-        let ng = format!("{}/angular/e2e_1-s1", kept.display());
+        let kept_text = crate::ci_host::fwd(&kept);
+        assert_eq!(written, format!("npm_config_cache={kept_text}/npm-s1\n"));
+        let ng = format!("{kept_text}/angular/e2e_1-s1");
         assert!(Path::new(&ng).is_dir(), "the kept Angular folder exists");
         assert!(
             !d.path().join("ws/ui/.angular/cache").exists(),
@@ -180,11 +190,11 @@ mod tests {
         );
         assert_eq!(
             links.made.lock().unwrap().as_slice(),
-            [(ng.clone(), format!("{}/ws/ui/.angular/cache", d.path().display()))]
+            [(ng.clone(), under(d.path(), "ws/ui/.angular/cache"))]
         );
-        assert!(out.contains(&format!("node-caches: npm {}/npm-s1", kept.display())), "{out}");
+        assert!(out.contains(&format!("node-caches: npm {kept_text}/npm-s1")), "{out}");
         assert!(
-            out.contains(&format!("node-caches: Angular {}/ws/ui/.angular/cache -> {ng}", d.path().display())),
+            out.contains(&format!("node-caches: Angular {} -> {ng}", under(d.path(), "ws/ui/.angular/cache"))),
             "{out}"
         );
     }
@@ -208,10 +218,7 @@ mod tests {
         let links = RecordingLinks::default();
         let (code, _) = go(&env, false, "ui", &links);
         assert_eq!(code, 0);
-        assert_eq!(
-            links.made.lock().unwrap()[0].1,
-            format!("{}/clone/ui/.angular/cache", d.path().display())
-        );
+        assert_eq!(links.made.lock().unwrap()[0].1, under(d.path(), "clone/ui/.angular/cache"));
     }
 
     #[test]
@@ -229,9 +236,9 @@ mod tests {
         assert_eq!(code, 0, "{out}");
         assert_eq!(
             std::fs::read_to_string(d.path().join("github-env")).unwrap(),
-            format!("npm_config_cache={}/npm\n", mount.display())
+            format!("npm_config_cache={}\n", mount.join("npm").display())
         );
-        assert_eq!(links.made.lock().unwrap()[0].0, format!("{}/angular/e2e_1", mount.display()));
+        assert_eq!(links.made.lock().unwrap()[0].0, under(&mount, "angular/e2e_1"));
     }
 
     #[test]
