@@ -25,7 +25,8 @@
    ".gitea/actions/node-caches/action.yml used by .gitea/workflows/x.yml"
   ],
   "conformance": [
-   "ci files .gitea/actions/node-caches/action.yml"
+   "ci files .gitea/actions/node-caches/action.yml",
+   "conformance always runs"
   ],
   "tools": [
    ".gitea/actions/node-caches/action.yml used by .gitea/workflows/nightly.yml, which runs only on a schedule, a tag or a manual run (not a pull request)"

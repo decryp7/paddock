@@ -31,9 +31,17 @@ fn plan_of(files: &[&str], all: bool) -> Value {
         all,
         per_machine_apps: per_machine().clone(),
         crates_naming: Some(&naming),
+        explain: true,
         ..Options::default()
     };
     affected(&files.iter().map(|s| s.to_string()).collect::<Vec<_>>(), graph(), &opts).unwrap()
+}
+
+/// Whether conformance is marked for a reason of the change (it is in every plan, user decision 2026-11-12).
+fn because(p: &Value) -> bool {
+    p["why"]["conformance"]
+        .as_array()
+        .is_some_and(|a| a.iter().any(|x| x != "conformance always runs"))
 }
 
 fn run(files: &[&str]) -> Value {
@@ -163,7 +171,12 @@ fn an_apps_cargo_toml_and_capabilities_run_conformance_other_app_files_do_not() 
         assert_eq!(r["conformance"], true, "{f}");
         assert_eq!(r["apps"], json!([f.split('/').nth(1).unwrap()]), "{f}");
     }
-    assert_eq!(run(&["apps/shell-demo/src-tauri/src/lib.rs"])["conformance"], false);
+    assert!(!because(&run(&["apps/shell-demo/src-tauri/src/lib.rs"])));
+    assert_eq!(
+        run(&["apps/shell-demo/src-tauri/src/lib.rs"])["conformance"],
+        true,
+        "planned all the same: conformance always runs"
+    );
     // C100 (./dev gates check) reads every README.
     assert_eq!(run(&["apps/shell-demo/README.md"])["conformance"], true);
 }
@@ -188,8 +201,8 @@ fn a_per_machine_apps_installer_files_run_c91_and_the_shared_crates_sync_test() 
         non["conformance"] == true && non["crates"] == false,
         "a per-user app marks conformance only"
     );
-    assert_eq!(run(&["apps/dyno/app/src-tauri/src/lib.rs"])["conformance"], false);
-    assert_eq!(run(&["apps/dyno/app/src-tauri/icons/icon.ico"])["conformance"], false);
+    assert!(!because(&run(&["apps/dyno/app/src-tauri/src/lib.rs"])));
+    assert!(!because(&run(&["apps/dyno/app/src-tauri/icons/icon.ico"])));
 }
 
 #[test]
@@ -346,7 +359,7 @@ fn the_planner_files_mark_tools_ui_and_paddock_dev_never_an_app_and_the_rust_inp
                 r["ui"].clone(),
                 r["crates"].clone(),
                 r["paddockDev"].clone(),
-                r["conformance"].clone()
+                json!(because(&r))
             ),
             (json!(false), json!(false), json!(true), json!(true), json!(f.starts_with("lint/"))),
             "{f}"

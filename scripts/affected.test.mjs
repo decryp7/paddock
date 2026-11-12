@@ -28,7 +28,12 @@ const scopedAll = (app, pats) => pats.flatMap((p) => [scoped(p, app), scoped(p, 
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
-const run = (...files) => affected(files, graph, { perMachine: (f) => adoptsPerMachine(ROOT, f) });
+// The conformance job is in every plan (user decision 2026-11-12), so what these tests ask is "is conformance marked for a reason of
+// the change", not "is it planned": `because(r)`. `why` is kept off the enumerable keys so whole-result comparisons are unchanged.
+const ALWAYS = 'conformance always runs';
+const hideWhy = (r) => Object.defineProperty(r, 'why', { value: r.why, enumerable: false });
+const because = (r) => (r.why?.conformance ?? []).some((x) => x !== ALWAYS);
+const run = (...files) => hideWhy(affected(files, graph, { perMachine: (f) => adoptsPerMachine(ROOT, f), explain: true }));
 const APPS = [...graph.apps.keys()].sort();
 /** The apps that are legs of ci.yml (not those with a workflow of their own, such as Debrief). */
 const LEGS = APPS.filter((a) => !graph.apps.get(a).workflow && graph.apps.get(a).cargo);
@@ -80,6 +85,16 @@ describe('the graph of this tree', () => {
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
+  // User decision 2026-11-12: "conformance always runs". A check skipped on the change that introduces its class never sees it.
+  test('conformance is in every plan: an app-only change, a workflow-only change, a spec, a doc and no change at all', () => {
+    for (const f of ['apps/shell-demo/src-tauri/src/lib.rs', 'apps/shell-demo/app/src/app/x.spec.ts', '.gitea/workflows/shell-demo-release.yml', 'docs/plans/x.md']) {
+      assert.equal(run(f).conformance, true, f);
+    }
+    assert.equal(run().conformance, true, 'no change');
+    assert.equal(affected(['.gitea/workflows/dyno.yml'], graph, { gitea: null }).conformance, true, 'a workflow with no reader marks everything');
+    assert.ok(run('apps/shell-demo/src-tauri/src/lib.rs').why.conformance.includes(ALWAYS), 'explain says why');
+  });
+
   test('the e2e port and build guard (imported by relative path by every app config) mark the UI half of every app', () => {
     for (const f of ['ui/projects/paddock-e2e/src/env.ts', 'ui/projects/paddock-e2e/src/build-guard.ts']) {
       const r = run(f);
@@ -119,12 +134,12 @@ describe('the graph of this tree', () => {
   test("an app's Cargo.toml and capabilities run conformance (C48 reads them), other app files do not", () => {
     for (const f of ['apps/shell-demo/src-tauri/capabilities/dialog.json', 'apps/shell-demo/src-tauri/Cargo.toml', 'apps/debrief/app/src-tauri/capabilities/dialog.json']) {
       const r = run(f);
-      assert.ok(r.conformance, f);
+      assert.ok(because(r), f);
       assert.deepEqual(r.apps, [f.split('/')[1]], f);
     }
-    assert.ok(!run('apps/shell-demo/src-tauri/src/lib.rs').conformance);
-    assert.ok(run('apps/shell-demo/README.md').conformance, 'a README is a rule-bearing doc C100 reads (ADR 0060)');
-    assert.ok(!run('apps/shell-demo/src-tauri/src/main.rs').conformance);
+    assert.ok(!because(run('apps/shell-demo/src-tauri/src/lib.rs')));
+    assert.ok(because(run('apps/shell-demo/README.md')), 'a README is a rule-bearing doc C100 reads (ADR 0060)');
+    assert.ok(!because(run('apps/shell-demo/src-tauri/src/main.rs')));
   });
 
   test('every input of conformance C99 plans the c99 job (ADR 0057 §3.4), and a docs-only or unrelated change does not', () => {
@@ -163,20 +178,20 @@ describe('the graph of this tree', () => {
       'apps/dyno/app/src-tauri/windows/paddock-per-machine.generated.nsh',
     ]) {
       const r = run(f);
-      assert.ok(r.conformance, `${f} runs C91`);
+      assert.ok(because(r), `${f} runs C91`);
       assert.ok(r.crates, `${f} runs paddock-service's per_machine sync test`);
       assert.deepEqual(r.apps, ['dyno'], f);
     }
     // The shared include itself is read by the same check and test, and every adopting app is marked.
     const inc = run('crates/paddock-setup/nsis/paddock-per-machine.nsh');
-    assert.ok(inc.conformance && inc.crates);
+    assert.ok(because(inc) && inc.crates);
     // An app that does not adopt the include runs C91 (its config may become perMachine) but not the shared crates' sync test.
     const non = run('apps/debrief/app/src-tauri/tauri.conf.json');
-    assert.ok(non.conformance && !non.crates, 'a per-user app marks conformance only');
+    assert.ok(because(non) && !non.crates, 'a per-user app marks conformance only');
     // Other app files do not.
     const other = run('apps/dyno/app/src-tauri/src/lib.rs');
-    assert.ok(!other.conformance);
-    assert.ok(!run('apps/dyno/app/src-tauri/icons/icon.ico').conformance);
+    assert.ok(!because(other));
+    assert.ok(!because(run('apps/dyno/app/src-tauri/icons/icon.ico')));
   });
 
   test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
@@ -190,7 +205,7 @@ describe('the graph of this tree', () => {
     const c = run('apps/shell-demo/CHANGELOG.md');
     assert.deepEqual([c.apps, c.kinds['shell-demo']], [['shell-demo'], ['rust', 'ui']]);
     const rules = run('docs/rules.md');
-    assert.deepEqual([rules.conformance, rules.tools, rules.docs, rules.apps], [true, true, false, []]);
+    assert.deepEqual([because(rules), rules.tools, rules.docs, rules.apps], [true, true, false, []]);
   });
 
   test("an app's Rust source can emit a health cause code the UI's chip table checks, so it marks ui, the app keeps its halves", () => {
@@ -229,7 +244,7 @@ describe('the graph of this tree', () => {
   test('global inputs mark everything; an app release workflow marks one app', () => {
     for (const f of ['rust-toolchain.toml', 'package.json', '.npmrc', 'tsconfig/base.json']) {
       const r = run(f);
-      assert.ok(r.all && r.crates && r.ui && r.eslint && r.conformance && r.tools, f);
+      assert.ok(r.all && r.crates && r.ui && r.eslint && because(r) && r.tools, f);
       assert.deepEqual(r.apps, APPS, f);
     }
     assert.deepEqual(run('.gitea/workflows/shell-demo-release.yml').apps, ['shell-demo']);
@@ -334,7 +349,7 @@ const BASE_TREE = {
   '.gitea/actions/nightly-only/action.yml': 'runs: n',
   ...ACTIONS,
 };
-const runGitea = (files, gitea) => affected(files, graph, { gitea });
+const runGitea = (files, gitea) => hideWhy(affected(files, graph, { gitea, explain: true }));
 const CARGO_APPS = APPS.filter((a) => graph.apps.get(a).cargo);
 const CI_FILE = '.gitea/workflows/ci.yml';
 
@@ -348,7 +363,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
 
   test('a ci.yml change to one job marks that job only; a change to the app job marks the app legs', () => {
     const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }));
-    assert.deepEqual([r.all, r.conformance, r.crates, r.ui, r.tools, r.apps], [false, true, false, false, false, []]);
+    assert.deepEqual([r.all, because(r), r.crates, r.ui, r.tools, r.apps], [false, true, false, false, false, []]);
     const a = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a', 'node c') }));
     assert.deepEqual([a.all, a.crates, a.apps], [false, false, APPS]);
   });
@@ -375,7 +390,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     const base = CI();
     // The key with a trailing comment starts its own job (the edit below must not be attributed to the job before it).
     const r = runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: base.replace('node a', 'node a2') }));
-    assert.deepEqual([r.all, r.conformance, r.ui, r.crates], [false, true, false, false]);
+    assert.deepEqual([r.all, because(r), r.ui, r.crates], [false, true, false, false]);
     for (const bad of [`${base}  "quoted": {}\n`, `${base}  crates2: { runs-on: x }\n`, `${base}anchors:\n  x: &rs 1\n`, base.replace('node b', 'node *rs'), base.replace('steps:\n      - uses: ./.gitea/actions/build-folder', 'steps: &rs\n      - uses: ./.gitea/actions/build-folder')]) {
       assert.equal(changedJobs(base, bad), null, bad);
       assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: bad })).all, bad);
@@ -408,7 +423,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
   test('a script of conformance/ci or conformance/release also marks the jobs of the actions that run it', () => {
     const g = giteaOf(BASE_TREE, {});
     const r = runGitea(['conformance/ci/build-folder.sh'], g);
-    assert.deepEqual([r.all, r.crates, r.conformance, r.ui, r.eslint, r.apps], [false, true, true, false, false, APPS]);
+    assert.deepEqual([r.all, r.crates, because(r), r.ui, r.eslint, r.apps], [false, true, true, false, false, APPS]);
     const other = runGitea(['conformance/release/latest-json.mjs'], g);
     assert.deepEqual([other.all, other.crates, other.ui], [false, false, false]);
     assert.deepEqual(other.apps, APPS);
@@ -473,7 +488,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.deepEqual(t.apps, APPS);
     for (const f of ['.cargo/config.toml', 'lint/clippy.toml']) {
       const r = run(f);
-      assert.deepEqual([r.all, r.ui, r.crates, r.paddockDev, r.conformance], [false, false, true, true, f.startsWith('lint/')], f);
+      assert.deepEqual([r.all, r.ui, r.crates, r.paddockDev, because(r)], [false, false, true, true, f.startsWith('lint/')], f);
       assert.deepEqual(r.apps, CARGO_APPS, f);
       assert.ok(CARGO_APPS.every((a) => r.kinds[a].join() === 'rust'), f);
     }
@@ -599,7 +614,7 @@ describe('planFor reads the .gitea revisions from git', () => {
       writeFileSync(join(dir, CI_FILE), CI('node a --only C06'));
       sh(dir, 'commit', '-q', '-am', 'one job');
       const r = planFor({ base, head: 'HEAD', root: dir, explain: true }).plan;
-      assert.deepEqual([r.all, r.conformance, r.crates, r.ui], [false, true, false, false]);
+      assert.deepEqual([r.all, because(r), r.crates, r.ui], [false, true, false, false]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -620,7 +635,7 @@ describe('planFor reads the .gitea revisions from git', () => {
       const base = sh(dir, 'rev-parse', 'HEAD').trim();
       put('conformance/ci/runtime-catalogue.mjs', 'export const entryFor = 2;');
       sh(dir, 'commit', '-q', '-am', 'helper');
-      const r = planFor({ base, head: 'HEAD', root: dir }).plan;
+      const r = hideWhy(planFor({ base, head: 'HEAD', root: dir, explain: true }).plan);
       assert.deepEqual([r.all, r.crates, r.ui], [false, true, false]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -631,8 +646,8 @@ describe('planFor reads the .gitea revisions from git', () => {
     const dir = scratch();
     try {
       writeFileSync(join(dir, CI_FILE), CI('node a --only C06'));
-      const dirty = planFor({ files: [CI_FILE], root: dir }).plan;
-      assert.deepEqual([dirty.all, dirty.conformance, dirty.crates], [false, true, false]);
+      const dirty = hideWhy(planFor({ files: [CI_FILE], root: dir, explain: true }).plan);
+      assert.deepEqual([dirty.all, because(dirty), dirty.crates], [false, true, false]);
       sh(dir, 'commit', '-q', '-am', 'one job');
       assert.ok(planFor({ files: [CI_FILE], root: dir }).plan.all);
     } finally {
@@ -852,7 +867,7 @@ describe('matrix legs', () => {
 
   test("onlyApp (a tag's gates, ci.yml's `app` input) keeps one app, both halves, and no other project", () => {
     const only = onlyApp(affected([], graph, { all: true }), 'pitcrew');
-    assert.deepEqual([only.apps, only.kinds, only.crates, only.ui, only.eslint, only.conformance, only.tools, only.icons, only.all], [['pitcrew'], { pitcrew: ['rust', 'ui'] }, false, false, false, false, false, false, false]);
+    assert.deepEqual([only.apps, only.kinds, only.crates, only.ui, only.eslint, because(only), only.tools, only.icons, only.all], [['pitcrew'], { pitcrew: ['rust', 'ui'] }, false, false, false, false, false, false, false]);
     assert.deepEqual(matrix(only, graph, { narrow: true }).map((l) => [l.os, l.rust, l.ui, l.filter]), [['ubuntu-latest', true, true, ''], ['windows-latest', true, false, ''], ['macos-latest', true, false, '']]);
   });
 });
@@ -1237,7 +1252,7 @@ describe('C100 inputs (ADR 0060): the planner runs conformance for what `./dev g
     assert.ok(globs.length > 15);
     for (const g of globs) {
       const f = sample(g);
-      assert.ok(run(f).conformance, `${g} (${f}) marks conformance`);
+      assert.ok(because(run(f)), `${g} (${f}) marks conformance`);
     }
     for (const re of C100_INPUTS) {
       assert.ok(globs.some((g) => re.test(sample(g))), `${re} has a glob in inputs.rs`);
@@ -1245,18 +1260,18 @@ describe('C100 inputs (ADR 0060): the planner runs conformance for what `./dev g
   });
 
   test('bad: an ordinary file is not a C100 input', () => {
-    assert.equal(run('crates/paddock-jobs/src/lib.rs').conformance, false);
-    assert.equal(run('docs/plans/x.md').conformance, false);
+    assert.equal(because(run('crates/paddock-jobs/src/lib.rs')), false);
+    assert.equal(because(run('docs/plans/x.md')), false);
   });
 
   test('a test file that adds or removes an ignore attribute or an environment guard marks conformance (content rule)', () => {
     const f = 'crates/paddock-jobs/tests/it/x.rs';
-    const plan = (before, after) => affected([f], graph, { content: { before: () => before, after: () => after } });
+    const plan = (before, after) => hideWhy(affected([f], graph, { explain: true, content: { before: () => before, after: () => after } }));
     assert.deepEqual([...guardSet('#[test]\n#[ignore = "slow"]\nfn a() {}')], ['#[ignore|a']);
-    assert.equal(plan('#[test]\nfn a() {}', '#[test]\n#[ignore]\nfn a() {}').conformance, true, 'an ignore was added');
-    assert.equal(plan('#[test]\nfn a() { if std::env::var("X").is_err() { return; } }', '#[test]\nfn a() {}').conformance, true, 'a guard was removed');
-    assert.equal(plan('#[test]\nfn a() {}', '#[test]\nfn a() { assert!(true); }').conformance, false, 'an ordinary edit');
-    assert.equal(plan('#[test]\n#[ignore]\nfn a() {}\n#[test]\nfn b() {}', '#[test]\nfn a() {}\n#[test]\n#[ignore]\nfn b() {}').conformance, true, 'an ignore moved to another test: same count, different set');
-    assert.equal(plan('#[test]\n#[ignore]\nfn a() {}', '// moved\n#[test]\n#[ignore]\nfn a() {}').conformance, false, 'the same ignore on the same test');
+    assert.equal(because(plan('#[test]\nfn a() {}', '#[test]\n#[ignore]\nfn a() {}')), true, 'an ignore was added');
+    assert.equal(because(plan('#[test]\nfn a() { if std::env::var("X").is_err() { return; } }', '#[test]\nfn a() {}')), true, 'a guard was removed');
+    assert.equal(because(plan('#[test]\nfn a() {}', '#[test]\nfn a() { assert!(true); }')), false, 'an ordinary edit');
+    assert.equal(because(plan('#[test]\n#[ignore]\nfn a() {}\n#[test]\nfn b() {}', '#[test]\nfn a() {}\n#[test]\n#[ignore]\nfn b() {}')), true, 'an ignore moved to another test: same count, different set');
+    assert.equal(because(plan('#[test]\n#[ignore]\nfn a() {}', '// moved\n#[test]\n#[ignore]\nfn a() {}')), false, 'the same ignore on the same test');
   });
 });

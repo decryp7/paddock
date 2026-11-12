@@ -25,7 +25,8 @@
    ".gitea/workflows/gates.yml used by .gitea/workflows/x.yml"
   ],
   "conformance": [
-   "ci files .gitea/workflows/gates.yml"
+   "ci files .gitea/workflows/gates.yml",
+   "conformance always runs"
   ],
   "tools": [
    ".gitea/workflows/gates.yml used by .gitea/workflows/nightly.yml, which runs only on a schedule, a tag or a manual run (not a pull request)"
