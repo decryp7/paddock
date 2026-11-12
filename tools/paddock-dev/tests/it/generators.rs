@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    PathBuf::from(paddock_env::winpath::real_for_tools(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap())
 }
 
 #[test]

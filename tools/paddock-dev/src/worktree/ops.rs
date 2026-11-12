@@ -781,7 +781,7 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         assert!(super::npm_ci_with(fake.to_str().unwrap(), &root).is_ok());
         let line = std::fs::read_to_string(&log).unwrap();
-        let canon = root.canonicalize().unwrap();
+        let canon = paddock_env::winpath::real(&root).unwrap();
         assert_eq!(
             line.trim(),
             format!("{} ci --ignore-scripts --no-audit --no-fund -w=conformance", canon.display())
