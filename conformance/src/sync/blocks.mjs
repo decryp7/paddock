@@ -100,7 +100,8 @@ export function inspectBlock(text, block, config) {
     const out = [...lines.slice(0, found.start), ...wanted.split('\n'), ...lines.slice(found.end + 1)];
     return { state, desired: out.join('\n') };
   }
-  if (block.whole) return { state: text.trim() ? 'unmarked' : 'missing', desired: `${wanted}\n` };
+  // An unmarked whole-file block goes on top and the app's own text stays below it: sync never deletes what it did not write.
+  if (block.whole) return text.trim() ? { state: 'unmarked', desired: `${wanted}\n\n${text.replace(/^\n+/, '')}` } : { state: 'missing', desired: `${wanted}\n` };
   const section = block.heading ? findSection(text, block.heading) : null;
   if (section) {
     let { from, to } = section;

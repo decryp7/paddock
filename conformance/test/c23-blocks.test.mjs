@@ -73,14 +73,14 @@ test('inspectBlock: sections end at the next heading, fences are respected, adja
   assert.ok(revOf('a') !== revOf('b'));
 });
 
-test('first-launch fills the app name; a whole-file block replaces a hand-written file', () => {
+test('first-launch fills the app name; a whole-file block goes above a hand-written file', () => {
   const reg = loadBlocks(PADDOCK);
   const fl = reg.blocks.find((b) => b.name === 'first-launch');
   assert.match(inspectBlock('', fl, { app: 'pitwall', appName: 'Pitwall' }).desired, /Pitwall is not code-signed yet/);
   const sl = reg.blocks.find((b) => b.name === 'suite-lessons');
   const r = inspectBlock('# Old hand-written lessons\n', sl, { app: 'x' });
   assert.equal(r.state, 'unmarked');
-  assert.doesNotMatch(r.desired, /Old hand-written/);
+  assert.match(r.desired, /Old hand-written lessons\n$/);
   assert.equal(inspectBlock('', sl, { app: 'x' }).state, 'missing');
 });
 

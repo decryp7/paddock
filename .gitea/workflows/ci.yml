@@ -344,7 +344,7 @@ jobs:
       # the checkout above has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).
       - name: Paddock itself (applicable checks)
         working-directory: .
-        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111 --strict C36
+        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111 --strict C36
 
       # ADR 0060, C100: every check the repository defines is run by a reachable CI line, or registered in docs/gates.toml with a
       # reason, an owner and a review date. Rollback: `./dev gates check --warn`. The nightly has a job of its own (nightly.yml).

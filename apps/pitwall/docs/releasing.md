@@ -122,12 +122,12 @@ fine; it is never published.
 4. After the release: install the published build (not the CI artifact) and run the app's installed-app verify script.
 <!-- /paddock:block releasing -->
 
-<!-- paddock:block first-launch rev=4679a047 -->
+<!-- paddock:block first-launch rev=e18d3f38 -->
 ### First launch
 
 Pitwall is not code-signed yet, so your system may warn the first time you open it.
 
-- **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Pitwall > **Open Anyway**.
+- **macOS:** first drag Pitwall from the disk image to Applications and open it from there. The first time, macOS says "“Pitwall” Not Opened": choose **Done** (not Move to Trash). Open System Settings > Privacy & Security, scroll down to "“Pitwall” was blocked to protect your Mac." and choose **Open Anyway**. macOS asks once more, "Open “Pitwall”?": choose **Open Anyway** again, then enter an administrator's name and password. You do this once; later starts open normally. If the button is missing, open Pitwall again first.
 - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
 <!-- /paddock:block first-launch -->
 

@@ -17,7 +17,7 @@ const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C0
                            [--preflight vX.Y.Z]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --subject <text> | --file <path> | --range <rev-range>
-       paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write]   # C28 baseline files and C23 doc blocks
+       paddock-conformance sync --app <name> [--root <dir>] [--paddock <dir>] [--write] [--blocks-only]   # C28 baseline files and C23 doc blocks
        paddock-conformance window-weight [kind...] [--root <dir>] [--stats <file>] [--max <kB>] [--record]   # C29, rule 35
        paddock-conformance list [--json]       # --json: id, scope, mode, needs, file of every check (ADR 0060)
        paddock-conformance commands --json      # the subcommands, for docs that name them (ADR 0060)`;
@@ -50,7 +50,7 @@ export function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) throw new Error(`unexpected argument: ${a}`);
     const k = a.slice(2);
-    if (k === 'json' || k === 'keep' || k === 'write' || k === 'record' || k === 'no-graph') o[k] = true;
+    if (k === 'json' || k === 'keep' || k === 'write' || k === 'blocks-only' || k === 'record' || k === 'no-graph') o[k] = true;
     else if (VALUE.has(k)) {
       if (argv[i + 1] === undefined) throw new Error(`--${k} needs a value`);
       o[k] = argv[++i];
@@ -101,7 +101,7 @@ export async function main(argv, { log = console.log, err = console.error, env =
       // licences, ...) over the repository's own root files: it is for an app's folder (`--root apps/<app>`), never for the root.
       const root = resolve(o.root ?? '.');
       if (o.write && existsSync(join(root, 'apps')) && existsSync(join(root, '.gitea')) && existsSync(join(root, 'tools', 'paddock-dev'))) {
-        err(`paddock-conformance: sync --write would overwrite the monorepo's own root files with the per-repository baseline. Fix: run it for an app's folder, --root apps/<app>, or edit the AGENTS.md blocks by hand (docs/blocks).`);
+        err(`paddock-conformance: sync --write would overwrite the monorepo's own root files with the per-repository baseline. Fix: run it for an app's folder, --root apps/<app>, (it rewrites only the shared blocks there), or edit the AGENTS.md blocks by hand (docs/blocks).`);
         return 2;
       }
       return syncMain(o, { log, err });
