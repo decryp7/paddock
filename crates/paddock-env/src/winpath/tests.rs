@@ -589,6 +589,9 @@ fn the_fold_keeps_dotless_i_and_long_s_apart_from_the_ascii_letters() {
     assert!(!same(p("C:\\\u{131}"), p(r"C:\I"), W));
     assert!(!same(p("C:\\\u{17f}"), p(r"C:\s"), W));
     assert!(same(p("C:\\\u{131}"), p("c:\\\u{131}"), W));
+    // Final sigma is not capital sigma for CompareStringOrdinal (ci.yml run 7969); small sigma is.
+    assert!(!same(p("C:\\\u{3c2}"), p("C:\\\u{3a3}"), W));
+    assert!(same(p("C:\\\u{3c3}"), p("C:\\\u{3a3}"), W));
 }
 
 #[test]

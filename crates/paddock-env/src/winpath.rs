@@ -538,8 +538,9 @@ fn fold(name: &str) -> String {
     name.chars()
         .map(|c| {
             // Above U+FFFF: two UTF-16 units, never folded. Dotless i and long s: Unicode's simple uppercase gives I and S, but
-            // the OS's ordinal table keeps them apart from the ASCII letters (the Windows test checks against the OS).
-            if u32::from(c) > 0xFFFF || matches!(c, '\u{131}' | '\u{17f}') {
+            // the OS's ordinal table keeps them apart from the ASCII letters; final sigma likewise stays apart from capital
+            // sigma (CompareStringOrdinal said so on the Windows CI leg, ci.yml run 7969). The Windows test checks against the OS.
+            if u32::from(c) > 0xFFFF || matches!(c, '\u{131}' | '\u{17f}' | '\u{3c2}') {
                 return c;
             }
             let mut upper = c.to_uppercase();
