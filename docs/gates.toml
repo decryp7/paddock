@@ -165,6 +165,14 @@ since = 2026-11-08
 review_by = 2026-12-06
 approved = "coordinator"
 
+[[report_only]]
+id = "C117"
+reason = "report-only until its first green run (ER-41): a step that runs after a failure in an isolated job must also stop when the job's setup failed (PADDOCK_JOB_ABORTED); the root conformance line runs it, 0 warnings today; then mode gate"
+owner = "run 8027, fix/dev-wrapper-build-race"
+since = 2026-11-12
+review_by = 2026-12-12
+approved = "coordinator"
+
 [[not_gated]]
 id = "C85"
 apps = ["debrief", "dyno", "pacenotes", "pitcrew", "pitwall", "shell-demo", "sighter", "spotter", "workbench-demo"]

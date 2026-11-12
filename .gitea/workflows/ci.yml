@@ -58,7 +58,7 @@ permissions:
 
 # The conformance checks Paddock runs on itself: one line, read by the conformance job and by the train-gates job.
 env:
-  PADDOCK_CONFORMANCE_ARGS: "--app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115 --strict C36"
+  PADDOCK_CONFORMANCE_ARGS: "--app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115,C117 --strict C36"
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
 
@@ -550,24 +550,24 @@ jobs:
             echo "::error::tools/wiki/Cargo.lock is stale, run cargo update -w in tools/wiki and commit it"; exit 1; }
 
       - name: Format
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo fmt --check
 
       - name: Clippy
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo nextest run --profile ci --locked --no-fail-fast
 
       - name: Deny
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo deny check
 
       # The tool lints the wiki the way a person runs it (stale pages only warn).
       - name: Lint the wiki
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         env:
           # The run log in the workspace, not the container's home, so a failed run's log survives the job (uploaded below).
           WIKI_LOG_DIR: ${{ github.workspace }}/wiki-logs
@@ -590,7 +590,7 @@ jobs:
       # hack once pulled gtk-sys into paddock-proc on x86_64 Linux, so `cargo install` of wiki and heavy needed GTK headers). The
       # check reads the dependency graph for the Linux target, so it holds on an image that happens to have GTK installed.
       - name: No GTK in the tools' Linux build
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: .
         run: |
           # bash -e -o pipefail: every command that may legitimately fail is handled by hand. grep exits 1 when it finds nothing,
@@ -652,19 +652,19 @@ jobs:
             echo "::error::tools/heavy/Cargo.lock is stale, run cargo update -w in tools/heavy and commit it"; exit 1; }
 
       - name: Format
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo fmt --check
 
       - name: Clippy
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo nextest run --profile ci --locked --no-fail-fast
 
       - name: Deny
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         run: cargo deny check
 
       - uses: ./.gitea/actions/sccache-stats
@@ -782,7 +782,7 @@ jobs:
       # The container runs as root and the orphan guardian is off for root: run its acting tests as an unprivileged user
       # (ADR 0076 amendment 2026-11-09; conformance/ci/guardian-as-user.sh prints one ::error:: per failure).
       - name: Orphan guardian as a user (Linux)
-        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' }}
         run: bash ../conformance/ci/guardian-as-user.sh
       - run: cargo deny check
       - uses: ./.gitea/actions/sccache-stats
@@ -903,14 +903,14 @@ jobs:
       # the crate of every failure. scripts/publish.test.mjs and conformance C37 fail when a workspace member is left out.
       # A leg with a filter (a rerun of failed tests) runs only the test steps below: its other steps passed in the earlier run.
       - name: Clippy (workspace, every feature)
-        if: ${{ !cancelled() && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       # The build chromium.toml pins, on the host runners (the Linux image has it): checked against its SHA-256 and kept in a
       # folder that outlives the job, so it is downloaded once per pin. Sets CHROMIUM_TEST_PATH.
       - name: Chrome for Testing (macOS, Windows)
-        if: ${{ !cancelled() && runner.os != 'Linux' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' }}
         uses: ./.gitea/actions/install-test-browser
         with:
           catalogue: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates/paddock-chromium/src/chromium.toml
@@ -922,7 +922,7 @@ jobs:
       # installed browser, rule 7; a missing browser fails instead of skipping). On Linux the coverage job (crates) runs
       # exactly this run under llvm-cov, so this leg does not run it twice.
       - name: Tests (workspace, every feature)
-        if: ${{ !cancelled() && runner.os != 'Linux' }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os != 'Linux' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         env:
           PADDOCK_REQUIRE_TEST_BROWSER: "1"
@@ -947,7 +947,7 @@ jobs:
       # selected crate depends on with a feature on gets its own run: paddock-shell turns on paddock-diag's, paddock-download's
       # and paddock-updater's `tauri`, and paddock-updater turns on paddock-download's default `http`.
       - name: Tests with the optional features off
-        if: ${{ !cancelled() && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
           cargo nextest run -p paddock-shell -p paddock-secrets -p paddock-siblings --profile ci
@@ -959,7 +959,7 @@ jobs:
 
       # nextest (and so the coverage job) does not run doc tests.
       - name: Doc tests (workspace, every feature)
-        if: ${{ !cancelled() && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: cargo test --workspace --all-features --doc
 
@@ -1326,17 +1326,17 @@ jobs:
             echo "::error::tools/paddock-dev/Cargo.lock is stale, run cargo update -w in tools/paddock-dev and commit it"; exit 1; }
 
       - name: Format
-        if: ${{ !cancelled() && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo fmt --check
 
       - name: Clippy
-        if: ${{ !cancelled() && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         env:
           FILTER: ${{ matrix.filter }}
@@ -1347,7 +1347,7 @@ jobs:
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
       - name: Deny
-        if: ${{ !cancelled() && runner.os == 'Linux' && !matrix.filter }}
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo deny check
 

@@ -303,3 +303,27 @@ test('kit.sh host fetches no tool for what has nothing to do: a Linux container 
     c.done();
   }
 });
+
+test('a failed setup step (build-jobs, isolation acquire) marks the job aborted in GITHUB_ENV and says so; a good one leaves it alone', () => {
+  const c = checkout();
+  try {
+    const env = join(c.root, 'github-env');
+    writeFileSync(env, '');
+    // The wrapper could not build the tool (run 8027: crate on Windows went on to run its tests without isolation).
+    exe(join(c.root, 'dev'), 'exit 1');
+    for (const args of [['build-jobs'], ['isolation', 'acquire']]) {
+      writeFileSync(env, '');
+      const r = c.run(args, { GITHUB_ENV: env });
+      assert.equal(r.status, 1, `${args}: ${r.stderr}`);
+      assert.match(r.stderr, /::error::A job setup step failed \(exit 1/, `${args}: ${r.stderr}`);
+      assert.equal(readFileSync(env, 'utf8'), 'PADDOCK_JOB_ABORTED=1\n', `${args} marks the job`);
+    }
+    exe(join(c.root, 'dev'), 'case "$*" in "--print-binary") echo "$0-none" ;; esac');
+    writeFileSync(env, '');
+    const ok = c.run(['build-jobs'], { GITHUB_ENV: env });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(readFileSync(env, 'utf8'), '', 'a good setup step marks nothing');
+  } finally {
+    c.done();
+  }
+});
