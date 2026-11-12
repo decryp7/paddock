@@ -2,6 +2,16 @@
 
 Status: **draft for the user's decisions.** No ADRs exist yet, so every size here is rough: agent-days for one agent, with a
 wide range; firm estimates come once the ADRs have work packages.
+
+**Amendment 2026-11-12 (user, cut review of 2026-11-12): the index is plain and private, and relies on disk encryption.** D5 is
+reversed: nothing is encrypted by Recce. Local and remote text sit in the per-user folder, **created owner-only** (the shared
+`paddock_env::private` type, ADR 0092 WP-1), as Spotlight and Windows Search keep theirs under the user profile and
+FileVault or BitLocker; Everything keeps a plain `.db`. There is no keychain key, no encrypted blob store, no first-run FDE
+check and no privacy ledger; Settings carries one line that says to turn on FileVault or BitLocker. **Forget a source** stays, and
+so does "no source text in logs". Clipboard history (WP 4.5) stays off by default and skips concealed pasteboard types, but is not
+encrypted. WP 2.6 is about 2 to 3 days (was 5 to 8), WP 4.5 about 4 to 6 (was 5 to 7), the rough total about 155 to 236 (was
+159 to 242); the review counted 4 to 7. Risk accepted: anyone who can read the user's profile can read the index, which is the
+platform norm. The text below that says otherwise (D5, section 2 storage lines, WP 2.6, WP 4.5, R6) is history.
 Research, sources and the reasoning behind each choice:
 [research/2026-11-04-pc-search-app.md](../research/2026-11-04-pc-search-app.md). The feature catalogue (what users love and
 miss in comparable tools, with a stage, effort and privacy note per feature):
@@ -26,7 +36,7 @@ to it.
   - Tantivy (content), one index per source shard;
   - vectors per shard: binary codes for search plus int8 codes for re-scoring, in a flat file or a USearch index served
     from disk (section 1; spike S6 decides);
-  - encrypted blobs for remote text.
+  - encrypted blobs for remote text *(cut 2026-11-12: plain files in the owner-only per-user folder, see the amendment at the top)*.
 - **Extension tiers:** built-in; TOML packs (quicklinks, web searches, snippets, workflows); Rust out-of-process plugins
   (new `SearchSource` and `ResultProvider` contributions).
 - **Every long operation** is a `paddock-jobs` job with phases, a growing count, Cancel, and build-then-swap (rules 10
@@ -454,7 +464,7 @@ The first useful release: hotkey, apps, files by name, calculator, actions, plus
 | 2.3 | Embeddings through `paddock-embed` (Model2Vec default at 256 dims; multilingual model a Setting per source); the vector store and layout S6 chose (binary search codes, int8 re-score of the top k, mmapped; USearch base plus delta and tombstones with rebuild-and-swap, or flat); RRF; Qwen re-rank of the top 50 through Pitwall when it runs | **X55 `paddock-embed`** (Debrief and Pacenotes build it first) | hit@5 against a stored synthetic query set (the bar set in R4); recall@10 against exact f32 meets the S6 bar; the index record lets a model change rebuild beside and swap | 7 to 11 |
 | 2.4 | Content job: pipeline walk → extract → chunk → index → embed → vector index → swap, with stage threads as Settings (Auto); utility QoS; resumable; passage fingerprints (text hash plus model id) so unchanged content is never re-embedded; the priority queue of section 1.2 | `paddock-jobs` | Phases, counts and Cancel; idle CPU ≈ 0 after catch-up; a touch-only or move-only change makes zero embed calls (test with a counting fake embedder) | 5 to 7 |
 | 2.5 | Windows helper (journal and MFT listing, read-only) | **`paddock-helper`** extracted from Dyno's helper (ADR 0034 copies), or an app helper with a registered copy | Callers checked; installer and uninstall paths in the VM; rule 54 bundle build | 8 to 12 |
-| 2.6 | Privacy storage: no stored local text; encrypted store for remote text and clipboard; FDE check at first run; Forget a source; the privacy ledger (V3: per source what is indexed, where, its size; index size and memory cap, F3) | `paddock-secrets`, `paddock-storage` | The invented-names test passes on index, logs and diagnostics | 5 to 8 |
+| 2.6 | Privacy storage **(amended 2026-11-12: plain, owner-only files in the per-user folder; one Settings line that says to use FileVault or BitLocker; no encryption, FDE check or ledger; was: no stored local text; encrypted store for remote text and clipboard; FDE check at first run; the privacy ledger (V3: per source what is indexed, where, its size; index size and memory cap, F3))**: Forget a source | `paddock-secrets`, `paddock-storage` | The invented-names test passes on index, logs and diagnostics | 2 to 3 (was 5 to 8) |
 | 2.7 | Deterministic natural-language filters shown as chips (Q10); browser bookmarks (C10); EPUB (C2); "Open in Debrief" for logs and bundles (G3) | `paddock-siblings` | The filter parser has a table test of phrases to chips and never calls a model | 3 to 5 |
 | 2.8 | Scale controls (section 1): tier rules (names for all, keyword for text-bearing types, meaning for selected passages; archives keyword-only by default, D18); per-source disk and CPU budgets as Settings with Auto (D17); priority order and eviction to keyword-only when a budget is full; pause on battery, user activity (one thread floor), low disk and thermal pressure (F2); coverage per source and tier in the ledger; type groups with levels, per-extension overrides and the custom-types pack (1.9, D22); size limits with "Index anyway" (1.10, D21) | `paddock-jobs`, `paddock-health`, `paddock-packs` | A budget change evicts lowest-priority vectors first and the ledger shows it; each pause shows its reason and Resume; coverage never mixes tiers into one percent; a file over a limit keeps its name and shows "too large" with Index anyway | 5 to 7 |
 
@@ -476,7 +486,7 @@ The first useful release: hotkey, apps, files by name, calculator, actions, plus
 | 4.2 | MCP server: `search`, `get_passage`, `list_sources` (and `answer` if enabled); per-source visibility; audit log view | `paddock-mcp` (spec update is its own item) | Off by default; caps and paging tested; the audit log has no text | 4 to 6 |
 | 4.3 | Packs: snippets and workflows (closed step set; chained actions A5; run-command only from user packs after confirmation); quicklinks and web searches moved to 1.8 | `paddock-packs` | Invalid packs refused whole with file and line; hot reload | 3 to 5 |
 | 4.4 | Plugin contributions `SearchSource` and `ResultProvider`; host wiring; a sample plugin (an Obsidian vault source) | `paddock-plugin-api`, `-host`, `-test` (ADR 0001 amendment) | Conformance checks; a slow provider is skipped within its budget; quarantine | 8 to 12 |
-| 4.5 | Clipboard history (off by default; concealed markers; password apps ignored by default; app exclusions; encrypted; retention choices; "clear last 5 or 15 minutes") and snippets in the launcher; deterministic secret filter for clipboard and MCP passages (V5, V7); paste into the front app (A7) | none | Privacy tests with invented secrets | 5 to 7 |
+| 4.5 | Clipboard history (off by default; concealed markers; password apps ignored by default; app exclusions; ~~encrypted~~ (cut 2026-11-12: plain, concealed types skipped); retention choices; "clear last 5 or 15 minutes") and snippets in the launcher; deterministic secret filter for clipboard and MCP passages (V5, V7); paste into the front app (A7) | none | Privacy tests with invented secrets | 4 to 6 (was 5 to 7) |
 | 4.6 | Family command registry (G1, family ADR on `paddock-siblings`): each Paddock app declares its commands and Recce lists them; Dyno hand-offs and summary results (G2); "Open in Pacenotes" (G4) | `paddock-siblings` (shared change with its adoption, rule 43) | A sibling's declared command appears and runs its deep link; Recce never performs another app's action itself | 4 to 6 |
 
 ### Stage 5 (optional, later): index server mode
@@ -485,7 +495,7 @@ Only when a user asks for it (section 1.6, ADR R10): a server process holding sh
 its client, sign-in and TLS, and an honest view of what leaves the machine. Rough size 15 to 25 agent-days; **not in the
 total below** and not estimated firmly before R10.
 
-**Total, rough:** about 159 to 242 agent-days after the spikes (about 17 to 24, including S6), before review rounds and
+**Total, rough:** about 155 to 236 agent-days after the spikes (159 to 242 before the amendment of 2026-11-12) (about 17 to 24, including S6), before review rounds and
 releases; the scale design added about 10 to 14 agent-days to stages 1 to 3, and scope, type levels and size limits
 (1.8 to 1.10) about 3 to 5 more. Firm figures
 come with the ADRs' work packages.
@@ -511,7 +521,7 @@ come with the ADRs' work packages.
 | D2 | Process model | **Per-user agent (login item) plus app**; the index is warm all the time | Index inside the app only (no updates while closed) |
 | D3 | Windows privileged helper | **Yes, in stage 2, read-only (journal and MFT)**, shared with Dyno's pattern | None: RDCW plus rescans only (slower first index, may miss changes while the agent is off) |
 | D4 | Name index | **Own in-memory table** (S1 confirms) | Tantivy n-gram field |
-| D5 | Stored text | **Store no local file text; remote text encrypted** with a keychain key; FDE check at first run | Encrypt everything, including a custom Tantivy directory (spike first); store plain text (fastest previews) |
+| D5 | Stored text | **Reversed 2026-11-12 (user): plain, owner-only files and reliance on FileVault or BitLocker; no encryption by Recce.** Was: store no local file text; remote text encrypted with a keychain key; FDE check at first run | Encrypt everything, including a custom Tantivy directory (spike first); store plain text (fastest previews) |
 | D6 | Clipboard history | **Off by default**; concealed markers honoured | On by default with a 7-day retention |
 | D7 | Microsoft 365 app registration | **A family app registration (multi-tenant plus personal accounts) and a BYO client id field** | BYO only; personal accounts only |
 | D8 | MCP | **Off until enabled; mail and M365 hidden from MCP by default; no paths unless allowed** | Everything visible once MCP is on |
