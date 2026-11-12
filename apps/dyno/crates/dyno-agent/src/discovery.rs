@@ -6,8 +6,9 @@ use paddock_ipc::Token;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// The folder holding the discovery file at `path` must be this account's and closed to others, for the writer and every reader
-/// alike (one rule, `paddock_env::check_data_folder`).
+/// Logs, once per change and with the reason only, when the folder holding the discovery file at `path` is not this account's and
+/// closed to others (`paddock_env::check_data_folder`). The writer and every reader then use the same rule through the private-folder
+/// type (ADR 0092): [`Discovery::write`] and [`Discovery::read`] both open the folder with `PrivateDir` and act through its handle.
 fn trusted_folder(path: &Path) -> Result<(), paddock_env::Refusal> {
     match path.parent().filter(|d| !d.as_os_str().is_empty()) {
         Some(dir) => paddock_env::check_data_folder(dir, "agent.json"),
@@ -61,12 +62,15 @@ impl Discovery {
         dir.write_atomic(name, &body).map_err(|e| std::io::Error::other(e.to_string()))
     }
 
-    /// Reads the file; `None` when missing or damaged.
-    /// Also `None` when the folder holding it belongs to another user or others can change it: a planted file is not even a hint
-    /// (the refusal is logged once per change, with its reason). A link to the user's own folder is followed.
+    /// Reads the file through the private-folder type, by the same rule as [`Discovery::write`]; `None` when missing or damaged.
+    /// Also `None` when the folder holding it belongs to another user, others can change it or its parent, or the file is not this
+    /// account's and closed to others: a planted file is not even a hint (a folder refusal is logged once per change, with its
+    /// reason). A link to the user's own folder is followed.
     pub fn read(path: &Path) -> Option<Discovery> {
         trusted_folder(path).ok()?;
-        serde_json::from_slice(&paddock_proc::hint::read_bounded(path)?).ok()
+        let (dir, name) = (path.parent().filter(|d| !d.as_os_str().is_empty())?, path.file_name()?.to_str()?);
+        let held = paddock_env::private::PrivateDir::open(dir, paddock_env::Links::Follow).ok()?;
+        serde_json::from_slice(&held.read(name, paddock_proc::hint::MAX_HINT_BYTES).ok()?).ok()
     }
 
     /// Removes the file only if it is still the one that was read as `seen` (same process, same start): a newer agent
@@ -347,5 +351,17 @@ mod tests {
         let own = tmp.path().join("own").join("agent.json");
         sample().write(&own).unwrap();
         assert_eq!(Discovery::read(&own), Some(sample()));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_file_the_account_does_not_hold_closed_is_not_read_even_in_a_safe_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("agent.json");
+        sample().write(&path).unwrap();
+        assert_eq!(Discovery::read(&path), Some(sample()));
+        // The writer's rule applies to readers: a file open to others (planted, or widened) is not a hint.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(Discovery::read(&path), None);
     }
 }

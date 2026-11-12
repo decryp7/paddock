@@ -333,10 +333,13 @@ fn swap_in(cache: &Path, y: i32, m: u32, raw: &[u8]) -> std::io::Result<()> {
 pub fn load_reader(dirs: &Dirs, now_secs: u64) -> GeoReader {
     let open = |source: Source| {
         let cache = dirs.intel_cache(source.id);
-        let mut names: Vec<PathBuf> = newest_month(&cache).map(|(y, m)| cache.join(file_name(y, m))).into_iter().collect();
-        names.push(cache.join("previous.mmdb"));
-        names.into_iter().find_map(|p| {
-            let bytes = std::fs::read(&p).ok().filter(|b| b.len() as u64 <= MAX_INFLATED)?;
+        // The reader follows the writer's rule (ADR 0092): the folder is opened through the private-folder type and the files are
+        // read through its handle, so a cache folder others can change, or a file others can write, is not read.
+        let held = paddock_env::private::PrivateDir::open(&cache, paddock_env::Links::Follow).ok()?;
+        let mut names: Vec<String> = newest_month(&cache).map(|(y, m)| file_name(y, m)).into_iter().collect();
+        names.push("previous.mmdb".to_owned());
+        names.into_iter().find_map(|name| {
+            let bytes = held.read(&name, MAX_INFLATED).ok()?;
             open_checked(bytes, source.kind, now_secs, false).ok()
         })
     };
@@ -554,5 +557,22 @@ mod tests {
         let (_tmp, open) = crate::paths::tests::everyone_folder();
         let e = swap_in(&open, 2026, 11, b"x").unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{e}");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn the_reader_follows_the_writers_rule_a_cache_folder_others_can_write_is_not_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dirs = Dirs::at(tmp.path().join("d"));
+        let cache = dirs.intel_cache(COUNTRY.id);
+        swap_in(&cache, 2026, 11, &sample_country(NOW - 3600)).unwrap();
+        let g = load_reader(&dirs, NOW);
+        assert_eq!(g.lookup(&"192.0.2.9".parse().unwrap()).unwrap().country, "XA");
+        std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let g = load_reader(&dirs, NOW);
+        assert!(
+            g.lookup(&"192.0.2.9".parse().unwrap()).is_none(),
+            "a planted database is not opened"
+        );
     }
 }

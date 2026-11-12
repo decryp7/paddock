@@ -303,11 +303,17 @@ fn prepare_folder(path: &Path) -> Result<(), CacheError> {
         )));
     };
     let held = crate::paths::open_private_io(dir, "the cache folder")?;
+    // A refused FILE (not the folder, which `open_private_io` above reported with its own next step): the file is the problem, so the
+    // next step is about the file. The text names the file and the reason; the log holds the reason only (ER-27).
     let refused = |e: paddock_env::private::PrivateError| {
         log::warn!(Why = e.reason(); "Not using the cache database: it is not safe");
         CacheError::Io(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,
-            format!("{e}. Next step: delete the cache folder and start Dyno again (it is rebuilt)"),
+            format!(
+                "the cache database {} is not safe to use ({}). Next step: delete that file and start Dyno again (it is rebuilt), or run chmod 600 on it",
+                path.display(),
+                e.reason()
+            ),
         ))
     };
     match held.open_file(name) {

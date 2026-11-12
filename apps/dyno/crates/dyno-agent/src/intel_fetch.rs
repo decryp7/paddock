@@ -182,7 +182,7 @@ pub(crate) fn map_download(e: DownloadError) -> FetchError {
 fn prepare_dest_folder(dir: &Path) -> Result<(), FetchError> {
     crate::paths::open_private_io(dir, "the intel cache folder")
         .map(|_| ())
-        .map_err(|e| FetchError::Save(e.kind().to_string()))
+        .map_err(|e| FetchError::Save(e.to_string()))
 }
 
 /// Downloads `url` to `dest` (a staging file in the cache folder) with `paddock-download`: job phases `connect`, `download` and
