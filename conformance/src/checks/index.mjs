@@ -41,6 +41,7 @@ import C98 from './C98-read-retry-optouts.mjs';
 import C104 from './C104-doc-links.mjs';
 import C99 from './C99-no-keychain.mjs';
 import C110 from './C110-fixture-identity.mjs';
+import C111 from './C111-workflow-yaml.mjs';
 
 /** Every check, in id order. A check is { id, title, rule, run(ctx) -> findings[] | Promise<findings[]> }. */
-export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110];
+export const checks = [C03, C04, C06, C07, C08, C13, C14, C15, C16, C23, C24, C28, C29, C30, C31, C32, C33, C34, C35, C36, C37, C39, C43, C45, C48, C50, C51, C53, C54, C56, C57, C59, C61, C62, C71, C78, C79, C85, C91, C98, C99, C104, C110, C111];
