@@ -2,7 +2,7 @@ import type { HealthReport } from './api.types';
 import wire from './health.wire.json';
 
 /**
- * The wire contract of `HealthReport.notChecked`. `health.wire.json` is written by the Rust test `tests/health_wire.rs` from the
+ * The wire contract of `HealthReport.notChecked`. `health.wire.json` is written by the Rust test `tests/wire/health.rs` from the
  * engine's own type; the value below is the same one as a TypeScript literal, so the compiler checks it against `api.types.ts`
  * and the test checks it equals what Rust produces.
  */

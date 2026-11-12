@@ -73,12 +73,12 @@ use serde::{Deserialize, Serialize};
 /// Version 8 (Health says what it could not check, ADR 0033 section 4.5; positional postcard): `HealthReport` gained `not_checked`
 /// (`NotChecked { what, why, kind }`). It is not persisted: the report exists only in `Reply::Health`, and the app, agent and
 /// command line ship in one installer. (`SystemFacts` gained `not_read_here` and `not_read_yet` too, but it never crosses the wire.)
-/// The bytes are pinned by `tests/health_wire.rs`.
+/// The bytes are pinned by `tests/wire/health.rs`.
 /// `LiveVia` (inside `LiveUpdate.via`, `Message::Live`) also gained `processes_hint: Option<String>` at the end, always sent (postcard
-/// has no skipped fields); like the other `via` fields it is unreleased and pinned by `tests/read_via_wire.rs` and `read-via.wire.json`.
+/// has no skipped fields); like the other `via` fields it is unreleased and pinned by `tests/wire/read_via.rs` and `read-via.wire.json`.
 ///
 /// Also in version 8 (still unreleased, so no further bump; ADR 0033, WP-4): `StartupOverview` gained `signer_read` and `coverage`, and
-/// `StartupLocation` gained `UserRunOnceKey`, `MachineRunOnceKey` and `PackagedApp` appended after `LoginItem`. `tests/startup_wire.rs` pins both.
+/// `StartupLocation` gained `UserRunOnceKey`, `MachineRunOnceKey` and `PackagedApp` appended after `LoginItem`. `tests/wire/startup.rs` pins both.
 pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a

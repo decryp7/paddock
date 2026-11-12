@@ -78,13 +78,34 @@ impl Scratch {
 
     /// A new scratch folder, or why it could not be made.
     pub fn try_new() -> Result<Scratch, ScratchError> {
-        let dir = tempfile::Builder::new()
-            .prefix("paddock-testkit-")
-            .tempdir()?;
+        Scratch::make(
+            tempfile::Builder::new()
+                .prefix("paddock-testkit-")
+                .tempdir()?,
+        )
+    }
+
+    /// A new scratch folder under `parent` instead of the system temp folder (for a test of the folder's own group, and for a
+    /// scratch on a chosen disk).
+    pub fn try_new_in(parent: &Path) -> Result<Scratch, ScratchError> {
+        Scratch::make(
+            tempfile::Builder::new()
+                .prefix("paddock-testkit-")
+                .tempdir_in(parent)?,
+        )
+    }
+
+    fn make(dir: TempDir) -> Result<Scratch, ScratchError> {
         // Canonical, so paths compare equal to what the code under test resolves (macOS /var vs /private/var).
         let root = paddock_env::winpath::real(dir.path())?;
+        // A new folder takes its parent's group on macOS (and on Linux under a setgid parent): on a disk whose folders are
+        // group `admin` the scratch would be `admin` too, and code that refuses a folder whose group is not the user's own
+        // (Dyno's data folder check) fails for a reason that is the machine's, not the code's. The scratch is the caller's
+        // egid, whatever the parent is.
+        own_group(&root)?;
         for sub in ["work", "home", "tmp"] {
             fs::create_dir(root.join(sub))?;
+            own_group(&root.join(sub))?;
         }
         Ok(Scratch {
             dir: Some(dir),
@@ -185,6 +206,23 @@ impl Drop for Scratch {
             panic!("{left}");
         }
     }
+}
+
+/// Puts `path` in the caller's effective group when it is in another (a no-op where there are no groups, and when it already is).
+#[cfg(unix)]
+fn own_group(path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::{MetadataExt, chown};
+    // SAFETY: getegid has no arguments and cannot fail.
+    let egid = unsafe { libc::getegid() };
+    if fs::metadata(path)?.gid() != egid {
+        chown(path, None, Some(egid))?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn own_group(_path: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 fn list_tree(root: &Path) -> Result<Vec<String>, ScratchError> {

@@ -2,7 +2,7 @@ import type { BusyNow, AwakeSpec, EnergyReport, IdleView, PowerSettings, PowerVi
 import wire from './power.wire.json';
 
 /**
- * The wire contract of the power views. `power.wire.json` is written by the Rust test `tests/power_wire.rs` from the engine's
+ * The wire contract of the power views. `power.wire.json` is written by the Rust test `tests/wire/power.rs` from the engine's
  * own types; the values below are the same ones as TypeScript literals, so the compiler checks them against `api.types.ts` and
  * the test checks they equal what Rust produces. Change one side without the other and this fails.
  */

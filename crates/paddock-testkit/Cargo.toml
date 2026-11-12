@@ -15,3 +15,7 @@ tempfile = "3"
 # `net::HeldPort::reset`: SO_LINGER 0 on an accepted connection.
 socket2 = "0.6"
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+# `Scratch` makes its folders in the caller's effective group (getegid).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

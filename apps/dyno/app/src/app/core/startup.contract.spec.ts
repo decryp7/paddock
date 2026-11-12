@@ -3,7 +3,7 @@ import wire from './startup.wire.json';
 
 /**
  * The wire contract of `StartupOverview.signerRead` and `.coverage` and of the appended `StartupLocation` values. `startup.wire.json`
- * is written by the Rust test `tests/startup_wire.rs` from the engine's own type; the value below is the same one as a TypeScript
+ * is written by the Rust test `tests/wire/startup.rs` from the engine's own type; the value below is the same one as a TypeScript
  * literal, so the compiler checks it against `api.types.ts` and the test checks it equals what Rust produces.
  */
 const command = '"C:\\Tools\\a.exe" --x';

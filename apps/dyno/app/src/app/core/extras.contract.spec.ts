@@ -3,7 +3,7 @@ import wire from './extras.wire.json';
 
 /**
  * The wire contract of the installed-software list and the inventory report. `extras.wire.json` is written by the Rust test
- * `tests/extras_wire.rs` from the engine's own types; the values below are the same ones as TypeScript literals, so the
+ * `tests/wire/extras.rs` from the engine's own types; the values below are the same ones as TypeScript literals, so the
  * compiler checks them against `api.types.ts` and the test checks they equal what Rust produces. Change one side without the
  * other and this fails.
  */

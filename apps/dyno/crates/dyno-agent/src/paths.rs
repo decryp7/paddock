@@ -319,10 +319,11 @@ mod tests {
     #[test]
     fn with_no_home_the_data_folder_is_a_private_per_user_folder_never_the_shared_fixed_path() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let d = Dirs::resolve(&no_env, tmp.path()).unwrap();
-        assert_ne!(d.root(), tmp.path().join("Dyno"));
-        assert!(d.root().starts_with(tmp.path()));
+        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
+        let tmp = scratch.work();
+        let d = Dirs::resolve(&no_env, &tmp).unwrap();
+        assert_ne!(d.root(), tmp.join("Dyno"));
+        assert!(d.root().starts_with(&tmp));
         assert_eq!(std::fs::metadata(d.root()).unwrap().permissions().mode() & 0o777, 0o700);
         assert_eq!(paddock_env::check_own_folder(d.root(), paddock_env::Links::Refuse), Ok(()));
     }
@@ -330,14 +331,15 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_planted_fallback_folder_is_refused_not_used() {
-        let tmp = tempfile::tempdir().unwrap();
-        let first = Dirs::resolve(&no_env, tmp.path()).unwrap();
+        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
+        let tmp = scratch.work();
+        let first = Dirs::resolve(&no_env, &tmp).unwrap();
         let name = first.root().file_name().unwrap().to_owned();
         std::fs::remove_dir(first.root()).unwrap();
-        let attacker = tmp.path().join("attacker");
+        let attacker = tmp.join("attacker");
         std::fs::create_dir(&attacker).unwrap();
-        std::os::unix::fs::symlink(&attacker, tmp.path().join(name)).unwrap();
-        assert!(Dirs::resolve(&no_env, tmp.path()).is_err());
+        std::os::unix::fs::symlink(&attacker, tmp.join(name)).unwrap();
+        assert!(Dirs::resolve(&no_env, &tmp).is_err());
         assert_eq!(std::fs::read_dir(&attacker).unwrap().count(), 0, "nothing was written there");
     }
 
@@ -345,8 +347,9 @@ mod tests {
     #[test]
     fn a_data_folder_made_with_umask_002_still_lets_the_agent_write_and_read_agent_json() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join("data");
+        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
+        let tmp = scratch.work();
+        let root = tmp.join("data");
         // What Dyno 1.1.0 left behind under umask 002: owned by the user, group write set, the user's own group.
         std::fs::create_dir(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o775)).unwrap();
@@ -374,8 +377,9 @@ mod tests {
     #[test]
     fn a_data_folder_others_can_write_to_is_refused_untouched_with_the_chmod_next_step() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join("data");
+        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
+        let tmp = scratch.work();
+        let root = tmp.join("data");
         std::fs::create_dir(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
         let e = prepare_root_with(&root, |_| false).unwrap_err();
@@ -390,8 +394,9 @@ mod tests {
     #[test]
     fn a_new_data_folder_is_private() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join("a").join("data");
+        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
+        let tmp = scratch.work();
+        let root = tmp.join("a").join("data");
         prepare_root_with(&root, |_| false).unwrap();
         assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o777, 0o700);
     }
@@ -400,11 +405,12 @@ mod tests {
     #[test]
     fn a_world_writable_temp_folder_without_the_sticky_bit_holds_no_fallback() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
-        let e = Dirs::resolve(&no_env, tmp.path()).unwrap_err();
+        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
+        let tmp = scratch.work();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let e = Dirs::resolve(&no_env, &tmp).unwrap_err();
         assert!(e.to_string().contains("use folder"), "{e}");
-        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0, "nothing was made there");
+        assert_eq!(std::fs::read_dir(&tmp).unwrap().count(), 0, "nothing was made there");
     }
 
     #[test]
@@ -415,10 +421,11 @@ mod tests {
 
     #[test]
     fn a_known_home_wins_over_the_fallback() {
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("home");
+        let scratch = paddock_testkit::Scratch::new(); // folders in the caller's own group, whatever TMPDIR's disk gives
+        let tmp = scratch.work();
+        let home = tmp.join("home");
         let env = |k: &str| (k == "DYNO_DATA_DIR").then(|| home.clone());
-        assert_eq!(Dirs::resolve(&env, tmp.path()).unwrap().root(), home);
+        assert_eq!(Dirs::resolve(&env, &tmp).unwrap().root(), home);
     }
 
     #[test]
