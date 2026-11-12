@@ -10,11 +10,11 @@
 [test-groups]
 real-browser = { max-threads = 1 }
 
+# waiver: a real browser's start is judged on its run state and may wait up to 120 s of CPU (see the ci profile's waiver below); two
+# minutes in total would stop it first, so the default profile gives it 180 s.
 [[profile.default.overrides]]
 filter = 'package(paddock-chromium) & binary(it) & test(/^real_browser::/)'
 test-group = 'real-browser'
-# waiver: a real browser's start is judged on its run state and may wait up to 120 s of CPU (see the ci profile's waiver below); two
-# minutes in total would stop it first, so the default profile gives it 180 s.
 slow-timeout = { period = "30s", terminate-after = 6 }
 
 [profile.default]

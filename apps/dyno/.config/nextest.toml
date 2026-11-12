@@ -37,3 +37,16 @@ path = "junit.xml"
 [[profile.ci.overrides]]
 filter = "package(dyno-agent) & binary(term) & (test(/^term_stops_/) | test(/^the_agents_start/) | test(/^a_refused_second/) | test(/^an_agent_on_a_data/))"
 slow-timeout = { period = "30s", terminate-after = 6 }
+
+# Benchmarks (`cargo nextest run --profile bench ...`, the commands of docs/performance.md): ignored tests that measure a large
+# corpus (idle windows of 130 s, a 600 s catalogue wait, minutes of import) and would be stopped by the default profile's two-minute
+# bound. Bounded all the same: a bench that waits on something that never comes is stopped after 30 minutes (60 s x 30). The
+# profile's own override is matched before the default profile's, so this limit wins over their shorter ones.
+[profile.bench]
+slow-timeout = { period = "60s", terminate-after = 30 }
+
+# waiver: the benchmarks of docs/performance.md, 30 minutes at most (the profile above says why); all() so that this limit, matched
+# first, replaces the shorter ones of the default profile's overrides.
+[[profile.bench.overrides]]
+filter = "all()"
+slow-timeout = { period = "60s", terminate-after = 30 }

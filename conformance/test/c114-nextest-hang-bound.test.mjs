@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
-import { boundProblem, durationSeconds } from '../src/checks/C114-nextest-hang-bound.mjs';
+import { boundProblem, durationSeconds, overrideProblems } from '../src/checks/C114-nextest-hang-bound.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const git = (root, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args], { cwd: root, encoding: 'utf8' });
@@ -52,7 +52,6 @@ test('C114 passes bounded workspaces, a demo that names a shared config, and ign
     'b/Cargo.toml': '[package]\nname = "b"\n', 'b/Cargo.lock': '',
   });
   assert.deepEqual(await findingsOf('C114', root), []);
-  assert.deepEqual(await findingsOf('C114', makeApp({ 'a/Cargo.toml': WS })), [], 'not a git checkout: nothing to check');
 });
 
 test('C114 fails a demo whose shared config is unbounded', async () => {
@@ -62,4 +61,44 @@ test('C114 fails a demo whose shared config is unbounded', async () => {
     'apps/demo/src-tauri/Cargo.toml': WS, 'apps/demo/src-tauri/Cargo.lock': '',
   });
   assert.deepEqual((await findingsOf('C114', root)).map((f) => f.file), ['crates/.config/nextest-demos.toml']);
+});
+
+test('C114 outside a git checkout is "not measured", an error with the next step (ER-33)', async () => {
+  const f = await findingsOf('C114', makeApp({ 'a/Cargo.toml': WS, 'a/Cargo.lock': '', 'a/.config/nextest.toml': BOUNDED }));
+  assert.equal(f.length, 1);
+  assert.equal(f[0].severity, 'error');
+  assert.match(f[0].message, /not measured/);
+  assert.match(f[0].fix, /git checkout/);
+});
+
+test('C114 counts an untracked Cargo.lock beside a workspace manifest', async () => {
+  const root = tracked({ 'x.txt': 'x\n' });
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  mkdirSync(`${root}/new`);
+  writeFileSync(`${root}/new/Cargo.toml`, WS);
+  writeFileSync(`${root}/new/Cargo.lock`, '');
+  assert.deepEqual((await findingsOf('C114', root)).map((f) => f.file), ['new']);
+});
+
+const WAIVED = (extra) => `${BOUNDED}\n# waiver: why\n[[profile.default.overrides]]\nfilter = "all()"\n${extra}\n`;
+
+test('C114 judges every override that sets a slow-timeout: waiver comment, terminate-after, cap, bench exempt from the cap', () => {
+  assert.deepEqual(overrideProblems(WAIVED('slow-timeout = { period = "60s", terminate-after = 8 }')), []);
+  assert.deepEqual(overrideProblems(WAIVED('test-group = "g"')), [], 'an override without a slow-timeout needs nothing');
+  const bare = `${BOUNDED}\n[[profile.ci.overrides]]\nfilter = "all()"\nslow-timeout = { period = "30s", terminate-after = 2 }\n`;
+  assert.match(overrideProblems(bare)[0][1], /ci override .*waiver/);
+  const apart = `${BOUNDED}\n# waiver: why\n\n[[profile.ci.overrides]]\nslow-timeout = { period = "30s", terminate-after = 2 }\n`;
+  assert.match(overrideProblems(apart)[0][1], /waiver/, 'a blank line separates the comment from the header');
+  assert.match(overrideProblems(WAIVED('slow-timeout = "30s"'))[0][1], /no terminate-after/);
+  assert.match(overrideProblems(WAIVED('slow-timeout = { period = "60s", terminate-after = 30 }'))[0][1], /1800 s/);
+  const bench = '# waiver: benchmarks\n[[profile.bench.overrides]]\nfilter = "all()"\nslow-timeout = { period = "60s", terminate-after = 30 }\n';
+  assert.deepEqual(overrideProblems(bench), []);
+  assert.match(overrideProblems(bench.replace('terminate-after = 30 ', ''))[0][1], /no terminate-after/);
+});
+
+test('C114 reports an override problem through the runner with its line and the next step', async () => {
+  const cfg = `${BOUNDED}\n[[profile.ci.overrides]]\nfilter = "all()"\nslow-timeout = { period = "30s", terminate-after = 2 }\n`;
+  const f = await findingsOf('C114', tracked({ 'a/Cargo.toml': WS, 'a/Cargo.lock': '', 'a/.config/nextest.toml': cfg }));
+  assert.deepEqual(f.map((x) => [x.file, x.line]), [['a/.config/nextest.toml', 4]]);
+  assert.match(f[0].fix, /# waiver:/);
 });

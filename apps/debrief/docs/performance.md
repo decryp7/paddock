@@ -177,7 +177,7 @@ some fields; "n/s" means the source does not state them.
 - **Load:** 1-minute load 6-10 during the runs; other agents running
 - **Build:** release; the folded importer in this process (the profiling plugin's process is not involved)
 - **Corpus:** 32 generated folded-stacks files of 24 MB each (the same invented stacks); synthetic
-- **Command:** `DEBRIEF_CAPTURES=32 DEBRIEF_BUDGET_MB=128 cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(many_captures_without_a_budget)'`
+- **Command:** `DEBRIEF_CAPTURES=32 DEBRIEF_BUDGET_MB=128 cargo nextest run --profile bench -p debrief-plugins --release --no-capture --run-ignored only -E 'test(many_captures_without_a_budget)'`
   and the same with `many_captures_within_a_budget` (one process per test)
 - **Runs:** one run per side
 - **Numbers:**
@@ -207,7 +207,7 @@ some fields; "n/s" means the source does not state them.
 - **Load:** 1-minute load 6-10 during the run; other agents running
 - **Build:** release; the profiling plugin in its own process (the `debrief-plugins` binary), this test process standing in for the app
 - **Corpus:** a generated folded-stacks file of 128 MB (invented stacks); synthetic
-- **Command:** `cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(app_holds_the_file) or test(file_is_lent_by_ranges)'`
+- **Command:** `cargo nextest run --profile bench -p debrief-plugins --release --no-capture --run-ignored only -E 'test(app_holds_the_file) or test(file_is_lent_by_ranges)'`
   (one process per test, so the peaks do not mix)
 - **Runs:** one run per side
 - **Numbers:**
@@ -302,7 +302,7 @@ some fields; "n/s" means the source does not state them.
 - **Build:** release; libduckdb 2.0.0; the test processes' system allocator
 - **Corpus:** a generated 64 MB `.evtx` (133,120 events, 38 catalogue names, 30 groups), imported through the Windows plugin
   into the store the app ships; synthetic (see the NR1 block)
-- **Command:** `DEBRIEF_EVTX_IDLE_S=20 cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
+- **Command:** `DEBRIEF_EVTX_IDLE_S=20 cargo nextest run --profile bench -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
 - **Runs:** the base side is the NR1 runs (2.81, 2.85, 2.90, 2.95 s); the change side one run; the READ lines are the mean of 3 reads, the same in both of the last two runs (19 and 20 ms)
 - **Numbers:**
 
@@ -335,8 +335,8 @@ some fields; "n/s" means the source does not state them.
 - **Corpus:** `merge_scaling`: 50,000 invented executable names, the first 8,000 groups, 200 of them in the events;
   `idle_after_an_event_log_import`: a generated 64 MB `.evtx` (133,120 events: the MIT/Apache-2.0 sample chunk repeated,
   see `evtx_memory.rs`), imported through the Windows plugin into the store the app ships; synthetic
-- **Command:** `cargo nextest run -p debrief-core --release --no-capture -E 'test(merge_scaling)'` and
-  `cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
+- **Command:** `cargo nextest run --profile bench -p debrief-core --release --no-capture -E 'test(merge_scaling)'` and
+  `cargo nextest run --profile bench -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
   (`DEBRIEF_EVTX_IDLE_MB` 64, `DEBRIEF_EVTX_IDLE_S` 60)
 - **Runs:** one run per side
 - **Numbers:**
@@ -378,7 +378,7 @@ some fields; "n/s" means the source does not state them.
 - **Build:** release; libduckdb 2.0.0; the store's default 192 MB memory limit
 - **Corpus:** `/samples` imported (38 sources), then its catalogue replaced by 1,600,000 invented rows (42,105 path-like
   names over the 38 sources); synthetic
-- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::a_1_6_million_row_catalogue)'`
+- **Command:** `cargo nextest run --profile bench -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::a_1_6_million_row_catalogue)'`
 - **Runs:** one run per side (the base failure was recorded with the P0 tests, debug build, the same message in a debug run)
 - **Numbers:**
 
@@ -404,7 +404,7 @@ some fields; "n/s" means the source does not state them.
 - **Load:** 1-minute load 5-13 during the runs; other agents running
 - **Build:** release; libduckdb 2.0.0; DuckDB's allocator (no mimalloc in the test process)
 - **Corpus:** `common::corpus` of 300,000 events (346 sources), generated from the invented samples; synthetic
-- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::building_the_catalogue)'`
+- **Command:** `cargo nextest run --profile bench -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::building_the_catalogue)'`
   (polls `duckdb_memory()` for the `IN_MEMORY_TABLE` tag every few ms while the catalogue builds, in steps of 4 MB)
 - **Runs:** one run per side
 - **Numbers:**
@@ -432,7 +432,7 @@ some fields; "n/s" means the source does not state them.
 - **Load:** 1-minute load 12-17 during the runs; Dyno release jobs and other agents running
 - **Build:** release; mimalloc not set in the test (the test process's system allocator); libduckdb 2.0.0
 - **Corpus:** the invented `/samples` log folders (about 38 sources), imported once; catalogue and index built
-- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --run-ignored only --no-capture -E 'test(regress_1_2::an_idle_store)'`
+- **Command:** `cargo nextest run --profile bench -p debrief-store-duck --release --test it --run-ignored only --no-capture -E 'test(regress_1_2::an_idle_store)'`
   (`an_idle_store_statements_and_cpu`; `DEBRIEF_IDLE_S` = 130 s, two turns of the loops' 60 s backstop)
 - **Runs:** one run per side (A then B); the 100-turn counts below are deterministic
 - **Numbers:**
@@ -462,7 +462,7 @@ some fields; "n/s" means the source does not state them.
 - **Corpus:** all generated by the tests into a temp folder (invented rows): a 3 GiB CSV, a `.gz` of 1.5 GB
   uncompressed (17,960,344 lines), 50,000 exception types, a catalogue of 1,600,000 rows over the 38 sources of
   `/samples`, the repeated sample `.evtx` chunk
-- **Command:** `cargo nextest run -p <crate> [--release] --run-ignored only --no-capture -E 'test(<name>)'`, one test per run
+- **Command:** `cargo nextest run --profile bench -p <crate> [--release] --run-ignored only --no-capture -E 'test(<name>)'`, one test per run
 - **Runs:** single; each test fails today, which is the point (ER-11)
 - **Numbers:**
 
