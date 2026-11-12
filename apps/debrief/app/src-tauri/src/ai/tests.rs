@@ -651,7 +651,8 @@ fn ai_requests_are_jobs_run_one_at_a_time_and_a_crash_fails_only_the_running_one
     // Shown in the pane after 2 s: the turn waits at position 1, and may be moved.
     app.state::<crate::test_support::TestClock>().0.advance(3_000);
     let list = ipc(&main, "jobs_list", json!({})).unwrap();
-    let jobs = list["jobs"].as_array().unwrap();
+    // The window's name-table rebuild (a `JobKind::Names` job, shown like any job after 2 s) is not what this test is about: only AI jobs are.
+    let jobs: Vec<&Value> = list["jobs"].as_array().unwrap().iter().filter(|j| j["kind"] == "ai").collect();
     assert_eq!(jobs.len(), 2);
     assert_eq!(
         (jobs[0]["state"].as_str(), jobs[0]["title"].as_str()),
@@ -744,6 +745,70 @@ fn a_waiting_request_can_be_cancelled_and_a_queued_turn_frees_its_chat() {
     for id in [first, second] {
         let state = ended(&app, id).map(|j| j.state);
         assert!(state.is_none_or(|s| s == crate::jobs::JobState::Cancelled), "{state:?}");
+    }
+    wait_until("no AI jobs", || active_ai(&app).is_empty());
+}
+
+#[test]
+fn clicking_summarize_twice_gives_one_job() {
+    let f = Fixture::new("summarize-twice");
+    let core = f.core();
+    let (model, steps, entered) = gated_counted(vec![text("A summary.")]);
+    core.set_fixed_provider(model);
+    let app = f.app(core);
+    let main = window(&app, "main");
+    open_samples(&main);
+    let range = json!({"op": "summarize", "from": 0, "to": 1000});
+    let first = start(&main, range.clone());
+    // The same ask from the menu or the palette while it runs (and the button again) joins the running job.
+    wait_until("the model to be asked", || entered.load(Ordering::SeqCst) == 1);
+    assert_eq!(start(&main, range.clone()), first, "a second click while it runs");
+    assert_eq!(active_ai(&app).len(), 1);
+    // A different range is a different job, queued behind it.
+    let other = start(&main, json!({"op": "summarize", "from": 0, "to": 2000}));
+    assert_ne!(other, first);
+    assert_eq!(active_ai(&app).len(), 2);
+    steps.send(Step::Answer).unwrap();
+    assert_eq!(ended(&app, first).map(|j| j.state), Some(crate::jobs::JobState::Done));
+    // A finished job frees the key: asking again summarises again.
+    wait_until("the other job to run", || entered.load(Ordering::SeqCst) == 2);
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 1);
+    steps.send(Step::Answer).unwrap();
+    wait_until("no AI jobs", || active_ai(&app).is_empty());
+    let again = start(&main, range);
+    assert_ne!(again, first);
+    // Leave nothing running: stop the new job and let the model's step end.
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 1);
+    steps.send(Step::Answer).unwrap();
+    wait_until("no AI jobs at the end", || active_ai(&app).is_empty());
+}
+
+#[test]
+fn explain_and_root_causes_started_twice_give_one_job_each() {
+    let f = Fixture::new("explain-root-twice");
+    let core = f.core();
+    let (model, steps, entered) = gated_counted(vec![text("Explained."), text("Causes.")]);
+    core.set_fixed_provider(model);
+    let app = f.app(core);
+    let main = window(&app, "main");
+    open_samples(&main);
+    let explain = json!({"op": "explain", "recordId": 1});
+    let first = start(&main, explain.clone());
+    wait_until("the model to be asked", || entered.load(Ordering::SeqCst) == 1);
+    assert_eq!(start(&main, explain), first, "Explain twice");
+    let root = start(&main, json!({"op": "rootCauses"}));
+    assert_eq!(start(&main, json!({"op": "rootCauses"})), root, "Root causes twice");
+    assert_ne!(root, first);
+    assert_eq!(active_ai(&app).len(), 2);
+    // Cancel: the waiting Root causes is dropped and the RUNNING Explain is stopping (the model's step is still held).
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 2);
+    wait_until("only the stopping job is active", || active_ai(&app).len() == 1);
+    let again = start(&main, json!({"op": "explain", "recordId": 1}));
+    assert_ne!(again, first, "a request after Cancel joined the running job that is being stopped");
+    // A second Cancel counts only the new request, not the job that is already stopping.
+    assert_eq!(ipc(&main, "ai_cancel", json!({})).unwrap(), 1);
+    for _ in 0..3 {
+        let _ = steps.send(Step::Answer);
     }
     wait_until("no AI jobs", || active_ai(&app).is_empty());
 }
@@ -865,6 +930,132 @@ fn the_model_drafts_the_search_text_and_the_leak_guard_still_checks_it() {
 mod knowledge;
 mod pitwall;
 mod vision;
+
+#[test]
+fn finding_values_builds_the_names_and_never_asks_the_model() {
+    let f = Fixture::new("names");
+    let core = f.core();
+    let provider = Arc::new(ScriptedProvider::new(vec![text(r#"{"items":[]}"#); 40]));
+    core.set_fixed_provider(provider.clone());
+    let app = f.app(core.clone());
+    let main = window(&app, "main");
+    open_samples(&main);
+    let win = app.state::<crate::windows::Windows>().get("main").unwrap();
+    wait_until("the name table", || {
+        ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
+        win.names.names().is_built()
+    });
+    // Rule 46: no background job over many names, so nothing can ask the model.
+    let reply = ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
+    assert!(reply["values"].is_array(), "{reply}");
+    assert!(provider.requests().is_empty(), "no name is sent to the model unless the user asks");
+}
+
+/// A rebuild that is running: a job under the window's rebuild key that ends when the returned sender is dropped.
+fn hold_rebuild(app: &tauri::App<MockRuntime>, label: &str) -> std::sync::mpsc::Sender<()> {
+    let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    jobs.submit_work(crate::names::rebuild_spec(label), crate::jobs::Controls::default(), move |_| {
+        let _ = rx.recv();
+        crate::jobs::queue::JobEnd::Done(None)
+    })
+    .unwrap();
+    tx
+}
+
+#[test]
+fn a_search_answers_from_the_last_table_at_once_and_queues_at_most_one_rebuild() {
+    let f = Fixture::new("names-once");
+    let app = f.app(f.core());
+    let main = window(&app, "main");
+    let win = app.state::<crate::windows::Windows>().get("main").unwrap();
+    // A rebuild is running (its job key is held): no request, and no import, may rebuild or queue another.
+    let held = hold_rebuild(&app, "main");
+    open_samples(&main);
+    for _ in 0..20 {
+        let reply = ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
+        assert!(reply["values"].is_array(), "{reply}");
+    }
+    assert!(!win.names.names().is_built(), "no request rebuilt the table inline");
+    assert_eq!(win.names.rebuild_runs(), 0, "every request joined the one that is running");
+    // The rebuild ends: the next search queues exactly one job, which builds the table.
+    drop(held);
+    wait_until("the name table", || {
+        ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
+        win.names.names().is_built()
+    });
+    let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+    wait_until("the rebuild job to end", || {
+        jobs.find_active(|j| j.kind == crate::jobs::JobKind::Names).is_empty()
+    });
+    // The table is current: more searches queue nothing.
+    assert_eq!(win.names.rebuild_runs(), 1, "exactly one rebuild job");
+    for _ in 0..10 {
+        ipc(&main, "find_values", json!({"request": {"text": "gateway"}})).unwrap();
+    }
+    assert_eq!(win.names.rebuild_runs(), 1);
+    // Cancel stops a rebuild and leaves the table as it was.
+    let ctx = crate::jobs::JobCtx::detached();
+    ctx.cancel_flag().store(true, Ordering::SeqCst);
+    let (id, store) = win.engine.tagged_store().unwrap();
+    assert_eq!(
+        win.names.run_rebuild(id, store.as_ref(), &ctx),
+        crate::names::RebuildOutcome::Cancelled
+    );
+    assert!(win.names.names().is_built());
+}
+
+#[test]
+fn queue_if_stale_queues_a_rebuild_only_for_a_table_that_is_out_of_date_and_says_so() {
+    let f = Fixture::new("names-stale");
+    let app = f.app(f.core());
+    let main = window(&app, "main");
+    let win = app.state::<crate::windows::Windows>().get("main").unwrap();
+    let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+    // A rebuild is running (its job key is held): the table does not exist, so it is stale and one more is queued.
+    let held = hold_rebuild(&app, "main");
+    open_samples(&main);
+    assert!(
+        crate::names::queue_if_stale(app.handle(), &win),
+        "no table yet: stale, a rebuild was queued"
+    );
+    drop(held);
+    wait_until("the name table", || win.names.names().is_built());
+    wait_until("the rebuild jobs to end", || {
+        jobs.find_active(|j| j.kind == crate::jobs::JobKind::Names).is_empty()
+    });
+    // The table is current: nothing is queued.
+    let runs = win.names.rebuild_runs();
+    assert!(!crate::names::queue_if_stale(app.handle(), &win), "a current table queues nothing");
+    assert!(jobs.find_active(|j| j.kind == crate::jobs::JobKind::Names).is_empty());
+    assert_eq!(win.names.rebuild_runs(), runs);
+}
+
+/// ADR 0024 section 3: each reader of the name table has a test with a stale table. The chat turn is one: it uses the
+/// last table, rebuilds nothing itself (0 rebuilds inline, 0 queued while one runs) and queues exactly one rebuild job.
+#[test]
+fn a_chat_turn_reads_the_last_name_table_and_starts_no_rebuild_of_its_own() {
+    let f = Fixture::new("names-chat");
+    let core = f.core();
+    core.set_fixed_provider(scripted(vec![text("Nothing unusual."), text("Still nothing.")]));
+    let app = f.app(core);
+    let main = window(&app, "main");
+    let win = app.state::<crate::windows::Windows>().get("main").unwrap();
+    // A rebuild is running (its job key is held) while the workspace opens and the chat asks.
+    let held = hold_rebuild(&app, "main");
+    open_samples(&main);
+    let sid = ipc(&main, "ai_chat_new", json!({})).unwrap()["id"].as_str().unwrap().to_string();
+    ipc(&main, "ai_chat_send", json!({"sessionId": sid, "text": "Anything unusual?"})).unwrap();
+    finish_turn(&main, &sid);
+    assert!(!win.names.names().is_built(), "the turn did not rebuild the table inline");
+    assert_eq!(win.names.rebuild_runs(), 0, "and queued nothing while a rebuild was running");
+    // The rebuild ends: the next turn answers from the (empty) last table and queues exactly one job.
+    drop(held);
+    ipc(&main, "ai_chat_send", json!({"sessionId": sid, "text": "And now?"})).unwrap();
+    finish_turn(&main, &sid);
+    wait_until("the name table", || win.names.names().is_built());
+    assert_eq!(win.names.rebuild_runs(), 1, "exactly one rebuild job");
+}
 
 #[test]
 fn the_name_commands_validate_what_the_webview_sends() {

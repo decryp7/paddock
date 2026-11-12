@@ -205,12 +205,8 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn the_disclaim_attribute_is_applied_when_the_function_exists_and_the_child_runs_as_configured() {
-        let dir = std::env::temp_dir();
+        let dir = paddock_testkit::boot_volume::boot_volume_temp();
         let script = "echo out:$PWD; echo err >&2; echo var:$PITCREW_TEST_VAR; read x < /dev/stdin; echo stdin:[$x]; ps -o pgid= -p $$ | tr -d ' ' ; exit 7";
         SEEN.store(-1, Ordering::SeqCst);
         let (out, err, code, disclaimed) = run(Some(recorder), script, &[("PITCREW_TEST_VAR".into(), "yes".into())], &dir);
@@ -227,23 +223,15 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn without_the_function_the_runner_still_starts_just_not_disclaimed() {
-        let (out, _, code, disclaimed) = run(None, "echo hi", &[], &std::env::temp_dir());
+        let (out, _, code, disclaimed) = run(None, "echo hi", &[], &paddock_testkit::boot_volume::boot_volume_temp());
         assert_eq!((out.trim(), code, disclaimed), ("hi", 0, false));
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn the_real_function_exists_on_this_macos_and_works() {
         assert!(disclaim_supported(), "libSystem has responsibility_spawnattrs_setdisclaim");
-        let (out, _, code, disclaimed) = run(find_disclaim(), "echo real", &[], &std::env::temp_dir());
+        let (out, _, code, disclaimed) = run(find_disclaim(), "echo real", &[], &paddock_testkit::boot_volume::boot_volume_temp());
         assert_eq!((out.trim(), code, disclaimed), ("real", 0, true));
     }
 
@@ -252,14 +240,14 @@ mod tests {
         unix,
         expect(
             clippy::disallowed_methods,
-            reason = "ADR 0033 WP-6 (test): killpg on a recorded pid; use paddock_proc. Its scratch path is the OS temp folder"
+            reason = "ADR 0033 WP-6 (test): killpg on a recorded pid; use paddock_proc"
         )
     )]
     fn the_child_leads_its_own_process_group_and_a_bad_program_is_an_error() {
         let mut s = spawn(
             Path::new("/bin/sh"),
             &["-c".into(), "sleep 30".into()],
-            &std::env::temp_dir(),
+            &paddock_testkit::boot_volume::boot_volume_temp(),
             &[],
             find_disclaim(),
         )
@@ -272,13 +260,25 @@ mod tests {
         let _ = nix::sys::wait::waitpid(nix::unistd::Pid::from_raw(s.pid), None);
         let mut sink = String::new();
         let _ = s.stdout.read_to_string(&mut sink);
-        let err = spawn(Path::new("/nonexistent/program"), &[], &std::env::temp_dir(), &[], None)
-            .err()
-            .unwrap();
+        let err = spawn(
+            Path::new("/nonexistent/program"),
+            &[],
+            &paddock_testkit::boot_volume::boot_volume_temp(),
+            &[],
+            None,
+        )
+        .err()
+        .unwrap();
         assert!(err.contains("could not be started"), "{err}");
-        let nul = spawn(Path::new("/bin/sh"), &["a\0b".into()], &std::env::temp_dir(), &[], None)
-            .err()
-            .unwrap();
+        let nul = spawn(
+            Path::new("/bin/sh"),
+            &["a\0b".into()],
+            &paddock_testkit::boot_volume::boot_volume_temp(),
+            &[],
+            None,
+        )
+        .err()
+        .unwrap();
         assert!(nul.contains("NUL"));
     }
 }

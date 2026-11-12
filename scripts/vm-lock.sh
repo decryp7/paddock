@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Interim exclusive lock for the Windows test VM (/Volumes/d7sst7/vms/paddock-win11-test). SOURCE it, then call
+# Interim exclusive lock for the Windows test VM (/Volumes/d8sst7/vm-data/paddock-win11-test). SOURCE it, then call
 # `vm_lock_acquire <label>` before anything that starts, stops, reverts, snapshots or loads the guest (vmrun, SSH jobs).
 #
 #   . "$(dirname "$0")/vm-lock.sh"; vm_lock_acquire vm-win-start
@@ -19,7 +19,8 @@
 # still has that start time, `slot status` shows the slot busy with that very owner folder AND the owner folder's who file names that pid; anything else (a stale pid,
 # $PPID of an unrelated process, an owner that no longer holds) is ignored and the lock is taken (or refused) as usual.
 #
-# NEVER set an EXIT trap after vm_lock_acquire (it would replace the release); set it before: the lock's trap runs yours too.
+# NEVER set an EXIT trap after vm_lock_acquire (it would replace the release); set it before: the lock's trap runs yours FIRST, with the
+# lock still held, then releases the lock (so a cleanup of the VM is never unlocked).
 #
 # Exit codes: 75 busy (EX_TEMPFAIL), 3 the lock could not be used (root missing, paddock-dev failed).
 # Environment: PADDOCK_VM_LOCK_ROOT (default /Volumes/d7sst7/ci/locks/test-machines), PADDOCK_VM_LOCK_WAIT (0),
@@ -92,11 +93,12 @@ vm_lock_release() {
   _vm_lock_slot=""; _vm_lock_owner=""
 }
 
-# The EXIT trap: release, then the trap the script had before (its exit status is kept).
+# The EXIT trap: the trap the script had before runs FIRST, while the lock is still held (a cleanup that stops or reverts the VM must
+# not run unlocked, when another acquirer may already own it), then the release (the exit status is kept).
 _vm_lock_on_exit() {
   local rc=$?
-  vm_lock_release
   [ -z "$_vm_lock_prev_trap" ] || eval "$_vm_lock_prev_trap"
+  vm_lock_release
   return "$rc"
 }
 

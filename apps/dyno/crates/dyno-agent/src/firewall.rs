@@ -12,6 +12,7 @@ use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, O
 use crate::helper_link::CallError;
 use dyno_core::firewall::{FirewallReader, FirewallSource, FirewallView, RuleSource};
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::metrics::Reading;
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::read_via::ReadVia;
@@ -37,6 +38,7 @@ impl HelperFirewall {
 
 impl HelperReading for HelperFirewall {
     type Value = FirewallSource;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Firewall];
 
     fn name(&self) -> &'static str {
         "firewall rules"
@@ -87,6 +89,33 @@ fn helper_sources_over(sources: &[RuleSource], port: &Arc<dyn HelperPort>) -> He
         .iter()
         .map(|s| (*s, HelperFirst::new(HelperFirewall::new(*s), Box::new(SharedHelper(port.clone())))))
         .collect()
+}
+
+/// The readers that run on this computer, for the `host` it is (none for a host that is not this computer: no real machine is read).
+#[allow(unused_variables)]
+fn local_readers(host: HelperHost, clock: Arc<dyn paddock_jobs::time::Clock>) -> Readers {
+    #[cfg(windows)]
+    if host == HelperHost::Windows {
+        return vec![(
+            RuleSource::WindowsFirewall,
+            Box::new(dyno_platform::windows_firewall::WindowsFirewallReader::new(
+                dyno_platform::windows::firewall_com::ComFirewall,
+                Box::new(dyno_platform::windows::indirect::ShellIndirect),
+                clock,
+            )),
+        )];
+    }
+    #[cfg(target_os = "macos")]
+    if host == HelperHost::Macos {
+        return vec![(
+            RuleSource::ApplicationFirewall,
+            Box::new(dyno_platform::firewall_readers::AlfReader::new(
+                Box::new(dyno_platform::runner::SystemRunner),
+                clock,
+            )),
+        )];
+    }
+    Vec::new()
 }
 
 /// A source as the agent presents it: **who read it is set here**, whatever the reader put in the field.
@@ -173,43 +202,17 @@ impl Inner {
 }
 
 impl FirewallCentre {
-    /// The readers of this OS. The sources only the helper reads say it is off until [`bind_helper`](Self::bind_helper) gives
-    /// them the helper (the platform is built before the agent's `Shared` exists).
-    pub fn for_this_os(clock: Arc<dyn paddock_jobs::time::Clock>) -> FirewallCentre {
-        #[cfg(windows)]
-        {
-            FirewallCentre::new(
-                HelperHost::Windows,
-                vec![(
-                    RuleSource::WindowsFirewall,
-                    Box::new(dyno_platform::windows_firewall::WindowsFirewallReader::new(
-                        dyno_platform::windows::firewall_com::ComFirewall,
-                        Box::new(dyno_platform::windows::indirect::ShellIndirect),
-                        clock,
-                    )),
-                )],
-                vec![],
-            )
-        }
-        #[cfg(target_os = "macos")]
-        {
-            FirewallCentre::new(
-                HelperHost::Macos,
-                vec![(
-                    RuleSource::ApplicationFirewall,
-                    Box::new(dyno_platform::firewall_readers::AlfReader::new(
-                        Box::new(dyno_platform::runner::SystemRunner),
-                        clock,
-                    )),
-                )],
-                vec![RuleSource::Pf],
-            )
-        }
-        #[cfg(not(any(windows, target_os = "macos")))]
-        {
-            let _: std::sync::Arc<dyn paddock_jobs::time::Clock> = clock;
-            FirewallCentre::new(HelperHost::Linux, vec![], vec![RuleSource::Nftables])
-        }
+    /// The readers for `host`. The helper's sources (`pf`, `nft`) are chosen by `host`, not by what this program was built for, so
+    /// a test agent for another system wires what that system's agent would; the readers that run on this computer exist only
+    /// for the host that is this computer's. The sources only the helper reads say it is off until
+    /// [`bind_helper`](Self::bind_helper) gives them the helper (the platform is built before the agent's `Shared` exists).
+    pub fn for_host(host: HelperHost, clock: Arc<dyn paddock_jobs::time::Clock>) -> FirewallCentre {
+        let helper_sources = match host {
+            HelperHost::Windows => vec![],
+            HelperHost::Macos => vec![RuleSource::Pf],
+            HelperHost::Linux => vec![RuleSource::Nftables],
+        };
+        FirewallCentre::new(host, local_readers(host, clock), helper_sources)
     }
 
     /// Readers given (tests); the helper is off until bound.

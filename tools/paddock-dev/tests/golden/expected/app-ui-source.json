@@ -3,7 +3,7 @@
  "crates": false,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "c99": true,
  "tools": false,
  "icons": false,
@@ -25,6 +25,9 @@
   ],
   "c99": [
    "C99 reads apps/x/app/src/main.ts"
+  ],
+  "conformance": [
+   "conformance always runs"
   ]
  }
 }

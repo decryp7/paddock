@@ -16,7 +16,12 @@
 //! process the host did not start), `--garbage` (sends bytes that are not a frame after the handshake),
 //! `--oversize` (announces a 1 GiB frame after the handshake), `--say=<text>` (a line on stderr first),
 //! `--protocol=<major.minor>` (speaks that protocol version in the handshake), `--skip-lockdown` (serves without
-//! locking itself down: a binary that ignores the sandbox, to test what the launcher enforces).
+//! locking itself down: a binary that ignores the sandbox, to test what the launcher enforces), `--exit-probe=<folder>`
+//! (runs the real child loop, [`debrief_ipc::child::child_main_then`], with a test-only `atexit` handler that records in
+//! the folder's `entered-1` and `entered-2` files whether a second thread entered `exit` while a first was still in the
+//! handlers; the files are opened before the lockdown, which may forbid opening them later), `--slow-exit=<folder>`
+//! (the child loop, then 600 ms of work before `main` returns, as the store worker joining its threads, and a `finished`
+//! file in the folder when it did: a parent that kills it sooner leaves the file empty).
 
 use debrief_ipc::child::{connect_speaking, lifeline, read_bootstrap};
 use debrief_ipc::frame::ProtocolVersion;
@@ -104,8 +109,133 @@ fn handle(ctx: &CallCtx, body: &[u8]) -> Result<Vec<u8>, RemoteError> {
     }
 }
 
+/// The test-only `atexit` handlers of `--exit-probe`. `holder` is registered last, so it runs first: the first thread to
+/// enter it waits on a bounded condition until another thread has been seen in `exit` (or [`PROBE_WAIT`] passes).
+/// `witness` is registered before it, so a thread that reaches it from another thread than the holder's is a second
+/// exit: libc marks an entry it is running as called, so a second thread skips `holder` and runs the entries after it
+/// (that is how both threads ended up in the static destructors at once on macOS).
+mod exit_probe {
+    use std::fs::File;
+    use std::io::Write;
+    use std::sync::{Condvar, Mutex, OnceLock};
+    use std::time::Duration;
+
+    /// Longest the first thread holds the handlers for a second one (never a sleep: it ends as soon as one arrives).
+    const PROBE_WAIT: Duration = Duration::from_millis(500);
+
+    struct State {
+        holder: Option<usize>,
+        second: bool,
+    }
+
+    static FILES: OnceLock<(Mutex<File>, Mutex<File>)> = OnceLock::new();
+    static STATE: (Mutex<State>, Condvar) = (
+        Mutex::new(State {
+            holder: None,
+            second: false,
+        }),
+        Condvar::new(),
+    );
+
+    /// The calling thread, without `std::thread::current` (not usable once a thread's locals are destroyed, as in `exit`).
+    #[cfg(unix)]
+    fn thread_id() -> usize {
+        // SAFETY: `pthread_self` has no preconditions.
+        unsafe { libc::pthread_self() as usize }
+    }
+
+    #[cfg(not(unix))]
+    fn thread_id() -> usize {
+        0
+    }
+
+    fn mark(file: &Mutex<File>) {
+        if let Ok(mut f) = file.lock() {
+            let _ = f.write_all(b"x");
+            let _ = f.flush();
+        }
+    }
+
+    /// Records a thread other than the holder's.
+    fn second_seen(state: &mut State) {
+        if !state.second {
+            state.second = true;
+            if let Some((_, second)) = FILES.get() {
+                mark(second);
+            }
+            STATE.1.notify_all();
+        }
+    }
+
+    extern "C" fn holder() {
+        let Some((first, _)) = FILES.get() else { return };
+        let Ok(mut st) = STATE.0.lock() else { return };
+        let me = thread_id();
+        match st.holder {
+            Some(h) if h != me => second_seen(&mut st),
+            Some(_) => {}
+            None => {
+                st.holder = Some(me);
+                mark(first);
+                let _ = STATE.1.wait_timeout_while(st, PROBE_WAIT, |s| !s.second);
+            }
+        }
+    }
+
+    extern "C" fn witness() {
+        let Ok(mut st) = STATE.0.lock() else { return };
+        if st.holder.is_some_and(|h| h != thread_id()) {
+            second_seen(&mut st);
+        }
+    }
+
+    /// Opens the marker files (before the lockdown).
+    pub fn open(dir: &str) {
+        let make = |name: &str| Mutex::new(File::create(std::path::Path::new(dir).join(name)).expect("probe file"));
+        let _ = FILES.set((make("entered-1"), make("entered-2")));
+    }
+
+    /// Registers the handlers (after the connection is up, so they run among the handlers DuckDB would have registered).
+    pub fn register() {
+        // SAFETY: both are plain `extern "C" fn()`.
+        #[cfg(unix)]
+        unsafe {
+            libc::atexit(witness);
+            libc::atexit(holder);
+        }
+        #[cfg(not(unix))]
+        let _ = (holder, witness); // the probe is a Unix test (std's `exit` on Windows is `ExitProcess`)
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--exit-probe=")) {
+        exit_probe::open(dir);
+        let r = debrief_ipc::child::child_main_then(
+            "Debrief",
+            ProtocolVersion::UNVERSIONED,
+            |_| Arc::new(handle),
+            |_, _| exit_probe::register(),
+        );
+        if let Err(e) = r {
+            eprintln!("fake child: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Some(dir) = args.iter().find_map(|a| a.strip_prefix("--slow-exit=")) {
+        // Opened before the lockdown, which may forbid opening it later.
+        let mut finished = std::fs::File::create(std::path::Path::new(dir).join("finished")).expect("marker file");
+        let r = debrief_ipc::child::child_main_speaking("Debrief", ProtocolVersion::UNVERSIONED, |_| Arc::new(handle));
+        std::thread::sleep(Duration::from_millis(600));
+        let _ = std::io::Write::write_all(&mut finished, b"x");
+        if let Err(e) = r {
+            eprintln!("fake child: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     for say in args.iter().filter_map(|a| a.strip_prefix("--say=")) {
         eprintln!("{say}");
     }
@@ -192,8 +322,9 @@ fn main() {
     match connect_speaking(&bootstrap, false, "Debrief", protocol, |_| handler) {
         Ok(peer) => {
             // As child_main does: after the lockdown, so the thread is locked down too.
-            lifeline();
+            debrief_ipc::child::lifeline_closing(&peer);
             peer.wait_closed(None);
+            debrief_ipc::child::exit_phase_begun();
         }
         Err(e) => {
             eprintln!("fake child: {e}");

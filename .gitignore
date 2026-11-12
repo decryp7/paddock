@@ -42,6 +42,7 @@ node_modules
 /vm-smoke-results/
 /apps/dyno/app/src-tauri/windows/paddock-setup.exe
 /apps/pitwall/app/src-tauri/windows/paddock-setup.exe
+/apps/pitwall/app/src-tauri/windows/vc_redist.x64.exe
 /crates/paddock-setup/nsis/test/*.exe
 # The heavy tool's local build folder.
 /tools/heavy/target/

@@ -3107,6 +3107,9 @@
       <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
         <source>Tool</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.tool-description" datatype="html">
+        <source>What it does</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.attach" datatype="html">
         <source>Attach files</source>
       </trans-unit>
@@ -3121,6 +3124,15 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.attach.image" datatype="html">
         <source>Image</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image-too-big" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="mib"/> MiB. Attach a smaller image, or export a smaller copy.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image-too-big-bytes" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="bytes"/> bytes. Attach a smaller image, or export a smaller copy.</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.attach.image-too-big-kib" datatype="html">
+        <source>&quot;<x id="name"/>&quot; is larger than <x id="kib"/> KiB. Attach a smaller image, or export a smaller copy.</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.attach.remove" datatype="html">
         <source>Remove from this question</source>
@@ -3275,6 +3287,12 @@
       <trans-unit id="pd.wb.assistant.hint.unavailable" datatype="html">
         <source>Pitwall is not available right now</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.images.many" datatype="html">
+        <source><x id="count"/> images</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.images.one" datatype="html">
+        <source>1 image</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.jump" datatype="html">
         <source>Jump to latest</source>
       </trans-unit>
@@ -3341,17 +3359,26 @@
       <trans-unit id="pd.wb.assistant.tool.approval.remembered" datatype="html">
         <source>Allowed earlier</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.arguments" datatype="html">
+        <source>Arguments</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.declined" datatype="html">
         <source>Declined</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.details" datatype="html">
+        <source>Details</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.done" datatype="html">
         <source>Done</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.failed" datatype="html">
         <source>Did not finish</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.output" datatype="html">
+        <source>Result</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.running" datatype="html">
         <source>Working…</source>

@@ -303,7 +303,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     };
     const startCall = (id_: string, name: string, summary: string, write: boolean, destructive: boolean): void => {
       call = { id: id_, summary, write, destructive };
-      this.emit(id, { type: 'toolStarted', callId: id_, name, summary, write, destructive });
+      this.emit(id, { type: 'toolStarted', callId: id_, name, summary, write, destructive, input: {} });
       kept.push({ role: 'assistant', text: '', toolCalls: [{ id: id_, name, input: {} }], atMs: at() });
     };
     const finishCall = (name: string, ok: boolean, summary: string, data?: unknown, how?: 'declined' | 'stopped', approval?: Approval): void => {
@@ -354,7 +354,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     } else if (command === '/look') {
       startCall('call_1', 'find', 'Find everything', false, false);
       const choice: ApprovalChoice | 'remembered' = this.lookRemembered ? 'remembered' : await (async () => {
-        this.emit(id, { type: 'approvalNeeded', callId: 'call_1', name: 'find', summary: 'Find everything', destructive: false, remember: true, input: { what: 'everything' } });
+        this.emit(id, { type: 'approvalNeeded', callId: 'call_1', name: 'find', summary: 'Find everything', description: '', destructive: false, remember: true, input: { what: 'everything' } });
         return ask('call_1', true);
       })();
       if (choice === 'deny') {
@@ -367,7 +367,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
       }
     } else if (command === '/write' && allowWrite) {
       startCall('call_2', 'erase', 'Erase everything', true, true);
-      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, remember: false, input: { scope: 'everything', keepBackups: false } });
+      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', description: '', destructive: true, remember: false, input: { scope: 'everything', keepBackups: false } });
       const approved = (await ask('call_2', false)) !== 'deny';
       if (approved) this.erased++;
       finishCall('erase', approved, approved ? 'Erased' : 'Declined by the user', undefined, approved ? undefined : run.stopped ? 'stopped' : 'declined', approved ? 'once' : undefined);

@@ -10,11 +10,14 @@
 #   scripts/vm-win.sh job <file.ps1> [secs]   run a script ON the desktop of paddock-test (UI Automation works), print its output; exit = its code
 #   scripts/vm-win.sh snapshot <name>         take a snapshot
 #   scripts/vm-win.sh revert [name]           revert to a snapshot (default clean-baseline); the VM is then off
+#   scripts/vm-win.sh revert --snapshot <name>   the same, named with a flag (for example admin-baseline)
+#   scripts/vm-win.sh admin-setup             one-time: from clean-baseline, paddock-test joins Administrators, UAC consent on the normal
+#                                             desktop (+ auto-logon and job runner as gui-setup), snapshot admin-baseline; reverts at the end
 #   scripts/vm-win.sh status | ip             running or stopped / the guest's address
 #   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
 #
-# Only ever acts on /Volumes/d7sst7/vms/paddock-win11-test: any other folder in PADDOCK_WIN_VM_DIR is refused before vmrun,
+# Only ever acts on /Volumes/d8sst7/vm-data/paddock-win11-test: any other folder in PADDOCK_WIN_VM_DIR is refused before vmrun,
 # ssh or scp run (vm-win/target.sh), except a fake VM under $TMPDIR with a fake FUSION_APP, for this script's own tests.
 # Any other VM on this Mac is never started, stopped or changed. Only if the VM is encrypted (option A, virtual TPM) is its password read
 # from the login keychain (service paddock-win11-test-vm, account vmrun) and passed to vmrun as -vp.
@@ -31,10 +34,13 @@ leases=/var/db/vmware/vmnet-dhcpd-vmnet8.leases # PADDOCK_VM_LEASES only in fake
 max_load=${PADDOCK_VM_MAX_LOAD:-25}
 ssh_deadline=${PADDOCK_VM_SSH_DEADLINE:-300}
 install_deadline=${PADDOCK_VM_INSTALL_DEADLINE:-7200}
+off_deadline=${PADDOCK_VM_OFF_DEADLINE:-180} # the guest's clean power-off after gui-setup and admin-setup
+cleanup_deadline=${PADDOCK_VM_CLEANUP_DEADLINE:-120} # each vmrun call of admin-setup's cleanup
+step_deadline=${PADDOCK_VM_STEP_DEADLINE:-300} # one PowerShell step in the guest (gui-setup, admin-setup)
 baseline=clean-baseline
 
 die() { echo "vm-win: $*" >&2; exit 1; }
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; }
 
 guard() {
   case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
@@ -54,9 +60,9 @@ vmrun() {
     local pw
     pw=$(security find-generic-password -s paddock-win11-test-vm -a vmrun -w 2>/dev/null) ||
       die "the VM is encrypted but the keychain has no item paddock-win11-test-vm/vmrun (docs/testing/windows-test-vm.md, TPM)"
-    "$lib/vmrun" -T fusion -vp "$pw" "$cmd" "$vmx" "$@"
+    ${vmrun_prefix:-} "$lib/vmrun" -T fusion -vp "$pw" "$cmd" "$vmx" "$@"
   else
-    "$lib/vmrun" -T fusion "$cmd" "$vmx" "$@"
+    ${vmrun_prefix:-} "$lib/vmrun" -T fusion "$cmd" "$vmx" "$@"
   fi
 }
 
@@ -82,14 +88,15 @@ ip() {
 ssh_to() { # user, then ssh arguments
   local user=$1; shift
   local host; host=$(ip)
-  ssh -i "$dir/keys/$user" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 \
+  # ssh_prefix=exec (set by a caller that runs this in a background subshell) makes the subshell BE ssh, so a kill reaches it.
+  ${ssh_prefix:-} ssh -i "$dir/keys/$user" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=5 -o ServerAliveCountMax=3 \
     -o UserKnownHostsFile="$dir/keys/known_hosts" -o StrictHostKeyChecking=accept-new "$user@$host" "$@"
 }
 
 scp_via() { # user, then scp arguments with @ placeholders for user@host
   local user=$1; shift
   local host; host=$(ip)
-  scp -q -i "$dir/keys/$user" -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile="$dir/keys/known_hosts" -o StrictHostKeyChecking=accept-new "${@//@HOST@/$user@$host}"
+  scp -q -i "$dir/keys/$user" -o IdentitiesOnly=yes -o BatchMode=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o UserKnownHostsFile="$dir/keys/known_hosts" -o StrictHostKeyChecking=accept-new "${@//@HOST@/$user@$host}"
 }
 
 wait_ssh() {
@@ -112,11 +119,89 @@ wait_off() { # deadline in seconds, label
 
 has_snapshot() { vmrun listSnapshots | tail -n +2 | grep -Fxq "$1"; }
 
+# A shutdown request over SSH, in the background: the session can hang while Windows shuts down (seen 2026-11-11, 13 min). The caller
+# waits for the VM to be off (wait_off), then reaps the request with reap_shutdown, which ends it if it is still open.
+shut_pid=""; shut_err=""
+shutdown_guest() { # one PowerShell command line to run as paddock-admin (it must end in the shutdown)
+  shut_err=$(mktemp)
+  (ssh_prefix="exec" ssh_to paddock-admin "$1") >/dev/null 2>"$shut_err" &
+  shut_pid=$!
+}
+reap_shutdown() { # ends the request if still open, waits (bounded: it was killed), and reports a failed request (ER-27)
+  [ -n "$shut_pid" ] || return 0
+  local rc=0 killed=0
+  if kill -0 "$shut_pid" 2>/dev/null; then
+    killed=1; kill "$shut_pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5; do kill -0 "$shut_pid" 2>/dev/null || break; sleep 1; done
+    kill -9 "$shut_pid" 2>/dev/null || true
+  fi
+  wait "$shut_pid" 2>/dev/null || rc=$?
+  if [ $killed = 1 ]; then echo "  the shutdown request was still open after the VM went off; ended it"
+  elif [ $rc -ne 0 ]; then echo "::warning::shutdown request: exit $rc; ssh said: $(tail -n 3 "$shut_err" | tr '\n' ' ')" >&2; fi
+  rm -f "$shut_err"; shut_pid=""
+}
+
+# bounded <secs> <command...>: run it in the background and give up after <secs> (the command must exec its last program, so a kill reaches it).
+bounded() {
+  local limit=$1 p end; shift
+  "$@" & p=$!
+  end=$((SECONDS + limit))
+  while kill -0 "$p" 2>/dev/null; do
+    if [ $SECONDS -ge $end ]; then
+      kill "$p" 2>/dev/null || true; sleep 1; kill -9 "$p" 2>/dev/null || true
+      wait "$p" 2>/dev/null || true
+      echo "::error::no answer within ${limit}s: $*" >&2
+      return 124
+    fi
+    sleep 1
+  done
+  wait "$p"
+}
+vmrun_exec() { vmrun_prefix="exec" vmrun "$@"; } # for bounded: the subshell becomes vmrun, so a kill reaches it
+ssh_admin_exec() { ssh_prefix="exec" ssh_to paddock-admin "$@"; }
+
+# The refused state before a snapshot: a run-win.mjs VNC password must never end up in a baseline (vmx-edit.mjs strips it after a run).
+vmx_vnc_free() { ! grep -q '^RemoteDisplay\.vnc\.' "$vmx"; }
+
+# Shared by gui-setup and admin-setup: the auto-logon of paddock-test and the in-session job runner (gui-setup.ps1 + logon-runner.ps1).
+# Returns 1 and sets runner_step when a step fails. $1: the VM-local paddock-test password. $2...: more scripts to copy (run by the caller).
+runner_step=""
+install_gui_runner() {
+  local pw=$1 here; shift
+  here=$(cd "$(dirname "$0")" && pwd)
+  local f
+  for f in logon-runner.ps1 gui-setup.ps1 "$@"; do
+    runner_step="copy $f"
+    (scp_via paddock-admin "$here/vm-win/$f" "@HOST@:C:/paddock-test/$f") || return 1
+  done
+  runner_step="gui-setup.ps1"
+  bounded "$step_deadline" ssh_admin_exec "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\gui-setup.ps1 -TestPassword '$pw' -RunnerSource C:\\paddock-test\\logon-runner.ps1" || return 1
+}
+# The last guest step of both: delete the setup scripts, then shut down (the request runs in the background, see shutdown_guest).
+SETUP_SHUTDOWN='Remove-Item C:\paddock-test\gui-setup.ps1, C:\paddock-test\admin-setup.ps1 -Force -ErrorAction SilentlyContinue; shutdown /s /t 0'
+
+# admin-setup's cleanup: whatever ends it early (a failed step, TERM, INT, HUP, a hang that was killed), the VM ends stopped and reverted to
+# clean-baseline. It is the EXIT trap, set before the lock (scripts/vm-lock.sh runs it FIRST, with the lock still held, then releases the
+# lock). Each vmrun call is bounded (PADDOCK_VM_CLEANUP_DEADLINE). Not covered: SIGKILL of this script and a lost host; then run
+# `vm-win.sh stop && vm-win.sh revert`.
+admin_active=0; admin_ok=0
+admin_cleanup() {
+  [ "$admin_active" = 1 ] && [ "$admin_ok" != 1 ] || return 0
+  jobs -p | xargs kill 2>/dev/null || true # a background step (bounded, a shutdown request) must not outlive this script
+  echo "::error::admin-setup did not finish: stopping the VM and reverting to $baseline ($baseline itself was never changed)" >&2
+  if running; then
+    bounded "$cleanup_deadline" vmrun_exec stop hard >&2 || echo "::error::could not power the VM off. Next step: stop it in Fusion (never leave it running), then scripts/vm-win.sh revert" >&2
+  fi
+  bounded "$cleanup_deadline" vmrun_exec revertToSnapshot "$baseline" >&2 || echo "::error::could not revert to $baseline. Next step: scripts/vm-win.sh revert" >&2
+}
+trap admin_cleanup EXIT
+admin_fail() { echo "::error::admin-setup failed at: $1 (read the output above); the cleanup follows" >&2; exit 1; }
+
 cmd=${1:-}
 [ $# -gt 0 ] && shift
 # One user of the test VM at a time (interim lock, scripts/vm-lock.sh): only the commands that change or load the guest.
 case $cmd in
-  start | stop | ssh | put | get | gui-setup | job | snapshot | revert | install | baseline)
+  start | stop | ssh | put | get | gui-setup | admin-setup | job | snapshot | revert | install | baseline)
     . "$(cd "$(dirname "$0")" && pwd)/vm-lock.sh"; vm_lock_acquire "vm-win-$cmd" ;;
 esac
 case $cmd in
@@ -128,8 +213,9 @@ case $cmd in
   stop)
     guard
     running || { echo "already stopped"; exit 0; }
-    (ssh_to paddock-admin 'shutdown /s /t 0') >/dev/null 2>&1 || true
+    shutdown_guest 'shutdown /s /t 0'
     wait_off 120 "shutting down" || { echo "  no clean shutdown in 120 s; powering off"; vmrun stop hard; }
+    reap_shutdown
     echo "stopped"
     ;;
   ssh)
@@ -150,19 +236,44 @@ case $cmd in
     ;;
   gui-setup)
     guard
-    here=$(cd "$(dirname "$0")" && pwd)
     running || { load_ok; vmrun start nogui; }
     wait_ssh
     pw=$(sed -n 's/^paddock-test=//p' "$dir/keys/setup-passwords")
     [ -n "$pw" ] || die "no paddock-test password in $dir/keys/setup-passwords"
-    scp_via paddock-admin "$here/vm-win/logon-runner.ps1" "@HOST@:C:/paddock-test/logon-runner.ps1"
-    scp_via paddock-admin "$here/vm-win/gui-setup.ps1" "@HOST@:C:/paddock-test/gui-setup.ps1"
-    ssh_to paddock-admin "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\gui-setup.ps1 -TestPassword '$pw' -RunnerSource C:\\paddock-test\\logon-runner.ps1"
-    ssh_to paddock-admin 'Remove-Item C:\paddock-test\gui-setup.ps1 -Force; shutdown /s /t 0' >/dev/null 2>&1 || true
-    wait_off 180 "shutting down" || vmrun stop hard
+    install_gui_runner "$pw" || die "gui-setup failed at: $runner_step; the VM may still be running: scripts/vm-win.sh stop && scripts/vm-win.sh revert"
+    shutdown_guest "$SETUP_SHUTDOWN"
+    wait_off "$off_deadline" "shutting down" || { reap_shutdown; vmrun stop hard; die "no clean shutdown in ${off_deadline}s; gui-baseline was not taken from a VM powered off hard. Next step: scripts/vm-win.sh revert, then run gui-setup again"; }
+    reap_shutdown
+    vmx_vnc_free || die "the .vmx has RemoteDisplay.vnc.* lines (a run-win.mjs run left them?); remove them before a snapshot (scripts/vm-smoke/vmx-edit.mjs stripVnc)"
     has_snapshot gui-baseline && vmrun deleteSnapshot gui-baseline
     vmrun snapshot gui-baseline
     echo "snapshot gui-baseline taken (clean-baseline + auto-logon + job runner); use: vm-win.sh revert gui-baseline"
+    ;;
+  admin-setup)
+    guard
+    here=$(cd "$(dirname "$0")" && pwd)
+    admin_snap=admin-baseline
+    running && die "the VM is running; stop it first (admin-setup starts from $baseline and never touches a running VM)"
+    has_snapshot "$baseline" || die "no snapshot named $baseline"
+    vmx_vnc_free || die "the .vmx has RemoteDisplay.vnc.* lines (a run-win.mjs run left them?); remove them first (scripts/vm-smoke/vmx-edit.mjs stripVnc)"
+    pw=$(sed -n 's/^paddock-test=//p' "$dir/keys/setup-passwords")
+    [ -n "$pw" ] || die "no paddock-test password in $dir/keys/setup-passwords"
+    load_ok
+    admin_active=1 # from here on, any exit but the last line stops the VM and reverts it (admin_cleanup, the EXIT trap)
+    vmrun revertToSnapshot "$baseline" || admin_fail "revert to $baseline"
+    vmrun start nogui || admin_fail "start"
+    (wait_ssh) || admin_fail "wait for SSH"
+    install_gui_runner "$pw" admin-setup.ps1 || admin_fail "$runner_step"
+    bounded "$step_deadline" ssh_admin_exec "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\admin-setup.ps1" || admin_fail "admin-setup.ps1"
+    shutdown_guest "$SETUP_SHUTDOWN"
+    wait_off "$off_deadline" "shutting down" || { reap_shutdown; admin_fail "clean shutdown (the VM did not power off in ${off_deadline}s; a snapshot of a hard power-off is not taken)"; }
+    reap_shutdown
+    vmx_vnc_free || admin_fail "the .vmx got RemoteDisplay.vnc.* lines during the run"
+    has_snapshot "$admin_snap" && { vmrun deleteSnapshot "$admin_snap" || admin_fail "delete the old $admin_snap"; }
+    vmrun snapshot "$admin_snap" || admin_fail "snapshot $admin_snap"
+    vmrun revertToSnapshot "$baseline" || admin_fail "final revert to $baseline"
+    admin_ok=1
+    echo "snapshot $admin_snap taken (clean-baseline + paddock-test in Administrators + UAC consent on the normal desktop + auto-logon and job runner); reverted to $baseline; use: vm-win.sh revert --snapshot $admin_snap"
     ;;
   job)
     guard
@@ -194,7 +305,8 @@ case $cmd in
     ;;
   revert)
     guard
-    snap=${1:-$baseline}
+    snap=$baseline
+    if [ "${1:-}" = "--snapshot" ]; then snap=${2:-}; [ -n "$snap" ] || die "usage: vm-win.sh revert --snapshot <name>"; elif [ -n "${1:-}" ]; then snap=$1; fi
     has_snapshot "$snap" || die "no snapshot named $snap"
     vmrun revertToSnapshot "$snap"
     echo "reverted to $snap"

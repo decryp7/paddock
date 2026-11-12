@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { againstBaseline, retriesWithoutFlakyFailure, lineHash, rustTimingSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
+import { againstBaseline, retriesWithoutFlakyFailure, lineHash, rustTimingSites, rustWaitSites, tsWaitSites, shrinkBaseline, timingSites, tsTimingSites } from '../src/checks/C71-test-timing.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const ts = (t) => tsTimingSites(t).map((s) => s.line);
@@ -189,4 +189,62 @@ test('C71 flags a Playwright config whose retries can exceed 0 without failOnFla
   const f = await findingsOf('C71', makeApp(files(bad)), { options: firstIntroduction });
   assert.deepEqual(f.map((x) => [x.severity, x.file, x.line]), [['error', 'apps/x/app/playwright.config.ts', 2]]);
   assert.deepEqual(await findingsOf('C71', makeApp(files('export default defineConfig({ retries: 1, failOnFlakyTests: true });\n')), { options: firstIntroduction }), []);
+});
+
+// ADR 0071 section 4, R2 and R3 in their smallest form: a fixed Duration under 40 s given to a wait or to a start/connect/ready setting
+// in test code. Its own baseline (conformance/baselines/C71-waits.json), shrink-only like C71's.
+const waits = (t, o = { wholeFileIsTest: true }) => rustWaitSites(t, o).map((s) => s.line);
+
+test('C71 waits: a fixed Duration under 40 s given to a wait helper or a start setting is flagged, in test code only', () => {
+  const t = (body) => `fn t() {\n${body}\n}\n`;
+  assert.deepEqual(waits(t('    wait_until(|| up(), Duration::from_secs(10));')), [2]);
+  assert.deepEqual(waits(t('    let m = rx.recv_timeout(Duration::from_millis(500));')), [2]);
+  assert.deepEqual(waits(t('    child.wait_timeout(Duration::from_secs(5))?;')), [2]);
+  assert.deepEqual(waits(t('    let cfg = Config { connect_window: Duration::from_secs(15), ..d };')), [2]);
+  assert.deepEqual(waits(t('    spec.ready_timeout = Duration::from_secs(20);')), [2]);
+  assert.deepEqual(waits(t('    wait_until(\n        || up(),\n        Duration::from_secs(30),\n    );')), [2], 'a call over several lines is one site, at its first line');
+  assert.deepEqual(waits('fn a() {\n    wait_until(|| up(), Duration::from_secs(10));\n}\n', { wholeFileIsTest: false }), [], 'not test code');
+  assert.deepEqual(waits('fn a() {}\n#[cfg(test)]\nmod tests {\n    fn t() {\n        wait_for(|| ok(), Duration::from_secs(3));\n    }\n}\n', { wholeFileIsTest: false }), [5]);
+});
+
+test('C71 waits: the ADR 0071 condition wait, a guard of 40 s or more, a fake seam, a waiver, a comment and an unrelated Duration pass', () => {
+  const t = (body) => `fn t() {\n${body}\n}\n`;
+  assert.deepEqual(waits(t('    wait_ready_or_exit(&mut child, HANG_GUARD)?;')), [], 'a named guard is not a literal budget');
+  assert.deepEqual(waits(t('    wait_until(|| up(), Duration::from_secs(40));')), [], '40 s is a hang guard, not a settle');
+  assert.deepEqual(waits(t('    let cfg = Config { connect_window: UNTIL_CONNECTED, ..d };')), []);
+  assert.deepEqual(waits(t('    wait_until(|| up(), Duration::from_secs(10), &FakeClock::new());')), []);
+  assert.deepEqual(waits(t('    // conformance: expiry-under-test — the test examines a 2 s window\n    wait_for(|| gone(), Duration::from_secs(2));')), []);
+  assert.deepEqual(waits(t('    // wait_until(|| up(), Duration::from_secs(10));\n    let s = "recv_timeout(Duration::from_secs(1))";')), []);
+  assert.deepEqual(waits(t('    let interval = Duration::from_secs(1);\n    let cfg = Config { retry_delay: Duration::from_millis(5), ..d };')), []);
+  assert.deepEqual(waits(t('    // conformance: hang-guard — a 20 s bound\n    wait_for(|| gone(), Duration::from_secs(20));')), [3], 'R2 accepts no hang-guard waiver (ADR 0071 section 4)');
+});
+
+test('C71 waits through the runner: a new site is an error naming the condition wait, the baseline passes known ones and grows never', async () => {
+  const bad = '    wait_until(|| up(), Duration::from_secs(10));\n';
+  const source = `fn t() {\n${bad}}\n`;
+  const files = { 'paddock.conformance.json': JSON.stringify({ app: 'demo', timingLint: true }), 'crates/x/tests/it/a.rs': source };
+  const f = await findingsOf('C71', makeApp(files), { options: { git: (a) => { if (a[0] === 'show') throw new Error('fatal: path does not exist'); return 'abc\n'; } } });
+  assert.deepEqual(f.map((x) => [x.severity, x.file, x.line]), [['error', 'crates/x/tests/it/a.rs', 2]]);
+  assert.match(f[0].message, /fixed Duration/);
+  assert.match(f[0].fix, /wait_ready_or_exit|wait_until|ADR 0071/);
+  const known = { sites: [{ file: 'crates/x/tests/it/a.rs', line: 2, hash: lineHash(bad) }] };
+  const withBaseline = makeApp({ ...files, 'conformance/baselines/C71-waits.json': JSON.stringify(known) });
+  const git = (base) => (a) => { if (a[0] === 'show') { if (base === null) throw new Error('fatal: path does not exist'); return JSON.stringify(base); } return 'abc\n'; };
+  assert.deepEqual(await findingsOf('C71', withBaseline, { options: { git: git(known) } }), []);
+  const grown = await findingsOf('C71', withBaseline, { options: { git: git({ sites: [] }) } });
+  assert.deepEqual(grown.map((x) => [x.severity, x.file]), [['error', 'conformance/baselines/C71-waits.json']]);
+});
+
+test('C71 waits in TypeScript: a fixed timeout under 40 s on a wait is flagged; a test option, a longer guard, a clock and a waiver are not', () => {
+  const w = (t) => tsWaitSites(t).map((s) => s.line);
+  assert.deepEqual(w("await vi.waitFor(() => expect(x()).toBe(1), { timeout: 5000 });\n"), [1]);
+  assert.deepEqual(w("await vi.waitFor(\n  () => ok(),\n  { timeout: 10_000 },\n);\n"), [1]);
+  assert.deepEqual(w("await expect(async () => { await a(); }).toPass({ timeout: 8000 });\n"), [1]);
+  assert.deepEqual(w("await expect.poll(() => n(), { timeout: 2000 }).toBe(3);\n"), [1]);
+  assert.deepEqual(w("it('slow', { timeout: 30000 }, async () => {});\n"), [], "a test's own timeout is the runner's guard");
+  assert.deepEqual(w("await vi.waitFor(() => ok(), { timeout: 60_000 });\n"), [], '40 s or more is a hang guard');
+  assert.deepEqual(w("await vi.waitFor(() => ok());\n"), []);
+  assert.deepEqual(w("// conformance: expiry-under-test — the toast hides after 3 s\nawait vi.waitFor(() => gone(), { timeout: 4000 });\n"), []);
+  assert.deepEqual(w("// await vi.waitFor(() => ok(), { timeout: 5000 });\n"), []);
+  assert.deepEqual(w("useTestClock();\nawait vi.waitFor(() => ok(), { timeout: 5000 });\n"), []);
 });

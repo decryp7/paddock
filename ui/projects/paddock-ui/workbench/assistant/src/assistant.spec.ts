@@ -512,15 +512,44 @@ describe('PdAssistant', () => {
       expect(text(r, 'assistant-approval-args')).toContain('"keepBackups": false');
       expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
       expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', description: '', input: { path: '/x' } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toContain('"path": "/x"');
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', description: '', input: { big: 'y'.repeat(3000) } });
       await settle(r.fixture);
-      expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(true);
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: undefined });
+      // Never cut: what the user approves is everything that is sent (the box scrolls).
+      expect(text(r, 'assistant-approval-args')).toContain('y'.repeat(3000));
+      expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(false);
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', description: '', input: undefined });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toBe('No arguments');
+    });
+
+    it('shows what the tool says it does under the details before the first approval', async () => {
+      const { r, backend } = await open();
+      r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: true, callId: 'call_2', name: 'dyno_disks', summary: 's', description: 'Dyno: Lists the disks.', input: {} });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-approval-description')).toBe('Dyno: Lists the disks.');
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: true, callId: 'call_2', name: 'dyno_disks', summary: 's', description: '', input: {} });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-approval-description]')).toHaveLength(0);
+    });
+
+    it('lets a call that ran be opened to show its arguments and its result', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      await press(r, await type(r, 'q'), { key: 'Enter' });
+      backend.emit('m1', { type: 'toolStarted', callId: 'c7', name: 'dyno_top_processes', summary: 'Read top processes from Dyno', write: false, destructive: false, input: { limit: 3 } });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-tool-details]')).toHaveLength(0);
+      backend.emit('m1', { type: 'toolFinished', callId: 'c7', name: 'dyno_top_processes', ok: true, summary: '1. build', output: '1. build (90% CPU)\n2. editor', approval: 'once' });
+      await settle(r.fixture);
+      const details = r.all('[data-testid=assistant-tool-details]').at(-1)!;
+      expect(details.querySelector('[data-testid=assistant-tool-args]')?.textContent).toContain('"limit": 3');
+      expect(details.querySelector('[data-testid=assistant-tool-output]')?.textContent).toBe('1. build (90% CPU)\n2. editor');
+      backend.release();
     });
 
     it('draws a chip icon only when the glyph exists', async () => {
@@ -556,7 +585,7 @@ describe('PdAssistant', () => {
       const { r, backend } = await open();
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', description: '', input: {} });
       await settle(r.fixture);
       const allow = r.one('[data-testid=assistant-allow]');
       const decline = r.one('[data-testid=assistant-decline]');
@@ -771,7 +800,7 @@ describe('PdAssistant', () => {
       backend.emit('m1', { type: 'phase', phase: { kind: 'queued' } });
       await settle(r.fixture);
       expect(r.all('[data-testid=assistant-phase] .pulse')).toHaveLength(1);
-      backend.emit('m1', { type: 'toolStarted', callId: 'c9', name: 'dyno_top_processes', title: 'Top processes', summary: 'Read top processes from Dyno', write: false, destructive: false });
+      backend.emit('m1', { type: 'toolStarted', callId: 'c9', name: 'dyno_top_processes', title: 'Top processes', summary: 'Read top processes from Dyno', write: false, destructive: false, input: {} });
       backend.emit('m1', { type: 'toolFinished', callId: 'c9', name: 'dyno_top_processes', ok: true, summary: '1. build', approval: 'once' });
       await settle(r.fixture);
       const card = r.all('[data-testid=assistant-tool-card]').at(-1)!;

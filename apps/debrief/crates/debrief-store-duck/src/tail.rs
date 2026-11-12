@@ -414,6 +414,13 @@ impl Inner {
                     ],
                 )?;
                 save_tracked(conn, a.id, &a.tracked)?;
+                if a.events > 0 {
+                    // The catalogue reads these rows again (only them) and adds their names to the source's.
+                    conn.execute(
+                        "INSERT INTO catalogue_tail VALUES (?, ?) ON CONFLICT (source) DO UPDATE SET from_id = least(from_id, excluded.from_id)",
+                        params![a.id, first_new],
+                    )?;
+                }
             }
             Ok(())
         })();

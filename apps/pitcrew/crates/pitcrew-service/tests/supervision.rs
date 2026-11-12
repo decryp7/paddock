@@ -54,6 +54,15 @@ fn fake_runner() -> PathBuf {
         .clone()
 }
 
+/// The folder the harness puts each test's runner in. The runner is started disclaimed, so it is its own responsible
+/// process (ADR 0020), and macOS (TCC, Removable Volumes) asked "gitea-runner would like to access files on a removable
+/// volume" once per test when `TMPDIR` was on an external disk: each test copies the fake runner to a new path, and TCC keys
+/// an unbundled ad-hoc program by its path (docs/lessons.md, 2026-11-04 and 2026-11-11). The shared rule keeps it on the
+/// boot volume.
+fn runner_temp_root() -> PathBuf {
+    paddock_testkit::boot_volume::boot_volume_temp()
+}
+
 struct Harness {
     sup: Supervisor,
     rx: Receiver<Msg>,
@@ -81,7 +90,7 @@ impl Harness {
     )]
     fn build(test: &str, fake: &str, registered: bool, runner_toml: &str, state_json: Option<&str>) -> Harness {
         pitcrew_service::launch::set_stop_helper(PathBuf::from(env!("CARGO_BIN_EXE_pitcrew-service")));
-        let root = std::env::temp_dir().join(format!("pitcrew-it-{test}-{}", std::process::id()));
+        let root = runner_temp_root().join(format!("pitcrew-it-{test}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let data = root.join("data");
         let runner_dir = root.join("runner");

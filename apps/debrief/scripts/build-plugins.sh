@@ -6,7 +6,7 @@
 #   (cd app && npx tauri build --config src-tauri/tauri.sidecars.conf.json)
 # This script is for building the plugins alone.
 # Pure Rust: no C toolchain needed. At run time Debrief finds it next to its executable (DEBRIEF_PLUGINS overrides
-# the path, for development).
+# the path in a debug build only).
 #
 # Usage: scripts/build-plugins.sh [--release|--debug] [--target <triple>]
 set -euo pipefail

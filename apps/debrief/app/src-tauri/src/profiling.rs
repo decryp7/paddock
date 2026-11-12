@@ -53,14 +53,28 @@ impl ProfilingSlot {
     }
 
     /// A store using the importers plugins contributed to `profiling.importers`.
+    #[cfg(test)]
     pub(crate) fn from_registry(registry: &debrief_core::PluginRegistry) -> ProfilingSlot {
-        let importers = registry
+        ProfilingSlot::from_registry_within(registry, None)
+    }
+
+    /// [`from_registry`](Self::from_registry) with its captures kept within the app-wide memory `budget`.
+    pub(crate) fn from_registry_within(
+        registry: &debrief_core::PluginRegistry,
+        budget: Option<Arc<debrief_budget::MemoryBudget>>,
+    ) -> ProfilingSlot {
+        let importers: Vec<Arc<dyn CaptureImporter>> = registry
             .contributions::<dyn CaptureImporter>(debrief_profile::IMPORTERS_POINT)
             .into_iter()
             .filter_map(GuardedImporter::new)
             .map(|g| Arc::new(g) as Arc<dyn CaptureImporter>)
             .collect();
-        ProfilingSlot::new(importers)
+        match budget {
+            Some(b) => ProfilingSlot {
+                store: Arc::new(RwLock::new(Box::new(Captures::new(importers, Limits::default()).with_budget(b)))),
+            },
+            None => ProfilingSlot::new(importers),
+        }
     }
 }
 
@@ -120,6 +134,22 @@ impl CaptureImporter for GuardedImporter {
         }
     }
 
+    /// Under the same guard and budget as [`import`](CaptureImporter::import), but the file is not read here: the
+    /// importer gets the path (a plugin's process is lent the file by ranges).
+    fn import_file(&self, file_name: &str, path: &Path, limits: &Limits) -> debrief_profile::Result<Capture> {
+        let (name, path, limits) = (file_name.to_string(), path.to_path_buf(), *limits);
+        match self
+            .service
+            .call_detached_within(self.budget, move |i| i.import_file(&name, &path, &limits))
+        {
+            Ok(result) => result,
+            Err(e) => Err(ProfileError::Importer {
+                importer: self.id.clone(),
+                message: format!("{e:#}"),
+            }),
+        }
+    }
+
     fn produces(&self) -> CaptureKind {
         self.produces
     }
@@ -137,6 +167,20 @@ async fn read<T: Send + 'static>(
     let store = win.profiling.store.clone();
     crate::error::lift_dto(
         tauri::async_runtime::spawn_blocking(move || f(crate::sync::read(&store).as_ref()).map_err(ProfilingErrorDto::from))
+            .await
+            .map_err(join_error)?,
+    )
+}
+
+/// As [`read`], for a view of a capture: a capture the memory budget released is read again first, with no lock held
+/// (`debrief_profile::read_reloading`), so a reload of minutes never blocks the window's other captures.
+async fn read_view<T: Send + 'static>(
+    win: &CurrentWindow,
+    view: impl Fn(&dyn ProfileStore) -> debrief_profile::Result<T> + Send + 'static,
+) -> ProfResult<T> {
+    let store = win.profiling.store.clone();
+    crate::error::lift_dto(
+        tauri::async_runtime::spawn_blocking(move || debrief_profile::read_reloading(&store, view).map_err(ProfilingErrorDto::from))
             .await
             .map_err(join_error)?,
     )
@@ -178,8 +222,9 @@ fn canonical_file(path: &str) -> ProfResult<(std::path::PathBuf, std::fs::Metada
     Ok((canonical, meta))
 }
 
-/// Reads a capture the user chose: canonical path, a regular file, within the size limit.
-fn read_capture(path: &str) -> ProfResult<(String, String, Vec<u8>)> {
+/// A capture the user chose, checked but not read: its file name, its canonical path and its size. The file is read
+/// by the importer (a plugin's process is lent it by ranges); the app holds none of it.
+fn checked_capture(path: &str) -> ProfResult<(String, std::path::PathBuf)> {
     let (canonical, meta) = canonical_file(path)?;
     let max = Limits::default().max_input_bytes;
     if meta.len() > max {
@@ -193,9 +238,30 @@ fn read_capture(path: &str) -> ProfResult<(String, String, Vec<u8>)> {
             ),
         )));
     }
-    let bytes = std::fs::read(&canonical).map_err(|e| io_error("read", &canonical, &e))?;
     let name = canonical.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    Ok((name, canonical.to_string_lossy().into_owned(), bytes))
+    Ok((name, canonical))
+}
+
+/// Opens the capture at `canonical` into `store` the way a window does: the importer is picked under a read lock, the
+/// import (which can take minutes) runs with no lock held, so the captures already open stay usable meanwhile, and the
+/// result is added under a short write lock.
+pub(crate) fn open_capture(store: &RwLock<Box<dyn ProfileStore>>, name: &str, canonical: &Path) -> debrief_profile::Result<CaptureSummary> {
+    let head = read_head_of(canonical).map_err(|e| ProfileError::Remote {
+        code: debrief_profile::error::ErrorCode::Io,
+        message: format!("cannot read {}: {e}", canonical.display()),
+    })?;
+    let picked = {
+        let s = crate::sync::read(store);
+        s.check_room()?;
+        s.pick_importer(name, &head).ok_or_else(|| s.not_recognised(name))
+    };
+    let importer = picked?;
+    let capture = importer.import_file(name, canonical, &Limits::default())?;
+    crate::sync::write(store).adopt(name, capture, Some(&canonical.to_string_lossy()))
+}
+
+fn read_head_of(path: &Path) -> std::io::Result<Vec<u8>> {
+    debrief_profile::import::read_head(path)
 }
 
 /// File name and first bytes of a path, for sniffing; `None` when it is not a readable file.
@@ -256,16 +322,19 @@ pub async fn profiling_open<R: tauri::Runtime>(
     // An entry of the recent captures was chosen before: it is granted again now.
     let listed = crate::recent::recents(&app).has_capture(&path);
     let recorded = path.clone();
-    let (name, canonical, bytes) = tauri::async_runtime::spawn_blocking(move || {
+    let store = state.profiling.store.clone();
+    let summary = tauri::async_runtime::spawn_blocking(move || {
         canonical_file(&path)?;
         grants
             .read_or_listed(&path, &[], |_| listed)
             .map_err(|e| ProfilingErrorDto::new(ErrorCode::Invalid, e.message))?;
-        read_capture(&path)
+        let (name, canonical) = checked_capture(&path)?;
+        open_capture(&store, &name, &canonical)
+            .map_err(ProfilingErrorDto::from)
+            .map_err(crate::CmdError::from)
     })
     .await
     .map_err(join_error)??;
-    let summary = write(&state, move |s| s.open(&name, Some(&canonical), &bytes)).await?;
     crate::recent::opened_capture(&app, &recorded);
     Ok(summary)
 }
@@ -289,95 +358,95 @@ pub async fn profiling_spans(state: CurrentWindow) -> ProfResult<Vec<ProfileSpan
 
 #[tauri::command]
 pub async fn profiling_hotspots(state: CurrentWindow, request: HotspotsRequest) -> ProfResult<HotspotsPage> {
-    read(&state, move |s| s.hotspots(&request)).await
+    read_view(&state, move |s| s.hotspots(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_tree(state: CurrentWindow, request: TreeRequest) -> ProfResult<TreePage> {
-    read(&state, move |s| s.tree(&request)).await
+    read_view(&state, move |s| s.tree(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_hot_path(state: CurrentWindow, request: HotPathRequest) -> ProfResult<HotPath> {
-    read(&state, move |s| s.hot_path(&request)).await
+    read_view(&state, move |s| s.hot_path(&request)).await
 }
 
 /// The hottest top-down paths to a function ("show in tree", "zoom the flame graph to it").
 #[tauri::command]
 pub async fn profiling_frame_paths(state: CurrentWindow, request: FramePathsRequest) -> ProfResult<FramePaths> {
-    read(&state, move |s| s.frame_paths(&request)).await
+    read_view(&state, move |s| s.frame_paths(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_butterfly(state: CurrentWindow, request: ButterflyRequest) -> ProfResult<Butterfly> {
-    read(&state, move |s| s.butterfly(&request)).await
+    read_view(&state, move |s| s.butterfly(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_flame(state: CurrentWindow, request: FlameRequest) -> ProfResult<FlameGraph> {
-    read(&state, move |s| s.flame(&request)).await
+    read_view(&state, move |s| s.flame(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_diff_flame(state: CurrentWindow, request: DiffFlameRequest) -> ProfResult<FlameGraph> {
-    read(&state, move |s| s.diff_flame(&request)).await
+    read_view(&state, move |s| s.diff_flame(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_function_diff(state: CurrentWindow, request: FunctionDiffRequest) -> ProfResult<FunctionDiffPage> {
-    read(&state, move |s| s.function_diff(&request)).await
+    read_view(&state, move |s| s.function_diff(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_threads(state: CurrentWindow, request: ThreadTimelineRequest) -> ProfResult<ThreadTimeline> {
-    read(&state, move |s| s.thread_timeline(&request)).await
+    read_view(&state, move |s| s.thread_timeline(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_findings(state: CurrentWindow, request: FindingsRequest) -> ProfResult<Vec<ProfileFinding>> {
-    read(&state, move |s| s.findings(&request)).await
+    read_view(&state, move |s| s.findings(&request)).await
 }
 
 /// "Profile samples in this window" for the Moment view.
 #[tauri::command]
 pub async fn profiling_moment(state: CurrentWindow, request: ProfileMomentRequest) -> ProfResult<Vec<ProfileMoment>> {
-    read(&state, move |s| s.moment(&request)).await
+    read_view(&state, move |s| s.moment(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_types(state: CurrentWindow, request: HeapTypesRequest) -> ProfResult<HeapTypesPage> {
-    read(&state, move |s| s.heap_types(&request)).await
+    read_view(&state, move |s| s.heap_types(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_diff(state: CurrentWindow, request: HeapDiffRequest) -> ProfResult<HeapDiffPage> {
-    read(&state, move |s| s.heap_diff(&request)).await
+    read_view(&state, move |s| s.heap_diff(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_growth(state: CurrentWindow, request: HeapGrowthRequest) -> ProfResult<HeapGrowthPage> {
-    read(&state, move |s| s.heap_growth(&request)).await
+    read_view(&state, move |s| s.heap_growth(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_dominators(state: CurrentWindow, request: HeapDominatorsRequest) -> ProfResult<HeapObjectsPage> {
-    read(&state, move |s| s.heap_dominators(&request)).await
+    read_view(&state, move |s| s.heap_dominators(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_instances(state: CurrentWindow, request: HeapInstancesRequest) -> ProfResult<HeapObjectsPage> {
-    read(&state, move |s| s.heap_instances(&request)).await
+    read_view(&state, move |s| s.heap_instances(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_paths(state: CurrentWindow, request: HeapPathsRequest) -> ProfResult<HeapPaths> {
-    read(&state, move |s| s.heap_paths(&request)).await
+    read_view(&state, move |s| s.heap_paths(&request)).await
 }
 
 /// Automatic findings over a heap snapshot (growth against `baselineId`).
 #[tauri::command]
 pub async fn profiling_heap_findings(state: CurrentWindow, request: HeapFindingsRequest) -> ProfResult<Vec<HeapFinding>> {
-    read(&state, move |s| s.heap_findings(&request)).await
+    read_view(&state, move |s| s.heap_findings(&request)).await
 }
 
 #[cfg(test)]
@@ -727,6 +796,94 @@ mod tests {
         let e = hasty.import("orders.folded", &folded, &Limits::default()).unwrap_err();
         assert!(e.to_string().contains("did not finish within"), "{e}");
         assert_eq!(e.code(), ErrorCode::Invalid);
+    }
+
+    /// MEM-1: opening a capture reads none of it in this process (the importer is given the path and, for a plugin's
+    /// process, lends the file by ranges) and holds no lock on the window's captures while it imports (an import can take
+    /// minutes), so the captures already open stay usable.
+    #[test]
+    fn a_capture_is_imported_from_its_path_and_without_holding_the_store() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::mpsc;
+        struct Gated {
+            started: mpsc::Sender<()>,
+            release: std::sync::Mutex<mpsc::Receiver<()>>,
+            by_path: AtomicBool,
+            by_bytes: AtomicBool,
+        }
+        impl CaptureImporter for Gated {
+            fn id(&self) -> &'static str {
+                "gated"
+            }
+            fn name(&self) -> &'static str {
+                "Gated"
+            }
+            fn sniff(&self, file_name: &str, _: &[u8]) -> u8 {
+                if file_name.starts_with("second") {
+                    101
+                } else {
+                    0
+                }
+            }
+            fn import(&self, f: &str, b: &[u8], l: &Limits) -> debrief_profile::Result<Capture> {
+                self.by_bytes.store(true, Ordering::SeqCst);
+                debrief_plugin_profiling::folded::FoldedImporter.import(f, b, l)
+            }
+            fn import_file(&self, f: &str, path: &Path, l: &Limits) -> debrief_profile::Result<Capture> {
+                self.by_path.store(true, Ordering::SeqCst);
+                let _ = self.started.send(());
+                let _ = self.release.lock().unwrap().recv();
+                let bytes = std::fs::read(path).unwrap();
+                debrief_plugin_profiling::folded::FoldedImporter.import(f, &bytes, l)
+            }
+        }
+        let (started_tx, started) = mpsc::channel();
+        let (release_tx, release) = mpsc::channel();
+        let gated = Arc::new(Gated {
+            started: started_tx,
+            release: std::sync::Mutex::new(release),
+            by_path: AtomicBool::new(false),
+            by_bytes: AtomicBool::new(false),
+        });
+        let importers: Vec<Arc<dyn CaptureImporter>> = vec![gated.clone(), Arc::new(debrief_plugin_profiling::folded::FoldedImporter)];
+        let slot = Arc::new(ProfilingSlot::new(importers));
+        // A capture that is open already.
+        let dir = TempDir::new("profiling-lock");
+        let first = dir.0.join("first.folded");
+        std::fs::copy(sample("orders.folded"), &first).unwrap();
+        let first_summary = {
+            let mut w = slot.store.write().unwrap();
+            w.open("first.folded", Some(&first.to_string_lossy()), &std::fs::read(&first).unwrap())
+                .unwrap()
+        };
+        let second = dir.0.join("second.folded");
+        std::fs::copy(sample("orders.folded"), &second).unwrap();
+        let (s2, p2) = (slot.clone(), second.clone());
+        let opening = std::thread::spawn(move || open_capture(&s2.store, "second.folded", &p2));
+        // The import has started and waits.
+        started.recv().unwrap();
+        let during = slot.store.try_read().map(|s| s.list().len());
+        release_tx.send(()).unwrap();
+        let opened = opening.join().unwrap();
+        assert_eq!(
+            during.ok(),
+            Some(1),
+            "the open captures were readable while the second one was imported"
+        );
+        assert!(opened.is_ok(), "{opened:?}");
+        assert!(gated.by_path.load(Ordering::SeqCst), "the importer was given the path");
+        assert!(!gated.by_bytes.load(Ordering::SeqCst), "the app read no bytes for it");
+        let list = slot.store.read().unwrap().list();
+        assert_eq!(list.len(), 2);
+        assert!(
+            matches!(&list[0], CaptureSummary::Profile(p) if p.id == match &first_summary { CaptureSummary::Profile(f) => f.id, _ => 0 })
+        );
+        // Nobody recognises it: the error names the formats; nothing is added.
+        let junk = dir.0.join("junk.bin");
+        std::fs::write(&junk, b"definitely not a profile").unwrap();
+        let e = open_capture(&slot.store, "junk.bin", &junk).unwrap_err();
+        assert!(e.to_string().contains("not a recognised"), "{e}");
+        assert_eq!(slot.store.read().unwrap().list().len(), 2);
     }
 
     /// A crashing importer contributed by a plugin is contained: the open fails with its id, Debrief goes on.

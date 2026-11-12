@@ -965,10 +965,19 @@ let exit = finish(flags.format, result, &mut stdout, &mut stderr); // text, or O
 std::process::exit(exit.code());
 ```
 
-Exit codes (a contract): 0 ok, 1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 130 interrupted. Data goes to
+Exit codes (a contract): 0 ok, 1 failure, 2 usage, 3 not running, 4 refused, 5 findings, 6 not measured, 7 check broken,
+130 interrupted. Data goes to
 stdout, progress and notes to stderr. `Progress::update(now, line)` throttles to one line per 500 ms, drops repeats and lets a
 new phase through. `Table` renders text, CSV or JSON with bounded cells and a truncation note. `parse_time`, `parse_size`,
 `format_size` read command-line values once. `paddock_service::Verb` registers its words in `Help` and decides `status`'s exit.
+
+`paddock_cli::outcome` (ADR 0089): a check, probe or test ends in one `Outcome` (`Clean`, `NotApplicable`, `Findings`,
+`NotMeasured(reason)`, `CheckBroken(reason)`), which has no conversion to `bool`, `Result` or a default. `Verdict::of(outcomes,
+&Optional, &Run)` folds a run to one exit: `CheckBroken` 7, then a failing finding (or an expired optional entry) 5, then an
+uncovered `NotMeasured` 6 (report-only findings never mask it; an empty run, and `NotApplicable` in a whole-tree run, count as
+not measured), else 0. `Optional::parse` reads `docs/optional-measurements.toml`: an entry excuses a not-measured item only on
+its leg and OS, before it expires, and in a release run (`RunKind::detect`) only when a leg of its `measured_on` ran the same
+measurement green. `Verdict::exit`, `json` and `table` are the only ways out.
 
 ## `cargo-paddock-plugin` (plan X51, ADR 0001)
 

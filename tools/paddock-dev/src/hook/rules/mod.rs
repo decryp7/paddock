@@ -6,6 +6,7 @@ use super::lex::Script;
 
 mod no_force_push;
 mod no_pgrep_wait;
+mod no_unbounded_wait;
 
 /// One guard rule.
 pub trait Rule {
@@ -22,5 +23,9 @@ pub trait Rule {
 
 /// Every rule, in the order they are asked. A new rule is a new file and one line here.
 pub fn all() -> Vec<Box<dyn Rule>> {
-    vec![Box::new(no_pgrep_wait::NoPgrepWait), Box::new(no_force_push::NoForcePush)]
+    vec![
+        Box::new(no_pgrep_wait::NoPgrepWait),
+        Box::new(no_force_push::NoForcePush),
+        Box::new(no_unbounded_wait::NoUnboundedWait),
+    ]
 }

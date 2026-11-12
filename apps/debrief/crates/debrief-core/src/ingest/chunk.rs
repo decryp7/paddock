@@ -178,26 +178,16 @@ impl<R: Read> ReaderChunks<R> {
         self
     }
 
-    /// Appends up to one block of bytes to `buf`.
+    /// Appends up to one block of bytes to `buf`. The buffer grows with what is read, never by a whole block up
+    /// front: zero-filling a block before each read made every small file write `block` bytes (8 MB in an import),
+    /// which raised the import's peak by about 70 MB at 8 parse threads (performance.md, 2026-11-10).
     fn fill(&mut self) -> std::io::Result<()> {
-        let len = self.buf.len();
-        self.buf.resize(len + self.block, 0);
-        let mut read = 0;
-        while read < self.block {
-            match self.reader.read(&mut self.buf[len + read..]) {
-                Ok(0) => {
-                    self.eof = true;
-                    break;
-                }
-                Ok(n) => read += n,
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-                Err(e) => {
-                    self.buf.truncate(len + read);
-                    return Err(e);
-                }
-            }
+        let block = u64::try_from(self.block).unwrap_or(u64::MAX);
+        // `read_to_end` retries an interrupted read and keeps what was read before an error, as the loop did.
+        let read = (&mut self.reader).take(block).read_to_end(&mut self.buf)?;
+        if read < self.block {
+            self.eof = true;
         }
-        self.buf.truncate(len + read);
         Ok(())
     }
 
@@ -528,6 +518,25 @@ mod tests {
             assert_eq!(lines.iter().map(|l| l.byte_offset).collect::<Vec<_>>(), [0, 2, 53, 55]);
             assert!(src.buf.capacity() < 1000 || block == 1000, "the long line was not buffered");
         }
+    }
+
+    /// Regression (nightly store-bench, import over 768 MB at 8 parse threads): every read appended a whole block of
+    /// zeros (8 MB in the import) before reading into it, so each small file, read in a few KB, still wrote 8 MB of
+    /// memory, and the allocator kept those pages for its purge delay. A small input holds about its own size. The
+    /// buffer's capacity stands in for the memory written: the old fill zeroed (and so touched) all of it.
+    #[test]
+    fn a_small_input_never_holds_a_whole_block() {
+        let text = "2026-10-14 10:00:00 INFO first\n2026-10-14 10:00:01 ERROR second\n";
+        let block = 1 << 20;
+        let mut src = ReaderChunks::with_limits(text.as_bytes(), Encoding::Utf8, 0, block, MAX_LINE_LEN);
+        let (lines, _) = all_lines(&mut src);
+        assert_eq!(lines.len(), 2);
+        assert!(
+            src.buf.capacity() < 64 << 10,
+            "a {}-byte input held a buffer of {} bytes (block {block})",
+            text.len(),
+            src.buf.capacity()
+        );
     }
 
     #[test]

@@ -86,7 +86,7 @@ test.describe('WP-4b screenshots', () => {
           await shot(page, '2-sent', 'A sent question with its files', 'The question shows its files; the meter is the engine’s count');
           await pane.getByTestId('assistant-file-input').setInputFiles(photo);
           await expect(pane.getByTestId('assistant-failure')).toBeVisible();
-          await shot(page, '3-refused', 'A refusal', 'An image is refused in words (images arrive with WP-5)');
+          await shot(page, '3-refused', 'A refusal', 'An image is refused in words when the model cannot read images (WP-5)');
         });
       }
 

@@ -41,15 +41,19 @@ mod unix;
 #[cfg(unix)]
 pub(crate) use unix::{Registration, register};
 #[cfg(unix)]
-pub use unix::{enable_in_test_binary, run_if_requested, set_log};
+pub use unix::{enable_in_test_binary, run_if_requested, serve_if_guardian, set_log};
 
 /// Call first thing in `main`. In the guardian process this serves the owner and never returns; elsewhere it returns at
 /// once and lets this executable start a guardian for its supervised children. Windows: nothing to do.
 #[cfg(not(unix))]
 pub fn run_if_requested() {}
 
+/// The test entry of a test binary's guardian (`serve_if_guardian` on Unix). Windows: nothing to do.
+#[cfg(not(unix))]
+pub fn serve_if_guardian() {}
+
 /// For a test binary (whose `main` is the test harness): `entry` is the full path of a test function of this binary that
-/// calls [`run_if_requested`]. Windows: nothing to do.
+/// calls `serve_if_guardian`. Windows: nothing to do.
 #[cfg(not(unix))]
 pub fn enable_in_test_binary(_entry: &str) {}
 

@@ -1289,7 +1289,8 @@ pub(crate) mod test_support {
     /// Fails fast, naming the command, when the bundled plugins binary is not next to the test executable. It used to be built
     /// here, in every test process: nextest runs each test in its own process, so three tests queued behind three `cargo build`s
     /// (about 179 s on a cold target). CI's `cargo nextest run --workspace` builds every binary first, and a local
-    /// `cargo nextest run -p debrief-app` needs `cargo build -p debrief-plugins` once. `DEBRIEF_PLUGINS` names one built elsewhere.
+    /// `cargo nextest run -p debrief-app` needs `cargo build -p debrief-plugins` once. `DEBRIEF_PLUGINS` names one built elsewhere
+    /// (honoured in a debug build only).
     fn ensure_plugins_binary() {
         static CHECKED: std::sync::Once = std::sync::Once::new();
         CHECKED.call_once(|| {

@@ -37,6 +37,7 @@ mod ql_rows;
 mod query_cancel;
 mod real_libraries;
 mod redaction_summary;
+mod regress_1_2;
 mod related;
 mod report_resolve;
 mod robustness;

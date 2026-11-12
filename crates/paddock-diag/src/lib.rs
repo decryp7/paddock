@@ -27,6 +27,7 @@
 //!   its own. A section returns [`Content`], never bytes, so every file is redacted; a section that panics costs only itself.
 //! - [`Collected`] → [`Report`] → [`Preview`] / zip: the preview and the zip are built from the same list of files, so the
 //!   preview equals the zip. The zip replaces the destination atomically at the end (cancel leaves no partial file).
+//! - [`perf`]: the Performance section (startup phases, the slowest recent operations, machine facts) and the recorder apps call.
 //! - [`logging`]: the "Diagnostics > Logging" settings section over `paddock-log`'s `LogSettings`.
 //! - [`export`]: the same report without a window (`--export-diagnostics`), for a window that failed to start.
 //! - `tauri` (feature): the adapter the shell plugin installs: state, the preview/save/cancel commands, the save as a job
@@ -39,6 +40,7 @@ pub mod export;
 pub mod limits;
 pub mod logging;
 mod manifest;
+pub mod perf;
 mod personal;
 mod redact;
 mod report;

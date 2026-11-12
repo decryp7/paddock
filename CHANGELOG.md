@@ -4,6 +4,84 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-secrets`: `write_owner_only`, the secret-file writer for any trust-bearing file (ADR 0092 WP-0)
+- New `paddock_secrets::write_owner_only(path, bytes)`: the mechanism of `SecretFile::write` for a file that is not a secret
+  value (Pitwall's `apps.json`, the access list). The folder is made private or refused, then a unique temporary file is
+  created new and owner-only (0600 and no link followed on Unix; a protected DACL with no sharing on Windows), flushed and
+  renamed over the target. No backup copy. `SecretFile::write` now calls it, so there is one implementation.
+- New `paddock_secrets::read_owner_only(path, max)`, its read twin: opens without following a link or reparse point and checks
+  the open handle (regular file, owner, no group or other bits or a DACL entry for anyone else, one name; on Windows also the
+  folder's access list), reads at most `max` bytes. `None` when there is no file; a refusal names the file and the next step.
+- New `paddock_secrets::random_token(bytes)` (lowercase hex of 1 to 64 OS random bytes; fails closed, no stand-in) and
+  `random_token_with` (an injected source for tests). `paddock-secrets` gains the `getrandom` dependency.
+
+### `paddock-pitwall`: the pairing poll carries its token (ADR 0092)
+- Breaking (before v1): `Pairing` gains `poll_token` (the `pollToken` of Pitwall's answer to `POST /x/v1/pair`; an answer
+  without a usable one is a `Protocol` error) and `Client::poll_pairing(pairing_id, poll_token)` sends it in the
+  `X-Pitwall-Pair-Token` header. Pitwall answers `denied` to a poll without its request's token, so the guessable id alone no
+  longer takes the key. The fake server (`testing`) behaves the same. Debrief's own client does the same in this change.
+
+### `paddock-env`: `dev_override`, the development-only environment override (ADR 0073 WP-S)
+- New `paddock_env::dev_override`: `decide(debug, value)` (pure; empty is unset), `resolve(debug, name, value)` (a set variable is ignored in a release build and logged once per name, never its value; a poisoned lock still answers), `from_environment(debug, name)`, `warn_ignored(name)` and the `dev_override!(NAME)` macro. The build mode is `cfg!(debug_assertions)` of the calling crate (the macro expands it there), not of `paddock-env`, so a per-package profile override or a prebuilt copy cannot make a release app honour the variable.
+- Adopted in the same change: Debrief (`debrief_ipc::dev_env` removed; the store worker in the app and CLI and the plugins lookup use it), Dyno (`agent_override` removed; `DYNO_AGENT_BIN` now logs the ignored name too) and Debrief's chromium-driver (its own log-once removed). Register: `dev-env-override` is built, its three copies are gone.
+
+### `paddock-cli`: `Outcome` and `Verdict`, exit codes 6 and 7 (ADR 0089, WP-0 and WP-1)
+- New `paddock_cli::outcome`: `Outcome` (`Clean`, `NotApplicable`, `Findings`, `NotMeasured`, `CheckBroken`; no `bool`, `Result` or default conversion), `Verdict::of(outcomes, &Optional, &Run)` with the precedence `CheckBroken` 7, failing findings 5, `NotMeasured` 6, clean 0 (report-only findings never mask a missing measurement; an empty run and `NotApplicable` in a whole-tree run are not measured), `Optional::parse` for `docs/optional-measurements.toml` (leg, OS, expiry, `measured_on` in release runs) and `RunKind::detect`. `Verdict` writes JSON and a `Table`.
+- `Exit` gains `NotMeasured = 6` and `CheckBroken = 7`; the existing codes are unchanged.
+- Conformance (JS host): a check that crashes, throws a non-Error, returns no list or returns a malformed finding (or an unknown severity) is an unwaivable error, so a `path = "*"` waiver can no longer hide it, and a waiver for such a check is not reported as stale. The CLI exits 7 for a broken check and 6 for one that did not look (new `conformance/src/outcome.mjs`); findings still exit 1.
+
+### `paddock-env`: `PrivateDir` and `PrivateFile`, trust-bearing files made owner-only (ADR 0092 WP-1)
+- New `paddock_env::private::{PrivateDir, PrivateFile}` (the module is now public; the existing fallback-folder items keep
+  their names and are still re-exported at the crate root). A folder or file is owner-only from the moment it exists, with no
+  chmod or ACL call afterwards: Unix `mkdirat(0700)` plus `fchmod` on the new handle, files `O_CREAT | O_EXCL | O_NOFOLLOW`
+  0600; Windows `NtCreateFile` relative to the held parent handle (`RootDirectory`) with the descriptor
+  `O:<user SID>D:P(A;OICI;FA;;;<user SID>)(A;OICI;FA;;;SY)` in the creating call, no file sharing, not content-indexed.
+  Every later step (create a child, write, replace, read, remove) is relative to the held handle, so an ancestor replaced
+  afterwards changes which path names the folder, not what the handle refers to.
+- `PrivateDir::create_all`, `open` (with `Links`), `child`, `write_atomic` (unique exclusive temp file, fsync, rename inside
+  the held folder), `open_file`, `read` (bounded), `remove_file`; typed `PrivateError` with a fix-it message per OS.
+- The folder and its parent are checked from handles: owner, group or other write (Unix, plus macOS extended ACLs through
+  `acl_get_fd_np`), the DACL with an entry for another principal and a reparse point refused (Windows); another account that
+  could rename or replace the folder (a writable parent, `FILE_DELETE_CHILD` for others) is refused too. An existing folder
+  open to others is refused and left as it was; nothing is tightened.
+- `Refusal` gains `OpenToOthersAcl { who }`, `OtherOwnerAccount { who }`, `NotAFile` and `Parent(..)`. Nothing adopts the type
+  yet (later work packages of ADR 0092 move the copies onto it).
+- Review round: two creators racing to make the same new folder both succeed; `create_all_as` and `open_as` exist only with
+  the `test-support` feature; each `Refusal` has its own fix-it sentence, `PrivateError::reason` names no path, and a Windows
+  reparse point is `Refusal::ReparsePoint`; the macOS ACL check refuses only write-type entries for others on a folder (any
+  right on a file) and names the principal; a Windows replace works while a reader holds the file (`FILE_SHARE_DELETE`) and
+  falls back to `FileRenameInformation` on a system without the Ex class.
+- Second review round: on macOS a folder ACL entry for another principal that new files or folders inherit (`file_inherit` or
+  `directory_inherit`, with or without `only_inherit`) is refused with every right, because it would make each file written
+  there readable; the refusal names the inherited entry and the advice says how to remove it. The Windows rename also falls
+  back on `STATUS_INVALID_INFO_CLASS`, `STATUS_NOT_SUPPORTED` and `STATUS_INVALID_DEVICE_REQUEST`.
+- Third round: the macOS ACL of a folder's parent is judged by the parent rule only (an entry that lets others delete a child, change
+  its permissions or take it over refuses, wrapped as a parent refusal; a read entry that is inherited does not); the ACL
+  refusal wording is "grants access to ..."; `paddock-ipc`'s peer-facts test no longer expects the primary gid in the
+  supplementary group list (it fails under `setpriv --clear-groups`).
+
+### Pitwall chat: the eight P2s of the security review (WP-11, ADR 0023)
+- The approval card shows an action's arguments in full (the box scrolls) and, under Details, what the tool says it does
+  (`ApprovalNeeded.description`, cleaned by Rust). A call that ran can be opened on its card to show the arguments it was
+  sent and the result the model read (`ToolStarted.input`, `ToolFinished.output`; paddock-ui assistant wire types regenerated).
+- `AssistantTool::argument_problem` (new, defaults to the small check) runs before the approval policy; Pitwall's MCP tools
+  validate against the whole schema with `paddock_mcp::schema::validate`, so a call that fails never reaches a card (ADR 0023
+  Decision 9).
+- The approval book is a `VersionedFile` (owner-only, atomic, backup, a newer file never overwritten) instead of a hand-rolled
+  write (rule 55). The approval fingerprint now covers the server's whole description and its MCP `title`
+  (`pitwall_core::approvals::fingerprint` takes the title): every remembered Always allow asks again once.
+- Logs carry only the argument names the schema declares, with a count of the others (`other_args=`); names from outside
+  (tool, server, argument names, the tool named over IPC) are escaped so they cannot forge a log line (ER-27).
+- ADR 0023 records two deviations for 1.1: the per-chat tool chooser and the quarter-of-context result cap are not built.
+
+### `paddock-diag`: a Performance section in the diagnostics bundle (user decision 2026-11-11)
+- New `paddock_diag::perf`: the `PerformanceSection` adds `performance.json` (versioned, `schema` 1) and `performance-summary.txt` to a report: startup phases with durations, the 50 slowest operations of the last 24 hours (name, phase, duration, age in seconds) and machine facts (processor model and cores, memory total and available in MiB, SSD/HDD type and free space of the data folder's volume, OS version, load average; no machine name, user name or serial number). No tracing; the format follows the startup and summary views of VS Code, Chrome and Windows Performance Recorder.
+- The recorder apps call: `perf::init(data_dir)` (once; reads the ring the last run left), `perf::startup_phase(name)`, `perf::record(op, duration)`, `perf::record_phase(op, phase, duration)`, `perf::record_job(kind, outcome, duration)` and the `perf::time(op)` guard, with `perf::flush_in_background()` after a record that returned `true` and `perf::flush()` at exit, then `PerformanceSection::new()` in the report's sections. Operation, phase and startup names are `&'static str`, so a file name or query text cannot be passed. Bounded and cheap: a ring of 50 entries, at most 64 startup phases, and a call shorter than the ring's shortest (while the ring is full of live entries) costs one atomic read and one clock read. The ring is saved atomically as `performance-ring.json` in the data folder, one flush at a time; a damaged, oversized or foreign file is replaced and never stops the app.
+- No user content: names are identifiers (letters, digits and `. _ : -`, at most 48 characters); anything else, in a call or in a ring file read back, becomes `invalid-name`.
+- The JSON writes no number of 13 or more digits (RFC 3339 times, ages in seconds, sizes in MiB, durations capped at 12 digits): the text redactor masks a Luhn-valid run of 13 digits as a card number and broke the file about one time in ten.
+- The floor that turns away short operations counts only entries of the last 24 hours, so a day after a slow session short operations are recorded again.
+- Pitwall is the first app wired (startup phases, finished jobs by kind and outcome saved off the job thread, a flush at exit, the section). `paddock-diag` depends on `sysinfo` 0.40 (one version in every lockfile).
+
 ### `paddock-proc`: `Supervised::exit_status`; Spotter's browser start ends on ready or exit (ADR 0071)
 - New `Supervised::exit_status`: the status of a child that has ended, without taking the child, so the tree is still ended
   by `kill` or `terminate` afterwards (`wait` forgets the tree).
@@ -41,6 +119,13 @@ Conventional Commits; one semver tag for the whole repo.
   written_ms)` (the holder must have started no later than the record). Code that deletes something on "gone" (a profile
   folder, a discovery or lock file) uses these, so an unreadable process table removes nothing; `is_alive` keeps `Unknown`
   as not running, for code that ends or waits for a process (ADR 0081).
+- New `paddock_proc::guardian::serve_if_guardian()`: the entry a test binary's guardian test function calls (and nothing
+  else). It serves only in the guardian process (`PADDOCK_PROC_GUARDIAN=1`) and never touches the guardian hook. Test
+  binaries use it instead of `run_if_requested`: that call also marks the process as one that runs the guardian with no
+  arguments, so after the entry ran as a plain test every supervised launch started the guardian as the whole test binary,
+  which re-ran every test, wrote its log in the user's log folder and left its children running when it ended. Used by the
+  `paddock-proc` and `paddock-chromium` test binaries (unit and `real_browser`). The `paddock-chromium` fake browser also
+  ends when its launcher is gone (the launcher's pid comes from its start script), so a killed run leaves none.
 - `paddock-chromium`: throwaway profiles go with an orphaned browser, are named `chromium-<pid>-s<start µs>-...`, and each
   throwaway launch sweeps profiles whose owner is gone (by pid and start time, within the slack).
 

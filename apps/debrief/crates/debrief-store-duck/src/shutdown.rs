@@ -39,6 +39,15 @@ pub(crate) fn interrupt_on_exit(conn: &duckdb::Connection) {
     }
 }
 
+/// Interrupts the statement every background thread of ours runs now (the indexer's, the catalogue's). Does not mark the
+/// process as exiting: the threads are stopped and joined by their owners, then the process ends (see
+/// [`crate::DuckStore::stop_for_exit`]).
+pub(crate) fn interrupt_all() {
+    for handle in crate::lock(&INTERRUPTS).iter().filter_map(std::sync::Weak::upgrade) {
+        handle.interrupt();
+    }
+}
+
 /// One borrowed connection that may run a statement; dropping it lets the exit handler go on.
 pub(crate) struct Active(());
 

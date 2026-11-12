@@ -4,4 +4,5 @@
 
 mod hostile;
 mod never_panics;
+mod redacted_json;
 mod report;

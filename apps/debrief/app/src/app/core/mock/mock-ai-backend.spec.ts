@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ChatEventEnvelope } from '../../ai/ai.types';
 import { AI_FAILABLE, MockAiBackend, mockAiOptionsFromSearch } from './mock-ai-backend';
+import { resetMockJobs, mockJobs } from '../../jobs/mock-jobs';
 import { demoRecordIds } from './mock-ai-data';
 
 const code = (p: Promise<unknown>) =>
@@ -65,6 +66,36 @@ describe('MockAiBackend', () => {
     expect((await new MockAiBackend({ stepMs: 0, vision: 'none' }).status()).vision).toBe(false);
     const failing = new MockAiBackend({ mode: 'setup', stepMs: 0, pitwall: 'absent' });
     expect((await failing.pitwallConnect()).problem).toBe('Pitwall is not running.');
+  });
+
+  it('starts one job for an equal Summarize, Explain or Root causes request while it is active', async () => {
+    const b = new MockAiBackend({ stepMs: 5 });
+    const summarize = await b.start({ op: 'summarize', from: 0, to: 1000 });
+    expect(await b.start({ op: 'summarize', from: 0, to: 1000 })).toBe(summarize);
+    expect(await b.start({ op: 'summarize', from: 0, to: 2000 })).not.toBe(summarize);
+    const explain = await b.start({ op: 'explain', recordId: 5 });
+    expect(await b.start({ op: 'explain', recordId: 5 })).toBe(explain);
+    const root = await b.start({ op: 'rootCauses' });
+    expect(await b.start({ op: 'rootCauses' })).toBe(root);
+    // After Cancel the same request is a new job.
+    await b.cancel();
+    expect(await b.start({ op: 'rootCauses' })).not.toBe(root);
+    await b.cancel();
+  });
+
+  it('starts a new job for a request made after Cancel, from the AI dialog or from the Jobs pane', async () => {
+    resetMockJobs();
+    const b = new MockAiBackend({ stepMs: 200 });
+    // The Jobs pane cancels a RUNNING job: its work has not ended, but it is stopping and is never joined.
+    const first = await b.start({ op: 'summarize', from: 0, to: 1000 });
+    await mockJobs().cancel(first);
+    const second = await b.start({ op: 'summarize', from: 0, to: 1000 });
+    expect(second).not.toBe(first);
+    // The same through the dialog's Cancel.
+    await b.cancel();
+    expect(await b.start({ op: 'summarize', from: 0, to: 1000 })).not.toBe(second);
+    await b.cancel();
+    resetMockJobs();
   });
 
   it('opens only https links', async () => {

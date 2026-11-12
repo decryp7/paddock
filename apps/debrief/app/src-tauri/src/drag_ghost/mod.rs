@@ -694,7 +694,7 @@ mod tests {
         }
         on_window_event(&w, &WindowEvent::Focused(false));
         let ended = app.state::<DragGhosts>().lock().session.is_none();
-        // Nobody holds the mouse while the tests run (where the platform can tell; else the drag ends too).
+        // The test's button is up (crate::pointer::hold_primary_button_for_test; the real mouse is never read).
         assert!(ended);
         // The ghost's own window going away resets the page state.
         app.state::<DragGhosts>().lock().loaded = true;
@@ -740,5 +740,29 @@ mod tests {
         drag_ghost_show(app.handle().clone(), w.clone(), true).now().unwrap();
         on_window_event(&w, &WindowEvent::Destroyed);
         assert!(!live(), "the dragging window was destroyed");
+    }
+
+    /// A blur while the button is still held (the user drags across another app's window) keeps the drag. The button's
+    /// state is the test's, never the real mouse's, so the result does not depend on who is using the machine.
+    #[test]
+    fn a_blur_with_the_button_held_keeps_the_drag() {
+        let app = test_app(None);
+        app.manage(DragGhosts::default());
+        let w = window(&app, MAIN).as_ref().window();
+        {
+            let g = app.state::<DragGhosts>();
+            g.lock().begin(MAIN, content(), SIZE, screens());
+            g.lock().set_visible(MAIN, true, Some((10.0, 10.0)));
+        }
+        crate::pointer::hold_primary_button_for_test(Some(true));
+        on_window_event(&w, &WindowEvent::Focused(false));
+        let kept = app.state::<DragGhosts>().lock().session.is_some();
+        crate::pointer::hold_primary_button_for_test(Some(false));
+        assert!(kept, "the button is held: the drag goes on");
+        on_window_event(&w, &WindowEvent::Focused(false));
+        assert!(
+            app.state::<DragGhosts>().lock().session.is_none(),
+            "the button is up: the drag ends"
+        );
     }
 }

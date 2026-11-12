@@ -24,7 +24,8 @@ tag (nothing is planned in the current diagrams); a diagram has at most 12 edges
 large ones are split (containers in three, engine components in four, UI components in three, domain model in four, plugin API in
 three, ingest in two, use cases in four, deployment in three, query sequences in three, plugin sequences in two, live tail in two).
 
-The footer reads "Debrief · updated YYYY-MM-DD". Update the date in `src/common.mjs` when a diagram changes. The 2x PNGs under
+The footer reads "Debrief · updated YYYY-MM-DD": the date in `src/common.mjs` marks the last full redraw of all diagrams, so a
+change to one diagram leaves it alone (a date per diagram is a later change). The 2x PNGs under
 `docs/diagrams/png/` are for local review and are not committed.
 
 ## Overview

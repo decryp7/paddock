@@ -137,6 +137,31 @@ two models racing through tool approvals is confusing and few would want it).
 - Text and code files: attach as text, UTF-8 only, 256 KiB each (judgement; cheap and expected of a full chat). PDFs and
   other documents wait for Recce, which already has readers: no second extractor here.
 
+**Built in WP-5** (`app/src-tauri/src/chat_host/pictures.rs`, `attach.rs`; `feat/pitwall-chat-images`). Where the build differs from
+the text above:
+
+- The file's bytes reach `chat_attach` as base64, not Tauri's JSON list of numbers (a 25 MiB picture would be about 90 MB of
+  digits); the command's limit is 36 MiB.
+- The size is read from the header before any pixel is decoded, so a pixel bomb is refused from its header: at most 40
+  megapixels and a side of 16,384 pixels. The header is read under a 16 MiB allocation limit, never none (a PNG's iCCP profile and
+  text chunks are inflated while the header is read: security review P1, a 2 MB file asked for 2 GB), and the pixels under 320 MiB.
+  The image is shrunk to the budget before it is turned (the budget is a pixel count), so only the decoded pixels, at most 320 MB at
+  16 bits with alpha, are held at full size, and one image is prepared at a time. EXIF orientation is applied before the metadata
+  is dropped. A JPEG is written as a JPEG (quality 90), everything else as a PNG, so flat colour and text stay exact. Only the first
+  frame of an animated GIF or WebP is sent, and the hint says so.
+- The budget is the projector's: the server reads each projector's header once, when it scans the models, and reports
+  `imageMaxPixels` on every local model (its `ProjectorInfo::max_image_pixels`, until now used only by its tests); the app
+  shrinks to the chosen model's budget, and to 1024 tokens at 28 px a side when a model has none.
+- The chosen model's picture state is Rust's (`chat_host::models::ChatImages`, in the picker's reply): whether it reads
+  pictures, why not in words, and the downloaded model that can use tools and read pictures (a loaded one first) that the bar
+  offers. A picture is refused for a model without vision with those words; Send stays off while a picture waits for one; the
+  provider sends no picture to such a model and says so in the message's text. A request carries at most 16 pictures and 24 MiB of
+  them, newest first, and says which older ones were left out.
+- An image's file name is kept only in the app's memory (the stored attachment has none), so a sent image shows its name until Pitwall restarts and then reads "Image 640 × 480".
+- A chip's thumbnail (160 px, a `data:` URL) is made in Rust, at attach and again by `chat_thumbnail` for a reopened chat.
+- Not done here: a picture's viewer (rule 45) and the real-model test with a tiny vision model (`PITWALL_LLAMA_E2E=1`), which
+  need WP-12's harness; the engine's own token count of a picture replaces the meter's estimate (one token per 28 x 28 pixels).
+
 ### 5. Speech input
 
 **Scope.** In: speech to text in the composer, and sending a recorded or attached audio clip to a model that hears. Out: TTS
@@ -490,6 +515,15 @@ From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a
   non-Latin text. With `--no-context-shift` an undercount ends in the server's refusal of that model call, in words, never in
   silent trimming. The window is read again before each measure and send (`chat_refresh_window`), so a change of the context
   per slot or a reload with other slots is followed.
+
+## Deviations for 1.1 (2026-11-11; approved: coordinator, 2026-11-11)
+
+Found by the independent security review of the chat host (WP-11); each is a gap between this ADR and the 1.1 build.
+
+- **The per-chat tool chooser is not built.** `publish()` offers the model every connected tool (Decisions 7 and 9, the
+  "Tool schemas in the prompt" row above). Deferred, accepted 2026-11-11; no risk with Dyno's tools.
+- **The result cap of a quarter of the model's context is not built.** Each result is cut to 16 KiB only (Decision 9, "Limits
+  on what reaches the model"). Deferred, accepted 2026-11-11; no risk with Dyno's tools.
 
 ## Consequences
 

@@ -5,6 +5,7 @@
 
 use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, ReadClass};
 use crate::helper_link::CallError;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::metrics::Reading;
 use dyno_core::network_traffic::{TrafficAnswer, TrafficRead};
 use dyno_core::ports::{PlatformError, ProcessTraffic};
@@ -24,6 +25,7 @@ impl ProgramTraffic {
 
 impl HelperReading for ProgramTraffic {
     type Value = TrafficAnswer;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Traffic];
 
     fn name(&self) -> &'static str {
         "program traffic"

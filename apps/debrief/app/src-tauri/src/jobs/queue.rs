@@ -8,7 +8,7 @@
 
 use super::model::{IllegalTransition, Job, JobEvent, JobId, JobKind, JobLink, JobProgress, JobResult, JobSource, JobSpec, JobState};
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 
 /// A job appears in the pane once it has existed this long: quick work never flickers in.
 pub const VISIBLE_AFTER_MS: i64 = 2_000;
@@ -33,7 +33,12 @@ pub enum JobEnd {
 /// Why a submit was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    QueueFull { kind: JobKind, cap: usize },
+    QueueFull {
+        kind: JobKind,
+        cap: usize,
+    },
+    /// A keyed spec was given to a call whose handle cannot follow a job it joins (see `Jobs::submit`).
+    KeyedWithHandle,
 }
 
 impl std::fmt::Display for Refusal {
@@ -44,6 +49,7 @@ impl std::fmt::Display for Refusal {
                 "{cap} {} jobs are already waiting; wait for some to finish or cancel one in the Jobs pane",
                 kind.as_str()
             ),
+            Refusal::KeyedWithHandle => write!(f, "a keyed job cannot hand its value to a waiter: use submit_work"),
         }
     }
 }
@@ -82,6 +88,14 @@ pub enum Cancel {
     Running,
     NotCancellable,
     AlreadyFinished,
+}
+
+/// What [`JobQueue::submit_or_existing`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Submission {
+    pub id: JobId,
+    /// False when an equal keyed job was already active and `id` is that job.
+    pub created: bool,
 }
 
 /// A job that just ended.
@@ -143,6 +157,10 @@ fn clean(s: &str, max: usize) -> String {
 /// Whether a finished job asks for attention: a success that took a while, or a failure the user cares
 /// about (a quick analysis failure is shown by its own view).
 pub fn needs_attention(job: &Job) -> bool {
+    // Background housekeeping nobody waits for (the Names rebuild after every import) never asks, even when it is slow or fails.
+    if job.quiet {
+        return false;
+    }
     match job.state() {
         // A research answer is always news ("Research finished · View answer").
         // So is an AI answer started in the background (explain, summarise, root causes): nobody waits for it.
@@ -211,6 +229,9 @@ pub struct JobQueue {
     /// Finished jobs, oldest first.
     history: VecDeque<Job>,
     next_id: u64,
+    /// Running jobs whose Cancel was requested: they still run until their work notices, but a keyed request never
+    /// joins one (it would be served by a job that is about to end cancelled, and be lost).
+    stopping: HashSet<JobId>,
 }
 
 impl JobQueue {
@@ -220,6 +241,7 @@ impl JobQueue {
             active: Vec::new(),
             history: VecDeque::new(),
             next_id: 1,
+            stopping: HashSet::new(),
         }
     }
 
@@ -229,8 +251,26 @@ impl JobQueue {
         id
     }
 
-    /// Queues a job; refused when its kind already has [`QUEUE_CAP`] waiting.
+    /// Queues a job; refused when its kind already has [`QUEUE_CAP`] waiting. A keyed spec whose kind and key match a queued or
+    /// running job returns that job's id instead (see [`JobSpec::key`]).
+    #[cfg(test)]
     pub fn submit(&mut self, spec: JobSpec, now: i64) -> Result<JobId, Refusal> {
+        self.submit_or_existing(spec, now).map(|s| s.id)
+    }
+
+    /// As [`submit`](Self::submit), saying whether a job was added.
+    pub fn submit_or_existing(&mut self, spec: JobSpec, now: i64) -> Result<Submission, Refusal> {
+        if let Some(key) = &spec.key {
+            if let Some(j) = self.active.iter().find(|j| {
+                j.kind == spec.kind
+                    && j.key.as_ref() == Some(key)
+                    && !j.state().is_finished()
+                    && !self.stopping.contains(&j.id)
+                    && (spec.joins_running || j.state() == JobState::Queued)
+            }) {
+                return Ok(Submission { id: j.id, created: false });
+            }
+        }
         let waiting = self
             .active
             .iter()
@@ -263,9 +303,16 @@ impl JobQueue {
             error: None,
             seen: false,
             request: spec.request,
+            quiet: spec.quiet,
+            key: spec.key,
             retry_of: None,
         });
-        Ok(id)
+        Ok(Submission { id, created: true })
+    }
+
+    /// The id the next new job gets: a job with a smaller id existed before.
+    pub fn next_id(&self) -> JobId {
+        JobId(self.next_id)
     }
 
     /// Marks the job as a retry of `of`.
@@ -330,6 +377,7 @@ impl JobQueue {
             JobEnd::Interrupted(_) => JobEvent::Interrupt,
         };
         let next = self.active[i].state.step(event)?;
+        self.stopping.remove(&id);
         let mut job = self.active.remove(i);
         job.state = next;
         job.finished_at = Some(now.max(job.queued_at));
@@ -372,8 +420,16 @@ impl JobQueue {
         match j.state() {
             JobState::Queued => Ok(Cancel::Dequeued(Box::new(self.finish(id, JobEnd::Cancelled, now)?))),
             _ if !j.cancellable => Ok(Cancel::NotCancellable),
-            _ => Ok(Cancel::Running),
+            _ => {
+                self.stopping.insert(id);
+                Ok(Cancel::Running)
+            }
         }
+    }
+
+    /// Whether Cancel was already requested for a running job that has not ended yet.
+    pub fn is_stopping(&self, id: JobId) -> bool {
+        self.stopping.contains(&id)
     }
 
     /// Moves a queued, reorderable job one place up (`up`) or down within its kind's queue.
@@ -536,6 +592,75 @@ mod tests {
         JobSpec::new(JobKind::Ai, title).window("main")
     }
 
+    #[test]
+    fn a_job_whose_cancel_was_requested_is_never_joined() {
+        let mut q = JobQueue::new(2);
+        let a = q.submit(ai("a").keyed("main|x"), 0).unwrap();
+        q.start(a, 1).unwrap();
+        assert!(matches!(q.cancel(a, 2).unwrap(), Cancel::Running));
+        // It still runs, but a new equal request is a new job, and that one is joined in turn.
+        let b = q.submit(ai("a").keyed("main|x"), 3).unwrap();
+        assert_ne!(a, b);
+        assert_eq!(q.submit(ai("a").keyed("main|x"), 4).unwrap(), b);
+        // The mark goes with the job.
+        q.finish(a, JobEnd::Cancelled, 5).unwrap();
+        assert_eq!(q.submit(ai("a").keyed("main|x"), 6).unwrap(), b);
+    }
+
+    #[test]
+    fn equal_keys_share_one_active_job_and_a_finished_job_frees_its_key() {
+        let mut q = JobQueue::new(4);
+        let a = q.submit(ai("a").keyed("main|x"), 0).unwrap();
+        assert_eq!(q.submit(ai("a again").keyed("main|x"), 0).unwrap(), a);
+        let other = q.submit(ai("b").keyed("main|y"), 0).unwrap();
+        assert_ne!(other, a);
+        // Another kind with the same key is its own job; unkeyed specs are never merged.
+        let exp = q.submit(JobSpec::new(JobKind::Export, "e").keyed("main|x"), 0).unwrap();
+        assert_ne!(exp, a);
+        let u1 = q.submit(ai("u"), 0).unwrap();
+        let u2 = q.submit(ai("u"), 0).unwrap();
+        assert_ne!(u1, u2);
+        assert_eq!(
+            q.submit_or_existing(ai("a").keyed("main|x"), 0).unwrap(),
+            Submission { id: a, created: false }
+        );
+        // Still shared while running.
+        q.start(a, 1).unwrap();
+        assert_eq!(q.submit(ai("a").keyed("main|x"), 2).unwrap(), a);
+        // A finished job frees the key.
+        q.finish(a, JobEnd::Done(None), 3).unwrap();
+        let again = q.submit(ai("a").keyed("main|x"), 4).unwrap();
+        assert_ne!(again, a);
+    }
+
+    #[test]
+    fn a_request_that_arrives_while_the_work_runs_queues_the_next_run_but_only_one() {
+        let mut q = JobQueue::new(4);
+        let first = q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 0).unwrap();
+        assert!(first.created);
+        // Queued: an equal request is served by it.
+        assert_eq!(
+            q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 0).unwrap(),
+            Submission {
+                id: first.id,
+                created: false
+            }
+        );
+        q.start(first.id, 1).unwrap();
+        // Running: the request may have come after the run read its input, so it queues the next run.
+        let next = q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 2).unwrap();
+        assert!(next.created, "the trigger during the run is not lost");
+        assert_ne!(next.id, first.id);
+        // At most one waits.
+        assert_eq!(
+            q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 3).unwrap(),
+            Submission {
+                id: next.id,
+                created: false
+            }
+        );
+    }
+
     fn states(q: &JobQueue, now: i64) -> Vec<(String, JobState)> {
         q.snapshot(Some("main"), now).jobs.into_iter().map(|j| (j.title, j.state)).collect()
     }
@@ -568,6 +693,56 @@ mod tests {
         q.finish(i1, JobEnd::Done(None), 5).unwrap();
         assert_eq!(q.startable(), vec![a2, i2]);
         assert!(!start.contains(&x[3]) && !start.contains(&e[2]));
+    }
+
+    /// A quiet job (the Names rebuild after every import) never raises a message or a notification, long or failed,
+    /// but still shows in the pane (it is `seen`). Main removed the check with the last quiet job (feddb4f6e); the Names
+    /// job brought `quiet` back.
+    #[test]
+    fn quiet_jobs_never_ask_for_attention_but_still_show() {
+        let mut q = JobQueue::new(2);
+        let long = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0)
+            .unwrap();
+        q.start(long, 0).unwrap();
+        let f = q.finish(long, JobEnd::Done(None), ATTENTION_AFTER_MS * 2).unwrap();
+        assert!(f.kept && !f.attention && f.job.seen, "long and finished, yet no message");
+        let failed = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0)
+            .unwrap();
+        q.start(failed, 0).unwrap();
+        let f = q.finish(failed, JobEnd::Failed("catalogue stopped".into()), 100).unwrap();
+        assert!(!f.attention, "a failure of background housekeeping is logged, not announced");
+        let loud = q.submit(JobSpec::new(JobKind::Maintenance, "clean").window("main"), 0).unwrap();
+        q.start(loud, 0).unwrap();
+        assert!(q.finish(loud, JobEnd::Failed("disk".into()), 100).unwrap().attention);
+    }
+
+    /// A name table waiting for the catalogue is a job: it must not hold the one Maintenance slot (storage clearing,
+    /// store actions), and one window's waiting must not hold another window's.
+    #[test]
+    fn a_names_job_waiting_for_the_catalogue_blocks_neither_maintenance_nor_other_windows() {
+        let mut q = JobQueue::new(4);
+        let n1 = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 0)
+            .unwrap();
+        let n2 = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("w-2").quiet(), 0)
+            .unwrap();
+        let m = q
+            .submit(JobSpec::new(JobKind::Maintenance, "Clear storage").window("main"), 0)
+            .unwrap();
+        assert_eq!(q.startable(), vec![n1, n2, m], "all three run at once");
+        for id in [n1, n2, m] {
+            q.start(id, 1).unwrap();
+        }
+        // The same window's second names job waits for the first (single flight is also kept by the window).
+        let again = q
+            .submit(JobSpec::new(JobKind::Names, "Updating names").window("main").quiet(), 2)
+            .unwrap();
+        assert!(q.startable().is_empty(), "{again:?} waits behind the running one of its window");
+        q.finish(n1, JobEnd::Done(None), 5).unwrap();
+        assert_eq!(q.startable(), vec![again]);
     }
 
     #[test]

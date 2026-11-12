@@ -2,12 +2,14 @@
 //!
 //! `pgrep -f PATTERN` matches the waiting shell's own command line, so `while pgrep -f PATTERN; do sleep 5; done` never ends.
 //! Ported from `.claude/hooks/no-pgrep-wait.sh`, whose regexes are the oracle (`oracle_tests`). The shell hook matched the text
-//! `(while|until) ... pgrep -f` with no `;` in between; this rule reads the command: a `pgrep` with `-f` or `--full` inside the
-//! condition of a `while` or `until` loop, that is, in the commands from the keyword up to the loop's `do`.
+//! `(while|until) ... pgrep -f` with no `;` in between; this rule reads the command through [`crate::hook::loops`]: a `pgrep` with
+//! `-f` or `--full` inside the condition of a loop (the commands from the keyword up to its `do`), or in its body where the result
+//! decides the loop.
 
 use crate::hook::decision::Denial;
 use crate::hook::input::ToolCall;
 use crate::hook::lex::{Item, Script, Sep, Simple, basename};
+use crate::hook::loops::{Loop, loops};
 use crate::hook::rules::Rule;
 use regex::Regex;
 use std::sync::OnceLock;
@@ -27,52 +29,27 @@ impl NoPgrepWait {
     }
 }
 
-/// Where the walk over the commands stands: inside a loop condition, and how many loops deep.
-#[derive(Clone, Copy, Default)]
-struct State {
-    in_condition: bool,
-    loops: usize,
-}
-
 impl Rule for NoPgrepWait {
     fn id(&self) -> &'static str {
         "no-pgrep-wait"
     }
 
     fn check(&self, _call: &ToolCall, script: Option<&Script>) -> Option<Denial> {
-        let items = &script?.items;
-        let mut state = State::default();
-        let mut saved: Vec<State> = Vec::new();
-        for (idx, item) in items.iter().enumerate() {
-            match item {
-                Item::Enter => saved.push(state),
-                Item::Leave => state = saved.pop().unwrap_or_default(),
-                Item::Sep(_) => {}
-                Item::Cmd(cmd) => {
-                    if cmd.is_do() {
-                        state.in_condition = false;
-                    }
-                    if cmd.opens_condition() {
-                        state.in_condition = true;
-                        state.loops += 1;
-                    } else if cmd.opens_for() {
-                        state.loops += 1;
-                    }
-                    if cmd.words.first().is_some_and(|w| w.text == "done") {
-                        state.loops = state.loops.saturating_sub(1);
-                    }
-                    if !polls_full_command_line(cmd) {
-                        continue;
-                    }
-                    // In a condition it is the loop's test. In a body it is the test when `|| break`, `&& break` or `if ...; then
-                    // break` follows it.
-                    if state.in_condition || (state.loops > 0 && decides_the_loop(items, idx, cmd)) {
-                        return Some(self.denial());
-                    }
-                }
-            }
-        }
-        None
+        let script = script?;
+        let items = &script.items;
+        let cmd_at = |at: usize| match &items[at] {
+            Item::Cmd(cmd) => Some(cmd),
+            _ => None,
+        };
+        // In a condition it is the loop's test. In a body it is the test when `|| break`, `&& break` or `if ...; then break` follows it.
+        let polls_the_loop = |lp: &Loop| {
+            lp.condition.iter().filter_map(|&at| cmd_at(at)).any(polls_full_command_line)
+                || lp
+                    .body
+                    .iter()
+                    .any(|&at| cmd_at(at).is_some_and(|cmd| polls_full_command_line(cmd) && decides_the_loop(items, at, cmd)))
+        };
+        loops(script).iter().any(polls_the_loop).then(|| self.denial())
     }
 
     fn legacy(&self, text: &str) -> Option<Denial> {

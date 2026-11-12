@@ -121,6 +121,14 @@ pub struct Client {
     connector: Arc<dyn Connector>,
 }
 
+/// A poll token that can go in a header: 1 to 128 letters, digits, `-` or `_`.
+fn token_ok(t: &str) -> bool {
+    !t.is_empty()
+        && t.len() <= 128
+        && t.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 impl std::fmt::Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
@@ -209,6 +217,22 @@ impl Client {
         auth: bool,
         limit: usize,
     ) -> Result<Raw, PitwallError> {
+        self.call_with_headers(method, path, body, o, policy, auth, limit, &[])
+    }
+
+    /// [`Client::call`] with more request headers (a pairing poll's token).
+    #[allow(clippy::too_many_arguments)]
+    fn call_with_headers(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        o: &CallOptions,
+        policy: Policy,
+        auth: bool,
+        limit: usize,
+        extra: &[(&'static str, String)],
+    ) -> Result<Raw, PitwallError> {
         let deadline = o.deadline.map(|d| Instant::now() + d);
         let t = o.timeouts.unwrap_or(self.quick);
         let bytes = body.map(|b| b.to_string().into_bytes());
@@ -219,6 +243,9 @@ impl Client {
                 _ => Request::get(path),
             };
             req = self.decorate(req, o, auth);
+            for (name, value) in extra {
+                req = req.header(name, value.clone());
+            }
             let r = loopback::send_via(
                 self.connector.as_ref(),
                 self.port,
@@ -316,16 +343,21 @@ impl Client {
             || p.code.len() > 16
             || p.pairing_id.is_empty()
             || p.pairing_id.len() > 128
+            || !token_ok(&p.poll_token)
         {
             return Err(PitwallError::Protocol(
-                "a pairing answer without a usable code".into(),
+                "a pairing answer without a usable code or poll token".into(),
             ));
         }
         Ok(p)
     }
 
-    /// `GET /x/v1/pair/{id}`.
-    pub fn poll_pairing(&self, pairing_id: &str) -> Result<PairPoll, PitwallError> {
+    /// `GET /x/v1/pair/{id}` with the poll token of [`Client::begin_pairing`] in the `X-Pitwall-Pair-Token` header.
+    pub fn poll_pairing(
+        &self,
+        pairing_id: &str,
+        poll_token: &str,
+    ) -> Result<PairPoll, PitwallError> {
         if pairing_id.is_empty()
             || !pairing_id
                 .bytes()
@@ -335,8 +367,13 @@ impl Client {
                 "a pairing id with unexpected characters".into(),
             ));
         }
+        if !token_ok(poll_token) {
+            return Err(PitwallError::Protocol(
+                "a pairing poll token with unexpected characters".into(),
+            ));
+        }
         let path = format!("/x/v1/pair/{pairing_id}");
-        let raw = self.call(
+        let raw = self.call_with_headers(
             "GET",
             &path,
             None,
@@ -344,6 +381,7 @@ impl Client {
             Policy::NONE,
             false,
             MAX_JSON,
+            &[("X-Pitwall-Pair-Token", poll_token.to_string())],
         )?;
         let v: Value = serde_json::from_slice(&raw.body)
             .map_err(|e| PitwallError::Protocol(format!("not JSON: {e}")))?;

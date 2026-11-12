@@ -15,17 +15,25 @@
 // Existing sites sit in `conformance/baselines/C71.json` as {file, hash of the normalised line}: a site in the baseline passes, any
 // other is an error. The baseline may only shrink: a listed site that is gone is a warning to remove it, and an entry that the
 // baseline at the merge base (`origin/main`, or PADDOCK_BASE_REF) does not have is an error. There is no expiry: ADR 0041 WP-6 is open-ended.
+// Fixed budgets (ADR 0071 section 4, R2 and R3 in their smallest form; own baseline `conformance/baselines/C71-waits.json`, shrink-only
+// the same way): in Rust test code, a `Duration` literal under 40 s given to a wait helper (`wait_until`, `wait_for`, `poll_for`,
+// `wait_ready_or_exit`, `wait_exit`, `recv_timeout`, `wait_timeout`) or assigned to a start setting (`connect_window`, `ready_timeout`,
+// `start_deadline`, ...). Wait for the condition (ready or exit), or give the kit's `HANG_GUARD`/`UNTIL_CONNECTED`; a 40 s or longer
+// literal is a hang guard. Exempt: a `FakeClock`/`ManualPace`/`TestSeams` argument, or `// conformance: expiry-under-test — <why>`
+// (the test examines that window). No hang-guard waiver: a 20 s guard on a start is the bug.
+// In TypeScript specs: `vi.waitFor`, `waitFor`, `waitUntil`, `expect.poll` or `.toPass` with `{ timeout: n }` under 40 000 ms.
 // Also (ER-12): a Playwright config (`playwright*.config.*`) whose `retries` can be above 0 sets `failOnFlakyTests` (not `false`), so a
 // retry never turns a red run green; a config with `retries: 0` or no `retries` is fine.
-// Not yet (ADR 0041 §4 amendment, "first slice"): Instant/SystemTime/Date.now, recv_timeout/wait_timeout/Deadline::after,
+// Not yet (ADR 0041 §4 amendment, "first slice"): Instant/SystemTime/Date.now, Deadline::after,
 // performance.now, page.clock.install without pauseAt, vi.waitFor under fake timers, the live-status spread, C30's elapsed asserts,
 // vm-smoke `observe()`, the ESLint rule.
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { baselineGrowth as sharedGrowth } from '../util/baseline.mjs';
 import { error, warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
 export const BASELINE_PATH = 'conformance/baselines/C71.json';
+export const WAITS_BASELINE_PATH = 'conformance/baselines/C71-waits.json';
 const WAIVER = /conformance:\s*hang-guard\s*[—–-]+\s*(\S.{2,})/;
 const BOUND = /(\d+(?:\.\d+)?)\s*(ms|milliseconds?|min|mins|minutes?|s|secs?|seconds?)\b/g;
 const FAKE_SEAM = /\b(?:FakeClock|ManualPace|TestSeams)\b/;
@@ -257,6 +265,90 @@ export function rustTimingSites(source, { wholeFileIsTest = false } = {}) {
   return out;
 }
 
+const WAIT_HELPER = /\b(?:wait_until|wait_for|poll_for|wait_ready_or_exit|wait_exit|recv_timeout|wait_timeout)\s*\(/;
+const START_SETTING = /\b(?:\w*(?:connect|hello|start|ready|spawn|launch|load)\w*_(?:window|timeout|deadline|limit|budget)|ready|start)\s*[:=](?!=)/;
+const DURATION_LITERAL = /\bDuration::from_(secs|millis|micros|nanos|secs_f32|secs_f64)\s*\(\s*([\d_]+(?:\.\d+)?)\s*\)/g;
+const EXPIRY_WAIVER = /conformance:\s*expiry-under-test\s*[—–-]+\s*\S.{2,}/;
+/** A literal this small is a settle, not a hang guard. */
+const GUARD_SECONDS = 40;
+
+/** Seconds of the smallest `Duration` literal in `text` (Infinity when there is none). */
+function smallestLiteral(text) {
+  let best = Infinity;
+  for (const m of text.matchAll(DURATION_LITERAL)) {
+    const n = Number(m[2].replace(/_/g, ''));
+    const scale = { secs: 1, secs_f32: 1, secs_f64: 1, millis: 1e-3, micros: 1e-6, nanos: 1e-9 }[m[1]];
+    best = Math.min(best, n * scale);
+  }
+  return best;
+}
+
+/** The fixed budgets in the test code of one Rust file (see the header): [{ line, what }] without waivers. */
+export function rustWaitSites(source, { wholeFileIsTest = false } = {}) {
+  const lines = source.split('\n');
+  const masked = maskRust(source);
+  const ranges = wholeFileIsTest ? [[0, masked.length]] : rustTestRanges(masked);
+  if (!ranges.length) return [];
+  const out = [];
+  let offset = 0;
+  masked.split('\n').forEach((line, i) => {
+    const at = offset;
+    offset += line.length + 1;
+    if (!ranges.some(([a, b]) => at >= a && at < b)) return;
+    const call = WAIT_HELPER.exec(line);
+    let region = '';
+    if (call) region = callArgs(masked, at + call.index + call[0].length - 1);
+    else if (START_SETTING.test(line)) region = line;
+    if (!region || smallestLiteral(region) >= GUARD_SECONDS) return;
+    if (FAKE_SEAM.test(region) || EXPIRY_WAIVER.test(lines[i]) || EXPIRY_WAIVER.test(lines[i - 1] ?? '')) return;
+    out.push({ line: i + 1, what: 'a fixed Duration under 40 s given to a wait or a start setting: the host sets how long the thing needs' });
+  });
+  return out;
+}
+
+const TS_WAIT = /\b(?:vi\.waitFor|waitFor|waitUntil|expect\.poll|toPass)\s*\(/;
+const TS_TIMEOUT = /\btimeout\s*:\s*([\d_]+)\b/;
+
+/**
+ * The fixed budgets in one TypeScript test file: `vi.waitFor`, `waitFor`, `waitUntil`, `expect.poll` or `.toPass` called with
+ * `{ timeout: n }` of less than 40 000 ms (a test's own `{ timeout }` option is the runner's hang guard, not a wait, and is not read).
+ * [{ line, what }]; the call's first line. Exempt under `useTestClock()` / `frozenClock(` or with `// conformance: expiry-under-test — <why>`.
+ */
+export function tsWaitSites(source) {
+  const lines = source.split('\n');
+  const masked = maskTs(source);
+  const out = [];
+  let offset = 0;
+  masked.split('\n').forEach((line, i) => {
+    const at = offset;
+    offset += line.length + 1;
+    const call = TS_WAIT.exec(line);
+    if (!call) return;
+    const args = callArgs(masked, at + call.index + call[0].length - 1);
+    const t = TS_TIMEOUT.exec(args);
+    if (!t || Number(t[1].replace(/_/g, '')) >= GUARD_SECONDS * 1000) return;
+    if (EXPIRY_WAIVER.test(lines[i]) || EXPIRY_WAIVER.test(lines[i - 1] ?? '') || clockInstalled(masked, at)) return;
+    out.push({ line: i + 1, what: 'a fixed `timeout` under 40 s given to a wait: the host sets how long the thing needs' });
+  });
+  return out;
+}
+
+/** Every fixed budget in a file tree, in the shape of [`timingSites`]. */
+export function waitSites(files, read) {
+  const out = [];
+  for (const file of files) {
+    if (SKIP_PATH.test(file)) continue;
+    const isTs = TS_TEST.test(file);
+    if (!isTs && !file.endsWith('.rs')) continue;
+    const text = read(file);
+    if (!text) continue;
+    const found = isTs ? tsWaitSites(text) : rustWaitSites(text, { wholeFileIsTest: RUST_TEST_FILE.test(file) });
+    const lines = text.split('\n');
+    for (const s of found) out.push({ file, ...s, text: lines[s.line - 1], hash: lineHash(lines[s.line - 1]) });
+  }
+  return out;
+}
+
 /** Every site in a file tree: [{ file, line, what, hash, text }]. */
 export function timingSites(files, read) {
   const out = [];
@@ -307,38 +399,20 @@ export function shrinkBaseline(sites, entries) {
   return kept;
 }
 
-const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20, stdio: ['ignore', 'pipe', 'pipe'] });
-
 /**
- * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash), or null with the
- * reason it could not be measured. A baseline that does not exist at the base is the first introduction: nothing was added.
+ * The baseline entries that the baseline at the merge base does not have (a multiset difference by file and hash), or `{ reason }`
+ * when it could not be measured. One shrink-only rule for every baseline file: conformance/src/util/baseline.mjs.
  */
-export function baselineGrowth(ctx, current) {
-  const git = ctx.options.git ?? defaultGit(ctx.root);
-  let base;
-  let text;
-  try {
-    const ref = ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF ?? 'origin/main';
-    const head = git(['rev-parse', 'HEAD']).trim();
-    base = git(['merge-base', 'HEAD', ref]).trim();
-    if (base === head) base = git(['rev-parse', 'HEAD^1']).trim(); // on the target branch itself: this commit against its parent
-  } catch (e) {
-    return { reason: `no merge base (${String(e.message ?? e).split('\n')[0].slice(0, 120)})` };
-  }
-  try {
-    text = git(['show', `${base}:${BASELINE_PATH}`]);
-  } catch (e) {
-    if (/does not exist|exists on disk, but not in|not in/.test(String(e.stderr ?? e.message))) return { base, added: [] };
-    return { reason: `the baseline at ${base.slice(0, 9)} cannot be read` };
-  }
-  const left = new Map();
-  for (const e of JSON.parse(text).sites ?? []) left.set(key(e), (left.get(key(e)) ?? 0) + 1);
-  const added = [];
-  for (const e of current) {
-    if ((left.get(key(e)) ?? 0) > 0) left.set(key(e), left.get(key(e)) - 1);
-    else added.push(e);
-  }
-  return { base, added };
+export function baselineGrowth(ctx, current, path = BASELINE_PATH) {
+  return sharedGrowth({
+    root: ctx.root,
+    path,
+    current,
+    keyOf: key,
+    entriesOf: (json) => json.sites ?? [],
+    ...(ctx.options.git ? { git: ctx.options.git } : {}),
+    ...(ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF ? { baseRef: ctx.options.baseRef ?? process.env.PADDOCK_BASE_REF } : {}),
+  });
 }
 
 const PW_CONFIG = /(?:^|\/)playwright[^/]*\.config\.(?:ts|mts|cts|js|mjs|cjs)$/;
@@ -364,24 +438,30 @@ export default {
       const line = retriesWithoutFlakyFailure(ctx.read(f) ?? '');
       return line ? [error('C71', 49, f, line, '`retries` can be above 0 without `failOnFlakyTests` (ER-12): a flaky test would pass its job unseen', 'Add `failOnFlakyTests: true` next to `retries` (Playwright 1.50+), so a test that needed its retry fails the run.')] : [];
     });
-    const sites = timingSites(ctx.files(), ctx.read);
-    let baseline = { sites: [] };
-    const raw = ctx.read(BASELINE_PATH);
-    if (raw) baseline = JSON.parse(raw);
-    const { fresh, stale } = againstBaseline(sites, baseline.sites);
-    const out = flaky.concat(fresh.map((s) =>
-      error('C71', 49, s.file, s.line, `${s.what} (ER-12, rule 49): ${s.text.trim().slice(0, 100)}`, 'Wait on the condition (an event, `expect.poll`, a locator assertion, `useTestClock`/`frozenClock`, the FakeClock), or for a real bound add `// conformance: hang-guard — <why>, <bound of at least 10 s>` on the line.'),
-    ));
-    for (const e of stale) {
-      out.push(warn('C71', 49, e.file, e.line ?? 1, `${BASELINE_PATH} lists a site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry (`node conformance/bin/paddock-timing-baseline.mjs --write` rewrites the file without it).'));
-    }
-    if (baseline.sites.length) {
-      const g = baselineGrowth(ctx, baseline.sites);
-      if (g.reason) {
-        out.push(warn('C71', 49, BASELINE_PATH, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
-      } else if (g.added.length) {
-        const list = g.added.slice(0, 8).map((e) => `${e.file}:${e.line ?? '?'}`).join(', ');
-        out.push(error('C71', 49, BASELINE_PATH, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)} (${list}${g.added.length > 8 ? ', ...' : ''}); it may only shrink (ADR 0041 §4)`, 'Remove the entries and fix the sites (wait on the condition, a fake clock, or `// conformance: hang-guard — <bound of at least 10 s>`). Growing the baseline needs the user\'s approval.'));
+    const readBaseline = (path) => {
+      const raw = ctx.read(path);
+      return raw ? JSON.parse(raw) : { sites: [] };
+    };
+    const fixFor = {
+      [BASELINE_PATH]: 'Wait on the condition (an event, `expect.poll`, a locator assertion, `useTestClock`/`frozenClock`, the FakeClock), or for a real bound add `// conformance: hang-guard — <why>, <bound of at least 10 s>` on the line.',
+      [WAITS_BASELINE_PATH]: 'Wait for the condition, ready or exit (ADR 0071: `wait_ready_or_exit`, `wait_until`), or pass the kit\'s `HANG_GUARD`/`UNTIL_CONNECTED`; a fixed budget under 40 s is a verdict the host speed decides. If the test examines that window, add `// conformance: expiry-under-test — <why>`.',
+    };
+    const out = [...flaky];
+    for (const [path, sites] of [[BASELINE_PATH, timingSites(ctx.files(), ctx.read)], [WAITS_BASELINE_PATH, waitSites(ctx.files(), ctx.read)]]) {
+      const baseline = readBaseline(path);
+      const { fresh, stale } = againstBaseline(sites, baseline.sites);
+      out.push(...fresh.map((s) => error('C71', 49, s.file, s.line, `${s.what} (ER-12, rule 49): ${s.text.trim().slice(0, 100)}`, fixFor[path])));
+      for (const e of stale) {
+        out.push(warn('C71', 49, e.file, e.line ?? 1, `${path} lists a site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry (`node conformance/bin/paddock-timing-baseline.mjs --shrink` rewrites the file without it; add `--waits` for the fixed budgets).'));
+      }
+      if (baseline.sites.length) {
+        const g = baselineGrowth(ctx, baseline.sites, path);
+        if (g.reason) {
+          out.push(warn('C71', 49, path, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
+        } else if (g.added.length) {
+          const list = g.added.slice(0, 8).map((e) => `${e.file}:${e.line ?? '?'}`).join(', ');
+          out.push(error('C71', 49, path, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)} (${list}${g.added.length > 8 ? ', ...' : ''}); it may only shrink (ADR 0041 §4)`, 'Remove the entries and fix the sites (wait on the condition, a fake clock, or a waiver with its reason). Growing the baseline needs the user\'s approval.'));
+        }
       }
     }
     return out;

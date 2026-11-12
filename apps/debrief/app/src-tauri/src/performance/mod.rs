@@ -42,6 +42,10 @@ pub struct PerformanceSettings {
     pub query_budget_mb: u32,
     /// The cap of a plugin that declares no need of its own.
     pub plugin_memory_mb: u32,
+    /// What the open captures and documents of all windows may keep in memory together (the app's, not a worker's);
+    /// 0: automatic, a quarter of this computer's memory (512 MB to 8 GB). The least recently used captures that have a
+    /// file are released and read again when used.
+    pub documents_memory_mb: u32,
     /// The store worker gives freed memory back to the system at once (the old Low memory mode's allocator).
     pub return_memory_at_once: bool,
     /// Parse threads of an import; 0: automatic.
@@ -78,6 +82,7 @@ impl Default for PerformanceSettings {
             import_budget_mb: 768,
             query_budget_mb: 300,
             plugin_memory_mb: 1024,
+            documents_memory_mb: 0,
             return_memory_at_once: false,
             parse_threads: 0,
             query_threads: 4,

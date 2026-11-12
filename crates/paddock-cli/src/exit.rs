@@ -13,19 +13,25 @@ pub enum Exit {
     Refused = 4,
     /// Done, but a `--fail-on-findings` style check found something (for CI).
     Findings = 5,
+    /// The check did not look (tool missing, precondition false, incomplete, nothing probed): never a pass (ADR 0089).
+    NotMeasured = 6,
+    /// The check looked but its positive control failed, or it crashed (ADR 0089); beats every other code.
+    CheckBroken = 7,
     /// Stopped by Ctrl+C or SIGTERM (128 + SIGINT).
     Interrupted = 130,
 }
 
 impl Exit {
     /// Every code.
-    pub const ALL: [Exit; 7] = [
+    pub const ALL: [Exit; 9] = [
         Exit::Ok,
         Exit::Failure,
         Exit::Usage,
         Exit::NotRunning,
         Exit::Refused,
         Exit::Findings,
+        Exit::NotMeasured,
+        Exit::CheckBroken,
         Exit::Interrupted,
     ];
 
@@ -43,6 +49,8 @@ impl Exit {
             Exit::NotRunning => "not-running",
             Exit::Refused => "refused",
             Exit::Findings => "findings",
+            Exit::NotMeasured => "not-measured",
+            Exit::CheckBroken => "check-broken",
             Exit::Interrupted => "interrupted",
         }
     }
@@ -56,6 +64,10 @@ impl Exit {
             Exit::NotRunning => "the program this talks to is not running",
             Exit::Refused => "refused (memory, offline mode, busy, not available here)",
             Exit::Findings => "done, and the check found something",
+            Exit::NotMeasured => {
+                "the check did not look (tool missing, precondition false, incomplete), so nothing is proven"
+            }
+            Exit::CheckBroken => "the check is broken (its positive control failed, or it crashed)",
             Exit::Interrupted => "stopped by Ctrl+C",
         }
     }
@@ -68,7 +80,7 @@ mod tests {
     #[test]
     fn the_numbers_are_a_stable_contract() {
         let codes: Vec<i32> = Exit::ALL.iter().map(|e| e.code()).collect();
-        assert_eq!(codes, [0, 1, 2, 3, 4, 5, 130]);
+        assert_eq!(codes, [0, 1, 2, 3, 4, 5, 6, 7, 130]);
         let mut names: Vec<&str> = Exit::ALL.iter().map(|e| e.name()).collect();
         names.sort();
         names.dedup();

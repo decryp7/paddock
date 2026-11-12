@@ -3,7 +3,7 @@
  "crates": false,
  "ui": false,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "c99": false,
  "tools": false,
  "icons": false,
@@ -22,6 +22,9 @@
  "why": {
   "app:y": [
    "apps/y/app/angular.json"
+  ],
+  "conformance": [
+   "conformance always runs"
   ]
  }
 }

@@ -180,7 +180,6 @@ fn kind(e: &ToolError) -> &'static str {
 
 /// What Settings offers for smartmontools right now.
 pub fn offer(shared: &crate::agent::Shared) -> dyno_core::tool_offer::ToolOffer {
-    use dyno_core::helper_wire::HelperState;
     let host = shared.helper.host();
     let pin = crate::tool_pins::pin_for(ToolKind::Smartmontools, host).map(|p| dyno_core::tool_offer::PinFacts {
         version: p.version.clone(),
@@ -189,7 +188,7 @@ pub fn offer(shared: &crate::agent::Shared) -> dyno_core::tool_offer::ToolOffer 
         licence: p.licence.clone(),
         source_url: p.source_url.clone(),
     });
-    let ready = shared.helper.status().state == HelperState::Ready;
+    let ready = shared.helper.status().state.usable();
     let from_helper = if ready {
         shared
             .helper
@@ -232,7 +231,6 @@ fn local_copy(own_tools: &std::path::Path) -> Option<InstalledTool> {
 
 /// The job body of `InstallTool`: the pin of this system, the real door, the staging folder under the cache folder, the helper.
 pub fn install(shared: &Arc<crate::agent::Shared>, ctx: &JobContext, tool: ToolKind) -> Result<ToolStatus, JobError> {
-    use dyno_core::helper_wire::HelperState;
     let fail = |m: &str| JobError::Failed(m.to_string());
     ctx.phase(Phase::discovering("check", "Checking what to download"));
     ctx.check()?;
@@ -254,7 +252,7 @@ pub fn install(shared: &Arc<crate::agent::Shared>, ctx: &JobContext, tool: ToolK
         crate::hardware::slow_cycle(shared);
         return Ok(status);
     }
-    if shared.helper.status().state != HelperState::Ready {
+    if !shared.helper.status().state.usable() {
         return Err(fail(
             "Turn on administrator readings first: the helper installs the tool. Then try again.",
         ));

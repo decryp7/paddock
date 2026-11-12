@@ -56,7 +56,7 @@ pub(crate) struct WorkerHost {
 }
 
 impl WorkerHost {
-    /// The worker next to Debrief's executable (`DEBRIEF_STORE_WORKER` overrides it), with libduckdb from the installed
+    /// The worker next to Debrief's executable (`DEBRIEF_STORE_WORKER` overrides it in a debug build only), with libduckdb from the installed
     /// resource folder `lib_dir` (installers), next to the worker, or from Debrief's own library path (development
     /// builds, `fetch-libduckdb.sh`). The worker starts the built-in plugins and the installed `third_party` ones
     /// for imports itself (ADR 0027), with `launch` (its cap and tuning from Settings ▸ Performance, ADR 0031) and
@@ -91,9 +91,15 @@ impl WorkerHost {
     }
 }
 
-/// Where the store worker's executable is: `DEBRIEF_STORE_WORKER`, else next to Debrief's own executable.
+/// Where the store worker's executable is: next to Debrief's own executable (`DEBRIEF_STORE_WORKER` names another one in a
+/// debug build only; a release build ignores it, see `paddock_env::dev_override`).
 pub(crate) fn worker_binary() -> PathBuf {
-    if let Some(p) = std::env::var_os("DEBRIEF_STORE_WORKER") {
+    worker_binary_with(cfg!(debug_assertions), std::env::var_os("DEBRIEF_STORE_WORKER"))
+}
+
+/// [`worker_binary`] for a given build mode and value of `DEBRIEF_STORE_WORKER`.
+fn worker_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf {
+    if let Some(p) = paddock_env::dev_override::resolve(debug, "DEBRIEF_STORE_WORKER", env) {
         return PathBuf::from(p);
     }
     let name = if cfg!(windows) {
@@ -163,7 +169,34 @@ pub(crate) enum StoreKind {
     Project,
 }
 
+/// Which store a window holds: a new number for every store the window opens, creates or is handed, so a table or a
+/// job tied to one store can tell that the window now holds another (two stores can have the same catalogue
+/// generation, and a freed store's address can be reused, so neither says it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct StoreId(u64);
+
+impl std::fmt::Display for StoreId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl StoreId {
+    /// The next identity; unique in the process.
+    fn next() -> StoreId {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        StoreId(NEXT.fetch_add(1, Ordering::SeqCst))
+    }
+
+    /// An identity for tests that stand in for a store.
+    #[cfg(test)]
+    pub(crate) fn for_test(n: u64) -> StoreId {
+        StoreId(n)
+    }
+}
+
 struct Current {
+    id: StoreId,
     store: SharedStore,
     kind: StoreKind,
 }
@@ -223,23 +256,30 @@ impl Engine {
 
     /// The window's store, opened in a new scratch folder on first use.
     pub(crate) fn store(&self) -> CmdResult<SharedStore> {
+        self.tagged_store().map(|(_, store)| store)
+    }
+
+    /// The window's store with its identity ([`StoreId`]): what a job tied to one store keeps to notice a replacement.
+    pub(crate) fn tagged_store(&self) -> CmdResult<(StoreId, SharedStore)> {
         if let Some(c) = crate::sync::read(&self.current).as_ref() {
-            return Ok(c.store.clone());
+            return Ok((c.id, c.store.clone()));
         }
         let mut slot = crate::sync::write(&self.current);
         if let Some(c) = slot.as_ref() {
-            return Ok(c.store.clone());
+            return Ok((c.id, c.store.clone()));
         }
         let dir = self.scratch_dir();
         let profile = crate::sync::lock(&self.profile).clone();
         let store = self.host.create(&dir, &profile).map_err(|e| unavailable(&e))?;
         self.hand_parsers(store.as_ref());
         self.new_ordering_episode();
+        let id = StoreId::next();
         *slot = Some(Current {
+            id,
             store: store.clone(),
             kind: StoreKind::Scratch,
         });
-        Ok(store)
+        Ok((id, store))
     }
 
     /// Another store in the window (opened, created, replaced or closed): a new ordering episode (`crate::ordering`,
@@ -281,6 +321,11 @@ impl Engine {
         crate::sync::read(&self.current).as_ref().map(|c| c.store.clone())
     }
 
+    /// The identity of the open store, if one is open (no worker start, nothing created): for a key that must not open a store.
+    pub(crate) fn opened_id(&self) -> Option<StoreId> {
+        crate::sync::read(&self.current).as_ref().map(|c| c.id)
+    }
+
     /// What the store's folder is (`None` before the first use).
     #[cfg(test)]
     pub(crate) fn kind(&self) -> Option<StoreKind> {
@@ -301,7 +346,11 @@ impl Engine {
     pub(crate) fn replace(&self, store: SharedStore, kind: StoreKind) {
         self.hand_parsers(store.as_ref());
         self.new_ordering_episode();
-        let previous = crate::sync::write(&self.current).replace(Current { store, kind });
+        let previous = crate::sync::write(&self.current).replace(Current {
+            id: StoreId::next(),
+            store,
+            kind,
+        });
         if let Some(p) = previous {
             retire(p);
         }
@@ -573,6 +622,43 @@ pub(crate) mod local;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A window's store has an identity that changes with the store, so a job tied to one store sees that the window now holds
+    /// another (two stores can be at the same catalogue generation).
+    #[test]
+    fn the_window_store_has_an_identity_that_changes_when_the_store_is_replaced() {
+        let state = crate::windows::tests::window_state("engine-store-id", debrief_core::PluginRegistry::new());
+        let engine = &state.engine;
+        let (first_id, first) = engine.tagged_store().unwrap();
+        let (again_id, again) = engine.tagged_store().unwrap();
+        assert_eq!(first_id, again_id, "the same store keeps its identity");
+        assert!(Arc::ptr_eq(&first, &again));
+        let second = engine.host().create(&engine.unpack_root(), &engine.profile()).unwrap();
+        engine.replace(second.clone(), StoreKind::Project);
+        let (second_id, current) = engine.tagged_store().unwrap();
+        assert_ne!(second_id, first_id, "another store, another identity");
+        assert!(Arc::ptr_eq(&current, &second), "the window holds the store it was given");
+        assert_eq!(engine.kind(), Some(StoreKind::Project));
+    }
+
+    #[test]
+    fn a_release_build_ignores_debrief_store_worker() {
+        let evil = Some(std::ffi::OsString::from("/evil/store-worker"));
+        assert_eq!(worker_binary_with(true, evil.clone()), PathBuf::from("/evil/store-worker"));
+        let release = worker_binary_with(false, evil);
+        assert_ne!(release, PathBuf::from("/evil/store-worker"));
+        assert!(release.file_name().unwrap().to_string_lossy().starts_with("debrief-store-worker"));
+    }
+
+    #[test]
+    fn asking_for_the_open_stores_identity_opens_nothing() {
+        let state = crate::windows::tests::window_state("engine-opened-id", debrief_core::PluginRegistry::new());
+        let engine = &state.engine;
+        assert_eq!(engine.opened_id(), None, "no store is open yet");
+        assert!(engine.opened().is_none(), "and asking did not create one");
+        let (id, _) = engine.tagged_store().unwrap();
+        assert_eq!(engine.opened_id(), Some(id));
+    }
 
     #[test]
     fn store_errors_become_typed_command_errors() {

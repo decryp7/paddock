@@ -22,12 +22,12 @@ function prompt(os: MockOs, verb: string): string {
 const READINGS: Record<MockOs, string[]> = {
   macos: ['Every process of every account', 'Login items and background tasks', 'Firewall (pf) rules', 'Temperature and energy readings'],
   windows: ['Every process of every account', 'Per-program network traffic', 'Disk health', 'What is keeping the computer awake'],
-  linux: ['Every process of every account', 'Which program owns each socket and file', 'Firewall (nft) rules', 'Memory modules'],
+  linux: ['Every process of every account', 'Which program owns each socket and file', 'Firewall (nft) rules', 'Disk health', 'Memory modules'],
 };
 
 /** The sentences the engine's `assess` gives, so the card reads the same against the mock. */
 export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): HelperStatus {
-  const verb = variant === 'off' ? 'install' : variant === 'outdated' ? 'update' : 'repair';
+  const verb = variant === 'off' ? 'install' : variant === 'outdated' || variant === 'updateAvailable' ? 'update' : 'repair';
   const base = { version: null, prompt: prompt(os, verb), recent: [], readings: READINGS[os], detail: null, error: null };
   switch (variant) {
     case 'notIncluded':
@@ -59,6 +59,14 @@ export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): Helper
         version: '1.0.9',
         message: `This Dyno needs helper version ${MOCK_HELPER_VERSION} or newer, and the installed one is older. Update the helper.`,
         detail: `Installed: version 1.0.9 (API 2). Needed: API 2, version ${MOCK_HELPER_VERSION} or newer.`,
+      };
+    case 'updateAvailable':
+      return {
+        ...base,
+        state: 'updateAvailable',
+        version: '1.1.0',
+        message: `A newer helper ships with this Dyno (installed 1.1.0, bundled ${MOCK_HELPER_VERSION}). Administrator readings are on; update the helper when you like.`,
+        detail: `Helper version 1.1.0, Dyno ${MOCK_HELPER_VERSION}.`,
       };
     case 'ready':
       return {

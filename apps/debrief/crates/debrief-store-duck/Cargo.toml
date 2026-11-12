@@ -33,6 +33,9 @@ tantivy = { workspace = true, features = ["mmap", "lz4-compression"] }
 [features]
 # Test-only helpers (`test_scratch`) for this crate's integration tests; enabled by its own dev-dependency below.
 test-support = []
+# Test hook of the catalogue thread (`DEBRIEF_EXIT_HOLD`): holds it inside DuckDB until it is stopped; enabled by the store
+# worker's dev-dependency, only in a debug build (a release build compiles the hook out even with the feature on).
+exit-hold = []
 
 [dev-dependencies]
 # The shared scratch_dir for fixtures that hand out a path.
@@ -49,3 +52,5 @@ chrono.workspace = true
 zip.workspace = true
 # Test folders removed after the store that uses them, also after a panic (rule 49).
 tempfile.workspace = true
+# Generates the big `.gz` of tests/regress_1_2.rs at test time.
+flate2.workspace = true

@@ -80,6 +80,106 @@ pub fn wait_for_within<T>(what: &str, guard: Duration, f: impl FnMut() -> Option
     poll_for(guard, f).unwrap_or_else(|| panic!("timed out after {guard:?} waiting for {what}"))
 }
 
+/// A counter of work done, for [`guarded`]: the work calls [`Progress::tick`] for every unit it finishes (a file scanned, a line
+/// read), from any thread. Cloning shares the count.
+#[derive(Debug, Clone, Default)]
+pub struct Progress(std::sync::Arc<std::sync::atomic::AtomicU64>);
+
+impl Progress {
+    /// A counter at zero.
+    pub fn new() -> Progress {
+        Progress::default()
+    }
+
+    /// One more unit done.
+    pub fn tick(&self) {
+        self.add(1);
+    }
+
+    /// `n` more units done.
+    pub fn add(&self, n: u64) {
+        self.0.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Units done so far.
+    pub fn get(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// The pure part of a progress guard (ADR 0071): stalled only when the count has not grown for `limit`. Time is a number the
+/// caller passes, so the rule is tested with no clock.
+#[derive(Debug, Clone, Copy)]
+pub struct StallGuard {
+    limit: Duration,
+    last: u64,
+    since: Duration,
+}
+
+impl StallGuard {
+    /// A guard that calls a count stalled after `limit` without growth, counted from `now`, when the count stood at `progress`.
+    pub fn new(limit: Duration, now: Duration, progress: u64) -> StallGuard {
+        StallGuard {
+            limit,
+            last: progress,
+            since: now,
+        }
+    }
+
+    /// Looks at the count at time `now`; `true` when it has not grown for the whole limit.
+    pub fn stalled(&mut self, progress: u64, now: Duration) -> bool {
+        if progress != self.last {
+            self.last = progress;
+            self.since = now;
+            return false;
+        }
+        now.saturating_sub(self.since) >= self.limit
+    }
+}
+
+/// Runs `work` on its own thread and waits for it under a progress guard instead of a total time: a slow disk that keeps
+/// finishing units passes however long it takes, and only work that finishes no unit for `stall_limit` fails, naming `what`
+/// and how far it got (ADR 0071). The work reports through the [`Progress`] it is given.
+///
+/// A hung worker is left running (it cannot be stopped); the panic ends the test and the process ends it.
+// conformance: hang-guard
+pub fn guarded<T: Send + 'static>(
+    what: &str,
+    stall_limit: Duration,
+    work: impl FnOnce(Progress) -> T + Send + 'static,
+) -> T {
+    let progress = Progress::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mine = progress.clone();
+    std::thread::spawn(move || {
+        // A send fails only when the waiter has given up.
+        drop(
+            tx.send(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || work(mine),
+            ))),
+        );
+    });
+    let began = Instant::now();
+    let mut guard = StallGuard::new(stall_limit, Duration::ZERO, progress.get());
+    loop {
+        match rx.recv_timeout(LAST) {
+            Ok(Ok(value)) => return value,
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if guard.stalled(progress.get(), began.elapsed()) {
+                    panic!(
+                        "{what} is hung: no progress for {stall_limit:?} after {} units (a slow host passes; only work that finishes nothing fails)",
+                        progress.get()
+                    );
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("the worker of {what} ended without a result")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,5 +270,63 @@ mod tests {
             (2..=4).contains(&never),
             "a fixed interval, not a fast poll: {never}"
         );
+    }
+
+    const S: fn(u64) -> Duration = Duration::from_secs;
+
+    #[test]
+    fn a_count_that_keeps_growing_is_never_stalled_however_long_it_takes() {
+        let mut g = StallGuard::new(S(60), S(0), 0);
+        // Two hours of work, one unit every 59 s: far over the limit in total, never over it between units.
+        for n in 1..=122u64 {
+            assert!(!g.stalled(n, S(n * 59)), "unit {n}");
+        }
+    }
+
+    #[test]
+    fn a_count_that_stops_is_stalled_after_the_limit_and_not_before() {
+        let mut g = StallGuard::new(S(60), S(0), 0);
+        assert!(!g.stalled(5, S(100)));
+        assert!(!g.stalled(5, S(159)));
+        assert!(g.stalled(5, S(160)));
+    }
+
+    #[test]
+    fn a_guard_starts_from_the_count_it_is_given() {
+        // A count that already stood at 5 and never moves is stalled at the limit; a guard that assumed 0 would call 5 growth.
+        let mut g = StallGuard::new(S(60), S(10), 5);
+        assert!(!g.stalled(5, S(69)));
+        assert!(g.stalled(5, S(70)));
+    }
+
+    #[test]
+    fn a_slow_but_finishing_job_passes_and_returns_its_value() {
+        let v = guarded("a counted job", S(30), |p| {
+            for _ in 0..1000 {
+                p.tick();
+            }
+            p.get()
+        });
+        assert_eq!(v, 1000);
+    }
+
+    #[test]
+    #[should_panic(expected = "a job that finishes nothing is hung")]
+    fn a_job_that_finishes_no_unit_is_reported_as_hung_naming_what_it_was() {
+        let (_keep, held) = std::sync::mpsc::channel::<()>();
+        // conformance: hang-guard — the stall limit is the thing under test; the worker is blocked on a channel that is never sent
+        let _: () = guarded(
+            "a job that finishes nothing",
+            Duration::from_millis(40),
+            move |_| {
+                let _ = held.recv();
+            },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "boom")]
+    fn a_panic_in_the_work_is_the_tests_panic() {
+        guarded("a job", S(30), |_| panic!("boom"));
     }
 }

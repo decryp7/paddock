@@ -42,6 +42,9 @@ pub enum Refusal {
     Symlink,
     /// The path is not a folder.
     NotAFolder,
+    /// A Windows reparse point (symbolic link, junction, mount point, or another kind such as a cloud-sync placeholder) is
+    /// where a plain folder or file must be. Reparse points are never followed by the private-files type.
+    ReparsePoint,
     /// Another account owns the folder.
     OtherOwner {
         /// The owner's uid.
@@ -52,6 +55,20 @@ pub enum Refusal {
         /// The permission bits.
         mode: u32,
     },
+    /// An access list lets another principal change the folder or file (Windows DACL entry, macOS extended ACL entry).
+    OpenToOthersAcl {
+        /// The principal: a SID in text form, or a description where the OS names none.
+        who: String,
+    },
+    /// Another account owns the folder or file (Windows: the owner's SID in text form).
+    OtherOwnerAccount {
+        /// The owner's SID.
+        who: String,
+    },
+    /// The path is not a regular file.
+    NotAFile,
+    /// The folder's parent cannot be trusted: another account could rename or replace the folder.
+    Parent(Box<Refusal>),
 }
 
 impl Refusal {
@@ -61,8 +78,15 @@ impl Refusal {
             Refusal::Unreadable { .. } => "it cannot be inspected",
             Refusal::Symlink => "it is a symbolic link",
             Refusal::NotAFolder => "it is not a folder",
+            Refusal::ReparsePoint => {
+                "it is a reparse point (a link, junction, mount point or cloud placeholder)"
+            }
             Refusal::OtherOwner { .. } => "it belongs to another user",
             Refusal::OpenToOthers { .. } => "other users can change it",
+            Refusal::OpenToOthersAcl { .. } => "its access list gives other users access",
+            Refusal::OtherOwnerAccount { .. } => "it belongs to another user",
+            Refusal::NotAFile => "it is not a regular file",
+            Refusal::Parent(_) => "its parent folder can be changed by other users",
         }
     }
 }
@@ -81,6 +105,13 @@ impl fmt::Display for Refusal {
                 "the folder (mode {:04o}) can be changed by other accounts",
                 mode & 0o7777
             ),
+            Refusal::OtherOwnerAccount { who } => {
+                write!(f, "it is owned by {who}, not by this account")
+            }
+            Refusal::OpenToOthersAcl { who } => {
+                write!(f, "its access list grants access to {who}")
+            }
+            Refusal::Parent(inner) => write!(f, "its parent folder cannot be trusted: {inner}"),
             other => f.write_str(other.reason()),
         }
     }
@@ -440,6 +471,26 @@ pub fn check_own_folder(folder: &Path, links: Links) -> Result<(), Refusal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_account_based_refusals_say_who_and_what() {
+        let acl = Refusal::OpenToOthersAcl {
+            who: "S-1-1-0".into(),
+        };
+        let owner = Refusal::OtherOwnerAccount {
+            who: "S-1-5-18".into(),
+        };
+        let parent = Refusal::Parent(Box::new(acl.clone()));
+        assert!(acl.to_string().contains("S-1-1-0"));
+        assert!(owner.to_string().contains("S-1-5-18"));
+        assert!(
+            parent.to_string().contains("parent folder") && parent.to_string().contains("S-1-1-0")
+        );
+        assert_eq!(Refusal::NotAFile.to_string(), "it is not a regular file");
+        for r in [acl, owner, parent, Refusal::NotAFile] {
+            assert!(!r.reason().is_empty());
+        }
+    }
 
     fn facts(uid: u32, mode: u32) -> impl FnOnce(&Path, Links) -> Result<FolderFacts, Refusal> {
         move |_, _| Ok(FolderFacts { uid, mode })

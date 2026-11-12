@@ -957,35 +957,43 @@ async fn live(State(st): S, h: HeaderMap) -> Response {
         .unwrap_or_default()
 }
 
-/// The neutral chat request for a playground request: text messages (with the tool calls and results of a tool loop), the
-/// tools the caller offers and its tool choice.
-fn playground_chat_request(req: &PlaygroundRequest) -> ChatRequest {
-    use pitwall_core::chat::{Part, Role, Tool, ToolCall, ToolChoice};
+/// The neutral chat request for a playground request: messages (text and images, with the tool calls and results of a tool
+/// loop), the tools the caller offers and its tool choice. Images are checked again here (valid base64, only on a `user`
+/// message, at most [`pitwall_core::chat::MAX_IMAGES`] in all): the caller's own checks are never trusted.
+fn playground_chat_request(req: &PlaygroundRequest) -> Result<ChatRequest, String> {
+    use pitwall_core::chat::{Image, Part, Role, Tool, ToolCall, ToolChoice};
     use pitwall_core::mgmt::PlaygroundToolChoice;
-    ChatRequest {
+    let mut messages = Vec::with_capacity(req.messages.len());
+    for m in &req.messages {
+        if !m.images.is_empty() && m.role != Role::User {
+            return Err("only a user message can carry images".into());
+        }
+        let mut parts = if m.content.is_empty() && m.role == Role::Assistant && !m.tool_calls.is_empty() {
+            vec![]
+        } else {
+            vec![Part::Text(m.content.clone())]
+        };
+        for i in &m.images {
+            parts.push(Part::Image(Image::from_base64(i.mime, &i.data).map_err(|e| e.to_string())?));
+        }
+        messages.push(Message {
+            role: m.role,
+            parts,
+            tool_calls: m
+                .tool_calls
+                .iter()
+                .map(|c| ToolCall {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    arguments: c.arguments.clone(),
+                })
+                .collect(),
+            tool_call_id: m.tool_call_id.clone(),
+        });
+    }
+    Ok(ChatRequest {
         model: ModelRef::Named(req.model_id.clone()),
-        messages: req
-            .messages
-            .iter()
-            .map(|m| Message {
-                role: m.role,
-                parts: if m.content.is_empty() && m.role == Role::Assistant && !m.tool_calls.is_empty() {
-                    vec![]
-                } else {
-                    vec![Part::Text(m.content.clone())]
-                },
-                tool_calls: m
-                    .tool_calls
-                    .iter()
-                    .map(|c| ToolCall {
-                        id: c.id.clone(),
-                        name: c.name.clone(),
-                        arguments: c.arguments.clone(),
-                    })
-                    .collect(),
-                tool_call_id: m.tool_call_id.clone(),
-            })
-            .collect(),
+        messages,
         tools: req
             .tools
             .iter()
@@ -1005,7 +1013,7 @@ fn playground_chat_request(req: &PlaygroundRequest) -> ChatRequest {
         max_tokens: Some(req.max_tokens),
         stream: true,
         ..Default::default()
-    }
+    })
 }
 
 fn playground_frame(e: &PlaygroundEvent) -> Bytes {
@@ -1022,9 +1030,10 @@ async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: to
     let started = std::time::Instant::now();
     log::info!(
         target: "pitwall_chat",
-        "chat started: model {}, {} messages, {} tools",
+        "chat started: model {}, {} messages, {} images, {} tools",
         req.model_id,
         req.messages.len(),
+        req.messages.iter().map(|m| m.images.len()).sum::<usize>(),
         req.tools.len()
     );
     let model = req.model_id.clone();
@@ -1093,7 +1102,24 @@ async fn run_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: toki
     {
         return;
     }
-    let start = st.start_chat(&Principal::Admin, meta, playground_chat_request(&req));
+    let chat_request = match playground_chat_request(&req) {
+        Ok(r) => r,
+        Err(cause) => {
+            *outcome = ChatOutcome::Failed {
+                code: mgmt::ErrorCode::BadRequest,
+                cause: cause.clone(),
+            };
+            send(PlaygroundEvent::Error {
+                error: err(
+                    mgmt::ErrorCode::BadRequest,
+                    format!("{cause}. Remove the image and attach it again."),
+                ),
+            })
+            .await;
+            return;
+        }
+    };
+    let start = st.start_chat(&Principal::Admin, meta, chat_request);
     tokio::pin!(start);
     let mut tick = tokio::time::interval(LOADING_TICK);
     tick.tick().await;
@@ -1320,6 +1346,46 @@ mod tests {
     use super::*;
     use crate::egress::DownloadError;
     use pitwall_core::mgmt::ErrorCode;
+
+    fn playground(messages: serde_json::Value) -> PlaygroundRequest {
+        serde_json::from_value(serde_json::json!({"modelId": "m", "messages": messages, "temperature": 0.2, "maxTokens": 8})).unwrap()
+    }
+
+    /// WP-5: a user message's images reach the neutral request as image parts after its text, in order; before, they were dropped.
+    #[test]
+    fn a_playground_message_carries_its_images_to_the_engine_request() {
+        use pitwall_core::chat::{ImageMime, Part};
+        let req = playground(serde_json::json!([
+            {"role": "user", "content": "what is this?", "images": [{"mime": "Png", "data": "iVBORw0KGgo="}, {"mime": "Jpeg", "data": "/9j/4A=="}]}
+        ]));
+        let chat = playground_chat_request(&req).unwrap();
+        let parts = &chat.messages[0].parts;
+        assert_eq!(parts.len(), 3);
+        assert!(matches!(&parts[0], Part::Text(t) if t == "what is this?"));
+        assert!(matches!(&parts[1], Part::Image(i) if i.mime == ImageMime::Png && i.data == "iVBORw0KGgo="));
+        assert!(matches!(&parts[2], Part::Image(i) if i.mime == ImageMime::Jpeg));
+        assert!(chat.check().is_ok());
+    }
+
+    /// The caller's images are checked again: bad base64, an image on a message that is not the user's, and more than the limit.
+    #[test]
+    fn a_playground_message_with_a_bad_image_is_refused_in_words() {
+        let bad = playground(serde_json::json!([{"role": "user", "content": "x", "images": [{"mime": "Png", "data": "***"}]}]));
+        assert!(playground_chat_request(&bad).unwrap_err().contains("not valid base64"));
+        let wrong_role =
+            playground(serde_json::json!([{"role": "assistant", "content": "x", "images": [{"mime": "Png", "data": "iVBORw0KGgo="}]}]));
+        assert!(playground_chat_request(&wrong_role).unwrap_err().contains("only a user message"));
+        let many: Vec<_> = (0..pitwall_core::chat::MAX_IMAGES + 1)
+            .map(|_| serde_json::json!({"mime": "Png", "data": "iVBORw0KGgo="}))
+            .collect();
+        let over = playground(serde_json::json!([{"role": "user", "content": "x", "images": many}]));
+        assert!(playground_chat_request(&over)
+            .unwrap()
+            .check()
+            .unwrap_err()
+            .to_string()
+            .contains("too many images"));
+    }
 
     #[test]
     fn download_failures_are_not_reported_as_a_stopped_server() {

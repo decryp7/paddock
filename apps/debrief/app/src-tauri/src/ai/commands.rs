@@ -115,7 +115,7 @@ pub async fn ai_start<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, request
 }
 
 /// Stops this window's use cases: the running ones fail with `cancelled`, the waiting ones are dropped
-/// (chat turns have their own Stop). Returns how many.
+/// (chat turns have their own Stop). Returns how many it cancelled now; a job already stopping is not counted again.
 #[tauri::command]
 pub async fn ai_cancel<R: Runtime>(app: AppHandle<R>, win: CurrentWindow) -> Ai<usize> {
     core(&app)?;
@@ -236,8 +236,7 @@ pub(crate) fn run_turn(
         // Each tool call takes a short read lock; live tail and imports never wait for the model.
         let access = WindowStore(win.clone());
         let browser_env = browser.map(|b| b.env());
-        let store = win.engine.store().ok();
-        let names = win.names.for_assistant(store.as_deref());
+        let names = win.names.for_assistant();
         let mut env = ChatEnv::new(&assistant, (&access as &dyn StoreAccess).into()).with_names(names);
         if let (Some(b), Some(e)) = (browser, browser_env.as_ref()) {
             env = env.with_browser(e).with_pages(b.pages.clone());

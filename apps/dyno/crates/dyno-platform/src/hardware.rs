@@ -288,6 +288,10 @@ const MAX_DRIVES: usize = 16;
 
 impl SmartctlWear {
     /// A reader that looks for `smartctl` at these paths.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "a platform adapter for the build OS: the readers here run on this machine; a composition for another host calls with_host"
+    )]
     pub fn new(candidates: Vec<PathBuf>) -> SmartctlWear {
         SmartctlWear {
             candidates,

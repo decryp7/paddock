@@ -6,7 +6,7 @@
 # VMware Tools is absent on the Arm guest the newest active NAT lease of the VM's fixed MAC) only finds the guest and is not the guard.
 # Results go outside the repository: WP0_OUT, default $TMPDIR/dyno-wp0-out.
 set -euo pipefail
-PINNED=/Volumes/d7sst7/vms/paddock-win11-test
+PINNED=/Volumes/d8sst7/vm-data/paddock-win11-test
 VMX="$PINNED/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx"
 VMRUN="/Applications/VMware Fusion.app/Contents/Library/vmrun"
 SNAP=gui-session-tools

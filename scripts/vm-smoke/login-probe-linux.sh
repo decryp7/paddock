@@ -3,7 +3,7 @@
 # Usage: login-probe-linux.sh <path to Dyno_1.1.0_amd64.deb>   (a fresh clone of the Linux test VM, removed at the end; --no-audio; nothing on the host desktop)
 set -u
 DEB=${1:?deb path}; HERE=$(cd "$(dirname "$0")" && pwd)
-export TART_HOME=${TART_HOME:-/Volumes/d7sst7/dev-targets/tart-home}
+export TART_HOME=${TART_HOME:-/Volumes/d8sst7/vm-data/tart-from-home}
 VM=paddock-vmsmoke-linux-login-$$
 S='export XDG_RUNTIME_DIR=/run/user/1000 DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus'
 g() { tart exec $VM bash -c "$1"; }

@@ -4,7 +4,7 @@
 # Usage: login-probe-mac.sh <new Dyno .dmg> <1.0.0 .dmg>   (fresh clones of the macOS test VM, removed at the end; --no-audio; guest only)
 set -u
 NEW=${1:?new dmg}; OLD=${2:?1.0.0 dmg}; HERE=$(cd "$(dirname "$0")" && pwd)
-export TART_HOME=${TART_HOME:-/Volumes/d7sst7/dev-targets/tart-home}
+export TART_HOME=${TART_HOME:-/Volumes/d8sst7/vm-data/tart-from-home}
 BASE=${PADDOCK_MAC_BASE:-vmgui-base-tahoe-4aaa751f}
 STAGE=$(mktemp -d /private/tmp/claude-501/login-mac-stage.XXXXXX); cp "$NEW" $STAGE/new.dmg; cp "$OLD" $STAGE/old.dmg
 res() { echo "RESULT $1: $2 -- $3"; }

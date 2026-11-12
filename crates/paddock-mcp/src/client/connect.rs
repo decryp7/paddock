@@ -179,6 +179,143 @@ impl LoopbackLink {
     }
 }
 
+/// How often a wait on the app looks at whether its process still runs. A process that was killed leaves a socket that may
+/// still complete a connection but never answers it; the wait ends within this, not at the end of its limit.
+const OWNER_LOOK: Duration = Duration::from_millis(100);
+
+/// Why a wait on the app ended without an answer.
+enum Waited {
+    /// The process the discovery file names is no longer the one that started when it says (rule 53).
+    OwnerGone,
+    /// The socket failed or the limit passed.
+    Failed(std::io::Error),
+}
+
+impl From<std::io::Error> for Waited {
+    fn from(e: std::io::Error) -> Self {
+        Waited::Failed(e)
+    }
+}
+
+/// Connects to the app's port in short tries, looking at its process between them, for at most `limit` (a live but slow app is
+/// still waited for). Windows retries a refused loopback connection for about 2 s, so a dead listener can cost that long per try
+/// there; the look between tries is what ends the wait when the owner is gone.
+fn connect_watching(hint: &Discovery, limit: Duration, alive: &Alive) -> Result<TcpStream, Waited> {
+    let addr = ([127, 0, 0, 1], hint.port).into();
+    let end = Instant::now() + limit;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        match TcpStream::connect_timeout(&addr, left.min(OWNER_LOOK).max(Duration::from_millis(1)))
+        {
+            Ok(s) => return Ok(s),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                if !alive(hint) {
+                    return Err(Waited::OwnerGone);
+                }
+                if left.is_zero() {
+                    return Err(Waited::Failed(e));
+                }
+            }
+            Err(e) => return Err(Waited::Failed(e)),
+        }
+    }
+}
+
+/// Reads the answer line into `into` (at most [`MAX_ANSWER`] bytes) within `limit`, looking at the app's process every
+/// [`OWNER_LOOK`] while nothing arrives: a gone owner ends the wait at once. The socket is waited on with a readiness poll
+/// (mio) and read without blocking, never with a receive timeout (Windows documents the socket as indeterminate after one) and
+/// never by ending the connection from another thread (Windows does not complete a pending blocking `recv` on `shutdown`: the
+/// client then waited the whole limit, CI 7943). Bytes after the line stay in `reader` for the protocol. A read that ends in EOF
+/// or an error because the owner died (the OS closes its sockets) is the app being gone, not a closed connection.
+fn read_answer(
+    stream: &SharedStream,
+    reader: &mut BufReader<SharedStream>,
+    into: &mut Vec<u8>,
+    hint: &Discovery,
+    limit: Duration,
+    alive: &Arc<Alive>,
+) -> Result<(), Waited> {
+    // A second handle on the same socket for the poll's registration; dropping it leaves the connection open.
+    let mut source = mio::net::TcpStream::from_std(stream.0.try_clone()?);
+    stream.0.set_nonblocking(true)?;
+    let read = wait_for_line(&mut source, reader, into, hint, limit, alive);
+    // Back to the blocking socket the protocol reads, whatever the wait ended with.
+    let restored = stream.0.set_nonblocking(false);
+    drop(source);
+    let read = match read {
+        Err(Waited::OwnerGone) => return Err(Waited::OwnerGone),
+        Err(Waited::Failed(e)) => Err(e),
+        Ok(n) => Ok(n),
+    };
+    let ended = !matches!(read, Ok(n) if n > 0);
+    if ended && !alive(hint) {
+        return Err(Waited::OwnerGone);
+    }
+    restored?;
+    read.map(|_| ()).map_err(Waited::Failed)
+}
+
+/// The poll loop of [`read_answer`]: the bytes appended to `into` (0 at EOF), [`Waited::OwnerGone`] when a look finds the owner
+/// gone, a `TimedOut` error at `limit`.
+fn wait_for_line(
+    source: &mut mio::net::TcpStream,
+    reader: &mut BufReader<SharedStream>,
+    into: &mut Vec<u8>,
+    hint: &Discovery,
+    limit: Duration,
+    alive: &Arc<Alive>,
+) -> Result<usize, Waited> {
+    let started = Instant::now();
+    let mut poll = mio::Poll::new()?;
+    poll.registry()
+        .register(source, mio::Token(0), mio::Interest::READABLE)?;
+    let mut events = mio::Events::with_capacity(4);
+    let max = usize::try_from(MAX_ANSWER).unwrap_or(usize::MAX);
+    let first = into.len();
+    loop {
+        // Readiness is edge-triggered: read until the socket has nothing more before waiting again.
+        loop {
+            let buf = match reader.fill_buf() {
+                Ok(buf) => buf,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(Waited::Failed(e)),
+            };
+            if buf.is_empty() {
+                return Ok(into.len() - first);
+            }
+            let room = max - (into.len() - first);
+            let (take, done) = match buf.iter().take(room).position(|&b| b == b'\n') {
+                Some(i) => (i + 1, true),
+                None => (buf.len().min(room), buf.len() >= room),
+            };
+            into.extend_from_slice(&buf[..take]);
+            reader.consume(take);
+            if done {
+                return Ok(into.len() - first);
+            }
+        }
+        let left = limit.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            return Err(Waited::Failed(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("no answer within {} ms", limit.as_millis()),
+            )));
+        }
+        match poll.poll(&mut events, Some(left.min(OWNER_LOOK))) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(Waited::Failed(e)),
+        }
+        if events.is_empty() && !alive(hint) {
+            return Err(Waited::OwnerGone);
+        }
+    }
+}
+
 /// Connects with the default limits; see [`connect_loopback_with`].
 ///
 /// # Errors
@@ -197,9 +334,28 @@ pub fn connect_loopback_with(
     key: &str,
     limits: ConnectLimits,
 ) -> Result<LoopbackLink, ConnectError> {
+    connect_checked(
+        discovery,
+        key,
+        limits,
+        Arc::new(|d: &Discovery| d.writer_alive()),
+    )
+}
+
+/// How the handshake asks whether the app's process still runs (rule 53: pid with start time). The real one is
+/// [`Discovery::writer_alive`]; a test counts the looks.
+type Alive = dyn Fn(&Discovery) -> bool + Send + Sync;
+
+/// [`connect_loopback_with`] with the owner check given.
+fn connect_checked(
+    discovery: &Path,
+    key: &str,
+    limits: ConnectLimits,
+    alive: Arc<Alive>,
+) -> Result<LoopbackLink, ConnectError> {
     let started = Instant::now();
     let hint = Discovery::read(discovery)
-        .filter(Discovery::writer_alive)
+        .filter(|d| alive(d))
         .ok_or_else(|| {
             log::info!(
                 "paddock_mcp client: no live discovery file at {}",
@@ -210,33 +366,53 @@ pub fn connect_loopback_with(
             }
         })?;
     let app = hint.app.clone();
-    let tcp = TcpStream::connect_timeout(&([127, 0, 0, 1], hint.port).into(), limits.connect)
-        .map_err(|e| {
+    let not_open = |why: &str| {
+        log::info!(
+            "paddock_mcp client: {app} is gone ({why}), after {} ms",
+            started.elapsed().as_millis()
+        );
+        ConnectError::NotOpen { app: app.clone() }
+    };
+    let tcp = connect_watching(&hint, limits.connect, &*alive).map_err(|e| match e {
+        Waited::OwnerGone => not_open("its process ended while connecting"),
+        Waited::Failed(e) => {
             log::warn!(
                 "paddock_mcp client: connect to {app} on port {} failed: {e}",
                 hint.port
             );
             ConnectError::NotOpen { app: app.clone() }
-        })?;
+        }
+    })?;
     let _ = tcp.set_nodelay(true);
     let stream = SharedStream(Arc::new(tcp));
     let mut reader = BufReader::new(stream.clone());
     // The key line and its answer are bounded in time and size; the protocol that follows has its own limits.
-    let mut first = String::new();
+    let mut first = Vec::new();
     let read = (|| {
-        stream.0.set_read_timeout(Some(limits.answer))?;
         writeln!(stream.clone(), "{}", serde_json::json!({"key": key}))?;
-        let n = reader.by_ref().take(MAX_ANSWER).read_line(&mut first)?;
-        stream.0.set_read_timeout(None)?;
-        Ok::<usize, std::io::Error>(n)
+        read_answer(
+            &stream,
+            &mut reader,
+            &mut first,
+            &hint,
+            limits.answer,
+            &alive,
+        )?;
+        Ok::<usize, Waited>(first.len())
     })()
-    .map_err(|e| {
-        log::warn!("paddock_mcp client: {app} gave no answer to the key: {e}");
-        ConnectError::NoAnswer {
-            app: app.clone(),
-            cause: e.to_string(),
+    .map_err(|e| match e {
+        Waited::OwnerGone => not_open("its process ended before it answered the key"),
+        // A write to a socket the dying owner closed fails like any other: look at the owner before blaming the app's answer.
+        Waited::Failed(_) if !alive(&hint) => not_open("its process ended while the key was sent"),
+        Waited::Failed(e) => {
+            log::warn!("paddock_mcp client: {app} gave no answer to the key: {e}");
+            ConnectError::NoAnswer {
+                app: app.clone(),
+                cause: e.to_string(),
+            }
         }
     })?;
+    let first = String::from_utf8_lossy(&first).into_owned();
     if read == 0 {
         log::warn!("paddock_mcp client: {app} closed the connection before answering the key");
         return Err(ConnectError::ClosedEarly { app });
@@ -268,4 +444,66 @@ pub fn connect_loopback_with(
         app,
         version: hint.version,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A live owner that is busy: its answer comes only after the client has looked at its process several times, so the
+    /// handshake keeps waiting while the owner is alive (no sleep: the peer waits for the third look, counted by the check).
+    #[test]
+    fn a_live_owner_that_answers_after_several_looks_is_still_waited_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let me = paddock_proc::ProcessId::of(std::process::id()).unwrap();
+        let hint = Discovery {
+            pid: me.pid(),
+            started_us: me.started().as_micros(),
+            port: listener.local_addr().unwrap().port(),
+            app: "Demo".into(),
+            version: "1".into(),
+        };
+        let file = crate::listener::discovery_path(dir.path());
+        std::fs::write(&file, serde_json::to_string(&hint).unwrap()).unwrap();
+        let looks = Arc::new(AtomicUsize::new(0));
+        let (third, third_look) = std::sync::mpsc::channel::<()>();
+        let third = Mutex::new(third);
+        let alive: Arc<Alive> = {
+            let looks = looks.clone();
+            Arc::new(move |_| {
+                if looks.fetch_add(1, Ordering::SeqCst) + 1 == 3 {
+                    let _ = third.lock().unwrap().send(());
+                }
+                true
+            })
+        };
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            // The first look is the one before connecting, the next two are the watcher's while this read waits.
+            third_look.recv_timeout(Duration::from_secs(30)).unwrap();
+            writeln!(
+                stream,
+                "{}",
+                serde_json::json!({"ok": true, "client": "Demo"})
+            )
+            .unwrap();
+            let _ = BufReader::new(stream).read_line(&mut line);
+        });
+        let limits = ConnectLimits {
+            connect: Duration::from_secs(30),
+            answer: Duration::from_secs(30),
+        };
+        let link = connect_checked(&file, "pmk_x", limits, alive).unwrap();
+        assert_eq!(link.app(), "Demo");
+        assert!(looks.load(Ordering::SeqCst) >= 3);
+        drop(link);
+        peer.join().unwrap();
+    }
 }

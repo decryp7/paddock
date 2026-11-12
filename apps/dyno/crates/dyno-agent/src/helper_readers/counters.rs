@@ -13,6 +13,7 @@
 use crate::helper_first::{HelperCalls, HelperFirst, HelperPort, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::helper_counters::{CounterAnswer, CounterValue, EnergyDomain};
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_requests::{CounterId, CounterQuery, RequestClass};
 use dyno_core::metrics::{Fan, Reading, SystemSample, Temperature};
 use dyno_core::ports::SystemSensors;
@@ -39,7 +40,10 @@ pub struct CounterSet {
 }
 
 /// The macOS readings.
-pub struct MacCounters;
+pub struct MacCounters {
+    /// Whether this computer is one the helper reads counters on; an inactive reading never asks the helper.
+    pub active: bool,
+}
 
 fn outcome<T>(answers: &[CounterAnswer], id: CounterId, pick: impl FnOnce(&CounterValue) -> Option<T>) -> Result<T, String> {
     match answers.iter().find(|a| a.id == id) {
@@ -53,6 +57,11 @@ fn outcome<T>(answers: &[CounterAnswer], id: CounterId, pick: impl FnOnce(&Count
 
 impl HelperReading for MacCounters {
     type Value = CounterSet;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Counters];
+
+    fn helper_applies(&self) -> bool {
+        self.active
+    }
 
     fn name(&self) -> &'static str {
         "temperatures, fans and CPU energy"
@@ -148,7 +157,7 @@ impl HelperClimate {
     pub fn new(port: Box<dyn HelperPort>, active: bool, saved: BTreeMap<i64, f64>) -> HelperClimate {
         HelperClimate {
             active,
-            reading: Mutex::new(HelperFirst::new(MacCounters, port)),
+            reading: Mutex::new(HelperFirst::new(MacCounters { active }, port)),
             state: Mutex::new(State {
                 view: None,
                 at: None,
@@ -408,7 +417,7 @@ mod tests {
             maxes[..maxes.len() - 1].iter().all(|m| *m == Some(crate::helper_link::LIVE_WAIT)),
             "the readiness probe is always live: {maxes:?}"
         );
-        assert_eq!(MacCounters.class(), ReadClass::Bulk);
+        assert_eq!(MacCounters { active: true }.class(), ReadClass::Bulk);
     }
 
     fn reply(a: Vec<CounterAnswer>) -> Result<dyno_core::helper_wire::HelperReply, crate::helper_link::TransportError> {

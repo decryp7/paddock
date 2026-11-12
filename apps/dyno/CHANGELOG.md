@@ -4,10 +4,15 @@
 
 ### Fixed
 
+- An administrator helper from an older Dyno that Dyno still accepts is now offered the newer helper that ships with the app: Settings shows "Update available" and "Update the helper", and the helper's readings keep working until you choose to update. A helper of the same version and build, or a newer one, is left alone; a newer one is never replaced by an older one. The agent's checks of its own program file now end on time even on a busy computer.
+- A helper version with a pre-release suffix (for example 1.1.0-beta.1) now counts as below the release it precedes, as SemVer says, so a pre-release helper is no longer accepted where 1.1.0 is the minimum. Settings now says "Update needed" for a helper that must be updated before Dyno can use it.
+- The dyno mcp command and other AI clients now say "Dyno isn't open" within a second when the Dyno app was killed, instead of waiting about ten seconds for an answer that cannot come. An app that is merely slow to answer is still waited for.
 - When Dyno cannot find your home folder, it no longer falls back to a shared folder in the temporary folder, where another user on the same computer could have put a file for Dyno to trust. It now uses a private folder made for your account only and refuses a folder that belongs to someone else or is a link. If no safe folder exists, the command stops and says what to set. The file that tells the app where the agent is runs is also ignored when its folder is a link or belongs to another user.
 
 ### Changed
 
+- Memory modules on Windows and macOS are now read by the agent itself, so their source shows Local instead of the helper.
+- On Linux the helper's card now lists disk health (SMART), which it already read for the wear forecast.
 - Health no longer says "Nothing needs your attention" when it could not read a fact the score looks at (disk health, a pending restart, pending updates). It says "Nothing found in what Dyno could check" and lists what was not checked; facts Dyno never reads on this OS are listed once as coverage. The score is unchanged. This is another protocol version (8), so an older app or agent is replaced at the next start.
 - A job that a limit stopped now says which limit it was. The app and the agent of this version talk a new protocol, so an older Dyno app or agent is replaced at the next start instead of being read wrongly.
 - Report a problem: the report now keeps private network addresses and this computer's own address, because they show how the network is set up and say nothing about who you are. Public addresses are still replaced.

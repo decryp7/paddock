@@ -9,6 +9,7 @@ use crate::helper_first::{HelperCalls, HelperFirst, HelperReading, ReadClass};
 use crate::helper_link::CallError;
 use dyno_core::hardware::DiskWear;
 use dyno_core::helper::HelperHost;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_requests::SmartQuery;
 use dyno_core::metrics::Reading;
 use dyno_core::ports::{DiskWearSource, PlatformError};
@@ -25,40 +26,29 @@ pub struct SmartWear {
 }
 
 impl SmartWear {
-    /// The reading with `local` as the agent's own reader.
-    pub fn new(local: Box<dyn DiskWearSource>) -> SmartWear {
-        SmartWear {
-            local,
-            host: dyno_platform::hardware::this_host(),
-        }
-    }
-
-    /// Reads as if on `host` (tests).
-    pub fn with_host(mut self, host: HelperHost) -> SmartWear {
-        self.host = host;
-        self
+    /// The reading for `host`, with `local` as the agent's own reader. The host is the one the composition builds for, never a
+    /// default taken from the machine the code runs on.
+    pub fn new(local: Box<dyn DiskWearSource>, host: HelperHost) -> SmartWear {
+        SmartWear { local, host }
     }
 }
 
 /// SSD wear through the seam.
 pub type HelperFirstWear = HelperFirst<SmartWear>;
 
-/// A wear reader over `port` with `local` as the fallback, switched as [`READ_LOCALLY_WHEN_HELPER_OFF`] says.
-pub fn helper_first_wear(port: Box<dyn crate::helper_first::HelperPort>, local: Box<dyn DiskWearSource>) -> HelperFirstWear {
-    helper_first_wear_on(dyno_platform::hardware::this_host(), port, local)
-}
-
-/// [`helper_first_wear`] as if on `host` (tests, so they read the same on every OS).
+/// A wear reader for `host` over `port` with `local` as the fallback, switched as [`READ_LOCALLY_WHEN_HELPER_OFF`] says. The
+/// composition passes the host it is composing for (the wiring test composes all three on one machine).
 pub fn helper_first_wear_on(
     host: HelperHost,
     port: Box<dyn crate::helper_first::HelperPort>,
     local: Box<dyn DiskWearSource>,
 ) -> HelperFirstWear {
-    HelperFirst::new(SmartWear::new(local).with_host(host), port).with_fallback(READ_LOCALLY_WHEN_HELPER_OFF)
+    HelperFirst::new(SmartWear::new(local, host), port).with_fallback(READ_LOCALLY_WHEN_HELPER_OFF)
 }
 
 impl HelperReading for SmartWear {
     type Value = Vec<DiskWear>;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Smart];
 
     fn name(&self) -> &'static str {
         "SSD wear"

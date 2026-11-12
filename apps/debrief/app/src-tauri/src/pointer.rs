@@ -5,11 +5,19 @@
 /// tell (then the host falls back to docking when the pointer rests on a guide).
 #[tauri::command]
 pub async fn pointer_button_down() -> Option<bool> {
-    primary_button_down()
+    platform_button_down()
+}
+
+/// What the host acts on: the platform's answer, or in tests the test's own (see [`hold_primary_button_for_test`]).
+pub(crate) fn primary_button_down() -> Option<bool> {
+    #[cfg(test)]
+    return TEST_BUTTON.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    platform_button_down()
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn primary_button_down() -> Option<bool> {
+fn platform_button_down() -> Option<bool> {
     // Bit 0 is the primary button, already mapped for left-handed setups by the system.
     Some(primary_in_mask(objc2_app_kit::NSEvent::pressedMouseButtons()))
 }
@@ -21,7 +29,7 @@ fn primary_in_mask(mask: usize) -> bool {
 }
 
 #[cfg(windows)]
-pub(crate) fn primary_button_down() -> Option<bool> {
+fn platform_button_down() -> Option<bool> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SWAPBUTTON};
     // GetAsyncKeyState reports physical buttons: with swapped buttons the primary one is the right button.
@@ -37,8 +45,21 @@ pub(crate) fn primary_button_down() -> Option<bool> {
 }
 
 #[cfg(not(any(target_os = "macos", windows)))]
-pub(crate) fn primary_button_down() -> Option<bool> {
+fn platform_button_down() -> Option<bool> {
     None
+}
+
+#[cfg(test)]
+thread_local! {
+    // The button as this test thread sets it; up unless a test holds it.
+    static TEST_BUTTON: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(Some(false)) };
+}
+
+/// Tests set what the primary button reports on their thread, so no test reads the real mouse of the machine it runs on (a
+/// click on the shared CI Mac failed a drag test, Debrief run 7955; ER-14).
+#[cfg(test)]
+pub(crate) fn hold_primary_button_for_test(down: Option<bool>) {
+    TEST_BUTTON.with(|b| b.set(down));
 }
 
 #[cfg(test)]

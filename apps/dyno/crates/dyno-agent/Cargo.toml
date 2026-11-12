@@ -71,8 +71,6 @@ postcard.workspace = true
 plist = "1"
 tempfile.workspace = true
 proptest = "1"
-# The source scan of tests/helper_wiring.rs (ADR 0052 section 1.1): which non-test code builds each helper request kind (MIT OR Apache-2.0).
-syn = { version = "2", features = ["full", "visit"] }
 
 # The tiny MMDB writer (`geo_db::testdb`) for the fuzz seed corpus.
 [features]

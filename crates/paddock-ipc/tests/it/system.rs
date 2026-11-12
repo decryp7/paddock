@@ -40,14 +40,41 @@ fn the_peer_facts_come_from_the_kernel_not_from_a_pid() {
     let (server, _client) = served_pair();
     let raw = server.raw_peer().unwrap();
     assert_eq!(raw.account, AccountId::Uid(uid));
-    match &raw.admin {
-        paddock_ipc::identity::AdminEvidence::Groups(g) => assert!(g.contains(&gid), "{g:?}"),
+    // The evidence is the peer's supplementary groups (`SO_PEERGROUPS`; `getgrouplist` on macOS): every group the process has
+    // appears in it, and a process with none (`setpriv --clear-groups`) has an empty list, not the primary gid.
+    let groups = {
+        // SAFETY: a size query, then a buffer of that many ids.
+        #[allow(unsafe_code)]
+        let n = unsafe { libc::getgroups(0, std::ptr::null_mut()) };
+        let mut mine = vec![0 as libc::gid_t; usize::try_from(n).unwrap()];
+        // SAFETY: `mine` holds `n` ids.
+        #[allow(unsafe_code)]
+        let n = unsafe { libc::getgroups(n, mine.as_mut_ptr()) };
+        mine.truncate(usize::try_from(n).unwrap());
+        mine
+    };
+    let admin_gid = match &raw.admin {
+        paddock_ipc::identity::AdminEvidence::Groups(g) => {
+            assert!(
+                groups.iter().all(|m| g.contains(m)),
+                "{g:?} lacks one of {groups:?}"
+            );
+            groups.first().copied()
+        }
         other => panic!("{other:?}"),
-    }
+    };
     // The pid is only for the audit line.
     assert_eq!(raw.audit.pid_for_log(), Some(std::process::id()));
-    let caller = caller_of(&server, &AdminRule::new([gid])).unwrap();
-    assert!(caller.is_admin(), "a member of a configured admin group");
+    // A member of a configured admin group is an administrator; with no supplementary group there is none to configure.
+    match admin_gid {
+        Some(g) => assert!(caller_of(&server, &AdminRule::new([g])).unwrap().is_admin()),
+        None => assert_eq!(
+            caller_of(&server, &AdminRule::new([gid]))
+                .unwrap()
+                .is_admin(),
+            uid == 0
+        ),
+    }
     assert_eq!(
         caller_of(&server, &AdminRule::default())
             .unwrap()

@@ -150,7 +150,7 @@ describe('guard rails', () => {
 // P1 of the 2026-11-08 review: only the test VM can ever be the target. A fake VM is allowed only with a fake Fusion AND a
 // folder under $TMPDIR; every other folder is refused before vmrun, ssh, scp or any file write.
 describe('only paddock-win11-test can be the target', () => {
-  const commands = [['status'], ['start', '--no-wait'], ['stop'], ['ssh', 'exit 0'], ['put', 'paddock-test', '/etc/hosts', 'C:\\x'], ['gui-setup'],
+  const commands = [['status'], ['start', '--no-wait'], ['stop'], ['ssh', 'exit 0'], ['put', 'paddock-test', '/etc/hosts', 'C:\\x'], ['gui-setup'], ['admin-setup'],
     ['snapshot', 'x'], ['revert', 'x'], ['ip'], ['install'], ['baseline']];
 
   test('another VM folder outside $TMPDIR is refused by every command, even with a fake Fusion, before any call', () => {
@@ -159,7 +159,7 @@ describe('only paddock-win11-test can be the target', () => {
     for (const args of commands) {
       const r = run('vm-win.sh', args, { PADDOCK_WIN_VM_DIR: other, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' });
       assert.notEqual(r.status, 0, `${args[0]} was not refused`);
-      assert.match(r.stderr, /only drives \/Volumes\/d7sst7\/vms\/paddock-win11-test/, `${args[0]}: ${r.stderr}`);
+      assert.match(r.stderr, /only drives \/Volumes\/d8sst7\/vm-data\/paddock-win11-test/, `${args[0]}: ${r.stderr}`);
     }
     assert.equal(calls(f.log), '');
     assert.equal(existsSync(other), false);
@@ -275,7 +275,7 @@ describe('only paddock-win11-test can be the target', () => {
     const other = '/Volumes/no-such-volume-paddock-test/vms/someone-elses-vm'; // not creatable, so a regression cannot leave a folder behind
     const r = run('vm-win/prepare.sh', ['--vm-only'], { PADDOCK_WIN_VM_DIR: other, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' });
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /only drives \/Volumes\/d7sst7\/vms\/paddock-win11-test/);
+    assert.match(r.stderr, /only drives \/Volumes\/d8sst7\/vm-data\/paddock-win11-test/);
     assert.equal(existsSync(other), false);
     assert.equal(calls(f.log), '');
   });
@@ -300,6 +300,231 @@ describe('vmrun password', () => {
     const calls = readFileSync(log, 'utf8');
     assert.match(calls, /^-T fusion snapshot \S+paddock-win11-test\.vmx probe$/m);
     assert.doesNotMatch(calls, /-vp|security/);
+  });
+});
+
+describe('revert chooses the snapshot', () => {
+  const setup = (label) => {
+    const dir = fakeVm(join(scratch, label));
+    const fusion = join(scratch, `${label}Fusion.app`);
+    const log = join(scratch, `${label}-vmrun.log`);
+    mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
+    writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\nguestOS = "arm-windows11-64"\n');
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    writeFileSync(join(fusion, 'Contents/Library/vmrun'), `#!/bin/sh\necho "$*" >> '${log}'\nfor a in "$@"; do [ "$a" = listSnapshots ] && printf 'Total snapshots: 2\\nclean-baseline\\nadmin-baseline\\n'; done\nexit 0\n`);
+    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
+    const revert = (args, env = {}) => run('vm-win.sh', ['revert', ...args], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, ...env });
+    return { revert, reverted: () => [...calls(log).matchAll(/revertToSnapshot \S+ (\S+)$/gm)].map((m) => m[1]) };
+  };
+
+  test('the default stays clean-baseline', macOnly, () => {
+    const t = setup('rv-default');
+    assert.equal(t.revert([]).status, 0);
+    assert.deepEqual(t.reverted(), ['clean-baseline']);
+  });
+
+  test('--snapshot <name> and the positional name choose another one', macOnly, () => {
+    const t = setup('rv-choose');
+    assert.equal(t.revert(['--snapshot', 'admin-baseline']).status, 0);
+    assert.equal(t.revert(['admin-baseline']).status, 0);
+    assert.deepEqual(t.reverted(), ['admin-baseline', 'admin-baseline']);
+  });
+
+  test('--snapshot without a name, or an unknown snapshot, fails before any revert', macOnly, () => {
+    const t = setup('rv-bad');
+    const a = t.revert(['--snapshot']);
+    assert.notEqual(a.status, 0);
+    assert.match(a.stderr, /usage: vm-win\.sh revert --snapshot <name>/);
+    const b = t.revert(['--snapshot', 'no-such']);
+    assert.notEqual(b.status, 0);
+    assert.match(b.stderr, /no snapshot named no-such/);
+    assert.deepEqual(t.reverted(), []);
+  });
+});
+
+// admin-setup and stop with a stateful fake vmrun and fake ssh/scp (review of 58ca20fb3, P1-1..P1-3): nothing touches Fusion or the real VM.
+describe('admin-setup and stop: cleanup, hangs, lock', macOnly, () => {
+  const VMX = 'paddock-win11-test.vmwarevm/paddock-win11-test.vmx';
+  /** A fake VM dir with keys and leases, a stateful vmrun (running flag, snapshot list) and fake ssh/scp driven by env: FAKE_SSH_FAIL / FAKE_SSH_HANG (text in the command). */
+  const rig = (label, { snaps = 'clean-baseline', vmxExtra = '' } = {}) => {
+    const dir = fakeVm(join(scratch, `${label}-vm`));
+    const vmx = join(dir, 'vm', VMX);
+    mkdirSync(dirname(vmx), { recursive: true });
+    writeFileSync(vmx, `.encoding = "UTF-8"\nguestOS = "arm-windows11-64"\n${vmxExtra}`);
+    mkdirSync(join(dir, 'keys'), { recursive: true });
+    writeFileSync(join(dir, 'keys/setup-passwords'), 'paddock-admin=a\npaddock-test=fake-pw\n');
+    const leases = join(scratch, `${label}.leases`);
+    writeFileSync(leases, 'lease 172.16.119.50 {\n  hardware ethernet 00:50:56:2a:d0:c7;\n}\n');
+    const st = mkdtempSync(join(scratch, `${label}-state-`));
+    const log = join(st, 'calls.log');
+    const pids = join(st, 'hung.pids');
+    writeFileSync(join(st, 'snaps'), `${snaps.split(',').join('\n')}\n`);
+    const fusion = join(scratch, `${label}Fusion.app`);
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    const sh = (file, body) => { writeFileSync(file, `#!/bin/sh\n${body}\n`); chmodSync(file, 0o755); };
+    sh(join(fusion, 'Contents/Library/vmrun'), `echo "vmrun $*" >> '${log}'
+if [ -n "$FAKE_VMRUN_HANG" ] && [ "$3" = "$FAKE_VMRUN_HANG" ]; then echo $$ >> '${pids}.vmrun'; exec tail -f /dev/null; fi
+case "$3" in
+  list) echo "Total running VMs: 0"; [ -f '${st}/running' ] && echo '${vmx}'; exit 0 ;;
+  start) touch '${st}/running' ;;
+  stop | revertToSnapshot) rm -f '${st}/running' ;;
+  listSnapshots) echo "Total snapshots: x"; cat '${st}/snaps' ;;
+  snapshot) echo "$5" >> '${st}/snaps' ;;
+  deleteSnapshot) grep -vFx "$5" '${st}/snaps' > '${st}/snaps.new'; mv '${st}/snaps.new' '${st}/snaps' ;;
+esac
+exit 0`);
+    const bin = join(scratch, `${label}-bin`);
+    mkdirSync(bin, { recursive: true });
+    sh(join(bin, 'ssh'), `for a; do last=$a; done
+echo "ssh $last" >> '${log}'
+case "$last" in *shutdown*) [ -n "$FAKE_SSH_NOSHUT" ] || rm -f '${st}/running' ;; esac
+if [ -n "$FAKE_SSH_FAIL" ] && printf %s "$last" | grep -Fq -- "$FAKE_SSH_FAIL"; then echo "fake ssh: boom" >&2; exit 3; fi
+if [ -n "$FAKE_SSH_HANG" ] && printf %s "$last" | grep -Fq -- "$FAKE_SSH_HANG"; then echo $$ >> '${pids}'; exec tail -f /dev/null; fi
+exit 0`);
+    sh(join(bin, 'scp'), `echo "scp $*" >> '${log}'; exit 0`);
+    sh(join(bin, 'security'), 'exit 1');
+    const env = { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PATH: `${bin}:${process.env.PATH}`, PADDOCK_VM_MAX_LOAD: '100000', PADDOCK_VM_LEASES: leases, FAKE_SSH_FAIL: '', FAKE_SSH_HANG: '', FAKE_SSH_NOSHUT: '', FAKE_VMRUN_HANG: '' };
+    const hungVmrun = () => (existsSync(`${pids}.vmrun`) ? readFileSync(`${pids}.vmrun`, 'utf8').split('\n').filter(Boolean).map(Number) : []);
+    const hung = () => (existsSync(pids) ? readFileSync(pids, 'utf8').split('\n').filter(Boolean).map(Number) : []);
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    return { env, log, st, vmx, hung, hungVmrun, alive, running: () => existsSync(join(st, 'running')), snaps: () => readFileSync(join(st, 'snaps'), 'utf8').split('\n').filter(Boolean), calls: () => calls(log), vmrunCalls: () => calls(log).split('\n').filter((l) => l.startsWith('vmrun ')) };
+  };
+  const killHung = (t) => t.hung().forEach((p) => { try { process.kill(p, 'SIGKILL'); } catch { /* gone */ } });
+  const stopsAndReverts = (t) => {
+    const v = t.vmrunCalls().filter((l) => / (stop|revertToSnapshot) /.test(l));
+    assert.ok(v.some((l) => / stop .*hard$/.test(l)), `stop hard in ${v}`);
+    assert.match(v.at(-1), /revertToSnapshot \S+ clean-baseline$/, 'the last call reverts to clean-baseline');
+  };
+  const neverTouchedBaseline = (t) => assert.doesNotMatch(t.calls(), /vmrun -T fusion (snapshot|deleteSnapshot) \S+ clean-baseline/);
+
+  test('a complete admin-setup takes admin-baseline once, replaces an old one, and ends reverted and off', () => {
+    const t = rig('as-ok', { snaps: 'clean-baseline,admin-baseline' });
+    const r = run('vm-win.sh', ['admin-setup'], t.env);
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(t.snaps(), ['clean-baseline', 'admin-baseline']);
+    assert.match(t.calls(), /deleteSnapshot \S+ admin-baseline/);
+    assert.match(t.calls(), /vmrun -T fusion snapshot \S+ admin-baseline$/m);
+    assert.equal(t.running(), false);
+    assert.doesNotMatch(t.calls(), / stop \S+ hard/);
+    assert.match(t.vmrunCalls().at(-1), /revertToSnapshot \S+ clean-baseline$/);
+    neverTouchedBaseline(t);
+    assert.doesNotMatch(r.stderr, /::warning::|::error::/);
+  });
+
+  test('P1-3a: a failing PowerShell step exits 1 with ::error::, stops hard, reverts to clean-baseline, and never snapshots or deletes clean-baseline', () => {
+    const t = rig('as-fail');
+    const r = run('vm-win.sh', ['admin-setup'], { ...t.env, FAKE_SSH_FAIL: '-File C:\\paddock-test\\admin-setup.ps1' });
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /::error::admin-setup failed at: admin-setup\.ps1/);
+    assert.match(r.stderr, /::error::admin-setup did not finish/);
+    stopsAndReverts(t);
+    assert.equal(t.running(), false);
+    assert.doesNotMatch(t.calls(), /vmrun -T fusion (snapshot|deleteSnapshot) /);
+    neverTouchedBaseline(t);
+  });
+
+  test('P1-1: a PowerShell step that hangs ends at its deadline, kills the hung ssh, and cleans up', () => {
+    const t = rig('as-hang');
+    const r = spawnSync('bash', [join(here, 'vm-win.sh'), 'admin-setup'], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, ...lockEnv, ...t.env, FAKE_SSH_HANG: '-File C:\\paddock-test\\admin-setup.ps1', PADDOCK_VM_STEP_DEADLINE: '2' } }); // conformance: hang-guard — 60 s only stops a regression that never ends
+    killHung(t);
+    assert.equal(r.status, 1, `${r.status} ${r.signal} ${r.stderr}`);
+    assert.match(r.stderr, /::error::no answer within 2s/);
+    stopsAndReverts(t);
+    assert.ok(t.hung().length > 0, 'the ssh did hang');
+  });
+
+  test('P1-1: TERM in the middle of a step stops the VM, reverts to clean-baseline and leaves no ssh behind', async () => {
+    const t = rig('as-term');
+    const child = spawn('bash', [join(here, 'vm-win.sh'), 'admin-setup'], { env: { ...process.env, ...lockEnv, ...t.env, FAKE_SSH_HANG: '-File C:\\paddock-test\\admin-setup.ps1' }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let err = '';
+    child.stderr.on('data', (d) => { err += d; });
+    const exited = new Promise((r) => child.on('exit', (code, sig) => r({ code, sig })));
+    for (let i = 0; i < 300 && t.hung().length === 0; i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 30 s bound that only stops a hung child
+    assert.ok(t.hung().length > 0, 'the step is waiting');
+    child.kill('SIGTERM');
+    const { code } = await exited;
+    killHung(t);
+    assert.equal(code, 143, err);
+    stopsAndReverts(t);
+    assert.equal(t.running(), false);
+    assert.match(err, /::error::admin-setup did not finish/);
+    for (const p of t.hung()) assert.equal(t.alive(p), false, `fake ssh ${p} did not outlive the script`);
+  });
+
+  test('P2: a vmrun stop that hangs in the cleanup is ended at its deadline, with ::error:: and the next step, and the revert still runs', () => {
+    const t = rig('as-cleanup-hang');
+    const r = spawnSync('bash', [join(here, 'vm-win.sh'), 'admin-setup'], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, ...lockEnv, ...t.env, FAKE_SSH_FAIL: '-File C:\\paddock-test\\admin-setup.ps1', FAKE_VMRUN_HANG: 'stop', PADDOCK_VM_CLEANUP_DEADLINE: '2' } }); // conformance: hang-guard — 60 s only stops a regression that never ends
+    const hv = t.hungVmrun();
+    const survivors = hv.filter(t.alive);
+    hv.forEach((p) => { try { process.kill(p, 'SIGKILL'); } catch { /* gone */ } });
+    assert.equal(r.status, 1, `${r.status} ${r.signal} ${r.stderr}`);
+    assert.ok(hv.length > 0, 'the vmrun stop hung');
+    assert.deepEqual(survivors, []);
+    assert.match(r.stderr, /::error::no answer within 2s: vmrun_exec stop hard/);
+    assert.match(r.stderr, /::error::could not power the VM off\. Next step/);
+    assert.match(t.vmrunCalls().at(-1), /revertToSnapshot \S+ clean-baseline$/);
+  });
+
+  test('P1-3c: admin-setup is refused while another holder has the lock, and never reaches vmrun', async () => {
+    const t = rig('as-lock');
+    const marker = join(mkdtempSync(join(scratch, 'held-')), 'held');
+    const holder = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire other-holder; touch '${marker}'; while :; do sleep 0.2; done`], { env: { ...process.env, ...lockEnv }, stdio: 'ignore', detached: true });
+    const exited = new Promise((r) => holder.on('exit', r));
+    try {
+      for (let i = 0; i < 150 && !existsSync(marker); i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a hung child
+      assert.ok(existsSync(marker));
+      const r = run('vm-win.sh', ['admin-setup'], t.env);
+      assert.equal(r.status, 75, r.stderr);
+      assert.match(r.stderr, /held by other-holder/);
+      assert.equal(t.calls(), '');
+    } finally {
+      try { process.kill(-holder.pid, 'SIGKILL'); } catch { /* gone */ }
+      await exited;
+    }
+  });
+
+  test('admin-setup never touches a running VM, and refuses a .vmx with VNC lines (before any change)', () => {
+    const t = rig('as-refuse');
+    writeFileSync(join(t.st, 'running'), '');
+    const r = run('vm-win.sh', ['admin-setup'], t.env);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /the VM is running/);
+    assert.doesNotMatch(t.calls(), /revertToSnapshot|stop|start/);
+    const v = rig('as-vnc', { vmxExtra: 'RemoteDisplay.vnc.enabled = "TRUE"\nRemoteDisplay.vnc.password = "x"\n' });
+    const r2 = run('vm-win.sh', ['admin-setup'], v.env);
+    assert.notEqual(r2.status, 0);
+    assert.match(r2.stderr, /RemoteDisplay\.vnc/);
+    assert.doesNotMatch(v.calls(), /revertToSnapshot|start/);
+  });
+
+  test('a shutdown that never powers the VM off is not snapshotted (clean shutdown), and the VM is stopped and reverted', () => {
+    const t = rig('as-noshut');
+    const r = spawnSync('bash', [join(here, 'vm-win.sh'), 'admin-setup'], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, ...lockEnv, ...t.env, FAKE_SSH_NOSHUT: '1', PADDOCK_VM_OFF_DEADLINE: '1' } }); // conformance: hang-guard — 60 s only stops a regression
+    assert.equal(r.status, 1, `${r.status} ${r.stderr}`);
+    assert.match(r.stderr, /::error::admin-setup failed at: clean shutdown/);
+    assert.doesNotMatch(t.calls(), /vmrun -T fusion snapshot /);
+    stopsAndReverts(t);
+  });
+
+  test('P1-3b / P1-2: stop with a hanging shutdown ssh returns, and no fake ssh survives', () => {
+    const t = rig('stop-hang');
+    writeFileSync(join(t.st, 'running'), '');
+    const r = spawnSync('bash', [join(here, 'vm-win.sh'), 'stop'], { encoding: 'utf8', timeout: 60_000, env: { ...process.env, ...lockEnv, ...t.env, FAKE_SSH_HANG: 'shutdown' } }); // conformance: hang-guard — 60 s only stops a regression that never ends
+    const pids = t.hung();
+    const survivors = pids.filter(t.alive);
+    killHung(t);
+    assert.equal(r.status, 0, `${r.status} ${r.signal} ${r.stderr}`);
+    assert.match(r.stdout, /stopped/);
+    assert.ok(pids.length > 0, 'the shutdown ssh ran');
+    assert.deepEqual(survivors, [], 'the hung ssh was ended by stop');
+  });
+
+  test('P1-2: a failed shutdown request is reported with its exit code and stderr tail (ER-27)', () => {
+    const t = rig('stop-fail');
+    writeFileSync(join(t.st, 'running'), '');
+    const r = run('vm-win.sh', ['stop'], { ...t.env, FAKE_SSH_FAIL: 'shutdown' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stderr, /::warning::shutdown request: exit 3; ssh said: .*fake ssh: boom/);
   });
 });
 

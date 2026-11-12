@@ -133,6 +133,14 @@ pub trait AssistantTool: Send + Sync {
         input.to_string()
     }
 
+    /// The first problem with `input` against this tool's schema, checked before the approval policy runs: a call that fails
+    /// never reaches a card (ADR 0023 Decision 9). Defaults to the small check of [`argument_problem`]; a tool whose schema
+    /// has more keywords overrides it with a full validator. A host whose tools write must override it with full schema
+    /// validation: the default only checks that the arguments are an object with their `required` keys.
+    fn argument_problem(&self, input: &Value) -> Option<String> {
+        argument_problem(&self.spec(), input)
+    }
+
     /// Runs the call.
     fn call(&self, input: &Value, cancel: &Cancel) -> ToolOutput;
 }

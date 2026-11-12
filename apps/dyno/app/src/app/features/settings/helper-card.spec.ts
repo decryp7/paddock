@@ -25,7 +25,8 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     ['silent', 'Not running', 'did not answer. Repair it', 'Repair the helper'],
     ['starting', 'Starting', 'The helper is starting', null],
     ['foreign', 'Not trusted', 'does not trust it', 'Repair the helper'],
-    ['outdated', 'Update available', 'needs helper version 1.1.0 or newer', 'Update the helper'],
+    ['outdated', 'Update needed', 'needs helper version 1.1.0 or newer', 'Update the helper'],
+    ['updateAvailable', 'On, update available', 'A newer helper ships with this Dyno', 'Update the helper'],
     ['ready', 'On', 'Administrator readings are on', null],
     ['notIncluded', 'Not available here', 'AppImage', null],
   ])('%s', async (variant, chip, message, primary) => {

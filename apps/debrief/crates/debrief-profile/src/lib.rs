@@ -20,7 +20,7 @@ pub mod wire;
 
 pub use builder::{FrameSpec, ProfileBuilder};
 pub use error::{ProfileError, Result};
-pub use import::{Capture, CaptureImporter, IMPORTERS_POINT};
+pub use import::{read_bounded, Capture, CaptureImporter, IMPORTERS_POINT};
 pub use limits::Limits;
 pub use model::*;
-pub use store::{fuzz_views, CaptureCatalog, Captures, HeapQueries, ProfileQueries, ProfileStore};
+pub use store::{fuzz_views, read_reloading, CaptureCatalog, Captures, HeapQueries, ProfileQueries, ProfileStore, Reload};

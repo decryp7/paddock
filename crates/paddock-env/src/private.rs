@@ -1,8 +1,26 @@
-//! The last-resort folder when no home folder is known.
+//! Private folders and files (ADR 0092): [`PrivateDir`] and [`PrivateFile`], owner-only from creation and checked from handles, and
+//! the last-resort folder when no home folder is known.
 //!
 //! A shared, fixed path such as `/tmp/Dyno` is never a fallback: another local user can create it first, and the app would then
 //! write into it or trust a discovery file planted there (rule 53). [`private_fallback_dir`] makes the one fallback that can pass
 //! the folder-trust check ([`crate::folder`]).
+
+mod acl;
+mod dir;
+mod error;
+#[cfg(unix)]
+mod unix;
+#[cfg(unix)]
+use unix as sys;
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+use windows as sys;
+
+#[cfg(any(test, feature = "test-support"))]
+pub use dir::AccountId;
+pub use dir::{PrivateDir, PrivateFile};
+pub use error::{PrivateError, PrivateResult};
 
 use crate::error::{EnvError, Result};
 use crate::folder::{FolderFacts, Refusal, current_uid, decide};

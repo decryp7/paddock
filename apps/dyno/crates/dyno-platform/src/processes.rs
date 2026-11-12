@@ -547,4 +547,48 @@ mod tests {
         };
         assert!(matches!(s.details(missing), Err(PlatformError::NotFound(_))));
     }
+
+    /// A guard for WP-10: a thread id (a task of `/proc/<pid>/task`) is never listed as a process, also after `details` refreshed with
+    /// tasks. It passes on sysinfo 0.40 without a code change: the list refresh there never keeps tasks.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn threads_are_not_listed_as_processes() {
+        let (stop, parked) = (
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            std::sync::Arc::new(std::sync::Barrier::new(5)),
+        );
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let (stop, parked) = (stop.clone(), parked.clone());
+                std::thread::spawn(move || {
+                    parked.wait();
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        std::thread::park_timeout(Duration::from_millis(20));
+                    }
+                })
+            })
+            .collect();
+        parked.wait();
+        let me = std::process::id();
+        let tids: Vec<u32> = std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+            .filter(|t| *t != me)
+            .collect();
+        assert!(tids.len() >= 4, "the test process has its own threads: {tids:?}");
+        let mut source = SysinfoProcesses::new(Box::new(NoDetails));
+        let first = source.processes();
+        // `details` refreshes with tasks, which puts the threads into sysinfo's table; the next list must not show them.
+        let mine = first.iter().find(|p| p.pid == me).expect("own process listed").reference();
+        source.details(mine).unwrap();
+        let listed = source.processes();
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for w in workers {
+            w.thread().unpark();
+            w.join().unwrap();
+        }
+        let leaked: Vec<u32> = listed.iter().map(|p| p.pid).filter(|p| tids.contains(p)).collect();
+        assert!(leaked.is_empty(), "threads listed as processes: {leaked:?}");
+        assert!(listed.iter().any(|p| p.pid == me), "the process itself is still listed");
+    }
 }

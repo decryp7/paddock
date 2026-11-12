@@ -47,7 +47,8 @@
    "global .gitea/workflows/ci.yml"
   ],
   "conformance": [
-   "global .gitea/workflows/ci.yml"
+   "global .gitea/workflows/ci.yml",
+   "conformance always runs"
   ],
   "crates": [
    "global .gitea/workflows/ci.yml"

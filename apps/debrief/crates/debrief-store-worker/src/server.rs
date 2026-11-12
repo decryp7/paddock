@@ -43,6 +43,27 @@ fn reply<T: Serialize>(v: &T) -> StoreResult<serde_json::Value> {
 
 pub use crate::plugins::install_plugins;
 
+/// Runs `work` on a thread named `name` and waits for it at most `budget`. `work` says what it is doing in the text it is
+/// given; on overrun the `Err` carries the last text, so the log names what was still running. The thread is left running
+/// then: the caller ends the process without running destructors.
+fn run_bounded(name: &str, budget: Duration, work: impl FnOnce(&Mutex<String>) + Send + 'static) -> Result<(), String> {
+    let doing = Arc::new(Mutex::new(String::from("starting the stop")));
+    let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+    let step = doing.clone();
+    let spawned = std::thread::Builder::new().name(name.into()).spawn(move || {
+        work(&step);
+        // The receiver is gone when the budget ran out: nobody waits for this any more.
+        let _ = done_tx.send(());
+    });
+    if let Err(e) = spawned {
+        return Err(format!("the thread {name} could not start: {e}"));
+    }
+    match done_rx.recv_timeout(budget) {
+        Ok(()) => Ok(()),
+        Err(_) => Err(format!("still {} after {} ms", lock(&doing), budget.as_millis())),
+    }
+}
+
 /// The stores of this worker.
 pub struct Worker {
     stores: Mutex<HashMap<u64, (PathBuf, DuckStore)>>,
@@ -75,6 +96,45 @@ impl Worker {
             mode,
             tuning: StoreTuning::default(),
         }
+    }
+
+    /// Stops what the worker owns that runs native code, within `budget`, before the process ends: every import session is
+    /// cancelled, each store's background threads (indexer, catalogue builder) are stopped and joined, the sessions are
+    /// waited for, the stores are dropped (closing their databases when nothing else holds them), and the plugin processes
+    /// are stopped together. Blocking joins run on a helper thread, so the bound holds.
+    ///
+    /// **Not stopped (open owners, for the exit phase's ratchet, ADR 0076 amendment WP-X1/X3):** the threads of calls in
+    /// flight (`spawn_blocking` work of the peer's handler is not waited for; the peer's close cancels it, but nothing joins
+    /// it, and the `DuckStore` clones it holds keep the databases open), the plugin processes' own threads, and the IPC
+    /// runtime's threads.
+    ///
+    /// `Err` names what was still running when the budget ran out (the thread being joined and its store): the caller
+    /// must then end the process without running static destructors, never return into `exit` under a live statement.
+    pub fn stop_for_exit(&self, budget: Duration) -> Result<(), String> {
+        let stores = std::mem::take(&mut *lock(&self.stores));
+        let sessions = std::mem::take(&mut *lock(&self.sessions));
+        let plugins = self.plugins.clone();
+        run_bounded("debrief-worker-stop", budget, move |doing| {
+            // Every session is asked to stop first, so an import that holds a store's write lock ends while the threads
+            // that wait for that lock are joined; then the sessions are waited for.
+            for session in sessions.values() {
+                session.cancel();
+            }
+            for (path, store) in stores.values() {
+                let path = path.display().to_string();
+                store.stop_for_exit(&|thread| *lock(doing) = format!("joining thread {thread} of the store {path}"));
+            }
+            for (id, session) in sessions {
+                *lock(doing) = format!("waiting for the import session {id}");
+                let _ = session.wait();
+            }
+            // The stores close before the plugins stop: a plugin that hangs is killed after its grace (longer than this
+            // budget), and that wait must not cost the databases their close.
+            *lock(doing) = "closing the stores".into();
+            drop(stores);
+            *lock(doing) = "stopping the plugin processes".into();
+            plugins.shutdown();
+        })
     }
 
     /// The worker with the knobs of Settings ▸ Performance over its mode's values.
@@ -415,17 +475,91 @@ fn tuned(base: StoreOptions, tuning: &StoreTuning) -> StoreOptions {
 ///
 /// `mode` is how the worker uses memory (its command line, see [`MemoryMode::from_args`]) and `tuning` the knobs of
 /// Settings ▸ Performance ([`StoreTuning::from_args`]).
+///
+/// `main` is the worker's only exit (the lifeline closes the connection instead of exiting, see
+/// [`debrief_ipc::child::lifeline_closing`]): once the connection is closed this stops the stores' threads within
+/// [`debrief_ipc::child::STOP_BUDGET`] before it returns into the C runtime's `exit`. A stop that overruns is logged and
+/// ends the process with `_exit` (no static destructors under a thread still inside DuckDB).
 pub fn run(plugins: Arc<dyn PluginSource>, mode: MemoryMode, tuning: StoreTuning) -> std::io::Result<()> {
-    debrief_ipc::child::child_main("Debrief", move |_| {
-        Arc::new(StoreHandler::new(Arc::new(
-            Worker::with_mode(plugins.clone(), mode).with_tuning(tuning.clone()),
-        )))
-    })
+    let worker = Arc::new(Worker::with_mode(plugins, mode).with_tuning(tuning));
+    let served = worker.clone();
+    let result = debrief_ipc::child::child_main("Debrief", move |_| Arc::new(StoreHandler::new(served)));
+    let started = std::time::Instant::now();
+    match worker.stop_for_exit(debrief_ipc::child::STOP_BUDGET) {
+        Ok(()) => log::info!("exit: the stores stopped in {} ms", started.elapsed().as_millis()),
+        Err(overran) => {
+            // stderr reaches Debrief's log for the worker; `_exit` flushes nothing.
+            eprintln!("debrief-store-worker: exit: the stop overran ({overran}); ending without running static destructors (exit code 0)");
+            debrief_ipc::child::end_without_destructors(0);
+        }
+    }
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bounded_stop_ends_with_its_work_or_names_what_it_was_doing_when_the_budget_ran_out() {
+        assert_eq!(
+            run_bounded("t-done", Duration::from_secs(30), |d| *lock(d) = "working".into()),
+            Ok(())
+        );
+        // Work that is still running when the budget ends (held until the test lets it go): the error names its last step.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let err = run_bounded("t-held", Duration::from_millis(50), move |d| {
+            *lock(d) = "joining thread debrief-catalogue of the store /x".into();
+            let _ = held.recv();
+        })
+        .unwrap_err();
+        assert!(
+            err.contains("joining thread debrief-catalogue of the store /x") && err.contains("50 ms"),
+            "{err}"
+        );
+        drop(release);
+    }
+
+    /// An import session is cancelled and waited for: dropping it detaches its `debrief-import` thread, which would run on
+    /// (and keep its store's connections open) while the process exits.
+    #[test]
+    fn stopping_for_exit_cancels_and_waits_for_the_import_sessions() {
+        let worker = Worker::default();
+        let ended = Arc::new(AtomicBool::new(false));
+        let progress = Arc::new(debrief_core::workspace::ImportProgress::default());
+        let seen = ended.clone();
+        let session = ImportSession::spawn(progress, move |p| {
+            // Runs until cancelled (bounded, so a failing run does not leave a spinning thread behind).
+            let give_up = std::time::Instant::now() + Duration::from_secs(30);
+            while !p.is_cancelled_flag() && std::time::Instant::now() < give_up {
+                std::thread::park_timeout(Duration::from_millis(5));
+            }
+            seen.store(true, Ordering::SeqCst);
+            Ok(Default::default())
+        })
+        .unwrap();
+        worker.session(session);
+        worker.stop_for_exit(Duration::from_secs(10)).unwrap();
+        assert!(ended.load(Ordering::SeqCst), "the import thread was still running after the stop");
+    }
+
+    /// The plugin processes are an explicit step of the stop (inside its budget), not left to a drop: a dropped worker
+    /// that was leaked, or ended with `_exit`, would leave their process groups behind.
+    #[test]
+    fn stopping_for_exit_stops_the_plugin_processes() {
+        struct Counting(AtomicBool);
+        impl PluginSource for Counting {
+            fn registry(&self, _: &PluginChoice<'_>) -> PluginRegistry {
+                PluginRegistry::new()
+            }
+            fn shutdown(&self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let source = Arc::new(Counting(AtomicBool::new(false)));
+        Worker::new(source.clone()).stop_for_exit(Duration::from_secs(10)).unwrap();
+        assert!(source.0.load(Ordering::SeqCst), "the plugin processes were not stopped");
+    }
 
     fn none(_: Vec<u8>) -> bool {
         true

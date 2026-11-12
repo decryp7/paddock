@@ -573,6 +573,8 @@ export interface LocalModel {
   capabilities: Capability[];
   /** A vision projector downloaded with it. */
   projector: string | null;
+  /** Most pixels of one picture its projector takes (its token budget); null without a readable projector. */
+  imageMaxPixels: number | null;
   addedAt: number;
   lastUsedAt: number | null;
   loaded: boolean;
@@ -1142,21 +1144,25 @@ export interface ChatStorage {
 
 /** What the chat's composer may attach (`chat_host::attach::AttachRules`, ADR 0023 WP-4b); Rust checks every file again. */
 export interface ChatAttachRules {
-  /** Largest file in bytes. */
+  /** Largest text file in bytes. */
   maxFileBytes: number;
   /** Most attachments one question carries. */
   maxCount: number;
+  /** Largest picture in bytes (WP-5). */
+  maxImageBytes: number;
   /** The file picker's filter. */
   accept: string;
   /** What can be attached, in a few words. */
   hint: string;
 }
 
-/** A file the chat took (`chat_host::attach::Attached`): the reference the question carries, its size and lines. */
+/** A file the chat took (`chat_host::attach::Attached`): the reference the question carries, its size and lines (a picture: its size in pixels and a small copy). */
 export interface ChatAttached {
-  attachment: { kind: 'file'; sha256: string; name: string };
+  attachment: { kind: 'file'; sha256: string; name: string } | { kind: 'image'; sha256: string; mime: string; width: number; height: number };
   bytes: number;
   lines: number;
+  /** A picture's small copy as a `data:` URL; null for text. */
+  thumbnail: string | null;
 }
 
 /** One model of the Chat tab's picker (`chat_host::models::ChatModel`). */
@@ -1166,6 +1172,24 @@ export interface ChatModel {
   loaded: boolean;
   /** Why it can't be chosen (no tool calls); null when it can. */
   disabled: string | null;
+  /** It has a vision projector: it reads pictures. */
+  vision: boolean;
+}
+
+/** A downloaded model the pane offers when the chosen one cannot read pictures (`chat_host::models::VisionSuggestion`). */
+export interface VisionSuggestion {
+  id: string;
+  name: string;
+}
+
+/** What the chosen model means for pictures (`chat_host::models::ChatImages`): Rust decides, the pane shows it. */
+export interface ChatImages {
+  /** The chosen model reads pictures. */
+  allowed: boolean;
+  /** When it does not: why, and what to do. */
+  reason: string | null;
+  /** A downloaded model that can use tools and read pictures; null when there is none. */
+  suggest: VisionSuggestion | null;
 }
 
 /** The Chat tab's picker: tool-capable models first, and the one the chat uses (`chat_host::models::ChatModels`). */
@@ -1174,6 +1198,8 @@ export interface ChatModels {
   selected: string | null;
   /** For each reason a model can't be chosen ("Can't use tools", "Not downloaded"), its full note. */
   notes: Record<string, string>;
+  /** What the chosen model means for pictures. */
+  images: ChatImages;
 }
 
 /** What "Open <app>" came to (`chat_host::apps::Opened`): starting, or the words saying why not. */

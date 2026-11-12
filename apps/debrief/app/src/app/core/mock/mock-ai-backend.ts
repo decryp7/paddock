@@ -442,8 +442,27 @@ export class MockAiBackend extends AiBackend {
     return c.record.id;
   }
 
-  /** Every use case as a background AI job: resolves with the job's id at once, or rejects when it cannot start. */
+  /** The jobs of Summarize, Explain and Root causes by what they are about, like the engine's job keys: an equal request joins the active one. */
+  private readonly keyedJobs = new Map<string, number>();
+
+  private static jobKey(r: AiStartRequest): string | null {
+    switch (r.op) {
+      case 'summarize':
+        return `summarize|${r.from}|${r.to}`;
+      case 'explain':
+        return `explain|${r.recordId}`;
+      case 'rootCauses':
+        return 'rootCauses';
+      default:
+        return null;
+    }
+  }
+
+  /** Every use case as a background AI job: resolves with the job's id at once, or rejects when it cannot start. An equal Summarize, Explain or Root causes request while one is queued or running resolves with that job. */
   async start(request: AiStartRequest): Promise<number> {
+    const key = MockAiBackend.jobKey(request);
+    const joined = key === null ? undefined : this.keyedJobs.get(key);
+    if (joined !== undefined && mockJobs().isActive(joined)) return joined;
     const before = mockJobs().nextId();
     const answer: Promise<unknown> = this.useCase(request);
     if (mockJobs().nextId() === before) {
@@ -452,6 +471,7 @@ export class MockAiBackend extends AiBackend {
       throw new AiError('engine', 'the request did not start');
     }
     answer.catch(() => undefined);
+    if (key !== null) this.keyedJobs.set(key, before);
     return before;
   }
 

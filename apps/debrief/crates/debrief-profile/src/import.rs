@@ -37,11 +37,48 @@ pub trait CaptureImporter: Send + Sync {
     /// Parses the whole file.
     fn import(&self, file_name: &str, bytes: &[u8], limits: &Limits) -> Result<Capture>;
 
+    /// Parses the file at `path`, which the caller has checked is a regular file the user chose. The default reads it
+    /// (up to [`Limits::max_input_bytes`]) and calls [`import`](Self::import); an importer that lives in another
+    /// process overrides it to lend the file by ranges, so the caller never holds a copy of it.
+    fn import_file(&self, file_name: &str, path: &std::path::Path, limits: &Limits) -> Result<Capture> {
+        let bytes = read_bounded(path, limits)?;
+        self.import(file_name, &bytes, limits)
+    }
+
     /// What [`CaptureImporter::import`] produces: profiles unless overridden
     /// (heap snapshot importers return [`CaptureKind::Heap`]).
     fn produces(&self) -> CaptureKind {
         CaptureKind::Profile
     }
+}
+
+/// The file at `path` read whole, refused above [`Limits::max_input_bytes`]: errors say what was tried and why.
+pub fn read_bounded(path: &std::path::Path, limits: &Limits) -> Result<Vec<u8>> {
+    let io = |what: &str, e: std::io::Error| ProfileError::Remote {
+        code: if e.kind() == std::io::ErrorKind::NotFound {
+            crate::error::ErrorCode::NotFound
+        } else {
+            crate::error::ErrorCode::Io
+        },
+        message: format!("cannot {what} {}: {e}", path.display()),
+    };
+    let len = std::fs::metadata(path).map_err(|e| io("open", e))?.len();
+    if len > limits.max_input_bytes {
+        return Err(ProfileError::LimitExceeded {
+            what: "file size",
+            limit: limits.max_input_bytes,
+            hint: "open a smaller capture",
+        });
+    }
+    std::fs::read(path).map_err(|e| io("read", e))
+}
+
+/// The first [`SNIFF_BYTES`] of the file at `path` (fewer when it is shorter).
+pub fn read_head(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(SNIFF_BYTES);
+    std::fs::File::open(path)?.take(SNIFF_BYTES as u64).read_to_end(&mut head)?;
+    Ok(head)
 }
 
 /// Sniff score from which a file counts as a capture when routing files

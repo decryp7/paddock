@@ -70,6 +70,21 @@ pub enum ProfileError {
     #[error("{0}")]
     NotAvailable(String),
 
+    /// The memory the app may keep for open captures and documents is used up (MEM-2); the message names the document and
+    /// what to do.
+    #[error("{message}")]
+    Budget { message: String },
+
+    /// The capture's body was released to make room and is read again by the caller (see
+    /// [`CaptureCatalog::reload_plan`](crate::store::CaptureCatalog::reload_plan)); a caller that does not reload sees this.
+    #[error("capture {0} was released from memory to make room for other captures; it is read again when a view asks")]
+    Released(u32),
+
+    /// The file of an open capture is not the file that was opened (it was changed, replaced or truncated since), so a
+    /// released capture is not read again from it.
+    #[error("\"{name}\" changed since it was opened; open it again")]
+    Changed { name: String },
+
     /// An error of an importer in the profiling plugin's process, with its code (ADR 0017).
     #[error("{message}")]
     Remote { code: ErrorCode, message: String },
@@ -97,7 +112,8 @@ impl ProfileError {
     /// The error's [`ErrorCode`].
     pub fn code(&self) -> ErrorCode {
         match self {
-            ProfileError::LimitExceeded { .. } => ErrorCode::Limit,
+            ProfileError::LimitExceeded { .. } | ProfileError::Budget { .. } | ProfileError::Released(_) => ErrorCode::Limit,
+            ProfileError::Changed { .. } => ErrorCode::Invalid,
             ProfileError::Unsupported { .. } | ProfileError::NotAvailable(_) => ErrorCode::Unsupported,
             ProfileError::Unrecognised(..) => ErrorCode::NotACapture,
             ProfileError::UnknownCapture(_) => ErrorCode::NotFound,

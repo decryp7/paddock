@@ -2052,6 +2052,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sysinfo",
  "zip",
 ]
 
@@ -2089,6 +2090,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2215,6 +2217,7 @@ dependencies = [
 name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "keyring",
  "libc",
  "log",
@@ -2371,6 +2374,8 @@ dependencies = [
  "uuid",
  "windows",
  "windows-core",
+ "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
  "windows-sys 0.60.2",
  "windows-sys 0.61.2",
  "winnow 1.0.4",

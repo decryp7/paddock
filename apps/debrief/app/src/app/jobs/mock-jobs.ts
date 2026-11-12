@@ -35,7 +35,7 @@ export class MockJobCancelled extends Error {
 }
 
 /** The engine's rules, mimicked (see app/src-tauri/src/jobs/queue.rs). */
-const LIMITS: Record<JobKind, number> = { ai: 1, research: 1, analysis: 3, import: 1, export: 2, download: 2, collection: 1, capture: 4, maintenance: 1 };
+const LIMITS: Record<JobKind, number> = { ai: 1, research: 1, analysis: 3, import: 1, export: 2, download: 2, collection: 1, capture: 4, maintenance: 1, names: 1 };
 const QUEUE_CAP = 20;
 /** Results the user asked for and waits to see: their job always tells when it is done (engine: queue.rs). */
 const ATTENTION_RESULTS = new Set<string>(['narrative', 'proposal', 'file', 'folderSurvey', 'storage', 'relatedLogs']);
@@ -69,6 +69,8 @@ interface Entry {
   result: JobResult | null;
   start: (() => void) | null;
   cancel: () => void;
+  /** Cancel was requested for a running job that has not ended yet: it is never joined by an equal request. */
+  stopping?: boolean;
   rerun: (() => Promise<unknown>) | null;
   doneTitle?: string;
 }
@@ -217,6 +219,11 @@ export class MockJobs implements JobsBackend {
     return { id: e.info.id, state: e.info.state, result: e.result, error: e.info.error, message: e.info.message };
   }
 
+  /** Whether job `id` is queued or running and not being stopped (also while the Jobs pane does not list it yet). */
+  isActive(id: number): boolean {
+    return this.entries.some((e) => e.info.id === id && !e.stopping && (e.info.state === 'queued' || e.info.state === 'running'));
+  }
+
   /** The id the next job gets. */
   nextId(): number {
     return this.next;
@@ -270,6 +277,8 @@ export class MockJobs implements JobsBackend {
           if (entry.info.state === 'queued') {
             this.finish(entry, 'cancelled');
             reject(new MockJobCancelled());
+          } else {
+            entry.stopping = true;
           }
         },
       };

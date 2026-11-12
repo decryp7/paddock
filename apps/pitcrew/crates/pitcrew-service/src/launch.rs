@@ -361,24 +361,20 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn runs_a_child_and_reads_both_streams() {
         let (sink, got) = collect();
         let spec = if cfg!(windows) {
             LaunchSpec {
                 program: "cmd.exe".into(),
                 args: vec!["/d".into(), "/c".into(), "echo out && echo err 1>&2".into()],
-                dir: std::env::temp_dir(),
+                dir: paddock_testkit::boot_volume::boot_volume_temp(),
                 env: vec![],
             }
         } else {
             LaunchSpec {
                 program: "/bin/sh".into(),
                 args: vec!["-c".into(), "echo out; echo err 1>&2".into()],
-                dir: std::env::temp_dir(),
+                dir: paddock_testkit::boot_volume::boot_volume_temp(),
                 env: vec![],
             }
         };
@@ -401,17 +397,13 @@ mod tests {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_methods,
-        reason = "a test builds its scratch path from the OS temp folder and removes it"
-    )]
     fn a_missing_binary_is_a_message() {
         let (sink, _) = collect();
         let err = spawn_child(
             &LaunchSpec {
                 program: "/no/such/gitea-runner".into(),
                 args: vec![],
-                dir: std::env::temp_dir(),
+                dir: paddock_testkit::boot_volume::boot_volume_temp(),
                 env: vec![],
             },
             sink,

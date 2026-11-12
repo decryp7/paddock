@@ -47,7 +47,8 @@
    "global .gitea/actions/unused/action.yml"
   ],
   "conformance": [
-   "global .gitea/actions/unused/action.yml"
+   "global .gitea/actions/unused/action.yml",
+   "conformance always runs"
   ],
   "crates": [
    "global .gitea/actions/unused/action.yml"

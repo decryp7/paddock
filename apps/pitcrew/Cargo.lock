@@ -3133,6 +3133,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3192,6 +3193,7 @@ dependencies = [
 name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "keyring",
  "libc",
  "log",
@@ -3200,6 +3202,17 @@ dependencies = [
  "paddock-workspace-hack",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-limits",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
 ]
 
 [[package]]
@@ -3268,6 +3281,8 @@ dependencies = [
  "uuid",
  "windows",
  "windows-core",
+ "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
  "windows-sys 0.60.2",
  "windows-sys 0.61.2",
  "winnow 1.0.4",
@@ -3456,6 +3471,7 @@ dependencies = [
  "nix",
  "paddock-ipc",
  "paddock-proc",
+ "paddock-testkit",
  "pitcrew-core",
  "serde",
  "serde_json",
@@ -3900,9 +3916,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -6031,6 +6047,15 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
+dependencies = [
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]

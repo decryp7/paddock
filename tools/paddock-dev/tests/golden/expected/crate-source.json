@@ -3,7 +3,7 @@
  "crates": true,
  "ui": true,
  "eslint": false,
- "conformance": false,
+ "conformance": true,
  "c99": true,
  "tools": false,
  "icons": false,
@@ -33,6 +33,9 @@
   ],
   "c99": [
    "C99 reads crates/a/src/lib.rs"
+  ],
+  "conformance": [
+   "conformance always runs"
   ],
   "crates": [
    "crates/a/src/lib.rs",

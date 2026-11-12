@@ -14222,88 +14222,95 @@
           <context context-type="linenumber">24</context>
         </context-group>
       </trans-unit>
+      <trans-unit id="jobs.kind.names" datatype="html">
+        <source>Names</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
+          <context context-type="linenumber">26</context>
+        </context-group>
+      </trans-unit>
       <trans-unit id="jobs.state.queued" datatype="html">
         <source>Queued</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">31</context>
+          <context context-type="linenumber">33</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.running" datatype="html">
         <source>Running</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">33</context>
+          <context context-type="linenumber">35</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.done" datatype="html">
         <source>Done</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">35</context>
+          <context context-type="linenumber">37</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.failed" datatype="html">
         <source>Failed</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">37</context>
+          <context context-type="linenumber">39</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.cancelled" datatype="html">
         <source>Cancelled</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">39</context>
+          <context context-type="linenumber">41</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.interrupted" datatype="html">
         <source>Interrupted</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">41</context>
+          <context context-type="linenumber">43</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.event" datatype="html">
         <source>event <x id="id" equiv-text="link.recordId"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">50</context>
+          <context context-type="linenumber">52</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.range" datatype="html">
         <source>a time range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">52</context>
+          <context context-type="linenumber">54</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.query" datatype="html">
         <source>query <x id="ql" equiv-text="link.ql"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">54</context>
+          <context context-type="linenumber">56</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.chat" datatype="html">
         <source>a chat</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">58</context>
+          <context context-type="linenumber">60</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.queued.plain" datatype="html">
         <source>Queued</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">64</context>
+          <context context-type="linenumber">66</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.queued.position" datatype="html">
         <source>Queued (position <x id="position" equiv-text="position"/>)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">64</context>
+          <context context-type="linenumber">66</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.store.failed" datatype="html">
@@ -36679,280 +36686,280 @@
         <source>Timeline title</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">33</context>
+          <context context-type="linenumber">36</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.unlinked.title" datatype="html">
         <source>Zoom, pan and the time cursor are not linked to the main timeline</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">37</context>
+          <context context-type="linenumber">40</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.unlinked" datatype="html">
         <source>Unlinked</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">37,39</context>
+          <context context-type="linenumber">40,42</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.hint.helpLabel" datatype="html">
         <source>Zoom and pan</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">45</context>
+          <context context-type="linenumber">48</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.loading" datatype="html">
         <source>Loading</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">47</context>
+          <context context-type="linenumber">52</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.zoom" datatype="html">
         <source>Zoom</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">50</context>
+          <context context-type="linenumber">58</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.back.title" datatype="html">
         <source>Previous range (Alt+←)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">51</context>
+          <context context-type="linenumber">59</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.back.aria" datatype="html">
         <source>Previous range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">51</context>
+          <context context-type="linenumber">59</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.forward.title" datatype="html">
         <source>Next range (Alt+→)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">52</context>
+          <context context-type="linenumber">60</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.forward.aria" datatype="html">
         <source>Next range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">52</context>
+          <context context-type="linenumber">60</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.zoomIn.title" datatype="html">
         <source>Zoom in</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">53</context>
+          <context context-type="linenumber">61</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.zoomIn.aria" datatype="html">
         <source>Zoom in</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">53</context>
+          <context context-type="linenumber">61</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.zoomOut.title" datatype="html">
         <source>Zoom out</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">54</context>
+          <context context-type="linenumber">62</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.zoomOut.aria" datatype="html">
         <source>Zoom out</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">54</context>
+          <context context-type="linenumber">62</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.fit.title" datatype="html">
         <source>Fit all (double-click)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">55</context>
+          <context context-type="linenumber">63</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.fit" datatype="html">
         <source><x id="START_TAG_DEBRIEF_ICON" ctype="x-debrief_icon" equiv-text="&lt;debrief-icon name=&quot;zoomOut&quot; [size]=&quot;13&quot; /&gt;"/><x id="CLOSE_TAG_DEBRIEF_ICON" ctype="x-debrief_icon" equiv-text="&lt;debrief-icon name=&quot;zoomOut&quot; [size]=&quot;13&quot; /&gt;"/> Fit</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">55,57</context>
+          <context context-type="linenumber">63,65</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.menu.title" datatype="html">
         <source>Timeline menu</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">57</context>
+          <context context-type="linenumber">65</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.panel.menu.aria" datatype="html">
         <source>Timeline menu</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">57</context>
+          <context context-type="linenumber">65</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.aria" datatype="html">
         <source>Timeline settings</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">60</context>
+          <context context-type="linenumber">69</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.events" datatype="html">
         <source>Events</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">62,63</context>
+          <context context-type="linenumber">71,72</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.eventsShown" datatype="html">
         <source>Events shown</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">63</context>
+          <context context-type="linenumber">72</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.scope.global" datatype="html">
         <source>Workspace filter</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">64,65</context>
+          <context context-type="linenumber">73,74</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.scope.own" datatype="html">
         <source>Own query</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">65,67</context>
+          <context context-type="linenumber">74,76</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.queryAria" datatype="html">
         <source>Timeline query</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">71,72</context>
+          <context context-type="linenumber">80,81</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.queryPlaceholder" datatype="html">
         <source>e.g. level &gt;= error and MachineName = WEB01</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">73,74</context>
+          <context context-type="linenumber">82,83</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.lanes" datatype="html">
         <source>Lanes</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">82,83</context>
+          <context context-type="linenumber">91,92</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.lanesAria" datatype="html">
         <source>Lanes</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">83</context>
+          <context context-type="linenumber">92</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.laneField" datatype="html">
         <source>Lane field</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">88</context>
+          <context context-type="linenumber">97</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.chooseField" datatype="html">
         <source>Choose a field…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">89,90</context>
+          <context context-type="linenumber">98,99</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.config.syncTime" datatype="html">
         <source>Sync time</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">94,97</context>
+          <context context-type="linenumber">103,106</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.hint.instancesShort.one" datatype="html">
         <source><x id="count" equiv-text="n"/> instance · bucket <x id="bucket" equiv-text="bucket"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">140</context>
+          <context context-type="linenumber">156</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.hint.instancesShort.other" datatype="html">
         <source><x id="count" equiv-text="n"/> instances · bucket <x id="bucket" equiv-text="bucket"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">141</context>
+          <context context-type="linenumber">157</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.hint.lanesShort.one" datatype="html">
         <source><x id="count" equiv-text="n"/> lane · bucket <x id="bucket" equiv-text="bucket"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">144</context>
+          <context context-type="linenumber">160</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.hint.lanesShort.other" datatype="html">
         <source><x id="count" equiv-text="n"/> lanes · bucket <x id="bucket" equiv-text="bucket"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">145</context>
+          <context context-type="linenumber">161</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.hint.gestures" datatype="html">
         <source>Drag across the lanes to zoom into a range. <x id="mod" equiv-text="isMac() ? &apos;⌘&apos; : &apos;Ctrl&apos;"/>+wheel zooms; Shift+wheel or Space+drag pans; double-click fits all.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">149</context>
+          <context context-type="linenumber">165</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.new" datatype="html">
         <source>New timeline</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">187</context>
+          <context context-type="linenumber">203</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.rename" datatype="html">
         <source>Rename…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">190</context>
+          <context context-type="linenumber">206</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.unlink" datatype="html">
         <source>Unlink time from the main timeline</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">191</context>
+          <context context-type="linenumber">207</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.sync" datatype="html">
         <source>Sync time with the main timeline</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">191</context>
+          <context context-type="linenumber">207</context>
         </context-group>
       </trans-unit>
       <trans-unit id="timeline.menu.close" datatype="html">
         <source>Close</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/timeline/timeline-header.ts</context>
-          <context context-type="linenumber">192</context>
+          <context context-type="linenumber">208</context>
         </context-group>
         <note priority="1" from="description">menu item, closes the timeline panel</note>
       </trans-unit>

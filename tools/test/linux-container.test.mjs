@@ -22,7 +22,7 @@ test('first use builds the labelled image, creates the labelled volumes and runs
   assert.match(log[2], /docker volume create --label paddock\.tools=dyno dyno-cargo-registry/);
   assert.match(log[3], /docker volume create --label paddock\.tools=dyno dyno-linux-target/);
   const runLine = log[4];
-  assert.match(runLine, /^docker run --rm --label paddock\.tools=dyno --cpus 4 /);
+  assert.match(runLine, /^docker run --rm --label paddock\.tools=dyno --cpus 4 --memory 12g /);
   assert.ok(runLine.includes(`type=bind,source=${repo},target=/work,readonly`));
   assert.match(runLine, /type=volume,source=dyno-cargo-registry,target=\/usr\/local\/cargo\/registry/);
   assert.match(runLine, /CARGO_BUILD_JOBS=2/);
@@ -63,4 +63,15 @@ test('usage errors: no id, bad id, nothing to run, unknown option, no docker', (
   assert.equal(none.status, 1);
   assert.match(none.out, /is needed/);
   assert.deepEqual(calls(bin), [], 'nothing was started');
+});
+
+test('--image runs a ready image as it is: no inspect, no build, the platform passed, the caps kept', () => {
+  const bin = docker();
+  const r = go(bin, ['--id', 'paddock', '--image', 'reg.example/ci:v2', '--platform', 'linux/amd64', '--', 'rustc', '--version']);
+  assert.equal(r.status, 0, r.out);
+  const log = calls(bin);
+  assert.ok(!log.some((l) => l.includes('image inspect') || l.includes('docker build')));
+  const runLine = log.at(-1);
+  assert.match(runLine, /^docker run --rm --label paddock\.tools=paddock --cpus 4 --memory 12g --platform linux\/amd64 /);
+  assert.match(runLine, / reg\.example\/ci:v2 rustc --version$/);
 });

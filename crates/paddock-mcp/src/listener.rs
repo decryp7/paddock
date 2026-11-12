@@ -7,8 +7,8 @@
 use crate::keys::KeyStore;
 use crate::loopback::{Serving, serve_loopback};
 use crate::server::Server;
-use paddock_proc::ProcessId;
 use paddock_proc::hint::{self, Hint};
+use paddock_proc::{ProcessId, StartTime};
 use serde::{Deserialize, Serialize};
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
@@ -44,9 +44,10 @@ impl Discovery {
         serde_json::from_slice(&hint::read_bounded(path)?).ok()
     }
 
-    /// Whether the process that wrote it still runs (same pid and same start time).
+    /// Whether the process that wrote it still runs (same pid and same start time, and not one that was killed and is only
+    /// waiting to be collected by its parent).
     pub fn writer_alive(&self) -> bool {
-        ProcessId::of(self.pid).is_some_and(|p| p.started().as_micros() == self.started_us)
+        ProcessId::new(self.pid, StartTime::from_micros(self.started_us)).is_alive()
     }
 }
 

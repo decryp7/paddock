@@ -6,10 +6,13 @@
     "ui/docs/screenshots"
   ],
   "ownTestBinaries": {
+    "apps/pitwall/app/src-tauri/tests/picture_memory.rs": "a counting global allocator must run alone: it counts every allocation of its process, so no other test may share the binary",
     "crates/paddock-assistant/tests/tauri.rs": "needs the tauri feature (required-features), which the crate's other tests do not",
     "crates/paddock-service/tests/service_main_process.rs": "runs itself again as the service (child mode): SIGTERM handling and exit statuses belong to a process of its own",
+    "crates/paddock-env/tests/dev_override_log.rs": "installs the process-wide log, once per process, and reads what the ignored override wrote",
     "crates/paddock-diag/tests/trail.rs": "installs the process-wide log, once per process",
     "crates/paddock-diag/tests/webview.rs": "installs the process-wide log, once per process",
+    "crates/paddock-diag/tests/perf.rs": "drives the process-wide performance recorder, once per process (its state is global)",
     "crates/paddock-shell/tests/start_log.rs": "installs the process-wide log, once per process, and reads what the start wrote (needs mock-runtime)",
     "crates/paddock-log/tests/installed.rs": "installs the process-wide subscriber, log logger and panic hook, once per process",
     "crates/paddock-pitwall/tests/contract.rs": "needs the testing feature (required-features)",
@@ -19,6 +22,7 @@
     "apps/workbench-demo/src-tauri/tests/app.rs": "the demo is the starter of new apps like the shell demo; one file, so one binary already",
     "apps/debrief/crates/debrief-store-duck/tests/analysis_memory.rs": "Debrief: a release-build memory or speed measurement run on its own (`cargo test --release --test analysis_memory`, debrief.yml and debrief-bench.yml), never with the crate's other tests",
     "apps/debrief/crates/debrief-store-duck/tests/bench.rs": "Debrief: a release-build memory or speed measurement run on its own (`cargo test --release --test bench`, debrief.yml and debrief-bench.yml), never with the crate's other tests",
+    "apps/debrief/crates/debrief-store-duck/tests/bench_name_reads.rs": "Debrief: an ignored, release-build measurement of the name rebuild's reads on a large store (`cargo test --release --test bench_name_reads -- --ignored`, docs/performance.md); it sets the shipped global allocator (mimalloc), which is process-wide, so it cannot share a binary with the crate's other tests",
     "apps/debrief/crates/debrief-store-duck/tests/bench_reads.rs": "Debrief: a release-build memory or speed measurement run on its own (`cargo test --release --test bench_reads`, debrief.yml and debrief-bench.yml), never with the crate's other tests",
     "apps/debrief/crates/debrief-store-duck/tests/perf_idle.rs": "Debrief: an ignored, release-build CPU and memory measurement of a reopened store (`cargo test --release --test perf_idle -- --ignored`, scripts/perf/perf-post.sh), run on its own under an outside sampler; it sets the shipped global allocator (mimalloc), which is process-wide, so it cannot share a binary with the crate's other tests",
     "apps/debrief/crates/debrief-store-duck/tests/import_ready.rs": "Debrief: a manual release-build measurement of import-to-search-ready on a folder (`cargo test --release --test import_ready -- --nocapture`, docs/performance.md; it does nothing without DEBRIEF_READY_CORPUS); it sets the shipped global allocator (mimalloc), which is process-wide, so it cannot share a binary with the crate's other tests",

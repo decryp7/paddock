@@ -1,7 +1,7 @@
 import type { AppPermissions, JobEvent, LiveUpdate, PlaygroundEvent, PlaygroundRequest, PresetDraft, Settings } from './api.types';
 import type { PitwallBackend } from './backend';
 import { JOB_METHODS } from './backend';
-import { LIVE_EVENT, POPOVER_EVENT, TauriBackend, type TauriBridge } from './tauri-backend';
+import { LIVE_EVENT, POPOVER_EVENT, TauriBackend, toBase64, type TauriBridge } from './tauri-backend';
 
 interface Call {
   cmd: string;
@@ -102,7 +102,8 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['deleteAllChats', (b) => b.deleteAllChats(), 'delete_all_chats', undefined],
   ['chatAttachRules', (b) => b.chatAttachRules(), 'chat_attach_rules', undefined],
   ['chatDetach', (b) => b.chatDetach('ab'), 'chat_detach', { sha256: 'ab' }],
-  ['chatAttach', (b) => b.chatAttach('a.txt', new Uint8Array([104, 105])), 'chat_attach', { name: 'a.txt', bytes: [104, 105] }],
+  ['chatAttach', (b) => b.chatAttach('a.txt', new Uint8Array([104, 105])), 'chat_attach', { name: 'a.txt', data: 'aGk=' }],
+  ['chatThumbnail', (b) => b.chatThumbnail('ab'), 'chat_thumbnail', { sha256: 'ab' }],
   ['removeLeftover', (b) => b.removeLeftover('pack-llamafile'), 'remove_leftover', { id: 'pack-llamafile' }],
   ['retryEngineSetup', (b) => b.retryEngineSetup(), 'retry_engine_setup', undefined],
   ['installBuild', (b) => b.installBuild('cuda-13'), 'install_build', { buildId: 'cuda-13' }],
@@ -161,6 +162,13 @@ describe('TauriBackend', () => {
     const { bridge, calls } = fakeBridge();
     await call(new TauriBackend(bridge));
     expect(calls).toEqual([args === undefined ? { cmd } : { cmd, args }]);
+  });
+
+  it('sends a file as base64, also one longer than a call can spread, and never as a list of numbers', () => {
+    const bytes = new Uint8Array(100_000).map((_, i) => (i * 31) % 256);
+    const back = Uint8Array.from(atob(toBase64(bytes)), (c) => c.charCodeAt(0));
+    expect(back).toEqual(bytes);
+    expect(toBase64(new Uint8Array())).toBe('');
   });
 
   it('covers every request/response method of the backend interface', () => {

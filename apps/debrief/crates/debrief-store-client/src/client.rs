@@ -97,11 +97,26 @@ pub struct WorkerConfig {
     /// Extra environment for the worker (and the plugin processes it starts). Tests that kill a worker on purpose point
     /// `TMPDIR` at a folder they own, since a killed host cannot remove the private folders it made.
     pub env: Vec<(String, String)>,
+    /// How long a worker that is alive may take to connect ([`debrief_ipc::process::DEFAULT_CONNECT_WINDOW`]; an exit ends the
+    /// wait at once). Tests that start a freshly built worker use [`WorkerConfig::for_tests`].
+    pub connect_window: Duration,
 }
 
 impl WorkerConfig {
+    /// The configuration of a test that starts a worker it just built: it waits until the worker connects or exits
+    /// ([`debrief_ipc::process::UNTIL_CONNECTED`], ADR 0071), never on a fixed window, since the first run of a fresh binary on
+    /// macOS is held by the OS for far longer than the product's window (CI 7919 and 7925). The test runner's slow-timeout is
+    /// the only hang guard. Tests that examine the window itself keep [`WorkerConfig::new`] and set their own.
+    pub fn for_tests(exe: impl Into<PathBuf>) -> WorkerConfig {
+        WorkerConfig {
+            connect_window: debrief_ipc::process::UNTIL_CONNECTED,
+            ..WorkerConfig::new(exe)
+        }
+    }
+
     pub fn new(exe: impl Into<PathBuf>) -> WorkerConfig {
         WorkerConfig {
+            connect_window: debrief_ipc::process::DEFAULT_CONNECT_WINDOW,
             exe: exe.into(),
             memory_cap: Some(DEFAULT_MEMORY_CAP),
             supervisor: SupervisorConfig::new("the store worker"),
@@ -274,6 +289,7 @@ impl StoreWorker {
     pub fn new(cfg: WorkerConfig) -> StoreResult<StoreWorker> {
         let mut spawn = SpawnSpec::new(cfg.exe.clone(), "the store worker");
         spawn.endpoint_prefix = debrief_ipc::endpoint::prefix::STORE.into();
+        spawn.connect_window = cfg.connect_window;
         // Imports and queries run at normal priority: they are what the user waits for.
         spawn.below_normal_priority = false;
         spawn.memory_listener = cfg.memory_listener.clone();
@@ -690,6 +706,17 @@ mod remote_ports;
 mod tests {
     use super::*;
 
+    /// ADR 0071 row 2: the product keeps its connect window (an exit ends a wait at once; a worker that is alive and never
+    /// connects must still end the launch, which holds the supervisor's lock), and the tests that start a freshly built worker
+    /// wait until it connects or exits.
+    #[test]
+    fn the_test_config_waits_until_connected_and_the_product_config_keeps_its_window() {
+        use debrief_ipc::process::{DEFAULT_CONNECT_WINDOW, UNTIL_CONNECTED};
+        assert_eq!(WorkerConfig::for_tests("worker").connect_window, UNTIL_CONNECTED);
+        assert_eq!(WorkerConfig::new("worker").connect_window, DEFAULT_CONNECT_WINDOW);
+        assert_eq!(DEFAULT_CONNECT_WINDOW, Duration::from_secs(15));
+    }
+
     #[test]
     fn the_library_path_puts_the_bundled_folder_first() {
         let (var, sep) = library_path_var();
@@ -708,7 +735,7 @@ mod tests {
         let scratch = tempfile::tempdir().unwrap();
         let dir = scratch.path().to_path_buf();
         assert!(find_library("no-such-library.dll", std::slice::from_ref(&dir)).is_none());
-        let mut cfg = WorkerConfig::new(dir.join("debrief-store-worker-test.exe"));
+        let mut cfg = WorkerConfig::for_tests(dir.join("debrief-store-worker-test.exe"));
         cfg.library_dirs = Some(vec![dir.join("no-such-folder")]);
         let w = StoreWorker::new(cfg).unwrap();
         let e = w

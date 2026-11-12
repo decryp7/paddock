@@ -980,6 +980,7 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "log",
+ "paddock-env",
  "paddock-proc",
  "serde",
  "serde_json",
@@ -1408,7 +1409,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.9",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -1639,6 +1640,7 @@ dependencies = [
  "debrief-agent",
  "debrief-ai",
  "debrief-alloc",
+ "debrief-budget",
  "debrief-collect",
  "debrief-core",
  "debrief-dump",
@@ -1668,6 +1670,7 @@ dependencies = [
  "objc2-web-kit",
  "open",
  "paddock-diag",
+ "paddock-env",
  "paddock-proc",
  "semver",
  "serde",
@@ -1706,6 +1709,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "debrief-budget"
+version = "0.1.0"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "debrief-cli"
 version = "0.1.0"
 dependencies = [
@@ -1716,6 +1726,7 @@ dependencies = [
  "debrief-pdf",
  "debrief-store-client",
  "debrief-store-duck",
+ "paddock-env",
  "serde",
  "serde_json",
  "tempfile",
@@ -1784,6 +1795,7 @@ dependencies = [
 name = "debrief-dump"
 version = "0.1.0"
 dependencies = [
+ "debrief-budget",
  "debrief-symbols",
  "postcard",
  "proptest",
@@ -2023,6 +2035,7 @@ dependencies = [
  "debrief-plugin-package",
  "debrief-profile",
  "log",
+ "paddock-env",
  "serde",
  "serde_json",
  "sha2 0.11.1",
@@ -2184,6 +2197,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "debrief-alloc",
+ "debrief-budget",
  "debrief-core",
  "debrief-dump",
  "debrief-ipc",
@@ -2201,7 +2215,9 @@ dependencies = [
  "debrief-plugin-web",
  "debrief-plugin-windows",
  "debrief-profile",
+ "debrief-store-duck",
  "insta",
+ "libc",
  "proptest",
  "serde_json",
  "sha2 0.11.1",
@@ -2214,12 +2230,15 @@ dependencies = [
 name = "debrief-profile"
 version = "0.1.0"
 dependencies = [
+ "debrief-budget",
+ "log",
  "postcard",
  "proptest",
  "regex",
  "rustc-hash",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
@@ -2251,6 +2270,7 @@ dependencies = [
  "debrief-store-client",
  "debrief-store-duck",
  "duckdb",
+ "flate2",
  "getrandom 0.4.3",
  "libc",
  "log",
@@ -2463,7 +2483,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2720,7 +2740,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4620,7 +4640,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.21",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5256,6 +5276,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sysinfo",
  "zip",
 ]
 
@@ -5293,6 +5314,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5434,6 +5456,8 @@ dependencies = [
  "uuid",
  "windows",
  "windows-core",
+ "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
  "windows-sys 0.60.2",
  "windows-sys 0.61.2",
  "winnow 1.0.4",
@@ -6345,15 +6369,15 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6410,7 +6434,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6990,7 +7014,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7945,7 +7969,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8392,7 +8416,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.21",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8504,7 +8528,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9012,7 +9036,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9033,7 +9057,7 @@ dependencies = [
  "objc2-foundation",
  "objc2-quartz-core",
  "raw-window-handle",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "windows-version",
 ]
 
@@ -9447,7 +9471,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d6f32a0ff4a9f6f01231eb2059cc85479330739333e0e58cadf03b6af2cca10"
 dependencies = [
  "cfg-if",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

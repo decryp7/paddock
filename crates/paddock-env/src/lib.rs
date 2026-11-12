@@ -16,10 +16,11 @@
 
 mod app;
 mod atomic;
+pub mod dev_override;
 mod dirs;
 mod error;
 mod folder;
-mod private;
+pub mod private;
 mod versioned;
 
 pub use app::AppId;
@@ -33,7 +34,10 @@ pub use folder::{
 };
 #[cfg(unix)]
 pub use folder::{group_has_other_members, tighten_group_write, tighten_group_write_with};
-pub use private::{check_temp_parent, private_fallback_dir, private_fallback_dir_as};
+pub use private::{
+    PrivateDir, PrivateError, PrivateFile, check_temp_parent, private_fallback_dir,
+    private_fallback_dir_as,
+};
 pub use versioned::{
     DEFAULT_KEEP_CORRUPT, DEFAULT_MAX_BYTES, FIRST_VERSION, Loaded, Migration, Problem,
     VersionedFile,

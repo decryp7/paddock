@@ -83,6 +83,409 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-10, store worker import peak at 20 copies: file order, freed pages and the chunk reader (branch `fix/debrief-import-memory`)
+
+- **Commit:** `origin/train/2026-11-09-3` 67a633ef3; change on `fix/debrief-import-memory`
+- **Why:** the nightly `store-bench` job failed `imports_and_queries_within_the_budgets` every night. It failed on the
+  import budget (768 MB) in 4 of 16 scheduled runs since 10-25 and on the query or idle budget (320 MB) in the others. The
+  import assertion comes first, so an import failure hides the query failure. Worker peaks per scheduled run, from the
+  job logs (RSS until 10-27, PSS after 9d802de4c), as import / index / idle / query MB:
+
+| Run (date, commit) | Import | Index | Idle | Query | Fails on |
+|---|---|---|---|---|---|
+| debrief 5976 (10-22, f826f4f4) | 593 | 261 | 196 | 303 | query (budget 300) |
+| debrief 6161 (10-23, eba53424) | 650 | 258 | 199 | 300 | green |
+| debrief 6233 (10-24, 9e4369c2) | 670 | 297 | 214 | 322 | query |
+| debrief 6344 (10-25, e42bb85e, 1.1.1) | 732 | 527 | 321 | 430 | idle |
+| debrief 6396, 6412 (10-26, 10-27, e42bb85e) | 778, 752 | 530, 509 | 298, 281 | 444, 424 | import, query |
+| paddock 6451 to 7870 (10-27 to 11-10, 14 runs) | 586–778 | 433–527 | 240–322 | 382–441 | import in 7567, 7688, 7870; query in the rest |
+
+  Runs 7815 and 7870 tested the same commit (b51c72509) and peaked at 679 and 776 MB: one commit moves about ±50 MB
+  between nights. Every run used runner d-gtr9 (16 cores, 128 GB); the logs checked (6233, 6344, 7870) show the same
+  image `garage:ubuntu-24.04-20261023-r5` and rustc 1.99.1. libduckdb was 1.5.6 up to run 7688 and 2.0.0 from run
+  7815 on (559885b08 reached main between them); the peaks did not move with it.
+- **Machine:** Mac mini, Linux arm64 container (`train3-linux-dev:1`, 6 CPUs, 24 GB), load 10–40 from other agents.
+  Release builds with `CARGO_BUILD_JOBS=2`. The worker sizes its parse threads from the cores (cores − 1, at most 8): 5
+  in the container, 8 on the CI runner, so the A/B runs set 8 through `StoreTuning::parse_threads`.
+- **Command** (from `apps/debrief`, libduckdb set up as in [development.md](development.md)):
+  `DEBRIEF_BENCH_COPIES=20 DEBRIEF_BENCH_PARSE_THREADS=8 cargo test --release -p debrief-store-worker --test it worker:: -- --nocapture`;
+  the switch sets the parse threads in normal mode only (low memory mode keeps its cap of 4); add `DEBRIEF_BENCH_TRACE=1`
+  for the memory per import phase. The A/B runs of the file order, freed pages and row groups
+  used temporary switches that are not committed (described with each result).
+- **Memory measure:** the worker process only, sampled every 20 ms. The bisect builds (10-23 to 10-25) measure RSS
+  (sysinfo, the test of that time); the train and the fix measure PSS (`paddock_proc::process_memory`, since 9d802de4c).
+  Compare within one block only.
+- **Build:** release; allocator mimalloc v3 (crate 0.1.52) with `debrief_alloc::tune` (10 ms purge delay). libduckdb
+  1.5.6 for the bisect builds (their `fetch-libduckdb.sh`), 2.0.0 for the train and the fix (`VERSION=2.0.0`, duckdb-rs
+  1.20000.0).
+- **Corpus:** `/samples` × 20 (585,800 events, 680 files), as the job.
+- **Bisect** (first parent, default 5 parse threads, 3 runs each, import / index / idle / query MB):
+
+| Commit | Import | Index | Idle | Query |
+|---|---|---|---|---|
+| d0f1be76c (good, 10-23) | 440–461 | 270–283 | 185–189 | 287–294 |
+| b18719967 (entity catalogue) | 433–446 | 270–280 | 192–209 | 329–339 |
+| a5322584c (long ops b: indexing pipeline) | 447–475 | 432–437 | 191–208 | 333–342 |
+| 10a1df67d (human names) | 451–501 | 420–464 | 183–213 | 323–354 |
+| 3fc2fd1f8 (long ops a: streaming import) | 558–611 | 484–513 | 259–260 | 397–412 |
+| 245ff96af alone (its parent is d0f1be76c) | 554–611 | 300–315 | 219–221 | 339–353 |
+| c3a37cc2f | 549–557 | 476–533 | 228–309 | 387–439 |
+| e190e2f30 (bad, 10-25) | 534–577 | 475–482 | 231–249 | 376–395 |
+
+  Three steps: the streaming import (245ff96af) raised the import peak and made the import 3–4 times slower; the
+  indexing pipeline (a5322584c) raised the indexing peak by about 160 MB; the entity catalogue (b18719967) raised the
+  query peak by about 40 MB.
+- **The import step, measured:**
+  - The peak grows with the parse threads, about 70 MB each (train, 2 runs each): 1 thread 246–276 MB, 2: 333–356,
+    4: 491, 8: 776–797. At 8 threads, d0f1be76c peaked at 616–649 MB and 245ff96af at 724–736 MB (3 runs each).
+  - File order (ER-28, removed and put back, interleaved in d0f1be76c at 8 threads, 3 runs each): the old import read the
+    largest files first, 615–661 MB; the same code reading in path order, as the streaming import must, 745–767 MB.
+  - Freed pages: mimalloc giving freed memory back at once (`debrief_alloc::purge_at_once`) took the train's peak at 8
+    threads from 744–773 MB to 547–570 MB (2 runs each). About 200 MB of the peak is memory already freed but not yet
+    returned (10 ms purge delay, 100 ms for arenas, `debrief_alloc::tune`).
+  - The chunk reader: `ReaderChunks::fill` zero-filled a whole block (8 MB) before every read, so each of the 680 small
+    files wrote 8 MB of memory (about 5.4 GB for 340 MB of logs), and freed it to the allocator's retained pages.
+  - Refuted: in-flight files (the streaming gate at 1× instead of 2× the threads: 565–593 against 535–575 MB); row groups
+    by size (`max_row_group_bytes` 8 MB: 751–769 against 751–757; 16k rows: 698–715); the real RAM probe (no product
+    code reads `WorkKind::Memory` or `ram_mb`); DuckDB, the allocator crate and the samples (unchanged in the range).
+- **Fix:** `fill` reads into the buffer as it grows (`take(block).read_to_end`), never a whole block of zeros. Regression
+  test `a_small_input_never_holds_a_whole_block` (failed before: a 64-byte input held 1,048,576 bytes).
+- **After the fix** (train at 8 parse threads, 8 interleaved pairs): import peak 658–712 MB (mean 688) against 746–776 MB
+  (mean 760; 3 of 8 over 768). Idle and query about 15 MB lower (means 315 against 331 and 415 against 428). Parse
+  phase 0.77–1.0 s against 0.68–1.07 s in 5 traced pairs (one fixed run took 2.4 s under load): no slowdown measured.
+
+| Worker, 20 copies, 8 parse threads, PSS | Before (8 runs) | After (8 runs) | Budget | Verdict after |
+|---|---|---|---|---|
+| Import peak | 746–776 MB (mean 760) | 658–712 MB (mean 688) | 768 MB | pass |
+| Idle | 317–345 MB (mean 331) | 292–334 MB (mean 315) | 320 MB | fail (2 of 8 over) |
+| Query peak | 414–440 MB (mean 428) | 396–433 MB (mean 415) | 320 MB | fail |
+
+- **Notes:** on a large file the new `fill` makes about 11× more read calls per 8 MB block (`read_to_end` grows the
+  buffer step by step) and its first fill peaks about 2 MB higher per thread (estimates from the review, not measured
+  here); no slowdown was measured on this corpus, whose files are small.
+- **Check run with the command above** (fixed branch, load under 20, 2 runs): import 637 and 641 MB (pass), idle 290
+  and 291 MB, query 383 and 388 MB (fail, as above); low memory mode imported at 307 MB (pass, budget 400).
+- **Still over budget, not changed here:** the query peak (396–440 MB) and idle (292–345 MB) at 20 copies stay over
+  320 MB (indexing pipeline, catalogue, path order). The import keeps about 200 MB of freed pages at its peak. Recording
+  the file fingerprints commits once per file (`record_fingerprints`, 680 commits): about 4 s of the import's 5–7 s.
+- **Budget:** unchanged (768 MB import, 320 MB query and idle).
+
+### 2026-11-05, MEM-2: one memory budget for the open captures and documents (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 5342c93f1 (MEM-1: 32 captures per window, no total) against the MEM-2 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-10 during the runs; other agents running
+- **Build:** release; the folded importer in this process (the profiling plugin's process is not involved)
+- **Corpus:** 32 generated folded-stacks files of 24 MB each (the same invented stacks); synthetic
+- **Command:** `DEBRIEF_CAPTURES=32 DEBRIEF_BUDGET_MB=128 cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(many_captures_without_a_budget)'`
+  and the same with `many_captures_within_a_budget` (one process per test)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | MEM-2 (128 MB budget) | Budget | Verdict |
+  |---|---|---|---|---|
+  | Memory the 32 open captures hold (the budget's own count; 256 MB budget: 249 MB) | not counted, about 390 MB | 124 MB | the setting | pass |
+  | Peak resident memory of the process opening all 32 (10 MB before) | 394 MB | 336 MB | | smaller |
+  | Time to open all 32 | 6.3 s | 6.3 s | no slower | pass |
+  | The 33rd capture, and the 33rd dump | refused at 32 (count only, however large) | released and read again as needed; a dump or pasted capture that cannot fit is refused naming it | | |
+
+- **Memory measure:** the budget's estimate (`Profile::approx_bytes`, sizes of the tables) and the process' peak resident set
+- **Notes:** the process peak falls less than the held bytes because the allocator keeps pages it has freed (macOS) and
+  the import itself needs the file and the builder at once; the held bytes are what grows with every capture left open. The
+  budget counts profiles and heap snapshots by the sizes of their tables, and dumps by their encoded size times 3 (a
+  decoded document takes about that many times its encoded size). Dumps are counted and never released (they are changed
+  in place when symbols arrive); captures that have a file are released least recently used first and read again from the
+  file when a view asks. The call trees built for views are not in the budget (a cache of 4 per window, rebuilt when
+  asked); that is the next thing to count. Auto is a quarter of the computer's memory between 512 MB and 8 GB. Red runs: with
+  `with_budget` made a no-op, the three tests (`captures_over_the_budget_release_the_oldest_and_read_it_again`,
+  `a_capture_that_does_not_fit_says_which_one_and_what_to_close`, `documents_are_counted_in_the_memory_budget`) fail.
+
+### 2026-11-05, MEM-1: opening a capture no longer holds the file in the app (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base fb027b50d (the app reads the file, copies it for a helper thread and lends the copy) against the MEM-1 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-10 during the run; other agents running
+- **Build:** release; the profiling plugin in its own process (the `debrief-plugins` binary), this test process standing in for the app
+- **Corpus:** a generated folded-stacks file of 128 MB (invented stacks); synthetic
+- **Command:** `cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(app_holds_the_file) or test(file_is_lent_by_ranges)'`
+  (one process per test, so the peaks do not mix)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | MEM-1 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Peak resident memory of the app process opening a 128 MB capture (it was 13 MB before the open) | 395 MB | 140 MB | the file is not held | pass |
+  | Time to open | 1.9 s | 1.9 s | no slower | pass |
+  | The window's open captures during the import | locked for all of it | readable (`a_capture_is_imported_from_its_path_and_without_holding_the_store`) | readable | pass |
+
+- **Memory measure:** peak resident set of the process (`ru_maxrss`), not footprint
+- **Notes:** before, the app read the file (1 x), copied it to move it to a helper thread (2 x) and the plugin's process read
+  it again over IPC; now the importer is given the path and the plugin's process reads it by ranges, so the app holds none
+  of it (the 140 MB are the decoded capture and the baseline). The write lock of the window's captures was held for the
+  whole import (minutes for a large file); the import now runs with no lock, and the capture is added under a short one.
+  What stays: the plugin's own process still reads the file whole (the slice-based importers parse from a buffer; a streaming
+  importer SDK is a larger change, `serve.rs` `ImportProfile`), under its memory cap. Red run of the lock test: with the old
+  flow it fails ("the open captures were readable while the second one was imported").
+
+### 2026-11-06, idle after an Event Viewer import: root cause per process (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 852b35ac0 (debrief/1.2-int) against ed8e6005a (debrief/p0-idle)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 4-17 during the runs; other agents running (plock normal lane)
+- **Build:** release; libduckdb 2.0.0; worker and plugin binaries from each side
+- **Corpus:** 20 generated `.evtx` of 28 MB (560 MB, 1,164,800 events): the MIT/Apache-2.0 fixture chunk filled as in
+  `evtx_memory.rs`, with SubjectUserName and one TargetUserName rewritten in place to invented names (20,000 `.exe`,
+  4,000 `.dll`, Zipf-weighted, families of 3 look-alike spellings): 24,033 catalogue names, 23,224 groups; synthetic
+- **Command:** example `idle_rca` (debrief-cli, not committed): real store worker and plugin processes with the app's
+  launch values, files opened one after the other, then the app's name step (`watch` = base `watch_catalogue`,
+  `job` = head `schedule_rebuild`, `none`), sampled every 2 s per process and thread (proc_pid_rusage, proc_pidinfo)
+- **Runs:** base watch x2, base none, base split (phases timed), head job, head watch (old 500 ms pattern), head none
+- **Numbers:**
+
+  | Measure | Base | Head | Budget | Verdict |
+  |---|---|---|---|---|
+  | App process CPU after import end (name step) | 118.3 / 117.4 CPU-s, about 1 core for 2 min | 0.2 CPU-s (job), 0.1 (500 ms watch) | rebuild at most 1 s (D7) | base fails, head pass |
+  | Name table rebuild, 23,224 groups | 123.6 / 119.8 s | 1.6 s (job), 1.4 s (watch) | 1 s | head close (not met) |
+  | Of it: `merge_cooccurring` | 114.3 s, 0 merges | n/a | | cause |
+  | Of it: look-alike reads (10 names, 300 rows) / grouping / vocabulary | 2.58 / 0.04 / 0.01 s | n/a | | |
+  | App CPU with no name step | 0.0 CPU-s | 0.0 CPU-s | | removal check |
+  | Store worker CPU after import end, no name step (catalogue and index, done by 20 s) | 32.0 CPU-s | 32.2 CPU-s | 20 CPU-s per GB (D7) | both fail (57 per GB) |
+  | Store worker CPU added by the name step | 8.6-12.1 CPU-s | 9.4-9.6 CPU-s | | same |
+  | Old 500 ms polling while the catalogue builds | app about 0.5 CPU-s, worker +2-3 CPU-s | worker +0 | | minor |
+  | Any process, 22-600 s after import end | 0.000-0.001 cores | 0.000-0.001 cores | 0.5 % of a core | pass |
+  | Plugin process after import end | 0.0-0.7 CPU-s | 0.5 CPU-s | | pass |
+
+- **Memory measure:** not measured (physical footprint was sampled but not analysed)
+- **Cause (ER-28):** base's `merge_cooccurring` compares every pair of groups (trigrams rebuilt per pair) on the app's
+  name thread once the catalogue is built: removed (no name step) the app stays at 0.0 CPU-s, put back it is 117-118 CPU-s
+  in two runs, split it is 114.3 of 123.6 s. Ruled out by measurement: the catalogue and index builds (over by 20 s), the
+  500 ms watcher polling, head's 1 s status waits, idle store loops, the plugin process, DuckDB background work.
+  Not measured: the webview. The fix is a35ef28c1's trigram-indexed merge; the watcher-to-job change is not what removed the CPU.
+- **Notes:** opening the 20 files at once stops the plugin at its 1,024 MB cap (and ten 55 MB files at 4,096 MB),
+  and the store worker at its 2,048 MB cap, on both sides (the whole-file EVTX importer); the files were opened one at a time.
+
+### 2026-11-06, the name rebuild's look-alike reads on a 10-million-event store (branch `debrief/p0-idle`)
+
+- **Commit:** measured on the working tree of `debrief/p0-idle` on top of ed8e6005a (the bench is `tests/bench_name_reads.rs`, the test `name_reads_by_how_often_the_name_occurs`; the reads are the ones in `names/build.rs`, before the time bound below was added to them)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 8-24 during the runs (other agents' builds); the first run and the second differ only by that and by the file cache
+- **Build:** release; libduckdb 2.0.0; the store worker's allocator (mimalloc)
+- **Corpus:** 10,033,335 events: the samples repeated to 10 M (`corpus()`, 360 copies, as `bench_reads`), imported in 21.9 s, with invented names of 5, 30, 300, 3,000 and 30,000 events spread evenly over the copies, one name of 5 events within a 4-minute window, and the full-text index built; synthetic
+- **Command:** `DEBRIEF_NAME_BENCH_EVENTS=10000000 DEBRIEF_NAME_BENCH_STORE=<folder> cargo test --release -p debrief-store-duck --test bench_name_reads -- --ignored --nocapture`
+- **Runs:** two (a third run of each read inside each); the figures are the runs' range
+- **Numbers:** one read is the first 30 events that hold a name:
+
+  | Events holding the name | Substring search | Phrase search through the index | Verdict |
+  |---|---|---|---|
+  | 5 (a scan of every event: 30 hits are never reached) | 303-415 ms | 576-638 ms | substring is cheaper |
+  | 30 | 627-645 ms | 873-889 ms | substring is cheaper |
+  | 300 | 458-470 ms | 679-779 ms | substring is cheaper |
+  | 3,000 | 333-747 ms | 552-943 ms | substring is cheaper |
+  | 30,000 | 313-403 ms | 583-710 ms | substring is cheaper |
+  | 5, all within 4 minutes: unbounded / bounded to the name's time range | 303-415 ms / 87-90 ms | | the bound is 3.4 times cheaper |
+
+  | Side by side (16 reads of the 3,000-event name) | Wall | Failed reads |
+  |---|---|---|
+  | 1 thread | 5.3-7.2 s | 0 |
+  | 2 threads | 3.9-4.6 s | 0 |
+  | 4 threads | 2.9-4.2 s | 0 |
+  | 8 threads | 2.7 s | 7 of 16: "Out of Memory Error: failed to allocate data of size 1.0 MiB (182.1 MiB/183.1 MiB used)" |
+
+- **Memory measure:** not measured (the failure above is the store's query memory budget, about 183 MiB)
+- **Notes:** the two questions of rule 51, answered for a rare name. Cheaper: the index does not help a rare name here. The phrase search through the index was slower than the substring search for every frequency from 5 to 30,000 events, so a rare name is not routed to it. A name with fewer than thirty events costs a scan of every event, 0.3-0.4 s per 10 million events (about 36 ns an event), which is why the scan is now bounded by the time range the catalogue saw the group in (`first_ts` and `last_ts`): a name seen in four minutes took 88 ms instead of 303 ms. A name spread over all the time (as these are) has no gain from it. At the 1 billion events the roadmap names, an unbounded scan would be 30-40 s a read: the next step for it is one scan for all the rare names together (an OR of their texts; the first scan reads everything anyway), not measured here. More threads: 4 side by side cut the 16 reads to 41 % (first run) and 80 % (second run, load 20) of one thread; 8 fail on the store's query memory budget, so the bound of 4 (`MAX_READ_THREADS`) is that budget's, and a read that fails ends the best-effort join. The bound of the time range excludes events without a time from the read (the catalogue's range comes from timed events only); a name that appears only in untimed events has no range and is read as before.
+
+### 2026-11-05, rule 51 for the name rebuild: side-by-side reads of cheaper searches (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 7b0c2421e (NR1, one phrase search per look-alike name, one after the other) against the change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-10 during the runs; other agents running
+- **Build:** release; libduckdb 2.0.0; the test processes' system allocator
+- **Corpus:** a generated 64 MB `.evtx` (133,120 events, 38 catalogue names, 30 groups), imported through the Windows plugin
+  into the store the app ships; synthetic (see the NR1 block)
+- **Command:** `DEBRIEF_EVTX_IDLE_S=20 cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
+- **Runs:** the base side is the NR1 runs (2.81, 2.85, 2.90, 2.95 s); the change side one run; the READ lines are the mean of 3 reads, the same in both of the last two runs (19 and 20 ms)
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | Name table rebuild, 2 look-alike reads (`Names::refresh`) | 2.81-2.95 s wall, 3.1-3.3 CPU-s | 0.08 s wall, 0.32 CPU-s | at most 1 s (D7) | pass |
+  | One look-alike read, phrase search through the full-text index | 1,074-1,075 ms | not used any more | | |
+  | One look-alike read, substring search | | 19-20 ms | | |
+
+- **Memory measure:** not measured
+- **Notes:** the two questions of rule 51, answered. Cheaper: the rebuild read the first 30 events of each look-alike name
+  with a phrase search, which the store answers from the full-text index and then checks every candidate event for the
+  phrase (133,120 here, since every event holds the names), about 1.07 s a read; a substring search stops at the thirtieth
+  hit and costs 20 ms, a factor 53, and it also found events for a name the phrase search found none for (60 rows in 3
+  reads against 30). It matches the group's most frequent spelling as written, not the other separator variants of the
+  phrase search; the join counts events by the spellings in them, so a group is judged on the events of its own spelling.
+  More threads: the reads now run side by side (at most 4, never more than the cores minus one), which helps when there
+  are many look-alikes; on this sample there are two, so the gain shown is all from the cheaper search. Names whose
+  look-alikes cannot appear in the same event (no source in common when both lists of sources are complete, or time
+  ranges that do not meet) are not read at all (`joinable_look_alikes`; tested; the sample is one source, so it shows
+  nothing here). Not measured: a real export with thousands of names; the reads there are many and the search is
+  cheap, so the parallel part is what the next measurement should look at.
+
+### 2026-11-05, NR1: the name join and the name watcher; idle after an event-log import (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 919661e7f (N2 P2s, after P3) against the NR1 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-13 during the runs; Dyno release jobs and other agents running (the runs queued behind them)
+- **Build:** release; libduckdb 2.0.0; the test processes' system allocator
+- **Corpus:** `merge_scaling`: 50,000 invented executable names, the first 8,000 groups, 200 of them in the events;
+  `idle_after_an_event_log_import`: a generated 64 MB `.evtx` (133,120 events: the MIT/Apache-2.0 sample chunk repeated,
+  see `evtx_memory.rs`), imported through the Windows plugin into the store the app ships; synthetic
+- **Command:** `cargo nextest run -p debrief-core --release --no-capture -E 'test(merge_scaling)'` and
+  `cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
+  (`DEBRIEF_EVTX_IDLE_MB` 64, `DEBRIEF_EVTX_IDLE_S` 60)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | NR1 | Budget | Verdict |
+  |---|---|---|---|---|
+  | `merge_cooccurring` over 500 / 1,000 / 2,000 / 4,000 / 8,000 groups | 0.17 / 0.65 / 2.6 / 10.5 / 43.5 s | 6.8 / 6.7 / 7.0 / 7.2 / 7.5 ms | 8,000 groups under 0.5 s | pass |
+  | Event-log import, in-process CPU (the plugin's process not counted) | 1.16 CPU-s in 2.2 s | 1.19 CPU-s in 2.3 s | n/a | same |
+  | Catalogue and index built | 6.65 CPU-s in 2.7 s | 6.86 CPU-s in 2.9 s | n/a | same |
+  | Name table rebuild (`Names::refresh`, 38 catalogue names, 30 groups) | 3.16 CPU-s in 2.95 s | 3.16 CPU-s in 2.94 s | rebuild at most 1 s (D7) | not met, see notes |
+  | Idle store, 60 s after all of the above: statements | 0 | 0 | 0 | pass |
+  | Idle store, 60 s: CPU time of the process | 0.010 s (0.017 % of a core) | 0.012 s (0.020 % of a core) | at most 0.5 % of a core | pass |
+
+- **Memory measure:** not measured
+- **Notes:** the generated log has only 38 distinct names (one chunk repeated), so the sample cannot show what a real
+  550 MB Event Viewer export does to the name table; the 8,000-group row is the measurement of that part, and on the
+  sample the two sides are equal because there is nothing to join. What the user saw (1-2 cores for
+  minutes after the import) was the quadratic join, not the watcher: measured per process on 2026-11-06 (see the
+  "idle after an Event Viewer import" block above), base's `merge_cooccurring` took 114 s of a 124 s rebuild on 23,224
+  groups, while the 500 ms watcher cost about 0.5 app CPU-s (earlier note: the watcher read the whole catalogue every 500 ms
+  while it was built, P3's test: 20 whole reads in 20 refreshes, now 0). The watcher is now a quiet job ("Updating
+  names") that blocks inside the store on `catalogue_status` until the catalogue commits (still right for ER-17 and
+  ER-18); it asks again every 10 s (one status statement) to notice a cancel, a closed window or a replaced store. It is
+  covered by app tests with a store double (one wait, woken once, never reading names while unbuilt), not by this
+  engine-level run, which does not start the app. The 3.1 CPU-s the rebuild takes on 30 groups is the
+  "Comparing look-alike names" phase: 2.89 of its 2.90 s is the page query that reads the events of each look-alike
+  name (full-text search over 133,120 events; the join itself compares 0 pairs). It is the same on both sides. Rule 51's two
+  questions are open for it (queries in parallel, and fewer or cheaper ones: for example one batched read, or none for a
+  name whose look-alikes cannot join); the D7 budget of 1 s is not met on this sample until then. A second run of the
+  scenario with the phases printed (20 s idle window): import 1.19 CPU-s, catalogue and index 6.66, rebuild 3.11, idle 0 statements and 0.004 CPU-s.
+  The 60 s idle window shows the store itself is quiet after an import; the 60 s base wait of the loops did not hide a
+  burn at the store level (0.010 s CPU, 0 statements in the base), so the idle cost the user saw was in the app (the join, per the 2026-11-06 block).
+
+### 2026-11-05, P3: bounded catalogue read and catalogue status (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base ee2a13899 (D-0) against the P3 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 9-10 during the run; other agents running
+- **Build:** release; libduckdb 2.0.0; the store's default 192 MB memory limit
+- **Corpus:** `/samples` imported (38 sources), then its catalogue replaced by 1,600,000 invented rows (42,105 path-like
+  names over the 38 sources); synthetic
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::a_1_6_million_row_catalogue)'`
+- **Runs:** one run per side (the base failure was recorded with the P0 tests, debug build, the same message in a debug run)
+- **Numbers:**
+
+  | Measure | Base | P3 | Budget | Verdict |
+  |---|---|---|---|---|
+  | `catalogue(all)` over 1.6 M rows at the 192 MB limit | Out of Memory (183.0/183.1 MiB used) | 42,106 names in 0.88 s | answers within the limit | pass |
+  | Reads of the whole catalogue in 20 refreshes while it is not built | 20 | 0 | 0 | pass |
+  | A status call with `after` set, with the catalogue being built again | n/a (new) | returns at the first commit, in under 10 s of a 10 s wait | wakes on commit | pass |
+
+- **Memory measure:** DuckDB's own limit (the query fails or not); RSS not measured
+- **Notes:** the query now totals every name with sums and a time range only, keeps the top 50,000, and lists each
+  kept name's sources from the same rows afterwards, so no hash table holds a source list per name. The research's
+  estimate of a stored per-source `catalogue_totals` table was not needed for this size; at much larger catalogues the
+  hash table of the totals would grow again (it holds about 100 bytes per name) and that table is the next step. The
+  base of the status call is `Names::refresh`, which asks `catalogue_status` before it reads the names, so the
+  watcher's 500 ms ticks are one small statement while an import is catalogued. The watcher itself (`names.rs`) still
+  ticks every 500 ms; making it block on the status call belongs to NR1, which owns that file.
+
+### 2026-11-05, D-0: the catalogue's unsaved rows (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base c0642f80c (P2) against the D-0 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 5-13 during the runs; other agents running
+- **Build:** release; libduckdb 2.0.0; DuckDB's allocator (no mimalloc in the test process)
+- **Corpus:** `common::corpus` of 300,000 events (346 sources), generated from the invented samples; synthetic
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::building_the_catalogue)'`
+  (polls `duckdb_memory()` for the `IN_MEMORY_TABLE` tag every few ms while the catalogue builds, in steps of 4 MB)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | D-0 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Most memory held by committed, not yet checkpointed catalogue rows while the catalogue builds | 56 MB | 8 MB | 16 MB | pass |
+
+- **Memory measure:** DuckDB's own accounting (`duckdb_memory()`, tag `IN_MEMORY_TABLE`), not RSS
+- **Cause (ER-28):** the store sets `checkpoint_threshold` to 1 GB (`open_db`), and the catalogue loop checkpointed only
+  once it ran out of sources, so each commit's rows (about 60 bytes per name or trigram row) stayed in memory, counted
+  against the 192 MB limit (64 MB in `analysis_memory`), until the whole build ended. The 1M-event corpus of
+  `analysis_memory` has 1,137 sources; at the point of its measurements the catalogue had written 153 of them and held
+  25 MB (`IN_MEMORY_TABLE`, measured with the D-0 probe of `wt/debrief-d0-catalogue`) beside 61 MB of limit. The fix checkpoints
+  after 100,000 rows. With it removed the red test fails again (56 MB); with it, 8 MB.
+- **Not measured:** the Linux CI numbers the plan quotes (338 MB against 315, and `compare` out of memory at 64 MB):
+  `analysis_memory` passes on this Mac (anomalies +79 MB, moment +3 MB, compare +7 MB) before and after, so the
+  step's `continue-on-error` (`debrief.yml:228`) stays until a Linux run (CI or a local container) shows it passing. The 7.6 GB
+  catalogue itself is not measured.
+
+### 2026-11-05, P2: store loops without polling (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 9a444d0a6 (the P0 tests on `debrief/1.2-int` 852b35ac0) against the P2 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 12-17 during the runs; Dyno release jobs and other agents running
+- **Build:** release; mimalloc not set in the test (the test process's system allocator); libduckdb 2.0.0
+- **Corpus:** the invented `/samples` log folders (about 38 sources), imported once; catalogue and index built
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --run-ignored only --no-capture -E 'test(regress_1_2::an_idle_store)'`
+  (`an_idle_store_statements_and_cpu`; `DEBRIEF_IDLE_S` = 130 s, two turns of the loops' 60 s backstop)
+- **Runs:** one run per side (A then B); the 100-turn counts below are deterministic
+- **Numbers:**
+
+  | Measure | Base | P2 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Statements in 130 s of an idle store (DuckDB QueryLog, all connections) | 18 | 0 | 0 | pass |
+  | CPU time of the process in those 130 s | 0.009 s | under 0.001 s | idle at most 0.5 % of a core | pass (both) |
+  | Statements in 100 idle catalogue turns (`catalogue::tests::a_hundred_idle_turns_run_no_statement`) | 500 | 0 | 0 | pass |
+  | Statements in 100 idle index turns (`fts::tests::a_hundred_idle_turns_run_no_statement`) | 400 | 0 | 0 | pass |
+
+- **Memory measure:** not measured (not the question)
+- **Notes:** the base already waits 60 s between idle turns (the `wip/debrief-1.2-lean-2026-11-04` loops), so the CPU
+  difference is small: what P2 removes is the last statement run on a timer, three deletes and a query in the
+  catalogue loop and one in the index loop, every minute. Both loops now look at the database only after a wake-up,
+  or after the store's generation moved (every import, removal, refresh and live-follow step bumps it), or when a
+  turn has to be tried again. The 1.1.1 figure of 500 ms polling is not re-measured here. The names watcher (H2) and
+  the per-pid memory probes (H1, `paddock-proc`) are other idle costs, in P3 and P1.
+
+### 2026-11-05, Debrief 1.2 wave 0: the failing performance and memory tests (branch `debrief/p0-idle`)
+
+- **Commit:** base `debrief/1.2-int` 852b35ac0; the tests are the P0 and 0.3 commit of `debrief/p0-idle`
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 12-17 during the runs (shared with the Dyno release and other agents)
+- **Build:** release for `merge_scaling`, the CSV, the `.gz`, the exception groups and the `.evtx` runs; debug for the idle
+  turns, the catalogue read and the jobs test (their numbers are counts and errors, not timings); libduckdb 2.0.0
+- **Corpus:** all generated by the tests into a temp folder (invented rows): a 3 GiB CSV, a `.gz` of 1.5 GB
+  uncompressed (17,960,344 lines), 50,000 exception types, a catalogue of 1,600,000 rows over the 38 sources of
+  `/samples`, the repeated sample `.evtx` chunk
+- **Command:** `cargo nextest run -p <crate> [--release] --run-ignored only --no-capture -E 'test(<name>)'`, one test per run
+- **Runs:** single; each test fails today, which is the point (ER-11)
+- **Numbers:**
+
+  | Test (package that fixes it) | Measure | Today | Required |
+  |---|---|---|---|
+  | `catalogue::tests::a_hundred_idle_turns_run_no_statement` (P2) | statements in 100 idle catalogue turns | 500 | 0 |
+  | `fts::tests::a_hundred_idle_turns_run_no_statement` (P2) | statements in 100 idle index turns | 400 | 0 |
+  | `names_perf::merge_scaling` (NR1) | `merge_cooccurring` over 8,000 groups (500 / 1,000 / 2,000 / 4,000 groups: 0.17 / 0.65 / 2.6 / 10.5 s) | 43.5 s | under 0.5 s |
+  | `names_perf::a_refresh_while_the_catalogue_is_not_built_reads_no_names` (P3) | reads of the whole catalogue in 20 refreshes of an unbuilt one | 20 | 0 |
+  | `regress_1_2::a_1_6_million_row_catalogue_is_read_within_the_query_budget` (P3) | `catalogue(all)` over 1.6 M rows | Out of Memory at 183.0/183.1 MiB | answers within 192 MB |
+  | `jobs::tests::two_identical_requests_give_one_job` (J1, AI part: fixed; imports and exports stay open) | job ids for two identical submits | 2 | 1 |
+  | `regress_1_2::a_3_gib_csv_imports_under_the_worker_cap` (3.5) | peak RSS importing a 3 GiB CSV | 17,399 MB | 768 MB |
+  | `regress_1_2::a_gz_of_1_5_gb_uncompressed_imports_under_the_import_budget` (3.5) | lines imported from the `.gz` | 0 of 17,960,344 | all, under 768 MB |
+  | `regress_1_2::an_exceptions_view_with_50_000_groups_...` (4.2) | groups returned | 50,000 | at most 5,000, with `truncated` |
+  | `evtx_memory::a_256_mb_event_log_imports_within_the_default_plugin_cap` (PH4) | plugin peak against the 1,024 MB cap | stopped at the cap (peak 1,062-1,079 MB) | imports within it |
+  | `evtx_memory::a_plugin_stopped_at_its_cap_says_so_instead_of_crashed` (PH2b) | error text of a cap stop | "crashed ... closed the connection" | names the cap |
+
+- **Memory measure:** RSS (sampled in the test process; the plugin's peak is its own process)
+- **Notes:** each test is `#[ignore]`d with its failure text until its package removes the marker. The CSV run took 88 s
+  and 17 GB of RAM: do not repeat it casually on a shared machine. The `.evtx` runs retry once under nextest and fail
+  both times. The 1.6 M-row catalogue is invented, spread over the samples' 38 sources with path-like names; the
+  research's 7.6 GB figure (1.58 M rows) is the shape, not a measurement of the same data.
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`
@@ -792,3 +1195,85 @@ group). One run:
 The differential tests gave back most of the first change's gain with the restored combinations, at a higher load than
 the "after" runs above; large_folder now runs beside everything else instead of in the group. The whole crate also passes
 with `DEBRIEF_TEST_APP_BUDGETS=1` (47.5 s without extra load).
+
+
+## Store worker exit: crashes over runs of its stop (2026-11-10, ADR 0076 exit-phase amendment, WP-X0)
+
+Rule 48 block. The store worker crashed in DuckDB at exit (21 crash reports on the development Mac, 2026-11-05 to 2026-11-10).
+Two causes were candidates (ER-28): (a) a native thread of the worker still inside DuckDB while C++ destroys its statics,
+(b) two threads in `exit` at once (the lifeline thread's `std::process::exit` and `main` returning). Each run starts a real
+worker (`debrief-store-worker`), imports the samples (the repository's invented samples), and stops it the way Debrief does
+(`StoreWorker::shutdown`, which closes the connection and then stdin) the moment the import is over, while the indexer and
+the names catalogue work. How the worker ended is read with `waitid` (`WNOWAIT`). The harness is
+`crates/debrief-store-worker/tests/it/exit_measure.rs` (`DEBRIEF_EXIT_RUNS`, `_PAR`, `_BUSY`, `_COPIES`, `_ARM`;
+`cargo test -p debrief-store-worker --test it measure_the_workers_exit -- --ignored --nocapture`).
+
+Setup: Mac mini (14 cores, macOS, Darwin 27.2), debug build, libduckdb 2.0.0, two runs at once (`DEBRIEF_EXIT_PAR=2`), on a
+machine also busy with other agents (5-minute load 16 to 25 during the runs; `DEBRIEF_EXIT_BUSY` busy threads where noted).
+"Crashed" is any signal but SIGKILL or a non-zero exit status; `parent_killed` (SIGKILL by the parent after its grace) was 0
+in every run. Every run's line is `EXIT-MEASURE arm=... ended=...`; SIGSEGV (11) was the only crash seen.
+
+The natural runs never crashed, so the per-run rate `p` is not measurable that way, and the arms need a hook that holds a
+thread inside DuckDB when `main` returns: **the hook** (a temporary edit of the catalogue thread, never committed) keeps it
+running `SELECT i FROM range(1)` (a statement that fails in the binder, which formats an error with identifiers: the
+keyword-table path of 17 of the 21 reports) in a loop, outside the exit handler's count, until its stop flag is set. Every
+arm below `H2` has it.
+
+| arm | what runs | runs | crashed (SIGSEGV) |
+|---|---|---|---|
+| 0 natural (no fix, no hook) | the code before this change | 12 + 20 (8 copies) | 0 of 32 |
+| 0 long statement (no fix; a 30-billion-row aggregate, interrupted at exit) | the code before this change | 75 | 0 of 75 |
+| **0 H2** (no fix, hook) | the code before this change | 100 | **12 of 100** (p about 0.12; a first 20 gave 2) |
+| **1 H2**: one exit route only | the lifeline closes the peer; `main` is the only exit; the catalogue is **not** joined | 100 | **22 of 100** |
+| **2 H2**: the join only | the join runs in `main`, **both** exits kept (the lifeline still calls `exit`) | 100 | **100 of 100** |
+| **fix H2** | both fixes (one exit route, the bounded join), hook | 200 (`BUSY=2`) | **0 of 200** |
+| fix natural | both fixes, no hook | 100 (2 copies, `BUSY=2`) | 0 of 100 |
+
+Review corrections (same day). The hook is now the `exit-hold` feature of `debrief-store-duck` (`DEBRIEF_EXIT_HOLD`), enabled
+by the worker's dev-dependency, with a test (`the_worker_stops_its_store_threads_before_it_exits`) that fails when `run()`
+does not stop the store threads. Arm 2 as first run (the row above, 100 of 100) **deviates from WP-X0's spec**: the lifeline
+still exited at once, before the join. As specified (the join in `main`, the lifeline's `exit` only after the join, so both
+`exit`s still run with nothing native alive) it was run again:
+
+| arm | what runs | runs | crashed |
+|---|---|---|---|
+| **2 H2 as specified** | the join, both exits kept, the lifeline exits only after the join | 100 | **0 of 100** |
+| fix H2 (the committed code, hook as the feature) | both fixes | 100 | 0 of 100 (2 `unknown`) |
+
+Reading: arm 1 crashes without any second exit route, so (a), a live native thread during static destruction, is a cause on
+its own. Arm 2 as specified does not crash, so a second `exit` alone, with nothing native alive, was not seen to crash:
+(b) amplifies (a) (arm 2 as first run, where the second `exit` ran before the join: 100 of 100) but is not shown to be a cause
+without it; the 0 of 100 bounds it only loosely (95% upper bound about 3%).
+
+**The D-E4 gate for instance 5 is NOT met yet.** The gate is the rate of crash reports against today's rate (21 reports in six
+days, about 3.5 a day). What was measured: the natural arm 0 was 0 of 107 runs, so the natural per-run rate `p` is
+unmeasured and below about 0.028 (95%); and 0 of 100 after the fix says nothing when 0 of 107 was also the result before
+it. The hooked rate (`p` about 0.12 with a thread held in DuckDB) proves the mechanism and the fix against that mechanism, not
+the field rate. To close it: a field soak on the development Mac, about 1 to 2 days of normal use with 0 crash reports of
+`debrief-store-worker` (against about 3.5 a day, 0 in 2 days is a 95% bound under one third of the old rate), or a natural
+harness that reproduces the old rate (longer-lived workers with big stores) and then runs 3/p after the fix.
+
+Not measured: the natural per-run rate (the 21 reports came from long-lived workers with big stores; the harness stops a worker
+seconds after an import of a few MB), the hook's catalogue loop is a model of the thread the crash reports show, not the
+catalogue's own statements; Linux and Windows (a native arm64 Linux run of the new tests: see the commit's report).
+
+## The catalogue's tail commit, per-name statements against one set-based merge (2026-11-11)
+
+Live follow adds the names of appended lines to a catalogued source (`catalogue::commit_tail`, branch
+`fix/debrief-live-follow-catalogue`). It runs under the store's write lock, so what it costs per name is what an import
+waits for. Measured by the store's own test `a_tail_commit_of_many_names_is_timed` (an in-memory store, one source, names
+that are executables with about 25 trigrams each; Mac mini, debug build, load about 5, single runs; the same test, the
+same machine, before and after the change).
+
+| names | per-name UPDATE, then INSERT of the name and each trigram | staging table, one UPDATE, appenders |
+|---|---|---|
+| 1,000 new | 3,530 ms | 32 ms |
+| 1,000 seen again (counts added) | 669 ms | 10 ms |
+| 10,000 new | 32,992 ms | 213 ms |
+| 10,000 seen again | 7,689 ms | 25 ms |
+
+The first version (a statement per name and per trigram) took over half a minute for 10,000 names, so the merge is now one
+UPDATE ... FROM over a staging table, a read of the names the source did not have, and appenders for the new rows and their
+trigrams. What is left of the 213 ms is the 250,000 trigram rows of 10,000 new names (a tail of text lines brings a few
+dozen names, not thousands). Cost per tail read: the events appended since the last read (read once, with their ids), plus
+a pass over the source's catalogue rows for the update join; never the source's other events.

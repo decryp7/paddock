@@ -6,6 +6,7 @@ use crate::helper_first::{Availability, HelperCalls, HelperFirst, HelperPort, He
 use crate::helper_link::CallError;
 use dyno_core::extras::sleep::{blockers_from_requests, SleepBlocker};
 use dyno_core::helper_extras::ExtrasAnswer;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_requests::ExtrasKind;
 use dyno_core::metrics::Reading;
 use dyno_core::ports::PlatformError;
@@ -39,6 +40,7 @@ impl WakeRequests {
 
 impl HelperReading for WakeRequests {
     type Value = Vec<SleepBlocker>;
+    const KINDS: &'static [RequestKind] = &[RequestKind::Extras];
 
     fn name(&self) -> &'static str {
         "wake requests"

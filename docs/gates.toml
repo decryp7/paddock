@@ -373,9 +373,9 @@ approved = "coordinator"
 
 [[ignored]]
 path = "apps/debrief/crates/debrief-core/tests/it/names_perf.rs"
-tests = ["timings_at_fifty_thousand_entities", "merge_scaling"]
+tests = ["timings_at_fifty_thousand_entities"]
 gate = "not-gated"
-reason = "a measurement (rule 48) whose results block is not written yet: timings_at_fifty_thousand_entities, merge_scaling"
+reason = "a measurement (rule 48) whose results block is not written yet: timings_at_fifty_thousand_entities"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -502,6 +502,66 @@ review_by = 2027-01-07
 approved = "coordinator"
 
 [[ignored]]
+path = "apps/debrief/crates/debrief-core/tests/it/regress_1_2.rs"
+tests = ["a_3_gib_csv_imports_under_the_worker_cap"]
+gate = "not-gated"
+reason = "a marked failing test of a later plan package (3.5, streaming legacy text): needs a 3 GiB generated file and minutes of CPU, enabled when it lands"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/it/regress_1_2.rs"
+tests = ["a_gz_of_1_5_gb_uncompressed_imports_under_the_import_budget", "an_exceptions_view_with_50_000_groups_returns_at_most_its_limit_and_says_truncated"]
+gate = "not-gated"
+reason = "marked failing tests of later plan packages (3.5 streaming archives, 4.2 bounded engine queries): fail today by design, enabled when those land"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/it/regress_1_2.rs"
+tests = ["an_idle_store_statements_and_cpu"]
+gate = "measurement"
+reason = "a measurement of an idle store's statements and CPU, run by hand with --ignored --nocapture; its results block is in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugins/tests/it/capture_open.rs"
+tests = ["app_holds_the_file", "file_is_lent_by_ranges", "many_captures_without_a_budget", "many_captures_within_a_budget"]
+gate = "measurement"
+reason = "a measurement of memory while opening large captures, run by hand with --ignored --nocapture; its results block is in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-plugins/tests/it/evtx_idle.rs"
+tests = ["idle_after_an_event_log_import"]
+gate = "measurement"
+reason = "a measurement of CPU after an event log import (20 CPU-s per GB budget), run by hand with --ignored --nocapture; its results block is in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/bench_name_reads.rs"
+tests = ["name_reads_by_how_often_the_name_occurs"]
+gate = "measurement"
+reason = "a benchmark of the name rebuild's reads, run by hand with --release --ignored --nocapture; its results block is in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-11
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/debrief/crates/debrief-plugins/tests/it/perf_plugins.rs"
 tests = ["idle_plugins"]
 gate = "not-gated"
@@ -538,6 +598,16 @@ gate = "not-gated"
 reason = "performance test run by hand: measurement, run by the bench workflow with DEBRIEF_PERF_STORE set (--ignored)"
 owner = "Debrief 1.2"
 since = 2026-11-08
+review_by = 2027-01-07
+approved = "coordinator"
+
+[[ignored]]
+path = "apps/debrief/crates/debrief-store-worker/tests/it/exit_measure.rs"
+tests = ["measure_the_workers_exit_under_load"]
+gate = "not-gated"
+reason = "a measurement (rule 48), run by hand; results in apps/debrief/docs/performance.md, Store worker exit"
+owner = "Debrief 1.2"
+since = 2026-11-10
 review_by = 2027-01-07
 approved = "coordinator"
 
@@ -699,16 +769,6 @@ reason = "VM-only rows (PADDOCK_VM or PADDOCK_SETUP_VM, a Windows or macOS guest
 owner = "Dyno 1.1.1"
 since = 2026-11-08
 review_by = 2026-12-20
-approved = "coordinator"
-
-[[ignored]]
-path = "apps/dyno/crates/dyno-agent/tests/helper_wiring.rs"
-tests = ["every_advertised_reading_has_a_production_sender", "the_user_guide_and_the_changelog_claim_what_readings_advertises"]
-gate = "not-gated"
-reason = "red until WP-INT wires every reading (Dyno 1.1.1 list); WP-INT adds the CI line and removes the entry"
-owner = "Dyno WP-INT"
-since = 2026-11-08
-review_by = 2026-11-29
 approved = "coordinator"
 
 [[ignored]]

@@ -32,7 +32,7 @@ import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } fr
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
 const BASE = process.env.PADDOCK_LINUX_BASE ?? 'linux-gnome-base';
-const TART_HOME = process.env.TART_HOME ?? '/Volumes/d7sst7/dev-targets/tart-home';
+const TART_HOME = process.env.TART_HOME ?? '/Volumes/d8sst7/vm-data/tart-from-home';
 const SESSION = 'export XDG_RUNTIME_DIR=/run/user/1000 DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus';
 const log = (m) => console.error(`vm-smoke(linux): ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

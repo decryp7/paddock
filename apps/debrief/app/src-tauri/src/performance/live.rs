@@ -13,12 +13,31 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
+/// The bytes the open captures and documents may use: the setting, or (0) a quarter of this computer's memory.
+fn documents_limit(s: &PerformanceSettings) -> u64 {
+    match s.documents_memory_mb {
+        0 => match sysinfo::System::new() {
+            Ok(mut sys) => {
+                sys.refresh_memory();
+                debrief_budget::auto_limit(sys.total_memory())
+            }
+            Err(why) => {
+                log::warn!("memory size unavailable (sysinfo): {why}; the documents limit is the smallest Auto limit");
+                debrief_budget::auto_limit(0)
+            }
+        },
+        mb => u64::from(mb) << 20,
+    }
+}
+
 /// Managed through [`crate::app_state::AppState`].
 pub struct Live {
     dir: Option<PathBuf>,
     cores: u32,
     settings: RwLock<PerformanceSettings>,
     pub hub: Arc<MemoryHub>,
+    /// The memory the open captures and documents of every window share (`documents_memory_mb`).
+    budget: Arc<debrief_budget::MemoryBudget>,
     worker: Mutex<Option<StoreWorker>>,
     plugins: Mutex<Option<Arc<Builtins>>>,
 }
@@ -44,14 +63,21 @@ impl Live {
 
     /// Fixed settings and cores (tests).
     pub fn with(dir: Option<PathBuf>, settings: PerformanceSettings, cores: u32) -> Arc<Live> {
+        let budget = debrief_budget::MemoryBudget::new(documents_limit(&settings));
         Arc::new(Live {
             dir,
             cores,
             settings: RwLock::new(settings),
             hub: MemoryHub::new(),
+            budget,
             worker: Mutex::new(None),
             plugins: Mutex::new(None),
         })
+    }
+
+    /// The budget for open captures and documents, shared by every window.
+    pub fn documents_budget(&self) -> Arc<debrief_budget::MemoryBudget> {
+        self.budget.clone()
     }
 
     pub fn settings(&self) -> PerformanceSettings {
@@ -96,6 +122,7 @@ impl Live {
     /// New settings (already saved): every process gets them at its next start.
     pub fn apply(&self, s: &PerformanceSettings) {
         *self.settings.write().unwrap_or_else(|p| p.into_inner()) = s.clone();
+        self.budget.set_limit(documents_limit(s));
         if let Some(w) = lock(&self.worker).as_ref() {
             w.set_launch(self.worker_launch());
         }
@@ -167,6 +194,28 @@ mod tests {
             "no folder: the defaults"
         );
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// MEM-2: the memory for open captures and documents follows the setting, live; 0 is a quarter of the computer's memory.
+    #[test]
+    fn the_memory_for_open_documents_follows_the_setting_and_auto_is_a_quarter_of_the_memory() {
+        let mut s = PerformanceSettings {
+            documents_memory_mb: 256,
+            ..PerformanceSettings::default()
+        };
+        let live = Live::with(None, s.clone(), 4);
+        assert_eq!(live.documents_budget().limit(), 256 << 20);
+        s.documents_memory_mb = 0;
+        live.apply(&s);
+        let auto = live.documents_budget().limit();
+        assert!((debrief_budget::AUTO_MIN..=debrief_budget::AUTO_MAX).contains(&auto), "{auto}");
+        s.documents_memory_mb = 2048;
+        live.apply(&s);
+        assert_eq!(live.documents_budget().limit(), 2048 << 20);
+        assert!(
+            PerformanceSettings::default().bounded().documents_memory_mb == 0,
+            "the default is Auto"
+        );
     }
 
     #[test]

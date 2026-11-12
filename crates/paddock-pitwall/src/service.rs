@@ -566,7 +566,9 @@ impl Link {
                     if cancel.is_cancelled() {
                         return;
                     }
-                    let Some(outcome) = link.poll_once(port, &start.pairing_id, give_up_at) else {
+                    let Some(outcome) =
+                        link.poll_once(port, &start.pairing_id, &start.poll_token, give_up_at)
+                    else {
                         continue;
                     };
                     link.finish_pairing(&start.pairing_id, outcome, use_for_app);
@@ -578,11 +580,17 @@ impl Link {
     }
 
     /// One poll of a waiting pairing: `None` keeps waiting, `Some` ends it.
-    fn poll_once(&self, port: u16, id: &str, give_up_at: u64) -> Option<Result<(), PitwallError>> {
+    fn poll_once(
+        &self,
+        port: u16,
+        id: &str,
+        token: &str,
+        give_up_at: u64,
+    ) -> Option<Result<(), PitwallError>> {
         if self.cfg.clock.now_ms() > give_up_at {
             return Some(Err(PitwallError::PairingExpired));
         }
-        match self.client(port, None).poll_pairing(id) {
+        match self.client(port, None).poll_pairing(id, token) {
             Ok(PairPoll::Pending) => None,
             Ok(PairPoll::Approved(Some(key))) => Some(
                 self.keys

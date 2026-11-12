@@ -21,6 +21,9 @@ const ARGS_ENV: &str = "PADDOCK_FAKE_BROWSER_ARGS_FILE";
 /// the wrong binary can never open the app's windows on the desktop.
 pub use crate::FAKE_CHILD_ENV as CHILD_ENV;
 const MODE_ENV: &str = "PADDOCK_FAKE_BROWSER_MODE";
+/// The pid of the process that installed (and so launches) the fake: the fake ends as soon as its parent is another
+/// process, or init.
+const OWNER_ENV: &str = "PADDOCK_FAKE_BROWSER_OWNER";
 const TABS_ENV: &str = "PADDOCK_FAKE_BROWSER_TABS";
 const CTL_ENV: &str = "PADDOCK_FAKE_BROWSER_CTL";
 const URL_ENV: &str = "PADDOCK_FAKE_BROWSER_URL";
@@ -136,13 +139,14 @@ fn script(
     tabs: usize,
     me: &Path,
     test_path: &str,
+    owner: u32,
 ) -> String {
     let dyld: String = dyld
         .iter()
         .map(|(k, v)| format!("export {k}='{v}'\n"))
         .collect();
     format!(
-        "#!/bin/sh\n{dyld}printf '%s\\n' \"$@\" > '{args}'\nexport {CHILD_ENV}=1 {ARGS_ENV}='{args}' {MODE_ENV}={mode} {TABS_ENV}={tabs} {URL_ENV}='{url}' {CTL_ENV}='{ctl}' {CALLS_ENV}='{calls}' {EVAL_ENV}='{eval}'\nexec '{me}' '{test_path}' --exact --nocapture\n",
+        "#!/bin/sh\n{dyld}printf '%s\\n' \"$@\" > '{args}'\nexport {CHILD_ENV}=1 {ARGS_ENV}='{args}' {MODE_ENV}={mode} {TABS_ENV}={tabs} {URL_ENV}='{url}' {CTL_ENV}='{ctl}' {CALLS_ENV}='{calls}' {EVAL_ENV}='{eval}' {OWNER_ENV}={owner}\nexec '{me}' '{test_path}' --exact --nocapture\n",
         args = f.args_file.display(),
         url = f.url_file.display(),
         ctl = f.ctl_file.display(),
@@ -177,7 +181,10 @@ impl FakeBrowser {
             .iter()
             .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
             .collect();
-        std::fs::write(&f.exe, script(&dyld, &f, mode, tabs, &me, test_path))?;
+        std::fs::write(
+            &f.exe,
+            script(&dyld, &f, mode, tabs, &me, test_path, std::process::id()),
+        )?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&f.exe, std::fs::Permissions::from_mode(0o755))?;
         Ok(f)
@@ -221,6 +228,19 @@ impl FakeBrowser {
     }
 }
 
+/// Whether the fake ends: its parent is not the launcher the start script named, or is init (the launcher is gone, and
+/// the fake is a child of init, or of a subreaper such as Linux's `PR_SET_CHILD_SUBREAPER` holders, which is not the
+/// launcher either).
+fn should_exit(parent: libc::pid_t, owner: libc::pid_t) -> bool {
+    parent != owner || parent <= 1
+}
+
+/// The pid of this process's parent (it changes to the reaper's when the parent dies).
+fn parent_pid() -> libc::pid_t {
+    // SAFETY: getppid has no arguments and cannot fail.
+    unsafe { libc::getppid() }
+}
+
 /// Becomes the fake browser when this process was started by [`FakeBrowser::install`]'s script; returns at once otherwise
 /// (so the caller's marker test is harmless in a normal run). Never returns when it serves.
 pub fn serve_if_requested() {
@@ -234,10 +254,19 @@ pub fn serve_if_requested() {
         .unwrap_or(1);
     let url_file = std::env::var(URL_ENV).unwrap_or_default();
     apply_control();
-    // An idle fake still quits when told to.
-    std::thread::spawn(|| {
+    // The process that launches this fake, named by its start script (not read from the parent here: the launcher may be
+    // gone already). When it is gone (a killed or timed-out test run, no guardian) the fake ends.
+    let owner: libc::pid_t = std::env::var(OWNER_ENV)
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or_else(parent_pid);
+    // An idle fake still quits when told to, and when its owner is gone (it would otherwise listen for ever, ER-14).
+    std::thread::spawn(move || {
         loop {
             apply_control();
+            if should_exit(parent_pid(), owner) {
+                std::process::exit(0);
+            }
             std::thread::sleep(TICK);
         }
     });
@@ -624,6 +653,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn the_fake_ends_when_its_parent_is_not_its_launcher() {
+        assert!(!should_exit(4242, 4242), "the launcher is alive");
+        assert!(should_exit(1, 4242), "reparented to init");
+        assert!(
+            should_exit(777, 4242),
+            "reparented to a subreaper (Linux), not the launcher"
+        );
+        assert!(should_exit(1, 1), "a launcher that is init is no launcher");
+        assert!(should_exit(0, 0));
+    }
+
     /// Regression (macOS CI, nextest): the test binary finds its native libraries through `DYLD_FALLBACK_LIBRARY_PATH`,
     /// which the shell running the fake dropped, so every fake browser exited at once.
     #[test]
@@ -643,7 +684,15 @@ mod tests {
             calls_file: "/t/calls".into(),
             eval_file: "/t/eval".into(),
         };
-        let s = script(&dyld, &f, "obey", 1, Path::new("/bin/test"), "x::fake");
+        let s = script(
+            &dyld,
+            &f,
+            "obey",
+            1,
+            Path::new("/bin/test"),
+            "x::fake",
+            4242,
+        );
         assert!(s.contains("export DYLD_LIBRARY_PATH='/a'\n"), "{s}");
         assert!(
             s.contains("export DYLD_FALLBACK_LIBRARY_PATH='/b:/c'\n"),
@@ -651,6 +700,7 @@ mod tests {
         );
         assert!(s.contains(&format!("export {CHILD_ENV}=1 ")), "{s}");
         assert!(s.contains(&format!("{EVAL_ENV}='/t/eval'")), "{s}");
+        assert!(s.contains(&format!("{OWNER_ENV}=4242\n")), "{s}");
         assert!(
             s.ends_with("exec '/bin/test' 'x::fake' --exact --nocapture\n"),
             "{s}"

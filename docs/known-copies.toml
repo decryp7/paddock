@@ -629,6 +629,20 @@ status = "built"
   delete_by = "spotter-v1.1.0"
   note = "paddock-jobs' schedule tests say the maths was ported from this file; Spotter 1.0 still uses its own."
 
+[[mechanism]]
+id = "job-idempotency-key"
+title = "Idempotency key on queued jobs: an equal key serves the request instead of adding a job (ADR 0024 rule 3, plan J1)"
+canonical = "paddock-jobs"
+paths = ["crates/paddock-jobs/src/queue.rs"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/jobs/queue.rs", "apps/debrief/app/src-tauri/src/jobs/service.rs"]
+  symbols = ["item:submit_or_existing", "item:submit_keyed_work"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's own job queue holds the key (JobSpec::keyed, and keyed_while_queued for work that must run again after a trigger that arrives while it runs). Plan J1 puts the key in paddock-jobs, adopted by Debrief with M2a (jobs move to paddock-jobs); the canonical must keep both modes."
+
 # =====================================================================================================================
 # UI (@decryp7/paddock-ui)
 # =====================================================================================================================
@@ -921,7 +935,6 @@ adr = "0041"
     "crates/paddock-jobs/tests/it/parallel.rs",
     "crates/paddock-download/tests/it/http.rs",
     "crates/paddock-window/src/tauri/tests.rs",
-    "crates/paddock-chromium/src/launch/tests.rs",
   ]
   owner = "paddock"
   delete_by = "v0.5.0"
@@ -1053,3 +1066,16 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.4.0"
   note = "The oracle of `./dev ci timings` (a test compares its Markdown, byte for byte, with this script's output on recorded API replies: tools/paddock-dev/tests/ci-runs/timings/golden.md). It has no CI caller; delete it, and engineering-rules' copy one release later, once the Rust command is the only reader."
+
+# =====================================================================================================================
+# Environment overrides in a shipped build
+# =====================================================================================================================
+
+[[mechanism]]
+id = "dev-env-override"
+title = "A development-only environment variable that picks a program or switch, honoured under cfg!(debug_assertions) only and logged once by name when ignored (ADR 0073 DB1, DB9)"
+canonical = "paddock-env"
+paths = ["crates/paddock-env/src/dev_override.rs"]
+status = "built"
+adr = "0073"
+

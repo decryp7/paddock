@@ -28,19 +28,19 @@ describe('reduceTurn', () => {
   });
 
   it('marks a card destructive from its start or from the approval it asks', () => {
-    const started = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: true }]);
+    const started = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: true, input: {} }]);
     const asked = run([
-      { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false },
-      { type: 'approvalNeeded', destructive: true, remember: false, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
+      { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false, input: {} },
+      { type: 'approvalNeeded', destructive: true, remember: false, callId: 'c1', name: 'erase', summary: 'Erase', description: '', input: {} },
     ]);
     for (const t of [started, asked]) expect(t.parts.map((p) => p.kind === 'tool' && p.card.destructive)).toEqual([true]);
   });
 
   it('waits for a write, collects citations without duplicates, and closes dangling cards when the turn ends', () => {
     let t = run([
-      { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false },
-      { type: 'approvalNeeded', destructive: false, remember: false, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
-      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'x', write: false, destructive: false },
+      { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false, input: {} },
+      { type: 'approvalNeeded', destructive: false, remember: false, callId: 'c1', name: 'erase', summary: 'Erase', description: '', input: {} },
+      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'x', write: false, destructive: false, input: {} },
     ]);
     expect(t.parts.map((p) => (p.kind === 'tool' ? p.card.state : 'text'))).toEqual(['awaiting', 'running']);
     const cite = { text: 'item 7', target: 'record:7' };
@@ -64,17 +64,31 @@ describe('phases and approvals (ADR 0023 WP-4a)', () => {
     expect(waitingPhase(t)).toEqual({ kind: 'loading', elapsedMs: 1500 });
     expect(waitingPhase(reduceTurn(t, { type: 'phase', phase: { kind: 'generating' } }))).toBeNull();
     expect(waitingPhase(reduceTurn(t, { type: 'delta', text: 'a' }))).toBeNull();
-    expect(waitingPhase(reduceTurn(t, { type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false }))).toBeNull();
+    expect(waitingPhase(reduceTurn(t, { type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false, input: {} }))).toBeNull();
     expect(waitingPhase(reduceTurn(t, { type: 'done', text: '', usage, end: 'cancelled' }))).toBeNull();
     expect(waitingPhase(startTurn('q'))).toBeNull();
   });
 
+  it('keeps the arguments, the tool description and the result on the card', () => {
+    const t = run([
+      { type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false, input: { q: 'a' } },
+      { type: 'approvalNeeded', destructive: false, remember: true, callId: 'c1', name: 'find', summary: 'x', description: 'Finds things.', input: { q: 'a' } },
+      { type: 'toolFinished', callId: 'c1', name: 'find', ok: true, summary: 'ok', output: 'three things' },
+      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'y', write: false, destructive: false, input: {} },
+      { type: 'toolFinished', callId: 'c2', name: 'find', ok: true, summary: 'ok' },
+    ]);
+    expect(t.parts.map((p) => (p.kind === 'tool' ? [p.card.input, p.card.description, p.card.output] : null))).toEqual([
+      [{ q: 'a' }, 'Finds things.', 'three things'],
+      [undefined, undefined, undefined],
+    ]);
+  });
+
   it('says on each card how its call was approved, live and when reopened', () => {
     const t = run([
-      { type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false },
-      { type: 'approvalNeeded', destructive: false, remember: true, callId: 'c1', name: 'find', summary: 'x', input: {} },
+      { type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false, input: {} },
+      { type: 'approvalNeeded', destructive: false, remember: true, callId: 'c1', name: 'find', summary: 'x', description: '', input: {} },
       { type: 'toolFinished', callId: 'c1', name: 'find', ok: true, summary: 'ok', approval: 'always' },
-      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'y', write: false, destructive: false },
+      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'y', write: false, destructive: false, input: {} },
       { type: 'toolFinished', callId: 'c2', name: 'find', ok: true, summary: 'ok', approval: 'remembered' },
     ]);
     expect(t.parts.map((p) => (p.kind === 'tool' ? [p.card.approval, p.card.remember] : null))).toEqual([
@@ -141,7 +155,7 @@ describe('conversationTitle', () => {
 
 describe('setDeclined', () => {
   it('marks a call declined and keeps the mark when the engine reports it did not run', () => {
-    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false }]);
+    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false, input: {} }]);
     const declined = reduceTurn(setDeclined(base, 'c1', true), { type: 'toolFinished', callId: 'c1', name: 'erase', ok: false, summary: 'Declined by the user' });
     expect(declined.parts[0]).toMatchObject({ kind: 'tool', card: { state: 'failed', declined: true } });
     expect(setDeclined(setDeclined(base, 'c1', true), 'c1', false).parts[0]).toMatchObject({ card: { declined: false } });
@@ -150,7 +164,7 @@ describe('setDeclined', () => {
 
 describe('a turn stopped by the user', () => {
   it('marks a call that was still running as stopped, not as a failure', () => {
-    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false }]);
+    const base = run([{ type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false, input: {} }]);
     const done = reduceTurn(base, { type: 'done', text: '', usage: { inputTokens: 0, outputTokens: 0 }, end: 'cancelled' });
     expect(done.parts[0]).toMatchObject({ card: { state: 'failed', stopped: true } });
     const failed = reduceTurn(base, { type: 'error', kind: 'failed', message: 'x' });

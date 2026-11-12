@@ -1,7 +1,7 @@
 import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
-import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
+import { MatOptgroup, MatOption, MatSelect, MatSelectTrigger } from '@angular/material/select';
 import { MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, MatSlideToggle } from '@angular/material/slide-toggle';
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -10,7 +10,7 @@ import { ASSISTANT_SHORT_PANE_PX, AssistantAttachments, AssistantBackend, Assist
 import type { ChatModel, ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
-import { PitwallAttachments } from './chat-attachments';
+import { ChatImagesState, PitwallAttachments } from './chat-attachments';
 import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend';
 
 /**
@@ -22,11 +22,12 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
  */
 @Component({
   selector: 'pw-playground-chat',
-  imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatOption, MatOptgroup, MatButton, MatSlideToggle],
+  imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatSelectTrigger, MatOption, MatOptgroup, MatButton, MatSlideToggle],
   providers: [
     ChatSaving,
+    ChatImagesState,
     { provide: AssistantBackend, useFactory: createChatBackend },
-    // Text and code files (ADR 0023 Decision 4, WP-4b); Rust checks and keeps them.
+    // Text and code files and pictures (ADR 0023 Decision 4, WP-4b, WP-5); Rust checks and keeps them.
     { provide: AssistantAttachments, useClass: PitwallAttachments },
     // Speech input: none in the app until WP-7 (null: the pane shows no microphone); the browser build can play it.
     { provide: AssistantSpeech, useFactory: () => createChatSpeech() },
@@ -39,8 +40,10 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
       <mat-form-field class="model" subscriptSizing="dynamic">
         <mat-label>Model</mat-label>
         <mat-select data-testid="chat-model" panelClass="pw-chat-model-panel" [value]="picker()?.selected ?? null" [disabled]="!picker()" (selectionChange)="choose($event.value)">
+          <!-- The closed field shows the name alone; "reads images" belongs to the open list. -->
+          <mat-select-trigger>{{ selectedName() }}</mat-select-trigger>
           @for (m of usable(); track m.id) {
-            <mat-option [value]="m.id">{{ m.name }}</mat-option>
+            <mat-option [value]="m.id">{{ m.name }}@if (m.vision) {<span class="why"> · reads images</span>}</mat-option>
           }
           <!-- Why these can't be chosen is said once per reason, inside the open list (not under the field, where it moved the bar). -->
           @for (g of groups(); track g.reason) {
@@ -105,6 +108,7 @@ export class PlaygroundChat {
   private readonly openSettings = inject(OPEN_SETTINGS, { optional: true });
   private readonly dialogs = inject(DialogService);
   private readonly saving = inject(ChatSaving);
+  private readonly imagesState = inject(ChatImagesState);
   /** The chat open in the pane (null: a new one). */
   private readonly active = signal<string | null>(null);
   /** Settings > Chats' default for new chats. */
@@ -158,7 +162,11 @@ export class PlaygroundChat {
     return 'Tools from ' + on.map((a) => `${a.title} (${a.tools.length})`).join(', ') + '.';
   });
 
+  /** The chosen model's name for the closed field. */
+  protected readonly selectedName = computed(() => this.picker()?.models.find((m) => m.id === this.picker()?.selected)?.name ?? '');
+
   constructor() {
+    this.imagesState.use = (id) => void this.choose(id);
     void this.load();
     // Settings is another window: a connect made there reaches this tab through Rust's event.
     const stop = this.backend.onConnectedApps((apps) => this.apps.set(apps));
@@ -178,7 +186,7 @@ export class PlaygroundChat {
     this.problem.set(null);
     try {
       const [picker, apps, storage] = await Promise.all([this.backend.chatModels(), this.backend.connectedApps(), this.backend.chatStorage()]);
-      this.picker.set(picker);
+      this.setPicker(picker);
       this.apps.set(apps);
       this.saveNew.set(storage.saveNew);
       if (this.active() === null) this.setNext(storage.saveNew);
@@ -189,10 +197,16 @@ export class PlaygroundChat {
 
   protected async choose(id: string): Promise<void> {
     try {
-      this.picker.set(await this.backend.setChatModel(id));
+      this.setPicker(await this.backend.setChatModel(id));
     } catch (e) {
       this.problem.set(toCommandError(e));
     }
+  }
+
+  /** Rust's picker, and what it says of images for the attachments' gate. */
+  private setPicker(picker: ChatModels): void {
+    this.picker.set(picker);
+    this.imagesState.images.set(picker.images);
   }
 
   private setNext(save: boolean): void {

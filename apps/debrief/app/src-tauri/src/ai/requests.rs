@@ -9,6 +9,7 @@
 
 use super::commands::{core, sample_of, Emit, WindowStore};
 use super::error::{AiCmdError, AiResult};
+use crate::engine::StoreId;
 use crate::jobs::{self, Controls, Done, JobCtx, JobId, JobKind, JobLink, JobResult, JobSpec};
 use crate::windows::WindowState;
 use debrief_ai::assistant::{Assistant, FolderRefinement, Narrative, Proposal};
@@ -307,15 +308,36 @@ impl AiRequest {
         }
     }
 
-    pub fn spec(&self, window: &str) -> JobSpec {
+    /// The job's spec. `store` is the window's store when the request is about its data: it goes into the key, so the same
+    /// window with another project never joins the old project's job.
+    pub fn spec(&self, window: &str, store: Option<StoreId>) -> JobSpec {
         let mut spec = JobSpec::new(JobKind::Ai, self.title()).window(window);
         if let Some(l) = self.link() {
             spec = spec.link(l);
+        }
+        if let Some(key) = store.and_then(|id| self.dedupe_key(window, id)) {
+            spec = spec.keyed(key);
         }
         match serde_json::to_value(self) {
             Ok(v) => spec.retry_with(v),
             Err(_) => spec,
         }
+    }
+
+    /// What the request is about, so the same ask while it is queued or running joins that job (the button, the menu and the
+    /// palette each start the same request). Keyed are the requests that read the store and nothing else the user typed:
+    /// Summarize (range), Explain (event) and Root causes; the rest carry free text or samples and are never merged.
+    /// Window and store identity come first, so another window or another project is another job.
+    /// The key is made when the request is made: a request that waits in the queue keeps the store of that moment as its key but
+    /// runs on whatever store the window holds when its turn comes.
+    fn dedupe_key(&self, window: &str, store: StoreId) -> Option<String> {
+        let what = match self {
+            AiRequest::Summarize { from, to } => format!("summarize|{from}|{to}"),
+            AiRequest::Explain { record_id } => format!("explain|{record_id}"),
+            AiRequest::RootCauses => "rootCauses".to_string(),
+            _ => return None,
+        };
+        Some(format!("{window}|{store}|{what}"))
     }
 
     /// Runs the use case (blocking). Chat turns are not use cases (see [`start_turn`]).
@@ -461,7 +483,7 @@ pub(crate) fn start_turn_with_images<R: Runtime>(
             AiCmdError::busy(e)
         }
     })?;
-    let spec = req.spec(win.label());
+    let spec = req.spec(win.label(), None);
     let cancel = turn.cancel.clone();
     let pending = PendingTurn {
         turn: Some(turn),
@@ -470,9 +492,11 @@ pub(crate) fn start_turn_with_images<R: Runtime>(
         emit: emit.clone(),
     };
     let browser = crate::browser::TurnBrowser::begin(app, win.label(), sid);
-    let (w, session) = (win.clone(), sid.to_string());
+    let (w, session, handle) = (win.clone(), sid.to_string(), app.clone());
     let work = move |_: &JobCtx| -> AiResult<Done<()>> {
         let mut pending = pending;
+        // The turn uses the last name table; an out-of-date one is rebuilt by its own job, never inside the turn.
+        crate::names::queue_if_stale(&handle, &w);
         let Some(turn) = pending.turn.take() else {
             return Err(AiCmdError::invalid("the turn already ended"));
         };
@@ -542,7 +566,10 @@ pub(crate) fn start_use_case<R: Runtime>(app: &AppHandle<R>, win: &Arc<WindowSta
     // Fail fast (no model, AI off) instead of queueing a request that cannot run.
     core.provider()?;
     let req = req.validated()?;
-    let mut spec = req.spec(win.label());
+    // Only an open store keys the request: asking for its identity must not create a scratch store and start a worker for a
+    // request that may be refused. Without one the request is not merged.
+    let store = win.engine.opened_id();
+    let mut spec = req.spec(win.label(), store);
     if let Some(id) = req.image_id() {
         // Fail fast: the image must be open and the model must read images (never an automatic download).
         let img = win
@@ -560,7 +587,8 @@ pub(crate) fn start_use_case<R: Runtime>(app: &AppHandle<R>, win: &Arc<WindowSta
     jobs::spawn(app, spec, Controls::default(), use_case_work(core, win.clone(), req)).map_err(AiCmdError::busy)
 }
 
-/// Cancels the window's use cases, running and waiting (not its chat turns, which have their own Stop). Returns how many.
+/// Cancels the window's use cases, running and waiting (not its chat turns, which have their own Stop). Returns how many it
+/// cancelled now: a running job that is already stopping (an earlier Cancel, its work not ended yet) is not counted again.
 pub(super) fn cancel_use_cases<R: Runtime>(app: &AppHandle<R>, window: &str) -> usize {
     let Some(jobs) = app.try_state::<jobs::Jobs>() else { return 0 };
     let ids = jobs.find_active(|j| {
@@ -569,7 +597,9 @@ pub(super) fn cancel_use_cases<R: Runtime>(app: &AppHandle<R>, window: &str) -> 
             && !j.state().is_finished()
             && !matches!(j.source.link, Some(JobLink::Chat { .. }))
     });
-    ids.into_iter().filter(|id| jobs.cancel(*id).is_ok()).count()
+    ids.into_iter()
+        .filter(|id| !jobs.is_stopping(*id) && jobs.cancel(*id).is_ok())
+        .count()
 }
 
 /// Cancels the chat's waiting turn, if any. True when one was waiting.
@@ -614,12 +644,12 @@ mod tests {
             text: "why did the payment service fail at 10:42 yesterday afternoon and what should we do".into(),
         };
         assert_eq!(chat.title(), "Chat: why did the payment service fail at 10:42 yesterday afternoo…");
-        let spec = chat.spec("main");
+        let spec = chat.spec("main", None);
         assert_eq!(spec.source.link, Some(JobLink::Chat { session_id: "c-1".into() }));
         let saved = spec.request.unwrap();
         assert_eq!(saved["op"], "chat");
         assert_eq!(serde_json::from_value::<AiRequest>(saved).unwrap(), chat);
-        let explain = AiRequest::Explain { record_id: 7 }.spec("main");
+        let explain = AiRequest::Explain { record_id: 7 }.spec("main", None);
         assert_eq!(explain.title, "Explain event 7");
         assert_eq!(explain.request.unwrap(), serde_json::json!({"op": "explain", "recordId": 7}));
         assert_eq!(AiRequest::RootCauses.validated().unwrap().link(), None);

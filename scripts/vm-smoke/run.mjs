@@ -134,7 +134,7 @@ const load1 = () => Number(/load averages?: ([\d.,]+)/.exec(spawnSync('uptime', 
 async function main(argv) {
   const o = parseArgs(argv);
   const config = JSON.parse(readFileSync(join(REPO, 'apps', o.app, 'vm-smoke.json'), 'utf8'));
-  // One TART_HOME default with tools/macos-vm-smoke.sh (its $HOME/.tart); the images here live on d7: export TART_HOME=/Volumes/d7sst7/dev-targets/tart-home
+  // One TART_HOME default with tools/macos-vm-smoke.sh (its $HOME/.tart); the images here live on d8: export TART_HOME=/Volumes/d8sst7/vm-data/tart-from-home
   const tartHome = process.env.TART_HOME ?? join(homedir(), '.tart');
   const tartEnv = { ...process.env, TART_HOME: tartHome };
   const tartBin = process.env.TART ?? 'tart';

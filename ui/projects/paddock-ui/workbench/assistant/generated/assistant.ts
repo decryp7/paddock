@@ -351,7 +351,11 @@ write: boolean,
 /**
  * What it changes cannot be undone (implies `write`).
  */
-destructive: boolean, } | { "type": "approvalNeeded", 
+destructive: boolean, 
+/**
+ * The arguments as parsed, for the card's details once the call has run (also for a call that never asked).
+ */
+input: unknown, } | { "type": "approvalNeeded", 
 /**
  * The call.
  */
@@ -364,6 +368,10 @@ name: string,
  * What it would do.
  */
 summary: string, 
+/**
+ * What the tool says it does, as the host cleaned it (shown under Details before the first approval).
+ */
+description: string, 
 /**
  * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
  */
@@ -392,6 +400,10 @@ ok: boolean,
  * One line for the card.
  */
 summary: string, 
+/**
+ * The result as the model read it (what the card's details show), when there is one.
+ */
+output?: string, 
 /**
  * The structured result for the app's renderer of this tool.
  */
@@ -481,7 +493,11 @@ write: boolean,
 /**
  * What it changes cannot be undone (implies `write`).
  */
-destructive: boolean, } | { "type": "approvalNeeded", 
+destructive: boolean, 
+/**
+ * The arguments as parsed, for the card's details once the call has run (also for a call that never asked).
+ */
+input: unknown, } | { "type": "approvalNeeded", 
 /**
  * The call.
  */
@@ -494,6 +510,10 @@ name: string,
  * What it would do.
  */
 summary: string, 
+/**
+ * What the tool says it does, as the host cleaned it (shown under Details before the first approval).
+ */
+description: string, 
 /**
  * What it would change cannot be undone: the UI makes Decline the default and Allow a danger button.
  */
@@ -522,6 +542,10 @@ ok: boolean,
  * One line for the card.
  */
 summary: string, 
+/**
+ * The result as the model read it (what the card's details show), when there is one.
+ */
+output?: string, 
 /**
  * The structured result for the app's renderer of this tool.
  */

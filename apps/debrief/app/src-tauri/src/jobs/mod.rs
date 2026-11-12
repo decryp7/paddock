@@ -559,6 +559,11 @@ where
         }
         out
     };
+    if spec.key.is_some() {
+        // A keyed request may join a job that already exists, so there is no value to hand back: submit the work itself.
+        let end = move |ctx: &JobCtx| service::settle(f(ctx), ctx).0;
+        return jobs.submit_work(spec, controls, end).map_err(|r| r.to_string());
+    }
     jobs.submit(spec, controls, f).map(|h| h.id).map_err(|r| r.to_string())
 }
 
