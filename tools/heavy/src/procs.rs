@@ -51,13 +51,6 @@ pub fn evidence(procs: &dyn Procs, pid: u32, record_epoch: Option<u64>) -> Strin
     format!("pid {pid}: {seen}; record epoch {ep} (+{START_SLACK_SECS} s slack)")
 }
 
-/// Whether a pid that showed a start time is only a zombie: the look at that identity says `Gone`; `None` when the pid had no
-/// start time. **Unknown is not gone** (the table could not be read): a lock holder must never read as dead on a failed look
-/// (rule 53).
-fn zombie_gone(look: Option<paddock_proc::Presence>) -> bool {
-    look.is_some_and(|l| !l.may_be_alive())
-}
-
 /// The real process table.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OsProcs;
@@ -73,7 +66,8 @@ impl Procs for OsProcs {
             return Presence::Gone;
         }
         // A zombie shows a start time but is not running (a container whose PID 1 never reaps would hold the lock forever).
-        if zombie_gone(id.map(paddock_proc::ProcessId::presence)) {
+        // An unreadable process (pid 1 to a non-root macOS user) is unknown, not gone: `Presence::may_be_alive` counts unknown as alive.
+        if id.is_some_and(|p| !p.presence().may_be_alive()) {
             return Presence::Gone;
         }
         Presence::Present { start_micros: start }
@@ -121,16 +115,14 @@ impl Procs for FakeProcs {
     }
 }
 
-#[cfg(test)]
-mod zombie_tests {
-    use super::zombie_gone;
-    use paddock_proc::Presence;
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
 
+    /// Pid 1 exists on every Unix and a non-root user may be refused a look at it (macOS lists it with no start time or
+    /// status): "unknown" must read as present, or a lock held by it is broken as stale.
     #[test]
-    fn only_a_table_that_says_gone_makes_a_zombie_gone() {
-        assert!(zombie_gone(Some(Presence::Gone)));
-        assert!(!zombie_gone(Some(Presence::Unknown)), "a failed look is not a dead lock holder");
-        assert!(!zombie_gone(Some(Presence::Running)));
-        assert!(!zombie_gone(None), "without a start time the table is not asked");
+    fn pid_one_probes_as_present() {
+        assert!(matches!(OsProcs.probe(1), Presence::Present { .. }), "{:?}", OsProcs.probe(1));
     }
 }
