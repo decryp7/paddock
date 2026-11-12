@@ -73,13 +73,12 @@ pub fn run_mcp(args: &[String], env_key: Option<String>, err: &mut dyn Write) ->
 /// believed unless the folder passes the same check as a named data folder (ADR 0092, revised 2026-11-12). The OS's own folder is
 /// not checked. `Some(text)`: the cause and the next step. A folder that does not exist means Dyno is not open, not a refusal.
 fn refuse_supplied_config(config: &std::path::Path, source: paddock_env::Source) -> Option<String> {
-    use paddock_env::private::{PrivateDir, PrivateError};
     if source == paddock_env::Source::Os {
         return None;
     }
-    match PrivateDir::open(config, paddock_env::Links::Follow) {
-        Ok(_) => None,
-        Err(PrivateError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => None,
+    // The one check of a named folder, the agent's and the app's; a folder that does not exist means Dyno is not open.
+    match paddock_env::private::check_named_folder(config) {
+        Ok(()) => None,
         Err(e) => Some(format!("AI access is not used: {e}")),
     }
 }

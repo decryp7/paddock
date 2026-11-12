@@ -97,14 +97,10 @@ impl Discovery {
     /// The reason the data folder is not trusted, with the next step.
     pub fn read_checked(env: &Env) -> Result<Option<Discovery>, String> {
         let path = env.discovery();
-        if env.supplied && env.data_dir.exists() {
-            paddock_env::check_data_folder(&env.data_dir, "the agent's discovery file").map_err(|e| {
-                format!(
-                    "the data folder is not safe to use ({}); it must belong to this account and not be writable by others (chmod go-w on it). \
-                     Run dyno as the account that runs Dyno, or set DYNO_DATA_DIR to a folder you own",
-                    e.reason()
-                )
-            })?;
+        if env.supplied {
+            // The one check of a named folder, the agent's and the app's (nothing is created by it).
+            paddock_env::private::check_named_folder(&env.data_dir)
+                .map_err(|e| format!("{e}. Run dyno as the account that runs Dyno, or set DYNO_DATA_DIR to a folder you own"))?;
         }
         Ok(Discovery::read_trusted(&path))
     }
@@ -377,7 +373,7 @@ mod tests {
                 supplied: true,
             };
             let why = Discovery::read_checked(&foreign).unwrap_err();
-            assert!(why.contains("belongs to another user") && why.contains("DYNO_DATA_DIR"), "{why}");
+            assert!(why.contains("not by this account") && why.contains("DYNO_DATA_DIR"), "{why}");
             assert!(matches!(IpcAgent::connect(&foreign), Err(Problem::Failed(_))));
         }
     }

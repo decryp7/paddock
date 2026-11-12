@@ -33,7 +33,12 @@ fn check_app_folders(app_dirs: &Option<paddock_env::AppDirs>) -> Result<(), Stri
     let Some(app_dirs) = app_dirs.as_ref().filter(|a| a.source() != paddock_env::Source::Os) else {
         return Ok(());
     };
-    for folder in [app_dirs.data(), app_dirs.logs()] {
+    // Every check first, then anything is made: a refused `<ID>_HOME` is left without a `data` or `logs` folder inside it.
+    let folders = [app_dirs.data(), app_dirs.logs()];
+    for folder in folders {
+        paddock_env::private::check_named_folder(folder).map_err(|e| refusal_text(&e.to_string()))?;
+    }
+    for folder in folders {
         check_root_with(folder, true)?;
     }
     Ok(())
@@ -53,15 +58,21 @@ pub fn check_root_with(root: &Path, supplied: bool) -> Result<(), String> {
                 "the default folder"
             }
         );
-        format!("Dyno did not start: {why}. Nothing was started or changed. Fix the folder, or start Dyno with DYNO_DATA_DIR set to a folder of your own.")
+        refusal_text(&why)
     };
     if supplied {
+        // Checked first, from what exists, so a refused folder (and a refused parent) is left as it is: nothing is made inside it.
+        paddock_env::private::check_named_folder(root).map_err(|e| failed(e.to_string()))?;
         paddock_env::private::PrivateDir::create_all(root)
             .map(|_| ())
             .map_err(|e| failed(e.to_string()))
     } else {
         paddock_env::create_private_dir_all(root).map_err(|e| failed(format!("{} could not be made ({e})", root.display())))
     }
+}
+
+fn refusal_text(why: &str) -> String {
+    format!("Dyno did not start: {why}. Nothing was started or changed. Fix the folder, or start Dyno with DYNO_DATA_DIR set to a folder of your own.")
 }
 
 /// What to do when no data folder can be used (the same words for the agent and the CLI).
@@ -459,6 +470,29 @@ mod tests {
         )
         .ok();
         assert_eq!(check_app_folders(&os_own), Ok(()), "the OS's own places are not checked");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_refused_named_folder_has_nothing_made_inside_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777)).unwrap();
+        // The folder itself is missing under one others can write: refused, and not made.
+        assert!(check_root_with(&home.join("data"), true).is_err());
+        assert!(!home.join("data").exists());
+        // `<ID>_HOME` open to others: neither `data` nor `logs` is created before the refusal.
+        let id = paddock_env::AppId::new("dyno", "Dyno").unwrap();
+        let vars = paddock_env::MapVars::new().with("DYNO_HOME", home.clone().into_os_string());
+        let supplied = paddock_env::AppDirs::resolve(&id, paddock_env::Os::current(), &vars, None, true).ok();
+        assert!(check_app_folders(&supplied).is_err());
+        assert_eq!(
+            std::fs::read_dir(&home).unwrap().count(),
+            0,
+            "nothing was made inside the refused folder"
+        );
     }
 
     #[cfg(unix)]
