@@ -216,8 +216,8 @@ pub fn run_ci(env: &HashMap<String, String>, windows: bool, a: &CiArgs, out: &mu
         ));
         return 0;
     }
-    let real = match std::fs::canonicalize(&dir) {
-        Ok(p) => PathBuf::from(crate::ci_isolation::home::mixed(&p)),
+    let real = match paddock_env::winpath::real(Path::new(&dir)) {
+        Ok(p) => p,
         Err(e) => {
             step.say(format!("prune: cannot read {dir} ({e}); nothing to prune"));
             return 0;

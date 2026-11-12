@@ -79,7 +79,7 @@ impl Ops for RealOps {
     }
 
     fn canonical(&self, p: &Path) -> io::Result<PathBuf> {
-        std::fs::canonicalize(p).map(|c| PathBuf::from(home::mixed(&c)))
+        paddock_env::winpath::real(p)
     }
 
     fn volume_of(&self, p: &Path) -> Option<String> {
