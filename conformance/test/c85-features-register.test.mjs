@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parseToml } from '../src/checks/lib/mini-toml.mjs';
@@ -382,4 +382,19 @@ test('na = ["tauri"] never hides the real-engine test: a warning in a branch run
   assert.deepEqual(run(true).filter((f) => /na "tauri"/.test(f.message)).map((f) => f.severity), ['warn']);
   // and tauri is still missing: neither a test nor owed
   assert.ok(run(false).some((f) => /has no tests\.tauri: neither a test nor/.test(f.message)), 'na does not stand in for tauri');
+});
+
+test('pitwall-release.yml runs C85 without swallowing its exit code: only the owed warnings are report-only (ADR 0089)', () => {
+  const yml = readFileSync(new URL('../../.gitea/workflows/pitwall-release.yml', import.meta.url), 'utf8');
+  const step = yml.split('\n').filter((l) => /paddock-conformance\.mjs .*--only C85/.test(l));
+  assert.equal(step.length, 1, 'one C85 line');
+  assert.doesNotMatch(step[0], /\|\||;\s*true|\|\s*true/, 'a failure of C85 (not measured, broken, usage) fails the plan');
+  assert.doesNotMatch(yml, /::warning::C85/, 'the owed findings are C85\'s own warnings, not a shell fallback');
+});
+
+test('a release run of C85 on a source it cannot read fails (the workflow lets that exit code through)', async () => {
+  const root = build({}, owedRow('demo-v1.0.3'));
+  const r = (...more) => main(['--app', 'demo', '--root', root, '--only', 'C85', '--paddock', root, ...more], quiet);
+  rmSync(join(root, 'app/src/app/shell/nav.ts'));
+  assert.notEqual(await r('--version', 'demo-v1.1.0'), 0, 'a source it cannot read is not a pass');
 });

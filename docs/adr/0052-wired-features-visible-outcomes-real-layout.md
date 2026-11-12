@@ -5,13 +5,17 @@
   (`e494b2f78`): the user accepted D1 to D6 as recommended. Review round 1 asked for another round; revision 2
   (`28cc578ee`) answered it and changed D2 and D3 and added D7, which the user then decided. Round 2 accepted the ADR
   with the P2 and P3 edits of this revision folded in. Docs only: nothing here is built yet.
-- Amendment 2026-11-12 (user, cut review of 2026-11-12): **`features.toml` rows and check C85 are report-only. They never block a
-  tag.** The "enforced before Pitcrew 1.1" and "release-time gate" readings of §1.1 and WP-A4 no longer apply: an owed test
-  that is due, expired or past the next release line is a warning in a branch run and in a release run alike, and
-  `pitwall-release.yml` reports it and goes on. The register, the owed bounds and the report stay (they say what is untested);
-  only the refusal goes. The other checks of this ADR (C83, C84, C86, C89, WP-B1 to WP-B3) are no longer in the gate that
-  decides Pitcrew 1.1: the Pitcrew gate is its `features.toml` rows, report-only. Earlier text is history. Built on
-  `fix/adr0052-report-only`; the 19 `dyno-v*` rows of C102 got the same treatment (ADR 0072 amendment of the same date).
+- Amendment 2026-11-12 (user, cut review of 2026-11-12, the shared cuts: "ADR 0052: features.toml and C85 report only, no tag
+  blocking"): **`features.toml` rows and check C85 are report-only. They never block a tag.** The "enforced before Pitcrew 1.1"
+  and "release-time gate" readings of §1.1 and WP-A4 no longer apply: an owed test that is due, expired or past the next release
+  line is a warning in a branch run and in a release run alike. `pitwall-release.yml` runs C85 and lets only its exit codes
+  through: the owed findings are warnings (exit 0), while a source C85 cannot read (not measured), a broken reader and a usage
+  error still fail the plan (ADR 0089). The register, the owed bounds and the report stay; only the refusal goes.
+  The same cut review (the Pitcrew line, "the ADR 0052 gate items blocking 1.1 are trimmed"; "trim ADR 0052 gates", 14 to 16
+  agent-days) also trims the gate items that block Pitcrew 1.1. The decision does not name them. Until the user names which
+  items it covers, C83, C84, C86, C89 and WP-B1 to WP-B3 stay as written here and in the work package table. Earlier text is
+  history. Built on `fix/adr0052-report-only`; the 19 `dyno-v*` rows of C102 got the same treatment (ADR 0072 amendment of the
+  same date; each such row names its `app`, and that app's release run prints one warning per row).
 - Date: 2026-11-04
 - Related: ER-14 / rule 7 (tests never touch the user's machine), ER-17 to ER-19 / rules 10 to 12 (long work off the UI
   thread, live progress, no UI timeouts), ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-22 / rules 42

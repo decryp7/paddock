@@ -6,7 +6,7 @@
   client-side drains, the enforced D8 gate).
 - Trimmed 2026-11-11 (user, comparable-practice review): DEFERRED, keeping the logging part: keep WP-7 (ER-27 end lines and summaries) and Pitcrew's busy refusal (WP-11) only if the bug recurs; deferred WP-1 to WP-6, WP-8 to WP-10 and the rest of WP-11. Dyno's tag gate is now only the kept logging part (WP-7); M2 to M4 no longer gate any tag.
 - Amendment 2026-11-12 (user, cut review of 2026-11-12): the 19 ratchet entries that carried `blocks_tag = "dyno-v*"` are
-  `report-only` (a new value of `blocks_tag`: listed, counted, refuses no tag). ADR 0072's trim of 2026-11-11 deferred their
+  `report-only` (a new value of `blocks_tag`: listed, counted, refuses no tag; each such row names its `app`, and that app's release run prints one `::warning::` per row). ADR 0072's trim of 2026-11-11 deferred their
   endings (M1 to M4) but left them blocking, so the Dyno tag was refused by faults the trim had decided not to fix. The
   Pitcrew entries and the harness are unchanged. Earlier text is history.
 - Date: 2026-11-09

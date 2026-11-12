@@ -736,6 +736,8 @@ pub struct RatchetEntry {
     pub fault: String,
     /// The tag pattern this entry blocks, `none` for a logging gap, or `report-only` for a deferred fault that is listed and blocks nothing.
     pub blocks_tag: String,
+    /// The app a `report-only` entry belongs to (`dyno`): its release run reports the entry as a warning. Empty for other entries.
+    pub app: String,
     /// The operating systems it applies to (empty: all).
     pub os: String,
 }
@@ -754,6 +756,7 @@ pub fn parse_ratchet(text: &str) -> Result<Vec<RatchetEntry>, String> {
             scenario: text_of(t, "scenario"),
             fault: text_of(t, "fault"),
             blocks_tag: text_of(t, "blocks_tag"),
+            app: text_of(t, "app"),
             os: text_of(t, "os"),
         })
         .collect())
@@ -783,6 +786,25 @@ pub fn tag_matches(pattern: &str, tag: &str) -> bool {
 /// The `blocks_tag` value of an entry that is reported and never refuses a tag (ADR 0072's 2026-11-11 trim deferred these endings;
 /// ADR 0052's amendment of 2026-11-12 says a finding reports and does not fail a tag).
 pub const REPORT_ONLY: &str = "report-only";
+
+fn valid_app(app: &str) -> bool {
+    !app.is_empty()
+        && app.starts_with(|c: char| c.is_ascii_lowercase())
+        && app.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// A `blocks_tag` is `none`, [`REPORT_ONLY`] or a tag pattern `<app>-v...`.
+fn valid_blocks_tag(v: &str) -> bool {
+    v == "none" || v == REPORT_ONLY || v.split_once("-v").is_some_and(|(app, rest)| valid_app(app) && !rest.is_empty())
+}
+
+/// The `report-only` entries of the app whose release `tag` is (`dyno-v1.2.0` is `dyno`'s).
+pub fn reported_for<'a>(ratchet: &'a [RatchetEntry], tag: &str) -> Vec<&'a RatchetEntry> {
+    ratchet
+        .iter()
+        .filter(|e| e.blocks_tag == REPORT_ONLY && !e.app.is_empty() && tag.starts_with(&format!("{}-v", e.app)))
+        .collect()
+}
 
 /// The ratchet entries that block `tag` (the tag-refusal hook of D8): an entry whose `blocks_tag` pattern matches.
 pub fn blocked_by<'a>(ratchet: &'a [RatchetEntry], tag: &str) -> Vec<&'a RatchetEntry> {
@@ -980,6 +1002,17 @@ pub fn findings(root: &Path, sites: &[Site], register: &Register, ratchet: &[Rat
                 "{at}: `blocks_tag` names the tag pattern this entry blocks (`dyno-v*`, `pitcrew-v*`); only a logging gap or the deferred drain (WP-7, WP-2) may say `none`; `report-only` lists a deferred fault that blocks no tag."
             ));
         }
+        if !r.blocks_tag.is_empty() && !valid_blocks_tag(&r.blocks_tag) {
+            out.push(format!(
+                "{at}: `blocks_tag = \"{}\"` is not `none`, `{REPORT_ONLY}` or a tag pattern `<app>-v*` (a typo refuses or reports nothing).",
+                r.blocks_tag
+            ));
+        }
+        if r.blocks_tag == REPORT_ONLY && !valid_app(&r.app) {
+            out.push(format!(
+                "{at}: a `report-only` entry names its `app` (`dyno`, `pitcrew`), so a release of that app can report it."
+            ));
+        }
         for o in r.os.split(',').map(str::trim).filter(|o| !o.is_empty()) {
             if !["linux", "macos", "windows"].contains(&o) {
                 out.push(format!("{at}: unknown os `{o}`."));
@@ -1028,6 +1061,15 @@ pub fn command(root: Option<PathBuf>, tag: Option<String>) -> Result<Report, Cli
         return Err(CliError::failure(lines.join("\n"))
             .with_hint("Each line names its next step; run `./dev check ipc-endpoints` again when done."));
     }
+    let mut warnings = String::new();
+    if let Some(tag) = &tag {
+        for e in reported_for(&ratchet, tag) {
+            warnings.push_str(&format!(
+                "::warning::C102 {} ratchet entry {} ({} / {} / {}) is report-only: it does not block the tag {tag}.\n",
+                e.app, e.instance, e.endpoint, e.scenario, e.fault
+            ));
+        }
+    }
     if let Some(tag) = tag {
         let blocking = blocked_by(&ratchet, &tag);
         if !blocking.is_empty() {
@@ -1044,8 +1086,9 @@ pub fn command(root: Option<PathBuf>, tag: Option<String>) -> Result<Report, Cli
             return Err(CliError::refused(lines.join("\n")));
         }
     }
+    let report_only = ratchet.iter().filter(|e| e.blocks_tag == REPORT_ONLY).count();
     let text = format!(
-        "C102: {} listen site(s) in non-test code, {} endpoint(s), {} out-of-scope entr{}, {} ratchet entr{} ({} block a tag, {} report-only).",
+        "{warnings}C102: {} listen site(s) in non-test code, {} endpoint(s), {} out-of-scope entr{}, {} ratchet entr{} ({} block a tag, {} report-only).",
         sites.len(),
         register.endpoints.len(),
         register.out_of_scope.len(),
@@ -1056,10 +1099,10 @@ pub fn command(root: Option<PathBuf>, tag: Option<String>) -> Result<Report, Cli
             .iter()
             .filter(|e| e.blocks_tag != "none" && e.blocks_tag != REPORT_ONLY)
             .count(),
-        ratchet.iter().filter(|e| e.blocks_tag == REPORT_ONLY).count()
+        report_only
     );
     Ok(Report::new(
-        json!({"sites": sites.len(), "endpoints": register.endpoints.len(), "outOfScope": register.out_of_scope.len(), "ratchet": ratchet.len()}),
+        json!({"sites": sites.len(), "endpoints": register.endpoints.len(), "outOfScope": register.out_of_scope.len(), "ratchet": ratchet.len(), "reportOnly": report_only}),
         text,
     ))
 }
