@@ -135,6 +135,20 @@ pub fn source_key_of(root: &str, windows: bool) -> String {
     hex[..10].to_string()
 }
 
+/// The owner record `./dev disk` reads: made once (kind `slot`, owner `ci:<run>/<job>`), later only touched. Failures are ignored.
+fn record_owner(ctx: &Ctx, dir: &Path) {
+    use crate::disk::record::{Kind, Record, read, touch, write};
+    if matches!(read(dir), Ok(Some(_))) {
+        touch(dir);
+        return;
+    }
+    let job = |k: &str| ctx.get(k).unwrap_or("").to_string();
+    let mut r = Record::new(Kind::Slot, &format!("ci:{}/{}", job("GITHUB_RUN_ID"), job("GITHUB_JOB")));
+    r.branch = job("GITHUB_REF_NAME");
+    r.head = job("GITHUB_SHA");
+    let _ = write(dir, &r);
+}
+
 /// Sets a folder's time stamp to now (the orphan sweep removes only folders no job asked for in the last days). Failures are ignored.
 fn touch(dir: &Path) {
     #[cfg(not(windows))]
@@ -225,6 +239,7 @@ pub fn cmd_path(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
     }
     std::fs::create_dir_all(&target).map_err(|e| Stop::die(format!("cannot create {}: {e}", target.display())))?;
     touch(&target);
+    record_owner(ctx, &target);
     io.value(format!("{home}/{rel}"));
     Ok(())
 }

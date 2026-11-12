@@ -38,6 +38,34 @@ jobs:
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           schedule-workflow: nightly.yml
 
+  # The disk summary of the night: what is on the work disks (d7, d8), who owns it, what is reclaimable and what grew most in the
+  # last 7 days (`./dev disk report --summary`, read-only: nothing is cleaned here). Disk fills whether or not main changed, so it
+  # does not wait for the gate (the night's skip of an unchanged main or a train in CI does not apply). Informational: not in
+  # `mark`'s needs, and its failure never fails the night.
+  disk-summary:
+    name: disk summary (macos-latest)
+    runs-on: macos-latest
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/build-jobs
+      # Also runs `./dev disk check` for the host's disks.
+      - uses: ./.gitea/actions/job-isolation
+      - name: Scan and report
+        run: |
+          ./dev disk scan
+          ./dev disk report --summary >> "$GITHUB_STEP_SUMMARY"
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
   # ADR 0060: C100 with a job of its own, so that deleting the conformance job's line does not also delete the check.
   c100:
     name: C100 (every check runs somewhere)

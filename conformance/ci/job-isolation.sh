@@ -403,6 +403,17 @@ cmd_acquire() {
       exit 1
     fi
   fi
+  # `./dev disk check`: one warning under 200 GiB (with the largest folders) and a refusal under 50 GiB, on the CI home's disk and
+  # the job's workspace disk (PADDOCK_DISK_WARN_GIB, PADDOCK_DISK_REFUSE_GIB). Exit 1 is the refusal; any other failure (an older
+  # cached tool without `disk`) is a warning, never a refusal: the check did not run.
+  local disk_code=0
+  dev_tool disk check --path "$(native "$home")" ${GITHUB_WORKSPACE:+--path "$(native "$GITHUB_WORKSPACE")"} >&2 || disk_code=$?
+  if [ "$disk_code" = 1 ]; then
+    PADDOCK_CI_SLOT="$slot" PADDOCK_CI_SLOT_TOKEN="$token" cmd_release >/dev/null || true
+    exit 1
+  elif [ "$disk_code" != 0 ]; then
+    echo "::warning::job-isolation: ./dev disk check did not run (exit $disk_code); free space was not checked. Next step: run './dev disk check' on the runner." >&2
+  fi
 }
 
 # held_by_us <home> <slot> <token>: 0 when the slot's lock is held and its holder is the one this job started, 1 when not,

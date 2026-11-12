@@ -16,6 +16,7 @@ mod ipc_endpoints;
 mod isolation;
 mod merge_check;
 mod release_isolation;
+mod safe_remove_lint;
 mod setup_rust;
 mod slots;
 mod sparse;

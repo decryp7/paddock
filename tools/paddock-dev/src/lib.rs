@@ -24,6 +24,8 @@
 //! - `ci build-jobs [<split>]`: CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for a job, the port of `conformance/ci/build-jobs.sh`
 //!   ([`ci_build_jobs`]).
 //! - `ci release-isolation setup|record|verify`: a tag build reads nothing kept ([`release_isolation`], ADR 0085).
+//! - `disk check|report|scan|clean|adopt|record`: free-space check, usage tracking (owner records and a SQLite index) and clean-up
+//!   of merged and stale-pushed folders ([`disk`]).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and
 //!   bound to their agent, and the probe of the primary checkout ([`worktree`], ADR 0083).
 
@@ -36,6 +38,7 @@ pub mod ci_runs;
 pub mod ci_setup_rust;
 pub mod ci_tool;
 mod cli;
+pub mod disk;
 mod fds;
 pub mod gates;
 pub mod hook;
@@ -51,6 +54,7 @@ pub mod plan_gitea;
 pub mod plan_repo;
 pub mod plan_since;
 pub mod release_isolation;
+pub mod safe_remove;
 pub mod slots;
 pub mod wait;
 pub mod worktree;

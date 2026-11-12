@@ -45,6 +45,8 @@ if [ -n "\${RUSTC_WRAPPER:-}\${RUSTC_WORKSPACE_WRAPPER:-}\${CARGO_BUILD_RUSTC_WR
 fi
 [ -n "\${FAKE_DEV_FAILS:-}" ] && { echo "error: could not build paddock-dev" >&2; exit 101; }
 [ "$1" = --print-binary ] && { [ -n "\${FAKE_DEV_NO_PIN:-}" ] && { echo "no cached binary" >&2; exit 3; }; echo "$0"; exit 0; }
+# \`disk check\`: exits with FAKE_DISK_CHECK (default 0) and says so, as the real one does under a threshold.
+[ "$1 $2" = "disk check" ] && { [ "\${FAKE_DISK_CHECK:-0}" != 0 ] && echo "::error::disk: fake refusal" >&2; exit "\${FAKE_DISK_CHECK:-0}"; }
 [ "$1 $2" = "ci slot" ] || exit 2
 cmd=$3; shift 3
 max= owner= root= slot= token= run=()
@@ -100,7 +102,7 @@ function host() {
     mkdirSync(temp, { recursive: true });
     const envFile = join(root, 'work', id, 'github-env');
     writeFileSync(envFile, '');
-    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', PADDOCK_SOCKET_ROOT: sockets, ...extra };
+    const base = { PATH: '/usr/bin:/bin', HOME: join(root, 'home'), RUNNER_OS: 'macOS', RUNNER_TEMP: temp, GITHUB_ENV: envFile, GITHUB_RUN_ID: '7', GITHUB_JOB: id, PADDOCK_DEV: dev, FAKE_DEV_LOG: log, PADDOCK_SLOT_WAIT_TRIES: '0', PADDOCK_DF: df, PADDOCK_CI_MIN_FREE_GB: '0', PADDOCK_DISK_WARN_GIB: '0', PADDOCK_DISK_REFUSE_GIB: '0', PADDOCK_DISK_INDEX: join(root, 'disk-index.sqlite'), PADDOCK_SOCKET_ROOT: sockets, ...extra };
     const exec = (args, more = {}) => isolation(args, { ...base, ...more });
     const exported = () => Object.fromEntries(read(envFile).split('\n').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
     /** Runs a command with what acquire exported, as the job's later steps see it. */
@@ -400,6 +402,31 @@ test('disk: the floor comes from PADDOCK_CI_MIN_FREE_GB (default 30 GB) and acqu
   assert.match(above.stderr, /still only 20 GB free .*\(floor 21 GB\)/);
   assert.equal(run('c', '20').status, 0, 'exactly at the floor is enough');
   assert.equal(run('d', '0').status, 0);
+});
+
+test('disk check: acquire runs it on the CI home and the workspace; a refusal fails the job and frees its slot; a tool that cannot run it only warns', () => {
+  const h = host();
+  const ws = join(h.root, 'workspace');
+  mkdirSync(ws);
+  // Rust port: the check runs in process on a faked df (20 GiB free) against a 50 GiB refusal level; shell script: the fake dev answers.
+  const df = join(h.root, 'df-20gib');
+  writeFileSync(df, '#!/bin/sh\necho "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "disk 1 1 $((20 * 1048576)) 1% /"\n');
+  chmodSync(df, 0o755);
+  const refuse = RUST ? { PADDOCK_DF: df, PADDOCK_DISK_REFUSE_GIB: '50', PADDOCK_DISK_WARN_GIB: '200', GITHUB_WORKSPACE: ws } : { FAKE_DISK_CHECK: '1', GITHUB_WORKSPACE: ws };
+  const a = h.job('a'.repeat(16), refuse);
+  const r = a.exec(['acquire']);
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stderr, /::error::disk:/);
+  assert.match(a.exec(['status']).stdout, /s1 free/, 'the refused job gave its slot back');
+  if (!RUST) {
+    assert.match(h.log(), /disk check --path \S+ --path \S*workspace/, 'both disks are asked');
+    const w = h.job('b'.repeat(16), { FAKE_DISK_CHECK: '2' });
+    const rw = w.exec(['acquire']);
+    assert.equal(rw.status, 0, rw.stderr);
+    assert.match(rw.stderr, /::warning::job-isolation: \.\/dev disk check did not run \(exit 2\)/);
+  }
+  const ok = h.job('c'.repeat(16), { GITHUB_WORKSPACE: ws }).exec(['acquire']);
+  assert.equal(ok.status, 0, ok.stderr);
 });
 
 test('acquire sweeps the socket folders of jobs that were killed before their release (under the fake host, never /tmp)', () => {
