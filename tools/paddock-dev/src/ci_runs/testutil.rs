@@ -13,7 +13,7 @@ pub struct Fake {
 }
 
 impl Fake {
-    /// The replies recorded in a folder: `runs-1.json` (page 1 of the run list), `jobs-<run>.json` (page 1 of a run's jobs) and
+    /// The replies recorded in a folder: `runs-1.json` (page 1 of the run list), `run-<id>.json` (one run), `jobs-<run>.json` (page 1 of a run's jobs) and
     /// `log-<job>.txt`, for `repo` on `https://gitea.invalid`. Anything else is a 404.
     pub fn from_dir(dir: &std::path::Path, repo: &str) -> Fake {
         let api = format!("https://gitea.invalid/api/v1/repos/{repo}/actions");
@@ -28,6 +28,11 @@ impl Fake {
             if n == "runs-1.json" {
                 f.json(
                     &format!("{api}/runs?limit=50&page=1"),
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
+                );
+            } else if let Some(id) = n.strip_prefix("run-").and_then(|r| r.strip_suffix(".json")) {
+                f.json(
+                    &format!("{api}/runs/{id}"),
                     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap(),
                 );
             } else if let Some(id) = n.strip_prefix("jobs-").and_then(|r| r.strip_suffix(".json")) {

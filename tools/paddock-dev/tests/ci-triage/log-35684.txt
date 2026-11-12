@@ -1,0 +1,19 @@
+2026-11-11T11:11:54.7925570Z Job: rust-test-macos
+2026-11-11T12:04:21.3060850Z [32;1m    Starting[0m [1m4106[0m tests across [1m99[0m binaries ([1m21[0m tests [33;1mskipped[0m)
+2026-11-11T12:06:31.7266080Z [31;1m        FAIL[0m [  16.658s] ( 643/4106) [35;1mchromium-driver::it[0m [36mreal_browser[0m[36m::[0m[34;1mrenders_a_scripted_page_and_leaves_nothing_behind[0m
+2026-11-11T12:06:32.0326060Z [31;1m        FAIL[0m [  33.668s] ( 647/4106) [35;1mdebrief-app[0m [36mbrowser::renderer::tests[0m[36m::[0m[34;1ma_challenge_page_comes_to_the_front_and_the_work_continues_when_it_is_solved[0m
+2026-11-11T12:07:01.7300000Z [31;1m     TIMEOUT[0m [  93.561s] ( 886/4106) [35;1mdebrief-app::it[0m [36mexport_diagnostics[0m[36m::[0m[34;1mthe_cli_exports_a_report_without_a_window[0m
+2026-11-11T12:07:27.4774470Z [31;1m        FAIL[0m [  36.644s] ( 998/4106) [35;1mdebrief-app[0m [36mhealth::commands::tests[0m[36m::[0m[34;1ma_real_store_worker_killed_over_and_over_is_quarantined_then_repair_restarts_it[0m
+2026-11-11T12:08:43.0959500Z [31;1m     TIMEOUT[0m [  90.010s] (2568/4106) [35;1mdebrief-app[0m [36mlifecycle::tests[0m[36m::[0m[34;1mpanics_on_any_thread_are_logged_as_fatal_with_thread_and_backtrace[0m
+2026-11-11T12:12:04.8071940Z [31;1m        FAIL[0m [  68.663s] (3769/4106) [35;1mdebrief-plugin-e2e::it[0m [36mstore_worker[0m[36m::[0m[34;1ma_plugin_the_app_did_not_load_reads_nothing_in_the_worker[0m
+2026-11-11T12:12:21.0211630Z [31;1m        FAIL[0m [  16.214s] (3795/4106) [35;1mdebrief-plugin-e2e::it[0m [36mstore_worker[0m[36m::[0m[34;1man_installed_importer_reads_files_in_the_store_worker[0m
+2026-11-11T12:16:12.0458630Z [31;1m     Summary[0m [ 711.220s] [1m4106[0m tests run: [1m4099[0m [32;1mpassed[0m ([1m34[0m [33;1mslow[0m), [1m5[0m [31;1mfailed[0m, [1m2[0m [31;1mtimed out[0m, [1m21[0m [33;1mskipped[0m
+2026-11-11T12:16:12.0458660Z [31;1m        FAIL[0m [  16.658s] ( 643/4106) [35;1mchromium-driver::it[0m [36mreal_browser[0m[36m::[0m[34;1mrenders_a_scripted_page_and_leaves_nothing_behind[0m
+2026-11-11T12:16:12.0458900Z [31;1m        FAIL[0m [  33.668s] ( 647/4106) [35;1mdebrief-app[0m [36mbrowser::renderer::tests[0m[36m::[0m[34;1ma_challenge_page_comes_to_the_front_and_the_work_continues_when_it_is_solved[0m
+2026-11-11T12:16:12.0459150Z [31;1m     TIMEOUT[0m [  93.561s] ( 886/4106) [35;1mdebrief-app::it[0m [36mexport_diagnostics[0m[36m::[0m[34;1mthe_cli_exports_a_report_without_a_window[0m
+2026-11-11T12:16:12.0459540Z [31;1m        FAIL[0m [  36.644s] ( 998/4106) [35;1mdebrief-app[0m [36mhealth::commands::tests[0m[36m::[0m[34;1ma_real_store_worker_killed_over_and_over_is_quarantined_then_repair_restarts_it[0m
+2026-11-11T12:16:12.0459810Z [31;1m     TIMEOUT[0m [  90.010s] (2568/4106) [35;1mdebrief-app[0m [36mlifecycle::tests[0m[36m::[0m[34;1mpanics_on_any_thread_are_logged_as_fatal_with_thread_and_backtrace[0m
+2026-11-11T12:16:12.0459910Z [31;1m        FAIL[0m [  68.663s] (3769/4106) [35;1mdebrief-plugin-e2e::it[0m [36mstore_worker[0m[36m::[0m[34;1ma_plugin_the_app_did_not_load_reads_nothing_in_the_worker[0m
+2026-11-11T12:16:12.0460850Z [31;1m        FAIL[0m [  16.214s] (3795/4106) [35;1mdebrief-plugin-e2e::it[0m [36mstore_worker[0m[36m::[0m[34;1man_installed_importer_reads_files_in_the_store_worker[0m
+2026-11-11T12:16:12.6307850Z ##[error]Process completed with exit code 100.
+2026-11-11T13:09:21.2333780Z ##[error]Process completed with exit code 1.
