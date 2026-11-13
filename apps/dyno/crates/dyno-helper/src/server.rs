@@ -626,11 +626,31 @@ mod tests {
                 let c = Stream::connect(&rig.name, Duration::from_secs(5)).map_err(|_| "connect")?;
                 let result = observe(c, Expect::reason(&["busy"]));
                 drop(held);
+                // The held sessions end after their clients closed, on their own threads; the daemon's stop does not wait for
+                // them. The scenario's window closes only when all of them logged their ends, or a late one is counted in the
+                // next scenario's window (CI run 8060, Linux: malformed-first-frame got an extra `code=closed` end line).
+                if !log.wait_for_end_lines_since(from, MAX_SESSIONS + 1, READ_GUARD) {
+                    return Err("the held connections did not all log their ends");
+                }
                 rig.stop();
                 result
             }
             _ => Err("this scenario is not driven by the helper rig; declare it in [[not_applicable]] if it is out of scope"),
         }
+    }
+
+    /// Regression (CI run 8060, Linux): the busy scenario returned while the sessions it had held were still ending, and one
+    /// of their end lines (`code=closed`) landed in the next scenario's window (malformed-first-frame: end-line-count). A
+    /// scenario now returns only once every connection it opened has logged its end; the count is read without any wait.
+    #[cfg(unix)]
+    #[test]
+    fn the_busy_scenario_returns_only_after_every_connection_it_opened_has_ended() {
+        use paddock_ipc::testing::endings::log::end_lines;
+        let log = captured();
+        let from = log.len();
+        ending(paddock_ipc::testing::endings::Scenario::Busy).unwrap();
+        let lines = log.since(from);
+        assert_eq!(end_lines(&lines).len(), MAX_SESSIONS + 1, "{lines:#?}");
     }
 
     /// The ending test of the register's `dyno-helper` entry.
