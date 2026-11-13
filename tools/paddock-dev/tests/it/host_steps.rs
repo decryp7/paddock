@@ -1292,6 +1292,29 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
 }
 
 #[test]
+fn kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit() {
+    // `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase. The shell reads the work folder's commit and origin before any phase, without
+    // that limit; the Rust command bounded them by it, so under load (a `git rev-parse` over 1 s with the hung-phase test's 1 s limit,
+    // 4 of 204 runs) it failed the job with `cannot read the commit and the origin` where the shell went on.
+    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let setup = move |fx: &Fx| {
+        fx.script(
+            "bin/git",
+            &format!(
+                "case \" $* \" in *\"/work/abc/hostexecutor rev-parse HEAD \"*) /bin/sleep 2;; esac\nexec '{}' \"$@\"",
+                real.trim()
+            ),
+        )
+    };
+    let seen = kept_once(
+        &setup,
+        &kept_step("macOS", "lean", vec![("PADDOCK_KEPT_CLONE_TIMEOUT", "1".into())]),
+    );
+    assert_eq!(seen.code, 0, "{seen:?}");
+    assert!(seen.stdout.contains("kept-clone: ready: "), "{}", seen.stdout);
+}
+
+#[test]
 fn kept_fixture_repos_start_no_background_git_maintenance() {
     // `git commit`, `fetch` and a push's `receive-pack` start `git maintenance run --auto --detach`, which holds
     // `objects/maintenance.lock` after the command returns. `git clone --bare work-repo origin.git` copies the objects folder file by

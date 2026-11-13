@@ -63,6 +63,16 @@ const NAME: &str = "kept-clone";
 /// what a git command does, so the clone that carries one is not reused.
 const ALLOWED_KEYS: &str = r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|sparsecheckout|sparsecheckoutcone)|extensions\.(partialclone|objectformat)|remote\.origin\.(url|fetch|tagopt|promisor|partialclonefilter)|branch\.[^.=]+\.(remote|merge))$";
 
+/// The bound of a git command outside a phase (reading the work folder, the health probe, the fallback's expansion): the default phase
+/// limit. `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase; the shell runs these reads unbounded, so a short phase limit must not end
+/// them (it failed the job under load with the hung-phase test's 1 s limit, where the shell went on).
+const OUTSIDE_PHASE_LIMIT: Duration = Duration::from_secs(900);
+
+thread_local! {
+    /// Set on a phase's own thread: its git commands get the phase limit.
+    static IN_PHASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// What the phases share: the job's environment, the credentials for git, the folders and the two buffers a phase writes to (what the
 /// shell's `$scratch/err` and the `run:` lines were).
 struct Kc {
@@ -111,7 +121,11 @@ impl Kc {
             .pass(["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH"])
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
-            .timeout(self.limit);
+            .timeout(if IN_PHASE.with(std::cell::Cell::get) {
+                self.limit
+            } else {
+                OUTSIDE_PHASE_LIMIT
+            });
         if let Some(h) = &self.header {
             call = call
                 .env("GIT_CONFIG_COUNT", "1")
@@ -681,7 +695,10 @@ impl Flow {
             label,
             self.limit + Duration::from_secs(1),
             Some(&self.kc.timed_out),
-            move || f(&kc),
+            move || {
+                IN_PHASE.with(|p| p.set(true));
+                f(&kc)
+            },
         );
         self.flush(step);
         match r {
