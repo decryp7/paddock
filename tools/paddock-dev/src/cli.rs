@@ -1,6 +1,7 @@
 use crate::{
-    brief_check, check, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates, generators, hook,
-    input_hash, ipc_endpoints, load, locks, merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
+    generators, hook, input_hash, ipc_endpoints, load, locks, merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots,
+    wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -148,6 +149,16 @@ enum CheckCommand {
     /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
+    /// The next free conformance check id, read from the working tree, every local and origin branch and
+    /// conformance/reserved-ids.txt (ER-21: two branches took the same id four times). `--reserve <branch>` appends the reservation line.
+    NewId {
+        /// Append `C<n> <branch> <date>` to conformance/reserved-ids.txt (commit it: the commit is the reservation).
+        #[arg(long)]
+        reserve: Option<String>,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
     IpcEndpoints {
@@ -635,6 +646,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Check {
             command: CheckCommand::PrePush(a),
         } => pre_push::command(&a),
+        Command::Check {
+            command: CheckCommand::NewId { reserve, root },
+        } => check_ids::command(root, reserve),
         Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
