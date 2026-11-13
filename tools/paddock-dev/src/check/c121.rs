@@ -1,4 +1,4 @@
-//! C119: a test or a registry entry reads another part of the repository's declared data through its accessor, never by grepping or
+//! C121: a test or a registry entry reads another part of the repository's declared data through its accessor, never by grepping or
 //! slicing the file's text (rule 79, ADR 0098 WP-2; the instance that started it: bddd2947c, a registry entry that ran `sed` over
 //! ci.yml for a line that train 7 had moved, while `ci_line::conformance_args` already read it).
 //!
@@ -12,11 +12,11 @@
 //!
 //! Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (`11c365fc4`,
 //! `0308201b4`) have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows
-//! may read them: its path (a folder, ending in `/`, or a file) goes in `conformance/c119-allow.json` with a reason.
+//! may read them: its path (a folder, ending in `/`, or a file) goes in `conformance/c121-allow.json` with a reason.
 //!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
-//! Rust first (the rule's own host); `conformance/src/checks/C119-declared-data.mjs` is the port and `tests/it/check_c119.rs`
+//! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and `tests/it/check_c121.rs`
 //! compares them finding for finding.
 
 use super::finding::Finding;
@@ -27,7 +27,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 /// The allow list both hosts read.
-pub const ALLOW: &str = "conformance/c119-allow.json";
+pub const ALLOW: &str = "conformance/c121-allow.json";
 
 static TOOL: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:grep|egrep|fgrep|sed|awk|rg|perl)\b"));
 static WORKFLOW: LazyLock<Regex> = LazyLock::new(|| rx(r#"\.gitea/workflows/|(?:^|[\s"'`/])workflows/[\w.-]+\.ya?ml"#));
@@ -112,14 +112,14 @@ fn allowed(allow: &[Allowed], path: &str) -> bool {
     })
 }
 
-const FIX: &str = "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list its path with a reason in conformance/c119-allow.json.";
+const FIX: &str = "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list its path with a reason in conformance/c121-allow.json.";
 
 /// The check.
-pub struct C119;
+pub struct C121;
 
-impl Check for C119 {
+impl Check for C121 {
     fn id(&self) -> &'static str {
-        "C119"
+        "C121"
     }
 
     fn rule(&self) -> u32 {
@@ -190,7 +190,7 @@ impl Check for C119 {
             probes += 1;
             for (line, what) in flagged(kind, &text) {
                 findings.push(Finding::warn(
-                    "C119",
+                    "C121",
                     79,
                     f,
                     line,

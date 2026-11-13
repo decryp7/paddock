@@ -400,7 +400,7 @@ changes here, every app's copy is updated in the same change.
     constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
     crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
     remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
-    regenerate command (ER-40). Checked where cheap: C119 (report-only until its first green run on the real tree) flags a
+    regenerate command (ER-40). Checked where cheap: C121 (report-only until its first green run on the real tree) flags a
     registry entry or test that runs `grep`, `sed`, `awk` or a regular expression over `.gitea/workflows/*.yml`; slicing another
     file's text by anchors and hard-coded paths into another crate are not linted, so review and the train's test run cover them.
     *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of

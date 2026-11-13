@@ -164,7 +164,7 @@ GitLab do, but here it costs the runners each member's plan again (D1 (c)).
 > the owner exports and ends its span at an item boundary, not at a comment it remembers. A hand list that must equal
 > generated data (heavy's `inputs.txt`) is generated, or its test prints the regenerate command (ER-40).
 
-Checked where cheap: a report-only conformance check (the next free C id) flags registry `check` commands in `docs/*.toml`
+Checked where cheap: a report-only conformance check (C121, the id assigned centrally on 2026-11-13) flags registry `check` commands in `docs/*.toml`
 and test files that run `grep`, `sed` or a regex over `.gitea/workflows/*.yml`. A survey on origin/main (2026-11-13) finds 29
 test files that name a workflow file (most in `conformance/test/`, which test checks of workflows and may read them; the
 check takes an allow list with reasons) and 12 `include_str!` reads of shared crates' sources from apps (source audits such as

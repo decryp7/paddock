@@ -58,7 +58,7 @@ permissions:
 
 # The conformance checks Paddock runs on itself: one line, read by the conformance job and by the train-gates job.
 env:
-  PADDOCK_CONFORMANCE_ARGS: "--app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115,C116,C117,C118,C119 --strict C36"
+  PADDOCK_CONFORMANCE_ARGS: "--app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115,C116,C117,C118,C121 --strict C36"
   # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
   PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
 

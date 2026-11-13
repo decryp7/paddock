@@ -1992,5 +1992,5 @@ file, `0308201b4` a span ended at a remembered comment, `bddd2947c` a `sed` over
 existed, `be69a31f6` a hand list that had to equal `cargo metadata`). Three of the eight were siblings in review at the same
 time, so a trial before approval onto the open train could not have seen them; only a check at the merge does. What changed:
 the member gate at each merge (`./dev merge check --gates`), the blame command (`./dev ci triage --members`), the one-reader
-rule 79 with C119 (report-only), and the trial dispatch (`./dev ci dispatch --trial`). **Class: train-time combination
+rule 79 with C121 (report-only), and the trial dispatch (`./dev ci dispatch --trial`). **Class: train-time combination
 failures (the queue's Q3 and ER-8 already named it; ADR 0098).**

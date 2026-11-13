@@ -1,4 +1,4 @@
-// C119: a test or a registry entry reads another part of the repository's declared data through its accessor, never by grepping or
+// C121: a test or a registry entry reads another part of the repository's declared data through its accessor, never by grepping or
 // slicing the file's text (rule 79, ADR 0098 WP-2; the instance that started it: bddd2947c, a registry entry that ran `sed` over
 // ci.yml for a line that train 7 had moved, while `ci_line::conformance_args` already read it).
 // Flagged, one line at a time:
@@ -9,13 +9,13 @@
 //   `new RegExp(`, `Regex::new(`).
 // Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (11c365fc4, 0308201b4)
 // have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows may read them:
-// its path (a folder, ending in `/`, or a file) goes in `conformance/c119-allow.json` with a reason.
+// its path (a folder, ending in `/`, or a file) goes in `conformance/c121-allow.json` with a reason.
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
-// The Rust host (`tools/paddock-dev/src/check/c119.rs`) is the rule's own implementation; this is its port, and
-// `tools/paddock-dev/tests/it/check_c119.rs` compares the two finding for finding.
+// The Rust host (`tools/paddock-dev/src/check/c121.rs`) is the rule's own implementation; this is its port, and
+// `tools/paddock-dev/tests/it/check_c121.rs` compares the two finding for finding.
 import { unwaivable, warn } from '../finding.mjs';
 
-export const ALLOW = 'conformance/c119-allow.json';
+export const ALLOW = 'conformance/c121-allow.json';
 const TOOL = /\b(?:grep|egrep|fgrep|sed|awk|rg|perl)\b/;
 const WORKFLOW = /\.gitea\/workflows\/|(?:^|[\s"'`/])workflows\/[\w.-]+\.ya?ml/;
 const REGEX_USE = /\.(?:match|matchAll)\(|new RegExp\(|Regex::new\(/;
@@ -24,7 +24,7 @@ const TEST_PATH = /(?:^|\/)(?:tests?|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]s$|(
 const TEST_EXT = /\.(?:rs|mjs|js|cjs|ts|sh)$/;
 const NOT_TEST = /(?:^|\/)(?:fixtures|node_modules)\//;
 const FIX =
-  "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list its path with a reason in conformance/c119-allow.json.";
+  "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list its path with a reason in conformance/c121-allow.json.";
 
 /** 'registry', 'test' or null: how the check reads `path`. */
 export function kindOf(path) {
@@ -66,7 +66,7 @@ export function parseAllow(text) {
 const isAllowed = (allow, path) => allow.some((a) => (a.path.endsWith('/') ? path.startsWith(a.path) : path === a.path));
 
 export default {
-  id: 'C119',
+  id: 'C121',
   scope: 'root',
   mode: 'gate',
   title: 'Declared data is read through its accessor, not by searching a workflow\'s text',
@@ -78,7 +78,7 @@ export default {
       if (raw === null || raw === undefined) throw new Error(`${ALLOW} cannot be read`);
       allow = parseAllow(raw);
     } catch (e) {
-      return [unwaivable(warn('C119', 79, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c119-allow.json: {"allow": [{"path": "...", "reason": "..."}]}.'), 'check-broken')];
+      return [unwaivable(warn('C121', 79, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c121-allow.json: {"allow": [{"path": "...", "reason": "..."}]}.'), 'check-broken')];
     }
     const out = [];
     for (const f of ctx.files()) {
@@ -87,7 +87,7 @@ export default {
       const text = ctx.read(f);
       if (text === null || text === undefined) continue;
       for (const { line, what } of flagged(kind, text)) {
-        out.push(warn('C119', 79, f, line, `reads a workflow file's text with ${what}: the data it needs has one accessor`, FIX));
+        out.push(warn('C121', 79, f, line, `reads a workflow file's text with ${what}: the data it needs has one accessor`, FIX));
       }
     }
     return out;
