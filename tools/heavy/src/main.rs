@@ -101,6 +101,27 @@ fn real_main() -> i32 {
             print!("{}", h.status());
             0
         }
+        Cli::Mark { name, pid, remove } => {
+            if remove {
+                h.unmark(&name, pid);
+                0
+            } else {
+                match h.mark(&name, pid) {
+                    Ok(_) => 0,
+                    Err(e) => {
+                        eprintln!("heavy: {e}");
+                        announce(
+                            &run_id,
+                            h.log.file().map(PathBuf::as_path),
+                            exit::LOCK_NOT_TAKEN,
+                            &e,
+                            "free space or fix the folder's rights, then run it again",
+                        );
+                        exit::LOCK_NOT_TAKEN
+                    }
+                }
+            }
+        }
         Cli::Run(r) => {
             let cwd = std::env::current_dir().unwrap_or_default();
             let home = env_get("HOME").or_else(|| env_get("USERPROFILE")).map(PathBuf::from);

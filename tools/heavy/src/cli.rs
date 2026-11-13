@@ -8,6 +8,15 @@ pub enum Cli {
     Status,
     /// `run ...`.
     Run(RunArgs),
+    /// `mark <name> --pid P [--remove]`: announce (or withdraw) a CI job on this host (ADR 0102).
+    Mark {
+        /// The marker's name; it must start with `ci-`.
+        name: String,
+        /// The job's long-lived process; the marker goes when it does.
+        pid: u32,
+        /// Withdraw the marker instead.
+        remove: bool,
+    },
     /// `--help`.
     Help,
     /// `--version`.
@@ -42,7 +51,7 @@ pub struct RunArgs {
 }
 
 /// Usage text.
-pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--run-max S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit, 80 run limit, 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
+pub const USAGE: &str = "usage: heavy run [--high] [--no-gate] [--low] [--gate-load N] [--slots N] [--queue-max S] [--run-max S] [--verbose] [--log-file FILE] <agent-name> -- <command...>\n       heavy status\n       heavy mark [--remove] ci-<name> --pid P   (a CI job on this host: normal runs yield while it lives, up to HEAVY_CI_MAX)\nExit codes: the command's own; 64 usage, 75 lock not taken, 78 refused (home guard), 79 queue limit, 80 run limit, 126/127 cannot run it, 129/130/143 stopped by a signal.\n";
 
 /// Parses the arguments after the program name. Err is the message to print (exit 64).
 pub fn parse(args: &[String]) -> Result<Cli, String> {
@@ -110,7 +119,35 @@ pub fn parse(args: &[String]) -> Result<Cli, String> {
             }
             Ok(Cli::Run(r))
         }
-        _ => Err("expected run or status".into()),
+        Some("mark") => {
+            let (mut remove, mut pid, mut name) = (false, None, None);
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--remove" => remove = true,
+                    "--pid" => {
+                        let v = it.next().ok_or("--pid needs a process id")?;
+                        pid = Some(
+                            v.parse::<u32>()
+                                .ok()
+                                .filter(|p| *p > 0)
+                                .ok_or(format!("--pid {v:?} is not a process id"))?,
+                        );
+                    }
+                    n if !n.starts_with("--") && name.is_none() => name = Some(n.to_string()),
+                    other => return Err(format!("unexpected {other}")),
+                }
+            }
+            let name = name.ok_or("mark needs a name (ci-<name>)")?;
+            if !name.starts_with("ci-") {
+                return Err(format!("the name {name:?} must start with ci-"));
+            }
+            Ok(Cli::Mark {
+                name,
+                pid: pid.ok_or("mark needs --pid")?,
+                remove,
+            })
+        }
+        _ => Err("expected run, status or mark".into()),
     }
 }
 
@@ -120,6 +157,29 @@ mod tests {
 
     fn p(s: &str) -> Result<Cli, String> {
         parse(&s.split_whitespace().map(String::from).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn mark_takes_a_ci_name_and_a_pid() {
+        assert_eq!(
+            p("mark ci-s2 --pid 77"),
+            Ok(Cli::Mark {
+                name: "ci-s2".into(),
+                pid: 77,
+                remove: false
+            })
+        );
+        assert_eq!(
+            p("mark --remove ci-s2 --pid 77"),
+            Ok(Cli::Mark {
+                name: "ci-s2".into(),
+                pid: 77,
+                remove: true
+            })
+        );
+        assert!(p("mark agent --pid 77").unwrap_err().contains("ci-"));
+        assert!(p("mark ci-s2").unwrap_err().contains("--pid"));
+        assert!(p("mark ci-s2 --pid x").is_err());
     }
 
     #[test]

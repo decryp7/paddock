@@ -26,6 +26,9 @@ pub struct Config {
     /// (ADR 0102). Default 1800 s: twice the 15-minute run budget of the push gate that is the priority holder, so a healthy
     /// priority run is always inside it and a hung one cannot hold everybody for good.
     pub priority_max: Duration,
+    /// The same bound for the marker of a CI job on this host (`heavy mark ci-...`, ADR 0102): a job runs for up to its
+    /// `timeout-minutes` (the longest host job's is 120), so the bound is 7200 s, not the push gate's 1800 s.
+    pub ci_priority_max: Duration,
     /// Number of slots (1 = the plock-compatible single lock).
     pub slots: u32,
     /// The troubleshooting log file (None: the default under `root`).
@@ -90,6 +93,7 @@ impl Config {
         // heavy.sh's HEAVY_SLOTS is often exported globally; the shell plock knows only one lock, so slots count only when
         // the folder is chosen explicitly with HEAVY_DIR (or --slots is given). Otherwise the variable is ignored, with a warning.
         let priority_max = secs(get, &["HEAVY_PRIORITY_MAX"], 1800.0, 1.0, &mut w);
+        let ci_priority_max = secs(get, &["HEAVY_CI_MAX"], 7200.0, 1.0, &mut w);
         let slots_var = first(get, &["HEAVY_SLOTS"]);
         if slots_var.is_some() && first(get, &["HEAVY_DIR"]).is_none() {
             w.push(
@@ -115,6 +119,7 @@ impl Config {
             gate_load,
             gate_poll: Duration::from_secs_f64(gate_poll),
             priority_max: Duration::from_secs_f64(priority_max),
+            ci_priority_max: Duration::from_secs_f64(ci_priority_max),
             slots,
             log_file: first(get, &["HEAVY_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("HEAVY_VERBOSE"),
@@ -185,6 +190,7 @@ mod tests {
     fn the_priority_bound_has_a_default_and_a_setting() {
         let (c, w) = cfg(&[]);
         assert_eq!(c.priority_max, Duration::from_secs(1800));
+        assert_eq!(c.ci_priority_max, Duration::from_secs(7200));
         assert!(w.is_empty());
         let (c, _) = cfg(&[("HEAVY_PRIORITY_MAX", "90")]);
         assert_eq!(c.priority_max, Duration::from_secs(90));
