@@ -244,13 +244,14 @@ pub fn run_with(machine: &dyn Machine, env: &HashMap<String, String>, out: &mut 
         }
     };
     if !ran.success {
-        for l in crate::ci_tool::tail(&ran.stderr, crate::ci_tool::TAIL_LINES).lines() {
+        // The shell's output, line for line (it stays the reference until WP-11 deletes it): the last lines of the build log
+        // unindented (`tail -n 40`), then its one error line, whose next step is the sentence after the semicolon.
+        let lines: Vec<&str> = ran.stderr.lines().collect();
+        for l in &lines[lines.len().saturating_sub(crate::ci_tool::TAIL_LINES)..] {
             step.say(l);
         }
-        return step.fail(
-            format!("`cargo test --no-run` failed ({}; output above).", ran.how),
-            "fix the build first.",
-        );
+        step.say("::error::guardian-as-user: cargo test --no-run failed (output above); fix the build first");
+        return 1;
     }
     let (Some(proc_bin), Some(chromium_bin)) = (exe_of(&ran.stderr, "paddock_proc"), exe_of(&ran.stderr, "paddock_chromium")) else {
         return step.fail(
@@ -535,7 +536,7 @@ mod tests {
         assert_eq!(code, 1);
         assert_eq!(out.lines().filter(|l| l.starts_with("::error::")).count(), 1, "{out}");
         assert!(
-            out.contains("`cargo test --no-run` failed (exit 101; output above). Next step: fix the build first."),
+            out.contains("::error::guardian-as-user: cargo test --no-run failed (output above); fix the build first"),
             "{out}"
         );
         let mut lost = Fake::new(501);
