@@ -9,6 +9,10 @@
   (`7680e9d79`) answered it and was re-reviewed ("changes": P1-10, three P2s); revision 6 answers it.
   Nothing here is built yet.
 - Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-0, WP-1 (`Outcome`, `Verdict`, exit codes 6 and 7), WP-2 (`Measured`, `require_tool`) with fail-closed on release runs, the WP-3 ban on silent skips as a grep check, WP-5 step 1 and its test-body sites, WP-6; dropped the per-tag-workflow wiring, the runner-log reader, the C103 syn pass and the tooling copies.
+- Amended 2026-11-13 (user approved the mechanism): **a pass carries its evidence**; one gate outcome for every gate
+  (pre-push, both conformance hosts, `./dev ci verdict`, `./dev merge check --gates`). This brings back, for these four
+  sites only, part of the "tooling copies" the 2026-11-11 trim dropped. See "Amendment 2026-11-13" at the end; its scope
+  (A1, over the 1.5-day budget) and three smaller choices (A2 to A4) wait for the user.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism,
   `docs/known-copies.toml`), ER-12 (no silent skips), ER-27, ER-31, ER-33 / rule 71; ADR 0022 and its 2026-10-31
@@ -619,3 +623,185 @@ amd64 emulation; that the runners use the same digest is **unverified**).
   attribute: 33.
 - Ignored tests run in CI: `git grep -E 'run-ignored|--ignored|--include-ignored' -- .gitea apps/*/paddock.ci.json '*nextest.toml'` → none.
 - Playwright: `grep -E 'retries|failOnFlakyTests'` over the 10 `playwright*.config.ts` files.
+
+## Amendment 2026-11-13: a pass carries its evidence (one gate outcome for every gate)
+
+Drafted at the coordinator's request of 2026-11-13 (ER-21); the user approved the mechanism the same day. Scope and the
+choices below still need the user (A1 to A4).
+
+**Evidence heads** (ADR 0091; read 2026-11-13 after `git fetch`, re-read before commit): `origin/main` `3a342cb42`,
+`origin/fix/pre-push-known-commit` `90f1344de`, `origin/feat/adr-0098-member-gates` `8d84fc101` (re-read before commit; `ef8282a62` when first read, only a check renumbering between them), and the **local-only**
+branch `feat/ci-in-rust-wp10-engine` `8a71d54ec` (not on `origin`: read in the coordinator's clone; pushing it is a
+prerequisite of WP-T2's Rust half). None of the commits cited below is in a tag (`git tag --contains` empty for
+`6f7e86627`, `9853825d3`, `78dfc7789`, `90f1344de`): nothing here has shipped.
+
+### The class, one level up from tests
+
+0089 made "did not measure" its own value. The class keeps coming back one level up: **a gate gives its verdict from an
+indirect signal (an exit code, an absence, a neighbouring fact) instead of from its own recorded check.** Every row was a
+defect in committed code, read at the commit named:
+
+| # | Where, commit | Indirect signal read as a pass | State |
+|---|---|---|---|
+| 1 | 0089's six incidents (above) | a notice, an early `return`, a waivable crash | fixed per §8; the type exists (`crates/paddock-cli/src/outcome/`, `6f7e86627`, `160f8349f`) |
+| 2 | `./dev ci verdict`, `9853825d3` (2026-11-12) | a run counted as full from `plan mode: full=true` (`verdict.rs:5`, `:136` at that commit): a schedule-skipped run logs it and ends green having tested nothing; a rerun of failed jobs kept the run id and was not read (ER-15) | fixed by `aab31590d` (post-decision `complete=true` marker, earlier attempts read) and `177b0663c` |
+| 3 | pre-push, `7d8b0f29b` (2026-11-13) | `known_remote_branch`: "some remote-tracking branch `--contains` the commit" returned exit 0, "nothing new to check" | fixed on the branch by `ff9a848d0` and `90f1344de` (`pre_push/known.rs`: only a pass record for that sha and tree, or a complete green CI run with the sha a live tip of the push's own remote) |
+| 4 | pre-push, `84273d96b` (2026-11-13) | the conformance install judged ready because `node_modules/yaml/package.json` is a file | fixed on the branch by `ff9a848d0` (`node_env_problem` compares every installed version with `package-lock.json`) |
+| 5 | Dyno, before `78dfc7789` (2026-11-12) | the data-folder refusal enforced only by `if let Some(text) = data_folder_refusal(&dirs)` around the start: deleting the check left the tests green | fixed by `78dfc7789`: `StartGate` (`apps/dyno/app/src-tauri/src/lib.rs:722`), a token only `StartGate::open` makes, the only way to the app's `Builder` |
+| 6 | both conformance hosts (main `conformance/src/runner.mjs`, `outcome.mjs`; `8a71d54ec` `tools/paddock-dev/src/check/outcome.rs`) | **an empty run is clean**: no check ran, exit 0. Measured (synthetic, node 24.22.0): `runChecks({app: 'synthetic-app', only: []})` → `checks: []`, `exitStatus` 0; the Rust port asserts the same, `exit_status(&[], ..) == CLEAN`. The shared `Verdict` already says 6 for this (`verdict.rs`: "no outcome at all ... `Exit::NotMeasured`"), so the hosts drifted from it | **open** |
+| 7 | `./dev merge check --gates`, `543712a9f` (`merge_check/gates.rs:141` at `8d84fc101`) | reads only the exit code of `check --pre-push`: `code: Some(0)` → "member gate: passed". Exit 0 also means "nothing changed since the base; nothing to check" (main `pre_push/mod.rs:268-272`, reached with `--base` and no pushed refs, the way merge check calls it) and, on the fix branch, `known_commit` (`known.rs`, `report(..).with_exit(Exit::Ok)`) | **open** (read, not run; report-only today: `ENFORCED = false`) |
+
+Rows 6 and 7 were found by this survey. Row 7 is the shape the mechanism must close: a consumer that reads another
+gate's process exit cannot tell "checked this tree and passed" from "checked nothing".
+
+**Where each gate's result type stands** (one mechanism, five copies, rule 55):
+
+| Site (ref) | Its own type | Pass carries |
+|---|---|---|
+| shared, `paddock_cli::outcome::Outcome` (main) | `Clean`, `NotApplicable`, `Findings`, `NotMeasured`, `CheckBroken`; public variants | nothing: `Outcome::Clean` is constructible anywhere |
+| pre-push, `pre_push/exec.rs:52` (main) | `Verdict { Passed{secs}, Failed, Skipped, NotMeasured, Accepted, Broken }`; `known.rs` adds `Evidence { Record, CiRun }` and a JSON `"verdict": "known_commit"` (branch) | seconds; the known commit carries a record id or run id |
+| JS conformance host, `outcome.mjs` (main) | `f.outcome` string on a finding; clean = no finding | nothing |
+| Rust conformance host, `check/outcome.rs` (`8a71d54ec`) | `Outcome { CheckBroken, NotMeasured }` on a finding; `i32` constants | nothing |
+| `ci verdict`, `ci_runs/verdict.rs:24` (main) | `Verdict { Green{run}, Red, NotMeasured }` | the run id |
+| merge check, `merge_check/gates.rs` (`ef8282a62`) | `Step.data.outcome` strings "passed", "failed", "not measured", "not run" | nothing; derived from an exit code |
+
+### Comparable practice (ER-37; sources read 2026-11-13)
+
+- **JUnit XML** (the de facto report format): "A test case is considered successful (passed) unless there is another
+  result element underneath it" ([testmoapp/junitxml](https://github.com/testmoapp/junitxml)). Pass is the default:
+  this ADR's class, as a format.
+- **GitHub check runs**: `conclusion` is one of `action_required`, `cancelled`, `failure`, `neutral`, `success`,
+  `skipped`, `stale`, `timed_out`, required when `status` is `completed`
+  ([REST: check runs](https://docs.github.com/en/rest/checks/runs)). For required checks, "Successful check statuses are
+  `success`, `skipped`, and `neutral`", and a job skipped by a conditional "reports Success"
+  ([troubleshooting required status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)).
+  The vendor documents the trap (incident #2's shape) and tells users to avoid requiring skippable workflows.
+- **Bazel**: a test passes when its process exits 0, and a test may create `TEST_PREMATURE_EXIT_FILE` so that a stray
+  `exit()` is a failure ([test encyclopedia](https://bazel.build/reference/test-encyclopedia)): a positive control on
+  the exit code. The Build Event Protocol's `TestStatus` keeps not-run states apart from failure: `NO_STATUS`,
+  `PASSED`, `FLAKY`, `TIMEOUT`, `FAILED`, `INCOMPLETE`, `REMOTE_FAILURE`, `FAILED_TO_BUILD`,
+  `TOOL_HALTED_BEFORE_TESTING`, and each `TestResult` says whether it came from a cache (`cached_locally`,
+  `execution_info.cached_remotely`) ([build_event_stream.proto](https://github.com/bazelbuild/bazel/blob/master/src/main/java/com/google/devtools/build/lib/buildeventstream/proto/build_event_stream.proto)).
+  The remote cache keys a result by the digest of the `Action` (`command_digest`, `input_root_digest`, `platform`,
+  `timeout`), and an `ActionResult` holds `exit_code`, outputs and `execution_metadata`
+  ([remote_execution.proto](https://github.com/bazelbuild/remote-apis/blob/main/build/bazel/remote/execution/v2/remote_execution.proto)).
+  So in Bazel a reused pass is labelled as reused and is bound to the exact inputs, tool and command: the closest
+  practice to `known_commit` and to the evidence record below.
+- **cargo-nextest**: a test that passes on retry is `FLAKY`; since 0.9.131 `flaky-result = "fail"` makes it fail the run,
+  and JUnit gets `<flakyFailure>`/`<rerunFailure>` ([retries](https://nexte.st/docs/features/retries/)). The page of
+  its machine-readable format lists no status set (its specification reads "TODO"), so nextest's full status list is
+  **unverified** here.
+
+**Baseline.** Common practice is a status enum with distinct not-run states (Bazel, GitHub, nextest) plus, in the
+best case, provenance for a reused result (Bazel's cache flags and action digest). None of them makes "passed" a value
+that only carries evidence; JUnit and GitHub default or fold not-run into pass and document it. This amendment goes one
+step beyond the baseline because five of the seven rows above were enum-shaped already and still passed on an indirect
+signal: the state existed, but a consumer could make or infer `passed` without the check. That is what the evidence
+requirement removes.
+
+### Decision (amends §1, §2 and §8)
+
+**1. One gate outcome.** `paddock_cli::outcome::Outcome` becomes the one result of every gate and every check host;
+its variants keep 0089's names on the wire. The brief's names map one to one: passed = `clean` (and `findings` with only
+report-only findings), failed = `findings` with a failing one, not_measured = `not-measured`, broken = `check-broken`,
+known_commit = **new** `known-commit`. The survey adds no further constructible state:
+
+| Seen in the survey | Becomes |
+|---|---|
+| pre-push `Skipped`, merge check "not run" | `NotApplicable` (unchanged rule: 6 in a whole-tree run) |
+| pre-push `Accepted` (a person's override) | not a state: an excuse on a `NotMeasured` item, like an `[[optional]]` entry; `Verdict` records which (`excused_by: Register(id) \| Override(who)`) |
+| a run still going (`ci verdict`), cut short, interrupted, timed out | `NotMeasured` with the reason and the wait or rerun step |
+| flaky (passed on retry) | `Findings` (failing), as ER-12 |
+| environment not ready (pre-push's conformance install) | `NotMeasured` (§1: "tool missing"); the fix branch made it `Broken` (exit 7). A2 |
+
+**2. `passed` and `known_commit` exist only with evidence.** The variants become private-field structs:
+
+```rust
+pub struct Evidence { check: CheckId, subject: Subject, tool: ToolVersion, at: UnixSeconds }   // fields private
+pub enum Subject {
+    Commit { sha: Sha, tree: TreeId },           // a committed tree (pre-push on a pushed commit, merge check, CI conformance)
+    Files { head: Sha, digest: Sha256 },         // a working-tree or --files run: head plus a digest of the files read
+    CiRun { workflow: String, run: RunId, sha: Sha },
+}
+pub fn measure<F>(check: CheckId, subject: Subject, tool: ToolVersion, now: UnixSeconds, f: F) -> Outcome
+where F: FnOnce() -> Result<Vec<Finding>, Unmeasured>;     // Unmeasured::{NotMeasured(Reason), Broken(Reason)}; a panic is Broken
+```
+
+- `Outcome::Clean` and `Outcome::Findings` hold an `Evidence`; **`measure` is the only constructor** of either (the
+  `Evidence` fields and the variant payload types are private). Report-only findings exit 0, so they need evidence too.
+- `Outcome::KnownCommit(Evidence)` is made only by `Evidence::adopt(stored, &dyn LiveRepo)`, which reads a stored
+  record (pre-push's pass record, or a `CiRun` from the one CI reader) and re-reads the sha's tree **live**; a mismatch
+  is `NotMeasured`. The CI reader's constructor `Evidence::ci_run(..)` is public but has exactly one allowed caller
+  (`ci_runs::verdict`), held by WP-T6's check.
+- **Consumers check the subject.** A gate's result crosses a process boundary only as JSON, and
+  `Outcome::from_wire(json, expect: &Subject, accept_known: bool) -> Outcome` parses it: a missing or unparsable result,
+  a `clean` without evidence, evidence for another subject, or `known-commit` where the caller did not accept it, is
+  `NotMeasured`, never a pass. **An exit code alone is never read as a pass** (row 7). Merge check does not accept
+  `known-commit` (it asks about the merged tree); the pre-push hook does.
+- `KnownCommit` exits 0 and is listed by name; the JSON says `not_rechecked: true` (as the fix branch does).
+- An empty run (no outcome) stays `NotMeasured`; both conformance hosts adopt it (row 6).
+- **What this does not stop:** a person or program writing a fake record file. The type closes code paths, not a
+  malicious writer (single-user tooling, as the `tag` workflow's note in AGENTS.md says).
+
+**3. The JS mirror.** `conformance/src/outcome.mjs` gets `measure(checkId, subject, tool, fn)` and a module-private
+`Symbol` brand on its `clean` and `findings` results; `exitStatus` treats an unbranded "clean" as not measured. The Rust
+host ports the same (it replaces `check/outcome.rs`'s two-value enum and `i32` constants with the shared type).
+
+**4. The tests every migrated gate gets** (PRINCIPLES: "a gate's result comes only from the check"), each shown red on
+today's code first (ER-11):
+
+1. **Delete the check:** the gate wired with its check removed (registry empty, `measure` never called, the closure
+   replaced by `Ok(vec![])` without the probe) gives 6, never 0.
+2. **Skip the gate:** its consumer given a stand-in that exits 0 with no JSON, JSON without evidence, and evidence for
+   another sha, gives 6 each time.
+3. A property test in `paddock-cli`: no value reachable through the public API is `Clean`, `Findings` or `KnownCommit`
+   without an `Evidence` from `measure` or `adopt` (compile-fail doctests for the struct literals).
+
+**5. Report-only first (ER-41).** Each consumer's new evidence requirement (merge check, pre-push's reading of known
+commits, the conformance hosts' brand check) first prints `::warning::would be NOT MEASURED: <why>` and keeps today's
+exit, behind an `ENFORCED` constant as `merge_check/gates.rs` does; it flips in the change that records its first green
+run on a real train (run id) here. Row 6 (an empty run is clean) is a bug against §2 as accepted, so it enforces at once
+with its failing test. WP-T6's check starts report-only in its register.
+
+### Work packages (raw agent-days, one agent)
+
+| WP | Content | Touches (in-flight branches) | Days |
+|---|---|---|---|
+| WP-T1 | `Evidence`, `Subject`, `measure`, `adopt`, `KnownCommit`, `from_wire`, excuse sources; private payloads; property and compile-fail tests; JS `outcome.mjs` brand and `measure`; README section | main only (`crates/paddock-cli/src/outcome/`, `conformance/src/outcome.mjs`) | 0.75 |
+| WP-T2 | Both conformance hosts on `measure` per check; empty run 6 (failing test first); delete and skip tests | JS on main; Rust on `feat/ci-in-rust-wp10-engine` (local-only: push it first) | 0.5 |
+| WP-T3 | pre-push: `exec::Verdict` and `known::Evidence` onto the shared type; evidence `Commit{sha, tree}` per gate; pass record = a serialized `Evidence`; environment not ready per A2; JSON by `Verdict::json` | `fix/pre-push-known-commit` (lands first); conflicts with `feat/ci-in-rust-wp10-engine` (`pre_push/gates.rs`, `mod.rs`, `tests.rs`) and `feat/adr-0098-member-gates` (`pre_push/ci_line.rs`) | 0.5 |
+| WP-T4 | `ci verdict`: `Green{run}` → `KnownCommit`/`Clean` with `Subject::CiRun`, `Red` → `Findings`; `ci_verdict` (fix branch) returns `Outcome` | main `ci_runs/verdict.rs`; `fix/pre-push-known-commit` (`ci_runs/mod.rs`) | 0.25 |
+| WP-T5 | merge check `--gates`: read pre-push's JSON through `from_wire` with `Subject::Commit` of the merge, `accept_known = false`; exit code alone never a pass; skip test | `feat/adr-0098-member-gates` (`merge_check/gates.rs`) | 0.25 |
+| WP-T6 | The check (next free id at landing: C119 and C120 are taken on `feat/ci-in-rust-wp10-engine`, and `8d84fc101` moved `feat/adr-0098-member-gates`'s check to C121, so C122 or later): callers of `Evidence::ci_run`/`adopt` outside the allowed modules, `Outcome` struct literals outside `paddock-cli`, and in JS a result object with `status: 'clean'` built outside `outcome.mjs`; shrink-only seed; report-only first | main (Rust host, after WP-T2) | 0.5 |
+| | **Total** | | **2.75** |
+
+**Order for the integrator:** `fix/pre-push-known-commit` lands, then WP-T1 (main only, no conflicts), then WP-T4 and
+WP-T3 on top of the landed fix branch, WP-T5 after `feat/adr-0098-member-gates` lands, WP-T2's Rust half after
+`feat/ci-in-rust-wp10-engine` is pushed and lands, WP-T6 last. WP-T1 changes a crate in Dyno's and Pitwall's shipped
+dependency set (`paddock-cli` through `paddock-service`, §10); nothing outside the crate builds an `Outcome` on main
+today (`git grep` finds the module and its tests only), so the private payloads break no caller. It still lands outside
+a release freeze.
+
+### Cost against the baseline (ER-37)
+
+| Option | What | Days |
+|---|---|---|
+| (b) common practice | Add `KnownCommit` to the shared enum, a JSON wire format, migrate the five sites onto the enum, fix row 6 and row 7 (merge check reads the JSON status, not the exit). No evidence type, no `measure` token, no check | about 1.6 (WP-T1 0.35, T2 0.4, T3 0.4, T4 0.2, T5 0.25) |
+| (a) complete (recommended) | Everything above | 2.75 |
+
+The budget was about 1.5 days: (b) is 0.1 over, (a) 1.25 over, and (a) is 1.15 days beyond common practice, so it
+needs the user's yes (ER-37). What (a) buys over (b): rows 3, 5 and 7 were enum- or status-shaped and still passed
+from an indirect signal; (b) leaves `Clean` constructible by any code path and lets a consumer accept a pass about
+another commit.
+
+### Decisions for the user
+
+| # | Question | Options | Recommendation |
+|---|---|---|---|
+| A1 | Scope | (a) complete: evidence-bearing `passed`/`known-commit`, `measure` token, subject check at every consumer, WP-T6, 2.75 days; (b) common practice: the enum and wire format without evidence, about 1.6 days | **(a)**, as the standing "complete and right for foundation"; 1.25 days over budget |
+| A2 | Environment not ready (a missing or stale tool install) | (a) `NotMeasured`, exit 6, as §1 says for a missing tool; (b) `CheckBroken`, exit 7, as the fix branch does | **(a)**: 7 means the check itself is wrong; the next step text still says "not a finding in your change" |
+| A3 | `NotApplicable` evidence | (a) a reason only; a whole-tree run still turns it into 6; (b) evidence of the scoping decision (the plan's sha) | **(a)**: the root-run rule already closes it; revisit if a scoped run is found passing wrongly |
+| A4 | `known-commit` exit | (a) 0, named in JSON and text, refused by consumers that ask about another tree; (b) a new exit code | **(a)**: exit 8 is taken by the Rust host's I/O error, and the subject check is what protects consumers |
+
+Rollback: WP-T1's payloads can be made public again in one change; each consumer's `ENFORCED` stays false until its
+first green run.
