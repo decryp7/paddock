@@ -526,7 +526,7 @@ mod tests {
     fn kept(sc: &Scene) -> String {
         format!(
             "{}/.paddock-ci/src/decryp7_paddock-crate-s1",
-            paddock_testkit::path::text(&sc.dir.path().join("home"))
+            paddock_testkit::path::text(sc.dir.path().join("home"))
         )
     }
 
