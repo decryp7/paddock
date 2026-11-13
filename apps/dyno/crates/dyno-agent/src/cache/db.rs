@@ -703,7 +703,7 @@ pub(crate) mod tests {
 
     #[test]
     fn creates_saves_lists_and_loads_back() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let folder = d.path().join("cache");
         let mut db = open_in(&folder);
         let t = tree("alpha", 50);
@@ -728,7 +728,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_save_replaces_the_target_and_reopening_finds_it() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let first = db
             .save_disk(&params("volume:/"), &tree("a", 5), 1, CacheLimits::default(), &Roomy)
@@ -746,7 +746,7 @@ pub(crate) mod tests {
 
     #[test]
     fn migrations_run_forward_in_one_transaction() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let p = d.path().join("c.db");
         drop(CacheDb::try_open(&p, &[]).unwrap());
         let steps = ["CREATE TABLE extra (x INTEGER)", "ALTER TABLE extra ADD COLUMN y INTEGER"];
@@ -773,7 +773,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_newer_schema_is_refused_and_recreated() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         db.save_disk(&params("volume:/"), &tree("a", 3), 1, CacheLimits::default(), &Roomy)
             .unwrap();
@@ -790,7 +790,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_file_of_garbage_is_recreated_with_its_wal_and_shm() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let p = d.path().join("cache.db");
         std::fs::write(&p, vec![0xAB; 5000]).unwrap();
         std::fs::write(files_of(&p)[1].clone(), b"stale wal").unwrap();
@@ -807,7 +807,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_busy_file_is_left_alone() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let p = d.path().join("cache.db");
         drop(open_in(d.path()));
         // Another connection holds the write lock for the whole open.
@@ -826,7 +826,7 @@ pub(crate) mod tests {
 
     #[test]
     fn one_damaged_row_is_dropped_alone() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let a = db
             .save_disk(&params("volume:/a"), &tree("a", 5), 1, CacheLimits::default(), &Roomy)
@@ -845,7 +845,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_failed_save_keeps_the_old_map() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let old = tree("old", 20);
         let first = db.save_disk(&params("volume:/"), &old, 1, CacheLimits::default(), &Roomy).unwrap();
@@ -862,7 +862,7 @@ pub(crate) mod tests {
 
     #[test]
     fn eviction_follows_last_shown_and_the_target_count() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let mut ids = Vec::new();
         for n in 0..16 {
@@ -892,7 +892,7 @@ pub(crate) mod tests {
 
     #[test]
     fn eviction_follows_the_size_cap_and_a_map_over_the_cap_is_not_saved() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let raw = CacheLimits {
             max_bytes: 1 << 30,
@@ -928,7 +928,7 @@ pub(crate) mod tests {
                 Some((100 * 1024 * 1024 * 1024, self.0))
             }
         }
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let t = tree("t", 10);
         let gb = 1024 * 1024 * 1024;
@@ -971,7 +971,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_stream_that_inflates_past_the_rows_stored_bytes_is_refused() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let s = db
             .save_disk(&params("v:/"), &tree("t", 30), 1, CacheLimits::default(), &Roomy)
@@ -994,7 +994,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_missing_chunk_is_damage() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         // Many small chunks cannot be made cheaply; delete the only one and the load is cut short.
         let s = db
@@ -1007,7 +1007,7 @@ pub(crate) mod tests {
 
     #[test]
     fn views_are_kept_and_replaced() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let db = open_in(d.path());
         db.put_view("counters", 1, 10, "{\"a\":1}").unwrap();
         db.put_view("counters", 1, 20, "{\"a\":2}").unwrap();
@@ -1045,7 +1045,7 @@ pub(crate) mod tests {
     /// is emptied after a forget, a replacement and an eviction.
     #[test]
     fn a_forgotten_replaced_or_evicted_map_leaves_no_name_in_the_file_or_its_wal() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let raw = CacheLimits {
             max_bytes: 1 << 30,
@@ -1099,7 +1099,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_write_connection_overwrites_freed_pages_and_the_file_gives_the_space_back() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let secure: i64 = db.conn.query_row("PRAGMA secure_delete", [], |r| r.get(0)).unwrap();
         assert_eq!(secure, 1, "secure_delete is on");
@@ -1125,7 +1125,7 @@ pub(crate) mod tests {
     /// A file that cannot be deleted (Windows, another handle open) is emptied in place, and no name is left in it.
     #[test]
     fn a_database_that_cannot_be_deleted_is_emptied_in_place_without_leaving_a_name() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut db = open_in(d.path());
         let raw = CacheLimits {
             max_bytes: 1 << 30,

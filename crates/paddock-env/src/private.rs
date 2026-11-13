@@ -257,10 +257,9 @@ mod named_folder_tests {
         let own = tmp.path().join("own");
         std::fs::create_dir(&own).unwrap();
         std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(
-            check_named_folder(&own.join("not").join("yet")).is_ok(),
-            "a missing folder in a private one passes"
-        );
+        if let Err(e) = check_named_folder(&own.join("not").join("yet")) {
+            panic!("a missing folder in a private one passes: {e}");
+        }
         assert!(!own.join("not").exists(), "and is not made by the check");
     }
 }
@@ -309,12 +308,13 @@ mod named_folder_windows_tests {
             0,
             "nothing was created"
         );
+        // Made owner-only, not with `create_dir`: a plain folder takes the access list of `tmp`, and a CI runner's temp folder (under
+        // `C:\`) grants `Authenticated Users` Modify to what is made in it (Dyno CI run 8035), which the check rightly refuses.
         let own = tmp.path().join("own");
-        std::fs::create_dir(&own).unwrap();
-        assert!(
-            check_named_folder(&own.join("not").join("yet")).is_ok(),
-            "a missing folder in a private one passes"
-        );
+        PrivateDir::create_all(&own).unwrap();
+        if let Err(e) = check_named_folder(&own.join("not").join("yet")) {
+            panic!("a missing folder in a private one passes: {e}");
+        }
         assert!(!own.join("not").exists(), "and is not made by the check");
     }
 }

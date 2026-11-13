@@ -135,7 +135,7 @@ mod tests {
     fn a_quiesced_audit_log_writes_nothing_more_and_a_racing_request_never_writes_after_it() {
         use std::sync::atomic::AtomicBool;
         for round in 0..30 {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = paddock_testkit::private_tempdir().unwrap();
             let path = dir.path().join("audit.jsonl");
             let log = Arc::new(AuditLog::new(path.clone()));
             log.record(&entry(0, "first", AuditVerdict::Done)).unwrap();
@@ -185,7 +185,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_audit_log_is_never_written_through_a_link() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let target = dir.path().join("elsewhere");
         std::fs::write(&target, b"keep").unwrap();
         let path = dir.path().join("audit.jsonl");
@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn entries_are_appended_and_read_newest_first() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let log = AuditLog::new(dir.path().join("audit.jsonl"));
         assert!(log.tail(5).is_empty());
         for i in 0..5 {
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn a_damaged_line_is_skipped_and_the_log_rotates_once() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("audit.jsonl");
         let log = AuditLog::with_limit(path.clone(), 100);
         log.record(&entry(1, "a", AuditVerdict::Done)).unwrap();
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn an_unwritable_log_is_an_error_for_the_caller() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let log = AuditLog::new(dir.path().join("no-such-folder").join("audit.jsonl"));
         assert!(log
             .record(&entry(1, "x", AuditVerdict::Done))

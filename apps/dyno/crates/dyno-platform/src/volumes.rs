@@ -544,7 +544,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn linux_traits_come_from_sysfs() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let disk = t.path().join("devices/pci/usb1/block/sdb");
         std::fs::create_dir_all(disk.join("sdb1")).unwrap();
         std::fs::create_dir_all(disk.join("queue")).unwrap();
@@ -575,7 +575,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_linux_device_is_found_by_the_uuid_link_that_points_at_it() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let dev = t.path().join("sda1");
         let other = t.path().join("sdb1");
         std::fs::write(&dev, b"").unwrap();
@@ -617,7 +617,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_windows_drive_has_a_stable_identity_with_its_serial() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = t.path().ancestors().last().unwrap().to_string_lossy().into_owned();
         let id = win::identity(&root).expect("the system drive has a volume GUID");
         assert!(id.starts_with("\\\\?\\Volume{") && id.contains('|'), "{id}");
@@ -628,11 +628,11 @@ mod tests {
     fn the_startup_disk_name_is_the_link_to_root() {
         #[cfg(unix)]
         {
-            let t = tempfile::tempdir().unwrap();
+            let t = paddock_testkit::private_tempdir().unwrap();
             std::os::unix::fs::symlink("/", t.path().join("Macintosh HD")).unwrap();
             std::fs::create_dir(t.path().join("Work")).unwrap();
             assert_eq!(macos_startup_name(t.path()).as_deref(), Some("Macintosh HD"));
-            let empty = tempfile::tempdir().unwrap();
+            let empty = paddock_testkit::private_tempdir().unwrap();
             assert_eq!(macos_startup_name(empty.path()), None);
         }
         assert_eq!(macos_startup_name(Path::new("no-such-folder-for-dyno-tests")), None);
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn capacity_is_read_for_a_folder_of_this_run_and_refused_for_a_missing_mount() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let (total, free) = capacity(&t.path().to_string_lossy()).unwrap();
         assert!(total > 0 && free <= total);
         assert!(capacity("no-such-mount-for-dyno-tests").is_none());
@@ -673,7 +673,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn free_on_macos_is_never_below_statvfs() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let (_, bavail) = statvfs(t.path()).unwrap();
         let s = space(&t.path().to_string_lossy()).unwrap();
         assert!(s.free >= bavail, "free {} below statvfs {}", s.free, bavail);
@@ -725,7 +725,7 @@ mod tests {
 
         #[test]
         fn an_empty_or_failing_mount_table_is_an_empty_list() {
-            let none = tempfile::tempdir().unwrap();
+            let none = paddock_testkit::private_tempdir().unwrap();
             assert!(read_fsstat(none.path(), |_, _| 0).is_empty());
             assert!(read_fsstat(none.path(), |_, _| -1).is_empty());
         }
@@ -734,7 +734,7 @@ mod tests {
         fn a_table_that_shrinks_between_the_two_calls_is_read_as_far_as_it_goes() {
             let one = vec![entry("/dev/disk3s1", "/Volumes/usb", "exfat", 0)];
             let calls = std::cell::Cell::new(0);
-            let none = tempfile::tempdir().unwrap();
+            let none = paddock_testkit::private_tempdir().unwrap();
             let list = read_fsstat(none.path(), |buf, bytes| {
                 calls.set(calls.get() + 1);
                 if buf.is_null() {
@@ -748,7 +748,7 @@ mod tests {
 
         #[test]
         fn entries_carry_their_names_flags_and_the_startup_name() {
-            let none = tempfile::tempdir().unwrap();
+            let none = paddock_testkit::private_tempdir().unwrap();
             let list = read_fsstat(
                 none.path(),
                 table(vec![

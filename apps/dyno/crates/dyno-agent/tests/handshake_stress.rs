@@ -33,7 +33,7 @@ fn open_descriptors() -> Option<usize> {
 #[test]
 fn a_hundred_short_connections_in_a_row_are_all_answered_and_none_is_left_holding_descriptors() {
     let _log = agent_log::on_failure();
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     let running = Running::start(dirs.clone(), fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))).unwrap();

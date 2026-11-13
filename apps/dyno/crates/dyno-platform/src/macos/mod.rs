@@ -55,7 +55,7 @@ mod tests {
 
     #[test]
     fn the_macos_platform_wires_no_fake() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let found = crate::wiring::fakes_in(&platform(dir.path()).adapters());
         assert!(found.is_empty(), "the macOS platform wires test doubles: {found:?}");
     }

@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn cloud_sync_folders_are_not_walked() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         for rel in ["OneDrive/proj", "OneDrive - Contoso/proj", "onedrive/proj", "real/proj"] {
             let p = dir.path().join(rel);
             std::fs::create_dir_all(&p).unwrap();
@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn finds_projects_within_limits() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let root = dir.path();
         let mk = |rel: &str, file: &str| {
             let p = root.join(rel);

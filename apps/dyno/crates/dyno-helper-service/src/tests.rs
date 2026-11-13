@@ -508,7 +508,7 @@ fn run_maintainer_script(tmp: &std::path::Path, script: &str, args: &[&str], ena
 #[test]
 fn a_deb_upgrade_starts_the_helper_again_only_when_the_user_turned_it_on() {
     for enabled in [true, false] {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         run_maintainer_script(tmp.path(), "prerm", &["upgrade", "1.0.0"], enabled);
         let calls = run_maintainer_script(tmp.path(), "postinst", &["configure", "1.0.0"], enabled);
         let started: Vec<&String> = calls

@@ -300,7 +300,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_sysfs_tree_gives_zones_fans_and_energy_domains() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let r = dir.path();
         put(r, "class/thermal/thermal_zone0/type", "acpitz\n");
         put(r, "class/thermal/thermal_zone0/temp", "47000\n");
@@ -333,10 +333,10 @@ mod tests {
 
     #[test]
     fn missing_trees_are_empty_or_a_reason_never_a_panic() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         assert!(linux_thermal(dir.path()).is_empty() && linux_fans(dir.path()).is_empty());
         assert!(matches!(linux_rapl(dir.path()), Err(PlatformError::Unsupported(_))));
-        let junk = tempfile::tempdir().unwrap();
+        let junk = paddock_testkit::private_tempdir().unwrap();
         put(junk.path(), "class/thermal/thermal_zone0/temp", "not a number");
         assert!(linux_thermal(junk.path()).is_empty());
     }
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn unreadable_energy_counters_say_they_need_an_administrator() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         put(dir.path(), "class/powercap/intel-rapl:0/energy_uj", "1\n");
         let f = dir.path().join("class/powercap/intel-rapl:0/energy_uj");
         std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o000)).unwrap();

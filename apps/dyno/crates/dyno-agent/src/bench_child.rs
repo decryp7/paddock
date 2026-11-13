@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn a_restart_stops_only_the_recorded_unit_and_forgets_the_records() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let file = units_file(&dir.path().join("benchmarks.json"));
         let mine = "0123456789abcdef0123456789abcdef";
         write_records(

@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn saves_atomically_and_keeps_a_backup() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let p = dir.path().join("sub").join("s.json");
         assert_eq!(load(&p, json_or_default::<S>), (None, None));
         save(&p, &S { n: 1 }).unwrap();

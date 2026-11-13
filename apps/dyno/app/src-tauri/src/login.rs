@@ -1204,7 +1204,7 @@ mod tests {
             sys: FakeSystem,
             ctl: FakeSystemd,
             unit: PathBuf,
-            data: tempfile::TempDir,
+            data: paddock_testkit::PrivateTemp,
         }
 
         impl Rig {
@@ -1218,7 +1218,7 @@ mod tests {
                     sys,
                     ctl,
                     unit,
-                    data: tempfile::tempdir().unwrap(),
+                    data: paddock_testkit::private_tempdir().unwrap(),
                 }
             }
 
@@ -1454,7 +1454,7 @@ mod tests {
     }
 
     fn at_start(settings_text: Option<&str>) -> (Result<FirstRun, String>, Vec<String>, bool) {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let file = dir.path().join("settings.json");
         if let Some(t) = settings_text {
             std::fs::write(&file, t).unwrap();
@@ -1496,7 +1496,7 @@ mod tests {
     /// each repeat opens Login Items on macOS, and a later success would hand the running agent over again.
     #[test]
     fn a_failed_first_run_is_not_tried_again_in_the_same_run() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let file = dir.path().join("settings.json");
         let sys = paddock_service::testing::FakeSystem::new();
         let m = marker();
@@ -1647,7 +1647,7 @@ mod tests {
 
     #[test]
     fn a_removed_legacy_file_registers_the_new_entry_once_and_nothing_else_does() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let old = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\">\n<dict>\n<key>Label</key>\n<string>Dyno</string>\n\
             <key>AssociatedBundleIdentifiers</key>\n<array></array>\n<key>ProgramArguments</key>\n<array><string>/Applications/Dyno.app/Contents/MacOS/dyno-app</string>\
             <string>--hidden</string></array>\n<key>RunAtLoad</key>\n<true/>\n</dict>\n</plist>";

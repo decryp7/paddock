@@ -391,8 +391,8 @@ mod tests {
         }
     }
 
-    fn fixture() -> (tempfile::TempDir, PathBuf) {
-        let t = tempfile::tempdir().unwrap();
+    fn fixture() -> (paddock_testkit::PrivateTemp, PathBuf) {
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("stuff");
         write(&root, "big.bin", 1, 5 * MB);
         write(&root, "copy1/a.iso", 7, 2 * MB);
@@ -598,7 +598,7 @@ mod tests {
         let bound = (WORKERS * 2 * CANCEL_CHECK_ITEMS) as u64;
         let total = (DIRS * PER_DIR) as u64;
         assert!(bound < total / 2, "the fixture is big enough to tell a stop from a finish");
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("many");
         for d in 0..DIRS {
             std::fs::create_dir_all(root.join(format!("d{d}"))).unwrap();
@@ -620,7 +620,7 @@ mod tests {
 
     #[test]
     fn the_answer_does_not_depend_on_how_many_threads_read_the_folder() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("tree");
         for d in 0..6 {
             write(&root, &format!("d{d}/same-a.bin"), 3, 2 * MB);
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn a_file_over_the_comparison_budget_is_skipped_and_the_rest_are_still_compared() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("budget");
         // The biggest pair is first in the order of the groups and does not fit; the smaller pair after it does.
         write(&root, "big1.bin", 1, 3 * MB);
@@ -755,8 +755,8 @@ mod tests {
         );
     }
 
-    fn three_equal_files() -> (tempfile::TempDir, PathBuf, Vec<PathBuf>) {
-        let t = tempfile::tempdir().unwrap();
+    fn three_equal_files() -> (paddock_testkit::PrivateTemp, PathBuf, Vec<PathBuf>) {
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap().join("dups");
         let paths: Vec<_> = (0..3).map(|i| write(&root, &format!("same{i}.bin"), 9, 6 * MB)).collect();
         (t, root, paths)

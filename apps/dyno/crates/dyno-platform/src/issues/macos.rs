@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn the_reports_folder_is_read_with_the_window_and_missing_means_empty() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let text = format!("{HEADER}\n{BODY}");
         let file = dir.path().join("bench_reads_base-2026-10-22-204857.ips");
         std::fs::write(&file, &text).unwrap();
@@ -585,7 +585,7 @@ mod tests {
     #[test]
     fn an_unreadable_folder_says_what_to_allow() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let locked = dir.path().join("locked");
         std::fs::create_dir(&locked).unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();

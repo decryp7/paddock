@@ -119,7 +119,7 @@ mod tests {
 
     #[test]
     fn files_are_read_with_a_bound() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let cfg = dir.path().join("config.json");
         std::fs::write(&cfg, sample().to_text()).unwrap();
         assert_eq!(HelperConfig::load(&cfg).unwrap(), sample());

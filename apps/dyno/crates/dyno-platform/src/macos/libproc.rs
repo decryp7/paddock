@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn this_process_lists_its_own_open_file_by_path_and_its_program_as_mapped() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("held.txt");
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(b"x").unwrap();

@@ -49,7 +49,7 @@ mod tests {
 
     #[test]
     fn the_id_follows_the_content_and_an_unreadable_file_has_none() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let (a, b) = (dir.path().join("a"), dir.path().join("b"));
         std::fs::write(&a, b"build one").unwrap();
         std::fs::write(&b, b"build two!").unwrap();

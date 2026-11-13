@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn the_tools_list_comes_from_the_tools_folder() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let tools = dir.path().join("tools");
         let roots = InstallRoots {
             staging: dir.path().join("staging").to_string_lossy().into_owned(),
@@ -409,7 +409,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_real_staging_folder_creates_new_files_only_and_is_emptied() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let staging = dir.path().join("staging");
         let mut ports = FsPorts::system(staging.clone(), trusting());
         ports.create_staged("setup.exe").unwrap().write_all(b"x").unwrap();
@@ -432,7 +432,7 @@ mod tests {
     fn a_second_install_works_when_the_first_left_its_package_behind() {
         // The VM: the first install's staging could not be cleared (its installer still held the file), and the next attempt
         // failed with Staging("entity already exists").
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let staging = dir.path().join("staging");
         std::fs::create_dir_all(&staging).unwrap();
         let pin = dyno_platform::tool_install::pin_for(ToolKind::Smartmontools, HelperHost::Windows).unwrap();

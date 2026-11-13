@@ -2083,7 +2083,7 @@ mod tests {
 
     #[test]
     fn a_folder_the_person_chose_is_scanned_like_a_volume_without_a_scale() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let dir = std::fs::canonicalize(t.path()).unwrap();
         std::fs::create_dir(dir.join("sub")).unwrap();
         std::fs::write(dir.join("sub/f"), vec![1u8; 30_000]).unwrap();
@@ -2111,7 +2111,7 @@ mod tests {
 
     #[test]
     fn a_folder_inside_a_volume_takes_the_threads_of_that_volume() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let dir = std::fs::canonicalize(t.path()).unwrap();
         let mut hdd = vol("HDD", &dir, VolumeLocation::External { bus: Some("USB".into()) });
         hdd.volume.rotational = Some(true);
@@ -2133,7 +2133,7 @@ mod tests {
 
     #[test]
     fn the_read_threads_setting_replaces_the_volume_table_and_is_validated() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let dir = std::fs::canonicalize(t.path()).unwrap();
         let mut hdd = vol("HDD", &dir, VolumeLocation::External { bus: Some("USB".into()) });
         hdd.volume.rotational = Some(true);

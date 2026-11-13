@@ -1374,7 +1374,7 @@ mod tests {
 
     #[test]
     fn a_run_measures_each_kind_saves_and_removes_the_scratch_folder() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre(tmp.path(), None, None);
         // Whether the run is still going when start returns is a race with the fake; the gated test below pins the running state.
         start(&c, &[BenchKind::Cpu, BenchKind::Disk]).unwrap();
@@ -1437,8 +1437,11 @@ mod tests {
 
     #[test]
     fn the_disk_test_runs_once_per_chosen_drive_in_its_own_folder_and_marks_the_numbers() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let (a, b) = (
+            paddock_testkit::private_tempdir().unwrap(),
+            paddock_testkit::private_tempdir().unwrap(),
+        );
         let fake = Fake::plain();
         let seen = fake.seen.clone();
         let c = disk_centre(
@@ -1473,8 +1476,11 @@ mod tests {
 
     #[test]
     fn a_refused_or_cramped_or_vanished_drive_is_unavailable_with_its_reason_and_the_others_still_run() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (ok, ro) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let (ok, ro) = (
+            paddock_testkit::private_tempdir().unwrap(),
+            paddock_testkit::private_tempdir().unwrap(),
+        );
         let mut readonly = volume(ro.path(), "Frozen");
         readonly.read_only = true;
         let fake = Fake::plain();
@@ -1493,7 +1499,7 @@ mod tests {
         assert_eq!(lock(&seen).len(), 1, "the runner started only for the drive that can be tested");
 
         // Too little free space: refused before anything is written.
-        let tmp2 = tempfile::tempdir().unwrap();
+        let tmp2 = paddock_testkit::private_tempdir().unwrap();
         let fake = Fake::plain();
         let seen = fake.seen.clone();
         let c = disk_centre(tmp2.path(), vec![volume(ok.path(), "Fine")], Some((TB, 1_000_000)), fake);
@@ -1507,7 +1513,7 @@ mod tests {
         assert!(lock(&seen).is_empty());
 
         // The OS cannot say how much is free: the test does not write blind.
-        let tmp3 = tempfile::tempdir().unwrap();
+        let tmp3 = paddock_testkit::private_tempdir().unwrap();
         let mut unknown = volume(ok.path(), "Fine");
         (unknown.capacity, unknown.free) = (None, None);
         let c = disk_centre(tmp3.path(), vec![unknown], None, Fake::plain());
@@ -1517,8 +1523,11 @@ mod tests {
 
     #[test]
     fn cancel_during_the_first_drive_removes_its_folder_and_the_second_never_starts() {
-        let tmp = tempfile::tempdir().unwrap();
-        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let (a, b) = (
+            paddock_testkit::private_tempdir().unwrap(),
+            paddock_testkit::private_tempdir().unwrap(),
+        );
         let fake = Fake {
             until_stopped: true,
             ..Fake::plain()
@@ -1543,8 +1552,8 @@ mod tests {
 
     #[test]
     fn a_crash_of_the_agent_is_cleaned_up_at_the_next_start_by_identity() {
-        let tmp = tempfile::tempdir().unwrap();
-        let drive = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let drive = paddock_testkit::private_tempdir().unwrap();
         let folder = drive.path().join(".dyno-bench-crashed");
         // An earlier agent made the folder and its record, then died (no drop).
         std::mem::forget(
@@ -1602,7 +1611,7 @@ mod tests {
 
     #[test]
     fn a_sustained_run_keeps_its_trace_with_what_the_agent_read_beside_it() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre_with(
             tmp.path(),
             Fake {
@@ -1630,7 +1639,7 @@ mod tests {
 
     #[test]
     fn staying_near_the_critical_temperature_stops_the_run_with_the_reason_and_keeps_the_trace() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre_with(
             tmp.path(),
             Fake {
@@ -1653,7 +1662,7 @@ mod tests {
 
     #[test]
     fn where_no_temperature_can_be_read_the_sustained_run_is_limited_to_five_minutes() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre_with(tmp.path(), Fake::plain());
         c.attach(readings(None));
         let e = start_sustained(&c, 10).unwrap_err();
@@ -1669,7 +1678,7 @@ mod tests {
 
     #[test]
     fn a_second_run_is_refused_while_one_runs_and_cancel_stops_the_rest() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let c = centre(tmp.path(), Some(gate.clone()), None);
         start(&c, &[BenchKind::Cpu, BenchKind::Memory]).unwrap();
@@ -1685,7 +1694,7 @@ mod tests {
 
     #[test]
     fn cancel_in_any_phase_stops_the_kind_and_the_rest_never_start() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre_with(
             tmp.path(),
             Fake {
@@ -1711,7 +1720,7 @@ mod tests {
 
     #[test]
     fn the_childs_phase_and_liveness_reach_the_overview_while_it_runs() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         // The fake reports after the gate opens; the check reads the state it left, then lets it finish.
         let c = centre_with(
@@ -1743,7 +1752,7 @@ mod tests {
 
     #[test]
     fn a_job_is_registered_with_phases_and_its_cancel_stops_the_run() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre_with(
             tmp.path(),
             Fake {
@@ -1775,7 +1784,7 @@ mod tests {
 
     #[test]
     fn battery_needs_consent_for_this_run_only() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre(tmp.path(), None, None);
         let on_battery = LoadAtRun {
             on_battery: Some(true),
@@ -1796,7 +1805,7 @@ mod tests {
 
     #[test]
     fn switching_to_battery_without_consent_stops_the_run_with_a_named_reason() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre_with(
             tmp.path(),
             Fake {
@@ -1823,7 +1832,7 @@ mod tests {
 
     #[test]
     fn a_cancel_from_the_jobs_view_between_kinds_stops_the_kinds_that_have_not_started() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
         let c = centre(tmp.path(), Some(gate.clone()), None);
         let env = Env::new();
@@ -1874,7 +1883,7 @@ mod tests {
 
     #[test]
     fn with_consent_a_switch_to_battery_does_not_stop_the_run() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre(tmp.path(), None, None);
         let env = Env::new();
         *lock(&env.battery) = Some(true);
@@ -1889,7 +1898,7 @@ mod tests {
 
     #[test]
     fn a_crashing_launcher_is_one_failed_kind_not_a_dead_agent() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre(tmp.path(), None, Some(BenchKind::Memory));
         start(&c, &[BenchKind::Cpu, BenchKind::Memory]).unwrap();
         let o = wait_idle(&c);
@@ -1902,7 +1911,7 @@ mod tests {
 
     #[test]
     fn deleting_a_run_and_a_damaged_history() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre(tmp.path(), None, None);
         start(&c, &[BenchKind::Cpu]).unwrap();
         let id = wait_idle(&c).runs[0].id.clone();
@@ -1921,7 +1930,7 @@ mod tests {
 
     #[test]
     fn a_missing_runner_is_unavailable_with_a_next_step() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let req = ChildRequest {
             run_id: "1".into(),
             kind: BenchKind::Cpu,
@@ -1967,7 +1976,7 @@ mod tests {
 
     #[test]
     fn shutdown_cancels_and_waits_for_the_run_to_end() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let c = centre_with(
             tmp.path(),
             Fake {

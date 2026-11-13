@@ -636,7 +636,7 @@ mod tests {
     #[test]
     fn the_config_folder_is_made_owner_only_and_an_open_one_is_refused_untouched() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let made = tmp.path().join("config");
         prepare_config_folder(&made, true).unwrap();
         assert_eq!(std::fs::metadata(&made).unwrap().permissions().mode() & 0o777, 0o700);
@@ -659,7 +659,7 @@ mod tests {
         reason = "a Windows-only test runs icacls on its own temporary folder to set and read its access list"
     )]
     fn windows_the_ai_access_folder_is_refused_when_everyone_can_write_to_it() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let open = tmp.path().join("open");
         std::fs::create_dir(&open).unwrap();
         let out = std::process::Command::new("icacls")
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn a_refused_config_folder_loads_no_keys_starts_nothing_and_writes_nothing() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let open = tmp.path().join("open");
         std::fs::create_dir(&open).unwrap();
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();

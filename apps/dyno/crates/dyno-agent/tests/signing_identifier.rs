@@ -6,7 +6,7 @@
 
 #[test]
 fn the_agent_keeps_a_dotted_identifier_when_it_is_re_signed_the_way_tauri_does() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let copy = dir.path().join("dyno-agent");
     std::fs::copy(env!("CARGO_BIN_EXE_dyno-agent"), &copy).unwrap();
     // A 0-byte program is signed as a generic file named `<file>-<SHA-1 of the content>`; say so instead of a puzzling identifier.

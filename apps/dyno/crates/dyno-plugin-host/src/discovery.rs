@@ -172,7 +172,7 @@ mod tests {
 
     #[test]
     fn valid_plugins_are_found_and_broken_folders_say_what_to_fix() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = t.path();
         folder(
             root,

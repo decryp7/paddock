@@ -28,7 +28,7 @@ fn run_at(path: &std::path::Path, t: Timestamp) -> Learning {
 
 #[test]
 fn learning_counts_local_days_across_restarts() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let db = tmp.path().join("dyno.db");
     let first = local(0, 20);
     // Installed Monday 2 November in the evening.
@@ -46,7 +46,7 @@ fn learning_counts_local_days_across_restarts() {
 
 #[test]
 fn an_evening_install_waits_for_the_full_hours_on_the_last_day() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let db = tmp.path().join("dyno.db");
     let first = local(0, 20);
     run_at(&db, first);
@@ -60,7 +60,7 @@ fn an_evening_install_waits_for_the_full_hours_on_the_last_day() {
 
 #[test]
 fn a_morning_install_waits_until_the_same_morning_a_week_later() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let db = tmp.path().join("dyno.db");
     let first = local(0, 8);
     assert_eq!(run_at(&db, first), learning(1, first));
@@ -91,7 +91,7 @@ impl LocalZone for Cet {
 
 #[test]
 fn a_clock_change_moves_the_ready_time_by_the_hour_it_moved() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let db = tmp.path().join("dyno.db");
     // Saturday 24 October 20:00 local (UTC+2) = 18:00 UTC; the clocks go back on Sunday.
     let first = Timestamp(MON_UTC - 9 * DAY + 18 * HOUR);
@@ -121,7 +121,7 @@ fn a_clock_change_moves_the_ready_time_by_the_hour_it_moved() {
 
 #[test]
 fn a_first_seen_time_in_the_future_or_unreadable_starts_from_now() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let db = tmp.path().join("dyno.db");
     let t = local(3, 9);
     let (store, _) = Store::open(&db, t).unwrap();
@@ -139,7 +139,7 @@ fn a_first_seen_time_in_the_future_or_unreadable_starts_from_now() {
 
 #[test]
 fn the_first_start_is_remembered_without_any_window_open() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let db = tmp.path().join("dyno.db");
     // An agent started at logon (Windows Run entry) with no app: the start itself is the first sighting.
     {
