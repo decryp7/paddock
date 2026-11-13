@@ -8,6 +8,7 @@
 #    RUNNER_TEMP and PADDOCK_JOB_TEMP point at it (the runner's conformance/ci/job-tmpdir.sh)
 # 2. a git checkout (fetched from the bundle) with core.autocrlf=true checked out in the guest (never copied LF files)
 # 3. Git's bin first on PATH, then the script runs as: bash --noprofile --norc -e -o pipefail <script> (cwd = the clone)
+#    $env:CI_LIKE_DIR names the folder of the script and of the files `run --ci-like --with` copied
 # 4. a self-check printed first; a control that fails stops the run as "not measured" (ER-33), exit 3
 param(
   [Parameter(Mandatory)][string]$Bundle,
@@ -46,6 +47,7 @@ Set-Acl -Path $tmp -AclObject $acl
 # 3. The environment (S6, S7): the names and non-secret values the runner sets; 3 threads, not the runner's 5 and 8 (4 vCPU).
 foreach ($n in 'TEMP', 'TMP', 'TMPDIR', 'RUNNER_TEMP', 'PADDOCK_JOB_TEMP') { Set-Item -Path "Env:$n" -Value $tmp }
 $env:CI = 'true'; $env:GITHUB_ACTIONS = 'true'; $env:RUNNER_OS = 'Windows'; $env:CARGO_TERM_COLOR = 'always'
+$env:CI_LIKE_DIR = Split-Path $ScriptFile
 $env:CARGO_BUILD_JOBS = '3'; $env:NEXTEST_TEST_THREADS = '3'
 $head = @($gitBin, "$git\cmd", "$env:USERPROFILE\.cargo\bin") | Where-Object { Test-Path $_ }
 $env:PATH = (($head + ($env:PATH -split ';' | Where-Object { $head -notcontains $_ })) -join ';')
