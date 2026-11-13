@@ -618,6 +618,27 @@ mod tests {
             let rest = &text[start..];
             &rest[..rest.find(to).unwrap_or_else(|| panic!("{to} is gone: re-point this test"))]
         }
+        /// The function that starts at `signature`, up to its closing brace.
+        fn fn_item<'a>(text: &'a str, signature: &str) -> &'a str {
+            let start = text
+                .find(signature)
+                .unwrap_or_else(|| panic!("{signature} is gone: re-point this test"));
+            let open = start + text[start..].find('{').unwrap_or_else(|| panic!("{signature} has no body"));
+            let mut depth = 0usize;
+            for (i, c) in text[open..].char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return &text[start..=open + i];
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            panic!("{signature} is not closed");
+        }
         fn non_test(text: &str) -> &str {
             text.split("#[cfg(test)]").next().unwrap_or(text)
         }
@@ -678,15 +699,16 @@ mod tests {
                 "paddock-proc identity.rs",
                 code_of(non_test(include_str!("../../../../../../crates/paddock-proc/src/identity.rs"))),
             ),
-            (
-                "paddock-proc cleanup report and logged",
-                code_of(between(
-                    include_str!("../../../../../../crates/paddock-proc/src/cleanup.rs"),
-                    "pub fn report(",
-                    // The first item after `logged` (the private helpers of join and the removals follow it).
-                    "/// The message of a panic payload",
-                )),
-            ),
+            ("paddock-proc cleanup report and logged", {
+                // The two functions end at their closing braces (an item boundary), not at a comment that follows them: the
+                // private helpers of join and the removals sit after `logged` and must stay out (rule 79).
+                let cleanup = include_str!("../../../../../../crates/paddock-proc/src/cleanup.rs");
+                code_of(&format!(
+                    "{}\n{}",
+                    fn_item(cleanup, "pub fn report("),
+                    fn_item(cleanup, "pub fn logged<")
+                ))
+            }),
             // The OS log: on Windows the event log (native.rs, checked by the test above) or standard error; the journal branch,
             // which reads JOURNAL_STREAM, is Linux's alone and is cut out.
             ("paddock-service os_log.rs (Windows)", code_of(&os_log_windows())),

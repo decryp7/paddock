@@ -175,6 +175,10 @@ fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool) -> Ste
     }
 }
 
+// Flip ENFORCED only in the change that records the first green train run in ADR 0098 (this fails the build until it is decided).
+#[cfg(test)]
+const _: () = assert!(!ENFORCED);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,14 +225,6 @@ mod tests {
         assert_eq!(map(&run_of(Some(6)), true).exit, Exit::NotMeasured);
         assert_eq!(map(&Fake(Err("no tool".into())), true).exit, Exit::NotMeasured);
         assert_eq!(map(&run_of(None), true).exit, Exit::Findings);
-    }
-
-    #[test]
-    fn the_gate_is_report_only_until_the_first_green_run_is_recorded() {
-        assert!(
-            !ENFORCED,
-            "flip ENFORCED only in the change that records the first green train run in ADR 0098"
-        );
     }
 
     /// The mapping without the checkout precondition.

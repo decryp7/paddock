@@ -80,7 +80,7 @@ pub struct DispatchArgs {
     /// The trial before approval (ADR 0098 WP-4): merge this branch's head onto the open train (origin/main when none is open) in
     /// the tool's own clone, report a conflict or a merge-check finding instead of dispatching, push `trial/<branch>` and
     /// dispatch it with `base` = the target's sha. The branch's one CI run (rule 50 (a)); the scratch clone lives in
-    /// PADDOCK_TRIAL_DIR (default: a `paddock-trial` folder in the temp folder). Needs GITEA_TOKEN with write access.
+    /// PADDOCK_TRIAL_DIR (required: a folder on a data drive). Needs GITEA_TOKEN with write access.
     #[arg(long, value_name = "BRANCH")]
     trial: Option<String>,
     /// With --trial: merge onto this ref (for example `origin/train/2026-11-13-8`) instead of the open train.
@@ -462,15 +462,16 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
 /// its `::error::` line and nothing is pushed.
 fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(String, String), CliError> {
     use crate::queue::real::GitTrain;
-    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("paddock-trial"));
+    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR").map(PathBuf::from).ok_or_else(|| {
+        CliError::usage("PADDOCK_TRIAL_DIR is not set.")
+            .with_hint("Set it to a folder on a data drive for the trial's scratch clone (not under your home).")
+    })?;
     let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
     let fail = |why: String| {
         eprintln!("::error::trial: {why}");
         CliError::failure(why).with_hint("Check the branch name, GITEA_TOKEN's write scope and the network.")
     };
-    let g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(&fail)?;
+    let g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(fail)?;
     let check = |root: &std::path::Path, head: &str| {
         crate::merge_check::command(&crate::merge_check::Request {
             root: Some(root.to_path_buf()),
@@ -484,7 +485,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(String, S
         .map(|_| ())
         .map_err(|e| e.message)
     };
-    match trial::prepare(&g, branch, a.onto.as_deref(), &check).map_err(&fail)? {
+    match trial::prepare(&g, branch, a.onto.as_deref(), &check).map_err(fail)? {
         trial::Outcome::Ready {
             trial_ref,
             target,

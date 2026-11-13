@@ -103,7 +103,7 @@ mod tests {
     fn a_member_that_runs_everything_is_a_suspect_only_for_lack_of_a_precise_one() {
         let all = reach(&["*"], &[]);
         let f = fail("x", &["paddock-dev"], &[]);
-        let alone = suspects(&[all.clone()], &[&f]);
+        let alone = suspects(std::slice::from_ref(&all), &[&f]);
         assert!(alone.precise.is_empty() && alone.wild == [0]);
         // The wild member never matches a project by name: its `*` is not a project.
         let with = suspects(&[all, reach(&["paddock-dev"], &[])], &[&f]);

@@ -338,6 +338,7 @@ fn the_conformance_line_entry_reads_ci_yml_through_the_one_reader() {
 }
 
 #[test]
+#[allow(clippy::disallowed_methods, reason = "a test starts the built binary; it ends it itself")]
 fn ci_conformance_args_prints_the_line_ci_runs_and_is_not_measured_without_one() {
     let root = repo_root();
     let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
