@@ -3,6 +3,7 @@
 
 mod boot_volume;
 mod canonical_tempdir;
+mod cargo_layout;
 mod env;
 mod golden;
 mod hostile;

@@ -25,11 +25,9 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-/// The fixture next to this test binary (`target/<profile>/examples/native-busy.exe`).
+/// The fixture next to this test binary (`target/<profile>/examples/native-busy.exe`, in either of cargo's build-folder layouts).
 fn fixture() -> PathBuf {
-    let exe = std::env::current_exe().unwrap();
-    let profile_dir = exe.parent().and_then(|d| d.parent()).unwrap();
-    let p = profile_dir.join("examples").join("native-busy.exe");
+    let p = paddock_testkit::cargo_layout::example_bin("native-busy");
     assert!(p.is_file(), "{} is built by `cargo test -p debrief-plugin-native`", p.display());
     p
 }

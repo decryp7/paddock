@@ -115,6 +115,15 @@ ARG DUCKDB_VERSION=1.5.6
 ARG SCCACHE_VERSION=0.19.0
 ARG SHELLCHECK_VERSION=0.11.0
 ARG DRAWIO_VERSION=32.6.10
+# The Rust of the family: the `channel` of the root rust-toolchain.toml (scripts/ci-image.test.mjs checks they agree).
+ARG RUST_VERSION=1.100.0
+
+# Rust: the pinned version is installed under its own name, with the components the jobs use, and made the default; the base's
+# `stable` stays beside it. setup-rust finds the toolchain named like rust-toolchain.toml's channel and downloads nothing, and a
+# rebuild after a newer Rust release does not move the image (bump the pin and this ARG together; the verification below
+# fails the build when the default rustc is not RUST_VERSION).
+RUN rustup toolchain install "${RUST_VERSION}" --profile minimal -c rustfmt -c clippy -c llvm-tools --no-self-update \
+ && rustup default "${RUST_VERSION}"
 
 # sccache at the exact pin replaces whatever the base carries; the cargo tools sit beside the base's.
 COPY --from=fetch /out/bin/ /usr/local/bin/
@@ -146,7 +155,7 @@ COPY verify.sh /usr/local/bin/paddock-ci-verify
 
 # The build fails here when the image is not what the jobs expect; on success the manifest is /etc/paddock-ci-release.
 # (Chrome is checked on amd64 only: Google publishes no Linux arm64 build.)
-RUN EXPECT_NODE_MAJOR="${NODE_MAJOR}" EXPECT_SCCACHE="${SCCACHE_VERSION}" EXPECT_PLAYWRIGHT="${PLAYWRIGHT_VERSION}" \
+RUN EXPECT_RUST="${RUST_VERSION}" EXPECT_NODE_MAJOR="${NODE_MAJOR}" EXPECT_SCCACHE="${SCCACHE_VERSION}" EXPECT_PLAYWRIGHT="${PLAYWRIGHT_VERSION}" \
     EXPECT_DUCKDB="${DUCKDB_VERSION}" EXPECT_SHELLCHECK="${SHELLCHECK_VERSION}" EXPECT_DRAWIO="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${DRAWIO_VERSION}")" EXPECT_CHROME="$([ "${TARGETARCH:-amd64}" = amd64 ] && echo "${CHROME_VERSION}")" \
     paddock-ci-verify
 

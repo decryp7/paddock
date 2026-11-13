@@ -218,7 +218,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
       '',
     ].join('\n'),
   );
-  for (const tool of ['rustc', 'cargo']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} "\${FAKE_RUSTC:-1.99.1}"\n`);
+  for (const tool of ['rustc', 'cargo']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} "\${FAKE_RUSTC:-0.1.0}"\n`);
   for (const f of ['rustup', 'rustc', 'cargo']) chmodSync(join(dir, 'bin', f), 0o755);
   writeFileSync(join(dir, 'step.sh'), body);
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
@@ -248,7 +248,7 @@ test('setup-rust takes its toolchain from rust-toolchain.toml unless the job nam
 
 // A rust-toolchain.toml outranks `rustup default`, so the step settles on one toolchain with RUSTUP_TOOLCHAIN (which outranks the file):
 // a job that names one (the fuzz jobs' dated nightly) runs it, and the CI image's `stable` is used as it is when it is the pinned version
-// (a different name to rustup than 1.99.1: using the file there downloads the toolchain on every run, without llvm-tools).
+// (a different name to rustup than the pinned version: using the file there downloads the toolchain on every run, without llvm-tools).
 test('setup-rust settles the toolchain every later step runs through RUSTUP_TOOLCHAIN', () => {
   const pin = read(join(PADDOCK, 'rust-toolchain.toml'));
   const channel = /^channel\s*=\s*"(\d+\.\d+\.\d+)"/m.exec(pin)[1];
@@ -277,10 +277,19 @@ test('setup-rust settles the toolchain every later step runs through RUSTUP_TOOL
   assert.match(envOf(match), /^RUSTUP_TOOLCHAIN=stable$/m);
   assert.doesNotMatch(m.calls, /toolchain install/, 'no download when the image has the pinned version');
 
+  // The image has the pinned version under its own name (the Dockerfile installs `<version>` and makes it the default): used as it is.
+  const named1 = ghEnv();
+  const nm = runToolchainStep(
+    { TOOLCHAIN: '', GITHUB_WORKSPACE: ws, GITHUB_ENV: named1, PADDOCK_CI_RELEASE_FILE: image, FAKE_RUSTC: channel, RUNNER_OS: 'Linux' },
+    { components: 'clippy-x rustfmt-x', toolchains: `${channel}-x86_64-unknown-linux-gnu` },
+  );
+  assert.doesNotMatch(nm.calls, /toolchain install/, 'no download when the image has the pinned version under its name');
+  assert.match(envOf(named1), new RegExp(`^RUSTUP_TOOLCHAIN=${channel.replace(/\./g, '\\.')}$`, 'm'));
+
   // The image's stable is another version: the pinned one is installed.
   const other = ghEnv();
   const o = runToolchainStep(
-    { TOOLCHAIN: '', GITHUB_WORKSPACE: ws, GITHUB_ENV: other, PADDOCK_CI_RELEASE_FILE: image, FAKE_RUSTC: '1.100.0', RUNNER_OS: 'Linux' },
+    { TOOLCHAIN: '', GITHUB_WORKSPACE: ws, GITHUB_ENV: other, PADDOCK_CI_RELEASE_FILE: image, FAKE_RUSTC: '0.1.0', RUNNER_OS: 'Linux' },
     { components: 'clippy-x rustfmt-x' },
   );
   assert.match(o.calls, new RegExp(`toolchain install ${channel.replace(/\./g, '\\.')} `));

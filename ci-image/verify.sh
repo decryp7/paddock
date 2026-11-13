@@ -5,7 +5,7 @@
 #   paddock-ci-verify [--manifest FILE]
 #
 # Expected values come from the environment the Dockerfile sets: EXPECT_NODE_MAJOR, EXPECT_SCCACHE, EXPECT_CHROME,
-# EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK, EXPECT_DRAWIO. An expectation that is not set is not checked.
+# EXPECT_RUST (the rustc version), EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK, EXPECT_DRAWIO. An expectation that is not set is not checked.
 set -uo pipefail
 
 manifest=/etc/paddock-ci-release
@@ -29,7 +29,9 @@ tool() {
   note "$label: ${OUT:-present}"
 }
 
-tool rustc rustc --version
+if tool rustc rustc --version && [ -n "${EXPECT_RUST:-}" ]; then
+  case "$OUT" in "rustc ${EXPECT_RUST} "*) ;; *) bad "rustc is '$OUT', the image pins ${EXPECT_RUST} (the root rust-toolchain.toml)" ;; esac
+fi
 tool cargo cargo --version
 tool rustfmt rustfmt --version
 tool cargo-clippy cargo clippy --version

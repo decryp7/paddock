@@ -2594,6 +2594,7 @@ dependencies = [
 name = "paddock-build"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
  "paddock-workspace-hack",
  "serde_json",
  "tauri-build",

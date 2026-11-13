@@ -48,24 +48,28 @@ runs:
           if [ -n "${GITHUB_ENV:-}" ]; then echo "RUSTUP_TOOLCHAIN=$1" >> "$GITHUB_ENV"; fi
         }
         # In the Paddock CI image (it writes /etc/paddock-ci-release) the toolchain and its components (llvm-tools too) are installed
-        # as `stable`, a different toolchain name to rustup than 1.99.1. When that stable is the pinned version, use it as it is (nothing
-        # downloads); `RUSTUP_TOOLCHAIN=stable` makes the check itself skip the rust-toolchain.toml, which would start a download.
+        # under the pinned version's name (an older image: as `stable`, a different toolchain name to rustup). When it is the pinned
+        # version, use it as it is (nothing downloads); `RUSTUP_TOOLCHAIN=<name>` makes the check itself skip the rust-toolchain.toml,
+        # which would start a download.
         # Skipped when this job asks for extra targets or a component the image lacks. An image whose version differs from the pin
         # installs the pinned one below.
         if [ -f "${PADDOCK_CI_RELEASE_FILE:-/etc/paddock-ci-release}" ] && [ -z "$TARGETS" ]; then
-          have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}')
-          if [ "$TOOLCHAIN" = stable ] || [ "$have" = "$TOOLCHAIN" ]; then
-            installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true)
-            missing=0
-            for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
-            if [ "$missing" = 0 ]; then
-              settle stable
-              echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
-              rustc --version
-              cargo --version
-              exit 0
+          for name in "$TOOLCHAIN" stable; do
+            if [ "$name" != stable ] && ! rustup toolchain list 2>/dev/null | grep -q "^${name}-"; then continue; fi
+            have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}')
+            if [ "$TOOLCHAIN" = stable ] || [ "$have" = "$TOOLCHAIN" ]; then
+              installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true)
+              missing=0
+              for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
+              if [ "$missing" = 0 ]; then
+                settle "$name"
+                echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+                rustc --version
+                cargo --version
+                exit 0
+              fi
             fi
-          fi
+          done
         fi
         args=(--profile minimal)
         for c in $COMPONENTS; do args+=(--component "$c"); done
