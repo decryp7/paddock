@@ -1,0 +1,8 @@
+fn waived() {
+    // conformance: layout-guess — the cargo version is pinned to the old layout by this fixture
+    let d = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap();
+    let p = "x/deps/y"; // conformance: layout-guess — a docs link, not a build folder
+    // conformance: layout-guess
+    let q = base.join("deps");
+    let r = base.join("deps");
+}
