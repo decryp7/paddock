@@ -287,9 +287,44 @@ test('setup-rust settles the toolchain every later step runs through RUSTUP_TOOL
   assert.match(envOf(other), new RegExp(`^RUSTUP_TOOLCHAIN=${channel.replace(/\./g, '\\.')}$`, 'm'));
 });
 
-test('the dated-nightly fuzz workflow that bypasses setup-rust exports RUSTUP_TOOLCHAIN too', () => {
-  const text = read(join(WORKFLOWS, 'debrief-fuzz.yml'));
-  assert.match(text, /echo "RUSTUP_TOOLCHAIN=\$FUZZ_TOOLCHAIN" >> "\$GITHUB_ENV"/);
+test('the dated-nightly fuzz workflow names its toolchain in the fuzz job only; no workflow sets RUSTUP_TOOLCHAIN for every job', () => {
+  const wf = loadWorkflow('debrief-fuzz.yml');
+  assert.match(String(wf.jobs.fuzz.env.RUSTUP_TOOLCHAIN), /^nightly-\d{4}-\d{2}-\d{2}$/);
+  const wide = readdirSync(WORKFLOWS).filter((f) => /\.ya?ml$/.test(f)).filter((f) => loadWorkflow(f).env?.RUSTUP_TOOLCHAIN);
+  assert.deepEqual(wide, [], 'a workflow-level RUSTUP_TOOLCHAIN reaches the jobs that run ./dev (they would build it under that toolchain)');
+});
+
+// rust-toolchain.toml outranks the `rustup default` that dtolnay/rust-toolchain sets, and names a version the garage image does not have
+// (it would be downloaded on every run). A workflow that sets up Rust that way states which toolchain runs: RUSTUP_TOOLCHAIN.
+test('every workflow that uses dtolnay/rust-toolchain also sets RUSTUP_TOOLCHAIN (the repo pins a toolchain file)', () => {
+  const bad = readdirSync(WORKFLOWS)
+    .filter((f) => /\.ya?ml$/.test(f))
+    .filter((f) => /dtolnay\/rust-toolchain/.test(read(join(WORKFLOWS, f))) && !/RUSTUP_TOOLCHAIN/.test(read(join(WORKFLOWS, f))));
+  assert.deepEqual(bad, [], 'set RUSTUP_TOOLCHAIN (`stable` for the garage image, the dated nightly for fuzzing) after dtolnay/rust-toolchain, or use setup-rust');
+});
+
+// The garage image has only `stable`: any step that reaches rustc before RUSTUP_TOOLCHAIN is set (build-jobs and job-isolation build
+// ./dev, setup-rust, cargo, ./dev itself) makes rustup download the pinned version named by rust-toolchain.toml, on every run.
+test('a job in the garage image sets RUSTUP_TOOLCHAIN for the whole job, or in a step before the first one that reaches rustc', () => {
+  const reachesRustc = (st) =>
+    /build-jobs|job-isolation|setup-rust|kept-clone|stable-workspace|app-gates|tauri-bundle|host-tools/.test(st.uses ?? '') ||
+    /\bcargo\b|(^|[\s;&|])(\.\/)?dev(\s|$)|kit\.sh/.test(st.run ?? '');
+  const sets = (st) => /RUSTUP_TOOLCHAIN=/.test(st.run ?? '');
+  const bad = [];
+  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    const wf = loadWorkflow(f);
+    for (const [id, j] of Object.entries(wf.jobs ?? {})) {
+      const image = typeof j.container === 'string' ? j.container : j.container?.image ?? '';
+      if (!/garage:/.test(image)) continue;
+      if (j.env?.RUSTUP_TOOLCHAIN || wf.env?.RUSTUP_TOOLCHAIN) continue;
+      const steps = stepsOf(j);
+      const first = steps.findIndex(reachesRustc);
+      if (first < 0) continue;
+      const at = steps.findIndex(sets);
+      if (at < 0 || at > first) bad.push(`${f}:${id}`);
+    }
+  }
+  assert.deepEqual(bad, [], 'set RUSTUP_TOOLCHAIN in the job env (or in the first step) of these garage jobs');
 });
 
 test('a failed toolchain install fails the step with a message that names the cause, never a bare exit code', () => {
