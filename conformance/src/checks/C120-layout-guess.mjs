@@ -71,7 +71,7 @@ export function testModuleLines(text) {
 /** The layout guesses in one source: [{ line, what, waived: 'reason' | 'no-reason' | undefined, reason }]. `shell` picks the pattern set. */
 export function layoutGuesses(text, shell = false, file = '') {
   const code = withoutCommentLines(text, shell ? '#' : '//');
-  const view = commentView(text, shell ? 'hash' : 'rust');
+  const view = commentView(text, shell ? 'shell' : 'rust');
   const hits = [];
   (shell ? SHELL_PATTERNS : RUST_PATTERNS).forEach(({ src, what }, order) => {
     for (const m of code.matchAll(new RegExp(src, 'g'))) hits.push({ index: m.index, order, what });

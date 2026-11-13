@@ -61,7 +61,7 @@ fn indent_of(l: &str) -> usize {
 /// The `./dev` runs before any toolchain setup in one workflow text, one per job at most.
 pub fn dev_before_toolchain(text: &str, setup: &BTreeSet<String>) -> Vec<Early> {
     let lines: Vec<&str> = text.split('\n').collect();
-    let view = CommentView::of(text, Kind::Hash);
+    let view = CommentView::of(text, Kind::Yaml);
     let mut out = Vec::new();
     let (mut in_jobs, mut in_steps, mut ready) = (false, false, false);
     let mut job: Option<String> = None;

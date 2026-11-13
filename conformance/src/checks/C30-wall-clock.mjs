@@ -11,6 +11,7 @@
 // `performance.now()` differences asserted with `expect` (unless the spec uses fake timers: `useFakeTimers`, `setSystemTime`,
 // `page.clock`). Warning level: existing code is listed, never blocks a build; except an assertion over a grace period, an
 // error since it failed CI again as a warning (ER-21).
+import { maskRust } from '../util/mask-rust.mjs';
 import { error, warn } from '../finding.mjs';
 
 const HANG_GUARD = /conformance:\s*hang-guard/;
@@ -25,34 +26,8 @@ const OVER_BUDGET_FIX = 'Lower the guard below 60 s (40 s is over three times th
 // A measurement: a duration read off a real clock. A bare `Instant::now()` used as the base of a computed instant is deterministic.
 const CLOCK_READ = /\.elapsed\s*\(\)|\.duration_since\s*\(|\b(?:Instant|SystemTime)::now\s*\(\)\s*-/;
 
-/** `text` with comments and the insides of string/char literals blanked (newlines kept), so braces and parentheses in them do not count. */
-export function mask(text) {
-  let out = '';
-  for (let i = 0; i < text.length; ) {
-    const c = text[i];
-    const two = text.slice(i, i + 2);
-    if (two === '//') {
-      const end = text.indexOf('\n', i);
-      const stop = end < 0 ? text.length : end;
-      out += ' '.repeat(stop - i);
-      i = stop;
-    } else if (two === '/*') {
-      const end = text.indexOf('*/', i + 2);
-      const stop = end < 0 ? text.length : end + 2;
-      out += text.slice(i, stop).replace(/[^\n]/g, ' ');
-      i = stop;
-    } else if (c === '"') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
-      out += `"${text.slice(i + 1, j).replace(/[^\n]/g, ' ')}"`;
-      i = j + 1;
-    } else {
-      out += c;
-      i++;
-    }
-  }
-  return out;
-}
+/** `text` with comments and the insides of every literal blanked (newlines kept), so braces and parentheses in them do not count: rustc's own lexing, the one the other checks share (raw strings, `cr".."`, nested block comments). */
+export const mask = maskRust;
 
 /** Index of the bracket closing the one at `open` (in masked text), or -1. */
 function closing(text, open) {

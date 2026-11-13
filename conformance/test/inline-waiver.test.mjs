@@ -57,8 +57,10 @@ test('commentsOf: only comments are kept; a marker inside a string, raw string o
   const c = commentsOf(rust, 'rust');
   assert.equal(c.length, rust.length);
   assert.deepEqual(c.split('\n').map((l) => l.trim()), ['// conformance: t — real reason', '', '/* conformance: t — block */', '']);
-  const hash = commentsOf('run: echo "# not a comment" # conformance: t — real\nx: 1#conformance: t — glued\nplain # one\n', 'hash');
-  assert.deepEqual(hash.split('\n').map((l) => l.trim()), ['# conformance: t — real', '', '# one', '']);
+  const yaml = commentsOf('run: echo "# not a comment" # conformance: t — real\nx: 1#conformance: t — glued\nplain # one\nname: don\'t # two\n', 'yaml');
+  assert.deepEqual(yaml.split('\n').map((l) => l.trim()), ['# conformance: t — real', '', '# one', '# two', '']);
+  const shell = commentsOf("cat <<EOF\n# body\nEOF\necho $'a\\'b' # one\n", 'shell');
+  assert.deepEqual(shell.split('\n').map((l) => l.trim()), ['', '', '', '# one', '']);
 });
 
 test('commentView: a waiver reads the comment on the line or the line above, never a string', () => {

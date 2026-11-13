@@ -137,7 +137,7 @@ pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
         }
     }
     hits.sort_by_key(|h| (h.0, h.1));
-    let view = CommentView::of(text, if shell { Kind::Hash } else { Kind::Rust });
+    let view = CommentView::of(text, if shell { Kind::Shell } else { Kind::Rust });
     let file_waiver = view.file("file-layout-guess");
     let under_tests = UNDER_TESTS.is_match(file);
     let test_lines = if matches!(file_waiver, InlineWaiver::Reason(_)) && !shell && !under_tests {

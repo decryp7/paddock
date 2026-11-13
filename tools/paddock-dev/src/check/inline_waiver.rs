@@ -9,7 +9,6 @@
 
 use super::finding::Finding;
 use super::jsre::{is_js_space, rx, units};
-use super::mask::comment_units;
 
 /// What the comment near a site says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,55 +21,14 @@ pub enum InlineWaiver {
     Reason(String),
 }
 
-/// What a file's comments are written in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kind {
-    /// Rust: `//` and block comments, not the inside of a string, raw string or char literal.
-    Rust,
-    /// Shell, YAML, TOML: a `#` at the start of a line or after white space, outside a quoted string of the same line.
-    Hash,
-}
+/// What a file's comments are written in: Rust, shell (C120's `.sh` files) or YAML (workflows).
+pub use super::lex::Kind;
 
-const SPACE: u16 = b' ' as u16;
-const NL: u16 = b'\n' as u16;
-
-fn hash_comment(line: &[u16]) -> Vec<u16> {
-    let mut quote: Option<u16> = None;
-    let mut i = 0;
-    while i < line.len() {
-        let c = line[i];
-        match quote {
-            Some(q) => {
-                if c == b'\\' as u16 && q == b'"' as u16 {
-                    i += 1;
-                } else if c == q {
-                    quote = None;
-                }
-            }
-            None => {
-                if c == b'"' as u16 || c == b'\'' as u16 {
-                    quote = Some(c);
-                } else if c == b'#' as u16 && (i == 0 || char::from_u32(u32::from(line[i - 1])).is_some_and(is_js_space)) {
-                    let mut out = vec![SPACE; i];
-                    out.extend_from_slice(&line[i..]);
-                    return out;
-                }
-            }
-        }
-        i += 1;
-    }
-    vec![SPACE; line.len()]
-}
-
-/// `text` with everything but its comments blanked (newlines kept, so lines and columns stay). A waiver marker in a string literal is
-/// data, not a waiver (ER-33): [`CommentView`] reads only this text. The port of `commentsOf`.
+/// `text` with everything but its comments blanked (newlines kept, so lines and columns stay), read off the language's real lexer or
+/// parser (`lex`). A waiver marker in a string literal, a here-document or a block scalar is data, not a waiver (ER-33): [`CommentView`]
+/// reads only this text. The port of `commentsOf`.
 pub fn comments_of(text: &str, kind: Kind) -> String {
-    let t: Vec<u16> = text.encode_utf16().collect();
-    let out: Vec<u16> = match kind {
-        Kind::Hash => t.split(|&u| u == NL).map(hash_comment).collect::<Vec<_>>().join(&NL),
-        Kind::Rust => comment_units(&t),
-    };
-    String::from_utf16_lossy(&out)
+    super::lex::comments_only(text, kind)
 }
 
 /// The comments of one file, read by line: what a check asks to find out whether a site is waived.

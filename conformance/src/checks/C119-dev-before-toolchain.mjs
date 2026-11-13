@@ -32,7 +32,7 @@ const indentOf = (l) => l.length - l.trimStart().length;
 /** The `./dev` runs before any toolchain setup in one workflow text: [{ line, job, waived }] (lines are 1-based). */
 export function devBeforeToolchain(text, setupActions) {
   const lines = text.split('\n');
-  const view = commentView(text, 'hash');
+  const view = commentView(text, 'yaml');
   const out = [];
   let inJobs = false;
   let job = null;

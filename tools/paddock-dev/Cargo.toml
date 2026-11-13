@@ -38,6 +38,10 @@ yaml-rust2 = "0.13"
 # disk: the usage index, as cargo's own global cache tracker is SQLite too (cargo clean gc). Bundled: no system library needed; MIT, SQLite is public domain.
 rusqlite = { version = "0.41", features = ["bundled"] }
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
+ra-ap-rustc_lexer = "=0.184.0"
+tree-sitter = "=0.27.2"
+tree-sitter-bash = "=0.25.1"
+tree-sitter-yaml = "=0.7.2"
 
 [target.'cfg(unix)'.dependencies]
 # fds.rs: the holder closes the descriptors it inherited.

@@ -8,31 +8,27 @@
 // does not take the next line as its reason, and a list dash on the next line is no dash. A marker without a reason is not a waiver: the site stays a finding, with the check's own text.
 
 import { rustComments } from './mask-rust.mjs';
+import { shellCommentRanges } from './shell-lexer.mjs';
+import { yamlCommentRanges } from './yaml-lexer.mjs';
 
 const blank = (s) => s.replace(/[^\n]/g, ' ');
 
 /**
- * `text` with everything but its comments blanked (newlines kept, so lines and columns stay). `kind` is 'rust' (`//` and block
- * comments, not the inside of a string, raw string or char literal) or 'hash' (shell, YAML, TOML: a `#` at the start of a line or after
- * white space, outside a quoted string of the same line). A waiver marker in a string literal is data, not a waiver (ER-33): the
- * readers below look only at this text. Rust host: tools/paddock-dev/src/check/inline_waiver.rs.
+ * `text` with everything but its comments blanked (newlines kept, so lines and columns stay). `kind` is 'rust' (`//` and nested block
+ * comments; not the inside of any literal), 'shell' (a `#` that starts a word; not in a quote, `$'..'`, `${..}` or a here-document) or 'yaml'
+ * (a `#` after white space outside a scalar; not in a block scalar). A waiver marker anywhere else is data, not a waiver (ER-33): the readers
+ * below look only at this text. The Rust host reads the same files with rustc's lexer and tree-sitter (tools/paddock-dev/src/check/lex).
  */
 export function commentsOf(text, kind = 'rust') {
-  if (kind === 'hash') return text.split('\n').map(hashComment).join('\n');
-  return rustComments(text);
-}
-
-function hashComment(line) {
-  let quote = '';
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (quote) {
-      if (c === '\\' && quote === '"') i++;
-      else if (c === quote) quote = '';
-    } else if (c === '"' || c === "'") quote = c;
-    else if (c === '#' && (i === 0 || /\s/.test(line[i - 1]))) return blank(line.slice(0, i)) + line.slice(i);
+  if (kind === 'rust') return rustComments(text);
+  const ranges = kind === 'shell' ? shellCommentRanges(text) : yamlCommentRanges(text);
+  let out = '';
+  let at = 0;
+  for (const [a, b] of ranges) {
+    out += blank(text.slice(at, a)) + text.slice(a, b);
+    at = b;
   }
-  return blank(line);
+  return out + blank(text.slice(at));
 }
 
 /** The comments of one file, read by line: what a check asks to find out whether a site is waived. */
