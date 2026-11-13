@@ -115,7 +115,10 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
             .join(" ")
             .contains("--image registry/paddock-ci:v7 --platform linux/amd64")
     );
-    assert_eq!(by("conformance").args.last().unwrap(), "C06");
+    assert_eq!(
+        (by("conformance").program.as_str(), by("conformance").args.join(" ")),
+        ("/x/dev", "ci run conformance paddock".to_string())
+    );
     assert_eq!(
         by("commit-lint").args.join(" "),
         "conformance/bin/paddock-conformance.mjs commit-lint --range abc..HEAD"
@@ -360,7 +363,12 @@ fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_
     };
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
     let g = run_gates(&planned).into_iter().find(|g| g.id == "conformance").unwrap();
-    assert_eq!(g.args, args);
+    assert_eq!(
+        (g.program.as_str(), g.args.clone()),
+        ("/x/dev", ["ci", "run", "conformance", "paddock"].map(String::from).to_vec()),
+        "through the executor, like CI"
+    );
+    assert!(!args.is_empty());
     // An unreadable contract: the gate is BROKEN (exit 7), it does not silently run nothing.
     let f = Facts {
         conformance: Some(Err("conformance/paddock.ci.json cannot be read".into())),

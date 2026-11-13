@@ -166,6 +166,14 @@ review_by = 2026-12-10
 approved = "user"
 
 [[report_only]]
+id = "C119"
+reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C119-dev-before-toolchain.mjs (and its Rust port, tools/paddock-dev/src/check/c119.rs) and the mode to gate. Today's findings are the plan jobs of ci.yml, debrief.yml, dyno-release.yml and pitcrew-release.yml, the commits job and tag.yml's check job (they run ./dev before any setup-rust; their compiler is the image's)"
+owner = "CI-in-Rust WP-3 review (2026-11-13)"
+since = 2026-11-13
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[report_only]]
 id = "C14"
 reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
 owner = "Rule 40 follow-up"

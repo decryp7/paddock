@@ -164,8 +164,14 @@ jobs:
         with:
           persist-credentials: false
 
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      - uses: ./.gitea/actions/setup-rust
+
       - name: Every listen site is registered
         run: ./dev check ipc-endpoints
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   ui:
     needs: [plan]
@@ -175,13 +181,18 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
-      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): the read credential, and a tag or release run builds the tool from source.
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
+      # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/setup-rust
 
       - uses: ./.gitea/actions/node-caches
 
@@ -191,39 +202,62 @@ jobs:
         run: npm ci
 
       # WCAG contrast of every text/background pair and colour-vision separation of the chart palette.
-      - name: Contrast and CVD checks
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Contrast and CVD checks
         run: ./dev ci run ui tokens
 
       # The Paddock ESLint preset (rules 27 to 39 and the angular-eslint template and accessibility rules) over every ui project.
-      - name: Lint
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Lint
         run: ./dev ci run ui lint
 
-      - name: Component specs
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Component specs
         run: ./dev ci run ui specs
 
-      - name: Script tests
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Script tests
         run: ./dev ci run ui scripts
 
       # Every entry point (root, /shell/*, /workbench/*) is built by ng-packagr; the dry run below checks each is exported.
-      - name: Build the library (all entry points)
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Build the library (all entry points)
         run: ./dev ci run ui build
 
       # The shell's message catalog and the pseudo-locale files match the build (plan S15: `npm run i18n` to refresh).
-      - name: Translation files up to date
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Translation files up to date
         run: ./dev ci run ui i18n
 
-      - name: Build @decryp7/paddock-e2e
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Build @decryp7/paddock-e2e
         run: ./dev ci run ui build-e2e
 
-      - name: Build the shell demo
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Build the shell demo
         run: ./dev ci run ui shell-demo
 
-      - name: Build the workbench demo
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Build the workbench demo
         run: ./dev ci run ui workbench-demo
 
       # Lists every npm package, entry point and crate with what a tag would publish; publishes nothing.
-      - name: Publish dry run
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Publish dry run
         run: ./dev ci run ui publish-dry-run
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # The reference apps in the browser (gallery and shell demo; axe, keyboard, CSP, 320 px), in two shards that run at the
   # same time: the specs run one at a time within a shard (playwright.config.ts), so splitting the files halves the wait.
@@ -240,13 +274,18 @@ jobs:
       matrix:
         shard: [1, 2]
     env:
-      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): the read credential, and a tag or release run builds the tool from source.
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
+      # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/setup-rust
 
       # Playwright's browsers and Chrome for Testing are baked into the image (ci-image/): nothing is downloaded per job.
       - uses: ./.gitea/actions/node-caches
@@ -260,11 +299,15 @@ jobs:
       - name: Reference app checks
         # CI names its ports (@decryp7/paddock-e2e refuses a default there: another job could hold it), one pair per shard.
         env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
           PW_PORT: ${{ matrix.shard == 1 && '4300' || '4310' }}
           SHELL_DEMO_PORT: ${{ matrix.shard == 1 && '4301' || '4311' }}
           WORKBENCH_DEMO_PORT: ${{ matrix.shard == 1 && '4302' || '4312' }}
           E2E_SHARD: ${{ matrix.shard }}/2
         run: ./dev ci run ui e2e
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # WebKit is the engine of WKWebView, which the macOS apps render in: the three ui Playwright projects run in it on the Mac host runner
   # (Playwright's own WebKit build), for pushes to main, v* tags and nightly.yml only. Branch runs stay Chromium-only (rule 3).
@@ -413,26 +456,39 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
-      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): the read credential, and a tag or release run builds the tool from source.
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
+      # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Tools
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/setup-rust
+
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Tools
         run: ./dev ci run tools tests
 
-      - name: new-app templates
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: new-app templates
         run: ./dev ci run tools scripts
 
       # The VM start check's evidence parsers and judges (scripts/vm-smoke): a fake guest, no VM.
-      - name: VM start check
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: VM start check
         run: ./dev ci run tools vm-smoke
 
       # The plan's rules and the repo contracts it checks (doc inputs, app CI files, CODEOWNERS, Renovate, one npm lock).
-      - name: Affected rules and repo contracts
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Affected rules and repo contracts
         run: ./dev ci run tools affected
 
       # ER-40: a committed SVG is generated from its .drawio and never hand-edited. The check re-exports every diagram with the pinned
@@ -452,8 +508,13 @@ jobs:
             || { echo "::error::unpacking draw.io $v failed. Fix: run dpkg-deb -x on the same file in the paddock-ci image to see why."; exit 1; }
           echo "DRAWIO=$RUNNER_TEMP/drawio/opt/drawio/drawio" >> "$GITHUB_ENV"
 
-      - name: SVG drift (ER-40)
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: SVG drift (ER-40)
         run: ./dev ci run tools svg-drift
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # The Windows test VM tooling (scripts/vm-lock.sh, vm-win.sh, vm-win/) is a macOS tool: its lock and guard-rail tests have seven cases that
   # need sysctl, BSD stat, the keychain and Fusion's lease file, which the Linux `ui` job skips ("not measured on this OS", ER-33). They run
@@ -674,24 +735,36 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
-      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): the read credential, and a tag or release run builds the tool from source.
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
+      # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/setup-rust
+
       - uses: ./.gitea/actions/node-caches
 
       - name: Install
         run: npm ci
 
-      - name: Icon tests
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Icon tests
         run: ./dev ci run icons tests
 
-      - name: Installed icon copies match the build
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        name: Installed icon copies match the build
         run: ./dev ci run icons installed
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   # @decryp7/paddock-eslint (eslint/, plan X11): RuleTester cases per rule and the preset run through ESLint on temp files.
   eslint-preset:
@@ -702,13 +775,18 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
-      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): the read credential, and a tag or release run builds the tool from source.
-      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      # `./dev ci run` runs the job's commands from its project's paddock.ci.json (ADR 0038 §1): a tag or release run builds the tool from source.
+      # The read credential is set on the ./dev steps only.
       PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      # Before the first ./dev of the job: it hashes and builds itself with the job's pinned compiler (C119).
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        uses: ./.gitea/actions/setup-rust
 
       - uses: ./.gitea/actions/node-caches
         with:
@@ -718,7 +796,12 @@ jobs:
         working-directory: .
         run: npm ci
 
-      - run: ./dev ci run eslint tests
+      - env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        run: ./dev ci run eslint tests
+
+      - uses: ./.gitea/actions/sccache-stats
+        if: always()
 
   crates:
     name: crates (fmt, workspace hack, unused deps, coverage, deny)

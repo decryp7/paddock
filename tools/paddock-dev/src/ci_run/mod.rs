@@ -16,7 +16,7 @@
 //! (`--max-secs`, a line's whole process tree is ended at the limit through `paddock_proc`), a phase that does not exist is an error,
 //! and a Ctrl+C or SIGTERM ends the running line's tree. The conformance project's `conformance` field becomes
 //! `PADDOCK_CONFORMANCE_ARGS` for every line (the one copy of the check list). `E2E_INDEX` is derived from `E2E_SHARD` (`i/N`
-//! gives `i`), as the end-to-end step did. `--heavy` puts each line through the machine-wide slot (ER-24), as the pre-push gate does.
+//! gives `i`; empty without a shard), as the end-to-end step did, and the download credential of `./dev` (`PADDOCK_DEV_TOKEN`) is not passed on. `export` in one line does not carry to the next (each line is its own shell, as before). `--heavy` puts each line through the machine-wide slot (ER-24), as the pre-push gate does.
 
 pub mod contract;
 
@@ -173,8 +173,12 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
             Err(e) => return fail(out, e, "fix the `conformance` object in conformance/paddock.ci.json"),
         }
     }
-    if let Some(shard) = env.get("E2E_SHARD").filter(|s| !s.is_empty()) {
-        child_env.insert("E2E_INDEX".into(), shard.split('/').next().unwrap_or("").to_string());
+    // The end-to-end step's index: `i` of a shard `i/N`, empty for a leg without one (the WebKit leg), so `bash -u` never meets it unset.
+    let shard = env.get("E2E_SHARD").map(String::as_str).unwrap_or("");
+    child_env.insert("E2E_INDEX".into(), shard.split('/').next().unwrap_or("").to_string());
+    // The commands never need the download credential of `./dev` itself: it does not reach the programs a contract runs.
+    for secret in ["PADDOCK_DEV_TOKEN", "BUILD_INPUTS_TOKEN"] {
+        child_env.remove(secret);
     }
     if args.list {
         for l in &lines {

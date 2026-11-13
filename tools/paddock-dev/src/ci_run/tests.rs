@@ -190,6 +190,22 @@ fn the_end_to_end_index_comes_from_the_shard() {
 }
 
 #[test]
+fn the_end_to_end_index_is_empty_without_a_shard_and_the_download_token_is_not_passed_on() {
+    let r = Repo::new("ui", &json(&["echo \"[$E2E_INDEX][${PADDOCK_DEV_TOKEN-gone}]\" > i"]));
+    let (code, log) = r.run("ui", "checks", |_| {}, &[("PADDOCK_DEV_TOKEN", "secret")]);
+    assert_eq!(code, 0, "set -u must not meet E2E_INDEX unset: {log}");
+    assert_eq!(std::fs::read_to_string(r.root().join("i")).unwrap().trim(), "[][gone]");
+}
+
+#[test]
+fn an_export_does_not_carry_to_the_next_line() {
+    // Documented: every line is its own shell (as `run-commands.sh`'s `( set -e; eval line )` was).
+    let r = Repo::new("ui", &json(&["export X_ONE=1", "echo \"[${X_ONE-unset}]\" > x"]));
+    assert_eq!(r.run("ui", "checks", |_| {}, &[]).0, 0);
+    assert_eq!(std::fs::read_to_string(r.root().join("x")).unwrap().trim(), "[unset]");
+}
+
+#[test]
 fn the_job_environment_reaches_the_lines_and_nothing_is_cleared() {
     let r = Repo::new("ui", &json(&["echo \"$GITHUB_STEP_SUMMARY_FAKE-$PW_PORT\" > e"]));
     let (code, _) = r.run("ui", "checks", |_| {}, &[("GITHUB_STEP_SUMMARY_FAKE", "x"), ("PW_PORT", "4300")]);
@@ -219,6 +235,10 @@ fn a_set_stop_flag_ends_the_phase_before_the_next_line() {
 }
 
 // ---- parity with what CI ran before the executor (golden from the YAML and scripts at 11c365fc4) ----
+
+/// The root jobs of ci.yml the golden covers. `train-gates` is not modelled (its `if` needs a dispatch with a `base` input, which the
+/// model's contexts do not give), so its call of the executor is asserted as text below.
+const JOBS: [&str; 7] = ["ui", "e2e", "conformance", "tools", "icons", "eslint-preset", "crates"];
 
 /// The commands of the root jobs of ci.yml and of the app legs' contract lists, as the CI model reads them from the real tree.
 fn modelled_commands() -> std::collections::BTreeSet<String> {
@@ -260,6 +280,19 @@ fn the_contracts_run_exactly_the_commands_ci_ran_before_the_executor() {
     let golden = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/ci-run/commands.tsv")).unwrap();
     let want: std::collections::BTreeSet<String> = golden.lines().filter(|l| !l.starts_with('#')).map(str::to_string).collect();
     let got = modelled_commands();
+    for job in JOBS {
+        let rows = |set: &std::collections::BTreeSet<String>| set.iter().filter(|r| r.starts_with(&format!("job\t{job}\t"))).count();
+        assert!(
+            rows(&want) > 0 && rows(&got) > 0,
+            "job {job} has no row in the golden or in the model: the comparison would prove nothing"
+        );
+    }
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+    let train = ci.split("\n  train-gates:\n").nth(1).unwrap().split("\n  app:\n").next().unwrap();
+    assert!(
+        train.contains("run: ./dev ci run conformance paddock"),
+        "train-gates runs the conformance contract"
+    );
     let missing: Vec<&String> = want.difference(&got).collect();
     let extra: Vec<&String> = got.difference(&want).collect();
     assert!(

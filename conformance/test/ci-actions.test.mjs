@@ -458,7 +458,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['conformance', 'wiki', 'heavy', 'crates', 'crate', 'train-gates', 'app', 'paddock-dev']; // conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['ipc-endpoints', 'ui', 'e2e', 'conformance', 'tools', 'wiki', 'heavy', 'icons', 'eslint-preset', 'crates', 'crate', 'train-gates', 'app', 'paddock-dev']; // conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -2245,7 +2245,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 15, 'the ci.yml jobs that read the prebuilt tool: the four that take a host slot, ipc-endpoints, conformance, tools-macos, wiki, heavy and crates (setup-rust runs ./dev), and ui, e2e, tools, icons and eslint-preset (`./dev ci run`, WP-3)');
+  assert.equal(tagJobs, 10, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, ipc-endpoints, conformance, tools-macos, and wiki, heavy and crates (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
