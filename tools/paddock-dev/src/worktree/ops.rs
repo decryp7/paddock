@@ -231,7 +231,7 @@ pub fn resolve_root(repo: &Repo, arg: Option<&Path>, env: &dyn Fn(&str) -> Optio
         return Ok(v.into());
     }
     Err(CliError::usage("No worktree root is set, so there is no safe place to make the worktree.")
-        .with_hint("Pass --root <folder>, or run `git config paddock.worktreeRoot <folder>` once, or set PADDOCK_WORKTREE_ROOT (for example /Volumes/d7sst7/dev-targets/wt)."))
+        .with_hint("Pass --root <folder>, or run `git config paddock.worktreeRoot <folder>` once, or set PADDOCK_WORKTREE_ROOT (the folder is the machine's choice: put worktrees on the volume meant for them)."))
 }
 
 fn known<'a>(list: &'a [WorktreeInfo], k: &str) -> Option<&'a WorktreeInfo> {
@@ -798,5 +798,53 @@ mod tests {
         assert!(inside.to_string().contains("current folder"), "{inside}");
         let unknown = not_in_use(k, Err("no lsof".into())).unwrap_err();
         assert!(unknown.to_string().contains("cannot be checked"), "{unknown}");
+    }
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn repo_with(config: Option<&str>) -> (tempfile::TempDir, Repo) {
+        let d = tempfile::tempdir().unwrap();
+        let git = Git::at(d.path());
+        git.text(&["init", "-q"]).unwrap();
+        if let Some(v) = config {
+            git.text(&["config", "paddock.worktreeRoot", v]).unwrap();
+        }
+        let repo = Repo::discover(d.path()).unwrap();
+        (d, repo)
+    }
+
+    fn env_with(v: Option<&'static str>) -> impl Fn(&str) -> Option<String> {
+        move |k| (k == "PADDOCK_WORKTREE_ROOT").then(|| v.map(String::from)).flatten()
+    }
+
+    #[test]
+    fn the_flag_beats_git_config_and_the_environment() {
+        let (_d, repo) = repo_with(Some("/cfg"));
+        let got = resolve_root(&repo, Some(Path::new("/flag")), &env_with(Some("/env"))).unwrap();
+        assert_eq!(got, PathBuf::from("/flag"));
+    }
+
+    #[test]
+    fn git_config_beats_the_environment() {
+        let (_d, repo) = repo_with(Some("/cfg"));
+        assert_eq!(resolve_root(&repo, None, &env_with(Some("/env"))).unwrap(), PathBuf::from("/cfg"));
+    }
+
+    #[test]
+    fn the_environment_is_used_when_git_config_is_unset_and_empty_is_ignored() {
+        let (_d, repo) = repo_with(None);
+        assert_eq!(resolve_root(&repo, None, &env_with(Some("/env"))).unwrap(), PathBuf::from("/env"));
+        assert!(resolve_root(&repo, None, &env_with(Some(""))).is_err());
+    }
+
+    #[test]
+    fn with_nothing_set_it_refuses_and_names_no_machine_path() {
+        let (_d, repo) = repo_with(None);
+        let err = resolve_root(&repo, None, &env_with(None)).unwrap_err();
+        assert!(err.text().contains("No worktree root") && !err.text().contains("/Volumes/"));
     }
 }
