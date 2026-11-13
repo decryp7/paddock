@@ -931,6 +931,18 @@ mod known_commit {
         r.join(".git/paddock-pre-push")
     }
 
+    /// A pass of the push gate for `sha`, made the only way a pass is made: through `measure`.
+    fn pass_for(r: &Path, sha: &str) -> paddock_cli::Outcome {
+        let subject = crate::pre_push::outcome::subject_of(r, Some(sha));
+        paddock_cli::measure(
+            paddock_cli::CheckId::new("pre-push"),
+            subject,
+            crate::pre_push::outcome::tool(),
+            paddock_cli::outcome::UnixSeconds(1),
+            || Ok(Vec::new()),
+        )
+    }
+
     fn push_line(sha: &str) -> String {
         format!("refs/heads/x {sha} refs/heads/main {}\n", "0".repeat(40))
     }
@@ -947,13 +959,21 @@ mod known_commit {
     fn a_pass_record_of_the_exact_sha_and_tree_is_the_evidence() {
         let (_d, r, one, two) = repo();
         let l = fake(None, Err("no run"));
-        known::write_record(&r, &state(&r), &two, "origin/main", &["fmt crates".into()], 1_700_000_000).unwrap();
+        known::write_record(
+            &r,
+            &state(&r),
+            &two,
+            "origin/main",
+            &["fmt crates".into()],
+            1_700_000_000,
+            &pass_for(&r, &two),
+        )
+        .unwrap();
         let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
-        assert_eq!(
-            found,
-            Some(vec![Evidence::Record {
-                id: format!("{}@1700000000", &two[..12])
-            }])
+        let found = found.unwrap();
+        assert!(
+            matches!(&found[..], [Evidence::Record { id, outcome: paddock_cli::Outcome::KnownCommit(_) }] if *id == format!("{}@1700000000", &two[..12])),
+            "{found:?}"
         );
         assert!(trail[0].contains("pass record"), "{trail:?}");
         // The record of another sha is no evidence; a record whose tree changed is none either.
@@ -980,7 +1000,16 @@ mod known_commit {
         let tip = format!("{two}\trefs/heads/train/x\n");
         let green = fake(Some(&tip), Ok(8053));
         let (found, trail) = known::find(&r, &state(&r), Some("origin"), std::slice::from_ref(&two), &green);
-        assert_eq!(found, Some(vec![Evidence::CiRun { run: 8053 }]));
+        assert!(
+            matches!(
+                found.as_deref(),
+                Some([Evidence::CiRun {
+                    run: 8053,
+                    outcome: paddock_cli::Outcome::KnownCommit(_)
+                }])
+            ),
+            "{found:?}"
+        );
         assert!(trail.iter().any(|t| t.contains("git ls-remote origin (live)")), "{trail:?}");
         for (ls, remote) in [
             (None, Some("origin")),
@@ -1033,7 +1062,7 @@ mod known_commit {
     #[test]
     fn the_known_commit_report_is_its_own_verdict_and_says_not_re_checked() {
         let (_d, r, _one, two) = repo();
-        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5).unwrap();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
         let rep = command_in(
             &PrePushArgs {
                 root: Some(r.clone()),
@@ -1059,10 +1088,74 @@ mod known_commit {
         );
     }
 
+    /// ADR 0089 amendment (rows 3 and 7): the known commit is an outcome that names the commit and tree it stands on, exits 0 and
+    /// says `not_rechecked`; a consumer asking about another tree (merge check) refuses it, and a record without evidence is none.
+    #[test]
+    fn the_known_commit_outcome_names_its_tree_and_a_consumer_about_another_tree_refuses_it() {
+        use paddock_cli::outcome::{Sha, TreeId};
+        use paddock_cli::{Outcome, Subject};
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
+        let rep = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &push_line(&two),
+            &fake(None, Err("x")),
+        )
+        .unwrap();
+        let tree = git_text(&r, &["rev-parse", &format!("{two}^{{tree}}")]).unwrap().trim().to_string();
+        let ask = Subject::Commit {
+            sha: Sha::new(two.as_str()),
+            tree: TreeId::new(tree.as_str()),
+        };
+        let wire = &rep.data["outcome"];
+        assert_eq!(wire["status"], "known-commit");
+        assert_eq!(wire["not_rechecked"], true);
+        assert!(
+            matches!(Outcome::from_wire(wire, &ask, true), Outcome::KnownCommit(_)),
+            "the pre-push hook accepts it"
+        );
+        assert!(
+            matches!(Outcome::from_wire(wire, &ask, false), Outcome::NotMeasured(_)),
+            "merge check does not"
+        );
+        let other = Subject::Commit {
+            sha: Sha::new("0".repeat(40)),
+            tree: TreeId::new(tree),
+        };
+        assert!(
+            matches!(Outcome::from_wire(wire, &other, true), Outcome::NotMeasured(_)),
+            "another commit"
+        );
+        // A record written before evidence existed (no `evidence`) proves nothing.
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rec).unwrap()).unwrap();
+        v.as_object_mut().unwrap().remove("evidence");
+        std::fs::write(&rec, v.to_string()).unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &fake(None, Err("x")));
+        assert!(found.is_none());
+    }
+
+    /// Only a `Clean` outcome can leave a record: findings, not measured and an empty run cannot.
+    #[test]
+    fn only_a_pass_leaves_a_record() {
+        let (_d, r, _one, two) = repo();
+        for not_a_pass in [
+            paddock_cli::Outcome::NotMeasured(paddock_cli::Reason::new("x")),
+            paddock_cli::Outcome::NotApplicable(paddock_cli::Reason::new("x")),
+        ] {
+            assert!(known::write_record(&r, &state(&r), &two, "b", &[], 1, &not_a_pass).is_err());
+        }
+        assert!(!state(&r).join("records").join(format!("{two}.json")).exists());
+    }
+
     #[test]
     fn a_delete_only_push_and_an_explicit_base_never_use_evidence() {
         let (_d, r, _one, two) = repo();
-        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5).unwrap();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
         let l = fake(None, Err("x"));
         let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
         let got = command_in(
@@ -1131,13 +1224,13 @@ fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pas
     let mut f = facts();
     f.conformance_env = Some("node_modules/yaml is missing".into());
     let planned = plan_gates(&plan(), &change(&["conformance/a.mjs"]), &f);
-    let Some(Planned::Broken { cause, next, .. }) = planned
+    let Some(Planned::NotMeasured { reason, next, .. }) = planned
         .iter()
-        .find(|p| matches!(p, Planned::Broken { id, .. } if id == "conformance"))
+        .find(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "conformance"))
     else {
-        panic!("conformance must be Broken, not run: {planned:?}");
+        panic!("conformance must be NotMeasured (exit 6, ADR 0089 A2), not run: {planned:?}");
     };
-    assert!(cause.starts_with("environment not ready"), "{cause}");
+    assert!(reason.starts_with("environment not ready"), "{reason}");
     assert!(next.contains("npm ci --ignore-scripts -w conformance"), "{next}");
     assert!(!ids(&planned).contains(&"conformance".to_string()), "it does not run");
 }
@@ -1520,4 +1613,24 @@ fn a_branch_that_merged_its_train_in_is_measured_from_the_train_not_its_own_old_
     };
     let (base, why) = r.choose(&p);
     assert_eq!(base, t2, "the old tip would count t1 and t2 as new: {why}");
+}
+
+/// ADR 0089 amendment A2: an environment that is not ready is not measured (exit 6), not a broken check (exit 7).
+#[test]
+fn an_environment_not_ready_ends_the_run_with_exit_6_not_7() {
+    let mut f = facts();
+    f.conformance_env = Some("node_modules/yaml is missing".into());
+    let planned = plan_gates(&plan(), &change(&["conformance/a.mjs"]), &f);
+    let rows = run_all(
+        &planned.into_iter().filter(|p| !matches!(p, Planned::Run(_))).collect::<Vec<_>>(),
+        &Fake::default(),
+        1,
+    );
+    let report = render("h", &rows);
+    assert_eq!(report.exit, Exit::NotMeasured, "{}", report.text);
+    assert!(
+        report.text.contains("NOT MEASURED") && report.text.contains("not a finding in your change"),
+        "{}",
+        report.text
+    );
 }

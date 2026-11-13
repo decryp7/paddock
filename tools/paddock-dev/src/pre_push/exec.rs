@@ -195,7 +195,7 @@ pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(Str
 fn row_id(p: &Planned) -> &str {
     match p {
         Planned::Run(g) => &g.id,
-        Planned::Skip { id, .. } | Planned::Broken { id, .. } => id,
+        Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id,
     }
 }
 
@@ -242,6 +242,10 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
                             }
                         }
                         Planned::Skip { reason, .. } => Verdict::Skipped { reason: reason.clone() },
+                        Planned::NotMeasured { reason, next, .. } => Verdict::NotMeasured {
+                            reason: reason.clone(),
+                            next: next.clone(),
+                        },
                         Planned::Broken { cause, next, .. } => Verdict::Broken {
                             cause: cause.clone(),
                             next: next.clone(),

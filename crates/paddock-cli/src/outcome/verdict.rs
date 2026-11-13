@@ -115,6 +115,20 @@ impl Verdict {
         )
     }
 
+    /// Like [`Verdict::strict`] for a run scoped to a change (the push gate: a gate the change does not reach is not applicable, not
+    /// missing), with a person's override per item (see [`Verdict::of_overridden`]).
+    pub fn scoped<S: Into<String>>(
+        outcomes: impl IntoIterator<Item = (S, Outcome, Option<String>)>,
+    ) -> Verdict {
+        let today =
+            Date::parse("2000-01-01").unwrap_or_else(|_| unreachable!("a fixed valid date"));
+        Verdict::of_overridden(
+            outcomes,
+            &Optional::none(),
+            &Run::new(RunKind::Ordinary, Scope::Scoped, "any", today),
+        )
+    }
+
     /// The exit code, by the precedence in the module doc.
     pub fn exit(&self) -> Exit {
         if self

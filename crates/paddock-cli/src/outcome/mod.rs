@@ -150,7 +150,7 @@ pub enum Outcome {
 
 impl Outcome {
     /// The name in the JSON and the table.
-    pub(crate) fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Outcome::Clean(_) => "clean",
             Outcome::KnownCommit(_) => "known-commit",

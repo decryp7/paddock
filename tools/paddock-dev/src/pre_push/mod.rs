@@ -25,6 +25,7 @@ pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
 pub mod known;
+pub mod outcome;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -312,7 +313,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
     // An empty diff passes on its own only for a person's run with no pushed commit; a push is always measured (or known).
     if pushed.is_empty() && change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
-            json!({"gates": [], "changed": 0, "base": base}),
+            json!({"gates": [], "changed": 0, "base": base, "outcome": outcome::nothing_to_check(&base).json()}),
             format!("pre-push: base {base} ({base_why}); nothing changed since; nothing to check."),
         ));
     }
@@ -396,7 +397,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         planned.retain(|p| {
             let id = match p {
                 gates::Planned::Run(g) => &g.id,
-                gates::Planned::Skip { id, .. } | gates::Planned::Broken { id, .. } => id,
+                gates::Planned::Skip { id, .. } | gates::Planned::NotMeasured { id, .. } | gates::Planned::Broken { id, .. } => id,
             };
             args.only.iter().any(|w| id.split(' ').next() == Some(w.as_str()))
         });
@@ -442,6 +443,16 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
     }
     // A complete passing run is the evidence a later push of the same commit may rest on (known::find).
     let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
+    // The run's own outcome, with the commit and tree it is about: what a consumer reads (Outcome::from_wire), never the exit code.
+    let subject = outcome::subject_of(&root, checked.as_deref());
+    let who = std::env::var("USER").unwrap_or_else(|_| "a person".into());
+    let (shared, run_outcome) = outcome::fold(&rows, &subject, &who);
+    debug_assert!(
+        report.exit == Exit::Interrupted || report.exit == shared.exit(),
+        "the table's exit and the shared verdict's exit disagree"
+    );
+    report.data["outcome"] = run_outcome.json();
+    report.data["outcomes"] = shared.json();
     if let Some(sha) = checked.filter(|_| known::recordable(args, accept.len(), extra.len(), report.exit)) {
         let passed: Vec<String> = rows
             .iter()
@@ -451,7 +462,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
-        if let Err(e) = known::write_record(&root, &state, &sha, args.base(), &passed, now) {
+        if let Err(e) = known::write_record(&root, &state, &sha, args.base(), &passed, now, &run_outcome) {
             eprintln!("::warning::pre-push: the pass record of {sha} was not written: {e}. A later push of it is checked again.");
         }
     }
@@ -759,6 +770,10 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
             gates::Planned::Skip { id, reason } => {
                 text.push_str(&format!("skip  {id:<34} {reason}\n"));
                 data.push(json!({"id": id, "action": "skip", "reason": reason}));
+            }
+            gates::Planned::NotMeasured { id, reason, .. } => {
+                text.push_str(&format!("NOT MEASURED {id:<31} {reason}\n"));
+                data.push(json!({"id": id, "action": "not-measured", "reason": reason}));
             }
             gates::Planned::Broken { id, cause, .. } => {
                 text.push_str(&format!("BROKEN {id:<33} {cause}\n"));

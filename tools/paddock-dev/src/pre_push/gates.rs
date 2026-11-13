@@ -69,6 +69,16 @@ pub enum Planned {
         /// Why.
         reason: String,
     },
+    /// The environment is not ready (a missing or stale install): the check did not look, which is not a finding in the change and
+    /// not a broken check (ADR 0089 amendment A2): exit 6, never a pass.
+    NotMeasured {
+        /// The row.
+        id: String,
+        /// What is not ready.
+        reason: String,
+        /// What to do.
+        next: String,
+    },
     /// The check itself is broken (its input cannot be read): the push does not pass (ER-33).
     Broken {
         /// The row.
@@ -419,9 +429,9 @@ fn conformance(plan: &Value, facts: &Facts) -> Planned {
         };
     }
     if let Some(cause) = &facts.conformance_env {
-        return Planned::Broken {
+        return Planned::NotMeasured {
             id,
-            cause: format!("environment not ready: {cause}"),
+            reason: format!("environment not ready: {cause}"),
             next: "run `npm ci --ignore-scripts -w conformance` in the main checkout, then re-run `./dev check --pre-push`; this is not a finding in your change".into(),
         };
     }
