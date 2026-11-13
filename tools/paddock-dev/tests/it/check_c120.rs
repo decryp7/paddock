@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
 const r = await runChecks({ root: process.env.C120_ROOT, app: 'paddock', only: ['C120'] });
-process.stdout.write(JSON.stringify({ findings: r.findings, errors: r.errors, warnings: r.warnings }));
+process.stdout.write(JSON.stringify({ findings: r.findings, waived: r.waived, errors: r.errors, warnings: r.warnings }));
 "#;
 
 fn js(root: &Path) -> Value {
@@ -40,7 +40,7 @@ fn rust(root: &Path) -> Value {
         base_ref: None,
     };
     let r = run_checks(&opts, &registry()).unwrap().json();
-    json!({"findings": r["findings"], "errors": r["errors"], "warnings": r["warnings"]})
+    json!({"findings": r["findings"], "waived": r["waived"], "errors": r["errors"], "warnings": r["warnings"]})
 }
 
 /// The fixture cases as a tree.
@@ -90,6 +90,32 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     assert_eq!(at("scripts/c120_bad.sh"), [3, 4, 5, 8, 9]);
     assert!(at("scripts/c120_good.sh").is_empty());
     assert_eq!(a["errors"], 0, "report-only: warnings never fail");
+    // A waived site is counted as waived (with its reason), not as a finding: the site's own reason beats the file's.
+    let waived: Vec<(String, u64, String)> = a["waived"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|w| w["file"] == "crates/a/src/c120_file_waiver.rs")
+        .map(|w| {
+            (
+                w["file"].to_string(),
+                w["line"].as_u64().unwrap(),
+                w["waiver"]["reason"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(waived.len(), 2, "{waived:?}");
+    assert!(
+        waived[0].2.contains("filler data") && waived[1].2.contains("its own reason"),
+        "{waived:?}"
+    );
+    assert!(a["waived"].as_array().unwrap().iter().all(|w| w["waiver"]["expires"] == "inline"));
+    assert_eq!(at("crates/a/src/c120_file_waiver.rs"), Vec::<u64>::new());
+    assert_eq!(
+        at("crates/a/src/c120_bare_file_waiver.rs"),
+        [3],
+        "a file marker without a reason waives nothing"
+    );
 }
 
 #[test]
@@ -97,4 +123,8 @@ fn this_working_tree_gives_the_same_findings_in_both_hosts() {
     let root = repo();
     assert_eq!(js(&root)["findings"], rust(&root)["findings"]);
     assert_eq!(rust(&root)["warnings"], 0, "every site carries a waiver with a reason, or is fixed");
+    assert!(
+        rust(&root)["waived"].as_array().unwrap().len() >= 20,
+        "the waived sites stay visible in the report"
+    );
 }

@@ -18,6 +18,7 @@
 //!
 //! Deletions go through [`safe_remove`](super::safe_remove): only under the folder being capped, never through a link.
 
+// conformance: file-layout-guess — the prune code never names `deps`; its tests use it only as filler data for a build folder to prune
 use super::Step;
 use super::safe_remove::{self, RemoveError};
 use clap::Args as ClapArgs;
@@ -410,13 +411,11 @@ mod tests {
     fn over_the_cap_the_incremental_caches_go_first_and_the_rest_stays() {
         let (_d, dir) = scratch();
         big(&dir, "debug/incremental", 400);
-        // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
         big(&dir, "debug/deps", 50);
         let (code, out, _) = prune(&dir, "300");
         assert_eq!(code, 0, "{out}");
         assert!(out.contains("removing incremental caches"), "{out}");
         assert!(!dir.join("debug/incremental").exists());
-        // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
         assert!(dir.join("debug/deps/blob").exists());
     }
 
@@ -428,7 +427,6 @@ mod tests {
         // A sparse file: 400 KB long, nothing allocated (a file system that allocates late reports the same).
         let f = std::fs::File::create(dir.join("debug/incremental/blob")).unwrap();
         f.set_len(400 * 1024).unwrap();
-        // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
         big(&dir, "debug/deps", 1);
         let (code, out, _) = prune(&dir, "300");
         assert_eq!(code, 0);
@@ -440,7 +438,6 @@ mod tests {
     fn still_over_after_that_the_folder_is_removed() {
         let (_d, dir) = scratch();
         big(&dir, "debug/incremental", 10);
-        // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
         big(&dir, "debug/deps", 400);
         let (_, out, _) = prune(&dir, "300");
         assert!(out.contains("prune: still ") && out.contains("; removing "), "{out}");
@@ -469,7 +466,6 @@ mod tests {
         let d = crate::ci_host::canonical_tempdir();
         let home = d.path().join("home");
         let dir = home.join("target-x");
-        // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
         big(&dir, "debug/deps", 400);
         let mut env = kb_env();
         env.insert("HOME".into(), home.display().to_string());
@@ -486,7 +482,6 @@ mod tests {
         assert_eq!(code, 0, "a prune never fails the job");
         assert!(String::from_utf8(o).unwrap().contains("::warning::prune:"), "the refusal is said");
         assert!(
-            // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
             dir.join("debug/deps/blob").exists(),
             "the folder whose parent is the home folder stays"
         );

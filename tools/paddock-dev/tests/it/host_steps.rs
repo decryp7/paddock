@@ -553,7 +553,7 @@ fn prune_folder_removes_the_incremental_caches_first_then_the_folder_and_never_f
     let layout = |incremental: usize, deps: usize| {
         move |fx: &Fx| {
             fx.big("ci/build/debug/incremental", incremental);
-            // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
+            // conformance: layout-guess — the prune code never names `deps`; its tests use it only as filler data for a build folder to prune
             fx.big("ci/build/debug/deps", deps);
         }
     };

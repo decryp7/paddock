@@ -43,6 +43,8 @@ pub struct Finding {
     pub unwaivable: bool,
     /// The JSON key order of the JavaScript object this mirrors: waiver findings put `file` and `line` before `rule`.
     where_first: bool,
+    /// The reason of a comment at the finding's site that waives it: the host counts it as waived (with `expires` "inline"), not as a finding.
+    pub inline_waiver: Option<String>,
 }
 
 impl Finding {
@@ -58,6 +60,7 @@ impl Finding {
             fix: fix.into(),
             unwaivable: false,
             where_first: false,
+            inline_waiver: None,
         }
     }
 
@@ -83,6 +86,12 @@ impl Finding {
             where_first: true,
             ..Finding::error(check, 5, file, line, message, fix)
         }
+    }
+
+    /// Marks the finding as waived by a comment at its site, with the comment's reason.
+    pub fn inline_waived(mut self, reason: impl Into<String>) -> Finding {
+        self.inline_waiver = Some(reason.into());
+        self
     }
 
     /// Marks the finding as one no waiver covers.

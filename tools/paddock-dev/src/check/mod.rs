@@ -331,6 +331,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         })
         .collect();
     let mut runs = Vec::new();
+    let mut inline_waived: Vec<Waived> = Vec::new();
     for check in &selected {
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)));
         let control = control_holds(check.as_ref());
@@ -350,7 +351,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
             os: RunRecord::this_os(),
             matched: Vec::new(),
         };
-        let mut found = match attempt {
+        let found = match attempt {
             Ok(out) => {
                 record.completed = out.completed;
                 record.precondition = out.precondition;
@@ -362,6 +363,16 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
                 Vec::new()
             }
         };
+        // A finding waived by a comment at its site is waived, not found (the JavaScript runner does the same).
+        let (inline, mut found): (Vec<Finding>, Vec<Finding>) = found.into_iter().partition(|f| f.inline_waiver.is_some());
+        inline_waived.extend(inline.into_iter().map(|f| {
+            let reason = f.inline_waiver.clone().unwrap_or_default();
+            Waived {
+                finding: f,
+                reason,
+                expires: "inline".into(),
+            }
+        }));
         record.matched = found
             .iter()
             .filter(|f| !f.file.is_empty())
@@ -399,7 +410,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
                 .iter()
                 .any(|f| waivers::path_matches(w.path.as_deref().unwrap_or_default(), f))
     };
-    let (kept, waived) = waivers::apply(waivers::Applying {
+    let (kept, mut waived) = waivers::apply(waivers::Applying {
         findings,
         waivers: &parsed,
         problems: &problems,
@@ -407,6 +418,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         checks_run: &checks_run,
         skip_unused: &skip_unused,
     });
+    waived.extend(inline_waived);
     for e in &mut runs {
         e.kept = kept.iter().filter(|f| f.check == e.record.check).count();
     }

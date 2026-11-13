@@ -175,7 +175,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C120"
-reason = "ER-41: report-only until its first green run on main, then change warn to error in C120-layout-guess.mjs (and its Rust port, tools/paddock-dev/src/check/c120.rs) and the mode to gate. 0 warnings today: the 24 sites found (prune, cargo-output samples, old-layout tests) carry a layout-guess waiver with a reason"
+reason = "ER-41: report-only until its first green run on main, then change warn to error in C120-layout-guess.mjs (and its Rust port, tools/paddock-dev/src/check/c120.rs) and the mode to gate. 0 warnings today: the 24 sites found (prune test data, cargo-output samples, old-layout tests) are waived with a reason and counted as waived"
 owner = "build-folder layout (ER-21, paddock_env::cargo_layout)"
 since = 2026-11-13
 review_by = 2026-12-13
