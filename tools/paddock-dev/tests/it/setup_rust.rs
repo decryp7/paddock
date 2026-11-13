@@ -233,6 +233,11 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
     let (_, rs) = same(&r, &LOCAL, &[], true);
     assert!(rs.env.contains("RUSTC_WRAPPER=sccache\nCARGO_INCREMENTAL=0\n"), "{}", rs.env);
     assert!(
+        !rs.env.contains("__CARGO_"),
+        "cargo's build-dir layout is changed on Windows only: {}",
+        rs.env
+    );
+    assert!(
         rs.env.contains("SCCACHE_SERVER_PORT=4227\n") && rs.env.contains("/.paddock-ci/sccache-s1\n"),
         "{}",
         rs.env
@@ -472,6 +477,8 @@ fn on_a_windows_host_the_slot_and_the_exe_names_are_used() {
         "{}",
         rs.env
     );
+    // sccache 0.19 expands cargo's @argfile and starts rustc with the whole command line (run 8027, os error 206).
+    assert!(rs.env.contains("__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1\n"), "{}", rs.env);
     assert!(rs.calls.contains("--start-server port=4227"), "{}", rs.calls);
     assert_eq!(rs.path, "", "a runner with the pinned version keeps it");
     let rs = r.rust(

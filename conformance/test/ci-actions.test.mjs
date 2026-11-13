@@ -557,6 +557,34 @@ test('no script sits between cargo and rustc: RUSTC_WRAPPER is sccache itself, w
   }
 });
 
+// Run 8027 (job 37099): cargo 1.100's build-dir layout passes one `-L dependency=` per indirect dependency (313 for spotter_app_lib,
+// about 38,000 characters); cargo falls back to an @argfile, but sccache 0.19 expands it and starts rustc with the whole command line,
+// over CreateProcessW's 32,767 characters (os error 206, mozilla/sccache#2787). With the wrapper, Windows keeps cargo's legacy layout.
+test('on Windows the sccache wrapper comes with cargo\'s legacy build-dir layout, elsewhere not', () => {
+  const opt = /^__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1$/m;
+  const redis = { BACKEND: 'redis', REDIS_ENDPOINT: 'redis://127.0.0.1:1' };
+  const win = runSccacheStep({ ...redis, RUNNER_OS: 'Windows' });
+  assert.match(win, /^RUSTC_WRAPPER=sccache$/m, win);
+  assert.match(win, opt, win);
+  const mac = runSccacheStep(redis);
+  assert.doesNotMatch(mac, opt, mac);
+  assert.match(mac, /^RUSTC_WRAPPER=sccache$/m, mac);
+});
+
+// The reminder for the workaround above, tied to its cause: a bump of the pinned sccache (Windows installs it through setup-rust, in
+// the shell step and in `./dev ci setup-rust`) must decide whether the opt-out can go.
+test('the sccache pin is still the release that expands cargo\'s @argfile (LEGACY_BUILD_DIR_LAYOUT)', () => {
+  const shell = read(join(ACTIONS, 'setup-rust', 'action.yml')).match(/^\s*VERSION=(\S+)$/m)?.[1];
+  const rust = read(join(PADDOCK, 'tools', 'paddock-dev', 'src', 'ci_setup_rust.rs')).match(/pub const SCCACHE_VERSION: &str = "([^"]+)";/)?.[1];
+  for (const pin of [shell, rust]) {
+    assert.equal(
+      pin,
+      '0.19.0',
+      'sccache was bumped: check whether it now passes a response file through (mozilla/sccache#2787), then remove LEGACY_BUILD_DIR_LAYOUT or update this pin.',
+    );
+  }
+});
+
 // One mechanism sets a job's build folder in every workflow: the shared build-folder action, which writes it to the Cargo
 // workspace's .cargo/ci.toml (a kept folder on a host, target/ in a container). CARGO_TARGET_DIR would put it in sccache's
 // key (every CARGO_* variable is hashed), a --config flag does not reach `tauri build`, and app copies drift (rule 43).
