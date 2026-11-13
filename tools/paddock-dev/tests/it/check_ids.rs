@@ -1,10 +1,12 @@
 //! `./dev check new-id`: the next free check id across branches, against a scratch repository whose branches each add an id.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::check_ids::{RESERVED_DIR, command_with, id_of_path, ids_of_gates, ids_of_index, ids_of_readme, slug};
 use paddock_dev::input_hash::{Exec, Real};
 use serde_json::Value;
 use std::path::Path;
 
+// Plain `git` and the tool under test, started and awaited here; nothing is killed by pid.
+#[allow(clippy::disallowed_methods)]
 fn git(dir: &Path, args: &[&str]) {
     let out = std::process::Command::new("git")
         .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
@@ -64,6 +66,8 @@ fn repo() -> tempfile::TempDir {
     d
 }
 
+// Plain `git` and the tool under test, started and awaited here; nothing is killed by pid.
+#[allow(clippy::disallowed_methods)]
 fn dev(root: &Path, args: &[&str]) -> (i32, Value, String) {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["--json", "check", "new-id", "--root"])
