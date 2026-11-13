@@ -81,13 +81,11 @@ impl BudgetClock {
     /// credited: that was waiting for others.
     pub fn record(&self, started: Instant, ended: Instant, queued: Duration) {
         let queued = queued.min(ended.saturating_duration_since(started));
-        if queued.is_zero() {
-            return;
-        }
         let held_at = started + queued;
         let Ok(mut i) = self.inner.lock() else { return };
         let own = covered(started, held_at, &i.held);
         i.credit += queued.saturating_sub(own);
+        // Even a step that did not queue held the slot from `started`: a sibling that queued behind it is not waiting for others.
         i.held.push((held_at, ended));
     }
 }

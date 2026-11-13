@@ -324,7 +324,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
         budget_end: std::time::Instant::now() + BUDGET,
-        priority: pushes.first().is_some_and(|p| budget::is_landing_ref(&p.remote_ref)),
+        priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
         queue_max: queue_max(&env),
     };
     let history = GitHistory::new(&work, GIT_TIMEOUT);

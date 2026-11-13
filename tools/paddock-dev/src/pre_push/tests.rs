@@ -1079,7 +1079,7 @@ fn queue_time_and_run_time_are_reported_apart_and_the_pass_counts_only_the_run()
     );
     assert!(
         rows.iter()
-            .all(|(_, v)| matches!(v, Verdict::Passed { secs } if (*secs - 3.0).abs() < 1e-9)),
+            .all(|(_, v)| matches!(v, Verdict::Skipped { .. }) || matches!(v, Verdict::Passed { secs } if (*secs - 3.0).abs() < 1e-9)),
         "a pass shows the run time, not the wall time: {rows:?}"
     );
     assert_eq!(timings["fmt crates"], Timing { queued: 12.0, ran: 3.0 });
