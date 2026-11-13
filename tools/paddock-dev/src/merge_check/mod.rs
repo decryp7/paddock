@@ -357,7 +357,9 @@ fn check(req: &Request) -> Result<(String, Vec<Finding>, Option<generator_step::
                     "a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check <merge-commit>` after merging",
                 ))
             } else {
-                generator_step::run(&root, &git, &merge, &crate::generators::run::Real, &|l| eprintln!("{l}"))
+                generator_step::run(&root, &git, &merge, &crate::generators::run::Real::new(&root), &|l| {
+                    eprintln!("{l}")
+                })
             };
             Ok((merge.label, found, step))
         }

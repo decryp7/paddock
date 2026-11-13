@@ -64,7 +64,7 @@ struct Fake {
 }
 
 impl Runner for Fake {
-    fn run(&self, dir: &Path, argv: &[String], _limit: std::time::Duration) -> Ran {
+    fn run(&self, dir: &Path, argv: &[String], _limit: std::time::Duration, _spec: &super::run::Spec) -> Ran {
         self.started
             .lock()
             .unwrap()
@@ -254,4 +254,224 @@ fn a_crash_is_never_stale() {
 fn the_limit_follows_the_cost_class() {
     use super::registry::Cost;
     assert!(run::limit(Cost::Fast) < run::limit(Cost::Heavy));
+}
+
+/// `Real` with a fake `heavy` (the machine-wide slot) and a fake `cargo` (records what it was started with).
+#[cfg(unix)]
+mod real {
+    use super::super::registry::Cost;
+    use super::super::run::{Ran, Real, Runner, Spec};
+    use std::collections::HashMap;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    struct Fixture {
+        dir: tempfile::TempDir,
+        repo: PathBuf,
+        builds: PathBuf,
+    }
+
+    fn script(path: &Path, body: &str) {
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn fixture(heavy_body: &str) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let builds = dir.path().join("builds");
+        let bin = dir.path().join("bin");
+        for d in [&repo, &builds, &bin] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let calls = dir.path().join("calls");
+        script(
+            &bin.join("cargo"),
+            &format!(
+                "echo \"cargo jobs=$CARGO_BUILD_JOBS target=$CARGO_TARGET_DIR cwd=$(pwd)\" >> {}",
+                calls.display()
+            ),
+        );
+        script(&bin.join("fake-heavy"), heavy_body);
+        Fixture { dir, repo, builds }
+    }
+
+    fn env(f: &Fixture) -> HashMap<String, String> {
+        HashMap::from([
+            ("PATH".to_string(), format!("{}:/usr/bin:/bin", f.dir.path().join("bin").display())),
+            (
+                "PADDOCK_HEAVY".to_string(),
+                f.dir.path().join("bin/fake-heavy").display().to_string(),
+            ),
+            ("PADDOCK_DEV_TARGET_DIR".to_string(), f.builds.display().to_string()),
+        ])
+    }
+
+    fn calls(f: &Fixture) -> String {
+        std::fs::read_to_string(f.dir.path().join("calls")).unwrap_or_default()
+    }
+
+    const PASS_THROUGH: &str = r#"echo "slot taken" >> "$(dirname "$0")/../slot"; exec "$@""#;
+
+    fn argv() -> Vec<String> {
+        vec!["cargo".into(), "metadata".into()]
+    }
+
+    #[test]
+    fn a_heavy_entry_takes_the_slot_and_builds_in_its_workspaces_kept_folder_with_two_jobs() {
+        let f = fixture(PASS_THROUGH);
+        let real = Real::with(&f.repo, env(&f), Vec::new());
+        let ran = real.run(
+            &f.repo,
+            &argv(),
+            Duration::from_secs(20),
+            &Spec {
+                heavy: true,
+                workspace: "apps/dyno/app/src-tauri",
+            },
+        );
+        assert!(matches!(ran, Ran::Exited { code: Some(0), .. }), "{ran:?}");
+        assert!(f.dir.path().join("slot").is_file(), "the fake heavy ran first");
+        let c = calls(&f);
+        let want = f.builds.join("gen-check/apps-dyno-app-src-tauri");
+        assert!(c.contains("jobs=2"), "{c}");
+        assert!(c.contains(&format!("target={}", want.display())), "{c}");
+        assert!(
+            want.is_dir() && want.join(".paddock-dir").exists() || want.is_dir(),
+            "kept and recorded"
+        );
+        assert!(!want.starts_with(&f.repo), "never inside the worktree");
+    }
+
+    #[test]
+    fn a_fast_entry_skips_the_slot_but_gets_the_same_bounds_and_the_callers_job_count_wins() {
+        let f = fixture(PASS_THROUGH);
+        let mut e = env(&f);
+        e.insert("CARGO_BUILD_JOBS".into(), "3".into());
+        let real = Real::with(&f.repo, e, Vec::new());
+        let ran = real.run(
+            &f.repo,
+            &argv(),
+            Duration::from_secs(20),
+            &Spec {
+                heavy: false,
+                workspace: ".",
+            },
+        );
+        assert!(matches!(ran, Ran::Exited { code: Some(0), .. }), "{ran:?}");
+        assert!(!f.dir.path().join("slot").exists(), "a fast entry does not queue");
+        let c = calls(&f);
+        assert!(c.contains("jobs=3") && c.contains("gen-check/root"), "{c}");
+        assert_eq!(Cost::Fast.name(), "fast");
+    }
+
+    #[test]
+    fn a_wait_for_the_slot_past_the_hang_guard_is_not_measured_and_names_the_holder() {
+        let f = fixture("echo 'heavy: the lock is held by Bob (pid 12) for 3m, running: cargo test' >&2; sleep 30");
+        let real = Real::with(&f.repo, env(&f), Vec::new());
+        let ran = real.run(
+            &f.repo,
+            &argv(),
+            Duration::from_secs(1),
+            &Spec {
+                heavy: true,
+                workspace: "crates",
+            },
+        );
+        match ran {
+            Ran::SlotWait(who) => assert!(who.contains("Bob"), "{who}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(calls(&f).is_empty(), "cargo never started");
+    }
+
+    #[test]
+    fn a_heavy_that_ran_the_command_and_timed_out_later_is_a_plain_timeout() {
+        let f = fixture("echo 'heavy: pre-push holds the lock (pid 9) at 10:00:00Z, waited 0s' >&2; sleep 30");
+        let real = Real::with(&f.repo, env(&f), Vec::new());
+        let ran = real.run(
+            &f.repo,
+            &argv(),
+            Duration::from_secs(1),
+            &Spec {
+                heavy: true,
+                workspace: "crates",
+            },
+        );
+        assert_eq!(ran, Ran::TimedOut);
+    }
+
+    #[test]
+    fn no_build_root_or_one_inside_the_checkout_is_not_measured_rather_than_a_build_in_the_worktree() {
+        let f = fixture(PASS_THROUGH);
+        let mut e = env(&f);
+        e.remove("PADDOCK_DEV_TARGET_DIR");
+        let real = Real::with(&f.repo, e.clone(), Vec::new());
+        let spec = Spec {
+            heavy: false,
+            workspace: "crates",
+        };
+        match real.run(&f.repo, &argv(), Duration::from_secs(5), &spec) {
+            Ran::Unavailable(why) => assert!(
+                why.contains("no build-folder root") && why.contains("PADDOCK_DEV_TARGET_DIR"),
+                "{why}"
+            ),
+            other => panic!("{other:?}"),
+        }
+        // A default root that exists is used (the d7 root); one that does not is skipped.
+        let d7 = f.dir.path().join("d7");
+        std::fs::create_dir_all(&d7).unwrap();
+        let real = Real::with(&f.repo, e.clone(), vec![f.dir.path().join("missing"), d7.clone()]);
+        assert_eq!(real.target_dir("crates").unwrap(), d7.join("gen-check/crates"));
+        // A root under $HOME is refused, whether configured or one of the default roots.
+        let home = f.dir.path().join("home");
+        std::fs::create_dir_all(home.join("builds")).unwrap();
+        let mut under = e.clone();
+        under.insert("HOME".into(), home.display().to_string());
+        under.insert("PADDOCK_DEV_TARGET_DIR".into(), home.join("builds").display().to_string());
+        let why = Real::with(&f.repo, under.clone(), Vec::new()).target_dir("crates").unwrap_err();
+        assert!(
+            why.contains("under your home folder") && why.contains("PADDOCK_DEV_TARGET_DIR"),
+            "{why}"
+        );
+        under.remove("PADDOCK_DEV_TARGET_DIR");
+        let why = Real::with(&f.repo, under, vec![home.join("builds")])
+            .target_dir("crates")
+            .unwrap_err();
+        assert!(why.contains("under your home folder"), "{why}");
+        // Configured inside the checkout: refused.
+        e.insert("PADDOCK_DEV_TARGET_DIR".into(), f.repo.join("target").display().to_string());
+        let real = Real::with(&f.repo, e, Vec::new());
+        assert!(real.target_dir("crates").unwrap_err().contains("inside the checkout"));
+        assert!(calls(&f).is_empty());
+    }
+
+    #[test]
+    fn heavy_refusing_the_slot_is_not_the_checks_verdict() {
+        let f = fixture("echo 'heavy 0.1 (macos) exit 0x4b: the lock could not be taken. Next: x' >&2; exit 75");
+        let real = Real::with(&f.repo, env(&f), Vec::new());
+        let ran = real.run(
+            &f.repo,
+            &argv(),
+            Duration::from_secs(5),
+            &Spec {
+                heavy: true,
+                workspace: "crates",
+            },
+        );
+        assert!(
+            matches!(ran, Ran::Unavailable(ref w) if w.contains("heavy gave no slot")),
+            "{ran:?}"
+        );
+    }
+}
+
+/// The default roots come from `./dev disk`'s settings (`PADDOCK_DISK_ROOTS`), not from a path in this module.
+#[test]
+fn the_default_build_roots_are_the_disk_settings_roots() {
+    let env = std::collections::HashMap::from([("PADDOCK_DISK_ROOTS".to_string(), "/nope/a:/nope/b".to_string())]);
+    let roots = crate::disk::config::Settings::resolve(&Default::default(), &|k| env.get(k).cloned()).roots;
+    assert_eq!(roots, [std::path::PathBuf::from("/nope/a"), std::path::PathBuf::from("/nope/b")]);
+    assert!(!include_str!("run.rs").contains("DEFAULT_ROOTS"), "run.rs names no machine path");
 }

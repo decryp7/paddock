@@ -4,9 +4,10 @@
 
 use super::registry::{Cost, Generator};
 use paddock_proc::{Limits, Outcome, command, run_bounded};
-use std::path::Path;
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// The longest a check may run, by its cost class. These are hang guards, not measurements: a fast check is a script over files
@@ -36,6 +37,8 @@ pub enum Ran {
     Unavailable(String),
     /// It did not finish within the limit and its tree was ended.
     TimedOut,
+    /// It never got the machine-wide heavy slot within the limit (the text says who held it).
+    SlotWait(String),
     /// It wrote more than the output cap and its tree was ended.
     OutputCap,
 }
@@ -51,16 +54,23 @@ impl Ran {
     }
 }
 
+/// How one check is to be started beyond its command: through the machine-wide heavy slot or not, and for which workspace (its
+/// folder), whose kept build folder it gets.
+#[derive(Debug, Clone, Copy)]
+pub struct Spec<'a> {
+    /// A heavy entry queues for the slot the push gate uses (ER-24), so it never builds beside another heavy step.
+    pub heavy: bool,
+    /// The entry's `cwd`: one kept build folder per workspace.
+    pub workspace: &'a str,
+}
+
 /// Starts programs; faked in tests.
 pub trait Runner: Sync {
-    /// Runs `argv` in `dir`, ending it after `limit`.
-    fn run(&self, dir: &Path, argv: &[String], limit: Duration) -> Ran;
+    /// Runs `argv` in `dir`, ending it after `limit` (the wait for the slot counts).
+    fn run(&self, dir: &Path, argv: &[String], limit: Duration, spec: &Spec) -> Ran;
     /// Whether `path` exists (the `requires` of an entry).
     fn exists(&self, path: &Path) -> bool;
 }
-
-/// The real runner: bounded and started through `paddock-proc`.
-pub struct Real;
 
 /// The program as the OS can start it: on Windows `npm` is `npm.cmd` and is found on the `PATH` with its extension.
 fn resolve(program: &str) -> String {
@@ -72,24 +82,140 @@ fn resolve(program: &str) -> String {
     crate::pathfind::find_program(&path, program, true, &exts).map_or_else(|| program.to_string(), |p| p.to_string_lossy().into_owned())
 }
 
+/// The real runner: bounded and started through `paddock-proc`. Every check runs with `CARGO_BUILD_JOBS` (the caller's, else 2)
+/// and its workspace's kept `CARGO_TARGET_DIR` under the build-folder root; a heavy one is queued through `heavy`.
+pub struct Real {
+    root: PathBuf,
+    env: HashMap<String, String>,
+    /// Build-folder roots tried when `PADDOCK_DEV_TARGET_DIR` is not set (`./dev disk`'s configured roots), first that exists.
+    default_roots: Vec<PathBuf>,
+    built_heavy: OnceLock<Result<PathBuf, String>>,
+}
+
+impl Real {
+    /// The runner for the checkout at `root`, with the process's environment.
+    pub fn new(root: &Path) -> Real {
+        let env: HashMap<String, String> = std::env::vars().collect();
+        // The roots `./dev disk` tracks (PADDOCK_DISK_ROOTS, else its defaults): no machine path is named here.
+        let roots = crate::disk::config::Settings::resolve(&crate::disk::config::CommonArgs::default(), &|k| env.get(k).cloned()).roots;
+        Real::with(root, env, roots)
+    }
+
+    /// The same with an explicit environment and default roots (tests).
+    pub fn with(root: &Path, env: HashMap<String, String>, default_roots: Vec<PathBuf>) -> Real {
+        Real {
+            root: root.to_path_buf(),
+            env,
+            default_roots,
+            built_heavy: OnceLock::new(),
+        }
+    }
+
+    /// The kept build folder of a workspace: `<root>/gen-check/<workspace>`, where the root is `PADDOCK_DEV_TARGET_DIR`, else the
+    /// first of `./dev disk`'s configured roots that exists. Never inside the checkout and never under `$HOME` (ER-14: the
+    /// internal disk), and never on d8 unless that is what is configured.
+    pub fn target_dir(&self, workspace: &str) -> Result<PathBuf, String> {
+        let configured = self.env.get("PADDOCK_DEV_TARGET_DIR").filter(|d| !d.is_empty()).map(PathBuf::from);
+        let base = configured
+            .or_else(|| self.default_roots.iter().find(|r| r.is_dir()).cloned())
+            .ok_or("there is no build-folder root: set PADDOCK_DEV_TARGET_DIR (generator builds never go inside the worktree or under ~, and not onto d8 unless configured)")?;
+        if let Some(home) = self.env.get("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
+            && base.starts_with(&home)
+        {
+            return Err(format!(
+                "the build-folder root {} is under your home folder ({}), the internal disk; set PADDOCK_DEV_TARGET_DIR to a folder on a build disk",
+                base.display(),
+                home.display()
+            ));
+        }
+        let slug: String = workspace.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+        let dir = base.join("gen-check").join(if slug == "-" { "root".to_string() } else { slug });
+        if dir.starts_with(&self.root) {
+            return Err(format!(
+                "the build folder {} is inside the checkout; point PADDOCK_DEV_TARGET_DIR outside it",
+                dir.display()
+            ));
+        }
+        if !dir.exists() {
+            std::fs::create_dir_all(&dir).map_err(|e| format!("cannot make the build folder {}: {e}", dir.display()))?;
+            // The owner record lets `./dev disk` and `safe_remove` know the folder is a build folder of ours.
+            let _ = crate::disk::record::write(
+                &dir,
+                &crate::disk::record::Record::new(crate::disk::record::Kind::Build, "dev:gen-check"),
+            );
+        }
+        Ok(dir)
+    }
+}
+
 impl Runner for Real {
-    fn run(&self, dir: &Path, argv: &[String], limit: Duration) -> Ran {
-        let Some((program, args)) = argv.split_first() else {
+    fn run(&self, dir: &Path, argv: &[String], limit: Duration, spec: &Spec) -> Ran {
+        let target = match self.target_dir(spec.workspace) {
+            Ok(t) => t,
+            Err(why) => return Ran::Unavailable(why),
+        };
+        let mut full: Vec<String> = Vec::new();
+        if spec.heavy {
+            // The same resolver as the push gate; a heavy built from the tree goes into the configured root, not the checkout.
+            let mut env = self.env.clone();
+            if let Some(root) = target.parent().and_then(Path::parent) {
+                env.entry("PADDOCK_DEV_TARGET_DIR".into())
+                    .or_insert_with(|| root.display().to_string());
+            }
+            match crate::pre_push::exec::heavy_command_for(
+                &self.root,
+                &env,
+                &|p| crate::pre_push::exec::on_path(&self.env, p),
+                &self.built_heavy,
+                limit,
+            ) {
+                Ok(prefix) => full.extend(prefix),
+                Err(why) => return Ran::Unavailable(format!("no machine-wide heavy slot: {why}")),
+            }
+        }
+        full.extend(argv.iter().cloned());
+        let Some((program, args)) = full.split_first() else {
             return Ran::Unavailable("the entry names no command".into());
         };
+        let jobs = self
+            .env
+            .get("CARGO_BUILD_JOBS")
+            .filter(|j| !j.is_empty())
+            .cloned()
+            .unwrap_or_else(|| "2".into());
         let mut cmd = command(resolve(program));
-        cmd.current_dir(dir).args(args);
+        // The whole environment as this runner has it (the process's, in production): the program is looked up on its PATH.
+        cmd.env_clear()
+            .envs(&self.env)
+            .current_dir(dir)
+            .args(args)
+            .env("CARGO_TARGET_DIR", &target)
+            .env("CARGO_BUILD_JOBS", jobs);
         match run_bounded(cmd, Limits::new(limit).max_output(1 << 22).stop_on_cap()) {
             Ok(o) => match o.outcome {
                 Outcome::Exited(status) => {
                     let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
+                    // heavy's own refusals (it could not take the lock, or refused the folder) are not the check's verdict.
+                    if spec.heavy && matches!(status.code(), Some(75 | 78)) && text.contains("heavy ") {
+                        return Ran::Unavailable(format!(
+                            "heavy gave no slot (status {}): {}",
+                            status.code().unwrap_or(0),
+                            tail(&text)
+                        ));
+                    }
                     Ran::Exited {
                         code: status.code(),
                         tail: tail(&text),
                         text,
                     }
                 }
-                Outcome::TimedOut => Ran::TimedOut,
+                Outcome::TimedOut => {
+                    let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
+                    match crate::pre_push::exec::slot_wait(&text).filter(|_| spec.heavy) {
+                        Some(w) => Ran::SlotWait(w),
+                        None => Ran::TimedOut,
+                    }
+                }
                 Outcome::OutputCap => Ran::OutputCap,
             },
             Err(e) => Ran::Unavailable(e.to_string()),
@@ -253,12 +379,24 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, log: &(dyn Fn(&str) + Sy
     }
     log(&format!("gen {}: running [{}] {}", g.id, g.cost.name(), g.check_line()));
     let start = Instant::now();
-    let ran = runner.run(&dir, &g.check, limit(g.cost));
+    let ran = runner.run(
+        &dir,
+        &g.check,
+        limit(g.cost),
+        &Spec {
+            heavy: g.cost == Cost::Heavy,
+            workspace: &g.cwd,
+        },
+    );
     let took = start.elapsed();
     let verdict = match ran {
         Ran::Exited { code: Some(0), .. } => Verdict::Current,
         Ran::Exited { code, tail, text } => classify_failure(g, code, &tail, &text),
         Ran::Unavailable(why) => Verdict::NotMeasured(why),
+        Ran::SlotWait(who) => Verdict::NotMeasured(format!(
+            "it waited {} s, the hang guard, for the machine-wide heavy slot and never started ({who}); run it again when the machine is quieter",
+            limit(g.cost).as_secs()
+        )),
         Ran::TimedOut => Verdict::NotMeasured(format!("it did not finish within {} s and was ended", limit(g.cost).as_secs())),
         Ran::OutputCap => Verdict::NotMeasured("it wrote more output than the cap (4 MiB) and was ended".into()),
     };
