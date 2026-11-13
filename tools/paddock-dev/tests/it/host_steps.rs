@@ -91,6 +91,7 @@ fn norm(text: &str, fx: &Fx) -> String {
     let private = regex::Regex::new(r"<ROOT>/tmp/(tmp\.[A-Za-z0-9]+|guardian-as-user\.[0-9]+\.[0-9]+)").unwrap();
     let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
+    let bash_killed = regex::Regex::new(r": line \d+: +\d+ Killed ").unwrap();
     text.replace(&root, "<ROOT>")
         .lines()
         // The wrapper contract's lines, and the one line per pattern the Rust clean-up adds (ER-27).
@@ -100,8 +101,10 @@ fn norm(text: &str, fx: &Fx) -> String {
                 && !l.starts_with("ran: ")
                 && !l.starts_with("host-cleanup: pattern ")
                 && !l.starts_with("kit: ")
-                // bash's own note about the phase it killed at its limit (a job-control message, not the step's).
+                // bash's own note about the phase it killed at its limit (a job-control message, not the step's): macOS bash 3.2
+                // says `Killed: 9`, Linux bash 5 `<script>: line N: <pid> Killed  <command>`.
                 && !l.contains(" Killed: 9 ")
+                && !bash_killed.is_match(l)
         })
         .map(|l| {
             let l = dur.replace_all(l, " in N s").to_string();
@@ -127,6 +130,11 @@ fn norm(text: &str, fx: &Fx) -> String {
                 .replace_all(&l, "$1 N$2")
                 .to_string()
                 .replace(" (.gitea/actions/host-tools)", "");
+            // The guardian shell ends its error with the next step as a plain sentence; the Rust line says `Next step:`, cut below.
+            let l = l.replace(
+                ". Run the same command in the CI image to see it",
+                ". Next step: run the same command in the CI image to see it.",
+            );
             match (l.starts_with("::error::"), l.find(" Next step: ")) {
                 (true, Some(at)) => l[..at].to_string(),
                 _ => l,
