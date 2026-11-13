@@ -166,7 +166,7 @@ impl Outcome {
     }
 
     /// The reason or the findings, as one line for the table.
-    pub(crate) fn detail(&self) -> String {
+    pub fn detail(&self) -> String {
         match self {
             Outcome::Clean(_) => String::new(),
             Outcome::KnownCommit(_) => {

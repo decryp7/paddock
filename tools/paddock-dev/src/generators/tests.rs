@@ -71,6 +71,12 @@ impl Runner for Fake {
             .push(format!("{} :: {}", dir.file_name().unwrap().to_string_lossy(), argv.join(" ")));
         self.answers.get(&argv[1]).cloned().unwrap_or(Ran::exit(0, ""))
     }
+    fn subject(&self, _root: &Path) -> paddock_cli::Subject {
+        paddock_cli::Subject::Files {
+            head: paddock_cli::outcome::Sha::new("h"),
+            digest: paddock_cli::outcome::Sha256::new("d"),
+        }
+    }
     fn exists(&self, path: &Path) -> bool {
         let rel = path.strip_prefix("/r").unwrap().to_string_lossy().into_owned();
         rel.is_empty() || rel == "crates" || self.files.contains(&rel)
@@ -476,4 +482,34 @@ fn the_default_build_roots_are_the_disk_settings_roots() {
     let roots = crate::disk::config::Settings::resolve(&Default::default(), &|k| env.get(k).cloned()).roots;
     assert_eq!(roots, [std::path::PathBuf::from("/nope/a"), std::path::PathBuf::from("/nope/b")]);
     assert!(!include_str!("run.rs").contains("DEFAULT_ROOTS"), "run.rs names no machine path");
+}
+
+/// ADR 0089 amendment 4: the pass is made only by `measure`, from the check's own exit 0, and says what it is a pass of.
+#[test]
+fn a_current_generator_carries_its_evidence_and_the_exit_comes_only_from_the_outcomes() {
+    let fake = Fake::default();
+    let r = run(&fake, &["ui/a.ts"], false, &[]);
+    assert_eq!(r.exit, Exit::Ok);
+    let o = &r.data["results"][0]["outcome"];
+    assert_eq!(o["status"], "clean");
+    assert_eq!(o["evidence"]["check"], "gen:i18n");
+    assert_eq!(o["evidence"]["subject"]["kind"], "files");
+}
+
+/// "Delete the check": a generator whose check could not run (the program gone) gives 6, never 0; "skip the gate": a worker
+/// that never stored its result gives 6 as well.
+#[test]
+fn a_deleted_check_and_a_skipped_worker_are_exit_6_not_a_pass() {
+    let mut fake = Fake::default();
+    fake.answers.insert("i18n.mjs".into(), Ran::Unavailable("node is not installed".into()));
+    assert_eq!(run(&fake, &["ui/a.ts"], false, &[]).exit, Exit::NotMeasured);
+    let lost = super::run::Checked {
+        id: "x".into(),
+        line: "l".into(),
+        regenerate: "r".into(),
+        cost: super::registry::Cost::Fast,
+        outcome: paddock_cli::Outcome::NotMeasured(paddock_cli::Reason::new("the check did not run (a worker ended early)")),
+        took: std::time::Duration::ZERO,
+    };
+    assert_eq!(super::exit_of(&[lost]), Exit::NotMeasured);
 }

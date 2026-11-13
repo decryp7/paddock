@@ -3,7 +3,8 @@
 //! entry requires, a timeout.
 
 use super::registry::{Cost, Generator};
-use paddock_proc::{Limits, Outcome, command, run_bounded};
+use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, Unmeasured, measure};
+use paddock_proc::{Limits, command, run_bounded};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -70,6 +71,8 @@ pub trait Runner: Sync {
     fn run(&self, dir: &Path, argv: &[String], limit: Duration, spec: &Spec) -> Ran;
     /// Whether `path` exists (the `requires` of an entry).
     fn exists(&self, path: &Path) -> bool;
+    /// What a check of the tree at `root` is about: its head and a digest of the working tree the checks read.
+    fn subject(&self, root: &Path) -> Subject;
 }
 
 /// The program as the OS can start it: on Windows `npm` is `npm.cmd` and is found on the `PATH` with its extension.
@@ -193,7 +196,7 @@ impl Runner for Real {
             .env("CARGO_BUILD_JOBS", jobs);
         match run_bounded(cmd, Limits::new(limit).max_output(1 << 22).stop_on_cap()) {
             Ok(o) => match o.outcome {
-                Outcome::Exited(status) => {
+                paddock_proc::Outcome::Exited(status) => {
                     let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
                     // heavy's own refusals (it could not take the lock, or refused the folder) are not the check's verdict.
                     if spec.heavy && matches!(status.code(), Some(75 | 78)) && text.contains("heavy ") {
@@ -209,14 +212,14 @@ impl Runner for Real {
                         text,
                     }
                 }
-                Outcome::TimedOut => {
+                paddock_proc::Outcome::TimedOut => {
                     let text = format!("{}\n{}", o.stderr_text(), o.stdout_text());
                     match crate::pre_push::exec::slot_wait(&text).filter(|_| spec.heavy) {
                         Some(w) => Ran::SlotWait(w),
                         None => Ran::TimedOut,
                     }
                 }
-                Outcome::OutputCap => Ran::OutputCap,
+                paddock_proc::Outcome::OutputCap => Ran::OutputCap,
             },
             Err(e) => Ran::Unavailable(e.to_string()),
         }
@@ -224,6 +227,27 @@ impl Runner for Real {
 
     fn exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn subject(&self, root: &Path) -> Subject {
+        working_tree(root)
+    }
+}
+
+/// The head and a SHA-256 of the working tree's state (`git diff HEAD` and the untracked files' names): what a generator check
+/// that reads files is a check of. A git that cannot answer gives `unknown`, which no consumer matches to a commit.
+pub fn working_tree(root: &Path) -> Subject {
+    use sha2::{Digest, Sha256};
+    let git = crate::merge_check::git::Git::new(root);
+    let head = git.text(&["rev-parse", "HEAD"]).map(|t| t.trim().to_string()).unwrap_or_else(|_| "unknown".into());
+    let mut h = Sha256::new();
+    for args in [&["diff", "HEAD"][..], &["ls-files", "--others", "--exclude-standard"][..]] {
+        h.update(git.text(args).unwrap_or_default());
+    }
+    let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    Subject::Files {
+        head: paddock_cli::outcome::Sha::new(head),
+        digest: paddock_cli::outcome::Sha256::new(hex),
     }
 }
 
@@ -261,17 +285,6 @@ fn status_says_not_measured(code: i32) -> bool {
     matches!(code, 6 | 126 | 127)
 }
 
-/// What one check found.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Verdict {
-    /// The check passed: the files are current.
-    Current,
-    /// The check failed: the files are stale (or the check itself is broken; the tail says).
-    Stale(String),
-    /// The check did not look; the text says why.
-    NotMeasured(String),
-}
-
 /// One generator's result.
 #[derive(Debug, Clone)]
 pub struct Checked {
@@ -283,8 +296,8 @@ pub struct Checked {
     pub regenerate: String,
     /// Fast or heavy.
     pub cost: Cost,
-    /// What it found.
-    pub verdict: Verdict,
+    /// What it found: an [`Outcome`] made by `measure` (the check's exit 0 is the probe inside it), or not measured.
+    pub outcome: Outcome,
     /// How long it took (zero when it did not run).
     pub took: Duration,
 }
@@ -292,6 +305,7 @@ pub struct Checked {
 /// Runs the checks of `due` in `root`: the fast ones up to [`PARALLEL`] at a time, then the heavy ones one by one. Results are
 /// in the order of `due`. `log` gets one line when a check starts and one when it ends.
 pub fn execute(root: &Path, due: &[&Generator], runner: &dyn Runner, log: &(dyn Fn(&str) + Sync)) -> Vec<Checked> {
+    let subject = runner.subject(root);
     let slots: Vec<Mutex<Option<Checked>>> = due.iter().map(|_| Mutex::new(None)).collect();
     let fast: Vec<usize> = (0..due.len()).filter(|&i| due[i].cost == Cost::Fast).collect();
     let next = AtomicUsize::new(0);
@@ -301,13 +315,13 @@ pub fn execute(root: &Path, due: &[&Generator], runner: &dyn Runner, log: &(dyn 
                 loop {
                     let k = next.fetch_add(1, Ordering::SeqCst);
                     let Some(&i) = fast.get(k) else { break };
-                    store(&slots[i], one(root, due[i], runner, log));
+                    store(&slots[i], one(root, due[i], runner, &subject, log));
                 }
             });
         }
     });
     for (i, g) in due.iter().enumerate().filter(|(_, g)| g.cost == Cost::Heavy) {
-        store(&slots[i], one(root, g, runner, log));
+        store(&slots[i], one(root, g, runner, &subject, log));
     }
     slots
         .into_iter()
@@ -318,32 +332,34 @@ pub fn execute(root: &Path, due: &[&Generator], runner: &dyn Runner, log: &(dyn 
                 line: g.check_line(),
                 regenerate: g.regenerate_line(),
                 cost: g.cost,
-                verdict: Verdict::NotMeasured("the check did not run (a worker ended early)".into()),
+                outcome: Outcome::NotMeasured(Reason::new("the check did not run (a worker ended early)")),
                 took: Duration::ZERO,
             })
         })
         .collect()
 }
 
-/// A check that failed: drift only when it says so. A crash, a missing tool, a build that does not compile, a status that means
-/// "could not look", or (when the entry names `drift_marker`s) a failure that carries none of them is NOT MEASURED.
-pub fn classify_failure(g: &Generator, code: Option<i32>, tail: &str, text: &str) -> Verdict {
+/// A check that failed: drift only when it says so (a failing finding). A crash, a missing tool, a build that does not compile, a
+/// status that means "could not look", or (when the entry names `drift_marker`s) a failure that carries none of them is NOT
+/// MEASURED.
+pub fn classify_failure(g: &Generator, code: Option<i32>, tail: &str, text: &str) -> Result<Vec<Finding>, Unmeasured> {
+    let not = |why: String| Err(Unmeasured::NotMeasured(Reason::new(why)));
     if let Some(c) = code.filter(|c| status_says_not_measured(*c)) {
-        return Verdict::NotMeasured(format!("it ended with status {c} (could not look): {tail}"));
+        return not(format!("it ended with status {c} (could not look): {tail}"));
     }
     if code.is_none() {
-        return Verdict::NotMeasured(format!("it was ended by a signal: {tail}"));
+        return not(format!("it was ended by a signal: {tail}"));
     }
     if let Some(why) = broken_tool(text) {
-        return Verdict::NotMeasured(format!("the tool did not run to a verdict ({why}): {tail}"));
+        return not(format!("the tool did not run to a verdict ({why}): {tail}"));
     }
     if !g.drift_marker.is_empty() && !g.drift_marker.iter().any(|m| text.contains(m.as_str())) {
-        return Verdict::NotMeasured(format!(
+        return not(format!(
             "it failed without saying the files are stale (expected one of {:?}), so it did not reach a verdict: {tail}",
             g.drift_marker
         ));
     }
-    Verdict::Stale(tail.to_string())
+    Ok(vec![Finding::failing(tail)])
 }
 
 fn store(slot: &Mutex<Option<Checked>>, c: Checked) {
@@ -352,20 +368,20 @@ fn store(slot: &Mutex<Option<Checked>>, c: Checked) {
     }
 }
 
-fn one(root: &Path, g: &Generator, runner: &dyn Runner, log: &(dyn Fn(&str) + Sync)) -> Checked {
-    let done = |verdict: Verdict, took: Duration| Checked {
+fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: &(dyn Fn(&str) + Sync)) -> Checked {
+    let done = |outcome: Outcome, took: Duration| Checked {
         id: g.id.clone(),
         line: g.check_line(),
         regenerate: g.regenerate_line(),
         cost: g.cost,
-        verdict,
+        outcome,
         took,
     };
     if let Some(missing) = g.requires.iter().find(|r| !runner.exists(&root.join(r))) {
         let c = done(
-            Verdict::NotMeasured(format!(
+            Outcome::NotMeasured(Reason::new(format!(
                 "not on this tree: {missing} is missing (the check needs it: install or build what provides it, or merge the branch that adds it)"
-            )),
+            ))),
             Duration::ZERO,
         );
         log(&format!("gen {}: NOT MEASURED, not on this tree ({missing} is missing)", g.id));
@@ -375,7 +391,7 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, log: &(dyn Fn(&str) + Sy
     if !runner.exists(&dir) {
         let why = format!("the folder {} does not exist on this tree", g.cwd);
         log(&format!("gen {}: NOT MEASURED, {why}", g.id));
-        return done(Verdict::NotMeasured(why), Duration::ZERO);
+        return done(Outcome::NotMeasured(Reason::new(why)), Duration::ZERO);
     }
     log(&format!("gen {}: running [{}] {}", g.id, g.cost.name(), g.check_line()));
     let start = Instant::now();
@@ -389,24 +405,29 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, log: &(dyn Fn(&str) + Sy
         },
     );
     let took = start.elapsed();
-    let verdict = match ran {
-        Ran::Exited { code: Some(0), .. } => Verdict::Current,
-        Ran::Exited { code, tail, text } => classify_failure(g, code, &tail, &text),
-        Ran::Unavailable(why) => Verdict::NotMeasured(why),
-        Ran::SlotWait(who) => Verdict::NotMeasured(format!(
-            "it waited {} s, the hang guard, for the machine-wide heavy slot and never started ({who}); run it again when the machine is quieter",
-            limit(g.cost).as_secs()
-        )),
-        Ran::TimedOut => Verdict::NotMeasured(format!("it did not finish within {} s and was ended", limit(g.cost).as_secs())),
-        Ran::OutputCap => Verdict::NotMeasured("it wrote more output than the cap (4 MiB) and was ended".into()),
-    };
-    let word = match &verdict {
-        Verdict::Current => "current",
-        Verdict::Stale(_) => "STALE",
-        Verdict::NotMeasured(_) => "NOT MEASURED",
+    let tool = ToolVersion::new(concat!("paddock-dev ", env!("CARGO_PKG_VERSION")));
+    let outcome = measure(CheckId::new(format!("gen:{}", g.id)), subject.clone(), tool, UnixSeconds::now(), || {
+        let not = |why: String| Err(Unmeasured::NotMeasured(Reason::new(why)));
+        match ran {
+            // The check's own exit 0 is the probe: only `measure` turns it into a pass.
+            Ran::Exited { code: Some(0), .. } => Ok(Vec::new()),
+            Ran::Exited { code, tail, text } => classify_failure(g, code, &tail, &text),
+            Ran::Unavailable(why) => not(why),
+            Ran::SlotWait(who) => not(format!(
+                "it waited {} s, the hang guard, for the machine-wide heavy slot and never started ({who}); run it again when the machine is quieter",
+                limit(g.cost).as_secs()
+            )),
+            Ran::TimedOut => not(format!("it did not finish within {} s and was ended", limit(g.cost).as_secs())),
+            Ran::OutputCap => not("it wrote more output than the cap (4 MiB) and was ended".into()),
+        }
+    });
+    let word = match &outcome {
+        Outcome::Clean(_) => "current",
+        Outcome::Findings(_) => "STALE",
+        _ => "NOT MEASURED",
     };
     log(&format!("gen {}: {word} in {:.1}s", g.id, took.as_secs_f64()));
-    done(verdict, took)
+    done(outcome, took)
 }
 
 #[cfg(test)]
