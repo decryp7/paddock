@@ -195,7 +195,8 @@ impl Outcome {
         }
     }
 
-    pub(crate) fn json(&self) -> Value {
+    /// The result as the wire object a consumer reads with [`Outcome::from_wire`].
+    pub fn json(&self) -> Value {
         match self {
             Outcome::Clean(p) => p.json(),
             Outcome::KnownCommit(k) => k.json(),

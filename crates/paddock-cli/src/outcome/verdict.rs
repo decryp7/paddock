@@ -1,6 +1,6 @@
 //! Folding a run's outcomes into one exit code (ADR 0089 section 2).
 
-use super::{Optional, Outcome, Run, Scope};
+use super::{Date, Optional, Outcome, Run, RunKind, Scope};
 use crate::{Exit, Table};
 use serde_json::{Value, json};
 
@@ -103,6 +103,18 @@ impl Verdict {
         }
     }
 
+    /// Folds `outcomes` for a tool with no `[[optional]]` register: an ordinary whole-tree run, so nothing is excused, a
+    /// not-applicable item counts as not measured, and no outcome at all is [`Exit::NotMeasured`].
+    pub fn strict<S: Into<String>>(outcomes: impl IntoIterator<Item = (S, Outcome)>) -> Verdict {
+        let today =
+            Date::parse("2000-01-01").unwrap_or_else(|_| unreachable!("a fixed valid date"));
+        Verdict::of(
+            outcomes,
+            &Optional::none(),
+            &Run::new(RunKind::Ordinary, Scope::Root, "any", today),
+        )
+    }
+
     /// The exit code, by the precedence in the module doc.
     pub fn exit(&self) -> Exit {
         if self
@@ -201,7 +213,7 @@ impl Verdict {
 mod tests {
     use super::*;
     use crate::outcome::test_support::{clean, measured};
-    use crate::outcome::{Date, Finding, Reason, RunKind};
+    use crate::outcome::{Finding, Reason};
     use crate::{TableFormat, write_table};
 
     const FILE: &str = "[[optional]]\nid = \"test:cov\"\nwhere = { leg = [\"l\"] }\nreason = \"r\"\nexpires = \"2027-01-31\"\nmeasured_on = [\"m\"]\n";
@@ -564,5 +576,18 @@ mod tests {
             0
         );
         assert_eq!(on("2027-02-01").exit(), Exit::Findings);
+    }
+
+    #[test]
+    fn strict_folds_without_a_register() {
+        let one = |o: Outcome| Verdict::strict(vec![("x", o)]).exit();
+        assert_eq!(one(clean()), Exit::Ok);
+        assert_eq!(one(measured(vec![Finding::failing("f")])), Exit::Findings);
+        assert_eq!(one(Outcome::NotMeasured(reason())), Exit::NotMeasured);
+        assert_eq!(one(Outcome::NotApplicable(reason())), Exit::NotMeasured);
+        assert_eq!(
+            Verdict::strict(Vec::<(&str, Outcome)>::new()).exit(),
+            Exit::NotMeasured
+        );
     }
 }

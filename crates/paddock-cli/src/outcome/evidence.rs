@@ -60,6 +60,17 @@ text_id!(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnixSeconds(pub u64);
 
+impl UnixSeconds {
+    /// The wall clock now (the one place a caller that has no clock of its own asks for it).
+    pub fn now() -> UnixSeconds {
+        UnixSeconds(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs()),
+        )
+    }
+}
+
 /// A CI run's id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RunId(pub u64);

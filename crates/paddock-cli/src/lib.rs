@@ -34,7 +34,7 @@ pub use flags::{CommonFlags, Format};
 pub use help::{Help, version_line};
 pub use outcome::{
     CheckId, Entry, Evidence, Finding, Findings, Optional, Outcome, Reason, Run, RunKind, Scope,
-    Severity, Subject, ToolVersion, Verdict, measure,
+    Severity, Subject, ToolVersion, UnixSeconds, Unmeasured, Verdict, measure,
 };
 pub use progress::{LINE_EVERY, Progress, StopFlag};
 pub use report::{Report, finish};

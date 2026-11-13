@@ -1,7 +1,7 @@
 //! The `paddock-bench` command, as a function over arguments and writers (the binary only calls [`run`]).
 //!
 //! Follows `paddock-cli`: `--json`, `--quiet`, `--help`, `--version`; exit 0 within budget, 1 an unreadable file, 2 a wrong
-//! command line, 5 a budget missed (`Exit::Findings`).
+//! command line, 5 a budget missed (`Exit::Findings`), 6 a budgeted measurement was not recorded or nothing was compared (`Exit::NotMeasured`, ADR 0089).
 
 use crate::{BenchError, Budgets, Results, check};
 use paddock_cli::{CliError, CommonFlags, Exit, Format, Help, Report, finish, version_line};
@@ -34,7 +34,13 @@ fn help() -> Help {
         "propose: room above (below) the measured value, default 25",
     )
     .common_options()
-    .exit_codes(&[Exit::Ok, Exit::Failure, Exit::Usage, Exit::Findings])
+    .exit_codes(&[
+        Exit::Ok,
+        Exit::Failure,
+        Exit::Usage,
+        Exit::Findings,
+        Exit::NotMeasured,
+    ])
     .example("paddock-bench check --budgets bench/budgets.toml --results bench/app.results.json")
 }
 
@@ -115,17 +121,21 @@ fn execute(a: &Args, quiet: bool, err: &mut dyn Write) -> Result<Report, CliErro
                     None
                 }
             });
-            let outcome = check(&budgets, &results, previous.as_ref());
+            let outcome = check(
+                &budgets,
+                &results,
+                previous.as_ref(),
+                crate::check::subject_of(&results, &budgets),
+            );
             let text = if a.markdown {
                 outcome.render_markdown()
             } else {
                 outcome.render_text()
             };
             let report = Report::new(outcome.to_json(), text);
-            Ok(if outcome.failed() {
-                report.with_exit(Exit::Findings)
-            } else {
-                report
+            Ok(match outcome.exit() {
+                Exit::Ok => report,
+                other => report.with_exit(other),
             })
         }
         "propose" => {

@@ -138,3 +138,42 @@ fn propose_writes_a_budgets_file_that_the_check_accepts() {
         .unwrap();
     assert_eq!(out.status.code(), Some(0));
 }
+
+/// ADR 0089 amendment 4.1 and 4.2, end to end: a budget whose measurement the run did not record is exit 6, an empty
+/// results file against an empty budget list (the check deleted) is exit 6, and a pass says what it is a pass of.
+#[test]
+fn a_missing_measurement_or_nothing_compared_is_exit_6_never_0() {
+    let d = tempfile::tempdir().unwrap();
+    let b = write(d.path(), "budgets.toml", BUDGETS);
+    let empty_run = write(
+        d.path(),
+        "empty.json",
+        r#"{"version":1,"app":"demo","app_version":"1","commit":null,"host":{"os":"x","arch":"y","cpus":4},"measurements":[]}"#,
+    );
+    let out = bin()
+        .args(["check", "--budgets", &b, "--results", &empty_run])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(6),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let no_budgets = write(d.path(), "none.toml", "");
+    let out = bin()
+        .args(["check", "--budgets", &no_budgets, "--results", &empty_run])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(6));
+    let ok = write(d.path(), "ok.json", &results(90.0));
+    let out = bin()
+        .args(["check", "--budgets", &b, "--results", &ok, "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["outcomes"][0]["status"], "clean");
+    assert_eq!(v["outcomes"][0]["evidence"]["check"], "bench:demo");
+    assert_eq!(v["outcomes"][0]["evidence"]["subject"]["kind"], "files");
+}

@@ -9,7 +9,7 @@
 //! 2. [`Results::save`] writes the run to the app's results file (`bench/<app>.results.json`, versioned, atomic).
 //! 3. The budgets live in the app's `bench/budgets.toml` ([`Budgets`]): a limit per measurement, a tolerance, and how much
 //!    worse than the previous run counts as a regression.
-//! 4. [`check`] compares results with budgets (and the previous results) and gives a [`Verdict`] per measurement; the
+//! 4. [`check`] compares results with budgets (and the previous results) and gives a [`Standing`] per measurement and an `Outcome` (ADR 0089); the
 //!    `paddock-bench check` command prints it and exits 5 when anything missed, for the nightly workflow
 //!    (`.gitea/workflow-templates/bench-nightly.yml`).
 //!
@@ -27,7 +27,7 @@ mod results;
 mod stats;
 
 pub use budget::{Budget, Budgets, DEFAULT_REGRESSION_PCT, DEFAULT_TOLERANCE_PCT, MAX_BUDGETS};
-pub use check::{Outcome, Row, Summary, Verdict, check};
+pub use check::{Report, Row, Standing, Summary, check};
 pub use cli::run;
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use error::{BenchError, Result};
