@@ -5,7 +5,11 @@
 //!
 //! Blank lines and `#` comment lines are kept as they are and are not entries.
 
-use std::collections::BTreeSet;
+use super::jsre::is_js_space;
+use paddock_proc::{Limits, command, run_bounded};
+use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::path::Path;
+use std::time::Duration;
 
 /// Whether `key` can be an entry: one line, no surrounding white space, not empty, not starting with `#` (that is a comment). A key
 /// that cannot is never in a baseline, so a site with such a key always counts as new (it cannot be baselined by mistake).
@@ -76,6 +80,172 @@ pub fn ensure_shrink_only(old: &str, new: &str) -> Result<(), Vec<String>> {
     let old = Baseline::parse(old);
     let added: Vec<String> = Baseline::parse(new).entries.difference(&old.entries).cloned().collect();
     if added.is_empty() { Ok(()) } else { Err(added) }
+}
+
+/// The result of [`reconcile`], as indexes: the current items with no entry, the entries with no current item, and the moved pairs
+/// (current index, entry index).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Reconciled {
+    /// Current items the baseline does not cover: real additions.
+    pub fresh: Vec<usize>,
+    /// Entries nothing matches any more, in baseline order.
+    pub stale: Vec<usize>,
+    /// Pairs (current, entry) whose loose keys agree but whose exact keys do not: the same text in another place.
+    pub moved: Vec<(usize, usize)>,
+}
+
+/// Matches `current` against `base` entries as `reconcile` in `conformance/src/util/baseline.mjs` does, in two passes: first by the
+/// `exact` key (for example file and hash), then the leftovers by the `loose` key (for example the hash alone), where `can_move
+/// (current index, entry index)` allows the pairing (a site check lets only an entry whose file is gone move; the growth check
+/// lets any). A pass-two match is a MOVED entry: neither new nor stale. With no `loose` nothing moves. Counts are per key, so two
+/// identical lines in two files never hide a real addition.
+pub fn reconcile<T>(
+    current: &[T],
+    base: &[T],
+    exact: &dyn Fn(&T) -> String,
+    loose: Option<&dyn Fn(&T) -> String>,
+    can_move: &dyn Fn(usize, usize) -> bool,
+) -> Reconciled {
+    let mut buckets: HashMap<String, VecDeque<usize>> = HashMap::new();
+    for (i, e) in base.iter().enumerate() {
+        buckets.entry(exact(e)).or_default().push_back(i);
+    }
+    let mut unmatched: BTreeSet<usize> = (0..base.len()).collect();
+    let mut rest = Vec::new();
+    for (n, c) in current.iter().enumerate() {
+        match buckets.get_mut(&exact(c)).and_then(VecDeque::pop_front) {
+            Some(i) => {
+                unmatched.remove(&i);
+            }
+            None => rest.push(n),
+        }
+    }
+    let mut pool: HashMap<String, Vec<usize>> = HashMap::new();
+    if let Some(loose) = loose {
+        for &i in &unmatched {
+            pool.entry(loose(&base[i])).or_default().push(i);
+        }
+    }
+    let (mut fresh, mut moved) = (Vec::new(), Vec::new());
+    for n in rest {
+        let hit = loose.and_then(|loose| {
+            let list = pool.get_mut(&loose(&current[n]))?;
+            let at = list.iter().position(|&i| can_move(n, i))?;
+            Some(list.remove(at))
+        });
+        match hit {
+            Some(i) => {
+                unmatched.remove(&i);
+                moved.push((n, i));
+            }
+            None => fresh.push(n),
+        }
+    }
+    Reconciled {
+        fresh,
+        stale: unmatched.into_iter().collect(),
+        moved,
+    }
+}
+
+/// `git args` in `root`: standard output, or the error line the JavaScript reports (`Command failed: git ...`) and the standard error.
+fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
+    let mut cmd = command("git");
+    cmd.arg("-C").arg(root).args(args);
+    let failed = |e: String| (format!("Command failed: git {}", args.join(" ")), e);
+    match run_bounded(cmd, Limits::new(Duration::from_secs(120)).max_output(1 << 26)) {
+        Ok(out) if out.success() => Ok(out.stdout_text()),
+        Ok(out) => Err(failed(out.stderr_text())),
+        Err(e) => Err(failed(e.to_string())),
+    }
+}
+
+/// A current entry whose loose key is in the baseline at the merge base but whose exact key is not.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Moved<T> {
+    /// Index into the current entries.
+    pub current: usize,
+    /// The merge base's entry it was paired with.
+    pub from: T,
+}
+
+/// What the baseline at the merge base says about the current entries (`baselineGrowth`).
+#[derive(Debug, PartialEq, Eq)]
+pub enum Growth<T> {
+    /// Measured: the merge base, how many current entries it lacks, and which it holds under another place.
+    Added {
+        /// The merge base's commit.
+        base: String,
+        /// Entries the merge base's baseline does not have.
+        added: usize,
+        /// Entries it has under another exact key.
+        moved: Vec<Moved<T>>,
+    },
+    /// Not measurable here (no git, no merge base, an unreadable file): a warning, never silence.
+    Reason(String),
+}
+
+/// The entries of `current` that the baseline file `path` at the merge base with `base_ref` does not have, or the reason that
+/// cannot be measured (`baselineGrowth`). On the target branch itself the commit is compared with its first parent. A baseline
+/// absent at the merge base is the first introduction: nothing was added. `entries_of` reads the entries out of the file's text.
+pub fn growth<T: Clone>(
+    root: &Path,
+    base_ref: &str,
+    path: &str,
+    current: &[T],
+    entries_of: &dyn Fn(&str) -> Option<Vec<T>>,
+    exact: &dyn Fn(&T) -> String,
+    loose: Option<&dyn Fn(&T) -> String>,
+) -> Growth<T> {
+    let lookup = || -> Result<String, (String, String)> {
+        let head = git(root, &["rev-parse", "HEAD"])?.trim_matches(is_js_space).to_string();
+        let mut base = git(root, &["merge-base", "HEAD", base_ref])?.trim_matches(is_js_space).to_string();
+        if base == head {
+            base = git(root, &["rev-parse", "HEAD^1"])?.trim_matches(is_js_space).to_string();
+        }
+        Ok(base)
+    };
+    let base = match lookup() {
+        Ok(b) => b,
+        Err((msg, _)) => {
+            let first: String = msg.split('\n').next().unwrap_or("").chars().take(120).collect();
+            return Growth::Reason(format!("no merge base ({first})"));
+        }
+    };
+    let short = || base.chars().take(9).collect::<String>();
+    let text = match git(root, &["show", &format!("{base}:{path}")]) {
+        Ok(t) => t,
+        Err((_, stderr)) => {
+            let missing = ["does not exist", "exists on disk, but not in", "not in"]
+                .iter()
+                .any(|p| stderr.contains(p));
+            return if missing {
+                Growth::Added {
+                    base,
+                    added: 0,
+                    moved: Vec::new(),
+                }
+            } else {
+                Growth::Reason(format!("the baseline at {} cannot be read", short()))
+            };
+        }
+    };
+    let Some(old) = entries_of(&text) else {
+        return Growth::Reason(format!("the baseline at {} cannot be parsed", short()));
+    };
+    let r = reconcile(current, &old, exact, loose, &|_, _| true);
+    Growth::Added {
+        base,
+        added: r.fresh.len(),
+        moved: r
+            .moved
+            .iter()
+            .map(|&(n, i)| Moved {
+                current: n,
+                from: old[i].clone(),
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]

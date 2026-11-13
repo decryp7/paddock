@@ -10,10 +10,9 @@
 // The fix: `paddock_testkit::net::HeldPort` keeps the port taken (it hangs up or resets), and a test that needs "refused"
 // injects a connector or tests the error mapping. A justified case carries `// conformance: freed-port — <reason>` on the
 // line or the line above.
+import { applyInlineWaiver, inlineWaiver } from '../util/inline-waiver.mjs';
 import { error } from '../finding.mjs';
 
-const WAIVER = /conformance:\s*freed-port\s*[—–-]+\s*(\S.{2,})/;
-const BARE_WAIVER = /conformance:\s*freed-port/;
 /** `TcpListener::bind(` and `TcpSocket::bind(`, under their own names and any `use ... as Alias` of them; `Socket::new(` (socket2). */
 function bindPattern(clean) {
   const names = ['TcpListener', 'TcpSocket'];
@@ -113,7 +112,7 @@ function skipTail(text, i) {
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The freed ports in a Rust source: [{ line, kind, waived: false | 'no-reason' | 'reason' }]. */
+/** The freed ports in a Rust source: [{ line, kind, waived: inlineWaiver(...) }]. */
 export function freedPorts(text) {
   const clean = maskRust(text);
   const raw = text.split('\n');
@@ -122,7 +121,7 @@ export function freedPorts(text) {
   const push = (i, kind) => {
     const line = lineOf(i);
     const here = `${raw[line - 1] ?? ''}\n${raw[line - 2] ?? ''}`;
-    const waived = WAIVER.test(here) ? 'reason' : BARE_WAIVER.test(here) ? 'no-reason' : false;
+    const waived = inlineWaiver(here, 'freed-port');
     out.push({ line, kind, waived });
   };
   for (const m of clean.matchAll(bindPattern(clean))) {
@@ -181,9 +180,8 @@ export default {
       if (!text || !/::bind\s*\(/.test(text)) continue;
       for (const p of freedPorts(text)) {
         const what = { chain: 'reads the port of a listener it drops at once', block: 'returns the port of a listener the block drops', drop: 'drops a listener whose port it read' }[p.kind];
-        if (p.waived === 'reason') continue;
-        if (p.waived === 'no-reason') out.push(error('C39', 40, f, p.line, `the freed-port waiver gives no reason`, 'Write `// conformance: freed-port — <why the port may be freed>`.'));
-        else out.push(error('C39', 40, f, p.line, `${what}: another process may be given the port before the test uses it`, fix));
+        const site = error('C39', 40, f, p.line, `${what}: another process may be given the port before the test uses it`, fix);
+        out.push(applyInlineWaiver(p.waived, site, () => error('C39', 40, f, p.line, `the freed-port waiver gives no reason`, 'Write `// conformance: freed-port — <why the port may be freed>`.')));
       }
     }
     return out;

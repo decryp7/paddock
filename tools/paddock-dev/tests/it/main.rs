@@ -6,6 +6,8 @@ mod build_jobs_golden;
 mod check;
 mod check_c119;
 mod check_c120;
+mod check_engine;
+mod check_util;
 mod ci_isolation;
 mod ci_isolation_windows;
 mod cli;

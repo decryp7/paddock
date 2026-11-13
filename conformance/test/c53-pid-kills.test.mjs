@@ -15,13 +15,13 @@ test('C53 bad: Windows ends, kill programs and open follow-ups', () => {
   assert.deepEqual(lines('fn a() {\n    std::process::Command::new("kill").arg("-9");\n    paddock_proc::command("pkill");\n}\n'), [2, 3]);
   assert.deepEqual(lines('fn a() {\n    ps.arg("Stop-Process -Id 42 -Force");\n    Command::new("/bin/kill");\n}\n'), [2, 3]);
   const marked = pidKills('#[expect(clippy::disallowed_methods, reason = "ADR 0033 WP-5: killpg after reap")]\nfn a() {}\n// ADR 0033 WP-6: parent pids\n');
-  assert.deepEqual(marked.map((k) => [k.line, k.waived]), [[1, undefined], [3, undefined]]);
+  assert.deepEqual(marked.map((k) => [k.line, k.waived.state]), [[1, 'none'], [3, 'none']]);
   assert.match(marked[0].what, /WP-5/);
   assert.deepEqual(lines('#![allow(clippy::unwrap_used, clippy::disallowed_methods)]\nfn a() {}\n'), [1]);
   assert.deepEqual(lines('#![cfg_attr(test, allow(clippy::disallowed_methods))]\n'), [1]);
   assert.deepEqual(lines('#[allow(clippy::disallowed_methods)]\nfn a() {}\n// #![allow(clippy::disallowed_methods)]\n'), [], 'an item-level allow and a comment are fine');
   // conformance: pid-kill does not waive a follow-up marker
-  assert.equal(pidKills('// conformance: pid-kill — no\n// ADR 0033 WP-6: x\n')[0].waived, undefined);
+  assert.equal(pidKills('// conformance: pid-kill — no\n// ADR 0033 WP-6: x\n')[0].waived.state, 'none');
 });
 
 test('C53 good: Child::kill, a lookup without a kill, comments and strings', () => {
@@ -35,8 +35,8 @@ test('C53 good: Child::kill, a lookup without a kill, comments and strings', () 
 
 test('C53 waivers: with a reason the site passes, without one it is reported', () => {
   const k = pidKills('fn a(h: HANDLE) {\n    // conformance: pid-kill — a handle we own\n    unsafe { TerminateProcess(h, 1) };\n}\n');
-  assert.equal(k[0].waived, 'reason');
-  assert.equal(pidKills('fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) }; // conformance: pid-kill\n}\n')[0].waived, 'no-reason');
+  assert.equal(k[0].waived.state, 'reason');
+  assert.equal(pidKills('fn a(h: HANDLE) {\n    unsafe { TerminateProcess(h, 1) }; // conformance: pid-kill\n}\n')[0].waived.state, 'no-reason');
 });
 
 test('C53 through the runner: an error per bare-pid kill, none in the one implementation or for a waived site', async () => {
@@ -93,9 +93,9 @@ test('C53 liveness precision: signals, the own pid, aliases and globs', () => {
 
 test('C53 liveness waivers: a reason passes, none is reported', () => {
   const ok = pidLiveness('fn a(pid: u32) -> bool {\n    // conformance: pid-liveness — the pid came from our own child handle\n    paddock_proc::is_alive(pid)\n}\n', 'crates/a/src/x.rs');
-  assert.equal(ok[0].waived, 'reason');
+  assert.equal(ok[0].waived.state, 'reason');
   const bare = pidLiveness('fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid) // conformance: pid-liveness\n}\n', 'crates/a/src/x.rs');
-  assert.equal(bare[0].waived, 'no-reason');
+  assert.equal(bare[0].waived.state, 'no-reason');
 });
 
 const entry = (file, text) => ({ file, hash: lineHash(text) });

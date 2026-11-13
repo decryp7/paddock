@@ -819,6 +819,136 @@
         "reason": "covered by a waiver in the file",
         "expires": "2099-01-01"
       }
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/a/src/c39_waivers.rs",
+      "line": 3,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+      "waiver": {
+        "reason": "the child process binds it and the start retries on a taken port",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/a/src/c39_waivers.rs",
+      "line": 15,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+      "waiver": {
+        "reason": "handed to a child",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/a/tests/c39_crlf.rs",
+      "line": 3,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+      "waiver": {
+        "reason": "reason with CRLF",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d11.rs",
+      "line": 1,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+      "waiver": {
+        "reason": "- a",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d11.rs",
+      "line": 5,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+      "waiver": {
+        "reason": "abc",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d2.rs",
+      "line": 1,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+      "waiver": {
+        "reason": "😀a",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C39",
+      "severity": "error",
+      "rule": 40,
+      "file": "crates/e/src/d4.rs",
+      "line": 1,
+      "message": "reads the port of a listener it drops at once: another process may be given the port before the test uses it",
+      "fix": "Keep the port taken: `paddock_testkit::net::HeldPort::hang_up()` / `::reset()`; for \"refused\", inject a connector or test the error mapping (ADR 0023). A justified case carries `// conformance: freed-port — <reason>`.",
+      "waiver": {
+        "reason": "é😀",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/a/src/c53_waivers.rs",
+      "line": 3,
+      "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+      "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`.",
+      "waiver": {
+        "reason": "a handle we own",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/e/src/d3.rs",
+      "line": 1,
+      "message": "ends a process with `TerminateProcess`: the pid may belong to another process by now",
+      "fix": "End it through `paddock_proc` with a `ProcessId` (`kill_tree`, `end`, `terminate`; `Supervised` for a child), or through a handle or job object this process owns (ADR 0033). A justified case carries `// conformance: pid-kill — <reason>`.",
+      "waiver": {
+        "reason": "😀b",
+        "expires": "inline"
+      }
+    },
+    {
+      "check": "C53",
+      "severity": "error",
+      "rule": 53,
+      "file": "crates/a/src/c53_liveness_good.rs",
+      "line": 25,
+      "message": "asks `paddock_proc::is_alive` about a raw pid: the pid may belong to another process by now",
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`.",
+      "waiver": {
+        "reason": "the pid came from a child handle this process owns",
+        "expires": "inline"
+      }
     }
   ],
   "errors": 82,

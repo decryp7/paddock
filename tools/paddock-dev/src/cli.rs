@@ -50,6 +50,15 @@ enum Command {
         #[command(subcommand)]
         command: LocksCommand,
     },
+    /// The conformance checks on the Rust host, with the command line, output and exit codes of `paddock-conformance`
+    /// (`--app`, `--root`, `--only`, `--strict`, `--json`, `--out`, `--summary`, `list`, `commands`). It runs the checks ported so far;
+    /// `node conformance/bin/paddock-conformance.mjs` keeps the rest.
+    #[command(disable_help_flag = true)]
+    Conformance {
+        /// The arguments of `paddock-conformance`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
     /// Repository checks of the family.
     Check {
         #[command(subcommand)]
@@ -450,6 +459,10 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             .with_hint("Its output is the planner's own: JSON for a plan, true or false, a range.");
         return finish(Format::Json, Err(e), out, err).code();
     }
+    if let Command::Conformance { args } = &cli.command {
+        // The conformance host's contract: its own text or JSON on standard output, `::error::` lines, exit 0, 1, 2, 6 or 7.
+        return check::conformance::run(args, out, err, &|k| std::env::var(k).ok());
+    }
     if let Command::Ci {
         command: CiCommand::Isolation(a),
     } = &cli.command
@@ -560,6 +573,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Run(_),
         } => Err(CliError::failure("`ci run` was dispatched through the report path.")),
+        Command::Conformance { .. } => Err(CliError::failure("`conformance` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::Host(_),
         } => Err(CliError::failure("a `ci` host step was dispatched through the report path.")),

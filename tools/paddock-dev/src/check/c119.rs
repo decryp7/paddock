@@ -10,6 +10,7 @@
 //! The port of `conformance/src/checks/C119-dev-before-toolchain.mjs`, finding for finding (`tests/it/check_c119.rs` compares them).
 
 use super::finding::Finding;
+use super::inline_waiver::{InlineWaiver, recognise};
 use super::jsre::rx;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -17,8 +18,6 @@ use regex::Regex;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx("conformance:\\s*dev-before-toolchain[ \\t]*[—–-]+[ \\t]*(\\S.{2,})"));
-static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx("conformance:\\s*dev-before-toolchain"));
 static SETS_UP: LazyLock<Regex> = LazyLock::new(|| rx("kit\\.sh|--ensure-toolchain|actions/setup-rust"));
 static RUNS_DEV: LazyLock<Regex> = LazyLock::new(|| rx("(?:^|[\\s;&|(])\\./dev(?:\\s|$)"));
 static KIT_LINE: LazyLock<Regex> = LazyLock::new(|| rx("kit\\.sh|--ensure-toolchain"));
@@ -44,15 +43,15 @@ pub fn toolchain_actions(actions: &[(String, String)]) -> BTreeSet<String> {
     names
 }
 
-/// One run of `./dev` before the toolchain: the 1-based line, the job and the waiver (`Some(reason)`, or `Some("")` for a bare one).
+/// One run of `./dev` before the toolchain: the 1-based line, the job and the waiver comment.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Early {
     /// The 1-based line.
     pub line: usize,
     /// The job id.
     pub job: String,
-    /// The waiver: `None` none, `Some("")` a comment without a reason, `Some(reason)`.
-    pub waived: Option<String>,
+    /// The waiver comment near the run.
+    pub waived: InlineWaiver,
 }
 
 fn indent_of(l: &str) -> usize {
@@ -78,13 +77,7 @@ pub fn dev_before_toolchain(text: &str, setup: &BTreeSet<String>) -> Vec<Early> 
             return;
         }
         let near = format!("{}\n{}", if i > 0 { lines[i - 1] } else { "" }, lines[i]);
-        let waived = if let Some(w) = WAIVER.captures(&near) {
-            Some(w[1].to_string())
-        } else if BARE_WAIVER.is_match(&near) {
-            Some(String::new())
-        } else {
-            None
-        };
+        let waived = recognise(&near, "dev-before-toolchain");
         out.push(Early {
             line: i + 1,
             job: job.to_string(),
@@ -175,6 +168,14 @@ impl Check for C119 {
         3
     }
 
+    fn scope(&self) -> super::CheckScope {
+        super::CheckScope::Root
+    }
+
+    fn mode(&self) -> super::Mode {
+        super::Mode::ReportOnly
+    }
+
     fn title(&self) -> &'static str {
         "no workflow job runs ./dev before its toolchain is set up"
     }
@@ -200,6 +201,9 @@ impl Check for C119 {
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
+        if ctx.config().app() != "paddock" {
+            return CheckOutput::not_applicable("the check judges the Paddock repository (--app paddock)");
+        }
         let files = ctx.files();
         let workflows: Vec<&String> = files.iter().filter(|f| workflow(f)).collect();
         let actions: Vec<(String, String)> = files
@@ -215,25 +219,16 @@ impl Check for C119 {
             };
             probes += 1;
             for e in dev_before_toolchain(&text, &setup) {
-                if e.waived.as_deref().is_some_and(|w| !w.is_empty()) {
-                    continue;
-                }
-                let bare = if e.waived.is_some() {
-                    " (the waiver comment has no reason)"
-                } else {
-                    ""
-                };
-                findings.push(Finding::warn(
-                    "C119",
-                    3,
-                    f,
-                    e.line,
+                let message = |bare: &str| {
                     format!(
                         "job `{}` runs ./dev before its toolchain is set up{bare} (ER-9: ./dev hashes and builds itself with the job's compiler)",
                         e.job
-                    ),
-                    FIX,
-                ));
+                    )
+                };
+                let site = Finding::warn("C119", 3, f, e.line, message(""), FIX);
+                findings.push(e.waived.apply(site, || {
+                    Finding::warn("C119", 3, f, e.line, message(" (the waiver comment has no reason)"), FIX)
+                }));
             }
         }
         CheckOutput {
@@ -278,9 +273,9 @@ mod tests {
         let w =
             "jobs:\n  a:\n    steps:\n      # conformance: dev-before-toolchain — the image has the only compiler\n      - run: ./dev x\n";
         let found = dev_before_toolchain(w, &setup());
-        assert_eq!(found[0].waived.as_deref(), Some("the image has the only compiler"));
+        assert_eq!(found[0].waived, InlineWaiver::Reason("the image has the only compiler".into()));
         let bare = "jobs:\n  a:\n    steps:\n      # conformance: dev-before-toolchain\n      - run: ./dev x\n";
-        assert_eq!(dev_before_toolchain(bare, &setup())[0].waived.as_deref(), Some(""));
+        assert_eq!(dev_before_toolchain(bare, &setup())[0].waived, InlineWaiver::NoReason);
         assert!(lines("jobs:\n  a:\n    steps:\n      # ./dev x\n      - run: ./devx y\n      - run: echo ./dev\n").len() == 1);
     }
 }

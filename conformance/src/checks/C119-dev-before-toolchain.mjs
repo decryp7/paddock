@@ -9,12 +9,11 @@
 // until its first green run on main; flip SEVERITY to `error` and `mode` to 'gate' then (docs/gates.toml, C119).
 // The Rust host has the same check (tools/paddock-dev/src/check/c119.rs); tools/paddock-dev/tests/it/check_c119.rs holds them equal.
 // Runs for the Paddock root (`--app paddock`) only. No workflow file found is "check broken" (ER-33), never a pass.
+import { applyInlineWaiver, inlineWaiver } from '../util/inline-waiver.mjs';
 import { error, unwaivable, warn } from '../finding.mjs';
 
 /** The severity of a finding: report-only for now (ER-41). */
 export const SEVERITY = warn;
-const WAIVER = /conformance:\s*dev-before-toolchain[ \t]*[—–-]+[ \t]*(\S.{2,})/;
-const BARE_WAIVER = /conformance:\s*dev-before-toolchain/;
 const WORKFLOW = /^\.gitea\/workflows\/[^/]+\.ya?ml$/;
 const ACTION = /^\.gitea\/actions\/([^/]+)\/action\.ya?ml$/;
 const SETS_UP = /kit\.sh|--ensure-toolchain|actions\/setup-rust/;
@@ -76,8 +75,7 @@ export function devBeforeToolchain(text, setupActions) {
     if (/kit\.sh|--ensure-toolchain/.test(scriptLine)) { ready = true; return; }
     if (ready || !RUNS_DEV.test(scriptLine)) return;
     const near = `${lines[i - 1] ?? ''}\n${lines[i]}`;
-    const w = WAIVER.exec(near);
-    out.push({ line: i + 1, job, waived: w ? w[1] : BARE_WAIVER.test(near) ? 'no-reason' : undefined });
+    out.push({ line: i + 1, job, waived: inlineWaiver(near, 'dev-before-toolchain') });
     ready = true; // one finding per job: the first run is the one to fix
   }
 }
@@ -109,9 +107,8 @@ export default {
         continue;
       }
       for (const f of devBeforeToolchain(text, setup)) {
-        if (f.waived && f.waived !== 'no-reason') continue;
-        const bare = f.waived === 'no-reason' ? ' (the waiver comment has no reason)' : '';
-        out.push(SEVERITY('C119', 3, file, f.line, `job \`${f.job}\` runs ./dev before its toolchain is set up${bare} (ER-9: ./dev hashes and builds itself with the job's compiler)`, FIX));
+        const message = (bare) => `job \`${f.job}\` runs ./dev before its toolchain is set up${bare} (ER-9: ./dev hashes and builds itself with the job's compiler)`;
+        out.push(applyInlineWaiver(f.waived, SEVERITY('C119', 3, file, f.line, message(''), FIX), () => SEVERITY('C119', 3, file, f.line, message(' (the waiver comment has no reason)'), FIX)));
       }
     }
     return out;

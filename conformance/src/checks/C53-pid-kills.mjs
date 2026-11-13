@@ -25,16 +25,13 @@
 // Limits: a pid passed to another program by other means (a script file, a shell string built at run time) is not seen.
 // A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above.
 import { error, warn } from '../finding.mjs';
+import { applyInlineWaiver, inlineWaiver } from '../util/inline-waiver.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 import { againstBaseline, baselineGrowth, growthMovedWarning, lineHash, movedWarning, sourceGone } from './C71-test-timing.mjs';
 
 export const LIVENESS_BASELINE = 'conformance/baselines/C53.json';
-const LIVENESS_WAIVER = /conformance:\s*pid-liveness\s*[—–-]+\s*(\S.{2,})/;
-const BARE_LIVENESS_WAIVER = /conformance:\s*pid-liveness/;
 const LIVENESS_NAMES = 'is_alive|may_be_alive|presence';
 
-const WAIVER = /conformance:\s*pid-kill\s*[—–-]+\s*(\S.{2,})/;
-const BARE_WAIVER = /conformance:\s*pid-kill/;
 /** The one place that may signal a pid: it does so right after the identity check. */
 const IMPLEMENTATION = new Set(['crates/paddock-proc/src/sys.rs']);
 
@@ -77,7 +74,7 @@ export function pidKills(text) {
       const line = lineAt(masked, index);
       const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
       // A follow-up marker is waived only in paddock.waivers.toml (dated), never inline.
-      const waived = followUp ? undefined : WAIVER.test(near) ? 'reason' : BARE_WAIVER.test(near) ? 'no-reason' : undefined;
+      const waived = followUp ? { state: 'none' } : inlineWaiver(near, 'pid-kill');
       return { line, what, waived };
     });
 }
@@ -123,7 +120,7 @@ export function pidLiveness(text, file = '') {
     .map(({ index, what }) => {
       const line = lineAt(masked, index);
       const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
-      const waived = LIVENESS_WAIVER.test(near) ? 'reason' : BARE_LIVENESS_WAIVER.test(near) ? 'no-reason' : undefined;
+      const waived = inlineWaiver(near, 'pid-liveness');
       return { line, what, waived, text: lines[line - 1] ?? '' };
     });
 }
@@ -144,10 +141,10 @@ export default {
       const text = ctx.read(f);
       if (!text || !/kill|Stop-Process|Terminate(?:Process|JobObject)|ADR 0033 WP-|disallowed_methods/.test(text)) continue;
       for (const k of pidKills(text)) {
-        if (k.waived === 'reason') continue;
-        if (k.waived === 'no-reason') out.push(error('C53', 53, f, k.line, 'the pid-kill waiver gives no reason', 'Write `// conformance: pid-kill — <why this pid cannot have been handed on>`.'));
-        else if (k.what.startsWith('an open') || k.what.startsWith('allows')) out.push(error('C53', 53, f, k.line, k.what, 'Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml.'));
-        else out.push(error('C53', 53, f, k.line, `${k.what}: the pid may belong to another process by now`, fix));
+        const site = k.what.startsWith('an open') || k.what.startsWith('allows')
+          ? error('C53', 53, f, k.line, k.what, 'Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml.')
+          : error('C53', 53, f, k.line, `${k.what}: the pid may belong to another process by now`, fix);
+        out.push(applyInlineWaiver(k.waived, site, () => error('C53', 53, f, k.line, 'the pid-kill waiver gives no reason', 'Write `// conformance: pid-kill — <why this pid cannot have been handed on>`.')));
       }
     }
     out.push(...livenessFindings(ctx));
@@ -164,8 +161,8 @@ function livenessFindings(ctx) {
     const text = ctx.read(f);
     if (!text || !/is_alive|may_be_alive|presence|kill|OpenProcess|Pid::from/.test(text)) continue;
     for (const k of pidLiveness(text, f)) {
-      if (k.waived === 'reason') continue;
-      if (k.waived === 'no-reason') out.push(error('C53', 53, f, k.line, 'the pid-liveness waiver gives no reason', 'Write `// conformance: pid-liveness — <why this pid cannot have been handed on>`.'));
+      if (k.waived.state === 'reason') out.push({ ...error('C53', 53, f, k.line, `${k.what}: the pid may belong to another process by now`, fix), inlineWaiver: k.waived.reason });
+      else if (k.waived.state === 'no-reason') out.push(error('C53', 53, f, k.line, 'the pid-liveness waiver gives no reason', 'Write `// conformance: pid-liveness — <why this pid cannot have been handed on>`.'));
       else sites.push({ file: f, line: k.line, what: k.what, hash: lineHash(k.text) });
     }
   }
