@@ -146,6 +146,27 @@ scripts/vm-win.sh snapshot before-update  # optional extra snapshot
 scripts/vm-win.sh stop                    # always stop when done: the VM holds 8 GB
 ```
 
+### Like the CI runner: `run --ci-like`
+
+A test that depends on how the Gitea Windows runner starts a step passes in a plain `ssh` session and fails in CI (the temp
+folder's ACL, CRLF checkouts, Git bash, the PATH). For every Windows check of such code, use:
+
+```sh
+scripts/vm-win.sh start
+scripts/vm-win.sh run --ci-like --ref <commit> -- 'cargo test -p paddock-env --lib private'   # default ref HEAD
+scripts/vm-win.sh stop && scripts/vm-win.sh revert
+```
+
+It sends a `git bundle` of the commit, checks it out in the guest with `core.autocrlf=true` (never copied LF files), makes
+`C:\gitea-runner\work\<hex>\tmp` with a write grant for Authenticated Users (S-1-5-11) and sets `TEMP`, `TMP`, `TMPDIR`,
+`RUNNER_TEMP` and `PADDOCK_JOB_TEMP` to it, puts Git's `bin` first on PATH, sets `CI`, `GITHUB_ACTIONS`, `RUNNER_OS`,
+`CARGO_BUILD_JOBS=3` and `NEXTEST_TEST_THREADS=3`, and runs the command as `bash --noprofile --norc -e -o pipefail` from the
+checkout. A self-check is printed first (temp ACL, autocrlf, shell, PATH head, tools missing in the guest); a failed control
+stops the run with exit 3 (`not measured`, ER-33). The values are fixed in `scripts/vm-win/ci-like.ps1`, from the runner's
+job logs of runs 8034 and 8035 (ADR 0087 amendment of 2026-11-13, the cheap option); they do not follow a change of the
+runner. Not mirrored: CPU count and architecture, the runner's account and logon type, Defender exclusions. `start` also
+prints the load and the busy rate of the VM's disk and warns (never refuses) when the disk is busy.
+
 Copy files with `scp -i <vm dir>/keys/paddock-test -o UserKnownHostsFile=<vm dir>/keys/known_hosts <file>
 paddock-test@$(scripts/vm-win.sh ip):C:/paddock-test/`. Always revert afterwards; never keep test state in the baseline.
 

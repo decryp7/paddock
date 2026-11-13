@@ -13,6 +13,11 @@
 #   scripts/vm-win.sh revert --snapshot <name>   the same, named with a flag (for example admin-baseline)
 #   scripts/vm-win.sh admin-setup             one-time: from clean-baseline, paddock-test joins Administrators, UAC consent on the normal
 #                                             desktop (+ auto-logon and job runner as gui-setup), snapshot admin-baseline; reverts at the end
+#   scripts/vm-win.sh run --ci-like [--ref <commit>] [--] <bash command...>
+#                                             in the RUNNING guest, run the command the way the Gitea Windows CI runner starts a step: runner-style
+#                                             temp folder (Authenticated Users may write), a git checkout of <ref> (default HEAD) with core.autocrlf=true
+#                                             sent as a git bundle, Git bash (--noprofile --norc -e -o pipefail) with Git's bin first on PATH, CI env;
+#                                             prints a self-check first; exit = the command's (3: a control failed, not measured). scripts/vm-win/ci-like.ps1
 #   scripts/vm-win.sh status | ip             running or stopped / the guest's address
 #   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
@@ -40,7 +45,7 @@ step_deadline=${PADDOCK_VM_STEP_DEADLINE:-300} # one PowerShell step in the gues
 baseline=clean-baseline
 
 die() { echo "vm-win: $*" >&2; exit 1; }
-usage() { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; }
 
 guard() {
   case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
@@ -115,6 +120,17 @@ wait_off() { # deadline in seconds, label
     if [ $SECONDS -ge $next ]; then echo "  $2: still working ($((SECONDS / 60)) min)"; next=$((SECONDS + 60)); fi
     sleep 5
   done
+}
+
+# A warning, never a refusal (ADR 0087 amendment, d8-quiet guard): heavy work on the disk that holds the VM slows its boot and the tests.
+quiet_warn() {
+  local load disk mbs
+  load=$(sysctl -n vm.loadavg | awk '{print $2}') || true
+  disk=$(df "$dir" 2>/dev/null | awk 'NR==2{print $1}' | sed 's|^/dev/||; s/s[0-9]*$//') || true
+  mbs=$(iostat -d -c 2 -w 1 "$disk" 2>/dev/null | awk 'END{print $3}') || true
+  echo "  before boot: 1-minute load $load, disk $disk busy ${mbs:-unknown} MB/s"
+  awk -v m="${mbs:-0}" 'BEGIN{exit !(m+0>50)}' && echo "::warning::the VM's disk ($disk) is busy ($mbs MB/s); the boot and the tests will be slow and slow numbers mean little. Next step: wait for the other work to end, or go on knowing this." >&2
+  return 0
 }
 
 has_snapshot() { vmrun listSnapshots | tail -n +2 | grep -Fxq "$1"; }
@@ -201,13 +217,13 @@ cmd=${1:-}
 [ $# -gt 0 ] && shift
 # One user of the test VM at a time (interim lock, scripts/vm-lock.sh): only the commands that change or load the guest.
 case $cmd in
-  start | stop | ssh | put | get | gui-setup | admin-setup | job | snapshot | revert | install | baseline)
+  start | stop | ssh | put | get | run | gui-setup | admin-setup | job | snapshot | revert | install | baseline)
     . "$(cd "$(dirname "$0")" && pwd)/vm-lock.sh"; vm_lock_acquire "vm-win-$cmd" ;;
 esac
 case $cmd in
   start)
     guard
-    if running; then echo "already running"; else load_ok; vmrun start nogui; fi
+    if running; then echo "already running"; else load_ok; quiet_warn; vmrun start nogui; fi
     [ "${1:-}" = "--no-wait" ] || { wait_ssh; echo "ready: $(ip)"; }
     ;;
   stop)
@@ -233,6 +249,40 @@ case $cmd in
     guard
     [ $# -eq 3 ] || die "usage: vm-win.sh get <user> <guest path> <local file>"
     scp_via "$1" "@HOST@:$2" "$3"
+    ;;
+  run)
+    guard
+    [ "${1:-}" = "--ci-like" ] || die "usage: vm-win.sh run --ci-like [--ref <commit>] [--] <bash command...> (--ci-like is the only mode)"
+    shift
+    ref=HEAD
+    [ "${1:-}" = "--ref" ] && { ref=${2:-}; [ -n "$ref" ] || die "usage: vm-win.sh run --ci-like --ref <commit> ..."; shift 2; }
+    [ "${1:-}" = "--" ] && shift
+    [ $# -gt 0 ] || die "usage: vm-win.sh run --ci-like [--ref <commit>] [--] <bash command...>"
+    running || die "the VM is not running: scripts/vm-win.sh start first (clean-baseline; revert and stop when done)"
+    here=$(cd "$(dirname "$0")" && pwd)
+    sha=$(git -C "$here" rev-parse --verify --quiet "$ref^{commit}") || die "no commit $ref in this repository"
+    work=$(mktemp -d "${TMPDIR:-/tmp}/ci-like.XXXXXX")
+    refname="refs/vm-ci-like/$$"
+    # A bundle needs a ref; a temporary one names the commit and is deleted at once. (No EXIT trap here: the lock's trap must stay the only one.)
+    git -C "$here" update-ref "$refname" "$sha"
+    git -C "$here" bundle create "$work/src.bundle" "$refname" >/dev/null 2>&1 || { git -C "$here" update-ref -d "$refname"; die "git bundle failed for $ref"; }
+    git -C "$here" update-ref -d "$refname"
+    printf 'set -e\n%s\n' "$*" >"$work/step.sh" # LF, no CR: bash in the guest reads it as is
+    echo "ci-like: $(basename "$dir") <- ${sha:0:12} ($(du -h "$work/src.bundle" | awk '{print $1}') bundle)"
+    gdir=C:/Users/paddock-test/ci-like
+    # shellcheck disable=SC2016 # the $env: is PowerShell's
+    ssh_to paddock-test 'New-Item -ItemType Directory -Force -Path $env:USERPROFILE\ci-like | Out-Null' || die "cannot make the guest folder"
+    for f in "$work/src.bundle" "$work/step.sh" "$here/vm-win/ci-like.ps1"; do
+      scp_via paddock-test "$f" "@HOST@:$gdir/$(basename "$f")" || die "copy of $(basename "$f") to the guest failed"
+    done
+    set +e
+    ssh_to paddock-test "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\paddock-test\\ci-like\\ci-like.ps1 -Bundle C:\\Users\\paddock-test\\ci-like\\src.bundle -Ref $refname -ScriptFile C:\\Users\\paddock-test\\ci-like\\step.sh" |
+      grep -v -e 'post-quantum' -e 'store now' -e 'openssh.com/pq'
+    rc=${PIPESTATUS[0]}
+    set -e
+    rm -rf "$work"
+    [ "$rc" -eq 0 ] || echo "::error::ci-like run exited $rc (3 = a self-check control failed, nothing was measured). Next step: read the output above" >&2
+    exit $rc
     ;;
   gui-setup)
     guard

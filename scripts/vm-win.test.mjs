@@ -136,6 +136,19 @@ describe('guard rails', () => {
     assert.match(r.stderr, /vm-win\.sh start/);
   });
 
+  test('vm-win.sh run takes only --ci-like and a command, and needs a running VM', () => {
+    const a = noTargetRun('vm-win.sh', ['run', 'echo', 'hi'], 'RunNoMode');
+    assert.notEqual(a.status, 0);
+    const b = noTargetRun('vm-win.sh', ['run', '--ci-like'], 'RunNoCmd');
+    assert.notEqual(b.status, 0);
+  });
+
+  test('ci-like.ps1 sets what the runner sets and stops as not measured when a control fails', () => {
+    const ps = read('vm-win/ci-like.ps1');
+    for (const needle of ['S-1-5-11', 'C:\\gitea-runner\\work\\', 'core.autocrlf', '--noprofile --norc -e -o pipefail', "'TMPDIR'", 'RUNNER_TEMP', 'PADDOCK_JOB_TEMP', 'exit 3'])
+      assert.ok(ps.includes(needle), `ci-like.ps1 lacks ${needle}`);
+  });
+
   test('vm-win.sh says what to do when the VM is not prepared', () => {
     const fusion = join(scratch, 'NoneFusion.app');
     mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
