@@ -159,7 +159,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C122"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C122-test-path-text.mjs (and c122.rs) and the mode to gate. Rules A and B start with no sites on the tree (all 65 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C122-test-path-text.mjs (and c122.rs) and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
 owner = "ADR 0099"
 since = 2026-11-13
 review_by = 2026-12-13

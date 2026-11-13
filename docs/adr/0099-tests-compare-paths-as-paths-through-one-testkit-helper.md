@@ -1,7 +1,7 @@
 # 99. Tests compare paths as paths, through one testkit helper
 
 - Status: Accepted 2026-11-13 (user, afternoon): D1 (a) the full check, D2 (b) migrate the sites now (changed by the user, 2026-11-13, "better to build complete right for foundation"; first chosen (a) baseline the 65 sites), D3 (b) ban raw
-  `canonicalize` in the apps' preset as foundation work (WP-4). Nothing is built yet. History: proposed 2026-11-13;
+  `canonicalize` in the apps' preset as foundation work (WP-4). Built 2026-11-13 on `feat/adr-0099-path-asserts` (WP-1, WP-2, WP-3b; WP-4 is a later task); the check is `C122`. History: proposed 2026-11-13;
   drafting approved by the user on 2026-11-13 (ER-21).
   ER-23 does not apply (no drawings). Revision 2 (same day) answers the coordinator's one review round of revision 1
   (`5b23e68c9`): an instance-to-mechanism recall table, the Clippy `canonicalize` bans of train 8, the existing
@@ -119,9 +119,13 @@ lite helper plus the Clippy bans; see "Recall"). Item 4 below (the apps' preset)
      an expected line that a program printed; `under(base, "a/b")`: `rel` joined component by component.
    - `from_git_bash` moves into `paddock_env::winpath` (pure, `Os` parameter) as the one implementation; the `paddock-dev`
      copies (`home::from_git_bash`, `queue/tests.rs::native_path_of_bash`, `home::mixed`, `ci_host::fwd`) call it or are
-     deleted. The Git bash copies (`home::from_git_bash`, `queue/tests.rs::native_path_of_bash`) are added as
-     `[[mechanism.copy]]` rows of the existing `verbatim-path` mechanism (`canonical = "paddock-env"`, `winpath.rs`), whose
-     `mixed` row already exists; no new mechanism id (rule 55).
+     deleted. As built, `home::from_git_bash`, `queue/tests.rs::native_path_of_bash` and `ci_host::fwd` are deleted, so no
+     `[[mechanism.copy]]` row is added for them (a row names code that exists); `home::mixed` stays, as it was, because
+     `lexical_text` would also drop the verbatim prefix and respell device paths in the junction call and the slot tool's
+     arguments, so its `verbatim-path` row stays too (no new mechanism id, rule 55).
+   - `same_path(actual, expected)` reads a Git bash spelling on the EXPECTED side only: a product that prints `/c/x` is
+     run 8034's bug and must fail; `same_path_from_shell` reads the actual side too, for output that really came from Git
+     bash. `text` spells a drive root `C:/`.
    - Not covered by any mechanism here: spelling 3 (a Git bash path arriving as text from a shell or a fake, as in run
      8034) and spelling 5 (a list joined with `:` by hand, as in run 8050). Both stay uncaught: the helper only helps a
      test that calls it, and no syntactic rule tells a hand-written `"/nope/a:/nope/b"` or a shell's `pwd` from correct
