@@ -59,8 +59,11 @@ $head = @($gitBin, "$git\cmd", "$env:USERPROFILE\.cargo\bin") | Where-Object { T
 $env:PATH = (($head + ($env:PATH -split ';' | Where-Object { $head -notcontains $_ })) -join ';')
 
 # 2. The checkout (S5): a real git checkout in the guest with the runner's line-end setting.
-$clone = "$env:USERPROFILE\.paddock-ci\src\$Slot"
-if (Test-Path $clone) { Remove-Item -Recurse -Force $clone }
+# The slot is one folder name below the clone root this script owns, so the delete below holds only its own clone.
+if ($Slot -notmatch '^[A-Za-z0-9._-]+$' -or $Slot -match '^\.+$') { Fail "-Slot '$Slot' is not one folder name" }
+$ciSrc = "$env:USERPROFILE\.paddock-ci\src"
+$clone = "$ciSrc\$Slot"
+if (Test-Path $clone) { Remove-Item -Recurse -Force "$ciSrc\$Slot" }
 New-Item -ItemType Directory -Force -Path (Split-Path $clone) | Out-Null
 Native 'git init' { git init --quiet $clone }
 Native 'git config' { git -C $clone config core.autocrlf true }
