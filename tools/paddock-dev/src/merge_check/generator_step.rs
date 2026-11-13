@@ -47,36 +47,8 @@ pub fn run(root: &Path, git: &Git, merge: &Merge, runner: &dyn Runner, log: &(dy
         Ok(r) => r,
         Err(e) => return Some(unmeasured(&e.message, &format!("fix {PATH}"))),
     };
-    // A check reads files: the checkout must hold exactly the merge result.
-    let head_tree = match git.text(&["rev-parse", "HEAD^{tree}"]) {
-        Ok(t) => t.trim().to_string(),
-        Err(e) => {
-            return Some(unmeasured(
-                &format!("HEAD cannot be read: {e}"),
-                "run from the worktree that holds the merge",
-            ));
-        }
-    };
-    if head_tree != merge.tree {
-        return Some(unmeasured(
-            "the checkout is not the merge result (its HEAD tree differs from the merge's)",
-            "check out the merge commit in this worktree (the integrator's), then run it again; or pass --no-generators to skip this step on purpose",
-        ));
-    }
-    match git.text(&["status", "--porcelain", "--untracked-files=no"]) {
-        Ok(s) if s.trim().is_empty() => {}
-        Ok(_) => {
-            return Some(unmeasured(
-                "the checkout has uncommitted changes, so the files are not the merge result",
-                "commit or discard them, then run it again",
-            ));
-        }
-        Err(e) => {
-            return Some(unmeasured(
-                &format!("git status failed: {e}"),
-                "run from the worktree that holds the merge",
-            ));
-        }
+    if let Some((why, next)) = checkout_problem(git, merge) {
+        return Some(unmeasured(&why, &next));
     }
     let [first, second] = merge.parents.as_slice() else {
         return Some(unmeasured("the merge does not have two parents", "check a two-parent merge"));
@@ -100,5 +72,36 @@ pub fn run(root: &Path, git: &Git, merge: &Merge, runner: &dyn Runner, log: &(dy
             exit: r.exit,
         }),
         Err(e) => Some(unmeasured(&e.message, "fix the registry")),
+    }
+}
+
+/// Why the checkout is not the merge result, and the next step: `None` when HEAD's tree is the merge's and nothing tracked is
+/// modified. A check that reads files (the generator checks, the member gate) is meaningless on any other checkout (ER-33).
+pub(super) fn checkout_problem(git: &Git, merge: &Merge) -> Option<(String, String)> {
+    let head_tree = match git.text(&["rev-parse", "HEAD^{tree}"]) {
+        Ok(t) => t.trim().to_string(),
+        Err(e) => {
+            return Some((
+                format!("HEAD cannot be read: {e}"),
+                "run from the worktree that holds the merge".into(),
+            ));
+        }
+    };
+    if head_tree != merge.tree {
+        return Some((
+            "the checkout is not the merge result (its HEAD tree differs from the merge's)".into(),
+            "check out the merge commit in this worktree (the integrator's), then run it again; or pass --no-generators / leave out --gates to skip the step on purpose".into(),
+        ));
+    }
+    match git.text(&["status", "--porcelain", "--untracked-files=no"]) {
+        Ok(s) if s.trim().is_empty() => None,
+        Ok(_) => Some((
+            "the checkout has uncommitted changes, so the files are not the merge result".into(),
+            "commit or discard them, then run it again".into(),
+        )),
+        Err(e) => Some((
+            format!("git status failed: {e}"),
+            "run from the worktree that holds the merge".into(),
+        )),
     }
 }

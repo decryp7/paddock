@@ -1271,3 +1271,166 @@ exit 0
         assert_eq!(text.lines().filter(|l| l.contains("::error::")).count(), 1, "{text}");
     }
 }
+
+// ADR 0098 WP-1: the member gate (`merge check --gates`). A stand-in for `dev check --pre-push` plays the fast gates: it fails
+// (exit 5) when the checkout it is run in holds both a.txt and b.txt, the shape of a pair of members that only fail together
+// (train 8: a lint list of one branch meeting new code of another).
+#[cfg(unix)]
+mod member_gate {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const FAKE_GATES: &str = r#"#!/bin/sh
+# argv: check --pre-push --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
+echo "$* HEAD=$(git rev-parse HEAD)" >> "$GATES_LOG"
+if [ -f a.txt ] && [ -f b.txt ]; then
+  echo "clippy FAILED: a.txt and b.txt together"
+  exit "${GATES_EXIT:-5}"
+fi
+echo "fmt ok; clippy ok"
+exit 0
+"#;
+
+    struct Train {
+        repo: Repo,
+        gates: tempfile::TempDir,
+    }
+
+    impl Train {
+        fn log(&self) -> PathBuf {
+            self.gates.path().join("log")
+        }
+
+        fn run(&self, args: &[&str], gates_exit: &str) -> (i32, String) {
+            let out = self
+                .repo
+                .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+                .env("PADDOCK_MERGE_CHECK_GATES", self.gates.path().join("gates"))
+                .env("GATES_LOG", self.log())
+                .env("GATES_EXIT", gates_exit)
+                .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
+                .args(["merge", "check", "--root"])
+                .arg(self.repo.path())
+                .args(args)
+                .output()
+                .unwrap();
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            (out.status.code().unwrap(), text)
+        }
+    }
+
+    /// A train with member `a` merged; `b` is merged too when `both`. HEAD is the last merge.
+    fn train(both: bool) -> Train {
+        let repo = Repo::new();
+        repo.write("base.txt", "base\n");
+        repo.commit("base");
+        for (member, on) in [("a", true), ("b", both)] {
+            if !on {
+                continue;
+            }
+            repo.git(&["checkout", "-q", "-b", member, "main"]);
+            repo.write(&format!("{member}.txt"), &format!("{member}\n"));
+            repo.commit(&format!("feat: {member}"));
+            repo.git(&["checkout", "-q", "main"]);
+            repo.git(&["merge", "-q", "--no-ff", "-m", &format!("Merge {member}"), member]);
+        }
+        let gates = tempfile::tempdir().unwrap();
+        let p = gates.path().join("gates");
+        fs::write(&p, FAKE_GATES).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        Train { repo, gates }
+    }
+
+    #[test]
+    fn a_member_that_passes_the_gates_on_the_combined_tree_is_reported_passed() {
+        let t = train(false);
+        let (code, out) = t.run(&["--gates", "HEAD"], "5");
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("member gate: passed"), "{out}");
+        assert!(!out.contains("FAILED"), "{out}");
+    }
+
+    #[test]
+    fn two_members_that_only_fail_together_are_named_at_the_merge_that_joins_them_and_stay_report_only() {
+        let t = train(true);
+        let (code, out) = t.run(&["--gates", "HEAD"], "5");
+        // Report-only until the first green run (ER-41, ADR 0098 D3 (a)): the rows and the warning are printed, the exit is not.
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("clippy FAILED: a.txt and b.txt together"), "{out}");
+        assert!(out.contains("::warning::member gate FAILED"), "{out}");
+        assert!(out.contains("REPORT-ONLY"), "{out}");
+        assert!(out.contains("take the member out") && out.contains("send it back"), "{out}");
+    }
+
+    #[test]
+    fn the_gates_run_on_the_merge_with_the_train_before_it_as_the_base() {
+        let t = train(true);
+        let first_parent = t.repo.git(&["rev-parse", "HEAD^1"]);
+        let head = t.repo.git(&["rev-parse", "HEAD"]);
+        t.run(&["--gates", "HEAD"], "5");
+        let log = fs::read_to_string(t.log()).unwrap();
+        assert!(
+            log.contains(&format!("check --pre-push --base {first_parent} --root")) && log.contains(&format!("HEAD={head}")),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn without_gates_nothing_is_run() {
+        let t = train(true);
+        let (code, out) = t.run(&["HEAD"], "5");
+        assert_eq!(code, 0, "{out}");
+        assert!(!t.log().exists(), "the gates ran without --gates");
+        assert!(!out.contains("member gate"), "{out}");
+    }
+
+    #[test]
+    fn a_checkout_that_is_not_the_merge_is_not_measured_and_runs_no_gate() {
+        let t = train(true);
+        t.repo.git(&["checkout", "-q", "a"]);
+        let merge = t.repo.git(&["rev-parse", "main"]);
+        let (code, out) = t.run(&["--gates", &merge], "5");
+        assert_eq!(code, 0, "report-only: {out}");
+        assert!(
+            out.contains("member gate NOT MEASURED") && out.contains("not the merge result"),
+            "{out}"
+        );
+        assert!(!t.log().exists(), "a gate ran on a checkout that is not the merge");
+    }
+
+    #[test]
+    fn a_gate_that_could_not_look_is_never_reported_as_a_pass() {
+        let t = train(true);
+        let (code, out) = t.run(&["--gates", "HEAD"], "6");
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("member gate NOT MEASURED"), "{out}");
+        assert!(!out.contains("member gate: passed"), "{out}");
+    }
+
+    #[test]
+    fn json_carries_the_gate_result_under_its_own_key() {
+        let t = train(true);
+        let (code, out) = t.run(&["--gates", "HEAD", "--json"], "5");
+        assert_eq!(code, 0, "{out}");
+        let v: serde_json::Value = serde_json::from_str(out.lines().find(|l| l.starts_with('{')).unwrap()).unwrap();
+        assert_eq!(v["gates"]["outcome"], "failed", "{out}");
+        assert_eq!(v["gates"]["enforced"], false, "{out}");
+    }
+
+    #[test]
+    fn a_branch_checked_before_merging_has_no_checkout_to_gate() {
+        let t = train(false);
+        t.repo.git(&["checkout", "-q", "-b", "c", "main"]);
+        t.repo.write("c.txt", "c\n");
+        t.repo.commit("feat: c");
+        let (code, out) = t.run(&["--branch", "c", "--target", "main"], "5");
+        assert_eq!(code, 0, "{out}");
+        let (code, out) = t.run(&["--branch", "c", "--target", "main", "--gates"], "5");
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.contains("member gate not run") && out.contains("before it is merged"),
+            "said out loud, not silent: {out}"
+        );
+        assert!(!t.log().exists(), "a gate ran without a merge checkout");
+    }
+}

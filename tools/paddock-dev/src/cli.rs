@@ -214,6 +214,10 @@ struct MergeCheckArgs {
     /// checkout must be the merge result, else they are NOT MEASURED).
     #[arg(long)]
     no_generators: bool,
+    /// Also run the member gate on the merge commit: `check --pre-push --base <merge>^1`, the fast gates on the combined tree
+    /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
+    #[arg(long)]
+    gates: bool,
 }
 
 #[derive(Subcommand)]
@@ -493,6 +497,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     branch: a.branch,
                     target: a.target,
                     generators: !a.no_generators,
+                    gates: a.gates,
                 },
                 out,
                 err,
@@ -627,6 +632,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             branch: a.branch,
             target: a.target,
             generators: !a.no_generators,
+            gates: a.gates,
         }),
         Command::Gen {
             command: GenCommand::Check(a),

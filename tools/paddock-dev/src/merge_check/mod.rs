@@ -36,6 +36,7 @@
 
 mod backwards;
 mod diff;
+mod gates;
 mod generated;
 mod generator_step;
 pub(crate) mod git;
@@ -245,6 +246,9 @@ pub struct Request {
     /// Run the generator checks of `docs/generators.toml` that the merge makes due (the commit form only; the checkout must be
     /// the merge result). `--no-generators` turns it off.
     pub generators: bool,
+    /// Run the member gate (`./dev check --pre-push --base <merge>^1`) on the merge (the commit form only; the checkout must be
+    /// the merge result). ADR 0098 WP-1; report-only until its first green run ([`gates::ENFORCED`]).
+    pub gates: bool,
 }
 
 fn resolve(git: &Git, req: &Request) -> Result<Merge, CliError> {
@@ -336,8 +340,38 @@ fn clean_report(label: &str) -> Report {
     )
 }
 
+/// The steps after the detectors (the generator checks, the member gate), each under its own key of the JSON.
+#[derive(Default)]
+struct Steps(Vec<(&'static str, generator_step::Step)>);
+
+impl Steps {
+    fn push(&mut self, key: &'static str, step: Option<generator_step::Step>) {
+        if let Some(s) = step {
+            self.0.push((key, s));
+        }
+    }
+
+    /// The steps' lines, one after the other.
+    fn text(&self) -> Option<String> {
+        (!self.0.is_empty()).then(|| self.0.iter().map(|(_, s)| s.text.join("\n")).collect::<Vec<_>>().join("\n"))
+    }
+
+    /// A stale file or a failing gate beats a step that could not look; `Ok` when none says more.
+    fn exit(&self) -> Exit {
+        let all: Vec<Exit> = self.0.iter().map(|(_, s)| s.exit).collect();
+        [Exit::Findings, Exit::NotMeasured]
+            .into_iter()
+            .find(|e| all.contains(e))
+            .unwrap_or(Exit::Ok)
+    }
+
+    fn data(&self) -> Vec<(&'static str, serde_json::Value)> {
+        self.0.iter().map(|(k, s)| (*k, s.data.clone())).collect()
+    }
+}
+
 /// Runs the check: the merge's label and its findings, or why it could not look.
-fn check(req: &Request) -> Result<(String, Vec<Finding>, Option<generator_step::Step>), CliError> {
+fn check(req: &Request) -> Result<(String, Vec<Finding>, Steps), CliError> {
     let root = crate::gates::command::repo_root(req.root.as_deref())?;
     let git = Git::new(&root);
     let merge = resolve(&git, req)?;
@@ -361,17 +395,30 @@ fn check(req: &Request) -> Result<(String, Vec<Finding>, Option<generator_step::
                     eprintln!("{l}")
                 })
             };
-            Ok((merge.label, found, step))
+            let mut steps = Steps::default();
+            steps.push("generators", step);
+            if req.gates {
+                steps.push(
+                    "gates",
+                    Some(if req.commit.is_none() {
+                        gates::not_run("a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging")
+                    } else {
+                        gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
+                    }),
+                );
+            }
+            Ok((merge.label, found, steps))
         }
     }
 }
 
 /// `./dev merge check`. Detector findings are an error (exit 5), so the text goes to standard error like every other failure.
-/// A stale generated file is exit 5 and a generator check that could not look is exit 6, both with their `::error::` lines.
+/// A stale generated file is exit 5 and a generator check that could not look is exit 6, both with their `::error::` lines; the
+/// member gate (`--gates`) adds its own rows and, once enforced, the same two exits.
 pub fn command(req: &Request) -> Result<Report, CliError> {
-    let (label, found, step) = check(req)?;
-    let lines = step.as_ref().map(|s| s.text.join("\n"));
-    let exit = step.as_ref().map_or(Exit::Ok, |s| s.exit);
+    let (label, found, steps) = check(req)?;
+    let lines = steps.text();
+    let exit = steps.exit();
     if !found.is_empty() {
         let mut text = findings_text(&label, &found);
         if let Some(l) = lines {
@@ -381,46 +428,53 @@ pub fn command(req: &Request) -> Result<Report, CliError> {
         return Err(CliError::new(Exit::Findings, text));
     }
     let mut report = clean_report(&label);
-    if let Some(s) = step {
+    if let Some(l) = lines {
         report.text.push('\n');
-        report.text.push_str(&lines.unwrap_or_default());
-        report.data["generators"] = s.data;
+        report.text.push_str(&l);
+    }
+    for (k, v) in steps.data() {
+        report.data[k] = v;
     }
     Ok(if exit == Exit::Ok { report } else { report.with_exit(exit) })
 }
 
 /// `./dev merge check --json`: one object on standard output. Findings are `"ok": false, "kind": "findings"` with the
 /// structured list (`kind`, `subject`, `detail`), and the text goes to standard error as without `--json`. `"generators"` holds
-/// the generator checks' results when they ran.
+/// the generator checks' results when they ran, `"gates"` the member gate's.
 pub fn command_json(req: &Request, out: &mut dyn std::io::Write, err: &mut dyn std::io::Write) -> i32 {
     match check(req) {
         Err(e) => paddock_cli::finish(paddock_cli::Format::Json, Err(e), out, err).code(),
-        Ok((label, found, step)) if found.is_empty() => {
-            let exit = step.as_ref().map_or(Exit::Ok, |s| s.exit);
+        Ok((label, found, steps)) if found.is_empty() => {
+            let exit = steps.exit();
             let mut report = clean_report(&label);
-            if let Some(s) = step {
+            if let Some(l) = steps.text() {
                 report.text.push('\n');
-                report.text.push_str(&s.text.join("\n"));
-                report.data["generators"] = s.data;
+                report.text.push_str(&l);
+            }
+            for (k, v) in steps.data() {
+                report.data[k] = v;
             }
             let report = if exit == Exit::Ok { report } else { report.with_exit(exit) };
             paddock_cli::finish(paddock_cli::Format::Json, Ok(report), out, err).code()
         }
-        Ok((label, found, step)) => {
+        Ok((label, found, steps)) => {
             let mut text = findings_text(&label, &found);
-            if let Some(s) = &step {
+            if let Some(l) = steps.text() {
                 text.push('\n');
-                text.push_str(&s.text.join("\n"));
+                text.push_str(&l);
             }
-            let object = json!({
+            let mut object = json!({
                 "ok": false,
                 "kind": "findings",
                 "exit": Exit::Findings.code(),
                 "merge": label,
                 "error": text,
                 "findings": found.iter().map(|f| json!({"kind": f.kind.name(), "subject": f.subject, "detail": f.detail, "excerpts": f.excerpts})).collect::<Vec<_>>(),
-                "generators": step.map(|s| s.data),
+                "generators": serde_json::Value::Null,
             });
+            for (k, v) in steps.data() {
+                object[k] = v;
+            }
             let _ = writeln!(out, "{object}");
             let _ = writeln!(err, "error: {text}");
             Exit::Findings.code()
