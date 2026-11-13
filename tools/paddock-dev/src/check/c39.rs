@@ -15,7 +15,7 @@
 //! The port of `conformance/src/checks/C39-freed-port.mjs`, finding for finding (the oracle test compares them).
 
 use super::finding::Finding;
-use super::inline_waiver::{InlineWaiver, recognise};
+use super::inline_waiver::{CommentView, InlineWaiver, Kind as CommentKind};
 use super::jsre::{line_at, rx};
 use super::mask::mask_rust;
 use super::record::Precondition;
@@ -120,16 +120,11 @@ fn word_re(name: &str, rest: &str) -> Regex {
 /// The freed ports in a Rust source.
 pub fn freed_ports(text: &str) -> Vec<FreedPort> {
     let clean = mask_rust(text);
-    let raw: Vec<&str> = text.split('\n').collect();
+    let view = CommentView::of(text, CommentKind::Rust);
     let mut out = Vec::new();
     let mut push = |i: usize, kind: Kind| {
         let line = line_at(&clean, i);
-        let here = format!(
-            "{}\n{}",
-            raw.get(line - 1).copied().unwrap_or(""),
-            if line >= 2 { raw.get(line - 2).copied().unwrap_or("") } else { "" }
-        );
-        let waived = recognise(&here, "freed-port");
+        let waived = view.waiver(line, "freed-port");
         out.push(FreedPort { line, kind, waived });
     };
     for m in bind_pattern(&clean).find_iter(&clean) {

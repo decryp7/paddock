@@ -16,7 +16,7 @@
 //! UTF-16 offsets, as in the JavaScript, so a hit orders the same way next to non-ASCII text.
 
 use super::finding::Finding;
-use super::inline_waiver::{InlineWaiver, recognise};
+use super::inline_waiver::{CommentView, InlineWaiver, Kind};
 use super::jsre::{line_at, rx, units};
 use super::mask::mask_units;
 use super::record::Precondition;
@@ -73,7 +73,7 @@ struct Hit {
 pub fn pid_kills(text: &str) -> Vec<PidKill> {
     let mask_u = mask_units(&text.encode_utf16().collect::<Vec<u16>>());
     let masked = String::from_utf16_lossy(&mask_u);
-    let lines: Vec<&str> = text.split('\n').collect();
+    let view = CommentView::of(text, Kind::Rust);
     let mut hits: Vec<Hit> = Vec::new();
     for (re, what) in WIN32.iter() {
         for m in re.find_iter(&masked) {
@@ -124,20 +124,11 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
     hits.sort_by_key(|h| h.index);
     hits.into_iter()
         .map(|h| {
-            let near = format!(
-                "{}\n{}",
-                lines.get(h.line - 1).copied().unwrap_or(""),
-                if h.line >= 2 {
-                    lines.get(h.line - 2).copied().unwrap_or("")
-                } else {
-                    ""
-                }
-            );
             // A follow-up marker is waived only in paddock.waivers.toml (dated), never inline.
             let waived = if h.follow_up {
                 InlineWaiver::No
             } else {
-                recognise(&near, "pid-kill")
+                view.waiver(h.line, "pid-kill")
             };
             PidKill {
                 line: h.line,

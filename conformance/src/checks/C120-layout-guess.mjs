@@ -12,7 +12,7 @@
 // (`# conformance: ...` in shell) on the line or the line above; the test code of a file, `// conformance: file-layout-guess — <why>` anywhere in it: it covers the lines inside `#[cfg(test)] mod` blocks, or every line of a file under `tests/`; production code in the same file is still reported.
 // Test code is recognised by the plain `#[cfg(test)] mod name { ... }` only: `#[cfg(all(test, ...))]` and an out-of-line `mod tests;` (its own file, not under `tests/`) are not, so their sites stay reported (fail-safe).
 // A waived site is not a finding: the host counts it as waived (`inlineWaiver`), so suppressions stay visible (ER-33). Rust host: tools/paddock-dev/src/check/c120.rs (same findings, line for line).
-import { applyInlineWaiver, inlineWaiver } from '../util/inline-waiver.mjs';
+import { applyInlineWaiver, commentView } from '../util/inline-waiver.mjs';
 import { warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
@@ -71,13 +71,13 @@ export function testModuleLines(text) {
 /** The layout guesses in one source: [{ line, what, waived: 'reason' | 'no-reason' | undefined, reason }]. `shell` picks the pattern set. */
 export function layoutGuesses(text, shell = false, file = '') {
   const code = withoutCommentLines(text, shell ? '#' : '//');
-  const lines = text.split('\n');
+  const view = commentView(text, shell ? 'hash' : 'rust');
   const hits = [];
   (shell ? SHELL_PATTERNS : RUST_PATTERNS).forEach(({ src, what }, order) => {
     for (const m of code.matchAll(new RegExp(src, 'g'))) hits.push({ index: m.index, order, what });
   });
   hits.sort((a, b) => a.index - b.index || a.order - b.order);
-  const fileWaiver = inlineWaiver(text, 'file-layout-guess');
+  const fileWaiver = view.file('file-layout-guess');
   const underTests = /(?:^|\/)tests\//.test(file);
   const testLines = fileWaiver.state === 'reason' && !shell && !underTests ? testModuleLines(text) : [];
   const fileWaives = (line) => underTests || testLines.some(([a, b]) => line >= a && line <= b);
@@ -89,8 +89,7 @@ export function layoutGuesses(text, shell = false, file = '') {
     const line = lineAt(code, index);
     if (seen.has(line)) continue;
     seen.add(line);
-    const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
-    const site = inlineWaiver(near, 'layout-guess');
+    const site = view.waiver(line, 'layout-guess');
     out.push({ line, what, waived: site.state !== 'reason' && fileWaiver.state === 'reason' && fileWaives(line) ? fileWaiver : site });
   }
   return out;

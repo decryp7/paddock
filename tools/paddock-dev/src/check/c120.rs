@@ -8,7 +8,7 @@
 //! comment are not read; a justified site carries `// conformance: layout-guess — <reason>` on the line or the line above.
 
 use super::finding::Finding;
-use super::inline_waiver::{InlineWaiver, recognise};
+use super::inline_waiver::{CommentView, InlineWaiver, Kind};
 use super::jsre::{WS, line_at, rx, trim};
 use super::mask::mask_rust;
 use super::record::Precondition;
@@ -129,7 +129,6 @@ pub fn without_comment_lines(text: &str, prefix: &str) -> String {
 /// The layout guesses in one source; `shell` picks the pattern set.
 pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
     let code = without_comment_lines(text, if shell { "#" } else { "//" });
-    let lines: Vec<&str> = text.split('\n').collect();
     let patterns = if shell { &SHELL_PATTERNS } else { &RUST_PATTERNS };
     let mut hits: Vec<(usize, usize, &'static str)> = Vec::new();
     for (order, (re, what)) in patterns.iter().enumerate() {
@@ -138,7 +137,8 @@ pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
         }
     }
     hits.sort_by_key(|h| (h.0, h.1));
-    let file_waiver = recognise(text, "file-layout-guess");
+    let view = CommentView::of(text, if shell { Kind::Hash } else { Kind::Rust });
+    let file_waiver = view.file("file-layout-guess");
     let under_tests = UNDER_TESTS.is_match(file);
     let test_lines = if matches!(file_waiver, InlineWaiver::Reason(_)) && !shell && !under_tests {
         test_module_lines(text)
@@ -160,16 +160,7 @@ pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
         if !seen.insert(line) {
             continue;
         }
-        let near = format!(
-            "{}\n{}",
-            lines.get(line - 1).copied().unwrap_or(""),
-            if line >= 2 {
-                lines.get(line - 2).copied().unwrap_or("")
-            } else {
-                ""
-            }
-        );
-        let waived = match (recognise(&near, "layout-guess"), &file_waiver) {
+        let waived = match (view.waiver(line, "layout-guess"), &file_waiver) {
             (site @ InlineWaiver::Reason(_), _) => site,
             (_, file @ InlineWaiver::Reason(_)) if file_waives(line) => file.clone(),
             (site, _) => site,

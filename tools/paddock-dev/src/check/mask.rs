@@ -130,6 +130,46 @@ pub fn mask_units(t: &[u16]) -> Vec<u16> {
     out
 }
 
+/// The complement of [`mask_units`]: only the comments are kept; code, strings, raw strings and char literals are blanked (newlines
+/// kept, same length). The port of `rustComments`: the waiver reader looks at this text only, so a marker inside a literal is data.
+pub fn comment_units(t: &[u16]) -> Vec<u16> {
+    let mut out: Vec<u16> = Vec::with_capacity(t.len());
+    let mut i = 0;
+    while i < t.len() {
+        let prev = if i == 0 { b' ' as u16 } else { t[i - 1] };
+        if let (Some((open, hashes)), false) = (raw_opener(t, i), is_word(prev)) {
+            let mut close = vec![QUOTE];
+            close.extend(std::iter::repeat_n(HASH, hashes));
+            let stop = index_of(t, &close, i + open).map_or(t.len(), |end| end + close.len());
+            blank(&mut out, slice(t, i, stop));
+            i = stop;
+        } else if t[i] == SLASH && t.get(i + 1) == Some(&SLASH) {
+            let stop = t[i..].iter().position(|&u| u == NL).map_or(t.len(), |p| p + i);
+            out.extend_from_slice(&t[i..stop]);
+            i = stop;
+        } else if t[i] == SLASH && t.get(i + 1) == Some(&STAR) {
+            let stop = index_of(t, &[STAR, SLASH], i + 2).map_or(t.len(), |e| e + 2);
+            out.extend_from_slice(&t[i..stop]);
+            i = stop;
+        } else if t[i] == QUOTE {
+            let mut j = i + 1;
+            while j < t.len() && t[j] != QUOTE {
+                j += if t[j] == BACKSLASH { 2 } else { 1 };
+            }
+            blank(&mut out, slice(t, i, j + 1));
+            i = j + 1;
+        } else if t[i] == SQ {
+            let len = char_literal(t, i);
+            blank(&mut out, slice(t, i, i + len.unwrap_or(1)));
+            i += len.unwrap_or(1);
+        } else {
+            out.push(if t[i] == NL { NL } else { b' ' as u16 });
+            i += 1;
+        }
+    }
+    out
+}
+
 /// `text` with comments and the insides of string, raw-string and char literals blanked (newlines kept). Unlike a plain
 /// string scan it knows raw strings (`r#"..."#`) and char literals (`'"'`), which would otherwise open a string that never ends.
 pub fn mask_rust(text: &str) -> String {

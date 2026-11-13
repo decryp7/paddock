@@ -10,7 +10,7 @@
 //! The port of `conformance/src/checks/C119-dev-before-toolchain.mjs`, finding for finding (`tests/it/check_c119.rs` compares them).
 
 use super::finding::Finding;
-use super::inline_waiver::{InlineWaiver, recognise};
+use super::inline_waiver::{CommentView, InlineWaiver, Kind};
 use super::jsre::rx;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -61,6 +61,7 @@ fn indent_of(l: &str) -> usize {
 /// The `./dev` runs before any toolchain setup in one workflow text, one per job at most.
 pub fn dev_before_toolchain(text: &str, setup: &BTreeSet<String>) -> Vec<Early> {
     let lines: Vec<&str> = text.split('\n').collect();
+    let view = CommentView::of(text, Kind::Hash);
     let mut out = Vec::new();
     let (mut in_jobs, mut in_steps, mut ready) = (false, false, false);
     let mut job: Option<String> = None;
@@ -76,8 +77,7 @@ pub fn dev_before_toolchain(text: &str, setup: &BTreeSet<String>) -> Vec<Early> 
         if *ready || !RUNS_DEV.is_match(script) {
             return;
         }
-        let near = format!("{}\n{}", if i > 0 { lines[i - 1] } else { "" }, lines[i]);
-        let waived = recognise(&near, "dev-before-toolchain");
+        let waived = view.waiver(i + 1, "dev-before-toolchain");
         out.push(Early {
             line: i + 1,
             job: job.to_string(),

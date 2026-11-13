@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { error } from '../src/finding.mjs';
-import { applyInlineWaiver, inlineWaiver } from '../src/util/inline-waiver.mjs';
+import { applyInlineWaiver, commentView, commentsOf, inlineWaiver } from '../src/util/inline-waiver.mjs';
 import { runChecks } from '../src/runner.mjs';
 import { makeApp } from './helpers.mjs';
 
@@ -50,4 +50,22 @@ test('the runner lists an inline-waived site of any check under waived, with the
   assert.deepEqual(r.findings.map((f) => f.line), [1, 4]);
   assert.equal(r.waived.length, 1);
   assert.deepEqual([r.waived[0].file, r.waived[0].line, r.waived[0].waiver], ['a.txt', 3, { reason: 'tracked in the backlog', expires: 'inline' }]);
+});
+
+test('commentsOf: only comments are kept; a marker inside a string, raw string or char literal is data', () => {
+  const rust = 'let a = "// conformance: t — x"; // conformance: t — real reason\nlet b = r#"/* conformance: t — y */"#;\n/* conformance: t — block */ let c = \'"\';\n';
+  const c = commentsOf(rust, 'rust');
+  assert.equal(c.length, rust.length);
+  assert.deepEqual(c.split('\n').map((l) => l.trim()), ['// conformance: t — real reason', '', '/* conformance: t — block */', '']);
+  const hash = commentsOf('run: echo "# not a comment" # conformance: t — real\nx: 1#conformance: t — glued\nplain # one\n', 'hash');
+  assert.deepEqual(hash.split('\n').map((l) => l.trim()), ['# conformance: t — real', '', '# one', '']);
+});
+
+test('commentView: a waiver reads the comment on the line or the line above, never a string', () => {
+  const v = commentView('let m = "conformance: t — in a string";\nlet x = 1;\n// conformance: t — above\nlet y = 2;\n', 'rust');
+  assert.equal(v.waiver(1, 't').state, 'none');
+  assert.equal(v.waiver(2, 't').state, 'none');
+  assert.deepEqual(v.waiver(4, 't'), { state: 'reason', reason: 'above' });
+  assert.equal(commentView('// conformance: f — whole file\nfn a() {}\n', 'rust').file('f').state, 'reason');
+  assert.equal(commentView('let m = "conformance: f — whole file";\n', 'rust').file('f').state, 'none');
 });

@@ -449,3 +449,75 @@ process.stdout.write(JSON.stringify({
     assert_eq!(json!(version::app_version(&ctx)), js["app"]);
     assert_eq!(sources.len(), 4);
 }
+
+#[test]
+fn the_comment_reader_equals_the_javascript_one_and_a_marker_in_a_string_is_no_waiver() {
+    use paddock_dev::check::inline_waiver::{CommentView, Kind, comments_of};
+    let pieces = [
+        "// ",
+        "# ",
+        "/* ",
+        " */",
+        "\"",
+        "'",
+        "r#\"",
+        "\"#",
+        "\\",
+        "conformance: t — because",
+        "conformance: t",
+        "x",
+        " ",
+        "\n",
+        "\n",
+        "é",
+        "😀",
+        "b\"",
+        "'\"'",
+        "$(",
+        "#!",
+        "-",
+    ];
+    let mut state: u64 = 0xD1B5_4A32_D192_ED03;
+    let mut next = |n: usize| {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_221)
+            .wrapping_add(1_442_695_040_888_963_407);
+        ((state >> 33) as usize) % n
+    };
+    let cases: Vec<String> = (0..3000)
+        .map(|_| (0..2 + next(12)).map(|_| pieces[next(pieces.len())]).collect::<String>())
+        .collect();
+    let js = node(
+        r#"
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const m = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/inline-waiver.mjs')).href);
+const { cases } = JSON.parse(process.env.UTIL_INPUT);
+process.stdout.write(JSON.stringify(cases.map((c) => [m.commentsOf(c, 'rust'), m.commentsOf(c, 'hash'), m.commentView(c, 'rust').file('t'), m.commentView(c, 'hash').waiver(2, 't')])));
+"#,
+        &json!({ "cases": cases }),
+    );
+    let state_json = |w: InlineWaiver| match w {
+        InlineWaiver::No => json!({"state": "none"}),
+        InlineWaiver::NoReason => json!({"state": "no-reason"}),
+        InlineWaiver::Reason(r) => json!({"state": "reason", "reason": r}),
+    };
+    let mut reasons = 0;
+    for (i, c) in cases.iter().enumerate() {
+        let (rust, hash) = (comments_of(c, Kind::Rust), comments_of(c, Kind::Hash));
+        let file = state_json(CommentView::of(c, Kind::Rust).file("t"));
+        let line2 = state_json(CommentView::of(c, Kind::Hash).waiver(2, "t"));
+        reasons += usize::from(file["state"] == "reason");
+        assert_eq!(json!([rust, hash, file, line2]), js[i], "case {i}: {c:?}");
+    }
+    assert!(reasons > 10, "the generated inputs reach a comment with a reason: {reasons}");
+    // The class this fixes: a marker in a string literal is data.
+    assert_eq!(
+        CommentView::of("let m = \"// conformance: t — x y z\";\n", Kind::Rust).file("t"),
+        InlineWaiver::No
+    );
+    assert!(matches!(
+        CommentView::of("// conformance: t — x y z\n", Kind::Rust).file("t"),
+        InlineWaiver::Reason(_)
+    ));
+}

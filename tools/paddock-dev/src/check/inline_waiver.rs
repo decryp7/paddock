@@ -9,6 +9,7 @@
 
 use super::finding::Finding;
 use super::jsre::{is_js_space, rx, units};
+use super::mask::comment_units;
 
 /// What the comment near a site says.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +20,85 @@ pub enum InlineWaiver {
     NoReason,
     /// The comment with its reason.
     Reason(String),
+}
+
+/// What a file's comments are written in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    /// Rust: `//` and block comments, not the inside of a string, raw string or char literal.
+    Rust,
+    /// Shell, YAML, TOML: a `#` at the start of a line or after white space, outside a quoted string of the same line.
+    Hash,
+}
+
+const SPACE: u16 = b' ' as u16;
+const NL: u16 = b'\n' as u16;
+
+fn hash_comment(line: &[u16]) -> Vec<u16> {
+    let mut quote: Option<u16> = None;
+    let mut i = 0;
+    while i < line.len() {
+        let c = line[i];
+        match quote {
+            Some(q) => {
+                if c == b'\\' as u16 && q == b'"' as u16 {
+                    i += 1;
+                } else if c == q {
+                    quote = None;
+                }
+            }
+            None => {
+                if c == b'"' as u16 || c == b'\'' as u16 {
+                    quote = Some(c);
+                } else if c == b'#' as u16 && (i == 0 || char::from_u32(u32::from(line[i - 1])).is_some_and(is_js_space)) {
+                    let mut out = vec![SPACE; i];
+                    out.extend_from_slice(&line[i..]);
+                    return out;
+                }
+            }
+        }
+        i += 1;
+    }
+    vec![SPACE; line.len()]
+}
+
+/// `text` with everything but its comments blanked (newlines kept, so lines and columns stay). A waiver marker in a string literal is
+/// data, not a waiver (ER-33): [`CommentView`] reads only this text. The port of `commentsOf`.
+pub fn comments_of(text: &str, kind: Kind) -> String {
+    let t: Vec<u16> = text.encode_utf16().collect();
+    let out: Vec<u16> = match kind {
+        Kind::Hash => t.split(|&u| u == NL).map(hash_comment).collect::<Vec<_>>().join(&NL),
+        Kind::Rust => comment_units(&t),
+    };
+    String::from_utf16_lossy(&out)
+}
+
+/// The comments of one file, read by line: what a check asks to find out whether a site is waived.
+pub struct CommentView {
+    lines: Vec<String>,
+    whole: String,
+}
+
+impl CommentView {
+    /// Reads the comments of `text`.
+    pub fn of(text: &str, kind: Kind) -> CommentView {
+        let whole = comments_of(text, kind);
+        CommentView {
+            lines: whole.split('\n').map(str::to_string).collect(),
+            whole,
+        }
+    }
+
+    /// The waiver comment for `tag` on the 1-based `line` or the line above.
+    pub fn waiver(&self, line: usize, tag: &str) -> InlineWaiver {
+        let at = |n: usize| n.checked_sub(1).and_then(|i| self.lines.get(i)).map_or("", String::as_str);
+        recognise(&format!("{}\n{}", at(line), at(line.wrapping_sub(1))), tag)
+    }
+
+    /// The waiver comment for `tag` anywhere in the file (a file-level marker).
+    pub fn file(&self, tag: &str) -> InlineWaiver {
+        recognise(&self.whole, tag)
+    }
 }
 
 /// The waiver comment for `tag` in `near` (the site's line and the line above, as the check defines them).
