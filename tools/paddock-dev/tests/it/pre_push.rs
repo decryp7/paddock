@@ -22,17 +22,40 @@ fn fake_bin(dir: &Path, script: &str) -> String {
     format!("{}:/usr/bin:/bin", dir.display())
 }
 
+/// Folder with a stand-in `heavy.sh` (`exec "$@"`): `dev` points `ENGINEERING_RULES` at it so no test finds the real machine-wide
+/// slot tool through the sibling lookup (ER-14).
+const FIXTURE_RULES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/heavy");
+
+/// Whether a run touched the slot folder: the real `heavy.sh` makes `HEAVY_LOCK_DIR` before it takes a slot and the folder stays
+/// after the slot is freed, so a folder that was never created means no slot tool ran.
+fn slots_touched(lock_dir: &Path) -> bool {
+    lock_dir.exists()
+}
+
+#[test]
+fn the_slot_detector_sees_a_slot_folder_that_was_made() {
+    let d = tempfile::tempdir().unwrap();
+    assert!(!slots_touched(&d.path().join("none")));
+    std::fs::create_dir(d.path().join("slots")).unwrap();
+    assert!(slots_touched(&d.path().join("slots")));
+}
+
 #[allow(clippy::disallowed_methods)]
 fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let tmp = tempfile::tempdir().unwrap();
+    let slots = tmp.path().join("slots");
     let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["check", "--pre-push", "--base", "HEAD", "--files", CHANGE])
         .args(args)
         .current_dir(root)
         .env("PATH", path)
         .env_remove("PADDOCK_HEAVY")
+        .env("ENGINEERING_RULES", FIXTURE_RULES)
+        .env("HEAVY_LOCK_DIR", &slots)
         .output()
         .unwrap();
+    assert!(!slots_touched(&slots), "a test run took a machine-wide heavy slot (ER-14)");
     (
         out.status.code().unwrap(),
         String::from_utf8_lossy(&out.stdout).into_owned(),

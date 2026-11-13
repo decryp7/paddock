@@ -293,8 +293,12 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool, s
 }
 
 /// Where a `heavy.sh` may sit when PATH has none: `$ENGINEERING_RULES/scripts/heavy.sh`, else the `engineering-rules` checkout beside
-/// the main checkout of this repository (a worktree's `.git` file leads to it). The first candidate that is a file.
+/// the main checkout of this repository (a worktree's `.git` file leads to it). The first candidate that is a file. None on Windows:
+/// `heavy.sh` is a shell script that CreateProcess cannot start.
 pub fn sibling_heavy(root: &Path, env: &HashMap<String, String>) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
     let mut dirs: Vec<PathBuf> = env
         .get("ENGINEERING_RULES")
         .filter(|d| !d.is_empty())
@@ -523,6 +527,29 @@ mod tests {
         assert_eq!(heavy_prefix(&env, &|_| false, &|| Some("/x/heavy.sh".into())), ["/x/heavy.sh"]);
         let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
         assert_eq!(heavy_prefix(&set, &|_| true, &none), ["my-heavy", "--x"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_sibling_checkout_of_the_main_checkout_is_found_from_a_worktree_path() {
+        let t = tempfile::tempdir().unwrap();
+        let main = t.path().join("repo");
+        std::fs::create_dir_all(t.path().join("engineering-rules/scripts")).unwrap();
+        std::fs::write(t.path().join("engineering-rules/scripts/heavy.sh"), "#!/bin/sh\n").unwrap();
+        std::fs::create_dir(&main).unwrap();
+        assert!(
+            paddock_proc::command("git")
+                .args(["init", "-q"])
+                .current_dir(&main)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let found = sibling_heavy(&main, &HashMap::new()).unwrap();
+        assert!(found.ends_with("engineering-rules/scripts/heavy.sh"), "{found}");
+        // no such checkout beside it: nothing
+        std::fs::remove_file(t.path().join("engineering-rules/scripts/heavy.sh")).unwrap();
+        assert_eq!(sibling_heavy(&main, &HashMap::new()), None);
     }
 
     #[cfg(unix)]

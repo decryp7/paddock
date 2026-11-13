@@ -42,10 +42,26 @@ pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
         .status()
         .map_err(|e| CliError::failure(format!("dev heavy: cannot start {program}: {e}")))?;
     if status.success() {
-        Ok(Report::new(json!({ "ok": true }), ""))
-    } else {
-        Err(CliError::failure(format!("dev heavy: {program} ended with {status}")))
+        return Ok(Report::new(json!({ "ok": true }), ""));
     }
+    // The wrapped command's own status is ours: the exit code, or 128 plus the signal on Unix.
+    let code = status.code().unwrap_or_else(|| signal_code(&status));
+    eprintln!(
+        "::error::dev heavy: `{}` ended with {status}. Next: fix what it printed above and commit again.",
+        a.command[0]
+    );
+    std::process::exit(code);
+}
+
+#[cfg(unix)]
+fn signal_code(status: &std::process::ExitStatus) -> i32 {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal().map_or(1, |s| 128 + s)
+}
+
+#[cfg(not(unix))]
+fn signal_code(_: &std::process::ExitStatus) -> i32 {
+    1
 }
 
 #[cfg(test)]
@@ -57,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn without_path_the_environment_or_sibling_tool_is_found() {
+    fn when_no_slot_tool_is_found_the_command_is_unchanged_with_a_warning_and_paddock_heavy_wins() {
         let env = HashMap::from([("ENGINEERING_RULES".to_string(), "/nonexistent".to_string())]);
         // no PATH tool, no sibling file: one warning, the command unchanged
         let (line, warn) = plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"));
@@ -70,6 +86,7 @@ mod tests {
         assert!(warn.is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn engineering_rules_variable_finds_the_script_off_path() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/heavy");
