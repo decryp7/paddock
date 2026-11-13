@@ -3,6 +3,7 @@
 mod build_jobs;
 mod build_jobs_golden;
 mod check;
+mod check_c121;
 mod ci_isolation;
 mod ci_isolation_windows;
 mod cli;

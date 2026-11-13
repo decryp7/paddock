@@ -158,6 +158,14 @@ review_by = 2026-12-27
 approved = "coordinator"
 
 [[report_only]]
+id = "C121"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C121-test-path-text.mjs (and c121.rs) and the mode to gate. Rules A and B start with no sites on the tree (all 65 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
+owner = "ADR 0099"
+since = 2026-11-13
+review_by = 2026-12-13
+approved = "user"
+
+[[report_only]]
 id = "C118"
 reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C118-floating-tools.mjs and the mode to gate. 16 floating-tool warnings today (7 cargo install without a pinned version, 5 dtolnay/rust-toolchain at a channel ref, 2 taiki-e/install-action refs without a digest, 1 install-action tool without @x.y.z, 1 npx --yes of a package that is not in the lockfile); an npx of a binary of a top-level package-lock.json package is not a finding"
 owner = "ER-26 (2026-11-13)"

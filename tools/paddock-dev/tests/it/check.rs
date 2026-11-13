@@ -18,7 +18,7 @@ fn manifest() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn repo_root() -> PathBuf {
+pub(crate) fn repo_root() -> PathBuf {
     crate::full_tree(manifest().ancestors().nth(2).unwrap())
 }
 
@@ -26,7 +26,7 @@ fn fixtures() -> PathBuf {
     manifest().join("tests/fixtures/check")
 }
 
-fn skip(reason: &str) {
+pub(crate) fn skip(reason: &str) {
     let ci = ["CI", "GITHUB_ACTIONS"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "true"));
     if ci && cfg!(target_os = "linux") {
         panic!("the live comparison cannot run in CI: {reason}");
@@ -42,7 +42,7 @@ fn skip(reason: &str) {
     clippy::disallowed_methods,
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
-fn has_node() -> bool {
+pub(crate) fn has_node() -> bool {
     Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
@@ -136,7 +136,7 @@ fn fixture_masks_equal_the_recorded_js_masks() {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 /// Runs a node program (an ES module given on the command line) in the repository and returns its standard output.
-fn node(driver: &str, env: &[(&str, String)]) -> String {
+pub(crate) fn node(driver: &str, env: &[(&str, String)]) -> String {
     let mut c = Command::new("node");
     c.args(["--input-type=module", "-e", driver]).current_dir(repo_root());
     // The parity runs measure growth against `origin/main` of their own repository, whatever the caller's environment says.
@@ -153,7 +153,7 @@ fn node(driver: &str, env: &[(&str, String)]) -> String {
 /// (ADR 0071). A slow disk or a loaded host stretches the run, never this: 42-49 s quiet against over 240 s under I/O load, and
 /// every one of those seconds finished files. nextest's slow-timeout (`.config/nextest.toml`) is only the backstop.
 // conformance: hang-guard
-const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
+pub(crate) const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[allow(
     clippy::disallowed_methods,
@@ -162,7 +162,7 @@ const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
 /// [`node`] for a driver that prints a `.` line per unit of work: every such line is a tick of `progress`, and everything else it
 /// prints is the answer, returned. The child's end (its exit status) ends the wait; a hang ends it through the progress guard
 /// around the call.
-fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
+pub(crate) fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
     use std::io::{BufRead, Read};
     let mut c = Command::new("node");
     c.args(["--input-type=module", "-e", driver])
