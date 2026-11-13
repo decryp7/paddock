@@ -843,3 +843,35 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
     assert!(refuse_home(&through_link, Some(h)).is_err());
     assert!(!home.join("work/also-never").exists());
 }
+
+/// Bug 2026-11-13: a commit already on a remote branch was measured from origin/main and rebuilt everything.
+#[test]
+fn a_push_of_a_commit_already_on_a_remote_branch_has_nothing_to_check() {
+    use crate::plan_repo::git_text;
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("r");
+    std::fs::create_dir(&r).unwrap();
+    let git = |args: &[&str]| git_text(&r, args).unwrap_or_else(|| panic!("git {args:?}"));
+    git(&["init", "-q", "-b", "main"]);
+    git(&["config", "user.email", "t@t"]);
+    git(&["config", "user.name", "t"]);
+    std::fs::write(r.join("a.txt"), "1\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&["commit", "-q", "-m", "one"]);
+    let one = git(&["rev-parse", "HEAD"]).trim().to_string();
+    git(&["update-ref", "refs/remotes/origin/main", &one]);
+    std::fs::write(r.join("a.txt"), "2\n").unwrap();
+    git(&["commit", "-q", "-am", "two"]);
+    let two = git(&["rev-parse", "HEAD"]).trim().to_string();
+    // No remote branch holds `two` yet: measured from the base.
+    assert_eq!(super::known_remote_branch(&r, &[two.clone()]), None);
+    assert_eq!(super::known_remote_branch(&r, &[]), None);
+    git(&["update-ref", "refs/remotes/origin/train", &two]);
+    // The push target is main, the sha is the tip of origin/train.
+    assert_eq!(super::known_remote_branch(&r, &[two.clone()]).as_deref(), Some("origin/train"));
+    // One pushed commit that no branch holds keeps the check running.
+    std::fs::write(r.join("a.txt"), "3\n").unwrap();
+    git(&["commit", "-q", "-am", "three"]);
+    let three = git(&["rev-parse", "HEAD"]).trim().to_string();
+    assert_eq!(super::known_remote_branch(&r, &[two, three]), None);
+}

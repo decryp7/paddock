@@ -255,6 +255,12 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     } else {
         Vec::new()
     };
+    if let Some(branch) = known_remote_branch(&root, &pushed) {
+        return Ok(Report::new(
+            json!({"gates": [], "changed": 0, "already_on": branch}),
+            format!("pre-push: already on {branch}; nothing new to check."),
+        ));
+    }
     let (change, mut notes, extra) = discover(&root, &args.base, &args.files, &pushed)?;
     if change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
@@ -599,6 +605,27 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
     .with_exit(exit)
 }
 
+/// The remote-tracking branch that already holds every pushed commit (`git branch -r --contains`), or None. Such a push adds
+/// nothing the remote does not have, so the change to check is empty and measured, not skipped; with no pushed commit, or one
+/// that no remote branch holds, the check runs from the base as before.
+fn known_remote_branch(root: &Path, pushed: &[String]) -> Option<String> {
+    let mut common: Option<Vec<String>> = None;
+    for sha in pushed {
+        let out = git_text(root, &["branch", "-r", "--contains", sha])?;
+        let here: Vec<String> = out
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.contains("->"))
+            .map(str::to_string)
+            .collect();
+        common = Some(match common {
+            None => here,
+            Some(c) => c.into_iter().filter(|b| here.contains(b)).collect(),
+        });
+    }
+    common.and_then(|c| c.into_iter().next())
+}
+
 /// The change, notes for the header and the pushed commits beyond the first. Without pushed refs: files since the merge base
 /// (committed, modified, untracked) and the range to HEAD. With them: the files and range of the first pushed commit only (the run
 /// checks that commit in a worktree of its own, so a dirty tree is not part of it).
@@ -633,6 +660,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     if let Some((tip, rest)) = pushed.split_first() {
         extra.extend(rest.iter().cloned());
         let mb = merge_base(tip)?;
+        notes.push(format!("measured from {base} (merge base {mb}): no remote branch holds every pushed commit"));
         let diff = git_text(root, &["diff", "--name-only", &mb, tip])
             .ok_or_else(|| CliError::failure(format!("git diff {mb} {tip} failed.")).with_hint("Run it by hand to see why."))?;
         changed.extend(lines(Some(diff)));
