@@ -1347,3 +1347,22 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The same handle-list CreateProcessAsUser start in the shared service crate: it leaks no handle either; it stays beside win_session.rs until both move onto one handle-list start."
+
+# =====================================================================================================================
+# Build folders kept off the home folder
+# =====================================================================================================================
+
+[[mechanism]]
+id = "home-root-guard"
+title = "Refusing a build folder under the home folder, the internal disk (ER-14, ER-24)"
+canonical = "heavy"
+paths = ["tools/heavy/src/guard.rs"]
+symbols = ["item:violation", "item:abs_path"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/generators/run.rs"]
+  symbols = ["item:target_dir"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The generator checks' build root (PADDOCK_DEV_TARGET_DIR or the first configured disk root) is refused when it starts with $HOME; heavy's guard also resolves relative and quoted cargo target dirs. Both move onto one guard when paddock-dev and heavy share it."
