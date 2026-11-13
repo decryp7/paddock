@@ -16,10 +16,10 @@
 //!   `<repo>/target/*` except debug, release, rust-analyzer, doc, tmp and flycheck*) with their sizes; with `--remove` deletes those
 //!   not kept (a `--keep 6c` keeps `~/.<app>-target-6c*` and `target/agent-6c*`). Ends with the free space of the repository's drive.
 //!
-//! Deletions go through [`safe_remove`](super::safe_remove): only under the folder being capped, never through a link.
+//! Deletions go through [`safe_remove`](crate::safe_remove): only under the folder being capped, never through a link.
 
 use super::Step;
-use super::safe_remove::{self, RemoveError};
+use crate::safe_remove::{self, RemoveError};
 use clap::Args as ClapArgs;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;

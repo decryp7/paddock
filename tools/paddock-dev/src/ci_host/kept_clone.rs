@@ -25,10 +25,10 @@
 //! The checkout's credentials (its http extra header) reach git through the environment, never a command line, never kept.
 
 use super::phase::{Phase, bounded_hung};
-use super::safe_remove;
 use super::{Step, folder_name, isolation_full};
 use crate::ci_isolation::home;
 use crate::ci_tool::{NETWORK_ENV, ToolCall};
+use crate::safe_remove;
 use clap::Args as ClapArgs;
 use std::collections::HashMap;
 use std::io::{self, Write};
