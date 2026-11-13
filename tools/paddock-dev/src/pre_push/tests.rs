@@ -1,8 +1,9 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
-use super::exec::{Done, Exec, RunOpts, Verdict, decide, run_all, run_all_with};
+use super::budget::Timing;
+use super::exec::{Done, Exec, RunOpts, Verdict, decide, run_all, run_all_timed, run_all_with};
 use super::gates::{Change, Facts, Gate, Need, Planned, plan_gates};
-use super::{accept_not_measured, parse_refs, render};
+use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -193,6 +194,10 @@ struct Fake {
     unstartable: Vec<String>,
     panics: Vec<String>,
     cut_short: Vec<String>,
+    /// What every gate that ran reports as its queue and run time (as `heavy`'s timing line would).
+    timing: Option<Timing>,
+    /// Gates that never got a slot: `how` is heavy's queue-limit text.
+    no_slot: Vec<String>,
     ran: Mutex<Vec<String>>,
 }
 
@@ -215,6 +220,16 @@ impl Exec for Fake {
                 how: "timed out after 900 s".into(),
                 tail: String::new(),
                 log: Some("/logs/x.log".into()),
+                timing: None,
+            });
+        }
+        if self.no_slot.contains(&g.id) {
+            return Ok(Done {
+                success: false,
+                how: "queue limit: no slot within 30 s".into(),
+                tail: String::new(),
+                log: Some("/logs/q.log".into()),
+                timing: Some(Timing { queued: 31.0, ran: 0.0 }),
             });
         }
         let fail = self.fail.iter().any(|f| f == &g.id);
@@ -223,6 +238,7 @@ impl Exec for Fake {
             how: if fail { "exit 1".into() } else { "exit 0".into() },
             tail: if fail { "error: boom".into() } else { String::new() },
             log: None,
+            timing: self.timing,
         })
     }
 }
@@ -344,6 +360,7 @@ fn a_docker_failure_names_its_cause() {
                 how: "exit 137".into(),
                 tail: String::new(),
                 log: None,
+                timing: None,
             })
         }
     }
@@ -1042,4 +1059,69 @@ fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output
     );
     let last = report.text.lines().last().unwrap();
     assert_eq!(last, "NOT MEASURED (2): clippy-windows apps/dyno; clippy crates");
+}
+
+#[test]
+fn queue_time_and_run_time_are_reported_apart_and_the_pass_counts_only_the_run() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        timing: Some(Timing { queued: 12.0, ran: 3.0 }),
+        ..Fake::default()
+    };
+    let (rows, timings) = run_all_timed(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 2,
+            budget: Duration::from_secs(900),
+            stop: &AtomicBool::new(false),
+        },
+    );
+    assert!(
+        rows.iter()
+            .all(|(_, v)| matches!(v, Verdict::Passed { secs } if (*secs - 3.0).abs() < 1e-9)),
+        "a pass shows the run time, not the wall time: {rows:?}"
+    );
+    assert_eq!(timings["fmt crates"], Timing { queued: 12.0, ran: 3.0 });
+    let report = render_timed("h", &rows, &timings);
+    assert!(
+        report.text.contains("ok            fmt crates") && report.text.contains("3.0 s run, 12.0 s queued"),
+        "{}",
+        report.text
+    );
+    let gate = report.data["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["id"] == "fmt crates")
+        .unwrap()
+        .clone();
+    assert_eq!((gate["run_secs"].as_f64(), gate["queued_secs"].as_f64()), (Some(3.0), Some(12.0)));
+}
+
+#[test]
+fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        no_slot: vec!["clippy crates".into()],
+        ..Fake::default()
+    };
+    let (rows, timings) = run_all_timed(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 2,
+            budget: Duration::from_secs(900),
+            stop: &AtomicBool::new(false),
+        },
+    );
+    let v = verdicts(&rows);
+    let Verdict::NotMeasured { reason, next } = &v["clippy crates"] else {
+        panic!("{:?}", v["clippy crates"])
+    };
+    assert!(reason.contains("never got a heavy slot") && reason.contains("31.0 s"), "{reason}");
+    assert!(next.contains("heavy status") && next.contains("PADDOCK_QUEUE_MAX"), "{next}");
+    let report = render_timed("h", &rows, &timings);
+    assert_eq!(report.exit, Exit::NotMeasured);
+    assert!(report.text.contains("NOT MEASURED  clippy crates"), "{}", report.text);
 }

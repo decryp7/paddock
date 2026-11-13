@@ -21,6 +21,7 @@
 //! `PADDOCK_ACCEPT_NOT_MEASURED=<full row ids>` (or `--accept-not-measured`) lets those not-measured rows pass the push; it is
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
+pub mod budget;
 pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
@@ -28,7 +29,7 @@ pub mod heavy_tool;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{BUDGET, RealExec, RunOpts, Verdict, parse_load, run_all_with, workers};
+use exec::{BUDGET, QUEUE_MAX, RealExec, RunOpts, Verdict, parse_load, run_all_timed, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -323,6 +324,8 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
         budget_end: std::time::Instant::now() + BUDGET,
+        priority: pushes.first().is_some_and(|p| budget::is_landing_ref(&p.remote_ref)),
+        queue_max: queue_max(&env),
     };
     let history = GitHistory::new(&work, GIT_TIMEOUT);
     let req = Request {
@@ -364,17 +367,23 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "{overridden}pre-push: base {} ({}); {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}); {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot is reported apart, limit {} min, {}); logs in {}\n{}",
         base,
         base_why,
         change.files.len(),
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
         BUDGET.as_secs() / 60,
+        real.queue_max.as_secs() / 60,
+        if real.priority {
+            "priority lane: this push lands on a train, main or a release tag"
+        } else {
+            "normal lane"
+        },
         real.logs.display(),
         notes.iter().map(|n| format!("pre-push: {n}")).collect::<Vec<_>>().join("\n")
     );
-    let mut rows = run_all_with(
+    let (mut rows, timings) = run_all_timed(
         &planned,
         &real,
         &RunOpts {
@@ -385,11 +394,19 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     );
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
-    let mut report = render(head.trim_end(), &rows);
+    let mut report = render_timed(head.trim_end(), &rows, &timings);
     if stop.load(Ordering::SeqCst) {
         report = report.with_exit(Exit::Interrupted);
     }
     Ok(report)
+}
+
+/// The longest a heavy step waits for a slot: `PADDOCK_QUEUE_MAX` (seconds, at least 1) or [`QUEUE_MAX`].
+fn queue_max(env: &HashMap<String, String>) -> Duration {
+    env.get("PADDOCK_QUEUE_MAX")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s >= 1)
+        .map_or(QUEUE_MAX, Duration::from_secs)
 }
 
 /// One not-measured row per pushed commit beyond the first: a run checks a single commit, so the others are never passed.
@@ -677,6 +694,15 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
 /// The table, one line per row, then what CI runs that this gate does not, and the exit code (see the module doc). A failure's line
 /// carries its cause and next step.
 pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
+    render_timed(head, rows, &std::collections::BTreeMap::new())
+}
+
+/// [`render`] with the queue and run time of the rows that went through `heavy`: a pass or a failure shows both, apart (ER-27).
+pub fn render_timed(head: &str, rows: &[(String, Verdict)], timings: &std::collections::BTreeMap<String, budget::Timing>) -> Report {
+    let both = |id: &str, secs: f64| match timings.get(id) {
+        Some(t) => format!("{:.1} s run, {:.1} s queued", t.ran, t.queued),
+        None => format!("{secs:.1} s"),
+    };
     let mut text = format!("{head}\n");
     let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
     let mut data = Vec::new();
@@ -685,7 +711,7 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
         let (line, kind) = match v {
             Verdict::Passed { secs } => {
                 ok += 1;
-                (format!("ok            {id:<34} {secs:.1} s"), "passed")
+                (format!("ok            {id:<34} {}", both(id, *secs)), "passed")
             }
             Verdict::Skipped { reason } => {
                 skip += 1;
@@ -712,7 +738,10 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
                     format!("\n    {}", tail.replace('\n', "\n    "))
                 };
                 (
-                    format!("FAIL          {id:<34} {secs:.1} s\n  ::error::{id}: {cause} Next step: {next}{shown}"),
+                    format!(
+                        "FAIL          {id:<34} {}\n  ::error::{id}: {cause} Next step: {next}{shown}",
+                        both(id, *secs)
+                    ),
                     "failed",
                 )
             }
@@ -723,7 +752,12 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
         };
         text.push_str(&line);
         text.push('\n');
-        data.push(json!({"id": id, "verdict": kind}));
+        let mut row = json!({"id": id, "verdict": kind});
+        if let Some(t) = timings.get(id) {
+            row["run_secs"] = json!(t.ran);
+            row["queued_secs"] = json!(t.queued);
+        }
+        data.push(row);
     }
     text.push_str("CI also runs, and this gate does not:\n");
     for (what, why) in gates::NOT_RUN {
