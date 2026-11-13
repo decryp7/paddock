@@ -16,6 +16,8 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 
 ## Checks
 
+**A new check gets its id from `./dev check new-id --reserve <branch>`** (ER-21): it prints the next id free across the working tree, every local and `origin/*` branch and `conformance/reserved/`, and adds one file `conformance/reserved/C<n>-<branch>` (one file per reservation, so branches never conflict); commit that file with the branch's first commit. Without `--reserve` it only prints. Never pick a number by hand: C110, C113 and C119 were each taken by two parallel branches.
+
 | Id | What | Needs |
 |---|---|---|
 | C03 | icons equal `icons/<app>/tauri` of Paddock and fill the canvas; CI runs an icon check | `--paddock` for the hash part |

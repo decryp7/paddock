@@ -30,6 +30,7 @@ Decisions: <what the user or an accepted ADR already decided, and what was ruled
 
 ## Checks
 
+Check ids: <a brief that adds a conformance check says: take the id with `./dev check new-id --reserve <branch>` and commit the reservation file; otherwise write "none">
 Gates: <the exact commands, in order: fmt, clippy on the host and through xwin, the touched tests, `./dev gates check`, commit-lint, and the conformance line if conformance is touched>
 Heavy steps: through /Volumes/d8sst7/dev.decryptology.net/engineering-rules/scripts/heavy.sh, with CARGO_BUILD_JOBS=2 and a private CARGO_TARGET_DIR under /Volumes/d8sst7/dev-targets/build/.
 

@@ -44,6 +44,7 @@
 
 pub mod brief_check;
 pub mod check;
+pub mod check_ids;
 pub mod child_env;
 pub mod ci_build_env;
 pub mod ci_build_jobs;
