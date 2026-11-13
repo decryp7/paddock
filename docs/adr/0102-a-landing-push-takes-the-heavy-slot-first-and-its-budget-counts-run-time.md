@@ -30,12 +30,34 @@ never crowd out a release; nothing enforced it.
 4. **Never a pass without a slot.** A step that got no slot within `PADDOCK_QUEUE_MAX` (default 1800 s) is "not measured" with its
    queue time and the next step (`heavy status`); the push is blocked (exit 6), never passed (ER-33).
 
+5. **A CI job on this host takes the lane too (the recurring macOS timeouts).** The Mac runners (gitea-runner daemons under
+   `~/gitea-runners`) run on the machine the agents build on; macOS CI tests timed out while agents loaded it (runs 8050, 8060,
+   8061, 8066), and nothing made the agents yield. The hook is the job-isolation action, which already brackets every host job:
+   `./dev ci isolation acquire` (first step) takes the job's slot, held by a long-lived holder process, and `release` (last step,
+   `if: always()`) gives it back. Acquire now runs `heavy mark ci-<slot> --pid <holder pid>`: a priority marker in heavy's folder
+   (the same file format as `--high`) owned by the holder; release runs `heavy mark --remove`. While the holder lives, agents' normal
+   heavy steps wait for the job (running steps are never killed; a job queues nothing, it only goes first). Three ways it ends, so
+   a crashed job cannot block for good: the job's `release`; the holder's death (the marker of a dead process is removed by the
+   next run that sees it, as every stale marker); and age, `HEAVY_CI_MAX` = 7200 s, after which waiting agents ignore it with a
+   `heavy.priority` warning. 7200 s is the longest `timeout-minutes` of a host job (120), not measured; the marker's age against the
+   job's real duration is in heavy's log (`heavy.mark`) to revisit it with. `heavy` is not built by a job: acquire uses
+   `PADDOCK_HEAVY_BIN`, else the binary cached for the tree by any agent's pre-push (`ensure` with no time to build); without one
+   it prints a `::warning::` and the job goes on unannounced (degrade, never fail the job).
+   A tag run keeps the shell `job-isolation.sh` (release path, unchanged) and does not announce itself; the Windows and Linux
+   runners are other machines and never do. Alternatives weighed: (a) agents poll the runner's job state (couples agents to Gitea's runner internals, and no process to
+   tie it to); (b) pause agents by hand, as now (3 interventions on 2026-11-13); (c) a second runner class on another machine
+   (a hardware decision, outside this ADR). The marker costs one file and two calls per job.
+
 ## Common practice (ER-37)
 
 - Buildkite agents' job priority and the Jenkins Priority Sorter plugin order a queue by priority and do not preempt a running job:
   the same shape as 1. GitLab's merge trains and Zuul's gate pipeline (which outranks the check pipeline) put what is about to land
   ahead of speculative runs. GitHub Actions has concurrency groups only (cancel or queue, no priority). None bounds the priority;
   starvation protection is by aging in Jenkins' sorter and in most schedulers (Slurm's age factor), which 2. imitates with a hard bound.
+- CI job priorities: Buildkite queues by agent priority per pipeline, Jenkins' Priority Sorter and GitLab runner tags separate
+  classes of work; sharing one machine between interactive work and a CI agent is normally avoided (a dedicated runner) or
+  limited by the OS scheduler (nice, cgroup CPU weights). A personal single-machine setup has no cgroup on macOS, so the cooperative
+  marker (5.) is the common practice's nearest equivalent; the dedicated-runner option is (c) above.
 - Queue time is reported apart from run time by Buildkite (wait time vs run time) and GitHub Actions (queued vs in progress); job
   timeouts count run time only. 3. does the same for the push gate.
 
@@ -45,12 +67,12 @@ never crowd out a release; nothing enforced it.
   on a landing day, and the gate stays flaky for landings.
 - Only pass `--high` (about 0.25 agent-day): a landing goes first, but the 15 minutes still count queue time behind a running step,
   and nothing bounds the lane.
-- This design: about 1 agent-day (heavy 0.4, pre-push 0.4, ADR and checks 0.2). It is the one asked for; the cheaper option is the
+- This design: about 1 agent-day (heavy 0.4, pre-push 0.4, ADR and checks 0.2), plus about 0.4 for the CI marker (5.). It is the one asked for; the cheaper option is the
   second one above.
 
 ## Consequences
 
-- `tools/heavy`: `HEAVY_PRIORITY_MAX`, `--queue-max`, `--run-max`, exit codes 79 and 80, the timing line. The shell plock does not
+- `tools/heavy`: `heavy mark [--remove] ci-<name> --pid P`, `HEAVY_CI_MAX`, `HEAVY_PRIORITY_MAX`, `--queue-max`, `--run-max`, exit codes 79 and 80, the timing line. The shell plock does not
   know the bound or the limits; it ignores the new flags it never receives (mixed use is unchanged: the marker format is the same).
 - `tools/paddock-dev/src/pre_push`: `budget.rs` (pure), `exec.rs` (the flags, the credit), `mod.rs` (the ref decision, the table).
 - Train 10 changes `pre_push/mod.rs`'s base choice; the overlap is the `RealExec { .. }` literal (two new fields) and `render`.
