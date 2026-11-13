@@ -239,7 +239,10 @@ impl Runner for Real {
 pub fn working_tree(root: &Path) -> Subject {
     use sha2::{Digest, Sha256};
     let git = crate::merge_check::git::Git::new(root);
-    let head = git.text(&["rev-parse", "HEAD"]).map(|t| t.trim().to_string()).unwrap_or_else(|_| "unknown".into());
+    let head = git
+        .text(&["rev-parse", "HEAD"])
+        .map(|t| t.trim().to_string())
+        .unwrap_or_else(|_| "unknown".into());
     let mut h = Sha256::new();
     for args in [&["diff", "HEAD"][..], &["ls-files", "--others", "--exclude-standard"][..]] {
         h.update(git.text(args).unwrap_or_default());
@@ -406,21 +409,27 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: 
     );
     let took = start.elapsed();
     let tool = ToolVersion::new(concat!("paddock-dev ", env!("CARGO_PKG_VERSION")));
-    let outcome = measure(CheckId::new(format!("gen:{}", g.id)), subject.clone(), tool, UnixSeconds::now(), || {
-        let not = |why: String| Err(Unmeasured::NotMeasured(Reason::new(why)));
-        match ran {
-            // The check's own exit 0 is the probe: only `measure` turns it into a pass.
-            Ran::Exited { code: Some(0), .. } => Ok(Vec::new()),
-            Ran::Exited { code, tail, text } => classify_failure(g, code, &tail, &text),
-            Ran::Unavailable(why) => not(why),
-            Ran::SlotWait(who) => not(format!(
-                "it waited {} s, the hang guard, for the machine-wide heavy slot and never started ({who}); run it again when the machine is quieter",
-                limit(g.cost).as_secs()
-            )),
-            Ran::TimedOut => not(format!("it did not finish within {} s and was ended", limit(g.cost).as_secs())),
-            Ran::OutputCap => not("it wrote more output than the cap (4 MiB) and was ended".into()),
-        }
-    });
+    let outcome = measure(
+        CheckId::new(format!("gen:{}", g.id)),
+        subject.clone(),
+        tool,
+        UnixSeconds::now(),
+        || {
+            let not = |why: String| Err(Unmeasured::NotMeasured(Reason::new(why)));
+            match ran {
+                // The check's own exit 0 is the probe: only `measure` turns it into a pass.
+                Ran::Exited { code: Some(0), .. } => Ok(Vec::new()),
+                Ran::Exited { code, tail, text } => classify_failure(g, code, &tail, &text),
+                Ran::Unavailable(why) => not(why),
+                Ran::SlotWait(who) => not(format!(
+                    "it waited {} s, the hang guard, for the machine-wide heavy slot and never started ({who}); run it again when the machine is quieter",
+                    limit(g.cost).as_secs()
+                )),
+                Ran::TimedOut => not(format!("it did not finish within {} s and was ended", limit(g.cost).as_secs())),
+                Ran::OutputCap => not("it wrote more output than the cap (4 MiB) and was ended".into()),
+            }
+        },
+    );
     let word = match &outcome {
         Outcome::Clean(_) => "current",
         Outcome::Findings(_) => "STALE",

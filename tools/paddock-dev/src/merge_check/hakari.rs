@@ -20,29 +20,20 @@ const TIMEOUT: Duration = Duration::from_secs(600);
 /// Lines of the diff shown in a finding.
 const EXCERPT_LINES: usize = 24;
 
-/// What `cargo hakari generate --diff` said.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Verdict {
-    /// Exit 0: the generated file is what is committed.
-    Clean,
-    /// Exit 1 and a diff on standard output.
-    Drift(Vec<String>),
-    /// Anything else: the tool could not answer.
-    NotMeasured(String),
-}
-
-/// Reads the exit code and output of `cargo hakari generate --diff` (pure, so every shape is tested).
-pub fn interpret(code: Option<i32>, stdout: &str, stderr: &str) -> Verdict {
+/// Reads the exit code and output of `cargo hakari generate --diff` (pure, so every shape is tested): `Ok(None)` when the
+/// generated file is what is committed (exit 0), `Ok(Some(lines))` for drift (exit 1 and a diff), `Err(why)` for anything else (the
+/// tool could not answer). This is the probe only; the pass is made by `measure` around the whole merge check (ADR 0089).
+pub fn interpret(code: Option<i32>, stdout: &str, stderr: &str) -> Result<Option<Vec<String>>, String> {
     let both = format!("{stdout}\n{stderr}");
     match code {
-        Some(0) => Verdict::Clean,
-        Some(1) if both.contains("--- original") => Verdict::Drift(
+        Some(0) => Ok(None),
+        Some(1) if both.contains("--- original") => Ok(Some(
             both.lines()
                 .filter(|l| !l.trim().is_empty())
                 .take(EXCERPT_LINES)
                 .map(str::to_string)
                 .collect(),
-        ),
+        )),
         other => {
             let tail: String = stderr
                 .trim()
@@ -53,7 +44,7 @@ pub fn interpret(code: Option<i32>, stdout: &str, stderr: &str) -> Verdict {
                 .into_iter()
                 .rev()
                 .collect();
-            Verdict::NotMeasured(format!("`cargo hakari generate --diff` ended with {other:?} and no diff: {tail}"))
+            Err(format!("`cargo hakari generate --diff` ended with {other:?} and no diff: {tail}"))
         }
     }
 }
@@ -110,10 +101,9 @@ pub fn check(git: &Git, tree: &str, files: &HashMap<String, String>, cargo: &str
         paddock_proc::Outcome::Exited(st) => st.code(),
         _ => None,
     };
-    match interpret(code, &String::from_utf8_lossy(&out.stdout), &out.stderr_text()) {
-        Verdict::Clean => Ok(Vec::new()),
-        Verdict::NotMeasured(why) => Err(why),
-        Verdict::Drift(excerpts) => Ok(vec![Finding {
+    match interpret(code, &String::from_utf8_lossy(&out.stdout), &out.stderr_text())? {
+        None => Ok(Vec::new()),
+        Some(excerpts) => Ok(vec![Finding {
             kind: Kind::WorkspaceHack,
             subject: "crates/paddock-workspace-hack/Cargo.toml".into(),
             detail: "does not match `cargo hakari generate` for the merged tree".into(),
@@ -139,7 +129,7 @@ mod tests {
 
     #[test]
     fn exit_zero_is_clean() {
-        assert_eq!(interpret(Some(0), "", ""), Verdict::Clean);
+        assert_eq!(interpret(Some(0), "", ""), Ok(None));
     }
 
     /// What cargo-hakari 0.9.39 printed for a workspace-hack that lacked `base64` (captured from the real tool, 2026-11-12): the
@@ -149,7 +139,7 @@ mod tests {
     #[test]
     fn the_real_tools_diff_on_standard_error_is_drift_and_keeps_the_diff() {
         match interpret(Some(1), "", REAL_DRIFT_STDERR) {
-            Verdict::Drift(lines) => assert!(lines.iter().any(|l| l.starts_with("+base64")), "{lines:?}"),
+            Ok(Some(lines)) => assert!(lines.iter().any(|l| l.starts_with("+base64")), "{lines:?}"),
             other => panic!("{other:?}"),
         }
     }
@@ -157,7 +147,7 @@ mod tests {
     #[test]
     fn a_diff_on_standard_output_is_drift_too() {
         match interpret(Some(1), "info: \n--- original\n+++ modified\n+x = 1\n", "") {
-            Verdict::Drift(lines) => assert!(lines.iter().any(|l| l == "+x = 1"), "{lines:?}"),
+            Ok(Some(lines)) => assert!(lines.iter().any(|l| l == "+x = 1"), "{lines:?}"),
             other => panic!("{other:?}"),
         }
     }
@@ -165,14 +155,8 @@ mod tests {
     #[test]
     fn exit_one_without_a_diff_is_not_measured_not_a_pass_and_not_drift() {
         let v = interpret(Some(1), "", "Error: building package graph failed");
-        assert!(
-            matches!(&v, Verdict::NotMeasured(w) if w.contains("building package graph")),
-            "{v:?}"
-        );
-        assert!(matches!(interpret(None, "", ""), Verdict::NotMeasured(_)));
-        assert!(matches!(
-            interpret(Some(101), "", "no such subcommand: `hakari`"),
-            Verdict::NotMeasured(_)
-        ));
+        assert!(matches!(&v, Err(w) if w.contains("building package graph")), "{v:?}");
+        assert!(interpret(None, "", "").is_err());
+        assert!(interpret(Some(101), "", "no such subcommand: `hakari`").is_err());
     }
 }

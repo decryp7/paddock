@@ -443,8 +443,7 @@ fn a_clone_without_the_parents_is_not_measured_never_a_pass() {
         let clone = dest.path().join("c");
         r.git(&["clone", "-q", "--no-local", "--depth", depth, &url, clone.to_str().unwrap()]);
         let (code, out) = r.check_at(&clone, &["HEAD"]);
-        // TODO(ADR 0089 WP-1): exit 6 once paddock_cli::Exit has it; until then a failure, exit 1.
-        assert_eq!(code, 1, "depth {depth}: {out}");
+        assert_eq!(code, 6, "depth {depth}: {out}");
         assert!(out.contains("NOT MEASURED") && out.contains("::error::"), "depth {depth}: {out}");
         assert!(!out.contains("nothing a parent added"), "depth {depth}: {out}");
     }
@@ -470,7 +469,7 @@ fn a_rust_file_that_does_not_parse_is_not_measured() {
     r.git(&["add", "--all"]);
     r.git(&["commit", "-q", "-m", "Merge feature"]);
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(
         out.contains("NOT MEASURED") && out.contains("crates/x/src/lib.rs does not parse"),
         "{out}"
@@ -481,7 +480,7 @@ fn a_rust_file_that_does_not_parse_is_not_measured() {
 fn an_unknown_revision_is_not_measured() {
     let r = clean_merge();
     let (code, out) = r.check(&["no-such-revision"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(out.contains("NOT MEASURED"), "{out}");
 }
 
@@ -648,7 +647,7 @@ fn a_deleted_file_whose_path_git_quotes_is_not_measured() {
     r.commit("fix: other");
     r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(out.contains("NOT MEASURED"), "{out}");
 }
 
@@ -723,7 +722,7 @@ fn a_shallow_clone_is_not_measured_even_when_every_object_is_there() {
     let root = r.git(&["rev-list", "--max-parents=0", "HEAD"]);
     fs::write(r.path().join(".git").join("shallow"), format!("{root}\n")).unwrap();
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(out.contains("NOT MEASURED") && out.contains("shallow"), "{out}");
 }
 
@@ -1001,7 +1000,7 @@ fn an_octopus_merge_is_not_measured() {
     r.git(&["merge", "-q", "-m", "Merge one and two", "one", "two"]);
     assert_eq!(r.git(&["rev-list", "--parents", "-n", "1", "HEAD"]).split(' ').count(), 4);
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(
         out.contains("NOT MEASURED") && out.contains("octopus merges are not supported"),
         "{out}"
@@ -1266,8 +1265,36 @@ exit 0
             .output()
             .unwrap();
         let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        assert_ne!(out.status.code(), Some(0), "{text}");
+        // Alone it is the merge check's not-measured, exit 6 (ADR 0089 amendment A2), not a finding (5) and never 0.
+        assert_eq!(out.status.code(), Some(6), "{text}");
         assert!(text.contains("NOT MEASURED"), "{text}");
         assert_eq!(text.lines().filter(|l| l.contains("::error::")).count(), 1, "{text}");
+    }
+
+    /// A pass says what it is a pass of: the merge commit and its tree, in the JSON (ADR 0089 amendment section 2).
+    #[test]
+    fn a_clean_merge_names_the_commit_and_tree_it_is_clean_for() {
+        let r = train(true, true);
+        let bin = tempfile::tempdir().unwrap();
+        fake_cargo(bin.path());
+        let out = r
+            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
+            .args(["merge", "check", "--json", "--root"])
+            .arg(r.path())
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let ev = &v["result"]["evidence"];
+        let head = r.git(&["rev-parse", "HEAD"]);
+        let tree = r.git(&["rev-parse", "HEAD^{tree}"]);
+        assert_eq!(v["result"]["status"], "clean", "{v}");
+        assert_eq!(
+            (ev["subject"]["sha"].as_str(), ev["subject"]["tree"].as_str()),
+            (Some(head.trim()), Some(tree.trim())),
+            "{v}"
+        );
     }
 }

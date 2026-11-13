@@ -22,8 +22,8 @@ pub mod run;
 
 use crate::merge_check::git::Git;
 use paddock_cli::{CliError, Exit, Report};
-use registry::{PATH, Registry};
 use paddock_cli::{Outcome, Verdict};
+use registry::{PATH, Registry};
 use run::{Checked, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -109,7 +109,11 @@ pub fn json_of(results: &[Checked]) -> serde_json::Value {
                 Outcome::Findings(_) => "stale",
                 _ => "not measured",
             };
-            let detail = if matches!(r.outcome, Outcome::Clean(_)) { String::new() } else { tail_of(&r.outcome) };
+            let detail = if matches!(r.outcome, Outcome::Clean(_)) {
+                String::new()
+            } else {
+                tail_of(&r.outcome)
+            };
             json!({"id": r.id, "verdict": verdict, "detail": detail, "check": r.line, "regenerate": r.regenerate,
                    "cost": r.cost.name(), "seconds": r.took.as_secs_f64(), "outcome": r.outcome.json()})
         })

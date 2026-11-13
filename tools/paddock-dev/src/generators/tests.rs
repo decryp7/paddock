@@ -501,7 +501,8 @@ fn a_current_generator_carries_its_evidence_and_the_exit_comes_only_from_the_out
 #[test]
 fn a_deleted_check_and_a_skipped_worker_are_exit_6_not_a_pass() {
     let mut fake = Fake::default();
-    fake.answers.insert("i18n.mjs".into(), Ran::Unavailable("node is not installed".into()));
+    fake.answers
+        .insert("i18n.mjs".into(), Ran::Unavailable("node is not installed".into()));
     assert_eq!(run(&fake, &["ui/a.ts"], false, &[]).exit, Exit::NotMeasured);
     let lost = super::run::Checked {
         id: "x".into(),
