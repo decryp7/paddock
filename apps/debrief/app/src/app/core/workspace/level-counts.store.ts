@@ -1,9 +1,10 @@
-import { effect, inject, untracked } from '@angular/core';
+import { DestroyRef, effect, inject, untracked } from '@angular/core';
 import { patchState, signalStore, withHooks, withState } from '@ngrx/signals';
 import { LEVELS, Level, QlQuery, Query } from '../api.types';
 import { DebriefBackend } from '../backend';
 import { QueryStore } from './query.store';
 import { WorkspaceDataStore } from './workspace-data.store';
+import { LatestRequest } from '../../shared/latest-request';
 
 /** Events per level that match every filter except the level chips themselves. */
 export type LevelCounts = Record<Level, number>;
@@ -31,28 +32,28 @@ export const LevelCountsStore = signalStore(
       const backend = inject(DebriefBackend);
       const query = inject(QueryStore);
       const data = inject(WorkspaceDataStore);
-      let seq = 0;
+      // The latest facet request wins; a newer query or the store's destruction makes it stale (ADR 0071).
+      const facets = new LatestRequest(inject(DestroyRef));
       // effect-state: IPC facet request keyed on the query; the answer lands in the store
       effect(() => {
         const q = { ...query.effectiveQuery(), levels: [] };
         data.dataVersion();
         const loaded = data.summary() !== null;
-        const mine = ++seq;
         if (!loaded || !narrowsBeyondLevels(q)) {
+          facets.cancel();
           untracked(() => patchState(store, { matching: null }));
           return;
         }
-        backend
-          .queryFacet({ query: q, field: '@level', limit: LEVELS.length + 1 })
-          .then((facet) => {
-            if (mine !== seq) return;
-            const matching = Object.fromEntries(LEVELS.map((l) => [l, 0])) as LevelCounts;
-            for (const v of facet.values) if ((LEVELS as readonly string[]).includes(v.value)) matching[v.value as Level] = v.count;
-            patchState(store, { matching });
-          })
-          .catch(() => {
-            if (mine === seq) patchState(store, { matching: null });
-          });
+        void facets.run(() => backend.queryFacet({ query: q, field: '@level', limit: LEVELS.length + 1 })).then((answer) => {
+          if (answer.status === 'stale') return;
+          if (answer.status === 'failed') {
+            patchState(store, { matching: null });
+            return;
+          }
+          const matching = Object.fromEntries(LEVELS.map((l) => [l, 0])) as LevelCounts;
+          for (const v of answer.value.values) if ((LEVELS as readonly string[]).includes(v.value)) matching[v.value as Level] = v.count;
+          patchState(store, { matching });
+        });
       });
     },
   }),

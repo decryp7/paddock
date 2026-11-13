@@ -3,6 +3,7 @@ import { RecordView, SourceContext } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { describeError } from '../core/logger';
 import { Debouncer } from '../shared/throttle';
+import { LatestRequest } from '../shared/latest-request';
 
 /** Lines shown on each side of the event at first, and the steps "More" takes up to the cap (the engine caps at 500). */
 export const CONTEXT_STEPS = [10, 50, 200, 500] as const;
@@ -80,7 +81,8 @@ export class ContextSection {
   protected readonly copyLabel = signal($localize`:@@inspector.context.copy:Copy`);
   protected readonly canGrow = computed(() => this.radius() < (CONTEXT_STEPS[CONTEXT_STEPS.length - 1] ?? 0));
   private readonly box = viewChild<ElementRef<HTMLElement>>('box');
-  private seq = 0;
+  /** The latest context request wins; closing the section, moving on or destruction makes it stale (ADR 0071). */
+  private readonly contexts = new LatestRequest(inject(DestroyRef));
   private shownId = -1;
   /** The selection moved to another event since the last load (its context waits until the selection settles). */
   private moved = false;
@@ -109,10 +111,10 @@ export class ContextSection {
         settle.cancel();
         if (!open) {
           this.moved = false;
-          this.seq++;
+          this.contexts.cancel();
         } else if (this.moved) {
           this.moved = false;
-          this.seq++;
+          this.contexts.cancel();
           settle.run(() => void this.load());
         } else void this.load();
       });
@@ -125,17 +127,17 @@ export class ContextSection {
   }
 
   protected async load(): Promise<void> {
-    const mine = ++this.seq;
     const radius = this.radius();
+    const recordId = this.record().id;
     this.error.set(null);
-    try {
-      const ctx = await this.backend.sourceContext({ recordId: this.record().id, before: radius, after: radius });
-      if (mine !== this.seq) return;
-      this.data.set(ctx);
-      afterNextRender(() => this.centreHit(), { injector: this.injector });
-    } catch (e) {
-      if (mine === this.seq) this.error.set(describeError(e));
+    const answer = await this.contexts.run(() => this.backend.sourceContext({ recordId, before: radius, after: radius }));
+    if (answer.status === 'stale') return;
+    if (answer.status === 'failed') {
+      this.error.set(describeError(answer.error));
+      return;
     }
+    this.data.set(answer.value);
+    afterNextRender(() => this.centreHit(), { injector: this.injector });
   }
 
   private centreHit(): void {

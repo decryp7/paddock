@@ -16,6 +16,7 @@ import { VisualExportService, VisualFormat } from '../share/visuals/visual-expor
 import { ReportActions } from '../share/report/report-actions';
 import { bucketsForWidth, RESIZE_SETTLE_MS } from '../shared/bucket-count';
 import { Debouncer } from '../shared/throttle';
+import { LatestRequest } from '../shared/latest-request';
 
 @Component({
   selector: 'debrief-chart-card',
@@ -187,7 +188,8 @@ export class ChartCard {
   });
 
   constructor() {
-    let seq = 0;
+    // The latest chart request wins; the card's destruction cancels it (ADR 0071).
+    const charts = new LatestRequest(inject(DestroyRef));
     let fetched = '';
     let fetchedKey = '';
     // effect-state: IPC chart request keyed on query and data version; the result lands in state
@@ -207,18 +209,18 @@ export class ChartCard {
         if (!onScreen && key === fetchedKey && this.live.isLiveRefresh()) return;
         fetched = fingerprint;
         fetchedKey = key;
-        const mine = ++seq;
         // Live updates replace the data in place; the spinner would only flicker.
         if (!this.data() || !this.live.isLiveRefresh()) this.loading.set(true);
-        this.backend
-          .queryChart({ query, chartId: fromProfile ? def.id : null, def: fromProfile ? null : def, buckets })
-          .then((d) => {
-            if (mine !== seq) return;
-            this.data.set(d);
-            this.error.set(null);
-          })
-          .catch((e) => mine === seq && this.error.set(String(e)))
-          .finally(() => mine === seq && this.loading.set(false));
+        void charts
+          .run(() => this.backend.queryChart({ query, chartId: fromProfile ? def.id : null, def: fromProfile ? null : def, buckets }))
+          .then((answer) => {
+            if (answer.status === 'stale') return;
+            if (answer.status === 'done') {
+              this.data.set(answer.value);
+              this.error.set(null);
+            } else this.error.set(String(answer.error));
+            this.loading.set(false);
+          });
       });
     });
 

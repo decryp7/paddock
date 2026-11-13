@@ -1,10 +1,11 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { QlError, QlQuery, QlResult, Completion, QueryProgress } from '../core/api.types';
 import { AnalysisBackend } from '../core/analysis-backend';
 import { DebriefEvents } from '../extensions/events';
 import { AnalysisActions } from './analysis-actions';
 import { errorText } from './async-resource';
 import { QueryHistory } from './history-store';
+import { LatestRequest } from '../shared/latest-request';
 
 export const CHECK_DELAY_MS = 150;
 const FOCUS_REQUEST_TTL_MS = 5000;
@@ -68,32 +69,38 @@ export class QuerySession {
 
   private focusRequestedAt = Number.NEGATIVE_INFINITY;
   private checkTimer: ReturnType<typeof setTimeout> | undefined;
-  private seq = 0;
+  /** The latest check and completion request wins (ADR 0071). */
+  private readonly checks = new LatestRequest(inject(DestroyRef));
 
   /** Updates the text and schedules the syntax check; completions refresh for the cursor. */
   edit(text: string, cursorBytes: number): void {
     this.text.set(text);
     this.runError.set(null);
     clearTimeout(this.checkTimer);
-    const mine = ++this.seq;
-    this.checkTimer = setTimeout(() => void this.refresh(text, cursorBytes, mine), CHECK_DELAY_MS);
+    // An answer for the text before this edit is stale from now on, not only once the next check starts.
+    this.checks.cancel();
+    this.checkTimer = setTimeout(() => void this.refresh(text, cursorBytes), CHECK_DELAY_MS);
   }
 
   /** Completions at a cursor (UTF-8 byte offset) without touching the text. */
   async complete(cursorBytes: number): Promise<void> {
-    const mine = ++this.seq;
-    await this.refresh(this.text(), cursorBytes, mine);
+    // It checks the current text too, so a check still waiting for its delay is not needed any more.
+    clearTimeout(this.checkTimer);
+    await this.refresh(this.text(), cursorBytes);
   }
 
-  private async refresh(text: string, cursorBytes: number, mine: number): Promise<void> {
-    try {
-      const [error, completions] = await Promise.all([text.trim() ? this.backend.checkQuery(text) : Promise.resolve(null), this.backend.completeQuery(text, cursorBytes)]);
-      if (mine !== this.seq) return;
-      this.error.set(error);
-      this.completions.set(completions);
-    } catch {
-      if (mine === this.seq) this.completions.set([]);
+  private async refresh(text: string, cursorBytes: number): Promise<void> {
+    const answer = await this.checks.run(() =>
+      Promise.all([text.trim() ? this.backend.checkQuery(text) : Promise.resolve(null), this.backend.completeQuery(text, cursorBytes)]),
+    );
+    if (answer.status === 'stale') return;
+    if (answer.status === 'failed') {
+      this.completions.set([]);
+      return;
     }
+    const [error, completions] = answer.value;
+    this.error.set(error);
+    this.completions.set(completions);
   }
 
   dismissCompletions(): void {

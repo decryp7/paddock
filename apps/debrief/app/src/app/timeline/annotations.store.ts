@@ -1,4 +1,4 @@
-import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { AnnotationDto, Query } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { describeError, Logger } from '../core/logger';
@@ -9,6 +9,7 @@ import { ConsumerGate } from '../core/panel-visibility';
 import { annotationKinds } from './annotation-layout';
 import { TimelineZoom } from './zoom';
 import { runKinds, runRange } from './run-layout';
+import { LatestRequest } from '../shared/latest-request';
 
 /**
  * Plugin annotations for the visible time range. They are fetched again whenever the data changes (open,
@@ -84,7 +85,8 @@ export class TimelineAnnotations {
   /** The views showing the annotations; nothing is fetched while none is visible. */
   readonly gate = new ConsumerGate();
 
-  private seq = 0;
+  /** The latest annotations request wins (ADR 0071). */
+  private readonly requests = new LatestRequest(inject(DestroyRef));
   private readonly retryNonce = signal(0);
 
   constructor() {
@@ -104,21 +106,20 @@ export class TimelineAnnotations {
     const key = range ? `${range.from}:${range.to}:${version}:${this.retryNonce()}` : '';
     if (key === this.lastKey) return;
     this.lastKey = key;
-    const mine = ++this.seq;
     if (!range) {
+      this.requests.cancel();
       this.items.set([]);
       this.error.set(null);
       return;
     }
-    try {
-      const items = await this.backend.annotations({ from: range.from, to: range.to });
-      if (mine !== this.seq) return;
-      this.items.set(Array.isArray(items) ? items : []);
+    const answer = await this.requests.run(() => this.backend.annotations({ from: range.from, to: range.to }));
+    if (answer.status === 'stale') return;
+    if (answer.status === 'done') {
+      this.items.set(Array.isArray(answer.value) ? answer.value : []);
       this.error.set(null);
-    } catch (e) {
-      if (mine !== this.seq) return;
-      this.error.set(describeError(e));
-      this.logger.warn('ui.timeline', 'Annotations could not be loaded', { Error: describeError(e) });
+    } else {
+      this.error.set(describeError(answer.error));
+      this.logger.warn('ui.timeline', 'Annotations could not be loaded', { Error: describeError(answer.error) });
     }
   }
 

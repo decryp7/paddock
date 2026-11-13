@@ -1,4 +1,4 @@
-import { effect, inject, untracked } from '@angular/core';
+import { DestroyRef, effect, inject, untracked } from '@angular/core';
 import { patchState, signalStore, withHooks, withState } from '@ngrx/signals';
 import { Query } from '../api.types';
 import { DebriefBackend } from '../backend';
@@ -6,6 +6,7 @@ import { CmdError, isCmdErrorDto } from '../cmd-error';
 import { Logger } from '../logger';
 import { QueryStore } from './query.store';
 import { WorkspaceDataStore } from './workspace-data.store';
+import { LatestRequest } from '../../shared/latest-request';
 
 interface SmartSearchState {
   /** Partial matches the background scan added to the current search (0: none, or not scanned yet). */
@@ -39,7 +40,8 @@ export const SmartSearchStore = signalStore(
       const query = inject(QueryStore);
       const data = inject(WorkspaceDataStore);
       const logger = inject(Logger);
-      let seq = 0;
+      // The latest scan wins; a newer search or the store's destruction makes it stale (ADR 0071).
+      const scans = new LatestRequest(inject(DestroyRef));
       let lastKey = '';
       // effect-state: IPC scan keyed on the query; progress and result land in the store
       effect(() => {
@@ -49,27 +51,26 @@ export const SmartSearchStore = signalStore(
         const key = scanKey(q);
         if (!loaded || !isWordSearch(q)) {
           lastKey = '';
-          seq++;
+          scans.cancel();
           untracked(() => patchState(store, { added: 0, scanning: false }));
           return;
         }
         if (key === lastKey) return;
         lastKey = key;
-        const mine = ++seq;
         untracked(() => patchState(store, { added: 0, scanning: true }));
-        backend
-          .searchPartial({ ...q, textMode: 'words' })
-          .then((found) => {
-            if (mine !== seq) return;
-            patchState(store, { scanning: false, added: found?.added ?? 0 });
-            if (found && found.added > 0 && query.query().textMode === 'words') query.patchQuery({ textMode: 'wordsOrSubstring' });
-          })
-          .catch((e) => {
-            if (mine !== seq) return;
+        void scans.run(() => backend.searchPartial({ ...q, textMode: 'words' })).then((answer) => {
+          if (answer.status === 'stale') return;
+          if (answer.status === 'failed') {
+            const e = answer.error;
             // Word matches are shown already; partial matches are a bonus, so a failed scan is only logged.
             logger.warn('search', 'Partial matches are unavailable', { Code: e instanceof CmdError || isCmdErrorDto(e) ? e.code : 'unknown' });
             patchState(store, { scanning: false });
-          });
+            return;
+          }
+          const found = answer.value;
+          patchState(store, { scanning: false, added: found?.added ?? 0 });
+          if (found && found.added > 0 && query.query().textMode === 'words') query.patchQuery({ textMode: 'wordsOrSubstring' });
+        });
       });
     },
   }),

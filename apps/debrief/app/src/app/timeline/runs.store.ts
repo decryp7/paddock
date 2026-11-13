@@ -1,9 +1,10 @@
-import { computed, effect, inject, Injectable, signal, untracked } from '@angular/core';
+import { computed, DestroyRef, effect, inject, Injectable, signal, untracked } from '@angular/core';
 import { RunsReply, RunsRequest, RunSort, RunStatus } from '../core/api.types';
 import { describeError, Logger } from '../core/logger';
 import { ConsumerGate } from '../core/panel-visibility';
 import { WorkspaceStore } from '../core/workspace.store';
 import { RunsBackend } from './runs-backend';
+import { LatestRequest } from '../shared/latest-request';
 
 /** Runs one page asks for; "Show more" adds another. */
 export const RUNS_PAGE = 200;
@@ -44,7 +45,8 @@ export class RunsStore {
   /** The views showing the runs; nothing is queried while none is visible. */
   readonly gate = new ConsumerGate();
 
-  private seq = 0;
+  /** The latest runs request wins (ADR 0071). */
+  private readonly requests = new LatestRequest(inject(DestroyRef));
   private readonly nonce = signal(0);
   private lastKey: string | null = null;
 
@@ -74,29 +76,27 @@ export class RunsStore {
   }
 
   private async load(req: RunsRequest | null): Promise<void> {
-    const mine = ++this.seq;
     if (!req) {
+      this.requests.cancel();
+      this.loading.set(false);
       this.reply.set(EMPTY);
       this.error.set(null);
       this.loaded.set(true);
       return;
     }
     this.loading.set(true);
-    try {
-      const reply = await this.backend.queryRuns(req);
-      if (mine !== this.seq) return;
+    const answer = await this.requests.run(() => this.backend.queryRuns(req));
+    if (answer.status === 'stale') return;
+    if (answer.status === 'done') {
+      const reply = answer.value;
       this.reply.set(reply && Array.isArray(reply.runs) ? reply : EMPTY);
       this.error.set(null);
-    } catch (e) {
-      if (mine !== this.seq) return;
-      this.error.set(describeError(e));
-      this.logger.warn('ui.runs', 'Runs could not be loaded', { Error: describeError(e) });
-    } finally {
-      if (mine === this.seq) {
-        this.loading.set(false);
-        this.loaded.set(true);
-      }
+    } else {
+      this.error.set(describeError(answer.error));
+      this.logger.warn('ui.runs', 'Runs could not be loaded', { Error: describeError(answer.error) });
     }
+    this.loading.set(false);
+    this.loaded.set(true);
   }
 
   retry(): void {

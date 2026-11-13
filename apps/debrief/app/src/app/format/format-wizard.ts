@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, ElementRef, inject, input, OnInit, signal, untracked, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, DestroyRef, effect, ElementRef, inject, input, OnInit, signal, untracked, viewChild } from '@angular/core';
 import { AiButton } from '../ai/ai-button';
 import { AiLauncher } from '../ai/ai-launcher';
 import { selectionWithin } from '../context/selection';
@@ -14,6 +14,7 @@ import { HelpHint } from '../ui/help-hint';
 import { DIALOG_REF } from '../ui/dialog.service';
 import { DIALOG_FORM_STYLES } from '../context/dialog-styles';
 import { FormatPart, Marks, regexFromMarks } from './format-parse';
+import { LatestRequest } from '../shared/latest-request';
 
 /** Sample lines offered for marking, and records the engine previews. */
 const PREVIEW_LINES = 50;
@@ -175,7 +176,8 @@ export class FormatWizard implements OnInit {
   protected readonly lines = computed(() => (this.head() ? this.head().split(/\r?\n/).slice(0, PREVIEW_LINES).filter((l) => l.length > 0) : []));
   protected readonly preview = signal<ParsePreview | null>(null);
   protected readonly previewError = signal<string | null>(null);
-  private previewSeq = 0;
+  /** The latest preview (draft, then parse) wins; closing the wizard cancels it (ADR 0071). */
+  private readonly previews = new LatestRequest(inject(DestroyRef));
   protected readonly loadError = signal<string | null>(null);
   protected readonly sampleIndex = signal(0);
   protected readonly marks = signal<Marks>({});
@@ -226,7 +228,7 @@ export class FormatWizard implements OnInit {
       const head = this.head();
       if (!request || !head) {
         untracked(() => {
-          this.previewSeq++;
+          this.previews.cancel();
           this.candidate.set(null);
           this.preview.set(null);
           this.previewError.set(null);
@@ -257,20 +259,24 @@ export class FormatWizard implements OnInit {
   }
 
   private async runPreview(request: ParserDraftRequest, sample: string): Promise<void> {
-    const mine = ++this.previewSeq;
     this.candidate.set(null);
     this.preview.set(null);
     this.previewError.set(null);
-    try {
+    const answer = await this.previews.run(async (signal) => {
       const draft = await this.parsers.draft(request);
-      if (mine !== this.previewSeq) return;
+      // A newer request made this one stale while the draft was made: do not parse with it.
+      if (signal.aborted) return null;
       const result = await this.backend.previewParse({ toml: draft.toml, sample, fileName: this.name(), limit: PREVIEW_LINES });
-      if (mine !== this.previewSeq) return;
-      this.candidate.set(draft);
-      this.preview.set(result);
-    } catch (e) {
-      if (mine === this.previewSeq) this.previewError.set(describeError(e));
+      return { draft, result };
+    });
+    if (answer.status === 'stale') return;
+    if (answer.status === 'failed') {
+      this.previewError.set(describeError(answer.error));
+      return;
     }
+    if (!answer.value) return;
+    this.candidate.set(answer.value.draft);
+    this.preview.set(answer.value.result);
   }
 
   protected time(ts: number | null): string {

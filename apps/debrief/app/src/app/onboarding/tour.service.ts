@@ -1,6 +1,7 @@
-import { computed, inject, Injectable, signal } from '@angular/core';
+import { computed, DestroyRef, inject, Injectable, signal } from '@angular/core';
 import { DockService } from '../dock/dock.service';
 import { TOUR_STEPS, TourStep } from './tour-steps';
+import { LatestRequest } from '../shared/latest-request';
 
 export const TOUR_DONE_KEY = 'debrief.tour.done.v1';
 /** How long a step waits for its panel to appear before it is skipped. */
@@ -34,7 +35,8 @@ export class TourService {
   readonly isFirst = computed(() => this.indexSignal() === 0);
   readonly isLast = computed(() => this.indexSignal() === this.steps.length - 1);
 
-  private seq = 0;
+  /** The latest step change wins: a newer one or the end of the tour stops a wait for a target (ADR 0071). */
+  private readonly moves = new LatestRequest(inject(DestroyRef));
   private target: Element | null = null;
 
   /** Finds a step's element; replaceable in tests. */
@@ -75,7 +77,7 @@ export class TourService {
   }
 
   finish(): void {
-    this.seq++;
+    this.moves.cancel();
     this.indexSignal.set(-1);
     this.spot.set(null);
     this.target = null;
@@ -93,7 +95,7 @@ export class TourService {
 
   /** Shows step `i`; a step whose target cannot be found is skipped in the direction of travel. */
   private async goTo(i: number, dir: 1 | -1): Promise<void> {
-    const mine = ++this.seq;
+    const mine = this.moves.begin();
     let at = i;
     while (at >= 0 && at < this.steps.length) {
       const step = this.steps[at];
@@ -104,7 +106,7 @@ export class TourService {
       if (!step.target) return;
       if (step.view) this.dock.show(step.view);
       const el = await this.waitFor(step.target, mine);
-      if (mine !== this.seq) return;
+      if (mine.aborted) return;
       if (el) {
         this.target = el;
         el.scrollIntoView?.({ block: 'nearest' });
@@ -117,12 +119,12 @@ export class TourService {
     this.finish();
   }
 
-  private async waitFor(selector: string, mine: number): Promise<Element | null> {
+  private async waitFor(selector: string, mine: AbortSignal): Promise<Element | null> {
     const deadline = Date.now() + TARGET_WAIT_MS;
     for (;;) {
       const el = this.query(selector);
       if (el && visible(el)) return el;
-      if (mine !== this.seq || Date.now() >= deadline) return null;
+      if (mine.aborted || Date.now() >= deadline) return null;
       await new Promise((r) => setTimeout(r, TARGET_POLL_MS));
     }
   }

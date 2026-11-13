@@ -107,15 +107,37 @@ describe('PagedRowsStore', () => {
     const engine = fakeEngine(10);
     const store = new PagedRowsStore({ fetch: engine.fetch });
     store.reset(q(), false);
-    const gen = store.generation;
     engine.calls.splice(0)[0]!.reject('down');
     await Promise.resolve();
     await Promise.resolve();
     expect(store.error()).toBe('down');
     store.retry([]);
-    expect(store.generation).toBe(gen + 1);
     await engine.flush();
     expect(store.total()).toBe(10);
+  });
+
+  it('after dispose a late page is not applied (ADR 0071)', async () => {
+    const engine = fakeEngine(10);
+    const store = new PagedRowsStore({ fetch: engine.fetch });
+    store.reset(q(), false);
+    store.dispose();
+    await engine.flush();
+    expect(store.loaded()).toBe(false);
+    expect(store.rowAt(0)).toBeNull();
+  });
+
+  it("a stale answer does not clear the new round's in-flight page (no second request for it)", async () => {
+    const engine = fakeEngine(10);
+    const store = new PagedRowsStore({ fetch: engine.fetch });
+    store.reset(q({ text: 'a' }), false);
+    const old = engine.calls.splice(0)[0]!;
+    store.reset(q({ text: 'b' }), false);
+    expect(engine.calls).toHaveLength(1);
+    old.reject('cancelled');
+    await Promise.resolve();
+    await Promise.resolve();
+    store.ensurePage(0);
+    expect(engine.calls).toHaveLength(1);
   });
 
   it('evicts the pages farthest from the view', async () => {
