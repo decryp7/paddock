@@ -3,6 +3,7 @@
 # from them on demand and caches it under ~/.paddock-dev/bin/heavy-<hash>. One path per line, relative to the repository root.
 tools/heavy
 crates/Cargo.toml
+crates/paddock-env
 crates/paddock-proc
 crates/paddock-workspace-hack
 .cargo/config.toml
