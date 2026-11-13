@@ -556,7 +556,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
             }
         };
         // A finding waived by a comment at its site is waived, not found (the JavaScript runner does the same).
-        let (inline, mut found): (Vec<Finding>, Vec<Finding>) = found.into_iter().partition(|f| f.inline_waiver.is_some());
+        let (inline, mut found): (Vec<Finding>, Vec<Finding>) = found.into_iter().partition(|f| f.inline_waiver.is_some() && !f.unwaivable);
         inline_waived.extend(inline.into_iter().map(|f| {
             let reason = f.inline_waiver.clone().unwrap_or_default();
             Waived {

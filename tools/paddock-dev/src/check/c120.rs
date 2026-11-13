@@ -10,6 +10,7 @@
 use super::finding::Finding;
 use super::inline_waiver::{InlineWaiver, recognise};
 use super::jsre::{WS, line_at, rx, trim};
+use super::mask::mask_rust;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
@@ -69,6 +70,35 @@ static NOT_A_LAYOUT: LazyLock<Regex> = LazyLock::new(|| rx(r"https?://|node_modu
 static TRAILING_SLASHES: LazyLock<Regex> = LazyLock::new(|| rx(r"\s//[^\n]*$"));
 static TRAILING_HASH: LazyLock<Regex> = LazyLock::new(|| rx(r"\s#[^\n]*$"));
 
+static TEST_MODULE: LazyLock<Regex> = LazyLock::new(|| rx(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{"));
+static UNDER_TESTS: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)tests/"));
+
+/// The 1-based `(first, last)` line ranges of the `#[cfg(test)] mod name { ... }` blocks of a Rust source. Only that plain form counts:
+/// `#[cfg(all(test, ...))]` and an out-of-line `mod tests;` (its own file, not under `tests/`) are not recognised, so their sites stay
+/// reported (fail-safe).
+pub fn test_module_lines(text: &str) -> Vec<(usize, usize)> {
+    let masked = mask_rust(text);
+    let bytes = masked.as_bytes();
+    let mut ranges = Vec::new();
+    for m in TEST_MODULE.find_iter(&masked) {
+        let mut depth = 0usize;
+        let mut end = bytes.len().saturating_sub(1);
+        for (i, b) in bytes.iter().enumerate().skip(m.end() - 1) {
+            if *b == b'{' {
+                depth += 1;
+            } else if *b == b'}' {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        ranges.push((line_at(&masked, m.start()), line_at(&masked, end)));
+    }
+    ranges
+}
+
 /// One layout guess in a source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Guess {
@@ -97,7 +127,7 @@ pub fn without_comment_lines(text: &str, prefix: &str) -> String {
 }
 
 /// The layout guesses in one source; `shell` picks the pattern set.
-pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
+pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
     let code = without_comment_lines(text, if shell { "#" } else { "//" });
     let lines: Vec<&str> = text.split('\n').collect();
     let patterns = if shell { &SHELL_PATTERNS } else { &RUST_PATTERNS };
@@ -109,6 +139,13 @@ pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
     }
     hits.sort_by_key(|h| (h.0, h.1));
     let file_waiver = recognise(text, "file-layout-guess");
+    let under_tests = UNDER_TESTS.is_match(file);
+    let test_lines = if matches!(file_waiver, InlineWaiver::Reason(_)) && !shell && !under_tests {
+        test_module_lines(text)
+    } else {
+        Vec::new()
+    };
+    let file_waives = |line: usize| under_tests || test_lines.iter().any(|&(a, b)| line >= a && line <= b);
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for (index, _, what) in hits {
@@ -134,7 +171,7 @@ pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
         );
         let waived = match (recognise(&near, "layout-guess"), &file_waiver) {
             (site @ InlineWaiver::Reason(_), _) => site,
-            (_, file @ InlineWaiver::Reason(_)) => file.clone(),
+            (_, file @ InlineWaiver::Reason(_)) if file_waives(line) => file.clone(),
             (site, _) => site,
         };
         out.push(Guess { line, what, waived });
@@ -203,7 +240,7 @@ impl Check for C120 {
             if !PREFILTER.is_match(&text) {
                 continue;
             }
-            for g in layout_guesses(&text, shell) {
+            for g in layout_guesses(&text, shell, f) {
                 let site = Finding::warn(
                     "C120",
                     40,

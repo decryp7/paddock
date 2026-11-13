@@ -1,6 +1,19 @@
 // conformance: file-layout-guess — the tests here use deps only as filler data
-fn one() {
+fn production() {
     let a = root.join("target/debug/deps/x");
-    // conformance: layout-guess — this one has its own reason
-    let b = base.join("deps");
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn one() {
+        let a = root.join("target/debug/deps/x");
+        // conformance: layout-guess — this one has its own reason
+        let b = base.join("deps");
+        let s = "}"; let c = base.join("deps");
+    }
+}
+
+fn production_again() {
+    let d = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap();
 }

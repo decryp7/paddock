@@ -9,10 +9,12 @@
 // Not read: lines that start with a comment (`//`, `#`), a trailing comment (white space then `//`, or `#` in shell), and a `deps` in a URL
 // (`https?://`) or a `node_modules/` path. Limits: a statement split by `;` (`let e = current_exe()?; e.parent()...`) is not
 // followed; a block comment is read as code. A justified site carries `// conformance: layout-guess — <why>`
-// (`# conformance: ...` in shell) on the line or the line above; a whole file, `// conformance: file-layout-guess — <why>` anywhere in it.
+// (`# conformance: ...` in shell) on the line or the line above; the test code of a file, `// conformance: file-layout-guess — <why>` anywhere in it: it covers the lines inside `#[cfg(test)] mod` blocks, or every line of a file under `tests/`; production code in the same file is still reported.
+// Test code is recognised by the plain `#[cfg(test)] mod name { ... }` only: `#[cfg(all(test, ...))]` and an out-of-line `mod tests;` (its own file, not under `tests/`) are not, so their sites stay reported (fail-safe).
 // A waived site is not a finding: the host counts it as waived (`inlineWaiver`), so suppressions stay visible (ER-33). Rust host: tools/paddock-dev/src/check/c120.rs (same findings, line for line).
 import { applyInlineWaiver, inlineWaiver } from '../util/inline-waiver.mjs';
 import { warn } from '../finding.mjs';
+import { maskRust } from './C39-freed-port.mjs';
 
 /** The files that read both layouts, and the check's own host port (its docs and tests name the patterns). */
 export const IMPLEMENTATION = new Set(['crates/paddock-env/src/cargo_layout.rs', 'crates/paddock-testkit/src/cargo_layout.rs', 'tools/paddock-dev/src/check/c120.rs']);
@@ -47,8 +49,27 @@ export function withoutCommentLines(text, prefix) {
     .join('\n');
 }
 
+/** The 1-based [first, last] line ranges of the `#[cfg(test)] mod name { ... }` blocks of a Rust source. */
+export function testModuleLines(text) {
+  const masked = maskRust(text);
+  const ranges = [];
+  for (const m of masked.matchAll(/#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{/g)) {
+    let depth = 0;
+    let end = masked.length - 1;
+    for (let i = m.index + m[0].length - 1; i < masked.length; i++) {
+      if (masked[i] === '{') depth++;
+      else if (masked[i] === '}' && --depth === 0) {
+        end = i;
+        break;
+      }
+    }
+    ranges.push([lineAt(masked, m.index), lineAt(masked, end)]);
+  }
+  return ranges;
+}
+
 /** The layout guesses in one source: [{ line, what, waived: 'reason' | 'no-reason' | undefined, reason }]. `shell` picks the pattern set. */
-export function layoutGuesses(text, shell = false) {
+export function layoutGuesses(text, shell = false, file = '') {
   const code = withoutCommentLines(text, shell ? '#' : '//');
   const lines = text.split('\n');
   const hits = [];
@@ -57,6 +78,9 @@ export function layoutGuesses(text, shell = false) {
   });
   hits.sort((a, b) => a.index - b.index || a.order - b.order);
   const fileWaiver = inlineWaiver(text, 'file-layout-guess');
+  const underTests = /(?:^|\/)tests\//.test(file);
+  const testLines = fileWaiver.state === 'reason' && !shell && !underTests ? testModuleLines(text) : [];
+  const fileWaives = (line) => underTests || testLines.some(([a, b]) => line >= a && line <= b);
   const seen = new Set();
   const out = [];
   for (const { index, what } of hits) {
@@ -67,7 +91,7 @@ export function layoutGuesses(text, shell = false) {
     seen.add(line);
     const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
     const site = inlineWaiver(near, 'layout-guess');
-    out.push({ line, what, waived: site.state !== 'reason' && fileWaiver.state === 'reason' ? fileWaiver : site });
+    out.push({ line, what, waived: site.state !== 'reason' && fileWaiver.state === 'reason' && fileWaives(line) ? fileWaiver : site });
   }
   return out;
 }
@@ -86,7 +110,7 @@ export default {
       if ((!shell && !f.endsWith('.rs')) || !SCOPE.test(f) || VENDORED.test(f) || IMPLEMENTATION.has(f)) continue;
       const text = ctx.read(f);
       if (!text || !/current_exe|OUT_DIR|deps/.test(text)) continue;
-      for (const g of layoutGuesses(text, shell)) {
+      for (const g of layoutGuesses(text, shell, f)) {
         const site = warn('C120', 40, f, g.line, `${g.what}: right in one cargo layout, a wrong folder in the other`, fix);
         out.push(applyInlineWaiver(g.waived, site, () => warn('C120', 40, f, g.line, 'the layout-guess waiver gives no reason', 'Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`.')));
       }

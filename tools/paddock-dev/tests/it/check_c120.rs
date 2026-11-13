@@ -91,27 +91,31 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     assert_eq!(at("scripts/c120_bad.sh"), [3, 4, 5, 8, 9]);
     assert!(at("scripts/c120_good.sh").is_empty());
     assert_eq!(a["errors"], 0, "report-only: warnings never fail");
-    // A waived site is counted as waived (with its reason), not as a finding: the site's own reason beats the file's.
-    let waived: Vec<(String, u64, String)> = a["waived"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|w| w["file"] == "crates/a/src/c120_file_waiver.rs")
-        .map(|w| {
-            (
-                w["file"].to_string(),
-                w["line"].as_u64().unwrap(),
-                w["waiver"]["reason"].as_str().unwrap().to_string(),
-            )
-        })
-        .collect();
-    assert_eq!(waived.len(), 2, "{waived:?}");
+    // A waived site is counted as waived (with its reason), not as a finding: the site's own reason beats the file's, the file's
+    // reason covers `#[cfg(test)]` modules and files under tests/, and production code of the same file is still reported.
+    let waived = |file: &str| -> Vec<(u64, String)> {
+        a["waived"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|w| w["file"] == file)
+            .map(|w| (w["line"].as_u64().unwrap(), w["waiver"]["reason"].as_str().unwrap().to_string()))
+            .collect()
+    };
+    let w = waived("crates/a/src/c120_file_waiver.rs");
+    assert_eq!(w.iter().map(|x| x.0).collect::<Vec<_>>(), [10, 12, 13], "{w:?}");
     assert!(
-        waived[0].2.contains("filler data") && waived[1].2.contains("its own reason"),
-        "{waived:?}"
+        w[0].1.contains("filler data") && w[1].1.contains("its own reason") && w[2].1.contains("filler data"),
+        "{w:?}"
     );
+    assert_eq!(
+        at("crates/a/src/c120_file_waiver.rs"),
+        [3, 18],
+        "production code in a file with a file waiver is still reported"
+    );
+    assert_eq!(waived("crates/a/tests/c120_tests_dir.rs").len(), 1);
+    assert!(at("crates/a/tests/c120_tests_dir.rs").is_empty());
     assert!(a["waived"].as_array().unwrap().iter().all(|w| w["waiver"]["expires"] == "inline"));
-    assert_eq!(at("crates/a/src/c120_file_waiver.rs"), Vec::<u64>::new());
     assert_eq!(
         at("crates/a/src/c120_bare_file_waiver.rs"),
         [3],
@@ -128,4 +132,65 @@ fn this_working_tree_gives_the_same_findings_in_both_hosts() {
         rust(&root)["waived"].as_array().unwrap().len() >= 20,
         "the waived sites stay visible in the report"
     );
+}
+
+/// A check that marks one finding inline-waived and one unwaivable-and-inline-waived (as a buggy check might).
+struct Fake;
+
+impl paddock_dev::check::Check for Fake {
+    fn id(&self) -> &'static str {
+        "X1"
+    }
+    fn rule(&self) -> u32 {
+        1
+    }
+    fn title(&self) -> &'static str {
+        "fake"
+    }
+    fn run(&self, _ctx: &paddock_dev::check::Ctx) -> paddock_dev::check::CheckOutput {
+        use paddock_dev::check::finding::Finding;
+        paddock_dev::check::CheckOutput {
+            findings: vec![
+                Finding::warn("X1", 1, "x.rs", 1, "m", "f").inline_waived("a reason here"),
+                Finding::error("X1", 1, "x.rs", 2, "it could not look", "fix")
+                    .unwaivable()
+                    .inline_waived("a comment cannot cover this"),
+            ],
+            probes: 1,
+            completed: true,
+            precondition: paddock_dev::check::record::Precondition {
+                met: true,
+                detail: String::new(),
+            },
+        }
+    }
+    fn control(&self) -> paddock_dev::check::Control {
+        paddock_dev::check::Control {
+            files: vec![("x.rs", "fn a() {}\n")],
+            expect: vec![("x.rs", 1), ("x.rs", 2)],
+        }
+    }
+}
+
+#[test]
+fn an_unwaivable_finding_is_never_waived_by_a_comment_and_an_inline_waived_one_counts_as_waived() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("x.rs"), "fn a() {}\n").unwrap();
+    let opts = RunOptions {
+        root: d.path().to_path_buf(),
+        app: "x".into(),
+        only: None,
+        files: None,
+        today: "2026-11-13".into(),
+        base_ref: None,
+    };
+    let r = run_checks(&opts, &[Box::new(Fake)]).unwrap();
+    assert_eq!(r.waived.len(), 1);
+    assert_eq!(
+        (r.waived[0].reason.as_str(), r.waived[0].expires.as_str()),
+        ("a reason here", "inline")
+    );
+    assert_eq!(r.findings.len(), 1);
+    assert_eq!(r.findings[0].line, 2, "the unwaivable finding stays a finding");
+    assert_eq!(r.errors(), 1);
 }

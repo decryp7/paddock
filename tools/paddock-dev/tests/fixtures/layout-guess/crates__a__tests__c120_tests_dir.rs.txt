@@ -1,0 +1,4 @@
+// conformance: file-layout-guess — everything under tests/ only uses deps as filler data
+fn one() {
+    let a = root.join("target/debug/deps/x");
+}

@@ -28,8 +28,14 @@ test('C120 waivers: a reason waives, a bare marker is reported as no reason', ()
   assert.equal(layoutGuesses('// conformance: layout-guess\nlet q = base.join("deps");\n')[0].waived.state, 'no-reason');
 });
 
-test('C120 waivers carry their reason; a file marker waives every site of the file, a site marker beats it', () => {
+test('C120 waivers carry their reason; a file marker covers test code only, a site marker beats it', () => {
+  const st = (x) => [x.line, x.waived.state, x.waived.reason];
   const g = layoutGuesses('// conformance: file-layout-guess — filler data\nlet a = "x/deps/y";\n// conformance: layout-guess — own reason\nlet b = base.join("deps");\n');
-  assert.deepEqual(g.map((x) => [x.line, x.waived.state, x.waived.reason]), [[2, 'reason', 'filler data'], [4, 'reason', 'own reason']]);
+  assert.deepEqual(g.map(st), [[2, 'none', undefined], [4, 'reason', 'own reason']], 'line 2 is production code: the file marker does not cover it');
   assert.equal(layoutGuesses('// conformance: file-layout-guess\nlet a = "x/deps/y";\n')[0].waived.state, 'none');
+  assert.deepEqual(layoutGuesses('// conformance: file-layout-guess — filler data\nlet a = "x/deps/y";\n', false, 'crates/a/tests/it.rs').map(st), [[2, 'reason', 'filler data']]);
+  const t = layoutGuesses('// conformance: file-layout-guess — filler data\nfn p() { let a = "x/deps/y"; }\n#[cfg(test)]\nmod tests {\n    fn t() { let b = "x/deps/y"; }\n}\n');
+  assert.deepEqual(t.map((x) => [x.line, x.waived.state]), [[2, 'none'], [5, 'reason']]);
+  const other = layoutGuesses('// conformance: file-layout-guess — filler data\n#[cfg(all(test, unix))]\nmod tests {\n    fn t() { let b = "x/deps/y"; }\n}\n');
+  assert.deepEqual(other.map((x) => x.waived.state), ['none'], 'cfg(all(test, ..)) is not recognised: the site stays reported');
 });
