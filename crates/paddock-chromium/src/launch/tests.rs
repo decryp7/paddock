@@ -1193,7 +1193,7 @@ fn a_look_the_browser_does_not_answer_ends_with_the_pages_time_and_says_so() {
             let _ = tx.send(p.wait_ready(None, &Rule::default(), Duration::from_millis(300)));
         });
         // The old fixed deadline is 10 s; the page's time is 0.3 s.
-        let r = rx.recv_timeout(Duration::from_secs(5));
+        let r = rx.recv_timeout(Duration::from_secs(5)); // conformance: expiry-under-test — the caller's 0.3 s must end the look long before the old fixed 10 s
         f.fake.act(UserAction::ReleaseAnswers).unwrap();
         if r.is_err() {
             let _ = rx.recv_timeout(CLOSE_GUARD);

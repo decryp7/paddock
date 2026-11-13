@@ -1233,7 +1233,7 @@ mod tests {
                 let _ = tx.send(p.evaluate_within("1", Duration::from_millis(300)));
             });
             // The old fixed deadline is 10 s.
-            let r = rx.recv_timeout(Duration::from_secs(5));
+            let r = rx.recv_timeout(Duration::from_secs(5)); // conformance: expiry-under-test — the caller's 0.3 s must end the look long before the old fixed 10 s
             fake.act(crate::fake::UserAction::ReleaseAnswers).unwrap();
             r
         });
