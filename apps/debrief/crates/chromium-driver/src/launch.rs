@@ -1217,6 +1217,30 @@ mod tests {
         fake.act(crate::fake::UserAction::ReleaseAnswers).unwrap();
     }
 
+    /// Regression (the canonical driver's CI run 8060, rule 55): a caller's own time bounds a look at the page. A look the
+    /// browser does not answer ends with the caller's 0.3 s and says which command it was, not after the fixed 10 s `CALL`
+    /// with "a command".
+    #[cfg(unix)]
+    #[test]
+    fn a_look_the_browser_does_not_answer_ends_with_the_callers_time_and_names_the_command() {
+        let (_d, fake, b) = launch_fake(crate::fake::Mode::Obey, 1);
+        let p = b.start_page().unwrap();
+        fake.act(crate::fake::UserAction::HoldEvaluate).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let p = &p;
+        let r = std::thread::scope(|s| {
+            s.spawn(move || {
+                let _ = tx.send(p.evaluate_within("1", Duration::from_millis(300)));
+            });
+            // The old fixed deadline is 10 s.
+            let r = rx.recv_timeout(Duration::from_secs(5));
+            fake.act(crate::fake::UserAction::ReleaseAnswers).unwrap();
+            r
+        });
+        let e = r.expect("the look ends with the caller's time").expect_err("no answer").to_string();
+        assert!(e.contains("Runtime.evaluate") && e.contains("300ms"), "{e}");
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_launch_command_line_has_no_offscreen_or_headless_argument() {
