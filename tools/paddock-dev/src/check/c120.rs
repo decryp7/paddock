@@ -1,10 +1,10 @@
-//! C119: nothing guesses cargo's build-folder layout (ER-21). "Two folders up from `current_exe()` or `OUT_DIR`" is the profile folder
+//! C120: nothing guesses cargo's build-folder layout (ER-21). "Two folders up from `current_exe()` or `OUT_DIR`" is the profile folder
 //! in one cargo layout and a wrong folder in the other; it broke three times (Pitcrew's supervision tests, CI run 8027; Debrief's
 //! plugins tests, run 8028; paddock-build). The one reader of both layouts is `paddock_env::cargo_layout`. In Rust and shell under
 //! `crates/`, `tools/`, `apps/` and `scripts/`, outside that module, this flags `current_exe()` or `OUT_DIR` followed by two or more
 //! parent or `..` hops, and a literal `deps` folder segment. Report-only (warnings) until its first green run (ER-41).
 //!
-//! The port of `conformance/src/checks/C119-layout-guess.mjs`, finding for finding (the oracle test compares them). Lines that start with a
+//! The port of `conformance/src/checks/C120-layout-guess.mjs`, finding for finding (the oracle test compares them). Lines that start with a
 //! comment are not read; a justified site carries `// conformance: layout-guess — <reason>` on the line or the line above.
 
 use super::finding::Finding;
@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 const IMPLEMENTATION: [&str; 3] = [
     "crates/paddock-env/src/cargo_layout.rs",
     "crates/paddock-testkit/src/cargo_layout.rs",
-    "tools/paddock-dev/src/check/c119.rs",
+    "tools/paddock-dev/src/check/c120.rs",
 ];
 
 static SCOPE: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:crates|tools|apps|scripts)/"));
@@ -116,11 +116,11 @@ pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
 }
 
 /// The check.
-pub struct C119;
+pub struct C120;
 
-impl Check for C119 {
+impl Check for C120 {
     fn id(&self) -> &'static str {
-        "C119"
+        "C120"
     }
 
     fn rule(&self) -> u32 {
@@ -176,7 +176,7 @@ impl Check for C119 {
                 match g.waived {
                     Some(true) => {}
                     Some(false) => findings.push(Finding::warn(
-                        "C119",
+                        "C120",
                         40,
                         f,
                         g.line,
@@ -184,7 +184,7 @@ impl Check for C119 {
                         "Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`.",
                     )),
                     None => findings.push(Finding::warn(
-                        "C119",
+                        "C120",
                         40,
                         f,
                         g.line,

@@ -63,7 +63,7 @@ fn options(root: &Path) -> RunOptions {
     RunOptions {
         root: root.to_path_buf(),
         app: "fixture".into(),
-        only: Some(vec!["C39".into(), "C53".into(), "C119".into()]),
+        only: Some(vec!["C39".into(), "C53".into(), "C120".into()]),
         files: None,
         today: "2026-11-10".into(),
     }
@@ -206,7 +206,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
 const now = process.env.RT5_NOW ? new Date(process.env.RT5_NOW) : undefined;
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53', 'C119'], options: { now } });
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53', 'C120'], options: { now } });
 process.stdout.write(JSON.stringify(r));
 "#;
 

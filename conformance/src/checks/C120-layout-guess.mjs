@@ -1,4 +1,4 @@
-// C119 (report-only until its first green run, ER-41): nothing guesses cargo's build-folder layout (ER-21). "Two folders up from
+// C120 (report-only until its first green run, ER-41): nothing guesses cargo's build-folder layout (ER-21). "Two folders up from
 // `current_exe()` or `OUT_DIR`" is the profile folder in one cargo layout and a wrong folder in the other: it broke three times (Pitcrew's
 // supervision tests, CI run 8027; Debrief's plugins tests, run 8028; paddock-build). The one reader of both layouts is
 // `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` for tests). In Rust and shell under `crates/`, `tools/`, `apps/` and
@@ -8,11 +8,11 @@
 // - a literal `/deps/` or `\deps\` path segment, and `.join("deps")` / `.push("deps")`.
 // Lines that start with a comment (`//`, `#`) are not read. Limits: a statement split by `;` (`let e = current_exe()?; e.parent()...`) is not
 // followed; a block comment or a trailing comment is read as code. A justified site carries `// conformance: layout-guess — <why>`
-// (`# conformance: ...` in shell) on the line or the line above. Rust host: tools/paddock-dev/src/check/c119.rs (same findings, line for line).
+// (`# conformance: ...` in shell) on the line or the line above. Rust host: tools/paddock-dev/src/check/c120.rs (same findings, line for line).
 import { warn } from '../finding.mjs';
 
 /** The files that read both layouts, and the check's own host port (its docs and tests name the patterns). */
-export const IMPLEMENTATION = new Set(['crates/paddock-env/src/cargo_layout.rs', 'crates/paddock-testkit/src/cargo_layout.rs', 'tools/paddock-dev/src/check/c119.rs']);
+export const IMPLEMENTATION = new Set(['crates/paddock-env/src/cargo_layout.rs', 'crates/paddock-testkit/src/cargo_layout.rs', 'tools/paddock-dev/src/check/c120.rs']);
 const SCOPE = /^(?:crates|tools|apps|scripts)\//;
 const VENDORED = /^apps\/[^/]+\/vendor\//;
 const WAIVER = /conformance:\s*layout-guess\s*[—–-]+\s*(\S.{2,})/;
@@ -61,7 +61,7 @@ export function layoutGuesses(text, shell = false) {
 }
 
 export default {
-  id: 'C119',
+  id: 'C120',
   scope: 'both',
   mode: 'report-only',
   title: 'No guessing of the cargo build-folder layout',
@@ -76,8 +76,8 @@ export default {
       if (!text || !/current_exe|OUT_DIR|deps/.test(text)) continue;
       for (const g of layoutGuesses(text, shell)) {
         if (g.waived === 'reason') continue;
-        if (g.waived === 'no-reason') out.push(warn('C119', 40, f, g.line, 'the layout-guess waiver gives no reason', 'Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`.'));
-        else out.push(warn('C119', 40, f, g.line, `${g.what}: right in one cargo layout, a wrong folder in the other`, fix));
+        if (g.waived === 'no-reason') out.push(warn('C120', 40, f, g.line, 'the layout-guess waiver gives no reason', 'Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`.'));
+        else out.push(warn('C120', 40, f, g.line, `${g.what}: right in one cargo layout, a wrong folder in the other`, fix));
       }
     }
     return out;

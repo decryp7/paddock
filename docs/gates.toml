@@ -133,8 +133,8 @@ review_by = 2027-01-07
 approved = "coordinator"
 
 [[not_gated]]
-id = "C119"
-reason = "report-only until its first green run (ER-41), 5 warnings today (Debrief plugin-host builtins.rs, paddock-dev prune.rs and host_steps_golden.rs: literal deps folders); not run in CI. Rust host port: tools/paddock-dev/src/check/c119.rs"
+id = "C120"
+reason = "report-only until its first green run (ER-41), 5 warnings today (Debrief plugin-host builtins.rs, paddock-dev prune.rs and host_steps_golden.rs: literal deps folders); not run in CI. Rust host port: tools/paddock-dev/src/check/c120.rs"
 owner = "build-folder layout (ER-21, paddock_env::cargo_layout)"
 since = 2026-11-13
 review_by = 2026-12-13
