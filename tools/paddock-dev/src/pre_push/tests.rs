@@ -29,6 +29,7 @@ fn facts() -> Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
             .map(String::from)
             .to_vec())),
+        conformance_env: None,
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         image: Some(Ok("registry/paddock-ci:v7".into())),
         linux: true,
@@ -864,14 +865,34 @@ fn a_push_of_a_commit_already_on_a_remote_branch_has_nothing_to_check() {
     git(&["commit", "-q", "-am", "two"]);
     let two = git(&["rev-parse", "HEAD"]).trim().to_string();
     // No remote branch holds `two` yet: measured from the base.
-    assert_eq!(super::known_remote_branch(&r, &[two.clone()]), None);
+    assert_eq!(super::known_remote_branch(&r, std::slice::from_ref(&two)), None);
     assert_eq!(super::known_remote_branch(&r, &[]), None);
     git(&["update-ref", "refs/remotes/origin/train", &two]);
     // The push target is main, the sha is the tip of origin/train.
-    assert_eq!(super::known_remote_branch(&r, &[two.clone()]).as_deref(), Some("origin/train"));
+    assert_eq!(
+        super::known_remote_branch(&r, std::slice::from_ref(&two)).as_deref(),
+        Some("origin/train")
+    );
     // One pushed commit that no branch holds keeps the check running.
     std::fs::write(r.join("a.txt"), "3\n").unwrap();
     git(&["commit", "-q", "-am", "three"]);
     let three = git(&["rev-parse", "HEAD"]).trim().to_string();
     assert_eq!(super::known_remote_branch(&r, &[two, three]), None);
+}
+
+/// A stale npm install made conformance fail with "yaml cannot be loaded", which counted as a finding (2026-11-13).
+#[test]
+fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pass() {
+    let mut f = facts();
+    f.conformance_env = Some("node_modules/yaml is missing".into());
+    let planned = plan_gates(&plan(), &change(&["conformance/a.mjs"]), &f);
+    let Some(Planned::Broken { cause, next, .. }) = planned
+        .iter()
+        .find(|p| matches!(p, Planned::Broken { id, .. } if id == "conformance"))
+    else {
+        panic!("conformance must be Broken, not run: {planned:?}");
+    };
+    assert!(cause.starts_with("environment not ready"), "{cause}");
+    assert!(next.contains("npm ci --ignore-scripts -w conformance"), "{next}");
+    assert!(!ids(&planned).contains(&"conformance".to_string()), "it does not run");
 }

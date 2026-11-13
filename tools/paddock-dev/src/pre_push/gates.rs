@@ -85,6 +85,8 @@ pub enum Planned {
 pub struct Facts {
     /// The conformance command's arguments after `node`, read from ci.yml's one line, or why that failed.
     pub conformance: Option<Result<Vec<String>, String>>,
+    /// Why conformance's npm dependencies are not installed (the environment is not ready), or None when they are.
+    pub conformance_env: Option<String>,
     /// Workspace folders whose CI lints Windows too (`apps/<app>`, from `windowsClippy`); `crates` always does.
     pub windows_clippy: BTreeSet<String>,
     /// The CI image reference (from `ci-image/VERSION`), or why it cannot be read.
@@ -414,6 +416,13 @@ fn conformance(plan: &Value, facts: &Facts) -> Planned {
         return Planned::Skip {
             id,
             reason: "the plan does not reach the conformance job".into(),
+        };
+    }
+    if let Some(cause) = &facts.conformance_env {
+        return Planned::Broken {
+            id,
+            cause: format!("environment not ready: {cause}"),
+            next: "run `npm ci --ignore-scripts -w conformance` in the main checkout, then re-run `./dev check --pre-push`; this is not a finding in your change".into(),
         };
     }
     match &facts.conformance {

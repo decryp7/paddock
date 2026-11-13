@@ -660,7 +660,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     if let Some((tip, rest)) = pushed.split_first() {
         extra.extend(rest.iter().cloned());
         let mb = merge_base(tip)?;
-        notes.push(format!("measured from {base} (merge base {mb}): no remote branch holds every pushed commit"));
+        notes.push(format!(
+            "measured from {base} (merge base {mb}): no remote branch holds every pushed commit"
+        ));
         let diff = git_text(root, &["diff", "--name-only", &mb, tip])
             .ok_or_else(|| CliError::failure(format!("git diff {mb} {tip} failed.")).with_hint("Run it by hand to see why."))?;
         changed.extend(lines(Some(diff)));
@@ -730,8 +732,16 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         })
         .unwrap_or_default();
     tests.sort();
+    // The throw-away worktree links this checkout's node_modules in; a stale install fails inside conformance as "yaml cannot be
+    // loaded", which reads as a finding. Look before the budget starts and say it is the environment.
+    let conformance_env = if root.join("node_modules/yaml/package.json").is_file() {
+        None
+    } else {
+        Some("conformance's dependencies are not installed here (node_modules/yaml is missing)".to_string())
+    };
     Facts {
         conformance: Some(ci),
+        conformance_env,
         windows_clippy: windows,
         image: Some(image),
         linux: false,
