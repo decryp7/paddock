@@ -90,27 +90,31 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     assert_eq!(at("scripts/c120_bad.sh"), [3, 4, 5, 8, 9]);
     assert!(at("scripts/c120_good.sh").is_empty());
     assert_eq!(a["errors"], 0, "report-only: warnings never fail");
-    // A waived site is counted as waived (with its reason), not as a finding: the site's own reason beats the file's.
-    let waived: Vec<(String, u64, String)> = a["waived"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|w| w["file"] == "crates/a/src/c120_file_waiver.rs")
-        .map(|w| {
-            (
-                w["file"].to_string(),
-                w["line"].as_u64().unwrap(),
-                w["waiver"]["reason"].as_str().unwrap().to_string(),
-            )
-        })
-        .collect();
-    assert_eq!(waived.len(), 2, "{waived:?}");
+    // A waived site is counted as waived (with its reason), not as a finding: the site's own reason beats the file's, the file's
+    // reason covers `#[cfg(test)]` modules and files under tests/, and production code of the same file is still reported.
+    let waived = |file: &str| -> Vec<(u64, String)> {
+        a["waived"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|w| w["file"] == file)
+            .map(|w| (w["line"].as_u64().unwrap(), w["waiver"]["reason"].as_str().unwrap().to_string()))
+            .collect()
+    };
+    let w = waived("crates/a/src/c120_file_waiver.rs");
+    assert_eq!(w.iter().map(|x| x.0).collect::<Vec<_>>(), [10, 12, 13], "{w:?}");
     assert!(
-        waived[0].2.contains("filler data") && waived[1].2.contains("its own reason"),
-        "{waived:?}"
+        w[0].1.contains("filler data") && w[1].1.contains("its own reason") && w[2].1.contains("filler data"),
+        "{w:?}"
     );
+    assert_eq!(
+        at("crates/a/src/c120_file_waiver.rs"),
+        [3, 18],
+        "production code in a file with a file waiver is still reported"
+    );
+    assert_eq!(waived("crates/a/tests/c120_tests_dir.rs").len(), 1);
+    assert!(at("crates/a/tests/c120_tests_dir.rs").is_empty());
     assert!(a["waived"].as_array().unwrap().iter().all(|w| w["waiver"]["expires"] == "inline"));
-    assert_eq!(at("crates/a/src/c120_file_waiver.rs"), Vec::<u64>::new());
     assert_eq!(
         at("crates/a/src/c120_bare_file_waiver.rs"),
         [3],

@@ -9,6 +9,7 @@
 
 use super::finding::Finding;
 use super::jsre::{DOT, WS, has_reason, line_at, rx, trim};
+use super::mask::mask_rust;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
@@ -27,7 +28,7 @@ static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*layout-gue
 static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*layout-guess"));
 /// The reason after the marker and its dashes: what the JavaScript `/marker\s*[—–-]+\s*(\S.{2,})/` captures.
 static WAIVER_REASON: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"conformance:\s*layout-guess\s*[—–-]+\s*(\S{DOT}{{2,}})")));
-/// One reason for a whole file (a test module that only uses `deps` as filler data): every site of the file is waived with it.
+/// One reason for the test code of a file (a test module that only uses `deps` as filler data): its sites are waived with it.
 static FILE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"conformance:\s*file-layout-guess\s*[—–-]+\s*(\S{DOT}{{2,}})")));
 static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"current_exe|OUT_DIR|deps"));
 
@@ -74,6 +75,33 @@ static NOT_A_LAYOUT: LazyLock<Regex> = LazyLock::new(|| rx(r"https?://|node_modu
 static TRAILING_SLASHES: LazyLock<Regex> = LazyLock::new(|| rx(r"\s//[^\n]*$"));
 static TRAILING_HASH: LazyLock<Regex> = LazyLock::new(|| rx(r"\s#[^\n]*$"));
 
+static TEST_MODULE: LazyLock<Regex> = LazyLock::new(|| rx(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{"));
+static UNDER_TESTS: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)tests/"));
+
+/// The 1-based `(first, last)` line ranges of the `#[cfg(test)] mod name { ... }` blocks of a Rust source.
+pub fn test_module_lines(text: &str) -> Vec<(usize, usize)> {
+    let masked = mask_rust(text);
+    let bytes = masked.as_bytes();
+    let mut ranges = Vec::new();
+    for m in TEST_MODULE.find_iter(&masked) {
+        let mut depth = 0usize;
+        let mut end = bytes.len().saturating_sub(1);
+        for (i, b) in bytes.iter().enumerate().skip(m.end() - 1) {
+            if *b == b'{' {
+                depth += 1;
+            } else if *b == b'}' {
+                depth -= 1;
+                if depth == 0 {
+                    end = i;
+                    break;
+                }
+            }
+        }
+        ranges.push((line_at(&masked, m.start()), line_at(&masked, end)));
+    }
+    ranges
+}
+
 /// One layout guess in a source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Guess {
@@ -104,7 +132,7 @@ pub fn without_comment_lines(text: &str, prefix: &str) -> String {
 }
 
 /// The layout guesses in one source; `shell` picks the pattern set.
-pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
+pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
     let code = without_comment_lines(text, if shell { "#" } else { "//" });
     let lines: Vec<&str> = text.split('\n').collect();
     let patterns = if shell { &SHELL_PATTERNS } else { &RUST_PATTERNS };
@@ -116,6 +144,13 @@ pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
     }
     hits.sort_by_key(|h| (h.0, h.1));
     let file_reason = FILE_WAIVER.captures(text).map(|c| c[1].to_string()).unwrap_or_default();
+    let under_tests = UNDER_TESTS.is_match(file);
+    let test_lines = if !file_reason.is_empty() && !shell && !under_tests {
+        test_module_lines(text)
+    } else {
+        Vec::new()
+    };
+    let file_waives = |line: usize| under_tests || test_lines.iter().any(|&(a, b)| line >= a && line <= b);
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for (index, _, what) in hits {
@@ -146,7 +181,7 @@ pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
         };
         let (waived, reason) = match site_reason {
             Some(r) => (Some(true), r),
-            None if !file_reason.is_empty() => (Some(true), file_reason.clone()),
+            None if !file_reason.is_empty() && file_waives(line) => (Some(true), file_reason.clone()),
             None if BARE_WAIVER.is_match(&near) => (Some(false), String::new()),
             None => (None, String::new()),
         };
@@ -217,7 +252,7 @@ impl Check for C120 {
             if !PREFILTER.is_match(&text) {
                 continue;
             }
-            for g in layout_guesses(&text, shell) {
+            for g in layout_guesses(&text, shell, f) {
                 match g.waived {
                     Some(true) => findings.push(
                         Finding::warn(
