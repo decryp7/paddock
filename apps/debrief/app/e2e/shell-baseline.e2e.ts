@@ -75,7 +75,7 @@ async function settled(page: Page): Promise<void> {
     await page.waitForFunction(
       () => {
         const w = window as unknown as { __baseBoxes?: string; __baseStable?: number };
-        const now = [...document.querySelectorAll('.dv-groupview, debrief-events-grid .row, debrief-timeline-panel .lane')]
+        const now = [...document.querySelectorAll('.dv-groupview, debrief-events-grid .row:not(.placeholder), debrief-timeline-panel .lane')]
           .slice(0, 40)
           .map((e) => {
             const r = e.getBoundingClientRect();

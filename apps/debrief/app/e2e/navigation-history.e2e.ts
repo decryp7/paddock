@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { gridTotal, initialTotal, openApp } from './app';
+import { gridRows, gridTotal, initialTotal, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 
@@ -33,7 +33,7 @@ async function expectEvent(page: Page, index: number): Promise<void> {
 
 /** Clicks the row at this position of the result (the DOM order of the virtual rows is not the visual one). */
 async function selectEvent(page: Page, index: number): Promise<void> {
-  await page.locator(`debrief-events-grid [role=row][aria-rowindex="${index + 2}"]`).click();
+  await gridRows(page).and(page.locator(`[aria-rowindex="${index + 2}"]`)).click();
   await expectEvent(page, index);
 }
 

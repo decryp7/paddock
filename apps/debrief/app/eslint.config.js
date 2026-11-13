@@ -6,6 +6,22 @@ const { defineConfig } = require('eslint/config');
 const tseslint = require('typescript-eslint');
 const angular = require('angular-eslint');
 
+/**
+ * Report-only rules (ER-41) run only in `npm run lint:report` (DEBRIEF_LINT_REPORT=1). `ng lint` fails on any
+ * warning (maxWarnings 0), so a warn-level rule there would already block. Each moves into the normal lint as an error
+ * after its first green report on the real tree, recorded here by CI run id.
+ */
+const REPORT = process.env['DEBRIEF_LINT_REPORT'] === '1' ? 'warn' : 'off';
+
+/** Selectors that also match the grid's loading placeholder rows (see the e2e block below). */
+function rawRowSelectors() {
+  const loaded = String.raw`(?!:not\(\.placeholder\)|\[aria-selected|\.sel|\.hl)`;
+  const role = String.raw`\[role=("|')?row("|')?\]`;
+  const pattern = String.raw`/(${role}\.row|debrief-events-grid \.row)${loaded}|${role}\[aria-rowindex/`;
+  const message = 'This selector also matches loading placeholder rows: use gridRows(page) from e2e/app.ts.';
+  return [`Literal[value=${pattern}]`, `TemplateElement[value.raw=${pattern}]`].map((selector) => ({ selector, message }));
+}
+
 module.exports = defineConfig(
   {
     ignores: [
@@ -69,22 +85,30 @@ module.exports = defineConfig(
     },
   },
   {
-    // A grid row whose page is still loading is a `.placeholder` with the same role: a spec that clicks or waits on
-    // `[role=row].row` can get one, and clicking it selects nothing (jobs.e2e.ts, run 8056). Specs use `gridRows`
-    // (e2e/app.ts). Selected (`[aria-selected`) and highlighted (`.hl`) rows are always loaded, so those stay allowed.
-    // Report-only (warn) until its first green run (ER-41).
+    // A grid row whose page is still loading is a `.placeholder` with the same role and an `aria-rowindex`: a spec that
+    // clicks or waits on `[role=row].row` (with or without quotes), `debrief-events-grid .row` or
+    // `[role=row][aria-rowindex=…]` can get one, and clicking it selects nothing (jobs.e2e.ts, run 8056). Specs use
+    // `gridRows` (e2e/app.ts). Selected (`[aria-selected`, `.sel`) and highlighted (`.hl`) rows are always loaded, so
+    // those stay allowed. Report-only (`lint:report`) until its first green run (ER-41).
     files: ['e2e/**/*.ts'],
     rules: {
+      'no-restricted-syntax': [REPORT, ...rawRowSelectors()],
+    },
+  },
+  {
+    // ADR 0071: a late async answer is dropped through `LatestRequest` (src/app/shared/latest-request.ts), not a
+    // hand-rolled counter (`const mine = ++this.seq; ... if (mine !== this.seq) return;`). Report-only (`lint:report`) until
+    // its first green run (ER-41); the guards it lists move to the helper when their files are next touched.
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/*.spec.ts', 'src/app/shared/latest-request.ts'],
+    rules: {
       'no-restricted-syntax': [
-        'warn',
-        {
-          selector: 'Literal[value=/\\[role=row\\]\\.row(?!:not\\(\\.placeholder\\)|\\[aria-selected|\\.hl)/]',
-          message: 'This selector also matches loading placeholder rows: use gridRows(page) from e2e/app.ts.',
-        },
-        {
-          selector: 'TemplateElement[value.raw=/\\[role=row\\]\\.row(?!:not\\(\\.placeholder\\)|\\[aria-selected|\\.hl)/]',
-          message: 'This selector also matches loading placeholder rows: use gridRows(page) from e2e/app.ts.',
-        },
+        REPORT,
+        // The guard itself: `mine !== this.seq`, `generation === store.generation()`, `gen !== this.gen`.
+        ...['right.name', 'right.property.name', 'right.callee.property.name'].map((path) => ({
+          selector: `BinaryExpression[operator=/^[!=]==$/][left.name=/^(mine|seq|gen|generation)$/][${path}=/^(seq|gen|generation|\\w+Seq|\\w+Generation)$/]`,
+          message: 'A hand-rolled request counter: use LatestRequest from src/app/shared/latest-request.ts (ADR 0071).',
+        })),
       ],
     },
   },
