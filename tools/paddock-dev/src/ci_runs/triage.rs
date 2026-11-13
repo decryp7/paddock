@@ -93,6 +93,14 @@ pub enum Status {
         /// Whether it also failed on the baseline run.
         also_on_baseline: bool,
     },
+    /// It failed on every attempt in this run. The flake history, when `ci flakes` lists the test, is shown beside it and never
+    /// turns the failure into FLAKY: only a pass on a retry in this run does.
+    Failed {
+        /// `ci flakes` history: runs it was listed in and runs examined.
+        history: Option<(usize, usize)>,
+        /// Whether it also failed on the baseline run.
+        also_on_baseline: bool,
+    },
     /// Nothing proves new or old, with the reason.
     Unknown(String),
 }
@@ -101,7 +109,10 @@ pub enum Status {
 pub type Flaky = BTreeMap<String, (usize, usize)>;
 
 /// Classifies one failure; pure.
-pub fn status_of(job: &str, test: &Test, baseline: Option<&Baseline>, flaky: &Flaky) -> Status {
+///
+/// `passed_on_retry` is this run's own outcome for the test: it passed on a retry (the runner marked it flaky). The history alone
+/// never makes a test FLAKY.
+pub fn status_of(job: &str, test: &Test, baseline: Option<&Baseline>, flaky: &Flaky, passed_on_retry: bool) -> Status {
     let name = match test {
         Test::Unread(why) => return Status::Unknown(why.clone()),
         Test::Named(n) => Some(n),
@@ -124,10 +135,18 @@ pub fn status_of(job: &str, test: &Test, baseline: Option<&Baseline>, flaky: &Fl
         Some(Some(JobState::Failed(Ok(names)))) => Ok(name.is_none_or(|n| names.contains(n))),
     };
     if let Some((count, runs)) = name.and_then(|n| flaky.get(n)) {
-        return Status::Flaky {
-            count: *count,
-            runs: *runs,
-            also_on_baseline: matches!(on_baseline, Ok(true)),
+        let also_on_baseline = matches!(on_baseline, Ok(true));
+        return if passed_on_retry {
+            Status::Flaky {
+                count: *count,
+                runs: *runs,
+                also_on_baseline,
+            }
+        } else {
+            Status::Failed {
+                history: Some((*count, *runs)),
+                also_on_baseline,
+            }
         };
     }
     match on_baseline {
@@ -183,6 +202,13 @@ impl Status {
                     if *also_on_baseline { ", also failed on the baseline" } else { "" }
                 )
             }
+            Status::Failed { history, also_on_baseline } => {
+                let hist = history.map_or(String::new(), |(c, r)| format!(" (flaky history: {c} of {r} runs)"));
+                format!(
+                    "FAILED{hist}{}",
+                    if *also_on_baseline { ", also failed on the baseline" } else { "" }
+                )
+            }
             Status::Unknown(_) => "UNKNOWN".into(),
         }
     }
@@ -192,6 +218,7 @@ impl Status {
             Status::New => "new",
             Status::OnBaseline => "already-failing",
             Status::Flaky { .. } => "flaky",
+            Status::Failed { .. } => "failed",
             Status::Unknown(_) => "unknown",
         }
     }
@@ -220,7 +247,7 @@ impl Report {
     pub fn text(&self) -> String {
         let (main, brun) = self.baseline.as_ref().map_or((false, None), |b| (b.2, Some(b.0)));
         let mut out = format!(
-            "run {} {} at {}: {} failing test(s) or job(s): {} new, {} already failing, {} flaky, {} unknown\n",
+            "run {} {} at {}: {} failing test(s) or job(s): {} new, {} already failing, {} flaky, {} failed every attempt, {} unknown\n",
             self.run,
             self.path,
             self.head.chars().take(9).collect::<String>(),
@@ -228,6 +255,7 @@ impl Report {
             self.count("new"),
             self.count("already-failing"),
             self.count("flaky"),
+            self.count("failed"),
             self.count("unknown")
         );
         match &self.baseline {
@@ -283,6 +311,7 @@ impl Report {
                 "new": self.count("new"),
                 "already_failing": self.count("already-failing"),
                 "flaky": self.count("flaky"),
+                "failed": self.count("failed"),
                 "unknown": self.count("unknown"),
             },
             "complete": self.complete(),
@@ -297,6 +326,9 @@ impl Report {
                 });
                 if let Status::Flaky { count, runs, also_on_baseline } = &r.status {
                     v["flaky"] = json!({"count": count, "runs": runs, "also_on_baseline": also_on_baseline});
+                }
+                if let Status::Failed { history: Some((count, runs)), also_on_baseline } = &r.status {
+                    v["flaky_history"] = json!({"count": count, "runs": runs, "also_on_baseline": also_on_baseline});
                 }
                 match (&r.status, &r.test) {
                     (Status::Unknown(w), _) | (_, Test::Unread(w)) => v["why"] = json!(w),
@@ -331,14 +363,24 @@ fn names_of(f: &logfind::Findings) -> BTreeSet<String> {
     f.failed.iter().chain(&f.vitest_failed).chain(&f.flaky).cloned().collect()
 }
 
+/// The tests of a log that passed on a retry in this run: flaky, and not also failed.
+fn retried_ok(f: &logfind::Findings) -> BTreeSet<String> {
+    f.flaky.difference(&f.failed).cloned().collect()
+}
+
 /// A failed job's tests: the names, `WholeJob` when the log has none, or why it cannot be said.
 fn read_job(client: &mut Client, job: &TimedJob) -> Result<BTreeSet<String>, String> {
+    read_job_ends(client, job).map(|(names, _)| names)
+}
+
+/// A failed job's tests and, of them, those that passed on a retry in this run (the runner marked them flaky).
+fn read_job_ends(client: &mut Client, job: &TimedJob) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     match client.log(job.id) {
         Ok(Some(t)) if !t.trim().is_empty() => {
             let f = logfind::read(&t);
             match f.broken {
                 Some(why) => Err(format!("job \"{}\": {why}", job.name)),
-                None => Ok(names_of(&f)),
+                None => Ok((names_of(&f), retried_ok(&f))),
             }
         }
         Ok(_) => Err(format!("job \"{}\": the server has no log for it", job.name)),
@@ -450,16 +492,20 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         .timed_jobs(run.id)?
         .ok_or_else(|| format!("the server has no job list for run {}", run.id))?;
     let mut skipped_jobs = 0;
-    let mut failed: Vec<(&TimedJob, Result<BTreeSet<String>, String>)> = Vec::new();
+    let mut failed: Vec<(&TimedJob, Result<BTreeSet<String>, String>, BTreeSet<String>)> = Vec::new();
     for j in jobs.iter().filter(|j| j.failed()) {
         if j.is_caller() || j.never_ran() {
             skipped_jobs += 1;
             continue;
         }
         log(&format!("run {} job {} \"{}\": reading the log", run.id, j.id, j.name));
-        failed.push((j, read_job(client, j)));
+        let (names, retried) = match read_job_ends(client, j) {
+            Ok((n, r)) => (Ok(n), r),
+            Err(why) => (Err(why), BTreeSet::new()),
+        };
+        failed.push((j, names, retried));
     }
-    let failed_names: BTreeSet<String> = failed.iter().map(|(j, _)| j.name.clone()).collect();
+    let failed_names: BTreeSet<String> = failed.iter().map(|(j, _, _)| j.name.clone()).collect();
     let mut gaps = Vec::new();
     // The baseline.
     let base_run = match req.against {
@@ -496,7 +542,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
     // The history.
     let mut flaky: Flaky = BTreeMap::new();
     if req.history {
-        let names: Vec<String> = failed.iter().map(|(j, _)| j.name.clone()).collect();
+        let names: Vec<String> = failed.iter().map(|(j, _, _)| j.name.clone()).collect();
         let (apps, shared) = history_apps(req, run.workflow(), &names);
         if apps.is_empty() {
             gaps.push("flake history: none (ci flakes reads one app at a time, and this run's failures belong to no app); pass --app to choose one".into());
@@ -530,14 +576,15 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         }
     }
     let mut rows = Vec::new();
-    for (j, tests) in &failed {
+    for (j, tests, retried) in &failed {
         let tests: Vec<Test> = match tests {
             Err(why) => vec![Test::Unread(why.clone())],
             Ok(names) if names.is_empty() => vec![Test::WholeJob],
             Ok(names) => names.iter().cloned().map(Test::Named).collect(),
         };
         for t in tests {
-            let status = status_of(&j.name, &t, baseline.as_ref(), &flaky);
+            let on_retry = matches!(&t, Test::Named(n) if retried.contains(n));
+            let status = status_of(&j.name, &t, baseline.as_ref(), &flaky, on_retry);
             rows.push(Row {
                 job: j.name.clone(),
                 test: t,
@@ -623,14 +670,14 @@ mod tests {
     #[test]
     fn a_test_whose_job_passed_on_the_baseline_is_new() {
         let b = base(&[("j", JobState::Passed)]);
-        assert_eq!(status_of("j", &named("t"), Some(&b), &Flaky::new()), Status::New);
+        assert_eq!(status_of("j", &named("t"), Some(&b), &Flaky::new(), false), Status::New);
     }
 
     #[test]
     fn a_test_the_baseline_job_also_failed_is_already_failing_and_another_failure_in_that_job_is_new() {
         let b = base(&[("j", names(&["t"]))]);
-        assert_eq!(status_of("j", &named("t"), Some(&b), &Flaky::new()), Status::OnBaseline);
-        assert_eq!(status_of("j", &named("u"), Some(&b), &Flaky::new()), Status::New);
+        assert_eq!(status_of("j", &named("t"), Some(&b), &Flaky::new(), false), Status::OnBaseline);
+        assert_eq!(status_of("j", &named("u"), Some(&b), &Flaky::new(), false), Status::New);
     }
 
     #[test]
@@ -638,7 +685,7 @@ mod tests {
         let flaky: Flaky = [("t".to_string(), (3, 40))].into();
         let b = base(&[("j", JobState::Passed)]);
         assert_eq!(
-            status_of("j", &named("t"), Some(&b), &flaky),
+            status_of("j", &named("t"), Some(&b), &flaky, true),
             Status::Flaky {
                 count: 3,
                 runs: 40,
@@ -647,7 +694,7 @@ mod tests {
         );
         let b = base(&[("j", names(&["t"]))]);
         assert_eq!(
-            status_of("j", &named("t"), Some(&b), &flaky),
+            status_of("j", &named("t"), Some(&b), &flaky, true),
             Status::Flaky {
                 count: 3,
                 runs: 40,
@@ -657,18 +704,63 @@ mod tests {
     }
 
     #[test]
+    fn a_test_that_failed_on_every_attempt_is_failed_and_its_flake_history_is_shown_beside_it() {
+        // Run 8056, job 37699 (shard 4/4) failed on every attempt and was labelled "FLAKY (3 of 154 runs)" from the history alone.
+        let flaky: Flaky = [("t".to_string(), (3, 154))].into();
+        let b = base(&[("j", JobState::Passed)]);
+        let s = status_of("j", &named("t"), Some(&b), &flaky, false);
+        assert_eq!(
+            s,
+            Status::Failed {
+                history: Some((3, 154)),
+                also_on_baseline: false
+            }
+        );
+        assert_eq!(s.word(true, Some(9)), "FAILED (flaky history: 3 of 154 runs)");
+        assert_eq!(s.kind(), "failed");
+    }
+
+    #[test]
+    fn the_runs_own_log_tells_a_retry_that_passed_from_a_failure_on_every_attempt() {
+        // Captured nextest log with retries: `flaky_once` passed on a retry, `always_fails` failed on every attempt.
+        for log in [
+            include_str!("../../tests/ci-runs/nextest-r1-pass.log"),
+            include_str!("../../tests/ci-runs/nextest-r1-fail.log"),
+        ] {
+            let f = logfind::read(log);
+            assert_eq!(retried_ok(&f), BTreeSet::from(["nxflaky t::flaky_once".to_string()]));
+        }
+    }
+
+    #[test]
+    fn a_test_that_passed_on_a_retry_stays_flaky() {
+        let flaky: Flaky = [("t".to_string(), (3, 154))].into();
+        let b = base(&[("j", JobState::Passed)]);
+        assert!(matches!(
+            status_of("j", &named("t"), Some(&b), &flaky, true),
+            Status::Flaky { count: 3, runs: 154, .. }
+        ));
+    }
+
+    #[test]
+    fn a_test_that_failed_on_every_attempt_and_has_no_history_is_not_flaky() {
+        let b = base(&[("j", JobState::Passed)]);
+        assert_eq!(status_of("j", &named("t"), Some(&b), &Flaky::new(), false), Status::New);
+    }
+
+    #[test]
     fn a_missing_comparison_is_unknown_never_new() {
         let none = Flaky::new();
-        assert!(matches!(status_of("j", &named("t"), None, &none), Status::Unknown(_)));
+        assert!(matches!(status_of("j", &named("t"), None, &none, false), Status::Unknown(_)));
         let b = base(&[]);
-        assert!(matches!(status_of("j", &named("t"), Some(&b), &none), Status::Unknown(_)));
+        assert!(matches!(status_of("j", &named("t"), Some(&b), &none, false), Status::Unknown(_)));
         let b = base(&[("j", JobState::NoResult("cancelled".into()))]);
-        assert!(matches!(status_of("j", &named("t"), Some(&b), &none), Status::Unknown(w) if w == "cancelled"));
+        assert!(matches!(status_of("j", &named("t"), Some(&b), &none, false), Status::Unknown(w) if w == "cancelled"));
         // The baseline job failed and its log could not say which tests: not "new".
         let b = base(&[("j", JobState::Failed(Err("log gone".into())))]);
-        assert!(matches!(status_of("j", &named("t"), Some(&b), &none), Status::Unknown(w) if w == "log gone"));
+        assert!(matches!(status_of("j", &named("t"), Some(&b), &none, false), Status::Unknown(w) if w == "log gone"));
         assert!(matches!(
-            status_of("j", &Test::Unread("broken".into()), Some(&base(&[("j", JobState::Passed)])), &none),
+            status_of("j", &Test::Unread("broken".into()), Some(&base(&[("j", JobState::Passed)])), &none, false),
             Status::Unknown(w) if w == "broken"
         ));
     }
@@ -676,14 +768,16 @@ mod tests {
     #[test]
     fn a_baseline_that_failed_before_any_test_ran_cannot_make_a_named_failure_new() {
         let b = base(&[("j", names(&[]))]);
-        assert!(matches!(status_of("j", &named("t"), Some(&b), &Flaky::new()), Status::Unknown(w) if w.contains("before any test ran")));
+        assert!(
+            matches!(status_of("j", &named("t"), Some(&b), &Flaky::new(), false), Status::Unknown(w) if w.contains("before any test ran"))
+        );
     }
 
     #[test]
     fn a_failure_outside_tests_is_not_the_baselines_failure_in_tests() {
         let b = base(&[("j", names(&["t"]))]);
         assert!(
-            matches!(status_of("j", &Test::WholeJob, Some(&b), &Flaky::new()), Status::Unknown(w) if w.contains("not the same failure"))
+            matches!(status_of("j", &Test::WholeJob, Some(&b), &Flaky::new(), false), Status::Unknown(w) if w.contains("not the same failure"))
         );
     }
 
@@ -691,11 +785,11 @@ mod tests {
     fn a_job_that_failed_outside_any_test_is_compared_by_job() {
         let none = Flaky::new();
         assert_eq!(
-            status_of("build", &Test::WholeJob, Some(&base(&[("build", names(&[]))])), &none),
+            status_of("build", &Test::WholeJob, Some(&base(&[("build", names(&[]))])), &none, false),
             Status::OnBaseline
         );
         assert_eq!(
-            status_of("build", &Test::WholeJob, Some(&base(&[("build", JobState::Passed)])), &none),
+            status_of("build", &Test::WholeJob, Some(&base(&[("build", JobState::Passed)])), &none, false),
             Status::New
         );
     }
@@ -865,7 +959,7 @@ mod tests {
             lines[0].starts_with("run 7963 debrief.yml@refs/heads/train/2026-11-11-5 at 607bb7928: 3 failing"),
             "{t}"
         );
-        assert!(lines[0].contains("2 new, 1 already failing, 0 flaky, 0 unknown"), "{t}");
+        assert!(lines[0].contains("2 new, 1 already failing, 0 flaky, 0 failed every attempt, 0 unknown"), "{t}");
         assert!(
             lines
                 .iter()
