@@ -1168,7 +1168,7 @@ at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).
 ## Pre-commit Clippy through the heavy slot (2026-11-13, fix/precommit-heavy-slot)
 
 The pre-commit hook started one `cargo clippy --workspace --all-targets` per app with staged Rust files, all at once; they now go through
-`PADDOCK_HEAVY` or `heavy.sh` like the pre-push gate's heavy steps (ER-24). Method: two apps (Dyno, Pitcrew) cold, started in parallel as
+`./dev heavy -- cargo clippy ...`, which finds the slot tool with the pre-push gate's `heavy_prefix` (`PADDOCK_HEAVY`, PATH, then `$ENGINEERING_RULES` or the engineering-rules checkout beside the main checkout) and warns once when it finds none (ER-24). The numbers below were measured with `heavy.sh` called directly, before `./dev heavy` existed; the slot logic is the same script. Method: two apps (Dyno, Pitcrew) cold, started in parallel as
 lefthook does, `CARGO_BUILD_JOBS=2` each, own target folder on d7, the 1-minute load sampled every 5 s. Plain commands, then the same
 commands through `heavy.sh` with `HEAVY_SLOTS=1` (the default is 5 slots machine-wide, so with the default setting two builds still run
 together unless other jobs hold slots). One run each on the shared Mac mini while other agents ran, so the load at the start differed.
