@@ -20,6 +20,7 @@
 //! - a green run that is not a full one: dispatch the full run (ER-8); main is fast-forwarded only when EVERY reached workflow has
 //!   a full green run per `ci verdict`, outside the backup window, with no hold. A verdict that is not measured never lands.
 
+use super::blame;
 use super::ports::{Blame, Built, Ci, Failure, Ledger, Marker, RunState, Sent, TRAIN_BRANCH, Train, TrainMember, label};
 use crate::ci_runs::verdict::Verdict;
 use crate::pr::gitea::Pull;
@@ -536,30 +537,25 @@ fn failed_run(
             measured: true,
         });
     }
-    // A pull request whose plan runs everything (`*`) cannot be told apart from the others: it is a suspect only for lack of a
-    // precise one, and then the queue stops instead of guessing.
-    let (mut precise, mut wild): (Vec<(&Pull, Vec<&Failure>)>, Vec<&Pull>) = (Vec::new(), Vec::new());
+    // The rule is `blame::suspects`, shared with `./dev ci triage --members`: a pull request whose plan runs everything (`*`)
+    // cannot be told apart from the others, so it is a suspect only for lack of a precise one, and then the queue stops.
+    let blamed_refs = &blamed;
+    let mut reaches = Vec::new();
     for pr in in_train {
-        let reach = p.train.affected(main, &pr.head)?;
         // A gate job (train gates, commit messages) fails on files, not on a project: its log's paths map it to the pull requests
         // that change those files.
-        let changed: Vec<String> = if blamed.iter().any(|f| !f.files.is_empty()) {
-            p.train.pr_files(main, &pr.head)?
-        } else {
-            Vec::new()
-        };
-        let by_file = |f: &Failure| f.files.iter().any(|x| changed.contains(x));
-        let hit: Vec<&Failure> = blamed
-            .iter()
-            .copied()
-            .filter(|f| by_file(f) || (!reach.contains("*") && f.projects.iter().any(|x| reach.contains(x))))
-            .collect();
-        if !hit.is_empty() {
-            precise.push((pr, hit));
-        } else if reach.contains("*") {
-            wild.push(pr);
-        }
+        reaches.push(blame::Reach {
+            projects: p.train.affected(main, &pr.head)?,
+            files: if blame::needs_files(blamed_refs) {
+                p.train.pr_files(main, &pr.head)?
+            } else {
+                Vec::new()
+            },
+        });
     }
+    let found = blame::suspects(&reaches, blamed_refs);
+    let precise: Vec<(&Pull, Vec<&Failure>)> = found.precise.into_iter().map(|(i, hit)| (in_train[i], hit)).collect();
+    let wild: Vec<&Pull> = found.wild.into_iter().map(|i| in_train[i]).collect();
     if precise.is_empty() {
         let why = if wild.is_empty() {
             format!(

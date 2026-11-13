@@ -197,6 +197,10 @@ changes here, every app's copy is updated in the same change.
 ## CI economy (user, 2026-10-29)
 50. **CI runs only what a change needs, once.**
     (a) At most one CI run per branch head. Before dispatching, cancel any queued run on the same branch with an older head.
+    The branch's one run is the trial run: `./dev ci dispatch ci.yml --trial <branch>` merges the branch head onto the open train
+    (origin/main when none is open) in its own clone, reports a conflict with its files instead of dispatching, and dispatches
+    with `base` = the target's sha, so the one run sees the combined tree (ADR 0098 WP-4; report-only for the reviewer until
+    its first green trial run is recorded in the ADR).
     (b) Do not dispatch while review fixes are pending. Dispatch once after the last fix, and do not re-dispatch just to
     refresh against main; merge main right before landing.
     (c) A branch already merged into another branch gets no CI of its own.
@@ -230,6 +234,12 @@ changes here, every app's copy is updated in the same change.
     landing (ER-10) is a plain dispatch without `since_run`.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
     (j) Every merge into a train or integration branch runs at merge time the checks that fail only on combined code (workspace-hack, publish dry run, conformance), not first in the full run (ER-8; 2026-11-12).
+    (k) The member gate (ADR 0098): the integrator runs `./dev merge check --gates <merge>` after each member's merge, which runs
+    the fast gates of `./dev check --pre-push` on the combined tree with `--base <merge>^1`. A member that fails them is taken
+    out (the train is reset to `<merge>^1` in the integrator's own worktree) and sent back to its author with the failing
+    rows; it is not fixed on the train. The gate is report-only (printed, exit unchanged) until its first green run on a real
+    train is recorded in ADR 0098, and sends members back from then on. For a failed train run, `./dev ci triage <run> --members
+    <train-base>` names the members whose change reaches each new failure (the queue's own rule). Tests stay once per train.
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
@@ -382,6 +392,20 @@ changes here, every app's copy is updated in the same change.
     *Why:* on 2026-11-10 synthetic experiments showed that a branch run can poison what a later tag run reads (an sccache
     entry, a kept build folder, the cargo registry), and every rule 54 dispatch had given the updater key to `npm ci`
     (`tauri-bundle.sh:55`), so every install script of every branch could read the key that signs updates.
+
+## Declared data (user, 2026-11-13; ADR 0098)
+79. **Tests read declared data through its accessor** (ER-42). A test, lint list or registry entry that needs data another part of the
+    repository declares (a workflow's command line, a manifest's dependencies, a register's rows, where a file lives) reads it
+    through the one accessor that owns that data (`ci_line::conformance_args`, `cargo metadata`, the register's parser, a
+    constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
+    crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
+    remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
+    regenerate command (ER-40). Checked where cheap: C121 (report-only until its first green run on the real tree) flags a
+    registry entry or test that runs `grep`, `sed`, `awk` or a regular expression over `.gitea/workflows/*.yml`; slicing another
+    file's text by anchors and hard-coded paths into another crate are not linted, so review and the train's test run cover them.
+    *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of
+    data that already had an accessor (`./dev ci conformance-args` now), `0308201b4` a span ended at a comment the author
+    remembered, `11c365fc4` a path into another area's layout, `be69a31f6` a hand list that had to equal `cargo metadata`.
 
 ## Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:

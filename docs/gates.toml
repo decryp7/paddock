@@ -174,6 +174,14 @@ review_by = 2026-12-13
 approved = "coordinator"
 
 [[report_only]]
+id = "C121"
+reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0098 (WP-2), then flip the findings to errors in C121-declared-data.mjs and c121.rs. first count 2026-11-13: 10 findings, all the parity fixtures of C121 in tools/paddock-dev/tests/it/check.rs, now allowed with a reason (0 left); it flags a registry entry or test that runs grep, sed, awk or a regular expression over a workflow file"
+owner = "ADR 0098 WP-2"
+since = 2026-11-13
+review_by = 2027-01-07
+approved = "user"
+
+[[report_only]]
 id = "C14"
 reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
 owner = "Rule 40 follow-up"

@@ -214,12 +214,23 @@ struct MergeCheckArgs {
     /// checkout must be the merge result, else they are NOT MEASURED).
     #[arg(long)]
     no_generators: bool,
+    /// Also run the member gate on the merge commit: `check --pre-push --base <merge>^1`, the fast gates on the combined tree
+    /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
+    #[arg(long)]
+    gates: bool,
 }
 
 #[derive(Subcommand)]
 enum SelfCommand {
     /// Print the input hash this binary's sources, dependencies and compiler give, and the hash it was built from.
     Hash,
+}
+
+#[derive(Args)]
+struct ConformanceArgsArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -259,6 +270,10 @@ enum CiCommand {
     /// flaky tests found exit 5 only with --fail-on-flakes;
     /// cancelled runs are counted and listed but never change the exit code.
     Flakes(ci_runs::FlakesArgs),
+    /// The arguments of CI's conformance line (`--app paddock ... --only ...`, after `node conformance/bin/paddock-conformance.mjs`... as
+    /// one line), read from .gitea/workflows/ci.yml by the one reader the push gate uses (ADR 0098 WP-2). Exit 6 when the
+    /// workflow has no single such line.
+    ConformanceArgs(ConformanceArgsArgs),
     /// For each failed test of a finished run: NEW, ALREADY FAILING ON MAIN (the last main run of the same workflow) or FLAKY (its
     /// `ci flakes` history). UNKNOWN when nothing proves either way. Read-only: it never quarantines or marks anything green (ER-12).
     Triage(ci_runs::TriageArgs),
@@ -277,6 +292,8 @@ enum CiCommand {
     /// Dispatch a workflow once no other run is on its single-machine runner (macOS, Windows): waits like `wait --ci-run`, at
     /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once.
     Dispatch(ci_runs::DispatchArgs),
+    /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).
+    TrialPrune(ci_runs::TrialPruneArgs),
 }
 
 #[derive(Subcommand)]
@@ -513,6 +530,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     branch: a.branch,
                     target: a.target,
                     generators: !a.no_generators,
+                    gates: a.gates,
                 },
                 out,
                 err,
@@ -573,6 +591,20 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::RecordFixture(a),
         } => ci_runs::record::command(&a),
         Command::Ci {
+            command: CiCommand::ConformanceArgs(a),
+        } => gates::command::repo_root(a.root.as_deref()).and_then(|root| {
+            // The one reader is the contract, `conformance/paddock.ci.json` (ADR 0038 section 1), which replaced the line in ci.yml.
+            let args = crate::ci_run::contract::conformance_args_at(&root).map_err(|why| {
+                paddock_cli::CliError::new(
+                    paddock_cli::Exit::NotMeasured,
+                    format!(
+                        "::error::conformance args NOT MEASURED: {why}. Next step: fix the `conformance` field of conformance/paddock.ci.json, then run it again."
+                    ),
+                )
+            })?;
+            Ok(paddock_cli::Report::new(serde_json::json!({ "args": args }), args.join(" ")))
+        }),
+        Command::Ci {
             command: CiCommand::Triage(a),
         } => ci_runs::triage(&a),
         Command::Ci {
@@ -587,6 +619,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
+        Command::Ci {
+            command: CiCommand::TrialPrune(a),
+        } => ci_runs::trial_prune(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Load(a) => load::command(&a),
         Command::Brief { command } => brief_check::command(command),
@@ -653,6 +688,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             branch: a.branch,
             target: a.target,
             generators: !a.no_generators,
+            gates: a.gates,
         }),
         Command::Gen {
             command: GenCommand::Check(a),

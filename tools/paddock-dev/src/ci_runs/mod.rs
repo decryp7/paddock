@@ -17,6 +17,7 @@ pub mod client;
 pub mod dispatch;
 pub mod flakes;
 pub mod logfind;
+pub mod members;
 pub mod preconditions;
 pub mod record;
 pub mod schedule_skip;
@@ -25,6 +26,7 @@ mod testutil;
 pub mod time;
 pub mod timings;
 pub mod triage;
+pub mod trial;
 pub mod verdict;
 
 use crate::wait::CurlHttp;
@@ -73,8 +75,17 @@ pub struct DispatchArgs {
     /// The workflow file in `.gitea/workflows` (`dyno-release.yml`).
     workflow: String,
     /// The branch or tag to run it on.
-    #[arg(long = "ref", value_name = "REF")]
-    git_ref: String,
+    #[arg(long = "ref", value_name = "REF", required_unless_present = "trial", conflicts_with = "trial")]
+    git_ref: Option<String>,
+    /// The trial before approval (ADR 0098 WP-4): merge this branch's head onto the open train (origin/main when none is open) in
+    /// the tool's own clone, report a conflict or a merge-check finding instead of dispatching, push `trial/<branch>` and
+    /// dispatch it with `base` = the target's sha. The branch's one CI run (rule 50 (a)); the scratch clone lives in
+    /// PADDOCK_TRIAL_DIR (required: a folder on a data drive). Needs GITEA_TOKEN with write access.
+    #[arg(long, value_name = "BRANCH")]
+    trial: Option<String>,
+    /// With --trial: merge onto this ref (for example `origin/train/2026-11-13-8`) instead of the open train.
+    #[arg(long, value_name = "REF", requires = "trial")]
+    onto: Option<String>,
     /// A workflow input, `key=value` (repeat for more).
     #[arg(long = "input", value_name = "KEY=VALUE")]
     inputs: Vec<String>,
@@ -155,6 +166,11 @@ pub struct TriageArgs {
     /// Skip the flake history (faster: it reads the failed job logs of the window).
     #[arg(long)]
     no_history: bool,
+    /// Also blame the members of a train built by hand: the first-parent merges between this base (for example `origin/main`) and
+    /// the commit the run tested, each with the planner's answer for its own diff (ADR 0098). Read-only; run it in the
+    /// integrator's checkout, which holds the train.
+    #[arg(long, value_name = "BASE")]
+    members: Option<String>,
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,
@@ -408,17 +424,45 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let hint = "Run `./dev ci dispatch --help`.";
     let token =
         token_from(std::env::var("GITEA_TOKEN").ok()).map_err(|e| e.with_hint("The dispatch needs a token that can write Actions."))?;
-    let req = dispatch::parse_request(&a.workflow, &a.git_ref, &a.inputs, &a.max, a.interval.as_deref())
-        .map_err(|e| CliError::usage(e).with_hint(hint))?;
     let root = a
         .root
         .clone()
         .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
         .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
     let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+    let mut inputs = a.inputs.clone();
+    let mut git_ref = a.git_ref.clone().unwrap_or_default();
+    let mut trial = None;
+    if let Some(branch) = &a.trial {
+        // Everything that can be refused is refused before `trial/<branch>` is pushed: the branch name, the inputs, --max and
+        // --interval (parsed with a stand-in ref and base), and the workflow (readable, its runner classes known).
+        if !trial::valid_branch(branch) {
+            return Err(CliError::usage(format!(
+                "`{branch}` is not a branch name --trial accepts (letters, digits, . _ - and /)."
+            ))
+            .with_hint(hint));
+        }
+        let mut probe_inputs = inputs.clone();
+        probe_inputs.push(format!("base={}", "0".repeat(40)));
+        dispatch::parse_request(
+            &a.workflow,
+            &format!("trial/{branch}"),
+            &probe_inputs,
+            &a.max,
+            a.interval.as_deref(),
+        )
+        .map_err(|e| CliError::usage(e).with_hint(hint))?;
+        dispatch::classes_of(&a.workflow, &read).map_err(|e| CliError::usage(e).with_hint("Check the workflow name and --root."))?;
+        let (g, trial_ref, base) = trial_merge(a, branch, &token)?;
+        git_ref = trial_ref.clone();
+        inputs.push(format!("base={base}"));
+        trial = Some((g, trial_ref));
+    }
+    let req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
+        .map_err(|e| CliError::usage(e).with_hint(hint))?;
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
-    match dispatch::run(
+    let result = dispatch::run(
         &mut http,
         &dispatch::Target {
             server: &a.server,
@@ -429,7 +473,15 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         &read,
         &mut clock,
         &mut std::io::stderr(),
-    ) {
+    );
+    // A trial that was not dispatched leaves no `trial/<branch>` behind (best effort; `ci trial-prune` catches the rest).
+    if let Some((g, trial_ref)) = &trial
+        && !matches!(result, Ok(dispatch::Dispatched::Yes { .. }))
+        && let Err(e) = trial::delete(g, trial_ref)
+    {
+        eprintln!("::warning::trial: {trial_ref} could not be deleted after the dispatch failed ({e}); run `./dev ci trial-prune`");
+    }
+    match result {
         Ok(dispatch::Dispatched::Yes { waited }) => Ok(Report::new(
             serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64}),
             format!(
@@ -446,6 +498,112 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
             Err(CliError::failure(e).with_hint("Check the workflow name, GITEA_TOKEN's scope and the network."))
         }
     }
+}
+
+/// The trial merge of `--trial`: the ref to dispatch and the `base` input. A conflict or a merge-check finding is a failure with
+/// its `::error::` line and nothing is pushed.
+fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::queue::real::GitTrain, String, String), CliError> {
+    use crate::queue::real::GitTrain;
+    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR").map(PathBuf::from).ok_or_else(|| {
+        CliError::usage("PADDOCK_TRIAL_DIR is not set.")
+            .with_hint("Set it to a folder on a data drive for the trial's scratch clone (not under your home).")
+    })?;
+    let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
+    let fail = |why: String| {
+        eprintln!("::error::trial: {why}");
+        CliError::failure(why).with_hint("Check the branch name, GITEA_TOKEN's write scope and the network.")
+    };
+    let g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(fail)?;
+    let check = |root: &std::path::Path, head: &str| {
+        crate::merge_check::command(&crate::merge_check::Request {
+            root: Some(root.to_path_buf()),
+            commit: Some(head.to_string()),
+            branch: None,
+            target: None,
+            // The trial runs no code of the branch: generator checks and the member gate need a checkout.
+            generators: false,
+            gates: false,
+        })
+        .map(|_| ())
+        .map_err(|e| e.message)
+    };
+    match trial::prepare(&g, branch, a.onto.as_deref(), &check).map_err(fail)? {
+        trial::Outcome::Ready {
+            trial_ref,
+            target,
+            target_sha,
+            head,
+        } => {
+            eprintln!(
+                "trial: {branch} merged onto {target} ({}) as {}; pushed {trial_ref}",
+                &target_sha[..target_sha.len().min(9)],
+                &head[..head.len().min(9)]
+            );
+            Ok((g, trial_ref, target_sha))
+        }
+        trial::Outcome::Conflict { target, files } => {
+            let why = format!(
+                "{branch} conflicts with {target} in {} file(s): {}. Next step: send the branch back to its author to merge {target} and resolve them; nothing was dispatched",
+                files.len(),
+                files.join(", ")
+            );
+            Err(CliError::new(Exit::Findings, format!("::error::trial: {why}")))
+        }
+        trial::Outcome::Findings(text) => {
+            eprintln!("::error::trial: the merge check found something in {branch} merged onto the train; nothing was dispatched");
+            Err(CliError::new(Exit::Findings, text))
+        }
+    }
+}
+
+/// The exit of `ci triage --members`: a blame that could not read the members (a plan, a merge) is NOT MEASURED (exit 6), whatever the
+/// failures said; it never leaves the run's own answer standing as if it were the blame's.
+fn members_exit(current: Exit, blame_read: bool) -> Exit {
+    if blame_read { current } else { Exit::NotMeasured }
+}
+
+/// Arguments of `ci trial-prune`.
+#[derive(Args)]
+pub struct TrialPruneArgs {
+    /// List the stale trial refs; delete nothing.
+    #[arg(long)]
+    dry_run: bool,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci trial-prune`: deletes the `trial/*` refs (ADR 0098 WP-4) of branches that are gone or landed on main. Needs GITEA_TOKEN with
+/// write access and PADDOCK_TRIAL_DIR (the trial's scratch clone).
+pub fn trial_prune(a: &TrialPruneArgs) -> Result<Report, CliError> {
+    use crate::queue::real::GitTrain;
+    let token = token()?;
+    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| CliError::usage("PADDOCK_TRIAL_DIR is not set.").with_hint("Set it to the folder of the trial's scratch clone."))?;
+    let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
+    let fail = |why: String| {
+        CliError::failure(format!("::error::trial-prune: {why}")).with_hint("Check GITEA_TOKEN's write scope and the network.")
+    };
+    let g = GitTrain::open(&url, &scratch, Some(token), true, false).map_err(fail)?;
+    let stale = trial::prune(&g, a.dry_run).map_err(fail)?;
+    let lines: Vec<String> = stale.iter().map(|s| format!("{} ({})", s.trial_ref, s.why)).collect();
+    Ok(Report::new(
+        serde_json::json!({"deleted": !a.dry_run, "refs": stale.iter().map(|s| &s.trial_ref).collect::<Vec<_>>()}),
+        if lines.is_empty() {
+            "no stale trial refs".to_string()
+        } else {
+            format!(
+                "{} {} stale trial ref(s):\n{}",
+                if a.dry_run { "would delete" } else { "deleted" },
+                lines.len(),
+                lines.join("\n")
+            )
+        },
+    ))
 }
 
 /// `ci triage`: read-only; it quarantines nothing and marks nothing green (ER-12).
@@ -466,8 +624,34 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
         CliError::failure(format!("run {} could not be triaged: {e}", a.run))
             .with_hint("Check the network, that GITEA_TOKEN can read the repository, and that the run has finished.")
     })?;
+    let (mut text, mut data, mut exit) = (report.text(), report.json(), report.exit());
+    if let Some(base) = &a.members {
+        // ADR 0098: blame the members of a hand-built train. Read-only; a member that cannot be read ends the blame (ER-33).
+        let answer = (|| -> Result<(String, serde_json::Value), String> {
+            let root = crate::gates::command::repo_root(None).map_err(|e| e.message)?;
+            let git = crate::merge_check::git::Git::new(&root);
+            let failures = crate::queue::real::failures_of(&report, a.run, &mut http, &a.server, &a.repo, &token);
+            let plan = |first: &str, merge: &str| crate::queue::real::run_planner(&root, first, merge);
+            let members = members::read(&git, base, &report.head, &plan, members::needs_files(&failures))?;
+            Ok(members::report(base, &report.head, &members, &failures))
+        })();
+        match answer {
+            Ok((t, d)) => {
+                text.push_str(&t);
+                data["members"] = d;
+            }
+            Err(why) => {
+                text.push_str(&format!(
+                    "::error::the members of {base}..{} could not be blamed: {why}. Next step: run this in the checkout that holds the train, with its base fetched; the failures above stand.\n",
+                    report.head.chars().take(9).collect::<String>()
+                ));
+                data["members"] = serde_json::json!({"error": why});
+                exit = members_exit(exit, false);
+            }
+        }
+    }
     // An answer with an UNKNOWN row or a gap is not a clean one: exit 5, so a script cannot read it as "nothing to worry about".
-    Ok(Report::new(report.json(), report.text()).with_exit(report.exit()))
+    Ok(Report::new(data, text).with_exit(exit))
 }
 
 /// `ci timings`.
@@ -622,5 +806,13 @@ mod tests {
         for flag in ["--repos", "--limit", "--no-logs", "--cache", "--out", "--json-file", "--base"] {
             assert!(out.contains(flag), "{flag} missing in {out}");
         }
+    }
+
+    #[test]
+    fn a_blame_that_could_not_read_the_members_is_not_measured_whatever_the_run_said() {
+        assert_eq!(members_exit(Exit::Ok, false), Exit::NotMeasured);
+        assert_eq!(members_exit(Exit::Findings, false), Exit::NotMeasured);
+        assert_eq!(members_exit(Exit::Findings, true), Exit::Findings);
+        assert_eq!(members_exit(Exit::Ok, true), Exit::Ok);
     }
 }
