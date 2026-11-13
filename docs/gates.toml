@@ -158,6 +158,14 @@ review_by = 2026-12-27
 approved = "coordinator"
 
 [[report_only]]
+id = "C118"
+reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C118-floating-tools.mjs and the mode to gate. 16 floating-tool warnings today (7 cargo install without a pinned version, 5 dtolnay/rust-toolchain at a channel ref, 2 taiki-e/install-action refs without a digest, 1 install-action tool without @x.y.z, 1 npx --yes of a package that is not in the lockfile); an npx of a binary of a top-level package-lock.json package is not a finding"
+owner = "ER-26 (2026-11-13)"
+since = 2026-11-12
+review_by = 2026-12-10
+approved = "user"
+
+[[report_only]]
 id = "C14"
 reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
 owner = "Rule 40 follow-up"
