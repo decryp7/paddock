@@ -297,17 +297,18 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         lookup_notes = trail;
     }
     let (base, why_base) = match (&args.base, pushed.first()) {
-        (None, Some(tip)) => choose_base(&root, args.remote.as_deref(), tip),
+        (None, Some(tip)) => choose_base(&root, args.remote.as_deref(), tip, look),
         (Some(b), _) => (b.clone(), "named with --base".to_string()),
         (None, None) => ("origin/main".to_string(), "the default base (no pushed commit)".to_string()),
     };
     let (change, mut notes, extra) = discover(&root, &base, &args.files, &pushed)?;
     notes.push(format!("base {base}: {why_base}"));
     notes.extend(lookup_notes.into_iter().map(|l| format!("known-commit lookup: {l}")));
-    if change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
+    // An empty diff passes on its own only for a person's run with no pushed commit; a push is always measured (or known).
+    if pushed.is_empty() && change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
             json!({"gates": [], "changed": 0}),
-            format!("pre-push: nothing changed since {base}; nothing to check ({why_base}; remote refs are as of the last fetch)."),
+            format!("pre-push: nothing changed since {base}; nothing to check ({why_base})."),
         ));
     }
     if !accept.is_empty() {
@@ -668,35 +669,47 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
     .with_exit(exit)
 }
 
-/// The base a pushed commit is measured from when none is named: the remote-tracking branch of the push's remote that leaves the
-/// fewest of the commit's commits new (`git rev-list --count <branch>..<tip>`), as git's pre-push.sample and lefthook check only what
-/// the remote lacks. With no such branch (none fetched, or no remote named) it falls back to origin/main and says so. Returns the
-/// base ref and why it was chosen (ER-27).
-fn choose_base(root: &Path, remote: Option<&str>, tip: &str) -> (String, String) {
-    let scope = remote
-        .filter(|r| !r.is_empty() && !r.starts_with('-'))
-        .map_or("refs/remotes/".to_string(), |r| format!("refs/remotes/{r}/"));
-    let refs = git_text(root, &["for-each-ref", "--format=%(refname:short)", &scope]).unwrap_or_default();
-    let mut best: Option<(u32, String)> = None;
+/// The base a pushed commit is measured from when none is named: the branch tip of the push's own remote, read live with
+/// `git ls-remote` (not from local tracking refs), that leaves the fewest of the commit's commits new (`rev-list --count
+/// <tip>..<pushed>`), as git's pre-push.sample and lefthook check only what the remote lacks. Tips this clone has no object for
+/// are skipped. Falls back to origin/main, and says why, when the remote cannot be read or names no usable branch, and when every
+/// pushed commit is already on a remote branch (an empty diff is never a pass on its own: evidence was looked up before, and
+/// without it the whole change from origin/main is measured). Returns the base and why it was chosen (ER-27).
+fn choose_base(root: &Path, remote: Option<&str>, tip: &str, look: &dyn known::Lookups) -> (String, String) {
+    let fallback = |why: String| ("origin/main".to_string(), format!("{why}; measuring from origin/main"));
+    let Some(remote) = remote.filter(|r| !r.is_empty() && !r.starts_with('-')) else {
+        return fallback("no remote was named for this push".into());
+    };
+    let Some(listing) = look.ls_remote(remote) else {
+        return fallback(format!("git ls-remote {remote} could not be read"));
+    };
+    let mut best: Option<(u32, String, String)> = None;
     let mut seen = 0;
-    for r in refs.lines().map(str::trim).filter(|r| !r.is_empty() && !r.ends_with("/HEAD")) {
+    for (sha, name) in listing
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .filter(|(_, n)| n.starts_with("refs/heads/"))
+    {
+        if git_text(root, &["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_none() {
+            continue;
+        }
         seen += 1;
-        let Some(n) = git_text(root, &["rev-list", "--count", &format!("{r}..{tip}")]).and_then(|t| t.trim().parse::<u32>().ok()) else {
+        let Some(n) = git_text(root, &["rev-list", "--count", &format!("{sha}..{tip}")]).and_then(|t| t.trim().parse::<u32>().ok()) else {
             continue;
         };
-        if best.as_ref().is_none_or(|(m, _)| n < *m) {
-            best = Some((n, r.to_string()));
+        if best.as_ref().is_none_or(|(m, _, _)| n < *m) {
+            best = Some((n, sha.to_string(), name.trim().to_string()));
         }
     }
     match best {
-        Some((n, r)) => (
-            r.clone(),
-            format!("the remote branch with the fewest new commits ({n}) among {seen} in {scope}, as of the last fetch"),
+        Some((0, _, name)) => fallback(format!(
+            "every pushed commit is already on {remote}'s {name} but no evidence for it was found"
+        )),
+        Some((n, sha, name)) => (
+            sha,
+            format!("{remote}'s {name} (read live with git ls-remote) leaves the fewest new commits ({n}) among {seen} usable branch tips"),
         ),
-        None => (
-            "origin/main".into(),
-            format!("no remote-tracking branch under {scope} is readable (missing or not fetched); fell back to origin/main"),
-        ),
+        None => fallback(format!("git ls-remote {remote} lists no branch tip this clone has")),
     }
 }
 

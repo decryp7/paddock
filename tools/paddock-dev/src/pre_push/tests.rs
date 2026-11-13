@@ -1126,11 +1126,32 @@ fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pas
 }
 
 mod base_choice {
-    use super::super::choose_base;
+    use super::super::known::Lookups;
+    use super::super::{PrePushArgs, choose_base, command_in};
     use crate::plan_repo::git_text;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
-    /// main: m1; train (origin/train/t): m1-t1-t2. Returns the repo and a git closure's root.
+    /// `git ls-remote` as the remote would answer it: a fixed text or unreachable.
+    struct Remote(Option<String>);
+    impl Lookups for Remote {
+        fn ls_remote(&self, _: &str) -> Option<String> {
+            self.0.clone()
+        }
+        fn ci_green(&self, _: &str) -> Result<u64, String> {
+            Err("no run".into())
+        }
+    }
+    /// The remote's branches as `ls-remote` text, from refs/remotes/origin/* of the fixture (the sha each ref points at).
+    fn live(r: &Path) -> Remote {
+        let refs = git_text(r, &["for-each-ref", "--format=%(objectname)\t%(refname)", "refs/remotes/origin/"]).unwrap();
+        Remote(Some(
+            refs.lines()
+                .map(|l| l.replacen("refs/remotes/origin/", "refs/heads/", 1) + "\n")
+                .collect(),
+        ))
+    }
+
+    /// main: m1; train (origin/train/t): m1-t1-t2.
     fn repo() -> (tempfile::TempDir, PathBuf) {
         let d = tempfile::tempdir().unwrap();
         let r = d.path().join("r");
@@ -1150,65 +1171,101 @@ mod base_choice {
         git_text(&r, &["update-ref", "refs/remotes/origin/train/t", "HEAD"]).unwrap();
         (d, r)
     }
-    fn commit(r: &std::path::Path, f: &str) {
+    fn commit(r: &Path, f: &str) {
         std::fs::write(r.join(f), f).unwrap();
         git_text(r, &["add", f]).unwrap();
         git_text(r, &["commit", "-q", "-m", f]).unwrap();
     }
-    fn sha(r: &std::path::Path) -> String {
-        git_text(r, &["rev-parse", "HEAD"]).unwrap().trim().to_string()
+    fn sha(r: &Path, rev: &str) -> String {
+        git_text(r, &["rev-parse", rev]).unwrap().trim().to_string()
     }
 
     #[test]
-    fn a_branch_made_from_a_train_branch_is_measured_from_that_train() {
+    fn a_branch_made_from_a_train_branch_is_measured_from_the_trains_live_tip() {
         let (_d, r) = repo();
+        let train = sha(&r, "origin/train/t");
         commit(&r, "w1");
-        let (base, why) = choose_base(&r, Some("origin"), &sha(&r));
-        assert_eq!(base, "origin/train/t", "{why}");
-        assert!(why.contains("fewest new commits (1)"), "{why}");
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        assert_eq!(base, train, "{why}");
+        assert!(why.contains("train/t") && why.contains("(1)") && why.contains("live"), "{why}");
     }
 
     #[test]
     fn a_branch_made_from_main_is_measured_from_main() {
         let (_d, r) = repo();
+        let main = sha(&r, "origin/main");
         git_text(&r, &["checkout", "-q", "-b", "w", "origin/main"]).unwrap();
         commit(&r, "w1");
-        let (base, _) = choose_base(&r, Some("origin"), &sha(&r));
-        assert_eq!(base, "origin/main");
+        let (base, _) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        assert_eq!(base, main);
     }
 
     #[test]
     fn main_merged_into_a_train_based_branch_is_still_measured_from_the_train() {
         let (_d, r) = repo();
-        // main moves on; the work branch is made from the train and merges the new main.
+        let train = sha(&r, "origin/train/t");
         git_text(&r, &["checkout", "-q", "main"]).unwrap();
         commit(&r, "m2");
         git_text(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
         git_text(&r, &["checkout", "-q", "-b", "w", "origin/train/t"]).unwrap();
         commit(&r, "w1");
         git_text(&r, &["merge", "-q", "--no-edit", "origin/main"]).unwrap();
-        let (base, why) = choose_base(&r, Some("origin"), &sha(&r));
-        assert_eq!(base, "origin/train/t", "{why}");
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        assert_eq!(base, train, "{why}");
     }
 
     #[test]
-    fn a_missing_remote_ref_falls_back_to_origin_main_and_says_so() {
+    fn an_unreachable_remote_or_no_remote_falls_back_to_origin_main_and_says_so() {
         let (_d, r) = repo();
-        let (base, why) = choose_base(&r, Some("nowhere"), &sha(&r));
+        commit(&r, "w1");
+        let tip = sha(&r, "HEAD");
+        let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
         assert_eq!(base, "origin/main");
-        assert!(why.contains("fell back to origin/main"), "{why}");
-        // Another remote's branches are not looked at when the push names its own.
-        let (base, _) = choose_base(&r, Some("upstream"), &sha(&r));
-        assert_eq!(base, "origin/main");
+        assert!(
+            why.contains("could not be read") && why.contains("measuring from origin/main"),
+            "{why}"
+        );
+        let (base, why) = choose_base(&r, None, &tip, &live(&r));
+        assert_eq!((base.as_str(), why.contains("no remote was named")), ("origin/main", true));
+        // Tips this clone has no object for are skipped.
+        let (base, why) = choose_base(
+            &r,
+            Some("origin"),
+            &tip,
+            &Remote(Some(format!("{}\trefs/heads/x\n", "1".repeat(40)))),
+        );
+        assert_eq!(base, "origin/main", "{why}");
     }
 
     #[test]
-    fn a_stale_remote_ref_only_widens_the_diff_it_never_hides_commits() {
+    fn every_pushed_commit_already_on_the_remote_is_never_an_empty_pass_it_measures_from_origin_main() {
         let (_d, r) = repo();
-        // The remote train moved on (t2 is new there) but the local tracking ref is still at t1: t2 counts as new.
-        git_text(&r, &["update-ref", "refs/remotes/origin/train/t", "HEAD~1"]).unwrap();
-        let (base, why) = choose_base(&r, Some("origin"), &sha(&r));
-        assert_eq!(base, "origin/train/t", "{why}");
-        assert!(why.contains("(1)") && why.contains("as of the last fetch"), "{why}");
+        let two = sha(&r, "origin/train/t");
+        let (base, why) = choose_base(&r, Some("origin"), &two, &live(&r));
+        assert_eq!(base, "origin/main", "{why}");
+        assert!(
+            why.contains("already on origin's refs/heads/") && why.contains("no evidence"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn a_push_already_on_the_remote_without_evidence_runs_the_checks_instead_of_nothing_to_check() {
+        let (_d, r) = repo();
+        let two = sha(&r, "origin/train/t");
+        let args = PrePushArgs {
+            root: Some(r.clone()),
+            base: None,
+            remote: Some("origin".into()),
+            only: vec![],
+            dry_run: true,
+            files: vec![],
+            refs_from_stdin: true,
+            linux: false,
+            accept_not_measured: vec![],
+        };
+        let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
+        let got = command_in(&args, &r, &line, &live(&r));
+        assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
     }
 }
