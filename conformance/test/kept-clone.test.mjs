@@ -340,7 +340,7 @@ test('kept-clone: a phase that hangs does not fail the job (the doc says it neve
   const real = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
   writeFileSync(join(bin, 'git'), `#!/bin/sh\ncase " $* " in *" fetch "*) exec sleep 30;; esac\nexec '${real}' "$@"\n`);
   chmodSync(join(bin, 'git'), 0o755);
-  const r = job(fx, sha, { env: { PATH: `${bin}:${process.env.PATH}`, PADDOCK_KEPT_CLONE_TIMEOUT: '1' } });
+  const r = job(fx, sha, { env: { PATH: `${bin}:${process.env.PATH}`, PADDOCK_KEPT_CLONE_TIMEOUT_FETCH: '1' } }); // only the hanging phase has the short limit: a slow clone under load meets none
   assert.equal(r.status, 0, r.out);
   assert.match(r.out, /::warning::kept-clone: 'fetch [0-9a-f]+' did not finish within 1 s/);
   assert.match(r.out, /::warning::kept-clone: [^\n]*building from the work folder/);

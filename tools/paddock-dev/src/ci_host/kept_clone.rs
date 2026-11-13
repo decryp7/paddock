@@ -16,7 +16,7 @@
 //! 4. verifies: HEAD is the commit, the tree has no change or stray file, no excluded path exists;
 //! 5. exports `PADDOCK_WORKSPACE` and, off Windows, leaves a link at the work folder.
 //!
-//! Every phase is bounded (`PADDOCK_KEPT_CLONE_TIMEOUT` seconds, default 900) and logs its duration (ER-27). A clone that cannot be made
+//! Every phase is bounded (`PADDOCK_KEPT_CLONE_TIMEOUT` seconds, default 900; one phase's own limit `PADDOCK_KEPT_CLONE_TIMEOUT_<ID>`) and logs its duration (ER-27). A clone that cannot be made
 //! never fails the job, and neither does a phase that hangs: a phase that fails is retried once on a new clone (stale `.git` locks removed
 //! first), and then the work folder is expanded to the profile instead (one `::warning::`; only the compile cache of the workspace crates
 //! is lost). The clone's `.git` survives between jobs and is shared by every job of the slot, so nothing in it is trusted: every git
@@ -63,6 +63,53 @@ const NAME: &str = "kept-clone";
 /// what a git command does, so the clone that carries one is not reused.
 const ALLOWED_KEYS: &str = r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|sparsecheckout|sparsecheckoutcone)|extensions\.(partialclone|objectformat)|remote\.origin\.(url|fetch|tagopt|promisor|partialclonefilter)|branch\.[^.=]+\.(remote|merge))$";
 
+/// The bound of a git command outside a phase (reading the work folder, the health probe, the fallback's expansion): the default phase
+/// limit. `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase; the shell runs these reads unbounded, so a short phase limit must not end
+/// them (it failed the job under load with the hung-phase test's 1 s limit, where the shell went on).
+const OUTSIDE_PHASE_LIMIT: Duration = Duration::from_secs(900);
+
+thread_local! {
+    /// Set on a phase's own thread: its git commands get that phase's limit.
+    static IN_PHASE: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
+}
+
+/// The phases, each with its own limit `PADDOCK_KEPT_CLONE_TIMEOUT_<ID>` over the general `PADDOCK_KEPT_CLONE_TIMEOUT` (the shell's
+/// `phase <ID>`): a job (or a test) can bound one phase tightly without the others meeting that bound.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PhaseId {
+    Resolve,
+    Create,
+    Clean,
+    Fetch,
+    Checkout,
+    Verify,
+    Link,
+}
+
+impl PhaseId {
+    /// The variable of the phase's own limit.
+    fn var(self) -> &'static str {
+        match self {
+            PhaseId::Resolve => "PADDOCK_KEPT_CLONE_TIMEOUT_RESOLVE",
+            PhaseId::Create => "PADDOCK_KEPT_CLONE_TIMEOUT_CREATE",
+            PhaseId::Clean => "PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN",
+            PhaseId::Fetch => "PADDOCK_KEPT_CLONE_TIMEOUT_FETCH",
+            PhaseId::Checkout => "PADDOCK_KEPT_CLONE_TIMEOUT_CHECKOUT",
+            PhaseId::Verify => "PADDOCK_KEPT_CLONE_TIMEOUT_VERIFY",
+            PhaseId::Link => "PADDOCK_KEPT_CLONE_TIMEOUT_LINK",
+        }
+    }
+}
+
+/// The phase's limit: its own variable when it is a whole number above 0 (digits, no leading zero, as the shell tests it), else
+/// `general`.
+fn phase_limit(env: &HashMap<String, String>, id: PhaseId, general: Duration) -> Duration {
+    env.get(id.var())
+        .filter(|v| !v.is_empty() && !v.starts_with('0') && v.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(general, Duration::from_secs)
+}
+
 /// What the phases share: the job's environment, the credentials for git, the folders and the two buffers a phase writes to (what the
 /// shell's `$scratch/err` and the `run:` lines were).
 struct Kc {
@@ -84,6 +131,10 @@ struct Kc {
 
 impl Kc {
     fn note(&self, text: impl AsRef<str>) {
+        // A command that wrote nothing (a git ended at its limit) adds nothing, as the shell's `$scratch/err` (no blank line).
+        if text.as_ref().is_empty() {
+            return;
+        }
         if let Ok(mut e) = self.err.lock() {
             e.push_str(text.as_ref());
             if !text.as_ref().ends_with('\n') {
@@ -111,7 +162,7 @@ impl Kc {
             .pass(["GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_GLOBAL", "GIT_SSL_CAINFO", "GIT_SSL_CAPATH"])
             .env("GIT_TERMINAL_PROMPT", "0")
             .env("GIT_NO_REPLACE_OBJECTS", "1")
-            .timeout(self.limit);
+            .timeout(IN_PHASE.with(std::cell::Cell::get).unwrap_or(OUTSIDE_PHASE_LIMIT));
         if let Some(h) = &self.header {
             call = call
                 .env("GIT_CONFIG_COUNT", "1")
@@ -482,7 +533,7 @@ fn run_inner(
     let folder = folder_name(&args.name);
     let resolved = {
         let (env2, win) = (flow.kc.env.clone(), flow.kc.windows);
-        flow.phase(step, "resolve the job slot's kept folder", move |_| {
+        flow.phase(step, PhaseId::Resolve, "resolve the job slot's kept folder", move |_| {
             let (code, o, e) = isolation_full(&env2, win, &["path", "src", &folder]);
             if code == 0 { Ok((o, e)) } else { Err(e) }
         })
@@ -581,7 +632,10 @@ fn run_inner(
     if !runner_windows {
         let (ws2, stable2) = (flow.ws.clone(), stable.clone());
         let label = format!("link {ws_text} to {stable_text}");
-        if flow.phase(step, &label, move |kc| link_work_folder(kc, &ws2, &stable2)).is_err() {
+        if flow
+            .phase(step, PhaseId::Link, &label, move |kc| link_work_folder(kc, &ws2, &stable2))
+            .is_err()
+        {
             step.warn(format!(
                 "could not link {ws_text} to {stable_text} ({}); steps build from PADDOCK_WORKSPACE.",
                 flow.kc.last_lines()
@@ -666,9 +720,11 @@ impl Flow {
     fn phase<T: Send + 'static>(
         &self,
         step: &mut Step<'_>,
+        id: PhaseId,
         label: &str,
         f: impl FnOnce(&Kc) -> Result<T, String> + Send + 'static,
     ) -> Result<T, Soft> {
+        let limit = phase_limit(&self.kc.env, id, self.limit);
         if let Ok(mut e) = self.kc.err.lock() {
             e.clear();
         }
@@ -676,13 +732,10 @@ impl Flow {
         let kc = self.kc.clone();
         // A git command ends itself at the limit (and its whole process tree with it); the phase waits one second longer so that it is
         // the git command's end that is seen first, and a phase that hangs elsewhere (a file call) is abandoned after that.
-        let r = bounded_hung(
-            step,
-            label,
-            self.limit + Duration::from_secs(1),
-            Some(&self.kc.timed_out),
-            move || f(&kc),
-        );
+        let r = bounded_hung(step, label, limit + Duration::from_secs(1), Some(&self.kc.timed_out), move || {
+            IN_PHASE.with(|p| p.set(Some(limit)));
+            f(&kc)
+        });
         self.flush(step);
         match r {
             Ok(v) => Ok(v),
@@ -690,7 +743,7 @@ impl Flow {
             Err(Phase::Timeout) => {
                 step.warn(format!(
                     "'{label}' did not finish within {} s. Last output: {}. Next step: {}",
-                    self.limit.as_secs(),
+                    limit.as_secs(),
                     self.kc.last_lines(),
                     self.hint
                 ));
@@ -772,7 +825,7 @@ impl Flow {
             limit: self.limit,
             hint: self.hint.clone(),
         };
-        let r = self.phase(step, "create the clone", move |kc| {
+        let r = self.phase(step, PhaseId::Create, "create the clone", move |kc| {
             flow.unlink_caches();
             let parent = stable.parent().ok_or("the kept folder has no parent")?.to_path_buf();
             kc.remove(&parent, &stable)?;
@@ -819,13 +872,14 @@ impl Flow {
         };
         // A reused clone is cleaned first; a clone just created has nothing to clean (its patterns come first: before them, a reset
         // would write the whole tree of the clone's branch, run 7808).
-        if !created && self.phase(step, "clean", make(Flow::clean)).is_err() {
+        if !created && self.phase(step, PhaseId::Clean, "clean", make(Flow::clean)).is_err() {
             return false;
         }
         let _ = &t;
-        self.phase(step, &format!("fetch {}", self.sha), make(Flow::fetch)).is_ok()
-            && self.phase(step, "check out", make(Flow::checkout)).is_ok()
-            && self.phase(step, "verify", make(Flow::verify)).is_ok()
+        self.phase(step, PhaseId::Fetch, &format!("fetch {}", self.sha), make(Flow::fetch))
+            .is_ok()
+            && self.phase(step, PhaseId::Checkout, "check out", make(Flow::checkout)).is_ok()
+            && self.phase(step, PhaseId::Verify, "verify", make(Flow::verify)).is_ok()
     }
 
     /// The shell's `clean_clone` is not a chain: `set -e` does not act inside a function that runs under `||`, so only the status of its
@@ -949,6 +1003,38 @@ impl Flow {
         walk(&dotgit, 1, &mut locks);
         for l in locks {
             let _ = self.kc.remove(&dotgit, &l);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL: [PhaseId; 7] = [
+        PhaseId::Resolve,
+        PhaseId::Create,
+        PhaseId::Clean,
+        PhaseId::Fetch,
+        PhaseId::Checkout,
+        PhaseId::Verify,
+        PhaseId::Link,
+    ];
+
+    #[test]
+    fn each_phase_reads_only_its_own_limit_and_falls_back_to_the_general_one() {
+        let general = Duration::from_secs(900);
+        for id in ALL {
+            let env = HashMap::from([(id.var().to_string(), "7".to_string())]);
+            for other in ALL {
+                let want = if other == id { Duration::from_secs(7) } else { general };
+                assert_eq!(phase_limit(&env, other, general), want, "{id:?} set, {other:?} read");
+            }
+        }
+        // As the shell's `^[1-9][0-9]*$`: anything else is the general limit.
+        for bad in ["", "0", "07", "-1", "+5", "1.5", " 5", "x"] {
+            let env = HashMap::from([(PhaseId::Fetch.var().to_string(), bad.to_string())]);
+            assert_eq!(phase_limit(&env, PhaseId::Fetch, general), general, "{bad:?}");
         }
     }
 }
