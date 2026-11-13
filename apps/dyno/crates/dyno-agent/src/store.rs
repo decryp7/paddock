@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn damaged_files_are_moved_aside() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("history.db");
         std::fs::write(&path, b"this is not a database at all, not even close........................").unwrap();
         let (s, note) = Store::open(&path, Timestamp(7)).unwrap();
@@ -724,7 +724,7 @@ mod tests {
 
     #[test]
     fn a_database_another_process_is_writing_is_never_set_aside_as_damaged() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("history.db");
         // Another writer (a second agent, before the single-agent lock) holds the write lock on a fresh file.
         let other = Connection::open(&path).unwrap();

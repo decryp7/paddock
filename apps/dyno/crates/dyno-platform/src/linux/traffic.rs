@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn owners_come_from_socket_links_of_visible_processes() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let p = HostPaths::under(dir.path());
         let fd = p.pid(41).join("fd");
         std::fs::create_dir_all(&fd).unwrap();

@@ -321,8 +321,8 @@ mod tests {
         assert_eq!(p[0].unit, U::Percent);
     }
 
-    fn tree() -> tempfile::TempDir {
-        let d = tempfile::tempdir().unwrap();
+    fn tree() -> paddock_testkit::PrivateTemp {
+        let d = paddock_testkit::private_tempdir().unwrap();
         let w = |rel: &str, text: &str| {
             let p = d.path().join(rel);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -361,13 +361,13 @@ mod tests {
 
     #[test]
     fn an_empty_proc_says_unsupported() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         assert!(matches!(ProcCounters::at(d.path()).catalog(), Err(PlatformError::Unsupported(_))));
     }
 
     #[test]
     fn big_files_are_read_only_up_to_the_limit() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let p = d.path().join("big");
         std::fs::write(&p, vec![b'a'; MAX_FILE as usize + 100]).unwrap();
         assert_eq!(read_bounded(&p).unwrap().len(), MAX_FILE as usize);

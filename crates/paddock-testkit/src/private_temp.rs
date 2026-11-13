@@ -6,12 +6,19 @@
 //! folder other accounts can write (`paddock_env::private::check_named_folder`) then refuses every test folder (Dyno CI run 8035:
 //! "its access list grants access to S-1-5-11"). A [`PrivateTemp`] is made owner-only from creation (no inheritance), so a test
 //! that hands its folder to such an app behaves as it does on a user's machine, whatever the temp folder's access list is.
+//!
+//! Known limit, for tests only: on Windows the folder is made inside an outer `tempfile` folder that has the temp folder's access
+//! list, so on a shared host another account that can write the temp folder can still rename or delete that outer folder (the
+//! private folder inside it cannot be read or changed by them). The apps' own check of a parent allows that case (it refuses only a
+//! parent others can delete from or change the permissions of), and a test folder is short-lived; nothing here is a security
+//! boundary for production data.
 
 use std::io;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-/// A temporary folder, deleted on drop, that only the account running the test can use (on Windows: owner-only, nothing inherited;
+/// A temporary folder, deleted on drop, that only the account running the test can use (on Windows: owner-only, nothing inherited, but see the
+/// known limit in the module docs about its outer folder;
 /// on Unix: mode 0700, as `tempfile` makes it).
 #[derive(Debug)]
 pub struct PrivateTemp {

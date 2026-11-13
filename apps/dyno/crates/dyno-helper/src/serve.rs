@@ -368,7 +368,7 @@ mod lifecycle_tests {
 
     #[test]
     fn nothing_is_written_after_the_helper_removed_itself() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let file = dir.path().join("lifecycle.log");
         // The self-uninstall removed the file; the `stopped` note that follows serve's return must not bring it back.
         note_to(&file, Some("stopped"), true);

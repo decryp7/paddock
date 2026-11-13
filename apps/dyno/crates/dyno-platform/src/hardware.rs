@@ -765,9 +765,7 @@ mod tests {
 
     fn temp(name: &str) -> PathBuf {
         // A fresh folder the test removes itself (the callers end with `remove_dir_all`).
-        tempfile::Builder::new()
-            .prefix(&format!("dyno-it-hw-{name}-"))
-            .tempdir()
+        paddock_testkit::PrivateTemp::with_prefix(&format!("dyno-it-hw-{name}-"), None)
             .unwrap()
             .keep()
     }

@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn one_holder_per_folder_and_the_lock_ends_with_its_holder() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         assert!(!is_held(&dirs));
         let first = InstanceLock::acquire(&dirs).unwrap();
@@ -95,7 +95,7 @@ mod tests {
 
     #[test]
     fn a_folder_that_cannot_hold_the_lock_file_says_where() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let file = tmp.path().join("not-a-folder");
         std::fs::write(&file, b"x").unwrap();
         let err = InstanceLock::acquire(&Dirs::at(&file)).unwrap_err();

@@ -774,7 +774,7 @@ mod tests {
     /// happens in the background; when that ends the answer is the fresh one and is saved for the next run.
     #[test]
     fn the_saved_catalog_is_shown_at_once_and_replaced_when_the_listing_ends() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let clock = Arc::new(crate::cache::testing::FakeClock::new(5_000));
         // The first run lists and saves.
         let first = CounterCentre::new(Arc::new(FakeCounters::new(vec![Entry::new(
@@ -826,7 +826,7 @@ mod tests {
 
     #[test]
     fn a_saved_catalog_that_does_not_parse_or_has_another_format_is_ignored() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let clock = Arc::new(crate::cache::testing::FakeClock::new(1));
         let cache = cache_in(dir.path(), clock);
         for (format, data) in [

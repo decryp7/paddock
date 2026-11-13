@@ -377,7 +377,7 @@ mod tests {
 
     #[test]
     fn the_folder_is_read_without_statting_unrelated_files_and_a_missing_folder_is_an_error() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         std::fs::write(dir.path().join("dyno-app-2026-11-05-101500.ips"), "secret path /Users/x").unwrap();
         std::fs::write(dir.path().join("other.txt"), "x").unwrap();
         let entries = read_entries(dir.path()).unwrap();
@@ -389,9 +389,9 @@ mod tests {
     #[test]
     fn the_start_logs_program_and_time_without_content_or_file_names_and_names_empty_folders() {
         let _ = crate::logging::testlog::lines(); // installs the capture before anything is logged
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         std::fs::write(dir.path().join("dyno-app-2026-11-05-101500.ips"), "secret path /Users/x").unwrap();
-        let empty = tempfile::tempdir().unwrap();
+        let empty = paddock_testkit::private_tempdir().unwrap();
         let folders = vec![
             Folder {
                 label: "start-probe-with-report".into(),

@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn every_fact_comes_from_its_reader() {
-        let home = tempfile::tempdir().unwrap();
+        let home = paddock_testkit::private_tempdir().unwrap();
         let mut sys = windows_11();
         sys.home = Some(home.path().to_path_buf());
         let f = WinFacts::new(sys).facts();

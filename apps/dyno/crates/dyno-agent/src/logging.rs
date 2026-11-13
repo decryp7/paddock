@@ -52,27 +52,93 @@ pub fn install(dirs: &Dirs) -> Option<LogHandle> {
     }
 }
 
-/// Logs a refused data folder (ER-27): the cause, the folder and the next step, in the OS's own logs folder, because the refused folder
-/// itself is never written to (not even a log) and a process started at login has no standard error anyone reads. The line is what
-/// the Report-a-problem bundle then shows. When the app's folders are supplied ones (portable mode, `<ID>_HOME`) they were checked
-/// too and nothing is written there: the text stays on standard error, as the app does ([`log_refusal_in`] is the part that writes).
-pub fn log_refusal(text: &str) {
+/// The next step a refusal log line gives (the full text, with the folder, is on standard error and in the app's dialog).
+pub const REFUSAL_NEXT_STEP: &str =
+    "set DYNO_DATA_DIR to a folder only your account can write, or remove the other accounts' entries on it";
+
+/// Logs a refused data folder (ER-27): the kind of folder, the reason class and the next step, in the OS's own logs folder, because the
+/// refused folder itself is never written to (not even a log) and a process started at login has no standard error anyone reads. No path
+/// and no account id (the logging rules): the full text stays on standard error. The line is what the Report-a-problem bundle then shows.
+/// Nothing is written when the app's folders are supplied ones (portable mode, `<ID>_HOME`), as in the app, or when the logs folder is
+/// inside the refused folder's tree or the other way round (a `DYNO_DATA_DIR` that names the default folder or its parent): the text
+/// then stays on standard error ([`log_refusal_in`] is the part that writes).
+pub fn log_refusal(dirs: &Dirs) {
     let Ok(app) = AppId::new(APP_ID, APP_NAME) else { return };
     match AppDirs::for_app(&app) {
-        Ok(dirs) if dirs.source() == paddock_env::Source::Os => log_refusal_in(&app, dirs.logs(), text),
+        Ok(app_dirs) if app_dirs.source() == paddock_env::Source::Os => {
+            let (kind, class) = crate::paths::refusal_class(dirs);
+            log_refusal_in(&app, app_dirs.logs(), dirs.root(), kind, class);
+        }
         Ok(_) => {}
         Err(e) => eprintln!("dyno-agent: the refusal could not be logged, no logs folder is known ({e})"),
     }
 }
 
-/// [`log_refusal`] into `log_dir`: installs the agent's log there (no crash marker), writes the one error line and closes the log.
-pub fn log_refusal_in(app: &AppId, log_dir: &std::path::Path, text: &str) {
+/// Whether one folder is the other or inside it (a log written there would be written in, or beside, the refused tree).
+fn overlaps(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let real = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let (a, b) = (real(a), real(b));
+    a.starts_with(&b) || b.starts_with(&a)
+}
+
+/// [`log_refusal`] into `log_dir` for the refused `root`: installs the agent's log there (no crash marker), writes the one error line
+/// and closes the log. Returns whether it wrote: nothing is written when `log_dir` and `root` overlap.
+pub fn log_refusal_in(app: &AppId, log_dir: &std::path::Path, root: &std::path::Path, kind: &str, class: &str) -> bool {
+    if overlaps(log_dir, root) {
+        eprintln!("dyno-agent: the refusal is not logged: the logs folder is in or around the refused folder");
+        return false;
+    }
     let config = LogConfig::new(app, PROCESS, env!("CARGO_PKG_VERSION")).with_log_dir(log_dir);
     match Logging::new(config).install() {
         Ok(_handle) => {
-            log::error!(ErrorCode = "DataFolderRefused", ErrorChain = text; "Agent did not start: its data folder is refused");
+            log::error!(
+                ErrorCode = "DataFolderRefused", Kind = kind, Reason = class, NextStep = REFUSAL_NEXT_STEP;
+                "Agent did not start: its data folder is refused"
+            );
+            true
         }
-        Err(e) => eprintln!("dyno-agent: the refusal could not be logged ({e})"),
+        Err(e) => {
+            eprintln!("dyno-agent: the refusal could not be logged ({e})");
+            false
+        }
+    }
+}
+
+#[cfg(test)]
+mod refusal_tests {
+    use super::*;
+
+    #[test]
+    fn a_logs_folder_in_or_around_the_refused_folder_is_never_written() {
+        let tmp = paddock_testkit::private_tempdir().unwrap();
+        let data = tmp.path().join("Dyno");
+        let logs = data.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let app = AppId::new(APP_ID, APP_NAME).unwrap();
+        // DYNO_DATA_DIR names the default folder (the logs are inside it) or its parent (it holds the logs folder).
+        for root in [&data, tmp.path()] {
+            assert!(!log_refusal_in(&app, &logs, root, "a folder the user named", "x"), "{root:?}");
+            assert!(std::fs::read_dir(&logs).unwrap().next().is_none(), "nothing written for {root:?}");
+        }
+        let other = tmp.path().join("elsewhere");
+        std::fs::create_dir(&other).unwrap();
+        assert!(log_refusal_in(
+            &app,
+            &logs,
+            &other,
+            "a folder the user named",
+            "its access list gives other users access"
+        ));
+        let log = std::fs::read_dir(&logs).unwrap().flatten().next().expect("a log was written");
+        let text = std::fs::read_to_string(log.path()).unwrap();
+        assert!(
+            text.contains("DataFolderRefused") && text.contains("its access list gives other users access"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("elsewhere") && !text.contains("S-1-"),
+            "no path and no account id: {text}"
+        );
     }
 }
 

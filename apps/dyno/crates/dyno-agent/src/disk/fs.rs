@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn entries_have_kind_size_and_identity() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         std::fs::create_dir(t.path().join("sub")).unwrap();
         std::fs::write(t.path().join("file.bin"), vec![1u8; 5000]).unwrap();
         let mut seen = Vec::new();
@@ -180,7 +180,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_sparse_file_occupies_less_than_its_length() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let f = std::fs::File::create(t.path().join("sparse.img")).unwrap();
         f.set_len(64 * 1024 * 1024).unwrap();
         let e = OsDirSource.stat(&t.path().join("sparse.img")).unwrap();
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn reading_can_stop_early() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         for n in 0..5 {
             std::fs::write(t.path().join(format!("f{n}")), b"x").unwrap();
         }
@@ -207,8 +207,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn links_are_reported_not_followed() {
-        let t = tempfile::tempdir().unwrap();
-        let target = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
+        let target = paddock_testkit::private_tempdir().unwrap();
         std::os::unix::fs::symlink(target.path(), t.path().join("shortcut")).unwrap();
         assert_eq!(OsDirSource.stat(&t.path().join("shortcut")).unwrap().kind, EntryKind::Link);
     }
@@ -216,7 +216,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_socket_is_neither_file_nor_folder() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let path = t.path().join("s");
         let _listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
         assert_eq!(OsDirSource.stat(&path).unwrap().kind, EntryKind::Other);
@@ -225,7 +225,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn hard_links_share_an_identity() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         std::fs::write(t.path().join("a"), b"hello").unwrap();
         std::fs::hard_link(t.path().join("a"), t.path().join("b")).unwrap();
         let (a, b) = (
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn a_folder_without_rights_is_a_permission_error() {
         use std::os::unix::fs::PermissionsExt;
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let locked = t.path().join("locked");
         std::fs::create_dir(&locked).unwrap();
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();

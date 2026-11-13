@@ -195,8 +195,15 @@ fn a_refused_start_leaves_its_reason_in_the_os_logs_folder() {
     assert_eq!(logs.len(), 1, "one agent log in the OS logs folder: {logs:?}");
     let text = std::fs::read_to_string(&logs[0]).unwrap();
     assert!(
-        text.contains("DataFolderRefused") && text.contains("DYNO_DATA_DIR") && text.contains(&*root.to_string_lossy()),
-        "the line names the code, the folder and the next step: {text}"
+        text.contains("DataFolderRefused")
+            && text.contains("a folder the user named")
+            && (text.contains("its access list gives other users access") || text.contains("other users can change it")),
+        "the line names the code, the kind and the reason class: {text}"
+    );
+    assert!(text.contains("DYNO_DATA_DIR"), "and the next step: {text}");
+    assert!(
+        !text.contains(&*root.to_string_lossy()) && !text.contains("S-1-"),
+        "and no folder path and no account id: {text}"
     );
     assert!(
         std::fs::read_dir(&root).unwrap().next().is_none(),

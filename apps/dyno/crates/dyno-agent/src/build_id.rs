@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn a_file_swapped_by_rename_gets_another_stamp_and_the_build_id_follows_the_content() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let p = dir.path().join("agent");
         std::fs::write(&p, b"build one").unwrap();
         let (s1, id1) = (FileStamp::of(&p), file_build_id(&p).unwrap());

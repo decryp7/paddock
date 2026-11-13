@@ -165,7 +165,7 @@ fn a_client_over_stdio_lists_the_tools_and_reads_dyno() {
 /// app's folder and changes what a client can list.
 #[test]
 fn the_ai_access_settings_list_every_tool_with_its_own_switch() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let id = paddock_env::AppId::new(dyno_app_lib::APP_ID, dyno_app_lib::APP_NAME).unwrap();
     let dirs = paddock_env::AppDirs::resolve(
         &id,

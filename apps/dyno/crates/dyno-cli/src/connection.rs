@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn discovery_is_read_from_the_data_folder_and_damage_means_not_running() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let env = Env {
             data_dir: tmp.path().into(),
             supplied: false,
@@ -336,7 +336,7 @@ mod tests {
 
     #[test]
     fn with_no_home_the_data_folder_is_private_and_never_the_shared_fixed_path() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let none = |_: &str| None;
         match Env::resolve(&none, tmp.path()) {
             Ok(env) => {
@@ -350,7 +350,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_discovery_file_behind_a_link_to_the_users_own_folder_is_read_and_one_in_a_foreign_folder_says_why() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let real = tmp.path().join("real");
         std::fs::create_dir(&real).unwrap();
         let body = r#"{"endpoint":"e","token":"ab","pid":7,"started":1,"version":"0.1.0","protocol":1}"#;
@@ -382,7 +382,7 @@ mod tests {
     #[test]
     fn a_default_folder_with_mode_0775_is_read_and_only_a_named_one_is_checked() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dir = tmp.path().join("data");
         std::fs::create_dir(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o775)).unwrap();

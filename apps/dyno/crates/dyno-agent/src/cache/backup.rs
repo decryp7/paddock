@@ -79,7 +79,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn the_file_and_its_folder_are_excluded_on_macos() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let f = d.path().join("cache.db");
         std::fs::write(&f, b"x").unwrap();
         assert!(exclude_from_backup(&f).unwrap());

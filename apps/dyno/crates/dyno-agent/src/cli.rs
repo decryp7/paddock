@@ -268,7 +268,7 @@ fn run() -> Result<(), StartError> {
     // Before the log, the lock and the markers: each of them writes into the data folder, and a refused one is never written to.
     if let Err(text) = crate::paths::check_root(&dirs) {
         // Not in the refused folder: the OS's own logs folder, so a start that leaves nothing else still leaves its reason (ER-27).
-        crate::logging::log_refusal(&text);
+        crate::logging::log_refusal(&dirs);
         return Err(StartError::DataFolderRefused(text));
     }
     let dirs = dirs.clone().with_log_folder(crate::logging::log_dir(&dirs));
@@ -502,7 +502,7 @@ mod tests {
         static CAPTURE: Capture = Capture(std::sync::Mutex::new(Vec::new()));
         log::set_logger(&CAPTURE).expect("no other test in this process installs a logger");
         log::set_max_level(log::LevelFilter::Info);
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let (platform, _details) = platforms(&Dirs::at(tmp.path().join("data")));
         let wired: Vec<_> = CAPTURE
             .0
