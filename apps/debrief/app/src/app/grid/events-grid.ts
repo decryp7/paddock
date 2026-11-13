@@ -3,7 +3,7 @@ import { ErrorDetails } from '../ui/error-details';
 import { RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { formatCount, formatDateTime } from '../core/format';
-import { describeError } from '../core/logger';
+import { describeError, Logger } from '../core/logger';
 import { QueryStore } from '../core/workspace/query.store';
 import { SelectionStore } from '../core/workspace/selection.store';
 import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
@@ -282,6 +282,7 @@ export class EventsGrid {
   protected readonly sel = inject(SelectionStore);
   protected readonly prefs = inject(UiPrefsStore);
   private readonly backend = inject(DebriefBackend);
+  private readonly logger = inject(Logger);
   private readonly formatters = inject(FieldFormatters);
   private readonly actions = inject(RecordActions);
   private readonly settings = inject(SettingsStore);
@@ -344,6 +345,8 @@ export class EventsGrid {
   });
   /** Row to select once its page arrives (keyboard navigation to a page that is not loaded yet). */
   private pendingSelect: number | null = null;
+  /** The latest jump; an older one still waiting for the engine gives way. */
+  private jumpSeq = 0;
   /** The scrollTop we last wrote ourselves; scroll events at that position carry no new information. */
   private writtenScroll = Number.NaN;
 
@@ -548,25 +551,43 @@ export class EventsGrid {
     this.rows.retry(this.missingRows());
   }
 
+  /**
+   * Jumps to record `id` under the current query. When the query changes while the engine answers (a restored search
+   * box's debounce, smart search), the answer is for the old result: it asks again against the new one instead of
+   * dropping the jump, so the record is still selected (a recovery reload restores query and selection together). A
+   * newer jump supersedes this one.
+   */
   private async jumpTo(id: number): Promise<void> {
-    const query = this.rows.query ?? this.queryStore.effectiveQuery();
-    const gen = this.rows.generation;
-    let res;
-    try {
-      res = await this.backend.queryPage({ query, offset: 0, limit: 1, descending: this.prefs.descending(), anchor: id });
-    } catch (e) {
-      if (gen === this.rows.generation) this.jumpError.set(describeError(e));
+    const seq = ++this.jumpSeq;
+    for (let attempt = 1; ; attempt++) {
+      const query = this.rows.query ?? this.queryStore.effectiveQuery();
+      const gen = this.rows.generation;
+      let res;
+      try {
+        res = await this.backend.queryPage({ query, offset: 0, limit: 1, descending: this.prefs.descending(), anchor: id });
+      } catch (e) {
+        if (seq === this.jumpSeq && gen === this.rows.generation) this.jumpError.set(describeError(e));
+        return;
+      }
+      if (seq !== this.jumpSeq) {
+        this.logger.debug('ui.grid', 'Jump superseded by a newer one', { Attempt: attempt });
+        return;
+      }
+      if (gen !== this.rows.generation) {
+        this.logger.info('ui.grid', 'Query changed during a jump; asking again', { Attempt: attempt });
+        continue;
+      }
+      this.logger.debug('ui.grid', 'Jump resolved', { Attempt: attempt, Found: res.anchorIndex !== null });
+      if (res.anchorIndex === null || !res.rows.length) {
+        this.sel.anchorResolved(null);
+        return;
+      }
+      this.rows.setTotal(res.total);
+      this.selection.set(single(res.anchorIndex));
+      this.sel.anchorResolved(res.rows[0] ?? null);
+      this.revealRow(res.anchorIndex, 'center', res.total);
       return;
     }
-    if (gen !== this.rows.generation) return;
-    if (res.anchorIndex === null || !res.rows.length) {
-      this.sel.anchorResolved(null);
-      return;
-    }
-    this.rows.setTotal(res.total);
-    this.selection.set(single(res.anchorIndex));
-    this.sel.anchorResolved(res.rows[0] ?? null);
-    this.revealRow(res.anchorIndex, 'center', res.total);
   }
 
   private revealRow(index: number, mode: 'nearest' | 'center', total = this.total()): void {
