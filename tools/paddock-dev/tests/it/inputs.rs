@@ -84,6 +84,31 @@ fn path_dependency_folders(meta: &Value) -> BTreeSet<String> {
         .collect()
 }
 
+/// What to change in an inputs file so it equals the generated set (ER-40, rule 79): the lines to add and the lines to remove, or
+/// `None` when they agree. A hand list that must equal generated data names its regenerate step in the failure.
+fn regenerate_hint(file: &str, listed: &BTreeSet<String>, expected: &BTreeSet<String>) -> Option<String> {
+    let add: Vec<&String> = expected.difference(listed).collect();
+    let remove: Vec<&String> = listed.difference(expected).collect();
+    if add.is_empty() && remove.is_empty() {
+        return None;
+    }
+    let lines = |v: &[&String]| v.iter().map(|l| format!("  {l}")).collect::<Vec<_>>().join("\n");
+    Some(format!(
+        "{file} and cargo metadata disagree. Regenerate: add these lines to {file}:\n{}\nand remove these:\n{}\n(one path per line, relative to the repository root)",
+        lines(&add),
+        lines(&remove)
+    ))
+}
+
+#[test]
+fn the_regenerate_hint_names_the_lines_to_add_and_to_remove() {
+    let set = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<BTreeSet<_>>();
+    let hint = regenerate_hint("f.txt", &set(&["a", "stale"]), &set(&["a", "crates/paddock-env"])).unwrap();
+    assert!(hint.contains("add these lines to f.txt:\n  crates/paddock-env"), "{hint}");
+    assert!(hint.contains("remove these:\n  stale"), "{hint}");
+    assert!(regenerate_hint("f.txt", &set(&["a"]), &set(&["a"])).is_none());
+}
+
 #[test]
 fn inputs_txt_matches_cargo_metadata() {
     let listed =
@@ -93,10 +118,9 @@ fn inputs_txt_matches_cargo_metadata() {
     expected.extend(EXTRAS.map(String::from));
     let listed_set: BTreeSet<String> = listed.iter().cloned().collect();
     assert_eq!(listed.len(), listed_set.len(), "inputs.txt lists a path twice");
-    assert_eq!(
-        listed_set, expected,
-        "inputs.txt and cargo metadata disagree: update tools/paddock-dev/inputs.txt"
-    );
+    if let Some(hint) = regenerate_hint("tools/paddock-dev/inputs.txt", &listed_set, &expected) {
+        panic!("{hint}");
+    }
 }
 
 #[test]
@@ -114,8 +138,7 @@ fn heavy_inputs_txt_matches_cargo_metadata() {
     expected.extend(HEAVY_EXTRAS.map(String::from));
     let listed_set: BTreeSet<String> = listed.iter().cloned().collect();
     assert_eq!(listed.len(), listed_set.len(), "tools/heavy/inputs.txt lists a path twice");
-    assert_eq!(
-        listed_set, expected,
-        "tools/heavy/inputs.txt and cargo metadata disagree: update tools/heavy/inputs.txt"
-    );
+    if let Some(hint) = regenerate_hint("tools/heavy/inputs.txt", &listed_set, &expected) {
+        panic!("{hint}");
+    }
 }
