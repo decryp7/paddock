@@ -1164,3 +1164,20 @@ above (every app linted, one gate at a time at a load of 25) took over 14 minute
 to workspaces with their own changes is what makes a shared-crate push fit the 15 minute budget. Not measured: the same run at a
 load of 25 or more (the load was 11 at the start; with one gate at a time the three Clippy runs would add up to about 5 minutes
 at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).
+
+## Pre-commit Clippy through the heavy slot (2026-11-13, fix/precommit-heavy-slot)
+
+The pre-commit hook started one `cargo clippy --workspace --all-targets` per app with staged Rust files, all at once; they now go through
+`PADDOCK_HEAVY` or `heavy.sh` like the pre-push gate's heavy steps (ER-24). Method: two apps (Dyno, Pitcrew) cold, started in parallel as
+lefthook does, `CARGO_BUILD_JOBS=2` each, own target folder on d7, the 1-minute load sampled every 5 s. Plain commands, then the same
+commands through `heavy.sh` with `HEAVY_SLOTS=1` (the default is 5 slots machine-wide, so with the default setting two builds still run
+together unless other jobs hold slots). One run each on the shared Mac mini while other agents ran, so the load at the start differed.
+
+| Run | Start load (1, 5, 15 min) | Wall | Peak 1-min load |
+| --- | --- | ---: | ---: |
+| plain, parallel | 30.5, 29.0, 20.6 | 363 s | 66.6 |
+| through `heavy.sh`, `HEAVY_SLOTS=1` | 9.0, 13.4, 16.3 | 532 s | 30.8 |
+
+Result: taking turns costs wall time (about 1.5 times here, the two builds no longer overlap) and the peak stayed under half. Not measured:
+a quiet machine, the default 5 slots, and a real `lefthook run pre-commit` (lefthook is not installed in this worktree); the difference in
+start load makes the peak comparison indicative only.
