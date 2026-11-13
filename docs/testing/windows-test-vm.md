@@ -157,18 +157,18 @@ scripts/vm-win.sh run --ci-like --ref <commit> --with <test.exe> -- "$(cygpath -
 scripts/vm-win.sh stop && scripts/vm-win.sh revert
 ```
 
-It sends a `git bundle` of the commit, checks it out in the guest with `core.autocrlf=true` (never copied LF files), makes
+It sends a `git bundle` of the commit, checks it out in the guest with `core.autocrlf=true` (not copied LF files; see Not mirrored for the compiled-in fixtures), makes
 `C:\gitea-runner\work\<hex>\tmp` with a write grant for Authenticated Users (S-1-5-11) and sets `TEMP`, `TMP`, `TMPDIR`,
 `RUNNER_TEMP` and `PADDOCK_JOB_TEMP` to it, puts Git's `bin` first on PATH, sets `CI`, `GITHUB_ACTIONS`, `RUNNER_OS`,
 `CARGO_BUILD_JOBS=3` and `NEXTEST_TEST_THREADS=3`, and runs the command as `bash --noprofile --norc -e -o pipefail` from the
 checkout. A self-check is printed first (temp ACL, autocrlf, shell, PATH head, tools missing in the guest); a failed control
-stops the run with exit 3 (`not measured`, ER-33). The values are fixed in `scripts/vm-win/ci-like.ps1`, from the runner's
+stops the run with exit 75 (`not measured`, ER-33; also for a PowerShell error or when the command names cargo, rustc, node or npm and the guest lacks it; a command's own 75 is reported as 1). The values are fixed in `scripts/vm-win/ci-like.ps1`, from the runner's
 job logs of runs 8034 and 8035 (ADR 0087 amendment of 2026-11-13, the cheap option); they do not follow a change of the
 runner. Checked 2026-11-13: the Dyno WP-6 test `windows_the_check_walks_up_creates_nothing_and_refuses_a_folder_everyone_can_write`
 (`paddock-env`) passes through plain `ssh` at 5a1ce058a, fails with `run --ci-like` at 5a1ce058a (the runner's failure) and
 passes with it at the fix 914b67ad4. The guest has no Rust toolchain: build the test program on the Mac (`cargo xwin test
 --no-run --target aarch64-pc-windows-msvc`), pass it with `--with <file>` and call it from the command as
-`"$(cygpath -u "$CI_LIKE_DIR")/<file>"`. Not mirrored: CPU count and architecture, the runner's account and logon type, Defender exclusions. `start` also
+`"$(cygpath -u "$CI_LIKE_DIR")/<file>"`. Not mirrored: fixtures compiled into the test program (`include_str!`, `include_bytes!`: LF, from the Mac) and `CARGO_MANIFEST_DIR` (a Mac path), so a test that reads the checkout at run time sees CRLF but one that uses a compiled-in fixture does not; CPU count and architecture, the runner's account and logon type, Defender exclusions. `start` also
 prints the load and the busy rate of the VM's disk and warns (never refuses) when the disk is busy.
 
 Copy files with `scp -i <vm dir>/keys/paddock-test -o UserKnownHostsFile=<vm dir>/keys/known_hosts <file>

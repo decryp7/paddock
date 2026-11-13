@@ -6,10 +6,14 @@
 #
 # 1. temp folder C:\gitea-runner\work\<16 hex>\tmp whose ACL grants Authenticated Users (S-1-5-11) write; TEMP, TMP, TMPDIR,
 #    RUNNER_TEMP and PADDOCK_JOB_TEMP point at it (the runner's conformance/ci/job-tmpdir.sh)
-# 2. a git checkout (fetched from the bundle) with core.autocrlf=true checked out in the guest (never copied LF files)
+# 2. a git checkout (fetched from the bundle) with core.autocrlf=true checked out in the guest (not copied LF files)
 # 3. Git's bin first on PATH, then the script runs as: bash --noprofile --norc -e -o pipefail <script> (cwd = the clone)
 #    $env:CI_LIKE_DIR names the folder of the script and of the files `run --ci-like --with` copied
-# 4. a self-check printed first; a control that fails stops the run as "not measured" (ER-33), exit 3
+# 4. a self-check printed first; a control that fails, a PowerShell error, or a tool the command needs (cargo, rustc, node, npm) that
+#    the guest lacks stops the run as "not measured" (ER-33): exit 75. The command's own exit code is passed through; a command that
+#    exits 75 itself is reported as 1, and an exit code that is a multiple of 256 (which a caller would read as 0) as 1.
+# Not mirrored: test programs built on the Mac carry fixtures compiled in with LF (include_str!, include_bytes!) and a Mac
+# CARGO_MANIFEST_DIR; only files read at run time from the checkout are CRLF as on the runner.
 param(
   [Parameter(Mandatory)][string]$Bundle,
   [Parameter(Mandatory)][string]$Ref,
@@ -21,7 +25,9 @@ $git = 'C:\Program Files\Git'
 $gitBin = "$git\bin"
 $bash = "$gitBin\bash.exe"
 
-function Fail($why) { Write-Host "::error::ci-like: $why. The run is not measured, it does not pass."; exit 3 }
+function Fail($why) { Write-Host "::error::ci-like: $why. The run is not measured, it does not pass (exit 75)."; exit 75 }
+# Any PowerShell error that no control caught is also "not measured", never a pass.
+trap { Fail "PowerShell error: $($_.Exception.Message) at line $($_.InvocationInfo.ScriptLineNumber)" }
 # A native program: its stderr is not an error record; its exit code decides.
 function Native([string]$what, [scriptblock]$cmd) {
   $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
@@ -76,7 +82,13 @@ Write-Host "checkout:  $clone @ $((NativeOut { git -C $clone rev-parse --short H
 $eol = (NativeOut { git -C $clone ls-files --eol -- AGENTS.md }).Trim()
 Write-Host "eol:       $eol"
 Write-Host '--------------------------'
-if ($icacls -notmatch 'Authenticated Users' -and $icacls -notmatch 'S-1-5-11') { Fail 'the temp folder ACL does not grant Authenticated Users' }
+# The control reads the tmp folder's own line (icacls prints the path first): the name alone also appears for C:\ and its parents.
+if ($icacls -notmatch ([regex]::Escape($tmp) + '\s+[^\r\n]*(Authenticated Users|S-1-5-11):\(OI\)\(CI\)\(M\)')) { Fail 'the temp folder does not itself grant Authenticated Users write (OI)(CI)(M)' }
+# A tool the command names but the guest lacks (the guest has no toolchain; test programs come from the Mac with --with).
+$stepText = Get-Content -Raw $ScriptFile
+foreach ($t in @(@('cargo', 'cargo'), @('rustc', 'rustc'), @('node', 'node'), @('npm', 'npm.cmd'))) {
+  if ($stepText -match "(?<![\w./-])$($t[0])(?![\w-])" -and -not (Get-Command $t[1] -ErrorAction SilentlyContinue)) { Fail "the command needs $($t[1]) and the guest has none (build on the Mac and pass the program with --with)" }
+}
 if ($crlf -notmatch 'true$') { Fail 'core.autocrlf is not true' }
 if ($shell[0].Trim() -ne '/usr/bin/bash') { Fail "bash is not Git's ($($shell[0]))" }
 if ($shell[2] -notmatch '^/c/') { Fail "pwd in bash does not start with /c/ ($($shell[2]))" }
@@ -89,4 +101,6 @@ $old = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
 $code = $LASTEXITCODE
 $ErrorActionPreference = $old
 Write-Host "ci-like: the script exited $code"
+if ($code -eq 75) { Write-Host '::warning::ci-like: the command itself exited 75 (the code of "not measured"); reported as 1'; $code = 1 }
+if ($code -ne 0 -and ($code -band 0xff) -eq 0) { $code = 1 }
 exit $code

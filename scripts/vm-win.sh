@@ -18,7 +18,7 @@
 #                                             temp folder (Authenticated Users may write), a git checkout of <ref> (default HEAD) with core.autocrlf=true
 #                                             sent as a git bundle of its tree, --with files (built on the Mac: the guest has no toolchain) copied to the
 #                                             folder named by $CI_LIKE_DIR (a Windows path; cygpath -u in bash), Git bash (--noprofile --norc -e -o pipefail) with Git's bin first on PATH, CI env;
-#                                             prints a self-check first; exit = the command's (3: a control failed, not measured). scripts/vm-win/ci-like.ps1
+#                                             prints a self-check first; exit = the command's (75: not measured). scripts/vm-win/ci-like.ps1
 #   scripts/vm-win.sh status | ip             running or stopped / the guest's address
 #   scripts/vm-win.sh install                 one-time: install Windows headless, wait for setup to power off
 #   scripts/vm-win.sh baseline                one-time: check setup finished, detach the discs, take clean-baseline
@@ -272,12 +272,16 @@ case $cmd in
     here=$(cd "$(dirname "$0")" && pwd)
     sha=$(git -C "$here" rev-parse --verify --quiet "$ref^{commit}") || die "no commit $ref in this repository"
     work=$(mktemp -d "${TMPDIR:-/tmp}/ci-like.XXXXXX")
-    refname="refs/vm-ci-like/$$"
-    # A bundle needs a ref. The ref names a parentless commit with the tree of <ref> (the whole history is 1.7 GB, the tree is small); the guest's
-    # git still applies .gitattributes and core.autocrlf to it. The ref is deleted at once. (No EXIT trap here: the lock's trap stays the only one.)
-    git -C "$here" update-ref "$refname" "$(git -C "$here" commit-tree "$sha^{tree}" -m "ci-like checkout of $sha")"
-    git -C "$here" bundle create "$work/src.bundle" "$refname" >/dev/null 2>&1 || { git -C "$here" update-ref -d "$refname"; die "git bundle failed for $ref"; }
-    git -C "$here" update-ref -d "$refname"
+    # A bundle needs a ref. It is built in a temporary bare repository that borrows the objects of this one (alternates), so no ref is written
+    # in the user's repository (whose refs every worktree shares). The ref names a parentless commit with the tree of <ref> (the whole history is
+    # 1.7 GB, the tree is small); the guest's git still applies .gitattributes and core.autocrlf to it.
+    objs=$(git -C "$here" rev-parse --path-format=absolute --git-path objects) || die "cannot find the object folder of this repository"
+    git init -q --bare "$work/repo" && echo "$objs" >"$work/repo/objects/info/alternates" || die "cannot make the bundle repository"
+    refname=refs/vm-ci-like/head
+    commit=$(GIT_AUTHOR_NAME=ci-like GIT_AUTHOR_EMAIL=ci-like@localhost GIT_COMMITTER_NAME=ci-like GIT_COMMITTER_EMAIL=ci-like@localhost \
+      git --git-dir="$work/repo" commit-tree "$sha^{tree}" -m "ci-like checkout of $sha") || die "cannot make the checkout commit for $ref"
+    git --git-dir="$work/repo" update-ref "$refname" "$commit"
+    git --git-dir="$work/repo" bundle create "$work/src.bundle" "$refname" >/dev/null 2>&1 || die "git bundle failed for $ref"
     printf 'set -e\n%s\n' "$*" >"$work/step.sh" # LF, no CR: bash in the guest reads it as is
     echo "ci-like: tree of ${sha:0:12} ($(du -h "$work/src.bundle" | awk '{print $1}') bundle), ${#withs[@]} extra file(s)"
     gdir=C:/Users/paddock-test/ci-like
@@ -292,7 +296,7 @@ case $cmd in
     rc=${PIPESTATUS[0]}
     set -e
     rm -rf "$work"
-    [ "$rc" -eq 0 ] || echo "::error::ci-like run exited $rc (the command failed, or a self-check control did: then the output says 'not measured'). Next step: read the output above" >&2
+    [ "$rc" -eq 0 ] || echo "::error::ci-like run exited $rc (75 = not measured: a control, a missing tool or a PowerShell error, nothing passed; other = the command's own code). Next step: read the output above" >&2
     exit $rc
     ;;
   gui-setup)
