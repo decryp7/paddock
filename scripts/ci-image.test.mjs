@@ -70,10 +70,11 @@ describe('pins', () => {
     assert.match(arg('CHROME_VERSION'), /^\d+\.\d+\.\d+\.\d+$/);
   });
 
-  test('Rust is the channel of the root rust-toolchain.toml, so the image\'s stable is the pin and setup-rust downloads nothing', () => {
+  test('Rust is the channel of the root rust-toolchain.toml, so the image names it and setup-rust downloads nothing', () => {
     const channel = read('rust-toolchain.toml').match(/^channel *= *"([^"]+)"/m)[1];
     assert.equal(arg('RUST_VERSION'), channel);
-    assert.match(dockerfile, /rustup update stable/);
+    assert.match(dockerfile, /rustup toolchain install "\$\{RUST_VERSION\}"/);
+    assert.match(dockerfile, /rustup default "\$\{RUST_VERSION\}"/);
   });
 
   test('the base is the garage image and the stage-2 copies of the version ARGs agree', () => {

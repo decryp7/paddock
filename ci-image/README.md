@@ -19,7 +19,7 @@ The last Dockerfile step runs `verify.sh` (`paddock-ci-verify`): the build fails
 `/etc/paddock-ci-release` lists every version. Jobs test `[ -f /etc/paddock-ci-release ]`; the `setup-rust` action then skips its
 toolchain install.
 
-v3 (not yet built when `ci-image/VERSION` and the workflows moved to it, 2026-11-13) includes Rust 1.100.0 (the `channel` of the root `rust-toolchain.toml`, checked by `scripts/ci-image.test.mjs` and by `verify.sh`: a rebuild after a newer Rust release fails until both are bumped together), shellcheck, DuckDB 2.0, `jq` and draw.io (until then the `tools` job unpacks the same pinned package itself) (the live oracle of `paddock-dev`'s hook tests runs the old shell hooks, which need it; the test fails when `jq` is missing). Dispatch `ci-image` before anything that names `paddock-ci:v3` lands.
+v3 (not yet built when `ci-image/VERSION` and the workflows moved to it, 2026-11-13) includes Rust 1.100.0 (the `channel` of the root `rust-toolchain.toml`, checked by `scripts/ci-image.test.mjs` and by `verify.sh`: installed under its own name and made the default, so a rebuild does not track newer releases; `verify.sh` fails if the default is not that version), shellcheck, DuckDB 2.0, `jq` and draw.io (until then the `tools` job unpacks the same pinned package itself) (the live oracle of `paddock-dev`'s hook tests runs the old shell hooks, which need it; the test fails when `jq` is missing). Dispatch `ci-image` before anything that names `paddock-ci:v3` lands.
 
 ## Building
 

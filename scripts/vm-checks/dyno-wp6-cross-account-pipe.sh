@@ -28,7 +28,9 @@ $V start >"$O/start.log" 2>&1 </dev/null || die "the VM did not start; next step
 [ "$(g 'echo up' | tr -d '\r' | tail -1)" = "up" ] || die "the VM started but does not answer over ssh; next step: see $O/start.log, then stop and revert it by hand"
 ph "status $($V status)"
 g 'New-Item -ItemType Directory -Force C:\paddock-test\dv | Out-Null; "up"' >/dev/null
-for p in "$A/deps/$IT ipc_it.exe" "$M/deps/$IT ipc_it_mut.exe" "$A/paddock-ipc-test-child.exe child.exe"; do
+# The test program is in deps/ (cargo before 1.100) or build/<package>/<hash>/out/ (1.100): whichever layout built it.
+find_test() { find "$1/deps" "$1/build" -type f -name "$2" 2>/dev/null | head -1; }
+for p in "$(find_test "$A" "$IT") ipc_it.exe" "$(find_test "$M" "$IT") ipc_it_mut.exe" "$A/paddock-ipc-test-child.exe child.exe"; do
   set -- $p; [ -f "$1" ] || die "missing build output $1; next step: build it (see the header)"
   $V put paddock-test "$1" "C:/paddock-test/dv/$2" 2>&1 | tail -1
 done

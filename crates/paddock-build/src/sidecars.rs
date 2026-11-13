@@ -38,6 +38,9 @@ pub fn hide_external_bin(current: Option<&str>) -> String {
 
 /// `target/<profile>`, from Cargo's `OUT_DIR` (`target/<profile>/build/<package>-<hash>/out`, and since cargo 1.100
 /// `target/<profile>/build/<package>/<hash>/out`). `None` for any other shape.
+///
+/// This mirrors tauri-build's own `target_dir_from_out_dir` heuristic, which is where tauri-build copies the sidecars to; cargo
+/// gives a build script no variable for the profile folder (rust-lang/cargo#5457), so both read it from `OUT_DIR`'s shape.
 pub fn profile_dir(out_dir: &Path) -> Option<PathBuf> {
     paddock_env::cargo_layout::profile_dir_of_dir(out_dir)
 }
