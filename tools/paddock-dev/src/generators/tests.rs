@@ -424,6 +424,22 @@ mod real {
         std::fs::create_dir_all(&d7).unwrap();
         let real = Real::with(&f.repo, e.clone(), vec![f.dir.path().join("missing"), d7.clone()]);
         assert_eq!(real.target_dir("crates").unwrap(), d7.join("gen-check/crates"));
+        // A root under $HOME is refused, whether configured or one of the default roots.
+        let home = f.dir.path().join("home");
+        std::fs::create_dir_all(home.join("builds")).unwrap();
+        let mut under = e.clone();
+        under.insert("HOME".into(), home.display().to_string());
+        under.insert("PADDOCK_DEV_TARGET_DIR".into(), home.join("builds").display().to_string());
+        let why = Real::with(&f.repo, under.clone(), Vec::new()).target_dir("crates").unwrap_err();
+        assert!(
+            why.contains("under your home folder") && why.contains("PADDOCK_DEV_TARGET_DIR"),
+            "{why}"
+        );
+        under.remove("PADDOCK_DEV_TARGET_DIR");
+        let why = Real::with(&f.repo, under, vec![home.join("builds")])
+            .target_dir("crates")
+            .unwrap_err();
+        assert!(why.contains("under your home folder"), "{why}");
         // Configured inside the checkout: refused.
         e.insert("PADDOCK_DEV_TARGET_DIR".into(), f.repo.join("target").display().to_string());
         let real = Real::with(&f.repo, e, Vec::new());
@@ -449,4 +465,13 @@ mod real {
             "{ran:?}"
         );
     }
+}
+
+/// The default roots come from `./dev disk`'s settings (`PADDOCK_DISK_ROOTS`), not from a path in this module.
+#[test]
+fn the_default_build_roots_are_the_disk_settings_roots() {
+    let env = std::collections::HashMap::from([("PADDOCK_DISK_ROOTS".to_string(), "/nope/a:/nope/b".to_string())]);
+    let roots = crate::disk::config::Settings::resolve(&Default::default(), &|k| env.get(k).cloned()).roots;
+    assert_eq!(roots, [std::path::PathBuf::from("/nope/a"), std::path::PathBuf::from("/nope/b")]);
+    assert!(!include_str!("run.rs").contains("DEFAULT_ROOTS"), "run.rs names no machine path");
 }

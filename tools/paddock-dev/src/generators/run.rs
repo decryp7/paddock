@@ -87,7 +87,7 @@ fn resolve(program: &str) -> String {
 pub struct Real {
     root: PathBuf,
     env: HashMap<String, String>,
-    /// Build-folder roots tried when `PADDOCK_DEV_TARGET_DIR` is not set (the d7 root of ER-24's layout), first that exists.
+    /// Build-folder roots tried when `PADDOCK_DEV_TARGET_DIR` is not set (`./dev disk`'s configured roots), first that exists.
     default_roots: Vec<PathBuf>,
     built_heavy: OnceLock<Result<PathBuf, String>>,
 }
@@ -95,11 +95,10 @@ pub struct Real {
 impl Real {
     /// The runner for the checkout at `root`, with the process's environment.
     pub fn new(root: &Path) -> Real {
-        Real::with(
-            root,
-            std::env::vars().collect(),
-            vec![PathBuf::from(crate::disk::config::DEFAULT_ROOTS[0])],
-        )
+        let env: HashMap<String, String> = std::env::vars().collect();
+        // The roots `./dev disk` tracks (PADDOCK_DISK_ROOTS, else its defaults): no machine path is named here.
+        let roots = crate::disk::config::Settings::resolve(&crate::disk::config::CommonArgs::default(), &|k| env.get(k).cloned()).roots;
+        Real::with(root, env, roots)
     }
 
     /// The same with an explicit environment and default roots (tests).
@@ -113,19 +112,22 @@ impl Real {
     }
 
     /// The kept build folder of a workspace: `<root>/gen-check/<workspace>`, where the root is `PADDOCK_DEV_TARGET_DIR`, else the
-    /// first default root that exists, else (in CI, where the checkout is the job's) `<PADDOCK_DEV_HOME or ~/.paddock-dev>/build`.
-    /// Never inside the checkout, and never on d8 unless that is what is configured.
+    /// first of `./dev disk`'s configured roots that exists. Never inside the checkout and never under `$HOME` (ER-14: the
+    /// internal disk), and never on d8 unless that is what is configured.
     pub fn target_dir(&self, workspace: &str) -> Result<PathBuf, String> {
         let configured = self.env.get("PADDOCK_DEV_TARGET_DIR").filter(|d| !d.is_empty()).map(PathBuf::from);
         let base = configured
             .or_else(|| self.default_roots.iter().find(|r| r.is_dir()).cloned())
-            .or_else(|| {
-                self.env.contains_key("CI").then(|| {
-                    let home = self.env.get("PADDOCK_DEV_HOME").cloned().or_else(|| self.env.get("HOME").map(|h| format!("{h}/.paddock-dev")));
-                    home.map(|h| PathBuf::from(h).join("build"))
-                })?
-            })
-            .ok_or("there is no build-folder root: set PADDOCK_DEV_TARGET_DIR (generator builds never go inside the worktree, and not onto d8 unless configured)")?;
+            .ok_or("there is no build-folder root: set PADDOCK_DEV_TARGET_DIR (generator builds never go inside the worktree or under ~, and not onto d8 unless configured)")?;
+        if let Some(home) = self.env.get("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
+            && base.starts_with(&home)
+        {
+            return Err(format!(
+                "the build-folder root {} is under your home folder ({}), the internal disk; set PADDOCK_DEV_TARGET_DIR to a folder on a build disk",
+                base.display(),
+                home.display()
+            ));
+        }
         let slug: String = workspace.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
         let dir = base.join("gen-check").join(if slug == "-" { "root".to_string() } else { slug });
         if dir.starts_with(&self.root) {

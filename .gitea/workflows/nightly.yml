@@ -535,6 +535,8 @@ jobs:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+      # Generator builds go outside the checkout and the home folder (tools/paddock-dev generators/run.rs).
+      PADDOCK_DEV_TARGET_DIR: /var/tmp/paddock-gen-builds
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     steps:
       - uses: actions/checkout@v4
