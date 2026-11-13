@@ -52,6 +52,30 @@ pub fn install(dirs: &Dirs) -> Option<LogHandle> {
     }
 }
 
+/// Logs a refused data folder (ER-27): the cause, the folder and the next step, in the OS's own logs folder, because the refused folder
+/// itself is never written to (not even a log) and a process started at login has no standard error anyone reads. The line is what
+/// the Report-a-problem bundle then shows. When the app's folders are supplied ones (portable mode, `<ID>_HOME`) they were checked
+/// too and nothing is written there: the text stays on standard error, as the app does ([`log_refusal_in`] is the part that writes).
+pub fn log_refusal(text: &str) {
+    let Ok(app) = AppId::new(APP_ID, APP_NAME) else { return };
+    match AppDirs::for_app(&app) {
+        Ok(dirs) if dirs.source() == paddock_env::Source::Os => log_refusal_in(&app, dirs.logs(), text),
+        Ok(_) => {}
+        Err(e) => eprintln!("dyno-agent: the refusal could not be logged, no logs folder is known ({e})"),
+    }
+}
+
+/// [`log_refusal`] into `log_dir`: installs the agent's log there (no crash marker), writes the one error line and closes the log.
+pub fn log_refusal_in(app: &AppId, log_dir: &std::path::Path, text: &str) {
+    let config = LogConfig::new(app, PROCESS, env!("CARGO_PKG_VERSION")).with_log_dir(log_dir);
+    match Logging::new(config).install() {
+        Ok(_handle) => {
+            log::error!(ErrorCode = "DataFolderRefused", ErrorChain = text; "Agent did not start: its data folder is refused");
+        }
+        Err(e) => eprintln!("dyno-agent: the refusal could not be logged ({e})"),
+    }
+}
+
 static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
 /// Milliseconds since the agent process started its work (the first call, made by `dyno-agent run` first thing): the `ElapsedMs`

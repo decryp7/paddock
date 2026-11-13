@@ -74,12 +74,12 @@ impl ToolRunner for Tools {
 struct Harness {
     running: Option<Running>,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
     fn start() -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         fake.add_process(process(100, "calm", 1.0));
@@ -217,7 +217,7 @@ fn find(peer: &BodyPeer<Message>, query: FinderQuery) -> Result<FinderResult, St
 fn the_finder_lists_large_files_and_duplicates_and_moves_nothing() {
     let h = Harness::start();
     let peer = h.client();
-    let t = tempfile::tempdir().unwrap();
+    let t = paddock_testkit::private_tempdir().unwrap();
     let root = std::fs::canonicalize(t.path()).unwrap().join("stuff");
     const MB: usize = 1024 * 1024;
     let a = write(&root, "a/movie.mkv", 5, 2 * MB);
@@ -330,7 +330,7 @@ fn the_inventory_report_is_written_only_to_a_valid_path() {
         panic!("software")
     };
     assert_eq!(sw.items.len(), 2);
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let path = dir.path().join("inv.md");
     let req = |p: &std::path::Path| Request::SaveInventoryReport {
         path: p.to_string_lossy().into_owned(),

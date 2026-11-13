@@ -94,7 +94,7 @@ impl ChildEvents for Never {
 #[ignore = "needs a systemd user manager (docs/linux.md)"]
 fn a_unit_run_waits_for_go_runs_at_nice_0_without_a_memory_limit_and_leaves_nothing() {
     manager();
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     // The runner reads `go` (stdin through --pipe), then reports its own nice value and memory.high through its result line.
     let runner = script(
         dir.path(),
@@ -125,7 +125,7 @@ echo "{\"t\":\"result\",\"status\":{\"state\":\"unavailable\",\"reason\":\"ni=$n
 #[ignore = "needs a systemd user manager (docs/linux.md)"]
 fn cancel_stops_an_all_core_burner_within_two_seconds_and_nothing_is_left() {
     manager();
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let runner = script(
         dir.path(),
         "burner.sh",
@@ -166,7 +166,7 @@ while :; do echo '{"t":"heartbeat"}'; sleep 1; done"#,
 #[ignore = "needs a systemd user manager (docs/linux.md)"]
 fn a_restart_stops_a_recorded_leftover_unit_and_leaves_a_foreign_one() {
     manager();
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let pid = std::process::id();
     let (mine, foreign) = (format!("dyno-bench-t3a-{pid}"), format!("dyno-bench-t3b-{pid}"));
     for u in [&mine, &foreign] {

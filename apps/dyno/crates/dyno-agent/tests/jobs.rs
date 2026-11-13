@@ -77,12 +77,12 @@ impl IssueSource for Slow {
 struct Harness {
     running: Option<Running>,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
     fn start(sources: Vec<Box<dyn IssueSource>>) -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         fake.add_process(process(100, "calm", 1.0));
@@ -276,7 +276,7 @@ fn cancelling_a_log_read_keeps_what_was_there_and_the_next_read_works() {
 fn a_limit_is_named_in_the_result_and_a_bad_folder_fails_with_what_to_fix() {
     let h = Harness::start(vec![]);
     let peer = h.client();
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap().join("deep");
     let mut dir = root.clone();
     for i in 0..(dyno_core::extras::files::MAX_DEPTH + 2) {
@@ -327,7 +327,7 @@ fn only_the_last_few_finished_jobs_are_kept_and_an_unknown_id_is_not_found() {
     // Another job that has not ended, as the agent's own start-up job (the match index of the lists) can still be on a slow machine
     // (Windows CI run 7510: 17 listed against 16): it is listed besides the finished ones and never counts among them.
     let _alive = h.shared().jobs.register_external("test", "A job that has not ended", None);
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let f = tmp.path().join("p.bin");
     std::fs::write(&f, b"abc").unwrap();
     for _ in 0..(dyno_core::jobs::KEPT_FINISHED + 4) {
@@ -529,7 +529,7 @@ fn every_status_of_a_job_is_pushed_to_a_connected_app_in_order_and_the_end_is_ne
         }),
     )
     .unwrap();
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let f = tmp.path().join("p.bin");
     std::fs::write(&f, vec![1u8; 300_000]).unwrap();
     let job = start(

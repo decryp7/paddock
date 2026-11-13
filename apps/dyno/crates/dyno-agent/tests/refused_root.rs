@@ -69,7 +69,7 @@ mod unix {
 
     #[test]
     fn a_data_folder_the_user_named_and_others_can_write_stops_the_library_start_before_the_lock_and_the_database() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let root = open_root(tmp.path());
         std::fs::write(root.join("dyno.db"), b"planted, not a database").unwrap();
         let before = names(&root);
@@ -92,7 +92,7 @@ mod unix {
     /// The real start path (the binary, `run`) with links planted where the log, the lock and the markers go: none is followed.
     #[test]
     fn the_real_run_with_planted_links_follows_none_and_exits_with_the_refusal_code() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let root = open_root(tmp.path());
         let victims = tmp.path().join("victims");
         std::fs::create_dir(&victims).unwrap();
@@ -136,7 +136,7 @@ mod unix {
     reason = "a Windows-only test runs icacls on its own temporary folder to set its access list"
 )]
 fn windows_a_data_folder_everyone_can_write_stops_the_start_before_the_lock_and_says_what_to_do() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let root = tmp.path().join("data");
     std::fs::create_dir(&root).unwrap();
     let out = std::process::Command::new("icacls")
@@ -158,4 +158,92 @@ fn windows_a_data_folder_everyone_can_write_stops_the_start_before_the_lock_and_
         .output()
         .unwrap();
     assert_eq!(run.status.code(), Some(dyno_agent::cli::EXIT_DATA_FOLDER_REFUSED));
+}
+
+/// ER-27: a refused start leaves its reason in the OS's own logs folder (never the refused folder), because an agent started at
+/// login has no standard error and the refused folder is not written to. The test's account folders are temporary ones (ER-14), so the
+/// real profile is not touched; the line names the folder, the cause and the next step.
+#[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "runs the dyno-agent binary under test itself, on a temporary data folder and temporary account folders"
+)]
+fn a_refused_start_leaves_its_reason_in_the_os_logs_folder() {
+    let tmp = paddock_testkit::private_tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir(&home).unwrap();
+    let root = tmp.path().join("data");
+    std::fs::create_dir(&root).unwrap();
+    open_to_everyone(&root);
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_dyno-agent"));
+    cmd.arg("run").env("DYNO_DATA_DIR", &root).env_remove("DYNO_HOME");
+    for var in [
+        "HOME",
+        "USERPROFILE",
+        "LOCALAPPDATA",
+        "APPDATA",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+    ] {
+        cmd.env(var, &home);
+    }
+    let run = cmd.output().unwrap();
+    assert_eq!(run.status.code(), Some(dyno_agent::cli::EXIT_DATA_FOLDER_REFUSED), "{run:?}");
+    let logs = logs_under(&home);
+    assert_eq!(logs.len(), 1, "one agent log in the OS logs folder: {logs:?}");
+    let text = std::fs::read_to_string(&logs[0]).unwrap();
+    assert!(
+        text.contains("DataFolderRefused") && text.contains("DYNO_DATA_DIR") && text.contains(&*root.to_string_lossy()),
+        "the line names the code, the folder and the next step: {text}"
+    );
+    assert!(
+        std::fs::read_dir(&root).unwrap().next().is_none(),
+        "nothing was written in the refused folder"
+    );
+}
+
+/// Makes `root` writable by every account (Unix: mode 0777; Windows: an Everyone entry that new files inherit).
+#[cfg_attr(
+    windows,
+    expect(clippy::disallowed_methods, reason = "runs icacls on the test's own temporary folder")
+)]
+fn open_to_everyone(root: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o777)).unwrap();
+    }
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("icacls")
+            .arg(root)
+            .args(["/grant", "*S-1-1-0:(OI)(CI)F"])
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+    }
+}
+
+/// The agent's dated logs below `dir`.
+fn logs_under(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if p
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("dyno-agent") && n.ends_with(".log"))
+            {
+                found.push(p);
+            }
+        }
+    }
+    found.sort();
+    found
 }
