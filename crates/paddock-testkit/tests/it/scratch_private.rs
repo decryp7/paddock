@@ -1,6 +1,5 @@
 //! A `Scratch` is private on every OS, so a test that gives its folders to code that refuses a folder other accounts can write
 //! (a data folder, ADR 0092) works on a CI runner whose temp folder is open to `Authenticated Users` (Dyno CI run 8035).
-#![cfg(windows)]
 
 use paddock_testkit::Scratch;
 
