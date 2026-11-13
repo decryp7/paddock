@@ -115,7 +115,10 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
             .join(" ")
             .contains("--image registry/paddock-ci:v7 --platform linux/amd64")
     );
-    assert_eq!(by("conformance").args.last().unwrap(), "C06");
+    assert_eq!(
+        (by("conformance").program.as_str(), by("conformance").args.join(" ")),
+        ("/x/dev", "ci run conformance paddock".to_string())
+    );
     assert_eq!(
         by("commit-lint").args.join(" "),
         "conformance/bin/paddock-conformance.mjs commit-lint --range abc..HEAD"
@@ -350,18 +353,32 @@ fn a_docker_failure_names_its_cause() {
 }
 
 #[test]
-fn only_the_ci_line_of_this_repository_is_read() {
-    // Parity on the real tree: the line the gate runs is the one CI runs.
-    let ci = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.gitea/workflows/ci.yml")).unwrap();
-    let args = super::ci_line::conformance_args(&ci).unwrap();
-    assert!(
-        args.contains(&"--strict".to_string()) && args.iter().any(|a| a.starts_with("C06,")),
-        "{args:?}"
+fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_never_a_pass() {
+    // The real tree: the arguments the gate runs are the contract's (the one copy CI's `./dev ci run conformance paddock` runs).
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let args = crate::ci_run::contract::conformance_args_at(&root).unwrap();
+    let f = Facts {
+        conformance: Some(Ok(args.clone())),
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "conformance").unwrap();
+    assert_eq!(
+        (g.program.as_str(), g.args.clone()),
+        ("/x/dev", ["ci", "run", "conformance", "paddock"].map(String::from).to_vec()),
+        "through the executor, like CI"
     );
-    // The line is in ci.yml as it is, or (the env form) its script on the step and its arguments in PADDOCK_CONFORMANCE_ARGS.
+    assert!(!args.is_empty());
+    // An unreadable contract: the gate is BROKEN (exit 7), it does not silently run nothing.
+    let f = Facts {
+        conformance: Some(Err("conformance/paddock.ci.json cannot be read".into())),
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
     assert!(
-        ci.contains(&args.join(" "))
-            || (ci.contains(&format!("node {} $PADDOCK_CONFORMANCE_ARGS", args[0])) && ci.contains(&args[1..].join(" ")))
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Broken { id, .. } if id == "conformance"))
     );
 }
 

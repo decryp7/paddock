@@ -1134,6 +1134,21 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   delete_by = "v0.5.0"
   note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh `host <step>` picks the implementation by the rule of the other kit steps) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/host_steps.rs runs both on the same inputs, and conformance/test/ci-actions.test.mjs and tools/test/prune-and-cleanup.test.mjs keep the scripts' own cases. WP-5 (docs/plans/ci-in-rust.md): kept-clone.sh (with bounded.sh, which only it sources) runs in Rust as `ci kept-clone`, held equal by host_steps.rs and by conformance/test/kept-clone.test.mjs run against the binary (KEPT_CLONE_CMD); guardian-as-user.sh runs as `ci guardian-as-user` (its parity runs where bash is 4.4 or newer: the Linux legs; the root path is a fake machine's unit tests); boot-volume.sh stays for job-tmpdir.sh (sourced), paddock_testkit::boot_volume and Dyno's check-bundle.sh, and `ci boot-volume` is the same rule in Rust (job-tmpdir's rule in process delegates to it). host-tools' pin is held equal by a unit test of ci_host/host_tools.rs. tools/prune-build-folders.ps1 was deleted with the port: a manual lister with no workflow, action, script or test caller, so no release-path run can need it; `./dev ci prune-agent-builds` replaces it on every OS."
 
+[[mechanism]]
+id = "ci-build-env"
+title = "The build's commit and date for the About page (PADDOCK_BUILD_COMMIT, PADDOCK_BUILD_DATE) in two implementations: `./dev ci build-env` in Rust, and the script the release path keeps"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_build_env.rs"]
+status = "built"
+adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/build-env.mjs"]
+  symbols = ["text:buildEnv"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "CI-in-Rust WP-3 (docs/plans/ci-in-rust.md): the script stays for tag, release and rule 54 runs (conformance/ci/kit.sh `build-env` picks the implementation by the kit's rule, as for the other kit steps) and for conformance check C56, which reads the two names from its `buildEnv` function (conformance/src/checks/C56-build-env-names.mjs), until the conformance engine (WP-10) and the release path (WP-11) are ported; tools/paddock-dev/tests/it/build_env.rs runs both on the same inputs."
+
 # =====================================================================================================================
 # CI run readers (RT-8)
 # =====================================================================================================================

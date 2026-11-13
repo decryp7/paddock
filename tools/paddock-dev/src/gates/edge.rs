@@ -39,6 +39,12 @@ pub fn load_sources(root: &Path) -> Result<Sources, String> {
             s.contracts.insert(name, read(&p)?);
         }
     }
+    for project in crate::ci_run::contract::ROOT_PROJECTS {
+        let p = root.join(project).join("paddock.ci.json");
+        if p.is_file() {
+            s.root_contracts.insert(project.to_string(), read(&p)?);
+        }
+    }
     Ok(s)
 }
 

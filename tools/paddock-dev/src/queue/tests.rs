@@ -1762,7 +1762,7 @@ fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a
     let gates = job_block(&ci, "train-gates");
     for needle in [
         "./dev gates check",
-        "paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS",
+        "./dev ci run conformance paddock",
         "cargo hakari generate --diff",
         "cargo metadata --locked --format-version 1",
         "node scripts/publish.mjs --offline",
@@ -1776,10 +1776,18 @@ fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a
         !gates.contains("secrets.") && !gates.to_lowercase().contains("token"),
         "the gates job holds no token"
     );
-    // The conformance line is in one place, read by both jobs that run it.
-    assert_eq!(ci.matches("--only C06").count(), 1, "the conformance arguments are written once");
-    assert!(job_block(&ci, "conformance").contains("paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"));
-    assert!(ci.contains("\nenv:\n  PADDOCK_CONFORMANCE_ARGS: \"--app paddock"));
+    // The conformance list is in one place, the contract (conformance/paddock.ci.json), run by both jobs through the executor.
+    assert_eq!(
+        ci.matches("--only C06").count(),
+        0,
+        "ci.yml holds no copy of the conformance arguments"
+    );
+    assert!(job_block(&ci, "conformance").contains("./dev ci run conformance paddock"));
+    assert!(
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../conformance/paddock.ci.json"))
+            .unwrap()
+            .contains("\"only\": [")
+    );
     // The commit lint is the commits job, which runs on every dispatch.
     assert!(job_block(&ci, "commits").contains("commit-lint"));
     // The planner's table knows the job, so a rerun of its failure plans it.

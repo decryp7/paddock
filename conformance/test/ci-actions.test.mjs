@@ -467,7 +467,7 @@ test('the sccache-stats action prints the statistics and tolerates a missing scc
     }
     return found;
   };
-  const rustJobs = ['conformance', 'wiki', 'heavy', 'crates', 'crate', 'train-gates', 'app', 'paddock-dev']; // conformance: ./dev gates check (C100, ADR 0060)
+  const rustJobs = ['ipc-endpoints', 'ui', 'e2e', 'conformance', 'tools', 'wiki', 'heavy', 'icons', 'eslint-preset', 'crates', 'crate', 'train-gates', 'app', 'paddock-dev']; // conformance: ./dev gates check (C100, ADR 0060)
   assert.deepEqual(jobsUsing('setup-rust'), rustJobs, 'setup-rust in every job that builds Rust');
   assert.deepEqual(jobsUsing('sccache-stats'), rustJobs, 'stats after each');
   assert.doesNotMatch(ci, /setup-rust\n\s+if: runner\.os/, 'no OS leg is left out');
@@ -1189,7 +1189,8 @@ test("a kit app's end-to-end legs and failure report: ci.yml forwards the shard,
   const step = /- uses: actions\/upload-artifact@\S+ # v3\n\s+if: failure\(\) && matrix\.e2e_artifacts != ''\n[\s\S]*?\n\n/.exec(ci)?.[0] ?? '';
   assert.match(step, /path: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}\/\$\{\{ matrix\.e2e_artifacts \}\}/, 'under the stable workspace');
   assert.match(step, /name: \$\{\{ matrix\.app \}\}-\$\{\{ matrix\.e2e_leg \|\| 'ui' \}\}-results-\$\{\{ strategy\.job-index \}\}/, 'one name per leg');
-  assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /E2E_INDEX="\$\{E2E_SHARD%%\/\*\}"/);
+  // `./dev ci run` derives E2E_INDEX (i of i/N) from E2E_SHARD (tools/paddock-dev/src/ci_run/tests.rs); the step hands it the shard.
+  assert.match(read(join(ACTIONS, 'app-gates', 'action.yml')), /E2E_SHARD: \$\{\{ inputs\.e2e-shard \}\}\n[\s\S]*?\.\/dev ci run "\$APP" "\$E2E_PHASE"/);
   assert.equal(ciContract('spotter').e2eArtifacts, 'apps/spotter/app/.angular/playwright-results', "the folder the old spotter.yml uploaded");
 });
 
@@ -1380,8 +1381,11 @@ test('ci.yml runs the icon tests and `install.mjs --check` in an icons job that 
   assert.ok(at > 0, 'ci.yml has an icons job');
   const job = ci.slice(at + 1, ci.indexOf('\n  # ', at + 1) > 0 ? ci.indexOf('\n  # ', at + 1) : undefined);
   assert.match(job, /needs\.plan\.outputs\.icons == 'true'/, 'the icons job runs when the plan says icons');
-  assert.match(job, /run: npm test/, 'it runs the icon tests');
-  assert.match(job, /run: node icons\/tools\/install\.mjs --check/, 'it runs install.mjs --check');
+  assert.match(job, /run: \.\/dev ci run icons tests/, 'it runs the icon tests');
+  assert.match(job, /run: \.\/dev ci run icons installed/, 'it runs install.mjs --check');
+  const contract = JSON.parse(read(join(PADDOCK, 'icons', 'paddock.ci.json')));
+  assert.deepEqual(contract.tests, ['cd icons', 'npm test'], 'the contract holds the icon tests');
+  assert.deepEqual(contract.installed, ['node icons/tools/install.mjs --check'], 'and install.mjs --check');
 });
 
 // cmd reads `echo CARGO_BUILD_JOBS=8>>"%GITHUB_ENV%"` as a redirect of handle 8, so the variable was never set (the logs showed
@@ -1473,22 +1477,14 @@ test('app-gates: every step that builds or checks Rust on a host leg runs from t
   for (const st of hostSteps) assert.match(st, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, st.split('\n')[0]);
 });
 
-test("app-gates runs every command list through run-commands.sh, which names the failing command and its exit code, stops there and keeps a cd", () => {
+test("app-gates runs every command list through `./dev ci run <app> <phase>` (the executor's own cases are tools/paddock-dev/src/ci_run/tests.rs)", () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.doesNotMatch(gates, /bash -euo pipefail -c "\$COMMANDS"/, 'no anonymous bash -c over a command list');
-  assert.equal((gates.match(/conformance\/ci\/run-commands\.sh/g) ?? []).length, 6, 'prepare, checks, rust-checks, host-rust-checks, ui and e2e');
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-run-commands-')));
-  mkdirSync(join(dir, 'sub'));
-  const run = (commands, env = {}) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'run-commands.sh')], { cwd: dir, env: { PATH: '/usr/bin:/bin', COMMANDS: commands, ...env }, encoding: 'utf8' });
-  const bad = run('cd sub\npwd > here\nprintf x\nexit 7\ntouch never');
-  assert.equal(bad.status, 7, 'the failing command\'s exit code');
-  assert.match(bad.stdout, /::error::command failed \(exit 7\): exit 7 \(in .*sub\)/, 'it names itself');
-  assert.equal(existsSync(join(dir, 'sub', 'here')), true, 'a cd holds for the lines after it');
-  assert.equal(existsSync(join(dir, 'sub', 'never')), false, 'the lines after a failure do not run');
-  const good = run('echo one\nE2E_INDEX=2 bash -c \'echo $((4359 + E2E_INDEX))\'\n\n');
-  assert.equal(good.status, 0, good.stdout);
-  assert.match(good.stdout, /4361/, 'shell expansion works as in the old bash -c');
-  assert.equal(run('cd nowhere').status, 1);
+  assert.doesNotMatch(gates, /run-commands\.sh/, 'the script is gone: the executor replaced it');
+  assert.doesNotMatch(gates, /COMMANDS:/, 'the lists are read from the contract, not passed through the environment');
+  const phases = [...gates.matchAll(/\.\/dev ci run "\$APP" (?:"\$E2E_PHASE"|(\w+))/g)].map((m) => m[1] ?? 'e2e|e2eWebkit');
+  assert.deepEqual(phases, ['prepare', 'checks', 'rustChecks', 'hostRustChecks', 'ui', 'e2e|e2eWebkit'], 'prepare, checks, rust-checks, host-rust-checks, ui and e2e');
+  assert.ok(!existsSync(join(PADDOCK, 'conformance', 'ci', 'run-commands.sh')), 'deleted');
 });
 
 // ---- A job's own temp folder (ER-14, 2026-10-29) ----
@@ -2286,7 +2282,7 @@ test('a release or installer job never runs a downloaded ./dev: PADDOCK_DEV_DOWN
     assert.match(job.text, /PADDOCK_DEV_DOWNLOAD: \$\{\{ \(inputs\.release == true \|\| startsWith\(github\.ref, 'refs\/tags\/'\)\) && '0' \|\| '' \}\}/, `ci.yml:${job.id}: a run for a tag builds the tool from source`);
     tagJobs += 1;
   }
-  assert.equal(tagJobs, 10, 'the ci.yml jobs that read the prebuilt tool: the four that take a host slot, ipc-endpoints, conformance, tools-macos, and wiki, heavy and crates (setup-rust runs ./dev)');
+  assert.equal(tagJobs, 10, 'the ci.yml jobs that read the prebuilt tool with the credential at job level: the four that take a host slot, ipc-endpoints, conformance, tools-macos, and wiki, heavy and crates (setup-rust runs ./dev); ui, e2e, tools, icons and eslint-preset (`./dev ci run`) set it on their ./dev steps only (WP-3 review)');
 });
 
 test('dev-tool.yml publishes only from main, in every job (ADR 0022: the store is written only by main)', () => {
