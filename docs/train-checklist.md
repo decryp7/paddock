@@ -20,4 +20,4 @@ locked worktree, never in the main checkout (rule 2).
 6. **A red train run.** `./dev ci triage <run> --members <train-base>` lists the members, each with the projects its own change
    reaches, and for every new failure the members that reach it. Take out every suspect, or fix the cause in its owner's
    branch, then fix round by failed tests only (ER-10). A failure that also fails on main is nobody's.
-7. **Land** only after the full green run on the final tree (rule 50 (b)); delete the `trial/*` refs of landed branches.
+7. **Land** only after the full green run on the final tree (rule 50 (b)); delete the `trial/*` refs of landed branches with `./dev ci trial-prune` (a trial that is sent back or not dispatched already deletes its own ref).
