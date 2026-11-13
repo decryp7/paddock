@@ -17,12 +17,17 @@
 //! passed in as a [`Run`].
 
 mod date;
+mod evidence;
 mod optional;
 mod verdict;
 
 pub use date::Date;
+pub use evidence::{
+    CheckId, Evidence, Found, Known, LiveRepo, Passed, RunId, Sha, Sha256, Subject, ToolVersion,
+    TreeId, UnixSeconds, Unmeasured, measure,
+};
 pub use optional::{Entry, Optional, Run, RunKind, Scope};
-pub use verdict::Verdict;
+pub use verdict::{Excuse, Verdict};
 
 use serde_json::{Value, json};
 
@@ -104,21 +109,39 @@ impl Findings {
         &self.0
     }
 
-    fn failing(&self) -> bool {
+    pub(crate) fn failing(&self) -> bool {
         self.0.iter().any(|f| f.severity == Severity::Failing)
     }
 }
 
 /// How one measurement ended. Deliberately not convertible to `bool` or `Result`, and without a `Default`.
+///
+/// A pass, findings and a known commit carry [`Evidence`] in a payload with private fields: [`measure`] builds the first
+/// two, [`Evidence::adopt`] the third, so no code path can say "clean" without a check behind it.
+///
+/// ```compile_fail
+/// use paddock_cli::Outcome;
+/// // No payload can be built outside the module: there is no pass without `measure`.
+/// let _ = Outcome::Clean(paddock_cli::outcome::Passed {});
+/// ```
+///
+/// ```compile_fail
+/// use paddock_cli::outcome::{Evidence, CheckId, Subject, ToolVersion, UnixSeconds};
+/// // Evidence has private fields.
+/// let _ = Evidence { check: CheckId::new("x"), subject: todo!(), tool: ToolVersion::new("t"), at: UnixSeconds(0) };
+/// ```
 #[must_use = "an outcome must reach a Verdict; dropping it turns a missing measurement into a pass"]
 #[derive(Debug, Clone)]
 pub enum Outcome {
-    /// Measured, nothing found.
-    Clean,
+    /// Measured, nothing found; made only by [`measure`].
+    Clean(Passed),
+    /// A commit that passed earlier, not checked again (exit 0, named in the JSON with `not_rechecked`); made only by
+    /// [`Evidence::adopt`]. A consumer that asks about another tree refuses it ([`Outcome::from_wire`]).
+    KnownCommit(Known),
     /// A scoped run (`--files`, an app scope) reached nothing this check reads. In a whole-tree run it counts as not measured.
     NotApplicable(Reason),
     /// Measured; each finding failing or report-only.
-    Findings(Findings),
+    Findings(Found),
     /// Did not look: tool missing, precondition false, incomplete, zero probes in its scope.
     NotMeasured(Reason),
     /// Looked, but its positive control failed, or it crashed.
@@ -126,18 +149,11 @@ pub enum Outcome {
 }
 
 impl Outcome {
-    /// Measured, with these findings: [`Outcome::Clean`] when the list is empty.
-    pub fn from_findings(list: Vec<Finding>) -> Outcome {
-        match Findings::new(list) {
-            Some(f) => Outcome::Findings(f),
-            None => Outcome::Clean,
-        }
-    }
-
     /// The name in the JSON and the table.
     pub(crate) fn name(&self) -> &'static str {
         match self {
-            Outcome::Clean => "clean",
+            Outcome::Clean(_) => "clean",
+            Outcome::KnownCommit(_) => "known-commit",
             Outcome::NotApplicable(_) => "not-applicable",
             Outcome::Findings(_) => "findings",
             Outcome::NotMeasured(_) => "not-measured",
@@ -146,17 +162,21 @@ impl Outcome {
     }
 
     pub(crate) fn failing(&self) -> bool {
-        matches!(self, Outcome::Findings(f) if f.failing())
+        matches!(self, Outcome::Findings(f) if f.findings().failing())
     }
 
     /// The reason or the findings, as one line for the table.
     pub(crate) fn detail(&self) -> String {
         match self {
-            Outcome::Clean => String::new(),
+            Outcome::Clean(_) => String::new(),
+            Outcome::KnownCommit(_) => {
+                "not checked again: a passing record for this commit".to_string()
+            }
             Outcome::NotApplicable(r) | Outcome::NotMeasured(r) | Outcome::CheckBroken(r) => {
                 r.as_str().to_string()
             }
             Outcome::Findings(f) => f
+                .findings()
                 .as_slice()
                 .iter()
                 .map(|x| {
@@ -177,29 +197,51 @@ impl Outcome {
 
     pub(crate) fn json(&self) -> Value {
         match self {
-            Outcome::Clean => json!({"status": self.name()}),
+            Outcome::Clean(p) => p.json(),
+            Outcome::KnownCommit(k) => k.json(),
             Outcome::NotApplicable(r) | Outcome::NotMeasured(r) | Outcome::CheckBroken(r) => {
                 json!({"status": self.name(), "reason": r.as_str()})
             }
-            Outcome::Findings(f) => {
-                let list: Vec<Value> = f
-                    .as_slice()
-                    .iter()
-                    .map(|x| json!({"message": x.message, "failing": x.severity == Severity::Failing}))
-                    .collect();
-                json!({"status": self.name(), "findings": list})
-            }
+            Outcome::Findings(f) => f.json(),
         }
     }
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    pub(crate) fn subject() -> Subject {
+        Subject::Commit {
+            sha: Sha::new("a1"),
+            tree: TreeId::new("t1"),
+        }
+    }
+
+    /// An outcome through the one door, `measure`.
+    pub(crate) fn measured(list: Vec<Finding>) -> Outcome {
+        measure(
+            CheckId::new("check:t"),
+            subject(),
+            ToolVersion::new("t 1"),
+            UnixSeconds(1),
+            || Ok(list),
+        )
+    }
+
+    pub(crate) fn clean() -> Outcome {
+        measured(Vec::new())
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_support::*;
     use super::*;
 
     #[test]
     fn findings_and_reasons_are_never_empty() {
-        assert!(matches!(Outcome::from_findings(Vec::new()), Outcome::Clean));
+        assert!(matches!(clean(), Outcome::Clean(_)));
         assert!(Findings::new(Vec::new()).is_none());
         let blank = Reason::new("  ");
         assert!(blank.as_str().contains("no reason was given"));
@@ -208,19 +250,21 @@ mod tests {
 
     #[test]
     fn detail_and_json_say_what_each_outcome_holds() {
-        let mixed = Outcome::from_findings(vec![Finding::report_only("r"), Finding::failing("f")]);
+        let mixed = measured(vec![Finding::report_only("r"), Finding::failing("f")]);
         assert_eq!(mixed.detail(), "(report only) r; f");
         let j = mixed.json();
         assert_eq!(j["findings"][0]["message"], "r");
         assert_eq!(j["findings"][0]["failing"], false);
         assert_eq!(j["findings"][1]["message"], "f");
         assert_eq!(j["findings"][1]["failing"], true);
-        assert_eq!(Outcome::Clean.detail(), "");
+        assert_eq!(j["evidence"]["subject"]["sha"], "a1");
+        assert_eq!(clean().detail(), "");
         let nm = Outcome::NotMeasured(Reason::new("no ffmpeg"));
         assert_eq!(nm.detail(), "no ffmpeg");
         assert_eq!(nm.json()["reason"], "no ffmpeg");
-        assert_eq!(Outcome::Clean.json()["status"], "clean");
-        assert!(!Outcome::Clean.failing() && mixed.failing());
-        assert!(!Outcome::from_findings(vec![Finding::report_only("r")]).failing());
+        assert_eq!(clean().json()["status"], "clean");
+        assert_eq!(clean().json()["evidence"]["tool"], "t 1");
+        assert!(!clean().failing() && mixed.failing());
+        assert!(!measured(vec![Finding::report_only("r")]).failing());
     }
 }

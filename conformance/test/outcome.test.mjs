@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runChecks } from '../src/runner.mjs';
 import { error, warn, unwaivable } from '../src/finding.mjs';
-import { exitStatus, EXIT } from '../src/outcome.mjs';
+import { exitStatus, EXIT, measure, isMeasured, Unmeasured } from '../src/outcome.mjs';
 import { main } from '../src/cli.mjs';
 import { makeApp } from './helpers.mjs';
 
@@ -55,7 +55,8 @@ test('exit status: 7 broken, 1 findings, 6 not measured, 0 clean, whatever the w
   assert.equal(exitStatus(await runChecks({ root: makeApp({ a: 'x' }), app: 'demo', registry: [{ id: 'C00', title: 't', rule: 1, run: () => [error('C00', 1, 'a', 1, 'm', 'f')] }] })), 1);
 });
 
-test('exit status over every combination of findings (property)', () => {
+test('exit status over every combination of findings (property)', async () => {
+  const done = { checks: ['K'], outcomes: [await measure('K', { kind: 'files', head: 'h', digest: 'd' }, 't', () => [])] };
   const kinds = [
     ['ok', []],
     ['err', [error('C1', 1, 'a', 1, 'm', 'f')]],
@@ -68,15 +69,15 @@ test('exit status over every combination of findings (property)', () => {
     combos += 1;
     const has = (n) => names.includes(n);
     const want = has('broken') ? 7 : has('err') ? 1 : has('nm') ? 6 : 0;
-    assert.equal(exitStatus({ findings, errors: findings.filter((f) => f.severity === 'error').length, warnings: 0 }), want, names.join());
+    assert.equal(exitStatus({ ...done, findings, errors: findings.filter((f) => f.severity === 'error').length, warnings: 0 }), want, names.join());
     if (!left) return;
     for (const [n, f] of kinds) go([...names, n], [...findings, ...f], left - 1);
   };
   go([], [], 4);
-  const warnOnly = { findings: [warn('C1', 1, 'a', 1, 'm', 'f')] };
+  const warnOnly = { ...done, findings: [warn('C1', 1, 'a', 1, 'm', 'f')] };
   assert.equal(exitStatus(warnOnly), 0, 'warnings are report-only');
   assert.equal(exitStatus(warnOnly, new Set(['C1'])), 1, '--strict makes them fail');
-  assert.equal(exitStatus({ findings: [...warnOnly.findings, ...kinds[3][1]] }), 6, 'a warning never masks a missing measurement');
+  assert.equal(exitStatus({ ...done, findings: [...warnOnly.findings, ...kinds[3][1]] }), 6, 'a warning never masks a missing measurement');
   assert.equal(combos, 1 + 5 + 25 + 125 + 625);
 });
 
@@ -89,4 +90,38 @@ test('main(): a crashing check exits 7 and an incomplete one 6, whatever the wai
   assert.equal(await go(() => [error('C00', 1, 'a', 1, 'm', 'f')]), 0, 'waived');
   const open = makeApp({ a: 'x' });
   assert.equal(await main(['--root', open, '--app', 'demo'], { log: () => {}, err: () => {}, registry: [{ id: 'C00', title: 't', rule: 1, run: () => [error('C00', 1, 'a', 1, 'm', 'f')] }] }), 1);
+});
+
+const subject = { kind: 'files', head: 'h', digest: 'd' };
+
+test('a pass is made only by measure, with its evidence (ADR 0089 amendment, JS mirror)', async () => {
+  const ok = await measure('C00', subject, 'tool 1', () => []);
+  assert.equal(ok.status, 'clean');
+  assert.deepEqual({ ...ok.evidence, at: 0 }, { check: 'C00', subject, tool: 'tool 1', at: 0 });
+  assert.equal(isMeasured(ok), true);
+  const found = await measure('C00', subject, 't', () => [error('C00', 1, 'a', 1, 'm', 'f')]);
+  assert.equal(found.status, 'findings');
+  assert.equal(isMeasured(found), true);
+  assert.equal((await measure('C00', subject, 't', () => { throw new Error('x'); })).status, 'check-broken');
+  assert.equal((await measure('C00', subject, 't', () => { throw new Unmeasured('not-measured', 'no tool'); })).status, 'not-measured');
+  assert.equal(isMeasured(await measure('C00', subject, 't', () => { throw new Unmeasured('broken', 'control'); })), false);
+});
+
+// Row 6: a run in which no check ran exited 0 (measured before this change: runChecks({only: []}) gave checks [] and status 0).
+test('delete the check: an empty selection or registry exits 6, never 0 (row 6)', async () => {
+  assert.equal(exitStatus(await runChecks({ root: makeApp({ a: 'x' }), app: 'demo', only: [], registry: [{ id: 'C00', title: 't', rule: 1, run: () => [] }] })), 6);
+  assert.equal(exitStatus(await runChecks({ root: makeApp({ a: 'x' }), app: 'demo', registry: [] })), 6);
+  assert.equal(exitStatus({ findings: [] }), 6);
+  const root = makeApp({ a: 'x' });
+  assert.equal(await main(['--root', root, '--app', 'demo'], { log: () => {}, err: () => {}, registry: [] }), 6);
+});
+
+test('skip the gate: a bare clean result, a literal or a JSON copy is not a pass', async () => {
+  const ok = await measure('C00', subject, 't', () => []);
+  const bare = { checks: ['C00'], outcomes: [{ status: 'clean', evidence: ok.evidence, findings: [] }], findings: [] };
+  assert.equal(exitStatus(bare), 6);
+  assert.equal(exitStatus({ ...bare, outcomes: [JSON.parse(JSON.stringify(ok))] }), 6);
+  assert.equal(exitStatus({ ...bare, outcomes: [{ ...ok }] }), 6);
+  assert.equal(exitStatus({ ...bare, outcomes: [ok] }), 0);
+  assert.equal(exitStatus({ checks: ['C00', 'C01'], outcomes: [ok], findings: [] }), 6, 'a check with no outcome of its own');
 });

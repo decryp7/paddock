@@ -33,7 +33,8 @@ pub use exit::Exit;
 pub use flags::{CommonFlags, Format};
 pub use help::{Help, version_line};
 pub use outcome::{
-    Entry, Finding, Findings, Optional, Outcome, Reason, Run, RunKind, Scope, Severity, Verdict,
+    CheckId, Entry, Evidence, Finding, Findings, Optional, Outcome, Reason, Run, RunKind, Scope,
+    Severity, Subject, ToolVersion, Verdict, measure,
 };
 pub use progress::{LINE_EVERY, Progress, StopFlag};
 pub use report::{Report, finish};
