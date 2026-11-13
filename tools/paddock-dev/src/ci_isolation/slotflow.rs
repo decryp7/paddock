@@ -66,7 +66,7 @@ fn pin_tool(ctx: &Ctx) -> Option<String> {
         let c = dev_tool(ctx, &["--print-binary"], Capture::Read, &[]).ok()?;
         return (c.code == 0 && !c.stdout.is_empty()).then_some(c.stdout);
     }
-    Some(paddock_env::winpath::lexical_text(&ctx.exe, paddock_env::Os::current())).filter(|s| !s.is_empty())
+    Some(super::home::mixed(&ctx.exe)).filter(|s| !s.is_empty())
 }
 
 /// Whole gigabytes free for this user on the folder's disk. `PADDOCK_DF` replaces the measurement with a `df -Pk`-shaped program (tests);
@@ -184,8 +184,8 @@ pub fn sweep_slot(ctx: &Ctx, mode: Option<&str>, io: &mut Sinks<'_>) -> R<()> {
 
 /// Runs the sweep of one slot under its lock; false when the call failed.
 fn idle_sweep(ctx: &Ctx, home: &str, n: u32, all: bool) -> R<bool> {
-    let exe = paddock_env::winpath::lexical_text(&ctx.exe, paddock_env::Os::current());
-    let tables = paddock_env::winpath::lexical_text(&ctx.tables, paddock_env::Os::current());
+    let exe = super::home::mixed(&ctx.exe);
+    let tables = super::home::mixed(&ctx.tables);
     let slot = format!("s{n}");
     let mut args: Vec<&str> = vec![
         "ci",

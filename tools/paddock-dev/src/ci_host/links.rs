@@ -32,10 +32,7 @@ pub struct OsLinks<'a> {
 impl Links for OsLinks<'_> {
     fn link_dir(&self, target: &Path, link: &Path) -> Result<(), String> {
         if self.windows {
-            let call = junction_call(
-                &paddock_env::winpath::lexical_text(target, paddock_env::Os::current()),
-                &paddock_env::winpath::lexical_text(link, paddock_env::Os::current()),
-            );
+            let call = junction_call(&home::mixed(target), &home::mixed(link));
             let ran = call.run(self.env, &mut std::io::sink())?;
             return if ran.success {
                 Ok(())
@@ -95,6 +92,17 @@ mod tests {
         assert_eq!(shown, r"cmd /c mklink /J C:\work\abc\hostexecutor C:\ci\src\x-s1");
         #[cfg(not(windows))]
         assert_eq!(shown, "cmd /c mklink /J C:/work/abc/hostexecutor C:/ci/src/x-s1");
+    }
+
+    #[test]
+    fn a_verbatim_or_device_path_reaches_the_junction_call_as_it_is_given() {
+        // The prefix is the caller's to repair (`winpath::real_for_tools`); the call neither drops nor respells it.
+        let c = junction_call(&home::mixed(Path::new(r"\\?\C:\ci\src")), &home::mixed(Path::new(r"\\.\C:\work")));
+        let shown = c.display();
+        #[cfg(windows)]
+        assert_eq!(shown, r"cmd /c mklink /J \\.\C:\work \\?\C:\ci\src");
+        #[cfg(not(windows))]
+        assert!(shown.contains(r"\\.\C:\work") && shown.contains(r"\\?\C:\ci\src"), "{shown}");
     }
 
     #[cfg(unix)]

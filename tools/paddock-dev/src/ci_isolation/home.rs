@@ -28,6 +28,14 @@ pub fn os_of(windows: bool) -> Os {
     if windows { Os::Windows } else { Os::Linux }
 }
 
+/// `p` as one string with `/` separators (what `cygpath -m` gives; the same on Unix). Programs on every OS take it, and so do Git
+/// bash's. A path from the file system goes through `winpath::real_for_tools` first: this does not repair a `\\?\` prefix (it keeps
+/// `\\?\` and `\\.\` as they are, as the junction call and the slot tool arguments always got them).
+pub fn mixed(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    if cfg!(windows) { s.replace('\\', "/") } else { s.to_string() }
+}
+
 /// The path as the operating system's own programs take it (`cygpath -w`: backslashes on Windows, as it is elsewhere).
 pub fn native(p: &str) -> String {
     if cfg!(windows) { p.replace('/', "\\") } else { p.to_string() }

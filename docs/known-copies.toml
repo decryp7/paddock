@@ -1253,6 +1253,13 @@ adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
   note = "Reads the drive of a path from its text (with and without the prefix); moves to winpath::kind (WP-P2)."
 
   [[mechanism.copy]]
+  paths = ["tools/paddock-dev/src/ci_isolation/home.rs"]
+  symbols = ["item:mixed"]
+  owner = "paddock"
+  delete_by = "v0.4.0"
+  note = "Spells a canonical path with forward slashes and no prefix; moves to winpath::lexical_text or for_tools (WP-P5). Kept as it was in ADR 0099's build: lexical_text also drops the verbatim prefix and respells device paths, which would change the junction call and the slot tool's arguments."
+
+  [[mechanism.copy]]
   paths = ["apps/debrief/app/src-tauri/src/paths.rs"]
   symbols = ["item:plain"]
   owner = "debrief"
