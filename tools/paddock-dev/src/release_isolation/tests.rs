@@ -327,37 +327,16 @@ mod path_door {
         ));
     }
 
-    /// The files called `name` under `dir`, however deep.
-    fn find_named(dir: &Path, name: &str) -> Vec<std::path::PathBuf> {
-        let mut out = Vec::new();
-        for e in std::fs::read_dir(dir).unwrap() {
-            let p = e.unwrap().path();
-            if p.is_dir() {
-                out.extend(find_named(&p, name));
-            } else if p.file_name().is_some_and(|n| n == name) {
-                out.push(p);
-            }
-        }
-        out
-    }
-
     #[test]
     fn no_probe_resolves_a_path_through_a_door_that_strips_the_prefix() {
         // `winpath::real` returns the plain spelling, the folders of the ledger are verbatim: comparing the two with Path methods
         // failed every Windows verify. Probes resolve through `PathOps` (or `real_verbatim` for a candidate list), nothing else.
-        // The files are found, not listed (rule 79): every source of the folder but this one, and the program lookup wherever it lives
-        // (it moved from this folder to src/pathfind.rs and the test then read the old path).
-        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(src.join("release_isolation"))
-            .unwrap()
-            .map(|e| e.unwrap().path())
-            .filter(|p| p.extension().is_some_and(|x| x == "rs") && p.file_name().is_some_and(|n| n != "tests.rs"))
-            .collect();
-        files.extend(find_named(&src, "pathfind.rs"));
-        assert!(files.len() >= 6, "the probe sources were not found: {files:?}");
-        for path in files {
-            let name = path.display().to_string();
-            let text = std::fs::read_to_string(&path).unwrap();
+        // The sources come from their owner's export (rule 79), not from a path or a name search here.
+        assert!(
+            crate::release_isolation::PROBE_SOURCES.len() >= 6,
+            "the probe sources are not exported"
+        );
+        for (name, text) in crate::release_isolation::PROBE_SOURCES {
             let code = text.split("#[cfg(test)]").next().unwrap();
             assert!(
                 !code.contains("winpath::real("),

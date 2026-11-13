@@ -5,6 +5,10 @@
 //! Every function returns whether the step failed (a caller that cares may use it; the log line is written either way).
 
 use std::fmt::Display;
+/// This file's own text, for the source audits of the crates that call it (Pitwall's elevated-registration audit): read through the
+/// owner's export, never through a path into this folder (rule 79). A constant costs nothing in a binary that does not use it.
+pub const SOURCE: &str = include_str!("cleanup.rs");
+
 use std::path::Path;
 
 /// Logs `error` of a clean-up step `what` at debug level.

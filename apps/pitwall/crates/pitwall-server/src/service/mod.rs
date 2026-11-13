@@ -702,7 +702,7 @@ mod tests {
             ("paddock-proc cleanup report and logged", {
                 // The two functions end at their closing braces (an item boundary), not at a comment that follows them: the
                 // private helpers of join and the removals sit after `logged` and must stay out (rule 79).
-                let cleanup = include_str!("../../../../../../crates/paddock-proc/src/cleanup.rs");
+                let cleanup = paddock_proc::cleanup::SOURCE;
                 code_of(&format!(
                     "{}\n{}",
                     fn_item(cleanup, "pub fn report("),
