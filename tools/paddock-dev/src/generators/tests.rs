@@ -470,7 +470,9 @@ mod real {
 /// The default roots come from `./dev disk`'s settings (`PADDOCK_DISK_ROOTS`), not from a path in this module.
 #[test]
 fn the_default_build_roots_are_the_disk_settings_roots() {
-    let env = std::collections::HashMap::from([("PADDOCK_DISK_ROOTS".to_string(), "/nope/a:/nope/b".to_string())]);
+    // The platform's list separator (`:`, `;` on Windows), as `split_paths` reads it.
+    let list = std::env::join_paths(["/nope/a", "/nope/b"]).unwrap().into_string().unwrap();
+    let env = std::collections::HashMap::from([("PADDOCK_DISK_ROOTS".to_string(), list)]);
     let roots = crate::disk::config::Settings::resolve(&Default::default(), &|k| env.get(k).cloned()).roots;
     assert_eq!(roots, [std::path::PathBuf::from("/nope/a"), std::path::PathBuf::from("/nope/b")]);
     assert!(!include_str!("run.rs").contains("DEFAULT_ROOTS"), "run.rs names no machine path");

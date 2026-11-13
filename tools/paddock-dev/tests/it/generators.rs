@@ -32,6 +32,9 @@ struct Repo {
     dir: tempfile::TempDir,
     /// The build-folder root (`PADDOCK_DEV_TARGET_DIR`): outside the repository, as the tool requires.
     builds: tempfile::TempDir,
+    /// The tool's `HOME`: the build-folder guard refuses a root under `$HOME`, and a runner's temp folder can be under the real
+    /// one (the macOS runner's is), so the tool under test gets a home of its own (ER-14).
+    home: tempfile::TempDir,
 }
 
 impl Repo {
@@ -39,6 +42,7 @@ impl Repo {
         let r = Repo {
             dir: tempfile::tempdir().unwrap(),
             builds: tempfile::tempdir().unwrap(),
+            home: tempfile::tempdir().unwrap(),
         };
         r.git(&["init", "-q", "-b", "main"]);
         r.write("docs/generators.toml", registry);
@@ -94,6 +98,7 @@ impl Repo {
         let out = self
             .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
             .env("PADDOCK_DEV_TARGET_DIR", self.builds.path())
+            .env("HOME", self.home.path())
             .args(args)
             .arg("--root")
             .arg(self.dir.path())
@@ -299,8 +304,10 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
             .unwrap_or_else(|| panic!("no entry for {tool}"));
         let mut shared = 0;
         for p in meta["packages"].as_array().unwrap() {
-            let manifest = p["manifest_path"].as_str().unwrap();
-            let Some(rel) = manifest.strip_prefix(root.to_str().unwrap()).map(|r| r.trim_start_matches('/')) else {
+            // cargo spells a Windows path with `\`, the root is spelled for tools (`/`): compare with one separator.
+            let manifest = p["manifest_path"].as_str().unwrap().replace('\\', "/");
+            let base = root.to_str().unwrap().replace('\\', "/");
+            let Some(rel) = manifest.strip_prefix(base.as_str()).map(|r| r.trim_start_matches('/')) else {
                 continue;
             };
             if p["source"].is_null() && rel.starts_with("crates/") {
