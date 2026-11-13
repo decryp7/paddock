@@ -1496,3 +1496,28 @@ fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output
     let last = report.text.lines().last().unwrap();
     assert_eq!(last, "NOT MEASURED (2): clippy-windows apps/dyno; clippy crates");
 }
+
+#[test]
+fn a_branch_that_merged_its_train_in_is_measured_from_the_train_not_its_own_old_tip() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    let f1 = r.commit("f1");
+    // The train moves on after the branch was pushed; the branch then merges it in and adds a commit.
+    r.git(&["checkout", "-q", "-b", "train", &c1]);
+    r.commit("t1");
+    let t2 = r.commit("t2");
+    r.remote("main", &c1);
+    r.remote("train/9", &t2);
+    r.git(&["checkout", "-q", "fix"]);
+    r.git(&["merge", "-q", "--no-edit", "train"]);
+    let m = r.commit("f2");
+    let p = super::Pushed {
+        local_ref: "refs/heads/fix".into(),
+        sha: m,
+        remote_ref: "refs/heads/fix".into(),
+        remote_sha: f1,
+    };
+    let (base, why) = r.choose(&p);
+    assert_eq!(base, t2, "the old tip would count t1 and t2 as new: {why}");
+}

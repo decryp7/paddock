@@ -583,14 +583,12 @@ pub fn parse_push(input: &str) -> Vec<Pushed> {
 pub fn choose_base(root: &Path, p: &Pushed, remote: Option<&str>, fallback: &str, look: &dyn known::Lookups) -> (String, String) {
     let short = |s: &str| s[..s.len().min(12)].to_string();
     let mut prefix = String::new();
+    let mut old = None;
     if p.remote_sha.chars().any(|c| c != '0') {
         if p.remote_sha == p.sha {
             prefix = format!("{} is already at the pushed commit on the remote; ", p.remote_ref);
         } else if git_text(root, &["cat-file", "-e", &format!("{}^{{commit}}", p.remote_sha)]).is_some() {
-            return (
-                p.remote_sha.clone(),
-                format!("{} exists on the remote: its old commit {}", p.remote_ref, short(&p.remote_sha)),
-            );
+            old = Some(p.remote_sha.clone());
         } else {
             prefix = format!(
                 "{} is on the remote at {}, which is not here (fetch it); ",
@@ -599,21 +597,43 @@ pub fn choose_base(root: &Path, p: &Pushed, remote: Option<&str>, fallback: &str
             );
         }
     }
-    let (b, w) = nearest_remote_branch(root, p, remote, fallback, look);
+    let (b, w) = nearest_remote_branch(root, p, remote, fallback, look, old.as_deref());
     (b, format!("{prefix}{w}"))
 }
 
 /// The most `train/*` branches whose distance is counted (the newest by name): bounds the search on a remote with hundreds of branches.
 const MAX_TRAINS: usize = 40;
 
-/// The candidates are the push's tracking upstream, the `train/*` branches and main (a sibling feature branch is no base, and counting
-/// every branch of a large remote spawned about 1,100 git processes before), their tips read live with `git ls-remote <remote>`; a tip
-/// this clone has no object for is skipped. The fewest new commits wins; on a tie the tracking upstream, then a train, then main (the
-/// tie-break the train's earlier rule had: it still decides when two candidates are equally far).
-fn nearest_remote_branch(root: &Path, p: &Pushed, remote: Option<&str>, fallback: &str, look: &dyn known::Lookups) -> (String, String) {
+/// The candidates are the remote ref's own old commit (when the ref exists and the commit is here), the push's tracking upstream, the
+/// `train/*` branches and main (a sibling feature branch is no base, and counting every branch of a large remote spawned about 1,100
+/// git processes before), the tips read live with `git ls-remote <remote>`; a tip this clone has no object for is skipped. The fewest
+/// new commits wins (so a branch that merged its train in is measured from the train, not from its own old tip, which would count the
+/// whole train as new); on a tie the old commit, then the tracking upstream, then a train, then main. If the remote cannot be read the
+/// old commit is the base when there is one.
+fn nearest_remote_branch(
+    root: &Path,
+    p: &Pushed,
+    remote: Option<&str>,
+    fallback: &str,
+    look: &dyn known::Lookups,
+    old: Option<&str>,
+) -> (String, String) {
     let started = std::time::Instant::now();
     let git = |args: &[&str]| git_text(root, args);
-    let fall = |why: String| (fallback.to_string(), format!("{why}; measuring from {fallback}"));
+    let old_why = |sha: &str, why: &str| {
+        (
+            sha.to_string(),
+            format!(
+                "{} exists on the remote: its old commit {}; {why}",
+                p.remote_ref,
+                &sha[..sha.len().min(12)]
+            ),
+        )
+    };
+    let fall = |why: String| match old {
+        Some(sha) => old_why(sha, &why),
+        None => (fallback.to_string(), format!("{why}; measuring from {fallback}")),
+    };
     let branch = p.remote_ref.strip_prefix("refs/heads/").unwrap_or(&p.remote_ref);
     let Some(remote) = remote.filter(|r| !r.is_empty() && !r.starts_with('-')) else {
         return fall("no remote was named for this push, so no live branch list".into());
@@ -634,41 +654,50 @@ fn nearest_remote_branch(root: &Path, p: &Pushed, remote: Option<&str>, fallback
         .collect();
     heads.sort_by(|a, b| b.0.cmp(a.0));
     let mut trains = 0;
+    let count = |sha: &str| git(&["rev-list", "--count", &format!("{sha}..{}", p.sha)]).and_then(|t| t.trim().parse::<u32>().ok());
     let mut cands: Vec<(u32, u8, String, String)> = Vec::new();
+    if let Some(sha) = old
+        && let Some(d) = count(sha)
+    {
+        cands.push((d, 0, p.remote_ref.clone(), sha.to_string()));
+    }
     for (name, sha) in heads {
         let prio = if upstream.as_deref() == Some(name) {
-            0
+            1
         } else if name == "main" {
-            2
+            3
         } else if name.starts_with("train/") && trains < MAX_TRAINS {
             trains += 1;
-            1
+            2
         } else {
             continue;
         };
         if git(&["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_none() {
             continue;
         }
-        let dist = git(&["rev-list", "--count", &format!("{sha}..{}", p.sha)]).and_then(|t| t.trim().parse().ok());
-        if let Some(d) = dist {
+        if let Some(d) = count(sha) {
             cands.push((d, prio, name.to_string(), sha.to_string()));
         }
     }
     cands.sort();
     let took = format!(
-        "counted {} live branch tip(s) of {remote} in {} ms",
+        "counted {} candidate tip(s) of {remote} in {} ms",
         cands.len(),
         started.elapsed().as_millis()
     );
     match cands.first() {
-        Some((0, _, name, _)) => fall(format!(
-            "every pushed commit is already on {remote}'s {name} but no evidence for it was found ({took})"
-        )),
+        Some((0, _, name, _)) => (
+            fallback.to_string(),
+            format!(
+                "every pushed commit is already on {remote}'s {name} but no evidence for it was found ({took}); measuring from {fallback}"
+            ),
+        ),
+        Some((dist, 0, _, sha)) => old_why(sha, &format!("it leaves the fewest new commits, {dist} ({took})")),
         Some((dist, prio, name, sha)) => (
             sha.clone(),
             format!(
                 "{remote}'s {name} (read live with git ls-remote) leaves the fewest new commits, {dist}{}; {took}",
-                if *prio == 0 { " (its tracking upstream)" } else { "" }
+                if *prio == 1 { " (its tracking upstream)" } else { "" }
             ),
         ),
         None => fall(format!(
