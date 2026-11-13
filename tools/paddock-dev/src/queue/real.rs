@@ -307,6 +307,12 @@ impl GitTrain {
         self.run_in(None, Child::Local, args)
     }
 
+    /// One git command in the clone as `kind` (`Authed` for a fetch or push that needs the token): whether it succeeded and its
+    /// output (the token redacted). The trial merge of `./dev ci dispatch --trial` reads and pushes through it.
+    pub fn run_git(&self, kind: Child, args: &[&str]) -> Result<(bool, String), String> {
+        self.run_in(None, kind, args).map(|(ok, out)| (ok, self.redact(&out)))
+    }
+
     fn ok(&self, args: &[&str]) -> Result<String, String> {
         let (ok, out) = self.git(args)?;
         if ok {

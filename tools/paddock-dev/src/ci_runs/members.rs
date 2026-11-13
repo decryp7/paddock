@@ -1,4 +1,3 @@
-// ci-runs-reader: ci triage --members: which member of a hand-built train a red run blames
 //! `ci triage <run> --members <train-base>` (ADR 0098 WP-1): the read-only blame the merge queue computes, for a train built by
 //! hand. The members are the first-parent merges between the train's base and the commit the run tested; each member's reach is
 //! the planner's answer for its own diff (`merge^1..merge`) and the files it changes. The rule is

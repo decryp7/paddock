@@ -26,6 +26,7 @@ mod testutil;
 pub mod time;
 pub mod timings;
 pub mod triage;
+pub mod trial;
 pub mod verdict;
 
 use crate::wait::CurlHttp;
@@ -74,8 +75,17 @@ pub struct DispatchArgs {
     /// The workflow file in `.gitea/workflows` (`dyno-release.yml`).
     workflow: String,
     /// The branch or tag to run it on.
-    #[arg(long = "ref", value_name = "REF")]
-    git_ref: String,
+    #[arg(long = "ref", value_name = "REF", required_unless_present = "trial", conflicts_with = "trial")]
+    git_ref: Option<String>,
+    /// The trial before approval (ADR 0098 WP-4): merge this branch's head onto the open train (origin/main when none is open) in
+    /// the tool's own clone, report a conflict or a merge-check finding instead of dispatching, push `trial/<branch>` and
+    /// dispatch it with `base` = the target's sha. The branch's one CI run (rule 50 (a)); the scratch clone lives in
+    /// PADDOCK_TRIAL_DIR (default: a `paddock-trial` folder in the temp folder). Needs GITEA_TOKEN with write access.
+    #[arg(long, value_name = "BRANCH")]
+    trial: Option<String>,
+    /// With --trial: merge onto this ref (for example `origin/train/2026-11-13-8`) instead of the open train.
+    #[arg(long, value_name = "REF", requires = "trial")]
+    onto: Option<String>,
     /// A workflow input, `key=value` (repeat for more).
     #[arg(long = "input", value_name = "KEY=VALUE")]
     inputs: Vec<String>,
@@ -401,7 +411,14 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let hint = "Run `./dev ci dispatch --help`.";
     let token =
         token_from(std::env::var("GITEA_TOKEN").ok()).map_err(|e| e.with_hint("The dispatch needs a token that can write Actions."))?;
-    let req = dispatch::parse_request(&a.workflow, &a.git_ref, &a.inputs, &a.max, a.interval.as_deref())
+    let mut inputs = a.inputs.clone();
+    let mut git_ref = a.git_ref.clone().unwrap_or_default();
+    if let Some(branch) = &a.trial {
+        let (trial_ref, base) = trial_merge(a, branch, &token)?;
+        git_ref = trial_ref;
+        inputs.push(format!("base={base}"));
+    }
+    let req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
     let root = a
         .root
@@ -437,6 +454,61 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         Err(e) => {
             eprintln!("::error::dispatch: {e}");
             Err(CliError::failure(e).with_hint("Check the workflow name, GITEA_TOKEN's scope and the network."))
+        }
+    }
+}
+
+/// The trial merge of `--trial`: the ref to dispatch and the `base` input. A conflict or a merge-check finding is a failure with
+/// its `::error::` line and nothing is pushed.
+fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(String, String), CliError> {
+    use crate::queue::real::GitTrain;
+    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("paddock-trial"));
+    let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
+    let fail = |why: String| {
+        eprintln!("::error::trial: {why}");
+        CliError::failure(why).with_hint("Check the branch name, GITEA_TOKEN's write scope and the network.")
+    };
+    let g = GitTrain::open(&url, &scratch, Some(token.to_string()), true, false).map_err(&fail)?;
+    let check = |root: &std::path::Path, head: &str| {
+        crate::merge_check::command(&crate::merge_check::Request {
+            root: Some(root.to_path_buf()),
+            commit: Some(head.to_string()),
+            branch: None,
+            target: None,
+            // The trial runs no code of the branch: generator checks and the member gate need a checkout.
+            generators: false,
+            gates: false,
+        })
+        .map(|_| ())
+        .map_err(|e| e.message)
+    };
+    match trial::prepare(&g, branch, a.onto.as_deref(), &check).map_err(&fail)? {
+        trial::Outcome::Ready {
+            trial_ref,
+            target,
+            target_sha,
+            head,
+        } => {
+            eprintln!(
+                "trial: {branch} merged onto {target} ({}) as {}; pushed {trial_ref}",
+                &target_sha[..target_sha.len().min(9)],
+                &head[..head.len().min(9)]
+            );
+            Ok((trial_ref, target_sha))
+        }
+        trial::Outcome::Conflict { target, files } => {
+            let why = format!(
+                "{branch} conflicts with {target} in {} file(s): {}. Next step: send the branch back to its author to merge {target} and resolve them; nothing was dispatched",
+                files.len(),
+                files.join(", ")
+            );
+            Err(CliError::new(Exit::Findings, format!("::error::trial: {why}")))
+        }
+        trial::Outcome::Findings(text) => {
+            eprintln!("::error::trial: the merge check found something in {branch} merged onto the train; nothing was dispatched");
+            Err(CliError::new(Exit::Findings, text))
         }
     }
 }
