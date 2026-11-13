@@ -237,6 +237,7 @@ mod tests {
     #[test]
     fn a_test_binary_in_deps_finds_the_one_cargo_built_beside_it() {
         let t = tempfile::tempdir().unwrap();
+        // conformance: layout-guess — the old layout's `deps` folder is the input under test; `binary_in` reads both layouts
         let deps = t.path().join("deps");
         std::fs::create_dir(&deps).unwrap();
         assert_eq!(binary_in(&deps, true), t.path().join(binary_name()));
@@ -259,6 +260,7 @@ mod tests {
     #[test]
     fn a_release_build_never_looks_in_the_profile_folder_above_its_own() {
         let t = tempfile::tempdir().unwrap();
+        // conformance: layout-guess — the old layout's `deps` folder is the input under test; `binary_in` reads both layouts
         for dir in [t.path().join("deps"), t.path().join("build").join("p").join("0123abcd").join("out")] {
             std::fs::create_dir_all(&dir).unwrap();
             assert_eq!(binary_in(&dir, false), dir.join(binary_name()));

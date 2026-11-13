@@ -1,5 +1,5 @@
 //! `./dev check run`: the host of Paddock's repository checks in Rust (RT-5, ADR 0022's conformance rules engine). It runs the
-//! checks ported so far ([`c39`], [`c53`]) over a tree, with
+//! checks ported so far ([`c39`], [`c53`], [`c120`]) over a tree, with
 //!
 //! - findings and a report JSON in the shape of `conformance/src/report.mjs`'s result (`app`, `checks`, `findings`, `waived`,
 //!   `errors`, `warnings`), so the conformance job can merge or diff the two hosts, plus `runs`, the run records;
@@ -14,6 +14,7 @@
 
 pub mod baseline;
 pub mod c119;
+pub mod c120;
 pub mod c39;
 pub mod c53;
 pub mod c53_liveness;
@@ -107,7 +108,7 @@ pub trait Check {
 
 /// The checks the host has, in the order of `conformance/src/checks/index.mjs`.
 pub fn registry() -> Vec<Box<dyn Check>> {
-    vec![Box::new(c39::C39), Box::new(c53::C53), Box::new(c119::C119)]
+    vec![Box::new(c39::C39), Box::new(c53::C53), Box::new(c119::C119), Box::new(c120::C120)]
 }
 
 /// The inputs of a run.
@@ -330,6 +331,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         })
         .collect();
     let mut runs = Vec::new();
+    let mut inline_waived: Vec<Waived> = Vec::new();
     for check in &selected {
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)));
         let control = control_holds(check.as_ref());
@@ -349,7 +351,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
             os: RunRecord::this_os(),
             matched: Vec::new(),
         };
-        let mut found = match attempt {
+        let found = match attempt {
             Ok(out) => {
                 record.completed = out.completed;
                 record.precondition = out.precondition;
@@ -361,6 +363,16 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
                 Vec::new()
             }
         };
+        // A finding waived by a comment at its site is waived, not found (the JavaScript runner does the same).
+        let (inline, mut found): (Vec<Finding>, Vec<Finding>) = found.into_iter().partition(|f| f.inline_waiver.is_some());
+        inline_waived.extend(inline.into_iter().map(|f| {
+            let reason = f.inline_waiver.clone().unwrap_or_default();
+            Waived {
+                finding: f,
+                reason,
+                expires: "inline".into(),
+            }
+        }));
         record.matched = found
             .iter()
             .filter(|f| !f.file.is_empty())
@@ -398,7 +410,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
                 .iter()
                 .any(|f| waivers::path_matches(w.path.as_deref().unwrap_or_default(), f))
     };
-    let (kept, waived) = waivers::apply(waivers::Applying {
+    let (kept, mut waived) = waivers::apply(waivers::Applying {
         findings,
         waivers: &parsed,
         problems: &problems,
@@ -406,6 +418,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         checks_run: &checks_run,
         skip_unused: &skip_unused,
     });
+    waived.extend(inline_waived);
     for e in &mut runs {
         e.kept = kept.iter().filter(|f| f.check == e.record.check).count();
     }

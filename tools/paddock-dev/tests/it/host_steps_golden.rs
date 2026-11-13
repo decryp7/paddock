@@ -5,6 +5,7 @@
 //! unit tests of `ci_host` with an injected link maker and by the Windows jobs themselves.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+// conformance: file-layout-guess — the prune code never names `deps`; its tests use it only as filler data for a build folder to prune
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
