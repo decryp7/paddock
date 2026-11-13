@@ -11,8 +11,8 @@
 - Trimmed 2026-11-11 (user, comparable-practice review): TRIM: keep WP-0, WP-1 (`Outcome`, `Verdict`, exit codes 6 and 7), WP-2 (`Measured`, `require_tool`) with fail-closed on release runs, the WP-3 ban on silent skips as a grep check, WP-5 step 1 and its test-body sites, WP-6; dropped the per-tag-workflow wiring, the runner-log reader, the C103 syn pass and the tooling copies.
 - Amended 2026-11-13 (user approved the mechanism): **a pass carries its evidence**; one gate outcome for every gate
   (pre-push, both conformance hosts, `./dev ci verdict`, `./dev merge check --gates`, and merge check's own and hakari steps, the generators and paddock-bench). This
-  brings back, for these sites only, part of the "tooling copies" the 2026-11-11 trim dropped. See "Amendment 2026-11-13" at the end; its scope
-  (A1, over the 1.5-day budget) and three smaller choices (A2 to A4) wait for the user.
+  brings back, for these sites only, part of the "tooling copies" the 2026-11-11 trim dropped. See "Amendment 2026-11-13" at the end. **Accepted 2026-11-13 (user):** A1 (a) complete, 4.0 days;
+  A2 (a) exit 6; A3 (a) reason only; A4 (a) known-commit exits 0, named, refused for another tree.
 - Date: 2026-11-10
 - Related: ER-21 / rule 40, ER-22 / rules 42 and 55 (share first; one implementation per mechanism,
   `docs/known-copies.toml`), ER-12 (no silent skips), ER-27, ER-31, ER-33 / rule 71; ADR 0022 and its 2026-10-31
@@ -626,8 +626,11 @@ amd64 emulation; that the runners use the same digest is **unverified**).
 
 ## Amendment 2026-11-13: a pass carries its evidence (one gate outcome for every gate)
 
-Drafted at the coordinator's request of 2026-11-13 (ER-21); the user approved the mechanism the same day. Scope and the
-choices below still need the user (A1 to A4).
+Drafted at the coordinator's request of 2026-11-13 (ER-21); the user approved the mechanism the same day.
+**Status: Accepted 2026-11-13 (user)**, all as recommended: A1 (a) complete, 4.0 agent-days (2.5 over the 1.5-day budget,
+approved with both costs shown, ER-37); A2 (a) environment not ready is `NotMeasured`, exit 6; A3 (a) `NotApplicable`
+keeps a reason only; A4 (a) `known-commit` exits 0, is named in JSON and text, and is refused by consumers that ask
+about another tree.
 
 **Evidence heads** (ADR 0091; read 2026-11-13 after `git fetch`, re-read before commit): `origin/main` `3a342cb42`,
 `origin/fix/pre-push-known-commit` `90f1344de`, `origin/feat/adr-0098-member-gates` `8d84fc101` (re-read before commit; `ef8282a62` when first read, only a check renumbering between them), and the **local-only**
