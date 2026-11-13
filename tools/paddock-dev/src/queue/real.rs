@@ -183,7 +183,12 @@ pub struct GitTrain {
     pub merge_check: MergeCheckFn,
     /// The planner; [`run_planner`] outside the tests.
     pub planner: PlannerFn,
+    /// The longest one git command may run: new, not raised (the calls had no bound); it only ends a hang.
+    pub timeout: Duration,
 }
+
+/// [`GitTrain::timeout`] by default: a clone or fetch of this repository over the network takes seconds to a few minutes.
+pub const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 
 impl GitTrain {
     /// The queue's clone of `url` under `scratch` (made once, then fetched into), and a worktree of `main` beside it for the
@@ -200,6 +205,7 @@ impl GitTrain {
             scratch: scratch.to_path_buf(),
             merge_check: crate::merge_check::command,
             planner: run_planner,
+            timeout: GIT_TIMEOUT,
         };
         if !g.root.join(".git").exists() {
             let kind = if authed_fetch { Child::Authed } else { Child::Local };
@@ -229,6 +235,7 @@ impl GitTrain {
             allow_file: true,
             merge_check: crate::merge_check::command,
             planner: run_planner,
+            timeout: GIT_TIMEOUT,
         }
     }
 
@@ -291,16 +298,23 @@ impl GitTrain {
         if kind == Child::Authed {
             self.ensure_askpass()?;
         }
-        let out = self
-            .command(dir, kind)
-            .args(args)
-            .output()
-            .map_err(|e| format!("cannot start git: {e}"))?;
-        let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
-        if !out.status.success() {
-            text.push_str(&String::from_utf8_lossy(&out.stderr));
+        let mut cmd = self.command(dir, kind);
+        cmd.args(args);
+        // Bounded (ER-32): a fetch or push that never answers ends the git tree and says so, instead of holding the tool.
+        let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(self.timeout)).map_err(|e| format!("cannot run git: {e}"))?;
+        if !matches!(out.outcome, paddock_proc::Outcome::Exited(_)) {
+            return Err(format!(
+                "git {} ended before it answered (limit {}): {}",
+                args.first().unwrap_or(&""),
+                crate::wait::fmt_duration(self.timeout),
+                self.redact(out.stderr_text().trim())
+            ));
         }
-        Ok((out.status.success(), text))
+        let mut text = out.stdout_text();
+        if !out.success() {
+            text.push_str(&out.stderr_text());
+        }
+        Ok((out.success(), text))
     }
 
     fn git(&self, args: &[&str]) -> Result<(bool, String), String> {

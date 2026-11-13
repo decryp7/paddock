@@ -411,24 +411,45 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let hint = "Run `./dev ci dispatch --help`.";
     let token =
         token_from(std::env::var("GITEA_TOKEN").ok()).map_err(|e| e.with_hint("The dispatch needs a token that can write Actions."))?;
-    let mut inputs = a.inputs.clone();
-    let mut git_ref = a.git_ref.clone().unwrap_or_default();
-    if let Some(branch) = &a.trial {
-        let (trial_ref, base) = trial_merge(a, branch, &token)?;
-        git_ref = trial_ref;
-        inputs.push(format!("base={base}"));
-    }
-    let req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
-        .map_err(|e| CliError::usage(e).with_hint(hint))?;
     let root = a
         .root
         .clone()
         .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
         .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
     let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+    let mut inputs = a.inputs.clone();
+    let mut git_ref = a.git_ref.clone().unwrap_or_default();
+    let mut trial = None;
+    if let Some(branch) = &a.trial {
+        // Everything that can be refused is refused before `trial/<branch>` is pushed: the branch name, the inputs, --max and
+        // --interval (parsed with a stand-in ref and base), and the workflow (readable, its runner classes known).
+        if !trial::valid_branch(branch) {
+            return Err(CliError::usage(format!(
+                "`{branch}` is not a branch name --trial accepts (letters, digits, . _ - and /)."
+            ))
+            .with_hint(hint));
+        }
+        let mut probe_inputs = inputs.clone();
+        probe_inputs.push(format!("base={}", "0".repeat(40)));
+        dispatch::parse_request(
+            &a.workflow,
+            &format!("trial/{branch}"),
+            &probe_inputs,
+            &a.max,
+            a.interval.as_deref(),
+        )
+        .map_err(|e| CliError::usage(e).with_hint(hint))?;
+        dispatch::classes_of(&a.workflow, &read).map_err(|e| CliError::usage(e).with_hint("Check the workflow name and --root."))?;
+        let (g, trial_ref, base) = trial_merge(a, branch, &token)?;
+        git_ref = trial_ref.clone();
+        inputs.push(format!("base={base}"));
+        trial = Some((g, trial_ref));
+    }
+    let req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
+        .map_err(|e| CliError::usage(e).with_hint(hint))?;
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
-    match dispatch::run(
+    let result = dispatch::run(
         &mut http,
         &dispatch::Target {
             server: &a.server,
@@ -439,7 +460,15 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         &read,
         &mut clock,
         &mut std::io::stderr(),
-    ) {
+    );
+    // A trial that was not dispatched leaves no `trial/<branch>` behind (best effort; `ci trial-prune` catches the rest).
+    if let Some((g, trial_ref)) = &trial
+        && !matches!(result, Ok(dispatch::Dispatched::Yes { .. }))
+        && let Err(e) = trial::delete(g, trial_ref)
+    {
+        eprintln!("::warning::trial: {trial_ref} could not be deleted after the dispatch failed ({e}); run `./dev ci trial-prune`");
+    }
+    match result {
         Ok(dispatch::Dispatched::Yes { waited }) => Ok(Report::new(
             serde_json::json!({"dispatched": true, "waitedMs": waited.as_millis() as u64}),
             format!(
@@ -460,7 +489,7 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
 
 /// The trial merge of `--trial`: the ref to dispatch and the `base` input. A conflict or a merge-check finding is a failure with
 /// its `::error::` line and nothing is pushed.
-fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(String, String), CliError> {
+fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(crate::queue::real::GitTrain, String, String), CliError> {
     use crate::queue::real::GitTrain;
     let scratch = std::env::var_os("PADDOCK_TRIAL_DIR").map(PathBuf::from).ok_or_else(|| {
         CliError::usage("PADDOCK_TRIAL_DIR is not set.")
@@ -497,7 +526,7 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(String, S
                 &target_sha[..target_sha.len().min(9)],
                 &head[..head.len().min(9)]
             );
-            Ok((trial_ref, target_sha))
+            Ok((g, trial_ref, target_sha))
         }
         trial::Outcome::Conflict { target, files } => {
             let why = format!(
@@ -512,6 +541,56 @@ fn trial_merge(a: &DispatchArgs, branch: &str, token: &str) -> Result<(String, S
             Err(CliError::new(Exit::Findings, text))
         }
     }
+}
+
+/// The exit of `ci triage --members`: a blame that could not read the members (a plan, a merge) is NOT MEASURED (exit 6), whatever the
+/// failures said; it never leaves the run's own answer standing as if it were the blame's.
+fn members_exit(current: Exit, blame_read: bool) -> Exit {
+    if blame_read { current } else { Exit::NotMeasured }
+}
+
+/// Arguments of `ci trial-prune`.
+#[derive(Args)]
+pub struct TrialPruneArgs {
+    /// List the stale trial refs; delete nothing.
+    #[arg(long)]
+    dry_run: bool,
+    /// The repository.
+    #[arg(long, default_value = "decryp7/paddock")]
+    repo: String,
+    /// The Gitea server.
+    #[arg(long, default_value = SERVER)]
+    server: String,
+}
+
+/// `ci trial-prune`: deletes the `trial/*` refs (ADR 0098 WP-4) of branches that are gone or landed on main. Needs GITEA_TOKEN with
+/// write access and PADDOCK_TRIAL_DIR (the trial's scratch clone).
+pub fn trial_prune(a: &TrialPruneArgs) -> Result<Report, CliError> {
+    use crate::queue::real::GitTrain;
+    let token = token()?;
+    let scratch = std::env::var_os("PADDOCK_TRIAL_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| CliError::usage("PADDOCK_TRIAL_DIR is not set.").with_hint("Set it to the folder of the trial's scratch clone."))?;
+    let url = format!("{}/{}.git", a.server.trim_end_matches('/'), a.repo);
+    let fail = |why: String| {
+        CliError::failure(format!("::error::trial-prune: {why}")).with_hint("Check GITEA_TOKEN's write scope and the network.")
+    };
+    let g = GitTrain::open(&url, &scratch, Some(token), true, false).map_err(fail)?;
+    let stale = trial::prune(&g, a.dry_run).map_err(fail)?;
+    let lines: Vec<String> = stale.iter().map(|s| format!("{} ({})", s.trial_ref, s.why)).collect();
+    Ok(Report::new(
+        serde_json::json!({"deleted": !a.dry_run, "refs": stale.iter().map(|s| &s.trial_ref).collect::<Vec<_>>()}),
+        if lines.is_empty() {
+            "no stale trial refs".to_string()
+        } else {
+            format!(
+                "{} {} stale trial ref(s):\n{}",
+                if a.dry_run { "would delete" } else { "deleted" },
+                lines.len(),
+                lines.join("\n")
+            )
+        },
+    ))
 }
 
 /// `ci triage`: read-only; it quarantines nothing and marks nothing green (ER-12).
@@ -554,7 +633,7 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
                     report.head.chars().take(9).collect::<String>()
                 ));
                 data["members"] = serde_json::json!({"error": why});
-                exit = Exit::Findings;
+                exit = members_exit(exit, false);
             }
         }
     }
@@ -714,5 +793,13 @@ mod tests {
         for flag in ["--repos", "--limit", "--no-logs", "--cache", "--out", "--json-file", "--base"] {
             assert!(out.contains(flag), "{flag} missing in {out}");
         }
+    }
+
+    #[test]
+    fn a_blame_that_could_not_read_the_members_is_not_measured_whatever_the_run_said() {
+        assert_eq!(members_exit(Exit::Ok, false), Exit::NotMeasured);
+        assert_eq!(members_exit(Exit::Findings, false), Exit::NotMeasured);
+        assert_eq!(members_exit(Exit::Findings, true), Exit::Findings);
+        assert_eq!(members_exit(Exit::Ok, true), Exit::Ok);
     }
 }

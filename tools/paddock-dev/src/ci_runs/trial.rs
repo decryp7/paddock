@@ -137,6 +137,8 @@ pub fn prepare(
         if files.is_empty() {
             return Err(format!("git merge-tree failed: {}", out.trim()));
         }
+        // A branch that is sent back keeps no trial ref from an earlier, cleaner trial.
+        delete(g, &format!("trial/{branch}"))?;
         return Ok(Outcome::Conflict { target, files });
     }
     let tree = out.lines().next().unwrap_or("").trim().to_string();
@@ -152,6 +154,7 @@ pub fn prepare(
     .trim()
     .to_string();
     if let Err(findings) = check(&g.root, &head) {
+        delete(g, &format!("trial/{branch}"))?;
         return Ok(Outcome::Findings(findings));
     }
     let trial_ref = format!("trial/{branch}");
@@ -167,6 +170,97 @@ pub fn prepare(
         target_sha,
         head,
     })
+}
+
+/// Whether `trial/<branch>` exists on origin.
+fn trial_exists(g: &GitTrain, trial_ref: &str) -> Result<bool, String> {
+    let out = git(
+        g,
+        Child::Authed,
+        &["ls-remote", "--heads", "origin", &format!("refs/heads/{trial_ref}")],
+    )?;
+    Ok(!out.trim().is_empty())
+}
+
+/// Deletes `trial_ref` on origin when it is there (a trial that was sent back or never dispatched leaves nothing behind).
+pub fn delete(g: &GitTrain, trial_ref: &str) -> Result<bool, String> {
+    if !trial_ref.starts_with("trial/") || !trial_exists(g, trial_ref)? {
+        return Ok(false);
+    }
+    git(
+        g,
+        Child::Authed,
+        &["push", "--quiet", "origin", "--delete", &format!("refs/heads/{trial_ref}")],
+    )?;
+    Ok(true)
+}
+
+/// A `trial/*` ref that is no longer needed, and why.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Stale {
+    /// The ref on origin (`trial/feat/a`).
+    pub trial_ref: String,
+    /// Why it can go.
+    pub why: String,
+}
+
+/// The trial refs of branches that are gone or whose trialed head is on main now (landed). `dry` lists them without deleting.
+pub fn prune(g: &GitTrain, dry: bool) -> Result<Vec<Stale>, String> {
+    git(
+        g,
+        Child::Authed,
+        &[
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "origin",
+            "+refs/heads/main:refs/remotes/origin/main",
+            "+refs/heads/trial/*:refs/remotes/origin/trial/*",
+        ],
+    )?;
+    let heads = git(g, Child::Authed, &["ls-remote", "--heads", "origin"])?;
+    let branches: std::collections::BTreeSet<&str> = heads
+        .lines()
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .filter_map(|r| r.strip_prefix("refs/heads/"))
+        .collect();
+    let listed = git(
+        g,
+        Child::Local,
+        &["for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/trial/"],
+    )?;
+    let mut stale = Vec::new();
+    for short in listed.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        let Some(trial_ref) = short.strip_prefix("origin/") else { continue };
+        let branch = trial_ref.trim_start_matches("trial/");
+        if !branches.contains(branch) {
+            stale.push(Stale {
+                trial_ref: trial_ref.to_string(),
+                why: format!("branch {branch} is gone"),
+            });
+            continue;
+        }
+        // The head the trial merged is its second parent: on main, the branch landed.
+        let (landed, _) = g.run_git(Child::Local, &["merge-base", "--is-ancestor", &format!("{short}^2"), "origin/main"])?;
+        if landed {
+            stale.push(Stale {
+                trial_ref: trial_ref.to_string(),
+                why: format!("branch {branch} landed on main"),
+            });
+        }
+    }
+    if !dry && !stale.is_empty() {
+        let mut args = vec![
+            "push".to_string(),
+            "--quiet".to_string(),
+            "origin".to_string(),
+            "--delete".to_string(),
+        ];
+        args.extend(stale.iter().map(|s| format!("refs/heads/{}", s.trial_ref)));
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        git(g, Child::Authed, &refs)?;
+    }
+    Ok(stale)
 }
 
 #[cfg(test)]
@@ -336,5 +430,60 @@ mod tests {
             assert!(!valid_branch(bad), "{bad:?}");
         }
         assert!(valid_branch("feat/adr-0098-member-gates") && valid_branch("fix/x.y_z"));
+    }
+
+    #[test]
+    fn prune_deletes_the_trial_refs_of_gone_and_landed_branches_and_keeps_live_ones() {
+        let w = world();
+        for b in ["feat/live", "feat/gone", "feat/landed"] {
+            commit(&w, b, &format!("{}.txt", b.replace('/', "_")), b, "main");
+        }
+        let g = open(&w);
+        for b in ["feat/live", "feat/gone", "feat/landed"] {
+            assert!(matches!(prepare(&g, b, None, &ok).unwrap(), Outcome::Ready { .. }));
+        }
+        // landed: the branch head reaches main; gone: the branch is deleted.
+        git_in(&w.work, &["checkout", "-q", "main"]);
+        git_in(&w.work, &["merge", "-q", "--ff-only", "feat/landed"]);
+        git_in(&w.work, &["push", "-q", "origin", "main"]);
+        git_in(&w.work, &["push", "-q", "origin", "--delete", "feat/gone"]);
+        let dry = prune(&g, true).unwrap();
+        assert_eq!(
+            dry.iter().map(|s| s.trial_ref.as_str()).collect::<Vec<_>>(),
+            ["trial/feat/gone", "trial/feat/landed"]
+        );
+        assert!(
+            git_in(&w.origin, &["branch", "--list", "trial/*"]).contains("trial/feat/gone"),
+            "a dry run deletes nothing"
+        );
+        let done = prune(&g, false).unwrap();
+        assert_eq!(done.len(), 2);
+        let left = git_in(&w.origin, &["branch", "--list", "trial/*"]);
+        assert!(
+            left.contains("trial/feat/live") && !left.contains("gone") && !left.contains("landed"),
+            "{left}"
+        );
+    }
+
+    #[test]
+    fn a_branch_sent_back_for_a_conflict_loses_its_earlier_trial_ref() {
+        let w = world();
+        commit(&w, "feat/f", "f.txt", "f", "main");
+        let g = open(&w);
+        assert!(matches!(prepare(&g, "feat/f", None, &ok).unwrap(), Outcome::Ready { .. }));
+        commit(&w, "train/open", "shared.txt", "train\n", "train/open");
+        commit(&w, "feat/f", "shared.txt", "branch\n", "feat/f");
+        assert!(matches!(prepare(&g, "feat/f", None, &ok).unwrap(), Outcome::Conflict { .. }));
+        assert!(git_in(&w.origin, &["branch", "--list", "trial/*"]).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_git_command_that_never_answers_ends_at_the_bound_and_says_so() {
+        let w = world();
+        let mut g = open(&w);
+        g.timeout = std::time::Duration::from_secs(1);
+        let e = g.run_git(Child::Local, &["-c", "alias.slow=!sleep 30", "slow"]).unwrap_err();
+        assert!(e.contains("ended before it answered"), "{e}");
     }
 }

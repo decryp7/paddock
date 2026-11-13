@@ -10,9 +10,9 @@
 // Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (11c365fc4, 0308201b4)
 // have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows may read them:
 // its path (a folder, ending in `/`, or a file) goes in `conformance/c121-allow.json` with a reason.
-// Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
+// Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
 // The Rust host (`tools/paddock-dev/src/check/c121.rs`) is the rule's own implementation; this is its port, and
-// `tools/paddock-dev/tests/it/check_c121.rs` compares the two finding for finding.
+// `tools/paddock-dev/tests/it/check.rs` (the `c121` tests) compares the two finding for finding.
 import { unwaivable, warn } from '../finding.mjs';
 
 export const ALLOW = 'conformance/c121-allow.json';
@@ -68,7 +68,7 @@ const isAllowed = (allow, path) => allow.some((a) => (a.path.endsWith('/') ? pat
 export default {
   id: 'C121',
   scope: 'root',
-  mode: 'gate',
+  mode: 'report-only',
   title: 'Declared data is read through its accessor, not by searching a workflow\'s text',
   rule: 79,
   run(ctx) {

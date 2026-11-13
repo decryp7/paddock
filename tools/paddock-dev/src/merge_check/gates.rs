@@ -157,16 +157,29 @@ fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool) -> Ste
             ],
             &text,
         ),
+        Ok(GateRun { code: Some(5), text }) => step(
+            report(enforced, Exit::Findings),
+            "failed",
+            base,
+            vec![
+                text.clone(),
+                format!(
+                    "{level}::member gate FAILED: `check --pre-push --base {base}` exited 5; the merge of this member fails on the combined tree. Next step: take the member out (reset the train to {base} in your own worktree) and send it back to its author with the rows above; do not fix it on the train.{report_only}"
+                ),
+            ],
+            &text,
+        ),
+        // Any other exit (a broken check 7, a usage error 2, a crash) or a run ended by the bound: the gates did not give an answer.
         Ok(GateRun { code, text }) => {
             let how = code.map_or("was ended before it finished".to_string(), |c| format!("exited {c}"));
             step(
-                report(enforced, Exit::Findings),
-                "failed",
+                report(enforced, Exit::NotMeasured),
+                "not measured",
                 base,
                 vec![
                     text.clone(),
                     format!(
-                        "{level}::member gate FAILED: `check --pre-push --base {base}` {how}; the merge of this member fails on the combined tree. Next step: take the member out (reset the train to {base} in your own worktree) and send it back to its author with the rows above; do not fix it on the train.{report_only}"
+                        "{level}::member gate NOT MEASURED: `check --pre-push --base {base}` {how} without a verdict on the merge. Next step: run it yourself in this worktree and fix what it prints; a tool that failed is not a member that failed, and not a member that passed.{report_only}"
                     ),
                 ],
                 &text,
@@ -224,7 +237,14 @@ mod tests {
         assert!(s.text.join("\n").contains("NOT MEASURED"));
         assert_eq!(map(&run_of(Some(6)), true).exit, Exit::NotMeasured);
         assert_eq!(map(&Fake(Err("no tool".into())), true).exit, Exit::NotMeasured);
-        assert_eq!(map(&run_of(None), true).exit, Exit::Findings);
+        // Only exit 5 (findings) is a failed gate. A broken tool (7), a usage error (2), any other exit and a run ended by the bound
+        // or a signal did not look: a member is never sent back for the tool's own failure.
+        for code in [Some(7), Some(2), Some(1), Some(137), None] {
+            let s = map(&run_of(code), true);
+            assert_eq!(s.exit, Exit::NotMeasured, "{code:?}");
+            assert!(!s.text.join("\n").contains("member gate FAILED"), "{code:?}");
+        }
+        assert_eq!(map(&run_of(Some(5)), true).exit, Exit::Findings);
     }
 
     /// The mapping without the checkout precondition.

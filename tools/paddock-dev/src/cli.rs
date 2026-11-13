@@ -285,6 +285,8 @@ enum CiCommand {
     /// Dispatch a workflow once no other run is on its single-machine runner (macOS, Windows): waits like `wait --ci-run`, at
     /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once.
     Dispatch(ci_runs::DispatchArgs),
+    /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).
+    TrialPrune(ci_runs::TrialPruneArgs),
 }
 
 #[derive(Subcommand)]
@@ -580,6 +582,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
+        Command::Ci {
+            command: CiCommand::TrialPrune(a),
+        } => ci_runs::trial_prune(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Load(a) => load::command(&a),
         Command::Brief { command } => brief_check::command(command),
