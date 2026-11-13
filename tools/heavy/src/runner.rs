@@ -21,6 +21,10 @@ pub struct RunOpts {
     pub gate: bool,
     /// Run the command at lower priority.
     pub low: bool,
+    /// Give up with [`exit::QUEUE_LIMIT`] when no slot was taken (queue and load gate included) within this long.
+    pub queue_max: Option<Duration>,
+    /// End the command with [`exit::RUN_LIMIT`] once it has run this long (queue time is not counted).
+    pub run_max: Option<Duration>,
 }
 
 /// A stop request (SIGINT/SIGTERM): the exit code to leave with, or None.
@@ -93,8 +97,34 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
             return exit::LOCK_NOT_TAKEN;
         }
     };
-    let t_queue = Instant::now();
+    let q0 = h.clock.now_micros();
+    let queued_secs = || h.clock.now_micros().saturating_sub(q0) as f64 / 1_000_000.0;
+    let timing = |q: f64, r: f64| (h.say)(&format!("{name} timing queued {q:.1} s, ran {r:.1} s"));
+    let over_queue_limit = || opts.queue_max.is_some_and(|m| queued_secs() >= m.as_secs_f64());
+    let queue_limit = |what: &str| {
+        let (q, max) = (queued_secs(), opts.queue_max.map_or(0.0, |m| m.as_secs_f64()));
+        let msg = format!("{name} queue limit: no slot {what} within {max:.0} s, so the command never ran");
+        (h.say)(&msg);
+        h.alog(&msg);
+        timing(q, 0.0);
+        h.log.event(
+            crate::log::Level::Error,
+            "heavy.run",
+            &msg,
+            &[("QueuedSeconds", json!(q)), ("QueueMaxSeconds", json!(max))],
+        );
+        ci_error(
+            h,
+            exit::QUEUE_LIMIT,
+            &format!("no heavy slot within the queue limit of {max:.0} s (queued {q:.1} s); the command never ran"),
+            "the machine is busy with other agents' heavy steps: re-run when `heavy status` shows it free; this is not a pass",
+        );
+        exit::QUEUE_LIMIT
+    };
     loop {
+        if over_queue_limit() {
+            return queue_limit("taken");
+        }
         if let Some(code) = stop() {
             h.log
                 .warn("heavy.run", "stopped while waiting for the lock", &[("ExitCode", json!(code))]);
@@ -190,12 +220,18 @@ pub fn run(h: &Heavy, req: Request, args: &[String], opts: RunOpts, stop: Stop<'
             &[("Phase", json!("gate_wait")), ("DurationMs", json!(ms(t_gate)))],
         );
     }
-    let _ = t_queue;
+    if over_queue_limit() {
+        // The slot came, but only after the limit (the load gate took the time): the limit is about waiting, not about running.
+        acq.release();
+        return queue_limit("taken before the load gate opened");
+    }
+    let queued = queued_secs();
 
     let t2 = h.now();
     let t_run = Instant::now();
     let (code, desc, tail) = exec(h, args, opts, stop, &mut acq);
     let ran = h.now().saturating_sub(t2);
+    timing(queued, t_run.elapsed().as_secs_f64());
     let t3 = h.now();
     h.log.info(
         "heavy.phase",
@@ -315,6 +351,8 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
     h.log.info("heavy.run", "command started", &[("ChildPid", json!(child.id()))]);
     let mut stopped: Option<i32> = None;
     let mut deadline: Option<Instant> = None;
+    let run_end = opts.run_max.map(|m| Instant::now() + m);
+    let mut over_run = false;
     let status = loop {
         match child.try_wait() {
             Ok(Some(s)) => break Some(s),
@@ -330,6 +368,19 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
                 "stop requested: ending the command and everything it started",
                 &[("ExitCode", json!(code))],
             );
+            if let Some(id) = id {
+                let _ = kill_tree(id);
+            }
+            deadline = Some(Instant::now() + Duration::from_secs(10));
+        }
+        if !over_run && stopped.is_none() && run_end.is_some_and(|e| Instant::now() >= e) {
+            over_run = true;
+            let msg = format!(
+                "run limit: the command ran {} s; ending it and everything it started",
+                opts.run_max.map_or(0, |m| m.as_secs())
+            );
+            (h.say)(&msg);
+            h.log.warn("heavy.run", &msg, &[]);
             if let Some(id) = id {
                 let _ = kill_tree(id);
             }
@@ -383,6 +434,10 @@ fn exec(h: &Heavy, args: &[String], opts: RunOpts, stop: Stop<'_>, acq: &mut Acq
         .filter(|t| !t.is_empty());
     if let Some(code) = stopped {
         return (code, "stopped by a signal to heavy".into(), tail_str);
+    }
+    if over_run {
+        let m = opts.run_max.map_or(0, |m| m.as_secs());
+        return (exit::RUN_LIMIT, format!("ended after the run limit of {m} s"), tail_str);
     }
     let Some(status) = status else {
         return (1, "could not wait for the command".into(), tail_str);

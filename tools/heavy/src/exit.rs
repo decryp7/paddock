@@ -8,6 +8,10 @@ pub const USAGE: i32 = 64;
 pub const LOCK_NOT_TAKEN: i32 = 75;
 /// Refused before anything ran (the home guard).
 pub const REFUSED: i32 = 78;
+/// No slot was taken within `--queue-max`: the command never ran.
+pub const QUEUE_LIMIT: i32 = 79;
+/// The command ran longer than `--run-max` and was ended.
+pub const RUN_LIMIT: i32 = 80;
 /// The command exists but cannot be run.
 pub const NOT_RUNNABLE: i32 = 126;
 /// The command was not found.

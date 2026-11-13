@@ -22,6 +22,10 @@ pub struct Config {
     pub gate_load: f64,
     /// Seconds between gate checks.
     pub gate_poll: Duration,
+    /// Priority is bounded: a priority marker older than this, or a waiter that has waited this long, no longer yields to it
+    /// (ADR 0102). Default 1800 s: twice the 15-minute run budget of the push gate that is the priority holder, so a healthy
+    /// priority run is always inside it and a hung one cannot hold everybody for good.
+    pub priority_max: Duration,
     /// Number of slots (1 = the plock-compatible single lock).
     pub slots: u32,
     /// The troubleshooting log file (None: the default under `root`).
@@ -85,6 +89,7 @@ impl Config {
         let gate_poll = secs(get, &["HEAVY_GATE_POLL", "PLOCK_GATE_POLL"], 20.0, 0.01, &mut w);
         // heavy.sh's HEAVY_SLOTS is often exported globally; the shell plock knows only one lock, so slots count only when
         // the folder is chosen explicitly with HEAVY_DIR (or --slots is given). Otherwise the variable is ignored, with a warning.
+        let priority_max = secs(get, &["HEAVY_PRIORITY_MAX"], 1800.0, 1.0, &mut w);
         let slots_var = first(get, &["HEAVY_SLOTS"]);
         if slots_var.is_some() && first(get, &["HEAVY_DIR"]).is_none() {
             w.push(
@@ -109,6 +114,7 @@ impl Config {
             unreadable_limit: unreadable as u64,
             gate_load,
             gate_poll: Duration::from_secs_f64(gate_poll),
+            priority_max: Duration::from_secs_f64(priority_max),
             slots,
             log_file: first(get, &["HEAVY_LOG_FILE"]).map(PathBuf::from),
             verbose: flag("HEAVY_VERBOSE"),
@@ -173,6 +179,17 @@ mod tests {
         let (c, w) = cfg(&[("HEAVY_POLL", "abc"), ("HEAVY_SLOTS", "0"), ("HEAVY_GATE_LOAD", "-1")]);
         assert_eq!((c.poll, c.slots, c.gate_load), (Duration::from_secs(5), 1, 30.0));
         assert_eq!(w.len(), 3);
+    }
+
+    #[test]
+    fn the_priority_bound_has_a_default_and_a_setting() {
+        let (c, w) = cfg(&[]);
+        assert_eq!(c.priority_max, Duration::from_secs(1800));
+        assert!(w.is_empty());
+        let (c, _) = cfg(&[("HEAVY_PRIORITY_MAX", "90")]);
+        assert_eq!(c.priority_max, Duration::from_secs(90));
+        let (c, w) = cfg(&[("HEAVY_PRIORITY_MAX", "x")]);
+        assert_eq!((c.priority_max, w.len()), (Duration::from_secs(1800), 1));
     }
 
     #[test]

@@ -148,6 +148,8 @@ fn real_main() -> i32 {
                 RunOpts {
                     gate: !r.no_gate,
                     low: r.low,
+                    queue_max: r.queue_max.map(std::time::Duration::from_secs_f64),
+                    run_max: r.run_max.map(std::time::Duration::from_secs_f64),
                 },
                 &stop,
             )
