@@ -450,7 +450,14 @@ fn an_inherited_git_dir_or_work_tree_does_not_move_the_wrapper_to_another_reposi
     // Another repository, named by the variables a hook would have set.
     let other = scratch.path().join("other");
     std::fs::create_dir_all(&other).unwrap();
-    assert!(TestCommand::new("git").args(["init", "-q"]).current_dir(&other).status().unwrap().success());
+    assert!(
+        TestCommand::new("git")
+            .args(["init", "-q"])
+            .current_dir(&other)
+            .status()
+            .unwrap()
+            .success()
+    );
     let mut hooked = env.to_vec();
     hooked.push(("GIT_DIR", other.join(".git").display().to_string()));
     hooked.push(("GIT_WORK_TREE", other.display().to_string()));
