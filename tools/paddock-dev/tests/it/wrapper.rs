@@ -638,6 +638,10 @@ fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::
 
 /// ER-26 (runs 8027, 8028, 8060): a toolchain whose install succeeded but whose cargo, clippy or rustfmt does not run is uninstalled
 /// and installed again, inside the install lock, and the job goes on.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
 #[cfg(unix)]
 #[test]
 fn a_half_installed_toolchain_is_uninstalled_and_installed_again_under_the_lock() {
