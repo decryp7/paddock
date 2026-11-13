@@ -435,6 +435,29 @@ fn cached_tool(path: &Path) {
     write_script(path, r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#);
 }
 
+/// A git hook runs its commands with `GIT_DIR` set (and a worktree's hooks may set `GIT_WORK_TREE`): the wrapper finds the repository
+/// from where it is, never from what it inherited, or it hashes another repository's inputs (or none) and builds the wrong tool.
+#[cfg(unix)]
+#[test]
+fn an_inherited_git_dir_or_work_tree_does_not_move_the_wrapper_to_another_repository() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let env = [("RUSTC", rustc.clone())];
+    let (hash, _) = f.both(&env);
+    let home = scratch.path().join("home");
+    cached_tool(&home.join("bin").join(&hash).join("paddock-dev-test-host"));
+    // Another repository, named by the variables a hook would have set.
+    let other = scratch.path().join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    assert!(TestCommand::new("git").args(["init", "-q"]).current_dir(&other).status().unwrap().success());
+    let mut hooked = env.to_vec();
+    hooked.push(("GIT_DIR", other.join(".git").display().to_string()));
+    hooked.push(("GIT_WORK_TREE", other.display().to_string()));
+    let (code, out, err) = run_wrapper(&f, &home, &hooked);
+    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
+}
+
 #[cfg(unix)]
 #[test]
 fn without_a_compiler_no_cached_binary_is_run_and_the_error_names_the_next_step() {

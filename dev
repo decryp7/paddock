@@ -16,6 +16,10 @@ set -eu
 restarted=${PADDOCK_DEV_RESTARTED:-}
 unset PADDOCK_DEV_RESTARTED
 
+# A git hook runs its commands with GIT_DIR (and GIT_WORK_TREE, GIT_INDEX_FILE) set; inherited, they make `--show-toplevel` answer the
+# folder the hook runs in, or name another repository. The repository is the one this folder is in, for the wrapper and the tool.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
+
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
 tool="$root/tools/paddock-dev"
 [ -f "$tool/inputs.txt" ] || {
