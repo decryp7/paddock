@@ -1,7 +1,7 @@
 # The commands CI ran before the gate executor (the `gates model` of ci.yml and app-gates at 11c365fc4, before CI-in-Rust WP-3):
 # `job` rows are every command of a root job, `app` rows the commands an app contract adds to its legs. The executor's contracts must
 # produce exactly these (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_ci_ran_before_the_executor`).
-# Two deliberate changes since then (WP-3 review): C119 joined the conformance list, and the setup-rust and sccache-stats actions' own lines are rows of the five jobs that now run it first (ui, e2e, tools, icons, eslint-preset).
+# Two deliberate changes since then (WP-3 review): C119 joined the conformance list, and the setup-rust and sccache-stats actions' own lines are rows of the five jobs that now run it first (ui, e2e, tools, icons, eslint-preset). Since train 9: the setup-rust action settles the image's pinned toolchain and stable (Rust 1.100, chore/rust-1-100) and prints the cargo build-dir layout opt-out on Windows (fix/spotter-win-cmdline-1-100).
 # kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
 app	dyno	macos-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	dyno	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app dyno --root apps/dyno --only C13 --paddock .
@@ -127,9 +127,11 @@ job	conformance			case "$RUNNER_OS-$(uname -m)" in
 job	conformance			case "$TOTAL" in ''
 job	conformance			case "local" in auto
 job	conformance			chmod +x "$DEST/$BIN.part.$$"
+job	conformance			continue
 job	conformance			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
 job	conformance			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
 job	conformance			dl=$(mktemp -d
+job	conformance			do
 job	conformance			echo "$DEST" >> "$GITHUB_PATH"
 job	conformance			echo "$kv"
 job	conformance			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
@@ -145,9 +147,10 @@ job	conformance			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the j
 job	conformance			echo "CARGO_INCREMENTAL=0"
 job	conformance			echo "RUSTC_WRAPPER=sccache"
 job	conformance			echo "Rust toolchain  (from rust-toolchain.toml)"
-job	conformance			echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	conformance			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
 job	conformance			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
 job	conformance			echo "SCCACHE_SERVER_PORT=$PORT"
+job	conformance			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	conformance			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	conformance			echo "sccache: local disk $DIR"
 job	conformance			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
@@ -161,9 +164,10 @@ job	conformance			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT
 job	conformance			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	conformance			for c in 
 job	conformance			for kv in "${SETTINGS[@]}"
+job	conformance			for name in "" stable
 job	conformance			for t in 
-job	conformance			have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}'
-job	conformance			installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true
+job	conformance			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	conformance			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	conformance			iso="conformance/ci/job-isolation.sh"
 job	conformance			kit="$(bash "conformance/ci/kit.sh" which)"
 job	conformance			local
@@ -185,12 +189,13 @@ job	conformance			rm -rf "$dl"
 job	conformance			rustc --version
 job	conformance			rustup default ""
 job	conformance			rustup toolchain install "" "${args[@]}" --no-self-update
+job	conformance			rustup toolchain list 2>/dev/null
 job	conformance			sccache --show-stats >/dev/null 2>&1
 job	conformance			sccache --start-server
 job	conformance			sccache --stop-server >/dev/null 2>&1
 job	conformance			sccache --version
 job	conformance			settle ""
-job	conformance			settle stable
+job	conformance			settle "$name"
 job	conformance			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	conformance			then
 job	conformance			unzip -q "$dl/$NAME.$EXT" -d "$dl"
@@ -251,9 +256,11 @@ job	crates			case "$RUNNER_OS-$(uname -m)" in
 job	crates			case "$TOTAL" in ''
 job	crates			case "local" in auto
 job	crates			chmod +x "$DEST/$BIN.part.$$"
+job	crates			continue
 job	crates			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
 job	crates			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
 job	crates			dl=$(mktemp -d
+job	crates			do
 job	crates			echo "$DEST" >> "$GITHUB_PATH"
 job	crates			echo "$kv"
 job	crates			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
@@ -269,9 +276,10 @@ job	crates			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	crates			echo "CARGO_INCREMENTAL=0"
 job	crates			echo "RUSTC_WRAPPER=sccache"
 job	crates			echo "Rust toolchain  (from rust-toolchain.toml)"
-job	crates			echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	crates			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
 job	crates			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
 job	crates			echo "SCCACHE_SERVER_PORT=$PORT"
+job	crates			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	crates			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	crates			echo "sccache: local disk $DIR"
 job	crates			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
@@ -285,9 +293,10 @@ job	crates			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" 
 job	crates			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	crates			for c in 
 job	crates			for kv in "${SETTINGS[@]}"
+job	crates			for name in "" stable
 job	crates			for t in 
-job	crates			have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}'
-job	crates			installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true
+job	crates			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	crates			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	crates			iso="conformance/ci/job-isolation.sh"
 job	crates			kit="$(bash "conformance/ci/kit.sh" which)"
 job	crates			local
@@ -307,12 +316,13 @@ job	crates			rm -rf "$dl"
 job	crates			rustc --version
 job	crates			rustup default ""
 job	crates			rustup toolchain install "" "${args[@]}" --no-self-update
+job	crates			rustup toolchain list 2>/dev/null
 job	crates			sccache --show-stats >/dev/null 2>&1
 job	crates			sccache --start-server
 job	crates			sccache --stop-server >/dev/null 2>&1
 job	crates			sccache --version
 job	crates			settle ""
-job	crates			settle stable
+job	crates			settle "$name"
 job	crates			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	crates			then
 job	crates			unzip -q "$dl/$NAME.$EXT" -d "$dl"
@@ -383,9 +393,11 @@ job	e2e			case "$RUNNER_OS-$(uname -m)" in
 job	e2e			case "$TOTAL" in ''
 job	e2e			case "local" in auto
 job	e2e			chmod +x "$DEST/$BIN.part.$$"
+job	e2e			continue
 job	e2e			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
 job	e2e			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
 job	e2e			dl=$(mktemp -d
+job	e2e			do
 job	e2e			echo "$DEST" >> "$GITHUB_PATH"
 job	e2e			echo "$kv"
 job	e2e			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
@@ -401,9 +413,10 @@ job	e2e			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	e2e			echo "CARGO_INCREMENTAL=0"
 job	e2e			echo "RUSTC_WRAPPER=sccache"
 job	e2e			echo "Rust toolchain  (from rust-toolchain.toml)"
-job	e2e			echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	e2e			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
 job	e2e			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
 job	e2e			echo "SCCACHE_SERVER_PORT=$PORT"
+job	e2e			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	e2e			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	e2e			echo "sccache: local disk $DIR"
 job	e2e			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
@@ -417,9 +430,10 @@ job	e2e			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCC
 job	e2e			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	e2e			for c in 
 job	e2e			for kv in "${SETTINGS[@]}"
+job	e2e			for name in "" stable
 job	e2e			for t in 
-job	e2e			have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}'
-job	e2e			installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true
+job	e2e			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	e2e			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	e2e			iso="conformance/ci/job-isolation.sh"
 job	e2e			kit="$(bash "conformance/ci/kit.sh" which)"
 job	e2e			local
@@ -440,12 +454,13 @@ job	e2e			rm -rf "$dl"
 job	e2e			rustc --version
 job	e2e			rustup default ""
 job	e2e			rustup toolchain install "" "${args[@]}" --no-self-update
+job	e2e			rustup toolchain list 2>/dev/null
 job	e2e			sccache --show-stats >/dev/null 2>&1
 job	e2e			sccache --start-server
 job	e2e			sccache --stop-server >/dev/null 2>&1
 job	e2e			sccache --version
 job	e2e			settle ""
-job	e2e			settle stable
+job	e2e			settle "$name"
 job	e2e			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	e2e			then
 job	e2e			unzip -q "$dl/$NAME.$EXT" -d "$dl"
@@ -508,9 +523,11 @@ job	eslint-preset			case "$RUNNER_OS-$(uname -m)" in
 job	eslint-preset			case "$TOTAL" in ''
 job	eslint-preset			case "local" in auto
 job	eslint-preset			chmod +x "$DEST/$BIN.part.$$"
+job	eslint-preset			continue
 job	eslint-preset			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
 job	eslint-preset			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
 job	eslint-preset			dl=$(mktemp -d
+job	eslint-preset			do
 job	eslint-preset			echo "$DEST" >> "$GITHUB_PATH"
 job	eslint-preset			echo "$kv"
 job	eslint-preset			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
@@ -526,9 +543,10 @@ job	eslint-preset			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the
 job	eslint-preset			echo "CARGO_INCREMENTAL=0"
 job	eslint-preset			echo "RUSTC_WRAPPER=sccache"
 job	eslint-preset			echo "Rust toolchain  (from rust-toolchain.toml)"
-job	eslint-preset			echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	eslint-preset			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
 job	eslint-preset			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
 job	eslint-preset			echo "SCCACHE_SERVER_PORT=$PORT"
+job	eslint-preset			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	eslint-preset			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	eslint-preset			echo "sccache: local disk $DIR"
 job	eslint-preset			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
@@ -542,9 +560,10 @@ job	eslint-preset			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOI
 job	eslint-preset			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	eslint-preset			for c in 
 job	eslint-preset			for kv in "${SETTINGS[@]}"
+job	eslint-preset			for name in "" stable
 job	eslint-preset			for t in 
-job	eslint-preset			have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}'
-job	eslint-preset			installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true
+job	eslint-preset			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	eslint-preset			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	eslint-preset			iso="conformance/ci/job-isolation.sh"
 job	eslint-preset			kit="$(bash "conformance/ci/kit.sh" which)"
 job	eslint-preset			local
@@ -565,12 +584,13 @@ job	eslint-preset			rm -rf "$dl"
 job	eslint-preset			rustc --version
 job	eslint-preset			rustup default ""
 job	eslint-preset			rustup toolchain install "" "${args[@]}" --no-self-update
+job	eslint-preset			rustup toolchain list 2>/dev/null
 job	eslint-preset			sccache --show-stats >/dev/null 2>&1
 job	eslint-preset			sccache --start-server
 job	eslint-preset			sccache --stop-server >/dev/null 2>&1
 job	eslint-preset			sccache --version
 job	eslint-preset			settle ""
-job	eslint-preset			settle stable
+job	eslint-preset			settle "$name"
 job	eslint-preset			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	eslint-preset			then
 job	eslint-preset			unzip -q "$dl/$NAME.$EXT" -d "$dl"
@@ -632,9 +652,11 @@ job	icons			case "$RUNNER_OS-$(uname -m)" in
 job	icons			case "$TOTAL" in ''
 job	icons			case "local" in auto
 job	icons			chmod +x "$DEST/$BIN.part.$$"
+job	icons			continue
 job	icons			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
 job	icons			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
 job	icons			dl=$(mktemp -d
+job	icons			do
 job	icons			echo "$DEST" >> "$GITHUB_PATH"
 job	icons			echo "$kv"
 job	icons			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
@@ -650,9 +672,10 @@ job	icons			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	icons			echo "CARGO_INCREMENTAL=0"
 job	icons			echo "RUSTC_WRAPPER=sccache"
 job	icons			echo "Rust toolchain  (from rust-toolchain.toml)"
-job	icons			echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	icons			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
 job	icons			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
 job	icons			echo "SCCACHE_SERVER_PORT=$PORT"
+job	icons			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	icons			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	icons			echo "sccache: local disk $DIR"
 job	icons			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
@@ -666,9 +689,10 @@ job	icons			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" S
 job	icons			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	icons			for c in 
 job	icons			for kv in "${SETTINGS[@]}"
+job	icons			for name in "" stable
 job	icons			for t in 
-job	icons			have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}'
-job	icons			installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true
+job	icons			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	icons			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	icons			iso="conformance/ci/job-isolation.sh"
 job	icons			kit="$(bash "conformance/ci/kit.sh" which)"
 job	icons			local
@@ -690,12 +714,13 @@ job	icons			rm -rf "$dl"
 job	icons			rustc --version
 job	icons			rustup default ""
 job	icons			rustup toolchain install "" "${args[@]}" --no-self-update
+job	icons			rustup toolchain list 2>/dev/null
 job	icons			sccache --show-stats >/dev/null 2>&1
 job	icons			sccache --start-server
 job	icons			sccache --stop-server >/dev/null 2>&1
 job	icons			sccache --version
 job	icons			settle ""
-job	icons			settle stable
+job	icons			settle "$name"
 job	icons			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	icons			then
 job	icons			unzip -q "$dl/$NAME.$EXT" -d "$dl"
@@ -757,9 +782,11 @@ job	tools			case "$RUNNER_OS-$(uname -m)" in
 job	tools			case "$TOTAL" in ''
 job	tools			case "local" in auto
 job	tools			chmod +x "$DEST/$BIN.part.$$"
+job	tools			continue
 job	tools			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
 job	tools			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
 job	tools			dl=$(mktemp -d
+job	tools			do
 job	tools			dpkg-deb -x "$RUNNER_TEMP/drawio.deb" "$RUNNER_TEMP/drawio"
 job	tools			echo "$DEST" >> "$GITHUB_PATH"
 job	tools			echo "$kv"
@@ -780,9 +807,10 @@ job	tools			echo "CARGO_INCREMENTAL=0"
 job	tools			echo "DRAWIO=$RUNNER_TEMP/drawio/opt/drawio/drawio" >> "$GITHUB_ENV"
 job	tools			echo "RUSTC_WRAPPER=sccache"
 job	tools			echo "Rust toolchain  (from rust-toolchain.toml)"
-job	tools			echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	tools			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
 job	tools			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
 job	tools			echo "SCCACHE_SERVER_PORT=$PORT"
+job	tools			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	tools			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	tools			echo "sccache: local disk $DIR"
 job	tools			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
@@ -796,9 +824,10 @@ job	tools			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" S
 job	tools			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	tools			for c in 
 job	tools			for kv in "${SETTINGS[@]}"
+job	tools			for name in "" stable
 job	tools			for t in 
-job	tools			have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}'
-job	tools			installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true
+job	tools			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	tools			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	tools			iso="conformance/ci/job-isolation.sh"
 job	tools			kit="$(bash "conformance/ci/kit.sh" which)"
 job	tools			local
@@ -823,12 +852,13 @@ job	tools			rm -rf "$dl"
 job	tools			rustc --version
 job	tools			rustup default ""
 job	tools			rustup toolchain install "" "${args[@]}" --no-self-update
+job	tools			rustup toolchain list 2>/dev/null
 job	tools			sccache --show-stats >/dev/null 2>&1
 job	tools			sccache --start-server
 job	tools			sccache --stop-server >/dev/null 2>&1
 job	tools			sccache --version
 job	tools			settle ""
-job	tools			settle stable
+job	tools			settle "$name"
 job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1
 job	tools			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	tools			then
@@ -891,9 +921,11 @@ job	ui			case "$RUNNER_OS-$(uname -m)" in
 job	ui			case "$TOTAL" in ''
 job	ui			case "local" in auto
 job	ui			chmod +x "$DEST/$BIN.part.$$"
+job	ui			continue
 job	ui			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
 job	ui			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
 job	ui			dl=$(mktemp -d
+job	ui			do
 job	ui			echo "$DEST" >> "$GITHUB_PATH"
 job	ui			echo "$kv"
 job	ui			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
@@ -909,9 +941,10 @@ job	ui			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	ui			echo "CARGO_INCREMENTAL=0"
 job	ui			echo "RUSTC_WRAPPER=sccache"
 job	ui			echo "Rust toolchain  (from rust-toolchain.toml)"
-job	ui			echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	ui			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
 job	ui			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
 job	ui			echo "SCCACHE_SERVER_PORT=$PORT"
+job	ui			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
 job	ui			echo "kit=$kit" >> "$GITHUB_OUTPUT"
 job	ui			echo "sccache: local disk $DIR"
 job	ui			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
@@ -925,9 +958,10 @@ job	ui			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCA
 job	ui			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	ui			for c in 
 job	ui			for kv in "${SETTINGS[@]}"
+job	ui			for name in "" stable
 job	ui			for t in 
-job	ui			have=$(RUSTUP_TOOLCHAIN=stable rustc --version 2>/dev/null | awk '{print $2}'
-job	ui			installed=$(RUSTUP_TOOLCHAIN=stable rustup component list --installed 2>/dev/null || true
+job	ui			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	ui			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	ui			iso="conformance/ci/job-isolation.sh"
 job	ui			kit="$(bash "conformance/ci/kit.sh" which)"
 job	ui			local
@@ -948,12 +982,13 @@ job	ui			rm -rf "$dl"
 job	ui			rustc --version
 job	ui			rustup default ""
 job	ui			rustup toolchain install "" "${args[@]}" --no-self-update
+job	ui			rustup toolchain list 2>/dev/null
 job	ui			sccache --show-stats >/dev/null 2>&1
 job	ui			sccache --start-server
 job	ui			sccache --stop-server >/dev/null 2>&1
 job	ui			sccache --version
 job	ui			settle ""
-job	ui			settle stable
+job	ui			settle "$name"
 job	ui			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	ui			then
 job	ui			unzip -q "$dl/$NAME.$EXT" -d "$dl"
