@@ -29,7 +29,10 @@ fn web_importers_open_their_fixtures_and_claim_only_web_samples() {
     let summary = ws.summary();
     let mut claimed: Vec<&str> = Vec::new();
     for src in &summary.sources {
-        let in_web = src.path.replace('\\', "/").contains("/samples/web/");
+        let in_web = std::path::Path::new(&src.path)
+            .ancestors()
+            .skip(1)
+            .any(|a| a.ends_with("samples/web"));
         let ours = ["w3c", "access-log", "har"].contains(&src.importer.as_str());
         assert_eq!(ours, in_web, "{} claimed by {}", src.path, src.importer);
         if ours {

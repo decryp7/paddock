@@ -53,7 +53,7 @@ fn workspace() -> Workspace {
 fn source<'a>(sources: &'a [SourceInfo], suffix: &str) -> &'a SourceInfo {
     sources
         .iter()
-        .find(|s| s.path.replace('\\', "/").ends_with(suffix))
+        .find(|s| std::path::Path::new(&s.path).ends_with(suffix))
         .unwrap_or_else(|| panic!("{suffix} not opened: {:?}", sources.iter().map(|s| &s.name).collect::<Vec<_>>()))
 }
 

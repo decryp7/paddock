@@ -246,7 +246,7 @@ mod tests {
             .query_row(
                 &format!(
                     "SELECT count(*) FROM read_parquet('{}')",
-                    written.path.to_string_lossy().replace('\\', "/")
+                    paddock_testkit::path::text(&written.path)
                 ),
                 [],
                 |r| r.get(0),

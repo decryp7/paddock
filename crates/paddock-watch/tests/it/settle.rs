@@ -239,8 +239,10 @@ fn scanning_filters_skips_links_and_reports_a_missing_folder_as_empty() {
             f.path
                 .strip_prefix(dir)
                 .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/")
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
         })
         .collect();
     assert_eq!(names, ["a.log", "sub/b.log"]);

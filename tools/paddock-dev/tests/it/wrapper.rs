@@ -1143,8 +1143,8 @@ fn updating_rustc(dir: &Path, cap: u32) -> String {
     let state = dir.join("state");
     std::fs::create_dir_all(&state).unwrap();
     let body = format!(
-        "n=$(wc -l < '{s}/cargo-runs' 2>/dev/null || echo 0); n=$((n+0)); [ $n -gt {cap} ] && n={cap}; printf 'rustc 1.9%s.0\\nbinary: rustc\\ncommit-hash: c%s\\ncommit-date: d\\nhost: test-host\\nrelease: 1.9%s.0\\nLLVM version: 1\\n' $n $n $n",
-        s = state.display()
+        "n=$(wc -l < '{runs}' 2>/dev/null || echo 0); n=$((n+0)); [ $n -gt {cap} ] && n={cap}; printf 'rustc 1.9%s.0\\nbinary: rustc\\ncommit-hash: c%s\\ncommit-date: d\\nhost: test-host\\nrelease: 1.9%s.0\\nLLVM version: 1\\n' $n $n $n",
+        runs = state.join("cargo-runs").display()
     );
     let p = dir.join("rustc-updating");
     write_script(&p, &body);
@@ -1157,7 +1157,7 @@ fn run_with_updating_compiler(cap: u32) -> (i32, String, String, tempfile::TempD
     let scratch = tempfile::tempdir().unwrap();
     let rustc = updating_rustc(scratch.path(), cap);
     let state = scratch.path().join("state");
-    let cargo = format!("echo run >> '{}/cargo-runs'; {}", state.display(), shim_cargo(0));
+    let cargo = format!("echo run >> '{}'; {}", state.join("cargo-runs").display(), shim_cargo(0));
     let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);
     (code, out, err, scratch)
 }
@@ -1229,7 +1229,7 @@ fn the_restart_marker_is_not_passed_on_to_the_tool_so_a_nested_dev_can_restart()
     let rustc = updating_rustc(scratch.path(), 1);
     let state = scratch.path().join("state");
     let cargo = cargo_building(
-        &format!("echo run >> '{}/cargo-runs'", state.display()),
+        &format!("echo run >> '{}'", state.join("cargo-runs").display()),
         "echo restarted=${PADDOCK_DEV_RESTARTED:-unset}",
     );
     let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);

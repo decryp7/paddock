@@ -617,6 +617,7 @@ mod tests {
         let cmds = fake.sys.commands();
         assert!(
             cmds.iter()
+                // conformance: path-text — `gui/{UID}` is a launchd domain, not a path join; the plist path is the whole argument
                 .any(|c| c == &format!("/bin/launchctl bootstrap gui/{UID} {}", plist.display())),
             "{cmds:?}"
         );

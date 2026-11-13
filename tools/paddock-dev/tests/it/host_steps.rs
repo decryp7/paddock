@@ -886,7 +886,16 @@ fn kept_fixture(fx: &Fx) {
     git(fx, fx.root().as_path(), &["clone", "-q", "--bare", "work-repo", "origin.git"]);
     git(fx, &origin, &["config", "uploadpack.allowFilter", "true"]);
     git(fx, &origin, &["config", "uploadpack.allowAnySHA1InWant", "true"]);
-    git(fx, &repo, &["remote", "add", "origin", &format!("file://{}", origin.display())]);
+    git(
+        fx,
+        &repo,
+        &[
+            "remote",
+            "add",
+            "origin",
+            &format!("file://{}", paddock_testkit::path::text(&origin)),
+        ],
+    );
     fx.write("profiles.txt", KEPT_PROFILES);
     std::fs::remove_dir_all(fx.p("work/abc/hostexecutor")).unwrap();
     bootstrap_at(fx, &git(fx, &repo, &["rev-parse", "HEAD"]));
@@ -895,7 +904,7 @@ fn kept_fixture(fx: &Fx) {
 /// The job's bootstrap checkout at `sha` (made again when it is not there yet).
 fn bootstrap_at(fx: &Fx, sha: &str) {
     let ws = fx.p("work/abc/hostexecutor");
-    let url = format!("file://{}", fx.p("origin.git").display());
+    let url = format!("file://{}", paddock_testkit::path::text(fx.p("origin.git")));
     if !ws.exists() {
         git(fx, &fx.root(), &["clone", "-q", "--no-checkout", &url, "work/abc/hostexecutor"]);
         git(
@@ -1185,7 +1194,7 @@ fn kept_clone_falls_back_to_the_work_folder_and_fails_only_on_an_unknown_profile
                     "remote",
                     "set-url",
                     "origin",
-                    &format!("file://{}/no-such-origin.git", fx.root().display()),
+                    &format!("file://{}", paddock_testkit::path::text(fx.root().join("no-such-origin.git"))),
                 ],
             );
         },

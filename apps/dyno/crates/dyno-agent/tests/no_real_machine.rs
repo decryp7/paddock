@@ -91,7 +91,7 @@ fn only_the_real_agent_builds_the_real_volume_lister() {
     let files: Vec<(String, String)> = paths
         .iter()
         .map(|p| {
-            let rel = p.strip_prefix(&dyno).unwrap().to_string_lossy().replace('\\', "/");
+            let rel = paddock_testkit::path::text(p.strip_prefix(&dyno).unwrap());
             (rel, std::fs::read_to_string(p).unwrap())
         })
         .collect();

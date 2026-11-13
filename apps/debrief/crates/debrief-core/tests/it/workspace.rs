@@ -144,7 +144,7 @@ fn remove_reload_clear_and_set_profile() {
         ws.summary()
             .sources
             .iter()
-            .find(|x| x.path.replace('\\', "/").ends_with("b/app.clef"))
+            .find(|x| std::path::Path::new(&x.path).ends_with("b/app.clef"))
             .map(|x| x.id)
     };
     ws.remove_source(in_b(&ws).unwrap());

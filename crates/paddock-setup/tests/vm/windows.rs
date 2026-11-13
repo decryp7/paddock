@@ -194,6 +194,7 @@ fn the_binary_carries_the_update_description_in_its_version_resource() {
 fn same_folder_ignores_case_a_trailing_backslash_and_short_names_but_not_a_junction() {
     let a = scratch("same-a");
     let upper = a.to_string_lossy().to_uppercase();
+    // conformance: path-text — the trailing backslash is the spelling under test
     let with_slash = format!("{}\\", a.display());
     let p = exe("PADDOCK_SETUP_EXE");
     assert_eq!(
@@ -412,7 +413,7 @@ fn clean_run_removes_machine_values_that_point_into_the_folder_only() {
     let site = Site::new("run");
     let mine = format!("PaddockSetupTestMine{}", std::process::id());
     let other = format!("PaddockSetupTestOther{}", std::process::id());
-    let command = format!("\"{}\\app.exe\" --hidden", site.0.display());
+    let command = format!("\"{}\" --hidden", site.0.join("app.exe").display());
     assert!(reg(&[
         "add", KEY, "/v", &mine, "/t", "REG_SZ", "/d", &command, "/f"
     ]));

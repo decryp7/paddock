@@ -340,7 +340,7 @@ fn open_sources(paths: &[PathBuf]) -> (Workspace, Vec<(String, Vec<debrief_core:
         .iter()
         .map(|src| {
             let recs = ws.records().iter().filter(|r| r.source == src.id).cloned().collect();
-            (src.path.replace('\\', "/"), recs)
+            (paddock_testkit::path::text(std::path::Path::new(&src.path)), recs)
         })
         .collect();
     (ws, by_source)

@@ -392,7 +392,11 @@ mod tests {
         let mut ws = debrief_core::workspace::Workspace::new(debrief_core::Profile::default_profile()).unwrap();
         ws.open(std::slice::from_ref(&o.logs)).unwrap();
         let s = ws.summary();
-        let mut names: Vec<String> = s.sources.iter().map(|x| x.name.replace('\\', "/")).collect();
+        let mut names: Vec<String> = s
+            .sources
+            .iter()
+            .map(|x| paddock_testkit::path::text(std::path::Path::new(&x.name)))
+            .collect();
         names.sort();
         assert_eq!(
             names,

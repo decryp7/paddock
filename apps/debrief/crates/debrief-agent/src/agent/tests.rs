@@ -65,7 +65,7 @@ every = "1h"
   [[schedules.actions]]
   kind = "collect"
 {extra}"#,
-        out.display().to_string().replace('\\', "/")
+        paddock_testkit::path::text(out)
     );
     AgentConfigFile::parse(&text).unwrap().validate(out).unwrap()
 }

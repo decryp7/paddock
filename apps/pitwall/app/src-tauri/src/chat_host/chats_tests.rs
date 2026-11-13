@@ -35,7 +35,7 @@ fn files(dir: &Path) -> Vec<String> {
             if p.is_dir() {
                 walk(root, &p, out);
             } else {
-                out.push(p.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/"));
+                out.push(paddock_testkit::path::text(p.strip_prefix(root).unwrap()));
             }
         }
     }

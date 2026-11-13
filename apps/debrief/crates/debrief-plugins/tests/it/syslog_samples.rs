@@ -57,7 +57,7 @@ fn the_workspace_picks_the_syslog_and_journald_importers() {
         let src = s
             .sources
             .iter()
-            .find(|x| x.path.replace('\\', "/").ends_with(suffix))
+            .find(|x| std::path::Path::new(&x.path).ends_with(suffix))
             .unwrap_or_else(|| panic!("{suffix} not opened"));
         assert_eq!((src.importer.as_str(), src.skipped), (importer, 0), "{suffix}");
         assert!(src.records > 0 && src.from.is_some(), "{suffix}");

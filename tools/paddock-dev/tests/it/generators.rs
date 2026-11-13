@@ -305,8 +305,8 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
         let mut shared = 0;
         for p in meta["packages"].as_array().unwrap() {
             // cargo spells a Windows path with `\`, the root is spelled for tools (`/`): compare with one separator.
-            let manifest = p["manifest_path"].as_str().unwrap().replace('\\', "/");
-            let base = root.to_str().unwrap().replace('\\', "/");
+            let manifest = paddock_testkit::path::text(Path::new(p["manifest_path"].as_str().unwrap()));
+            let base = paddock_testkit::path::text(&root);
             let Some(rel) = manifest.strip_prefix(base.as_str()).map(|r| r.trim_start_matches('/')) else {
                 continue;
             };

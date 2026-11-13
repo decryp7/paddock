@@ -96,7 +96,10 @@ impl Runner {
             // A secret of the job that sccache, curl and apt-get have no use for: the Rust command never passes it on.
             ("PADDOCK_DEV_TOKEN", "tok-secret".to_string()),
             // No test reaches the network: the Rust download goes here (the shell's install is only run where it never downloads).
-            ("PADDOCK_SCCACHE_RELEASES", format!("file://{}/no-releases", self.root.display())),
+            (
+                "PADDOCK_SCCACHE_RELEASES",
+                format!("file://{}", paddock_testkit::path::text(self.root.join("no-releases"))),
+            ),
         ]
         .into_iter()
         .map(|(k, v)| (k.to_string(), v))

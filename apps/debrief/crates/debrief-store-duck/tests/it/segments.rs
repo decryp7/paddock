@@ -114,7 +114,7 @@ fn removal_hides_at_once_and_compaction_reclaims() {
         debrief_store_duck::Compaction::default(),
         "nothing left to do"
     );
-    let glob = dir.0.join(SEGMENTS_DIR).join("*.parquet").to_string_lossy().replace('\\', "/");
+    let glob = paddock_testkit::path::text(dir.0.join(SEGMENTS_DIR).join("*.parquet"));
     assert_eq!(
         store
             .bench_sql(&format!("SELECT 1 FROM read_parquet('{glob}') WHERE source = {}", src.id))

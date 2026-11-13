@@ -144,7 +144,9 @@ mod tests {
         let t = paddock_testkit::private_tempdir().unwrap();
         let h = FileHasher::new();
         assert!(hash(&h, "relative/file").unwrap_err().contains("full path"));
-        assert!(hash(&h, &format!("{}/../x", t.path().display())).unwrap_err().contains("full path"));
+        assert!(hash(&h, paddock_testkit::path::under(t.path(), "../x").to_str().unwrap())
+            .unwrap_err()
+            .contains("full path"));
         assert!(hash(&h, t.path().join("missing").to_str().unwrap())
             .unwrap_err()
             .contains("no longer there"));

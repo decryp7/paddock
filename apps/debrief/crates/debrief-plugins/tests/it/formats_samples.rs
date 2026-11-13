@@ -35,7 +35,7 @@ fn workspace() -> Workspace {
 fn source<'a>(sources: &'a [SourceInfo], suffix: &str) -> &'a SourceInfo {
     sources
         .iter()
-        .find(|s| s.path.replace('\\', "/").ends_with(suffix))
+        .find(|s| std::path::Path::new(&s.path).ends_with(suffix))
         .unwrap_or_else(|| panic!("{suffix} not opened: {:?}", sources.iter().map(|s| &s.path).collect::<Vec<_>>()))
 }
 
@@ -67,7 +67,7 @@ fn every_new_sample_is_read_by_its_importer_and_nothing_else_is() {
     }
     // The other samples are never claimed by these importers.
     for src in &s.sources {
-        let ours = expect.iter().any(|(suffix, _)| src.path.replace('\\', "/").ends_with(suffix));
+        let ours = expect.iter().any(|(suffix, _)| std::path::Path::new(&src.path).ends_with(suffix));
         assert_eq!(OURS.contains(&src.importer.as_str()), ours, "{} read by {}", src.path, src.importer);
     }
 }
