@@ -1,6 +1,8 @@
 # 99. Tests compare paths as paths, through one testkit helper
 
-- Status: Proposed 2026-11-13. Drafting approved by the user on 2026-11-13 (ER-21); nothing here is accepted or built.
+- Status: Accepted 2026-11-13 (user, afternoon): D1 (a) the full check, D2 (a) baseline the 65 sites, D3 (b) ban raw
+  `canonicalize` in the apps' preset as foundation work (WP-4). Nothing is built yet. History: proposed 2026-11-13;
+  drafting approved by the user on 2026-11-13 (ER-21).
   ER-23 does not apply (no drawings). Revision 2 (same day) answers the coordinator's one review round of revision 1
   (`5b23e68c9`): an instance-to-mechanism recall table, the Clippy `canonicalize` bans of train 8, the existing
   known-copies entry, the uncaught spellings named, the cargo `[ROOT]` claim verified, D1 re-weighed.
@@ -103,8 +105,12 @@ survive `Path` equality, and because the CI Windows runner is the only place the
 
 ## Decision
 
-Items 1 and 2 are the full mechanism, D1 (a). The recommendation is D1 (b): item 1 in its lite form (WP-1-lite) plus
-the Clippy bans train 8 already adds, and no check (see "Recall").
+Items 1 and 2 are the full mechanism, D1 (a), which the user chose on 2026-11-13 (revision 2 had recommended D1 (b), the
+lite helper plus the Clippy bans; see "Recall"). Item 4 below (the apps' preset) is D3 (b).
+
+4. **The apps' preset bans raw `canonicalize`** (WP-4): the two `disallowed-methods` entries of `crates/clippy.toml` go
+   into `lint/clippy.toml` and, through C13, every app's `clippy.toml`; each raw call moves to a `winpath` door
+   (`real_for_tools`, `real` or `real_verbatim`), no blanket `#[expect]`.
 
 1. **One helper, in `paddock_testkit::path`** (Rust), built on `winpath`:
    - `same_path(actual, expected) -> bool`: `winpath::same` after reading a Git bash spelling (`/c/x`) as `C:/x` on Windows;
@@ -176,25 +182,29 @@ with mixed separators, so not every flagged site is a latent failure (precision 
 | WP-2 | The check (rules A-C) in the Rust host, fixtures, report-only; first green run recorded (needs RT-5's CI wiring) | 0.5 |
 | WP-3a | Baseline the 65 A/B sites (shrink-only); each is fixed when its file is next touched | 0.1 |
 | WP-3b | Instead of 3a: migrate all 65 sites now (Debrief and Dyno sites after their current tags) | 0.75 |
-| WP-4 | `canonicalize` entries in `lint/clippy.toml` and every app's `clippy.toml` (C13), 163 app sites onto `winpath` or `#[expect]`, Debrief and Dyno after their tags | about 1.5 (estimate, not designed) |
+| WP-4 | Foundation work, after train 10, app by app (Pitwall 2 sites, Pitcrew 5, Dyno 42, Debrief 114; Spotter has none): the two `canonicalize` entries in the app's `clippy.toml`, every site of that app through `winpath` (no blanket `#[expect]`), the app's Windows tests run; the last app adds the entries to `lint/clippy.toml` so C13 then holds them for every app | about 1.5 (estimate) |
 
-## Decisions for the user
+Chosen 2026-11-13: WP-0, WP-1, WP-2, WP-3a and WP-4, about 2.6 days (1.1 plus 1.5); WP-1-lite and WP-3b are not built.
+
+## Decisions (the user, 2026-11-13)
 
 - **D1. Scope.** (a) Full mechanism: WP-1, WP-2, WP-3a, 1.1 days; recall 1 of 5 for the check alone, 2 of 5 with the bans.
   (b) Common practice plus the bans: WP-0 and WP-1-lite, 0.25 day; recall 2 of 5 (the same instances (a) catches, through
-  Clippy). **Recommended: (b).** The check adds no instance the bans miss, and the three uncaught instances are not a
+  Clippy). Recommended in revision 2: (b). **Chosen 2026-11-13 by the user: (a).** The check adds no instance the bans miss, and the three uncaught instances are not a
   syntactic pattern; revisit (a) only if a later instance is one rule A or B would have caught and Clippy would not.
 - **D2. Existing sites** (only with D1 (a)). (a) Shrink-only baseline, fix on touch (WP-3a). (b) Migrate all 65 now
-  (WP-3b, +0.65 day). Recommended: (a).
+  (WP-3b, +0.65 day). Recommended: (a). **Chosen 2026-11-13 by the user: (a)** (the default with D1 (a)).
 - **D3. The apps' preset.** (a) Leave `lint/clippy.toml` as it is now; the apps' raw `canonicalize` calls move through the
   existing `verbatim-path` copy rows by their delete-by dates. (b) WP-4 after the current tags, about 1.5 days (over the
-  1-day line; needs a yes). Recommended: (a). None of the five instances was in an app.
-- Prerequisite for D1 (a) only: `./dev check run` wired into the conformance job (RT-5 hand-off, not on main).
+  1-day line; needs a yes). Recommended in revision 2: (a); none of the five instances was in an app. **Chosen 2026-11-13
+  by the user: (b)**, as foundation work, app by app after train 10, each site through `winpath` (WP-4, about 1.5 days).
+- Prerequisite of WP-2: `./dev check run` wired into the conformance job (RT-5 hand-off, not on main).
 
 ## Consequences
 
-- With D1 (b): raw `canonicalize` in test code of the shared crates and the Rust tools fails Clippy on every OS, and a
-  path test has `same_path` and `text` to reach for; whether it does rests on review. Spellings 3 and 5, and path-like
+- Raw `canonicalize` fails Clippy on every OS in the shared crates, the Rust tools and (after WP-4) every app; the check
+  refuses new rule A and B sites in test code once it blocks, and a path test has `same_path`, `assert_same_path!` and
+  `text` to reach for. Spellings 3 and 5, and path-like
   key text such as `file:/l`, still show only on the Windows runner.
 - Git bash conversion has one implementation (`winpath`), tested on every OS.
 - The check has false positives in rule C by design; rules A and B are syntactic and cheap to satisfy.
