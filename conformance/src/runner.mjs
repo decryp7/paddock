@@ -34,10 +34,10 @@ export async function runChecks({ root, app, only = null, options = {}, registry
         findings.push(unwaivable(error(check.id, check.rule, '', 1, `check broken: it returned an invalid finding (item ${bad}: ${shown.slice(0, 120)}); a finding is an object with severity "error" or "warn" and a message`, 'Fix the check so every finding is made with error() or warn().')));
         continue;
       }
-      // A finding the check marked `inlineWaiver: <reason>` is waived at its site (a comment): it counts as waived, never as a finding,
+      // A finding the check marked `inlineWaiver: <reason>` (and that is not `unwaivable`: no comment covers a check that could not look) is waived at its site (a comment): it counts as waived, never as a finding,
       // and stays in the report (ER-33). `expires` is 'inline': there is no date.
       for (const f of found) {
-        if (typeof f.inlineWaiver === 'string') {
+        if (typeof f.inlineWaiver === 'string' && !f.unwaivable) {
           const { inlineWaiver, ...rest } = f;
           inlineWaived.push({ ...rest, waiver: { reason: inlineWaiver, expires: 'inline' } });
         } else findings.push(f);

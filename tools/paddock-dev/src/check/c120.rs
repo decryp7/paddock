@@ -78,7 +78,9 @@ static TRAILING_HASH: LazyLock<Regex> = LazyLock::new(|| rx(r"\s#[^\n]*$"));
 static TEST_MODULE: LazyLock<Regex> = LazyLock::new(|| rx(r"#\[cfg\(test\)\]\s*(?:#\[[^\]]*\]\s*)*mod\s+\w+\s*\{"));
 static UNDER_TESTS: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)tests/"));
 
-/// The 1-based `(first, last)` line ranges of the `#[cfg(test)] mod name { ... }` blocks of a Rust source.
+/// The 1-based `(first, last)` line ranges of the `#[cfg(test)] mod name { ... }` blocks of a Rust source. Only that plain form counts:
+/// `#[cfg(all(test, ...))]` and an out-of-line `mod tests;` (its own file, not under `tests/`) are not recognised, so their sites stay
+/// reported (fail-safe).
 pub fn test_module_lines(text: &str) -> Vec<(usize, usize)> {
     let masked = mask_rust(text);
     let bytes = masked.as_bytes();

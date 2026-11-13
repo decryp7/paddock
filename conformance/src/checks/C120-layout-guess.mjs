@@ -10,6 +10,7 @@
 // (`https?://`) or a `node_modules/` path. Limits: a statement split by `;` (`let e = current_exe()?; e.parent()...`) is not
 // followed; a block comment is read as code. A justified site carries `// conformance: layout-guess — <why>`
 // (`# conformance: ...` in shell) on the line or the line above; the test code of a file, `// conformance: file-layout-guess — <why>` anywhere in it: it covers the lines inside `#[cfg(test)] mod` blocks, or every line of a file under `tests/`; production code in the same file is still reported.
+// Test code is recognised by the plain `#[cfg(test)] mod name { ... }` only: `#[cfg(all(test, ...))]` and an out-of-line `mod tests;` (its own file, not under `tests/`) are not, so their sites stay reported (fail-safe).
 // A waived site is not a finding: the host counts it as waived (`inlineWaiver`), so suppressions stay visible (ER-33). Rust host: tools/paddock-dev/src/check/c120.rs (same findings, line for line).
 import { warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
