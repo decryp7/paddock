@@ -77,6 +77,11 @@ describe('pins', () => {
     assert.match(dockerfile, /rustup default "\$\{RUST_VERSION\}"/);
   });
 
+  test('the Dockerfile has exactly two stages and one Rust install (a bad edit once doubled it: CI run 8043)', () => {
+    assert.equal((dockerfile.match(/^FROM /gm) || []).length, 2);
+    assert.equal((dockerfile.match(/^RUN rustup /gm) || []).length, 1);
+  });
+
   test('the base is the garage image and the stage-2 copies of the version ARGs agree', () => {
     assert.match(arg('GARAGE_IMAGE').replace('dev.decryptology.net/decryp7/', ''), /^garage:ubuntu-24\.04-\d{8}-r\d+$/);
     for (const name of ['CHROME_VERSION', 'DUCKDB_VERSION', 'SCCACHE_VERSION', 'SHELLCHECK_VERSION']) {
