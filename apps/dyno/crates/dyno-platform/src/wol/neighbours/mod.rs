@@ -136,7 +136,7 @@ mod tests {
     fn linux_prefers_ip_and_falls_back_to_the_proc_file() {
         let n = over(vec![("ip", out("192.0.2.1 dev eth0 lladdr 02:00:5e:10:00:01 REACHABLE\n"))]);
         assert_eq!(n.linux().unwrap()[0].state, NeighbourState::Reachable);
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("arp");
         std::fs::write(
             &f,

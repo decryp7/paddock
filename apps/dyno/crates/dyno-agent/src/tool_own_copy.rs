@@ -323,11 +323,11 @@ mod tests {
     struct Rig {
         own: OwnCopy,
         fake: Arc<Fake>,
-        dir: tempfile::TempDir,
+        dir: paddock_testkit::PrivateTemp,
     }
 
     fn rig(fault: Fault) -> Rig {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let fake = Arc::new(Fake {
             fault,
             calls: Mutex::new(Vec::new()),

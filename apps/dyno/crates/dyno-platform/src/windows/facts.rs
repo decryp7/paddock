@@ -355,7 +355,7 @@ mod tests {
                 Some(self.1.clone())
             }
         }
-        let home = tempfile::tempdir().unwrap();
+        let home = paddock_testkit::private_tempdir().unwrap();
         let f = WinFacts::new(InTemp(OsWinSystem, home.path().to_path_buf())).facts();
         assert!(f.os.starts_with("Windows"), "{}", f.os);
         assert_ne!(f.os, "Fake OS 1.0");

@@ -28,13 +28,13 @@ struct Harness {
     running: Option<Running>,
     fake: Fake,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
     /// The agent over the fake in [`ZONE`], with `first` as the sample it reads from the start.
     fn start(first: Option<dyno_core::metrics::SystemSample>) -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         fake.add_process(process(100, "calm", 1.0));

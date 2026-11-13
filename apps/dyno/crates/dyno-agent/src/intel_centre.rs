@@ -535,7 +535,7 @@ mod tests {
         clock: FakeClock,
         wire: Arc<FakeWire>,
         dirs: Dirs,
-        _tmp: tempfile::TempDir,
+        _tmp: paddock_testkit::PrivateTemp,
     }
 
     fn gz(bytes: &[u8]) -> Vec<u8> {
@@ -545,7 +545,7 @@ mod tests {
     }
 
     fn rig(replies: Vec<Reply>) -> Rig {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path());
         let clock = FakeClock::at_wall_ms(NOW_MS);
         let mut wire = FakeWire::new();
@@ -612,7 +612,7 @@ mod tests {
 
     #[test]
     fn a_corrupt_or_newer_lists_file_gives_the_defaults() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path());
         std::fs::write(dirs.intel_lists(), b"{ nope").unwrap();
         assert_eq!(load_lists(&dirs), UserLists::default());

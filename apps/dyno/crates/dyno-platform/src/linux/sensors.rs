@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn pressure_from_psi_and_free_memory() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut p = probe(d.path());
         let mut s = base_sample();
         p.enrich(&mut s);
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn a_cgroup_limit_replaces_the_hosts_total() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         w(d.path(), "proc/meminfo", "MemTotal: 16777216 kB\nMemAvailable: 8388608 kB\n");
         w(d.path(), "sys/fs/cgroup/memory.max", "1073741824\n");
         w(d.path(), "sys/fs/cgroup/memory.current", "536870912\n");
@@ -364,13 +364,13 @@ mod tests {
 
     #[test]
     fn cgroup_v1_and_own_path() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         w(d.path(), "sys/fs/cgroup/memory/memory.limit_in_bytes", "268435456\n");
         w(d.path(), "sys/fs/cgroup/memory/memory.usage_in_bytes", "134217728\n");
         let mut s = base_sample();
         probe(d.path()).enrich(&mut s);
         assert_eq!((s.memory.total, s.memory.used), (256 << 20, 128 << 20));
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         w(d.path(), "proc/self/cgroup", "0::/system.slice/dyno.service\n");
         w(d.path(), "sys/fs/cgroup/system.slice/dyno.service/memory.max", "2147483648\n");
         w(d.path(), "sys/fs/cgroup/system.slice/dyno.service/memory.current", "1048576\n");
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn disk_queue_and_busy_come_from_two_samples() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut p = probe(d.path());
         let mut s = base_sample();
         p.enrich(&mut s);
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn volumes_and_interfaces_are_cleaned() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let disk = |name: &str, mount: &str, total: u64| DiskSample {
             id: mount.into(),
             name: name.into(),
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn frequency_hardware_and_gpu_are_filled_and_cached() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         w(d.path(), "sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", "2000000\n");
         w(d.path(), "sys/devices/system/cpu/cpu1/cpufreq/scaling_cur_freq", "3000000\n");
         w(d.path(), "sys/devices/system/cpu/cpu0/cpufreq/base_frequency", "1800000\n");
@@ -470,7 +470,7 @@ mod tests {
         assert_eq!(s.cpu.frequency_mhz, 1234, "sysinfo's frequency is kept");
         assert_eq!(s.temperatures.value().map(|t| t[0].celsius), Some(50.0));
         // Nothing found: honest reasons, and sysinfo's temperatures survive.
-        let e = tempfile::tempdir().unwrap();
+        let e = paddock_testkit::private_tempdir().unwrap();
         let mut s = base_sample();
         probe(e.path()).enrich(&mut s);
         assert_eq!(s.temperatures, Reading::unavailable(NO_TEMPERATURE_FILES));

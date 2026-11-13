@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn fills_priority_threads_files_connections_and_modules() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         fake_process(d.path());
         let mut p = probe(d.path(), vec![], Arc::new(FakeTools::with("dpkg", "app: /usr/bin/app\n")));
         let mut det = blank(4242);
@@ -316,7 +316,7 @@ mod tests {
 
     #[test]
     fn what_the_kernel_hides_is_a_reason_not_an_error() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut p = probe(d.path(), vec![], Arc::new(FakeTools::default()));
         let mut det = blank(77);
         p.enrich(
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn lists_are_capped() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut maps = String::new();
         for i in 0..(MAX_DETAIL_ITEMS + 20) {
             maps.push_str(&format!("1000-2000 r-xp 00000000 08:01 {} /usr/lib/lib{i}.so\n", i + 1));
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn the_autostart_entry_that_started_a_program_is_named() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let auto = d.path().join("autostart");
         w(
             &auto,

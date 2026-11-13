@@ -3,6 +3,8 @@
 //! - [`Scratch`]: a temporary folder per test (work, home and tmp folders) whose `tmp` folder must be empty when the
 //!   test ends: code that leaves files in "the temp folder" fails the test that ran it. Replaces `std::env::temp_dir()`
 //!   in tests (clippy forbids it, `lint/clippy.toml`).
+//! - [`private_tempdir`]: the drop-in for `tempfile::tempdir()` for a folder given to code that refuses a data folder other accounts can
+//!   write: owner-only on Windows too, whatever the temp folder's access list is (CI runners' is open to Authenticated Users).
 //! - [`EnvLock`]: one process-wide lock for tests that read or write environment variables, restoring every variable it
 //!   changed, and [`EnvLock::hermetic`], which points `HOME`, `APPDATA`, the XDG folders and `TMPDIR` into a [`Scratch`].
 //! - [`golden`]: expected-output files; a difference fails with the first differing line, `PADDOCK_UPDATE_GOLDEN=1`
@@ -31,6 +33,7 @@ pub mod golden;
 pub mod hostile;
 pub mod limits;
 pub mod net;
+pub mod private_temp;
 pub mod runner;
 pub mod scratch;
 pub mod wait;
@@ -40,6 +43,7 @@ pub use golden::{Golden, GoldenError, GoldenMode, assert_golden, check_golden};
 pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_env::winpath::{real_or_given, same};
 pub use paddock_jobs::time::{Clock, FakeClock};
+pub use private_temp::{PrivateTemp, private_tempdir};
 pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{Leftovers, Scratch, ScratchError};
 pub use wait::{

@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn reads_the_facts_from_the_programs_output_without_touching_this_mac() {
-        let home = tempfile::tempdir().unwrap();
+        let home = paddock_testkit::private_tempdir().unwrap();
         let f = MacFacts::with(Some(home.path().to_path_buf()), canned).facts();
         assert!(f.os.starts_with("macOS"), "{}", f.os);
         assert_eq!(f.power_plan.value().map(|p| p.power_saver), Some(false));

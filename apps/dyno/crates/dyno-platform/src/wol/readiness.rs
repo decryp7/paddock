@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn linux_lists_only_physical_cards() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let net = dir.path();
         std::fs::create_dir_all(net.join("eth0/device/power")).unwrap();
         std::fs::write(net.join("eth0/device/power/wakeup"), "enabled\n").unwrap();

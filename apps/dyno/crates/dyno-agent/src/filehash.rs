@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn a_file_is_hashed_once_and_then_cached() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let f = t.path().join("prog.bin");
         std::fs::write(&f, b"abc").unwrap();
         let h = FileHasher::new();
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn bad_paths_say_what_is_wrong() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let h = FileHasher::new();
         assert!(hash(&h, "relative/file").unwrap_err().contains("full path"));
         assert!(hash(&h, &format!("{}/../x", t.path().display())).unwrap_err().contains("full path"));
@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn an_unreadable_file_is_reported() {
         use std::os::unix::fs::PermissionsExt;
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let f = t.path().join("secret");
         std::fs::write(&f, b"x").unwrap();
         std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o000)).unwrap();
@@ -168,7 +168,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_is_hashed_as_the_program_it_points_at() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let f = t.path().join("real.bin");
         std::fs::write(&f, b"abc").unwrap();
         let l = t.path().join("link");
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn the_hash_reports_the_bytes_read_and_never_goes_backwards() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let f = t.path().join("big.bin");
         std::fs::write(&f, vec![7u8; 300_000]).unwrap();
         let run = Run::new();
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn a_cancelled_hash_stops_within_a_chunk_and_caches_nothing() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let f = t.path().join("big.bin");
         std::fs::write(&f, vec![7u8; 4 * 1024 * 1024]).unwrap();
         let h = FileHasher::new();

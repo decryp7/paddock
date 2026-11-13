@@ -62,12 +62,12 @@ struct Harness {
     running: Option<Running>,
     fake: Fake,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
     fn start(sources: Vec<Box<dyn IssueSource>>) -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         fake.add_process(process(100, "calm", 1.0));
@@ -297,7 +297,7 @@ fn issues_export_as_json_lines_to_a_chosen_file_only() {
     ))]);
     let peer = h.client();
     overview(&peer, true);
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let path = dir.path().join("issues.jsonl");
     let Reply::IssuesSaved(saved) = ask(
         &peer,
@@ -485,7 +485,7 @@ fn a_fresh_install_learns_silently_for_the_configured_period() {
 
 #[test]
 fn the_baseline_survives_an_agent_restart() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     fake.add_process(process(100, "calm", 1.0));

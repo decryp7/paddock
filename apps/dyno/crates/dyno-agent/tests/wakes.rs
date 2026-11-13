@@ -25,7 +25,7 @@ struct Harness {
     timer: Arc<FakeWakeTimer>,
     udp: Arc<dyno_core::wol::fake::FakeUdp>,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
@@ -35,7 +35,7 @@ impl Harness {
 
     /// A harness whose OS wake timer is `wrap` of the recording one (the recording one stays what `timer` lists).
     fn start_with_timer(wrap: impl FnOnce(Arc<FakeWakeTimer>) -> Arc<dyn WakeScheduler>) -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         std::fs::create_dir_all(dirs.root()).unwrap();
         let (timer, udp) = (

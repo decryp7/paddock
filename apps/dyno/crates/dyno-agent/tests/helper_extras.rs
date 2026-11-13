@@ -36,12 +36,12 @@ impl ToolRunner for Refusing {
 struct Rig {
     running: Option<Running>,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Rig {
     fn start(caller: Caller, up: bool) -> Rig {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         let readers = Readers {

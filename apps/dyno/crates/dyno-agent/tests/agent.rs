@@ -71,7 +71,7 @@ struct Harness {
     running: Option<Running>,
     fake: Fake,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
@@ -88,7 +88,7 @@ impl Harness {
     fn start_seeded(seed: impl FnOnce(&Fake), adapt: impl FnOnce(Platform) -> Platform) -> Harness {
         // Install the capture before the agent starts, so its first lines are kept.
         let _ = captured();
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         for (pid, name, cpu) in [(100, "busy", 60.0), (101, "calm", 1.0), (102, "launchd", 0.1)] {
@@ -1169,7 +1169,7 @@ fn start_on(dirs: &Dirs) -> Result<Running, String> {
 #[test]
 fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
     let _ = captured();
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let first = start_on(&dirs).unwrap();
     let before = dyno_agent::discovery::Discovery::read(&dirs.discovery()).unwrap();
@@ -1219,7 +1219,7 @@ fn a_second_agent_on_the_same_data_folder_refuses_to_start_and_says_so() {
 fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the_activity() {
     let _ = captured();
     use dyno_agent::instance::LockError;
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     fake.add_process(process(100, "busy", 60.0));
@@ -1258,7 +1258,7 @@ fn a_folder_that_cannot_lock_still_runs_the_agent_but_says_so_in_the_log_and_the
 
 #[test]
 fn agents_on_different_data_folders_run_side_by_side() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let a = start_on(&Dirs::at(tmp.path().join("a"))).unwrap();
     let b = start_on(&Dirs::at(tmp.path().join("b"))).unwrap();
     a.stop();

@@ -34,7 +34,7 @@ fn start_on(dirs: &Dirs) -> Result<Running, String> {
 #[expect(clippy::disallowed_methods, reason = "the test starts a trivial program to hold a forked child")]
 fn a_child_forked_before_it_execs_keeps_the_folder_locked_until_it_does_and_the_next_start_waits() {
     use std::os::unix::process::CommandExt;
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let first = start_on(&dirs).unwrap();
 

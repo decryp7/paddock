@@ -119,14 +119,14 @@ mod tests {
 
     #[test]
     fn no_gpu_says_so() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mut r = GpuReader::new(Arc::new(FakeTools::default()), 5);
         assert_eq!(r.read(d.path()), Reading::unavailable(NO_GPU));
     }
 
     #[test]
     fn reads_amd_sysfs() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         w(d.path(), "class/drm/card1/device/gpu_busy_percent", "63\n");
         w(d.path(), "class/drm/card1/device/mem_info_vram_used", "1073741824\n");
         w(d.path(), "class/drm/card1/device/mem_info_vram_total", "8589934592\n");
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn nvidia_smi_runs_only_every_few_ticks_and_only_when_present() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let tools = Arc::new(FakeTools::with("nvidia-smi", "NVIDIA RTX A2000, 12, 800, 6138\n"));
         let mut r = GpuReader::new(tools.clone(), 3);
         for _ in 0..6 {
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn nvidia_failures_become_reasons() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let tools = Arc::new(FakeTools::default());
         tools.answer(
             "nvidia-smi",

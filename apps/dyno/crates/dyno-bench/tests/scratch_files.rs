@@ -5,8 +5,8 @@
 use dyno_bench::disk::driver::{AlignedBuf, BlockIo, ALIGN};
 use dyno_bench::disk::scratch::{Scratch, SCRATCH_NAME};
 
-fn dir() -> tempfile::TempDir {
-    tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap()
+fn dir() -> paddock_testkit::PrivateTemp {
+    paddock_testkit::PrivateTemp::new_in(std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))).unwrap()
 }
 
 #[test]

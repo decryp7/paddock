@@ -28,7 +28,7 @@ struct Harness {
     signals: Arc<dyno_platform::fake::FakeIdleSignals>,
     fake: Fake,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
@@ -38,7 +38,7 @@ impl Harness {
 
     /// Starts the agent; `seed` runs on the data folder first (to leave a marker behind, say).
     fn start_with(seed: impl FnOnce(&Dirs)) -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         std::fs::create_dir_all(dirs.root()).unwrap();
         seed(&dirs);

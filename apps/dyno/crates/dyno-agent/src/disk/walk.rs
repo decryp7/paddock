@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn a_modification_time_is_a_timestamp() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let meta = dir.path().symlink_metadata().unwrap();
         assert!(modified(&meta).millis() > 0);
     }

@@ -470,7 +470,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn holders_come_from_the_helper_by_device_and_inode() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let file = dir.path().join("held.log");
         std::fs::write(&file, "x").unwrap();
         let reply = HelperReply::FileHolders(FileHolders {
@@ -487,7 +487,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn programs_the_helper_counts_but_does_not_name_are_carried_so_an_empty_list_is_not_read_as_nothing() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let file = dir.path().join("held.log");
         std::fs::write(&file, "x").unwrap();
         let reply = HelperReply::FileHolders(FileHolders {
@@ -502,7 +502,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn without_the_helper_the_agents_own_lockers_come_back_as_local_and_its_refusal_is_kept() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let file = dir.path().join("a.log");
         std::fs::write(&file, "x").unwrap();
         let mine = Locker::new(ProcessRef { pid: 9, started: None }, "me".into(), None);

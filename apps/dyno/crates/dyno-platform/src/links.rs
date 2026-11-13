@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn wireless_devices_are_found_by_their_folder() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         std::fs::create_dir_all(t.path().join("wlan0/wireless")).unwrap();
         std::fs::create_dir_all(t.path().join("eth0/device")).unwrap();
         assert_eq!(linux_wireless_devices(t.path()), vec!["wlan0"]);

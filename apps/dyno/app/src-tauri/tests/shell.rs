@@ -8,7 +8,7 @@ use dyno_app_lib::{shell, Place, COMMANDS, MANIFEST};
 use paddock_commands::testing::{sync_generated, WriteMode};
 
 fn builder() -> paddock_shell::Builder<tauri::test::MockRuntime> {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     shell(
         Place::Test {
             dir: dir.path().to_path_buf(),
@@ -225,7 +225,7 @@ fn the_update_feed_is_the_release_the_workflow_publishes_latest_json_on() {
 #[test]
 fn the_start_opens_the_tray_and_the_main_window() {
     use paddock_shell::testing::{start, Started};
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let data = dir.path().to_path_buf();
     assert_eq!(
         start(move || composed(&data, paddock_window::launch::LaunchArgs::default())),
@@ -250,7 +250,7 @@ fn the_start_opens_the_tray_and_the_main_window() {
 #[test]
 fn the_start_registers_the_tray_popover_a_click_opens() {
     use paddock_window::tauri::Popovers;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let data = dir.path().to_path_buf();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -278,7 +278,7 @@ fn the_start_registers_the_tray_popover_a_click_opens() {
 /// command fails with a missing-state error and the link does nothing (the 1.0.0 report).
 #[test]
 fn the_start_sets_up_the_user_files_service_the_about_link_needs() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let data = dir.path().to_path_buf();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -309,7 +309,7 @@ fn a_hidden_start_stays_in_the_tray() {
         hidden: true,
         ..Default::default()
     };
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let data = dir.path().to_path_buf();
     assert_eq!(
         start(move || composed(&data, launch)),
@@ -342,7 +342,7 @@ fn a_hidden_start_without_a_tray_host_opens_the_window() {
         hidden: true,
         ..Default::default()
     };
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let data = dir.path().to_path_buf();
     assert_eq!(
         start(move || {
@@ -401,7 +401,7 @@ fn quit_from_the_menu_bar_works_after_the_last_window_closed_to_the_tray() {
     use paddock_menu::tauri::{menu_chosen, NativeMenu};
     use tauri::test::{mock_builder, mock_context, noop_assets};
     use tauri::{Manager, WindowEvent};
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let shell = shell(
         Place::Test {
             dir: dir.path().to_path_buf(),
@@ -659,7 +659,7 @@ mod widget_wiring {
 /// composes the shell without it. Pinned on the composed builder, not on a helper, so a changed guard in `shell` is seen.
 #[test]
 fn a_test_place_composes_the_shell_without_report_a_problem() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let test_shell = shell::<tauri::test::MockRuntime>(
         Place::Test {
             dir: dir.path().to_path_buf(),

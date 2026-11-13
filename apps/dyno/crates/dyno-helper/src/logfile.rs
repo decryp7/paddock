@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn a_quiesced_log_writes_nothing_more_to_its_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("helper.log");
         let log = HelperLog::new(path.clone()).with(1000, || 7);
         let write = |text: &str| log.log(&Record::builder().args(format_args!("{text}")).level(Level::Info).build());
@@ -337,7 +337,7 @@ mod tests {
 
     #[test]
     fn a_log_file_that_cannot_be_written_is_reported_once_to_the_os_log_and_the_line_goes_to_standard_error() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         // The folder of the log does not exist: every append fails.
         let path = dir.path().join("missing").join("helper.log");
         let heard = Arc::new(Mutex::new(Vec::<(Level, String)>::new()));
@@ -359,7 +359,7 @@ mod tests {
 
     #[test]
     fn a_line_before_the_data_folder_is_trusted_is_written_once_to_the_os_log_or_else_to_standard_error() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let on_stderr = Arc::new(Mutex::new(Vec::<String>::new()));
         let heard = Arc::new(Mutex::new(Vec::<String>::new()));
         let (e, h) = (on_stderr.clone(), heard.clone());
@@ -387,7 +387,7 @@ mod tests {
 
     #[test]
     fn a_deferred_log_touches_no_file_until_it_is_armed_and_never_follows_a_link() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("helper.log");
         let log = HelperLog::new(path.clone()).with(1000, || 7).deferred();
         let gate = LogGate(log.state.clone());
@@ -416,7 +416,7 @@ mod tests {
 
     #[test]
     fn the_early_sink_hears_the_lines_of_the_start_and_no_file_is_touched_until_the_gate_arms() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("helper.log");
         let heard = Arc::new(Mutex::new(Vec::<(Level, String)>::new()));
         let h = heard.clone();
@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn the_log_appends_rotates_and_is_read_back_from_the_end() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("helper.log");
         let log = HelperLog::new(path.clone()).with(120, || 7);
         for i in 0..10 {
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn a_fresh_log_after_a_rotation_continues_from_the_rotated_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("helper.log");
         std::fs::write(dir.path().join("helper.log.1"), "old-1\nold-2\nold-3\n").unwrap();
         std::fs::write(&path, "new-1\nnew-2\n").unwrap();
@@ -502,7 +502,7 @@ mod tests {
 
     #[test]
     fn the_tail_is_bounded_and_a_missing_log_is_empty() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         assert!(tail(&dir.path().join("none"), 5).is_empty());
         let path = dir.path().join("big.log");
         let line = "x".repeat(1000);
@@ -517,7 +517,7 @@ mod tests {
 
     #[test]
     fn a_log_that_cannot_be_written_does_not_panic() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let log = HelperLog::new(dir.path().join("missing").join("h.log"));
         log.log(&Record::builder().args(format_args!("x")).level(Level::Info).build());
         assert!(log.enabled(&Metadata::builder().level(Level::Warn).build()));

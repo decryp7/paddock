@@ -352,7 +352,7 @@ pub(crate) mod tests {
         fetcher: Fetcher,
         wire: Arc<FakeWire>,
         clock: FakeClock,
-        dir: tempfile::TempDir,
+        dir: paddock_testkit::PrivateTemp,
     }
 
     fn rig(replies: Vec<Reply>) -> Rig {
@@ -368,7 +368,7 @@ pub(crate) mod tests {
             fetcher: Fetcher::new(Arc::new(egress), Arc::new(clock.clone()), config()),
             wire,
             clock,
-            dir: tempfile::tempdir().unwrap(),
+            dir: paddock_testkit::private_tempdir().unwrap(),
         }
     }
 
@@ -511,7 +511,7 @@ pub(crate) mod tests {
 
     #[test]
     fn the_fetch_state_round_trips_and_a_corrupt_file_gives_the_defaults() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(dir.path());
         let mut s = FetchStore::default();
         let mut st = FetchState::default();

@@ -9,3 +9,5 @@ mod limits;
 mod net;
 mod runner;
 mod scratch;
+#[cfg(windows)]
+mod scratch_private;

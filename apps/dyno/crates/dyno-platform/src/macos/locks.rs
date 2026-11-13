@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn finds_a_dummy_that_holds_a_temp_file_and_nobody_for_a_free_one() {
         let began = std::time::Instant::now();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let held = dir.path().join("held.txt");
         std::fs::write(&held, b"x").unwrap();
         // The shell opens the file on descriptor 3, says so, and becomes `tail`, which keeps the descriptor: when "ready"

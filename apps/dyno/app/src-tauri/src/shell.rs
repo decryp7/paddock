@@ -1046,7 +1046,7 @@ mod saved_items_tests {
             None,
         )
         .unwrap();
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = write(dir.path(), &serde_json::to_string(&s).unwrap());
         let items = saved_items(&path);
         let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
@@ -1055,7 +1055,7 @@ mod saved_items_tests {
 
     #[test]
     fn no_file_or_a_damaged_one_gives_the_defaults() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let defaults = initial_items(&Settings::default().menu_bar.layout().placements);
         assert_eq!(saved_items(&dir.path().join("missing.json")), defaults);
         let path = write(dir.path(), "{ not json");

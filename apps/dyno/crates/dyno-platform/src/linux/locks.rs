@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn finds_this_process_holding_a_file_open() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("held.log");
         let mut file = std::fs::File::create(&f).unwrap();
         writeln!(file, "x").unwrap();
@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn reports_flock_holders() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("locked.db");
         let file = std::fs::File::create(&f).unwrap();
         // An advisory flock, held until the file is closed.
@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn other_users_processes_are_explained_when_nothing_else_is_found() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("x");
         std::fs::write(&f, "").unwrap();
         let proc = dir.path().join("proc");
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn a_fake_tree_with_a_lock_record_and_a_time_budget() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("x.db");
         std::fs::write(&f, "").unwrap();
         let meta = std::fs::metadata(&f).unwrap();

@@ -75,7 +75,7 @@ fn level(dirs: &Dirs, scan: u64) -> bool {
 fn the_log_of_a_whole_run_over_saved_maps_names_no_path_and_no_folder() {
     log::set_logger(&Capture).unwrap();
     log::set_max_level(log::LevelFilter::Trace);
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let work = std::fs::canonicalize(tmp.path()).unwrap().join("__PRIVATE_work__");
 

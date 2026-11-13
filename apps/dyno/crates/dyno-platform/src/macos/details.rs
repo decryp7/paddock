@@ -129,7 +129,7 @@ mod tests {
             signature(Path::new("/bin/ls")),
             SignatureInfo::Signed(_) | SignatureInfo::Invalid(_)
         ));
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("plain");
         std::fs::write(&f, b"not a program").unwrap();
         assert!(!matches!(signature(&f), SignatureInfo::Signed(_)));

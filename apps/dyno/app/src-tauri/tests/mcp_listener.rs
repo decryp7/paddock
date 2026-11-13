@@ -77,7 +77,7 @@ fn ask(port: u16, key: &str, lines: &[String]) -> Vec<Value> {
 
 #[test]
 fn dyno_serves_mcp_on_loopback_only_while_access_is_on_and_a_key_exists() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let (control, dirs) = control(dir.path());
     assert_eq!(control.get().listener, ListenerView::Off);
 
@@ -133,7 +133,7 @@ fn dyno_serves_mcp_on_loopback_only_while_access_is_on_and_a_key_exists() {
 
 #[test]
 fn a_saved_on_setting_starts_the_listener_when_the_app_starts() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let (first, _) = control(dir.path());
     first
         .save(McpSettings {

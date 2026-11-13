@@ -161,7 +161,7 @@ fn exits(agent: Agent) -> std::process::ExitStatus {
 
 #[test]
 fn term_stops_a_running_agent_cleanly_and_removes_its_discovery_file() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
     let mut child = start(dirs.root());
     // Ready: the agent has written its discovery file (the handshake the app uses). The wait is on the file and on the child.
@@ -183,7 +183,7 @@ fn term_sent_while_the_agent_is_starting_still_ends_it() {
     // TERM right after the spawn lands before the handlers, or in the middle of the start, or after it: whichever, the agent
     // ends (the start does not look at the flag, a thread of its own does).
     for _ in 0..3 {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
         let child = start(dirs.root());
         term(&child);
@@ -197,7 +197,7 @@ fn term_sent_while_the_agent_is_starting_still_ends_it() {
 /// and from the app's. Names and numbers only. The agent started by launchd has no stderr that anyone reads: this file is it.
 #[test]
 fn the_agents_start_and_stop_are_in_its_own_dated_log_with_millisecond_counts() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
     let mut child = start(dirs.root());
     ready(&mut child, &dirs);
@@ -263,7 +263,7 @@ fn the_agents_start_and_stop_are_in_its_own_dated_log_with_millisecond_counts() 
 /// holds the data folder" is shown.
 #[test]
 fn a_refused_second_agent_logs_why_who_holds_the_folder_and_exit_code_3() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
     let mut first = start(dirs.root());
     let first_pid = first.id();
@@ -308,7 +308,7 @@ fn a_refused_second_agent_logs_why_who_holds_the_folder_and_exit_code_3() {
 #[test]
 fn an_agent_on_a_data_folder_of_its_own_never_asks_this_computers_helper() {
     use dyno_core::protocol::{Reply, Request};
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = dyno_agent::paths::Dirs::at(tmp.path().join("data"));
     let mut child = start(dirs.root());
     ready(&mut child, &dirs);

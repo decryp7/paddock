@@ -47,7 +47,7 @@ fn make_tree(root: &std::path::Path) {
 #[test]
 #[ignore = "a measurement, not a check: run it by hand in release mode"]
 fn the_finder_on_a_generated_tree() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let root = std::fs::canonicalize(tmp.path()).unwrap().join("tree");
     let made = Instant::now();
     make_tree(&root);

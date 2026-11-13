@@ -335,12 +335,12 @@ mod tests {
         stop: Arc<AtomicBool>,
         daemon: Option<std::thread::JoinHandle<Result<(), String>>>,
         served: Arc<ServedCounts>,
-        _dir: tempfile::TempDir,
+        _dir: paddock_testkit::PrivateTemp,
     }
 
     impl Rig {
         fn start(owner: HelperUser, max_total: usize) -> Rig {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = paddock_testkit::private_tempdir().unwrap();
             let listener = Listener::bind().unwrap();
             let name = listener.name().to_string();
             let dispatcher = Arc::new(Dispatcher::new(Parts {
