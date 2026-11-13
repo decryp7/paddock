@@ -226,6 +226,13 @@ enum SelfCommand {
     Hash,
 }
 
+#[derive(Args)]
+struct ConformanceArgsArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+}
+
 #[derive(Subcommand)]
 enum CiCommand {
     /// Job-isolation slots held by kernel file locks.
@@ -256,6 +263,10 @@ enum CiCommand {
     /// flaky tests found exit 5 only with --fail-on-flakes;
     /// cancelled runs are counted and listed but never change the exit code.
     Flakes(ci_runs::FlakesArgs),
+    /// The arguments of CI's conformance line (`--app paddock ... --only ...`, after `node conformance/bin/paddock-conformance.mjs`... as
+    /// one line), read from .gitea/workflows/ci.yml by the one reader the push gate uses (ADR 0098 WP-2). Exit 6 when the
+    /// workflow has no single such line.
+    ConformanceArgs(ConformanceArgsArgs),
     /// For each failed test of a finished run: NEW, ALREADY FAILING ON MAIN (the last main run of the same workflow) or FLAKY (its
     /// `ci flakes` history). UNKNOWN when nothing proves either way. Read-only: it never quarantines or marks anything green (ER-12).
     Triage(ci_runs::TriageArgs),
@@ -551,6 +562,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::RecordFixture(a),
         } => ci_runs::record::command(&a),
+        Command::Ci {
+            command: CiCommand::ConformanceArgs(a),
+        } => gates::command::repo_root(a.root.as_deref()).and_then(|root| pre_push::ci_line::command(&root)),
         Command::Ci {
             command: CiCommand::Triage(a),
         } => ci_runs::triage(&a),

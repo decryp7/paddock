@@ -1,6 +1,27 @@
 //! The conformance command CI runs for Paddock itself, read from `.gitea/workflows/ci.yml` in this one place (ADR 0038 §1: the
 //! check list exists once; until the contract file of WP-3 holds it, the YAML line is the source and the push gate reads it).
 
+/// The workflow the line is read from, relative to the repository root.
+pub const WORKFLOW: &str = ".gitea/workflows/ci.yml";
+
+/// `./dev ci conformance-args` (ADR 0098 WP-2): the one reader of CI's conformance line, as a command, for whoever needs the
+/// line and is not Rust (the generator registry's `conformance-line` entry, a person). Prints the arguments after `node`, one
+/// line, space separated; a workflow that cannot be read or has no single line is NOT MEASURED (exit 6), never an empty line.
+pub fn command(root: &std::path::Path) -> Result<paddock_cli::Report, paddock_cli::CliError> {
+    let path = root.join(WORKFLOW);
+    let not_measured = |why: String| {
+        paddock_cli::CliError::new(
+            paddock_cli::Exit::NotMeasured,
+            format!(
+                "::error::conformance args NOT MEASURED: {why}. Next step: fix {WORKFLOW} so it has one conformance line (inline, or PADDOCK_CONFORMANCE_ARGS), then run it again."
+            ),
+        )
+    };
+    let text = std::fs::read_to_string(&path).map_err(|e| not_measured(format!("{} cannot be read: {e}", path.display())))?;
+    let args = conformance_args(&text).map_err(not_measured)?;
+    Ok(paddock_cli::Report::new(serde_json::json!({ "args": args }), args.join(" ")))
+}
+
 /// The arguments after `node` of the one `node conformance/bin/paddock-conformance.mjs --app paddock ... --only ...` line, or why
 /// there is not exactly one (zero or two lines make the check broken, not passed: ER-33).
 pub fn conformance_args(ci_yml: &str) -> Result<Vec<String>, String> {
@@ -103,6 +124,24 @@ mod tests {
         // The env named but missing is a broken check, not an empty run.
         let missing = "jobs:\n  c:\n    steps:\n      - run: node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS\n";
         assert!(conformance_args(missing).is_err());
+    }
+
+    #[test]
+    fn the_command_prints_the_line_and_is_not_measured_without_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let wf = dir.path().join(WORKFLOW);
+        std::fs::create_dir_all(wf.parent().unwrap()).unwrap();
+        let err = command(dir.path()).err().unwrap();
+        assert_eq!(err.exit, paddock_cli::Exit::NotMeasured);
+        assert!(err.message.contains("::error::conformance args NOT MEASURED"), "{}", err.message);
+        std::fs::write(&wf, format!("steps:\n  - name: x\n    run: {LINE}\n")).unwrap();
+        let report = command(dir.path()).unwrap();
+        assert_eq!(
+            report.text,
+            "conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14 --strict C36"
+        );
+        std::fs::write(&wf, "jobs: {}\n").unwrap();
+        assert_eq!(command(dir.path()).err().unwrap().exit, paddock_cli::Exit::NotMeasured);
     }
 
     #[test]
