@@ -208,12 +208,15 @@ mod tests {
         let (d, ws) = fixture(true);
         let (code, out, env, ci) = go(d.path(), &ws, "macOS", "spotter-rust", "s1");
         assert_eq!(code, 0, "{out}");
-        let kept = format!("{}/.paddock-ci/target-spotter-rust-s1", super::super::fwd(&d.path().join("home")));
+        let kept = format!(
+            "{}/.paddock-ci/target-spotter-rust-s1",
+            paddock_testkit::path::text(&d.path().join("home"))
+        );
         let canon = paddock_env::winpath::real(&d.path().join("home")).unwrap();
         let kept = if Path::new(&kept).exists() {
             kept
         } else {
-            format!("{}/.paddock-ci/target-spotter-rust-s1", super::super::fwd(&canon))
+            format!("{}/.paddock-ci/target-spotter-rust-s1", paddock_testkit::path::text(&canon))
         };
         assert_eq!(
             ci.unwrap().split('\n').skip(1).collect::<Vec<_>>().join("\n"),

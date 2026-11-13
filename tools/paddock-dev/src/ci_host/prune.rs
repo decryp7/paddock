@@ -561,7 +561,9 @@ mod tests {
         std::os::unix::fs::symlink(&real, c.home.join(".paddock-ci/target-link")).unwrap();
         big(&c.home, ".paddock-ci/notes/debug/incremental", 3000);
         big(&c.home, "Documents/debug/incremental", 3000);
-        let dotted = format!("{}/.paddock-ci/target-real-s1/../target-real-s1/../../Documents", c.home.display());
+        let dotted = paddock_testkit::path::under(&c.home, ".paddock-ci/target-real-s1/../target-real-s1/../../Documents")
+            .display()
+            .to_string();
         let cases: Vec<(&str, String, PathBuf)> = vec![
             ("unset", String::new(), real.join("debug/incremental/blob")),
             (

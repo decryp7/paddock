@@ -52,7 +52,7 @@ fn a_slots_port_and_kept_folder_on_a_windows_host() {
     assert_eq!(text(&port.stdout).trim(), "4228", "slot s2 takes the second port of the block");
     let tools = run(&home, &tables, &["path", "tools"]);
     assert!(tools.status.success(), "{}", text(&tools.stderr));
-    let shown = text(&tools.stdout).trim().replace('\\', "/");
+    let shown = paddock_testkit::path::text(Path::new(text(&tools.stdout).trim()));
     assert!(shown.ends_with("/ci/tools"), "{shown}");
     assert!(Path::new(shown.as_str()).is_dir());
 }
@@ -64,7 +64,7 @@ fn one_folder_has_one_key_however_it_is_spelled() {
     let work = paddock_env::winpath::real(d.path()).unwrap().join("work");
     std::fs::create_dir_all(&work).unwrap();
     let plain = work.to_string_lossy().trim_start_matches(r"\\?\").to_string();
-    let forward = plain.replace('\\', "/");
+    let forward = paddock_testkit::path::text(&work);
     let (drive, rest) = forward.split_at(2);
     let git_bash = format!("/{}{rest}", drive[..1].to_lowercase());
     let key = |p: &str| {

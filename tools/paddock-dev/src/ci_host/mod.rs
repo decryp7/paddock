@@ -248,13 +248,6 @@ pub(crate) fn canonical_tempdir() -> tempfile::TempDir {
     tempfile::Builder::new().tempdir_in(parent).expect("a temp folder")
 }
 
-/// A path as the kept-folder tools print it: `/` separators on every OS and no `\\?\` prefix (`C:/a/b`). Expected values of the
-/// tests of this module are built with it, never with `format!("{}/..", path.display())`, which mixes `\` and `/` on Windows.
-#[cfg(test)]
-pub(crate) fn fwd(path: &Path) -> String {
-    paddock_env::winpath::lexical_text(path, paddock_env::Os::current())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

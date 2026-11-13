@@ -32,7 +32,10 @@ pub struct OsLinks<'a> {
 impl Links for OsLinks<'_> {
     fn link_dir(&self, target: &Path, link: &Path) -> Result<(), String> {
         if self.windows {
-            let call = junction_call(&home::mixed(target), &home::mixed(link));
+            let call = junction_call(
+                &paddock_env::winpath::lexical_text(target, paddock_env::Os::current()),
+                &paddock_env::winpath::lexical_text(link, paddock_env::Os::current()),
+            );
             let ran = call.run(self.env, &mut std::io::sink())?;
             return if ran.success {
                 Ok(())

@@ -2,7 +2,7 @@
 
 use super::table::Layout;
 use super::{Ctx, R, Sinks, Stop};
-use paddock_env::winpath;
+use paddock_env::{Os, winpath};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -22,23 +22,10 @@ fn is_drive_path(p: &str) -> bool {
     b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
 }
 
-/// A Git-bash style `/c/dir` (or `/c`) as a drive path `C:/dir`; anything else as it is. Only on Windows (`windows`), where Git bash
-/// hands native programs such paths; `windows` is a parameter so every OS tests it.
-pub fn from_git_bash(p: &str, windows: bool) -> String {
-    let b = p.as_bytes();
-    if windows && (b.len() == 2 || b.len() >= 3 && b[2] == b'/') && b[0] == b'/' && b[1].is_ascii_alphabetic() {
-        // `/c` is the drive's root `C:/`, never the drive-relative `C:`.
-        let rest = if b.len() == 2 { "/" } else { &p[2..] };
-        return format!("{}:{rest}", (b[1] as char).to_ascii_uppercase());
-    }
-    p.to_string()
-}
-
-/// `p` as one string with `/` separators (what `cygpath -m` gives; the same on Unix). Programs on every OS take it, and so do Git
-/// bash's. A path from the file system goes through `winpath::real_for_tools` first: this does not repair a `\\?\` prefix.
-pub fn mixed(p: &Path) -> String {
-    let s = p.to_string_lossy();
-    if cfg!(windows) { s.replace('\\', "/") } else { s.to_string() }
+/// The OS a `windows` flag stands for: Git-bash spellings are read on Windows only (`winpath::from_git_bash`), and a test sets the
+/// flag to exercise them on any OS.
+pub fn os_of(windows: bool) -> Os {
+    if windows { Os::Windows } else { Os::Linux }
 }
 
 /// The path as the operating system's own programs take it (`cygpath -w`: backslashes on Windows, as it is elsewhere).
@@ -49,7 +36,7 @@ pub fn native(p: &str) -> String {
 /// The job's temp folder: the runner's `RUNNER_TEMP` without a trailing separator.
 pub fn job_temp(ctx: &Ctx) -> R<String> {
     let t = ctx.need("RUNNER_TEMP", "RUNNER_TEMP is not set (the per-job temp folder of the runner)")?;
-    let t = from_git_bash(t, ctx.windows);
+    let t = winpath::from_git_bash(t, os_of(ctx.windows));
     Ok(t.trim_end_matches(['/', '\\']).to_string())
 }
 
@@ -75,7 +62,7 @@ pub fn slot(ctx: &Ctx) -> R<String> {
 /// The CI home (`ci-home.sh`): `PADDOCK_CI_HOME` (absolute, must exist) or `~/.paddock-ci` (created); canonical, no trailing slash.
 pub fn ci_home(ctx: &Ctx) -> R<String> {
     let dir: PathBuf = if let Some(h) = ctx.get("PADDOCK_CI_HOME") {
-        let h = from_git_bash(h, ctx.windows);
+        let h = winpath::from_git_bash(h, os_of(ctx.windows));
         if !(h.starts_with('/') || is_drive_path(&h)) {
             return Err(Stop::line(1, format!("::error::PADDOCK_CI_HOME ({h}) is not an absolute path.")));
         }
@@ -115,7 +102,7 @@ pub fn source_key(dir: &Path, windows: bool) -> R<String> {
 /// A path text as the key is made from it: Git-bash spelling made a drive path (`windows`), `\` as `/`, a `\\?\` prefix dropped, no
 /// trailing `/`, the drive letter lower-cased. Pure, so every OS tests it.
 pub fn normalize_root(root: &str, windows: bool) -> String {
-    let mut text = from_git_bash(root, windows);
+    let mut text = winpath::from_git_bash(root, os_of(windows));
     if windows {
         text = text.replace('\\', "/");
     }
@@ -214,7 +201,7 @@ pub fn cmd_path(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
                 "the kept folder '{kind}' is keyed by its source: pass --source <the workspace folder> (ADR 0025 amendment)"
             ))
         })?;
-        source_key(Path::new(&from_git_bash(&dir, ctx.windows)), ctx.windows)?
+        source_key(Path::new(&winpath::from_git_bash(&dir, os_of(ctx.windows))), ctx.windows)?
     } else {
         String::new()
     };
@@ -276,13 +263,6 @@ mod tests {
         }
         assert_ne!(source_key_of("/c/y", true), k);
         // Off Windows `/c/x` is just a folder of that name.
-        assert_eq!(from_git_bash("/c/x", false), "/c/x");
-        assert_eq!(from_git_bash("/c/x", true), "C:/x");
-        assert_eq!(from_git_bash("/cc/x", true), "/cc/x", "only a one-letter first part is a drive");
-        assert_eq!(from_git_bash("/usr", true), "/usr");
-        assert_eq!(from_git_bash("/c", true), "C:/", "a drive's root, not the drive-relative C:");
-        assert_eq!(from_git_bash("/c/", true), "C:/");
-        assert_eq!(from_git_bash("/c", false), "/c");
         assert_eq!(normalize_root("/c/x", true), "c:/x");
     }
 

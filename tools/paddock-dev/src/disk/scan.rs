@@ -228,13 +228,7 @@ mod tests {
         let s = settings(&d.path().join("dev-targets"), &d.path().join("i.sqlite"));
         let names: Vec<String> = discover(&s)
             .iter()
-            .map(|f| {
-                f.path
-                    .strip_prefix(d.path().join("dev-targets"))
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            })
+            .map(|f| paddock_testkit::path::text(f.path.strip_prefix(d.path().join("dev-targets")).unwrap()))
             .collect();
         assert_eq!(names, ["app-target", "mystery", "wt/old-worktree"]);
     }

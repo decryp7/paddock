@@ -211,7 +211,8 @@ impl Step<'_> {
 
     /// A path from the environment as this process takes it (Git bash hands `/c/x` on Windows).
     fn path_var(&self, key: &str) -> Option<String> {
-        self.get(key).map(|v| home::from_git_bash(v, self.ctx.windows))
+        self.get(key)
+            .map(|v| paddock_env::winpath::from_git_bash(v, home::os_of(self.ctx.windows)))
     }
 
     /// `${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/<version>`.
@@ -571,7 +572,7 @@ impl Step<'_> {
             let slots = self.isolation(&["slots"])?;
             let slots: u64 = slots.parse().unwrap_or(1);
             let size = slot_cache_size(self.get("PADDOCK_CI_SCCACHE_GB"), slots);
-            (home::from_git_bash(&dir, self.ctx.windows), size)
+            (paddock_env::winpath::from_git_bash(&dir, home::os_of(self.ctx.windows)), size)
         };
         if let Err(e) = std::fs::create_dir_all(&dir) {
             return Err(self.fail(error_line(
@@ -833,7 +834,7 @@ mod tests {
             };
             let temp = root.join("temp");
             std::fs::create_dir_all(&temp).unwrap();
-            let releases = format!("file://{}", root.join("rel").display());
+            let releases = format!("file://{}", paddock_testkit::path::text(root.join("rel")));
             let ctx = crate::ci_isolation::testkit::ctx(&[
                 ("PATH", "/usr/bin:/bin"),
                 ("RUNNER_OS", os),

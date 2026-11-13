@@ -139,7 +139,7 @@ pub fn owns_rel(kept: &Kept, rel: &str, slot: &str, only: &str) -> bool {
 /// `owns <folder> [<kind>]`: exit 0 when the folder is a kept folder (of that kind) of this job's slot; 1 otherwise, with no output.
 pub fn cmd_owns(ctx: &Ctx, args: &[String]) -> R<()> {
     let refuse = || Stop::silent(1);
-    let dir = super::home::from_git_bash(args.first().map(String::as_str).unwrap_or(""), ctx.windows);
+    let dir = paddock_env::winpath::from_git_bash(args.first().map(String::as_str).unwrap_or(""), super::home::os_of(ctx.windows));
     let only = args.get(1).map(String::as_str).unwrap_or("");
     let meta = std::fs::symlink_metadata(&dir).map_err(|_| refuse())?;
     if dir.is_empty() || !meta.is_dir() {
@@ -225,7 +225,7 @@ mod tests {
 
     /// `p` below `home` as text with `/` between the parts, whatever the platform joined it with.
     fn rel(p: &Path, home: &Path) -> String {
-        p.strip_prefix(home).unwrap().to_string_lossy().replace('\\', "/")
+        paddock_testkit::path::text(p.strip_prefix(home).unwrap())
     }
 
     fn names(v: &[(PathBuf, String)], home: &Path) -> Vec<(String, String)> {

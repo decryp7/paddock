@@ -220,7 +220,7 @@ fn run_command(ctx: &Ctx, args: &[String], io: &mut Sinks<'_>) -> R<()> {
         Some("source-key") => {
             let dir = rest.first().ok_or_else(|| Stop::die("usage: dev ci isolation source-key <dir>"))?;
             io.value(home::source_key(
-                std::path::Path::new(&home::from_git_bash(dir, ctx.windows)),
+                std::path::Path::new(&paddock_env::winpath::from_git_bash(dir, home::os_of(ctx.windows))),
                 ctx.windows,
             )?);
             Ok(())

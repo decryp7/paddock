@@ -1860,32 +1860,16 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
     );
     // And every folder it visits is one `cargo metadata` can resolve, not a fixture a test makes.
     for l in visited.lines() {
-        let dir = if cfg!(windows) { native_path_of_bash(l) } else { l.to_string() };
+        let dir = if cfg!(windows) {
+            paddock_env::winpath::from_git_bash(l, paddock_env::Os::current())
+        } else {
+            l.to_string()
+        };
         assert!(
             Path::new(&dir).join("Cargo.toml").exists(),
             "{l} has no Cargo.toml (looked at {dir})"
         );
     }
-}
-
-/// What Git bash's `pwd` prints on Windows (`/c/Users/x`) as the path Windows itself reads (`C:/Users/x`); any other path is unchanged.
-/// Rust's `Path::exists` cannot resolve the first form, so the CI job on Windows (run 8034) reported "has no Cargo.toml" for a full tree.
-fn native_path_of_bash(p: &str) -> String {
-    let b = p.as_bytes();
-    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b'/' {
-        return format!("{}:{}", b[1].to_ascii_uppercase() as char, &p[2..]);
-    }
-    p.to_string()
-}
-
-#[test]
-fn a_git_bash_path_is_read_as_the_windows_path_it_names() {
-    assert_eq!(
-        native_path_of_bash("/c/Users/x/paddock-checkout-Windows-s1/apps/debrief"),
-        "C:/Users/x/paddock-checkout-Windows-s1/apps/debrief"
-    );
-    assert_eq!(native_path_of_bash("/Volumes/d7/x"), "/Volumes/d7/x");
-    assert_eq!(native_path_of_bash("C:/x"), "C:/x");
 }
 
 #[test]
