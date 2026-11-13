@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn the_folder_above_the_private_one_is_readable_by_everyone_so_a_standard_user_can_read_the_lifecycle_file() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let mut paths = paths_in(dir.path());
         // The macOS layout: /Library/Application Support/Dyno/Helper (private) beside Dyno/helper-lifecycle.log (public).
         paths.data_dir = dir.path().join("Dyno").join("Helper");
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn a_lifecycle_file_that_cannot_be_removed_does_not_stop_the_rest_of_the_removal() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let mut paths = paths_in(dir.path());
         // A directory in the place of the file: removing it as a file fails.
         let blocked = dir.path().join("blocked-lifecycle");
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn the_logs_folder_the_unit_made_goes_with_the_lifecycle_file_but_not_with_another_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let mut paths = paths_in(dir.path());
         let logs = dir.path().join("var-log").join("dyno-helper");
         std::fs::create_dir_all(&logs).unwrap();
@@ -592,7 +592,7 @@ mod tests {
 
     #[test]
     fn uninstall_removes_the_lifecycle_file_and_its_empty_logs_folder() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let paths = paths_in(dir.path());
         let file = paths.lifecycle.clone().unwrap();
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -605,7 +605,7 @@ mod tests {
 
     #[test]
     fn the_configuration_is_written_private_and_replaced_in_one_step() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let paths = paths_in(dir.path());
         std::fs::create_dir_all(&paths.data_dir).unwrap();
         let files = FakeFiles::new();
@@ -627,7 +627,7 @@ mod tests {
 
     #[test]
     fn a_folder_that_cannot_be_made_or_a_config_that_cannot_be_written_says_so() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let paths = paths_in(dir.path());
         let files = FakeFiles::new();
         files.fail_with(Some(std::io::ErrorKind::PermissionDenied));
@@ -663,7 +663,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         use std::sync::Arc;
         for round in 0..40 {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = paddock_testkit::private_tempdir().unwrap();
             let mut paths = paths_in(dir.path());
             paths.log = paths.data_dir.join("helper.log");
             std::fs::create_dir_all(&paths.data_dir).unwrap();
@@ -707,7 +707,7 @@ mod tests {
     #[test]
     fn an_empty_folder_that_cannot_be_removed_says_the_real_error_not_that_it_holds_something() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let paths = paths_in(dir.path());
         std::fs::create_dir_all(&paths.data_dir).unwrap();
         // The parent refuses the removal of an entry (as the service's read-only `/var/lib` does).
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn a_foreign_file_still_keeps_the_folder_in_place_with_the_log_quiesced() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let paths = paths_in(dir.path());
         std::fs::create_dir_all(&paths.data_dir).unwrap();
         std::fs::write(paths.data_dir.join("notes.txt"), b"someone else's").unwrap();
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn removing_the_data_folder_takes_only_the_helpers_own_files_and_the_folder_when_it_is_empty() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let paths = paths_in(dir.path());
         std::fs::create_dir_all(paths.data_dir.join("tools").join("smartmontools-7.5")).unwrap();
         std::fs::create_dir_all(paths.data_dir.join("staging")).unwrap();
@@ -784,7 +784,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_data_folder_that_is_a_link_is_never_followed() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let paths = paths_in(dir.path());
         let elsewhere = dir.path().join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn the_empty_dyno_parent_folder_goes_with_the_data_but_never_something_in_it() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let mut paths = paths_in(dir.path());
         paths.data_dir = dir.path().join("Dyno").join("Helper");
         std::fs::create_dir_all(&paths.data_dir).unwrap();
@@ -812,7 +812,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_stale_socket_and_its_empty_folder_are_removed_but_a_file_that_is_not_a_socket_is_not() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let mut paths = paths_in(dir.path());
         let run = dir.path().join("run").join("dyno-helper");
         std::fs::create_dir_all(&run).unwrap();

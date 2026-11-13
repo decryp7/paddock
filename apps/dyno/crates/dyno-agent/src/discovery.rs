@@ -142,7 +142,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_linked_data_folder_the_user_owns_is_read_and_written() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let real = tmp.path().join("real");
         std::fs::create_dir(&real).unwrap();
         let link = tmp.path().join("link");
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn a_default_folder_with_mode_0775_is_written_and_read() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dir = tmp.path().join("data");
         std::fs::create_dir(&dir).unwrap();
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o775)).unwrap();
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn the_file_is_written_again_when_it_is_missing_or_names_another_agent_and_left_alone_when_right() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let path = tmp.path().join("agent.json");
         let mine = sample();
         assert_eq!(ensure_describes(&path, &mine).unwrap(), Some(Rewrite::Missing), "no file");
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn round_trips_privately_and_is_removed_by_its_owner_only() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("sub").join("agent.json");
         let d = sample();
         d.write(&path).unwrap();
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn a_file_is_removed_as_seen_only_while_it_is_still_that_file() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("agent.json");
         let seen = sample();
         seen.write(&path).unwrap();
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn damaged_or_huge_files_are_none() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let path = dir.path().join("agent.json");
         assert_eq!(Discovery::read(&path), None);
         std::fs::write(&path, b"{nope").unwrap();

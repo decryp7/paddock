@@ -475,7 +475,7 @@ mod supplied_config_tests {
     #[test]
     fn a_supplied_config_folder_others_can_write_is_refused_and_the_oss_own_is_not() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let open = tmp.path().join("config");
         std::fs::create_dir(&open).unwrap();
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();

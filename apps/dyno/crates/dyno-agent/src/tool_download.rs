@@ -342,7 +342,7 @@ mod tests {
     struct Rig {
         d: ToolDownloader,
         wire: Arc<FakeWire>,
-        dir: tempfile::TempDir,
+        dir: paddock_testkit::PrivateTemp,
     }
 
     fn rig(pin: &ToolPin, replies: Vec<Reply>) -> Rig {
@@ -367,7 +367,7 @@ mod tests {
         Rig {
             d: ToolDownloader::new(Arc::new(egress), config),
             wire,
-            dir: tempfile::tempdir().unwrap(),
+            dir: paddock_testkit::private_tempdir().unwrap(),
         }
     }
 

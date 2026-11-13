@@ -203,7 +203,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_real_file_reports_its_length_and_a_hard_link_shares_its_identity() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let (a, b) = (t.path().join("a"), t.path().join("b"));
         std::fs::write(&a, vec![1u8; 5000]).unwrap();
         std::fs::hard_link(&a, &b).unwrap();

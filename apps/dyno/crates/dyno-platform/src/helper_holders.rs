@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn socket_links_give_inodes_per_program_and_other_links_are_ignored() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let plain = dir.path().join("plain.txt");
         std::fs::write(&plain, "x").unwrap();
         tree(
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn a_file_is_found_by_device_and_inode_through_descriptors_and_locks() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let target = dir.path().join("data.db");
         let other = dir.path().join("other.db");
         std::fs::write(&target, "x").unwrap();

@@ -37,7 +37,7 @@ fn service(os: Os, home: &std::path::Path, s: &Script) -> Service {
 
 #[test]
 fn macos_installs_by_bootstrapping_after_a_bootout_and_reports_status() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let mut svc = service(Os::Mac, dir.path(), &s);
     assert_eq!(svc.status(), Status::NotInstalled);
@@ -62,7 +62,7 @@ fn macos_installs_by_bootstrapping_after_a_bootout_and_reports_status() {
 
 #[test]
 fn macos_reregisters_when_launchd_cannot_run_the_installed_job() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let mut svc = service(Os::Mac, dir.path(), &s);
     svc.install().unwrap();
@@ -80,7 +80,7 @@ fn macos_reregisters_when_launchd_cannot_run_the_installed_job() {
 
 #[test]
 fn a_service_for_another_executable_is_registered_again_and_nothing_is_installed_unasked() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let mut old = Service::with(
         "/old/dyno-agent".into(),
@@ -108,13 +108,13 @@ fn a_service_for_another_executable_is_registered_again_and_nothing_is_installed
             current: true
         }
     );
-    let empty = tempfile::tempdir().unwrap();
+    let empty = paddock_testkit::private_tempdir().unwrap();
     assert!(!service(Os::Mac, empty.path(), &s).ensure().unwrap());
 }
 
 #[test]
 fn windows_uses_the_per_user_run_key() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let mut svc = Service::with(
         r"C:\Dyno\dyno-agent.exe".into(),
@@ -144,7 +144,7 @@ fn windows_uses_the_per_user_run_key() {
 /// until launchd has dropped it, and gives up waiting after a bounded time.
 #[test]
 fn macos_bootstraps_only_after_launchd_dropped_the_old_job_and_the_wait_is_bounded() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let waited = Arc::new(Mutex::new(Duration::ZERO));
     let w = waited.clone();
@@ -190,7 +190,7 @@ fn macos_bootstraps_only_after_launchd_dropped_the_old_job_and_the_wait_is_bound
 #[test]
 fn launchd_supervises_the_agent_and_a_windows_run_entry_does_not() {
     // macOS: a bootstrapped launch agent (KeepAlive) is started and restarted by launchd.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let mut mac = service(Os::Mac, dir.path(), &s);
     assert!(!mac.supervised());
@@ -200,7 +200,7 @@ fn launchd_supervises_the_agent_and_a_windows_run_entry_does_not() {
     assert!(!mac.supervised());
 
     // Windows: the Run entry starts the agent at the next logon only; nothing restarts it now.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     s.answer("query", true, "Dyno    REG_SZ    \"/opt/dyno/dyno-agent\" run");
     let mut win = service(Os::Windows, dir.path(), &s);
@@ -216,7 +216,7 @@ fn inside_a_mac_app_bundle_the_service_commands_are_refused_with_the_way_to_mana
     // The same path on other systems, and a dyno-agent outside a bundle on a Mac, are not refused.
     assert!(refuse_inside_app_bundle(Os::Linux, inside).is_ok());
     // On Linux the unit is the shared manager's: `Service` writes nothing there.
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let mut linux = service(Os::Linux, dir.path(), &Script::default());
     assert!(linux.install().is_err() && linux.uninstall().is_err());
     assert_eq!(linux.status(), Status::NotInstalled);
@@ -240,7 +240,7 @@ fn inside_a_mac_app_bundle_the_service_commands_are_refused_with_the_way_to_mana
 #[test]
 fn the_agents_windows_entry_never_shares_the_apps_value_name() {
     assert_ne!(spec::WINDOWS_AGENT_VALUE, spec::WINDOWS_APP_VALUE);
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let mut svc = Service::with(
         r"C:\Dyno\dyno-agent.exe".into(),
@@ -265,7 +265,7 @@ fn the_agents_windows_entry_never_shares_the_apps_value_name() {
 
 #[test]
 fn the_1_0_0_entry_that_replaced_the_apps_is_removed_and_reported() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let s = Script::default();
     let mut svc = Service::with(
         r"C:\Dyno\dyno-agent.exe".into(),

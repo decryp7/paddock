@@ -9,6 +9,10 @@ disallowed-methods = [
     { path = "std::process::Command::new", reason = "use dyno_platform::process::command: no console window on Windows, always bounded" },
     { path = "tokio::process::Command::new", allow-invalid = true, reason = "use the app's process helper (paddock-proc): no console window on Windows, always bounded" },
     { path = "std::env::temp_dir", reason = "tests use a scratch folder from the test kit and production code uses paddock-env: nothing is left in the shared temp folder" },
+    # ADR 0092 / 0078: a plain temp folder takes the access list of the temp folder it is made in, and a CI runner's (under C:\\) is open to
+    # Authenticated Users, so code that refuses a folder others can write refuses it. Tests make folders with the test kit.
+    { path = "tempfile::tempdir", reason = "use paddock_testkit::private_tempdir(): owner-only on Windows too (a CI runner's temp folder is open to Authenticated Users)" },
+    { path = "tempfile::TempDir::new", reason = "use paddock_testkit::private_tempdir() (or PrivateTemp::new_in): owner-only on Windows too" },
     { path = "reqwest::Client::new", allow-invalid = true, reason = "build the client with paddock-net's policy (https only, caps, redirects, timeouts)" },
     # ADR 0033: nothing is ended by a bare pid. A pid may name another process by the time it is signalled; end it through
     # paddock-proc with a ProcessId, or through a handle or job this process owns. A justified site carries

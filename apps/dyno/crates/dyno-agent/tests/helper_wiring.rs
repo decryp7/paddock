@@ -40,7 +40,7 @@ fn dyno_root() -> PathBuf {
 /// What `HelperFirst::new` recorded while the real agent was built for `host` over the fakes (no machine is touched: the data
 /// folder is a temp folder, the platform and the helper are the rig's).
 fn wired_on(host: HelperHost) -> HashSet<RequestKind> {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     let transport = DispatcherTransport::new(dispatcher(host, Readers::default(), tmp.path()), Caller::Owner);

@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn bounded_readers() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let f = dir.path().join("x");
         std::fs::write(&f, b"  12 \n").unwrap();
         assert_eq!(read_trim(&f).as_deref(), Some("12"));

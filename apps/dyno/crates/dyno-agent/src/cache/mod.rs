@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn a_save_goes_through_the_writer_thread_and_is_listed_and_loaded() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let clock = Arc::new(FakeClock::new(1_000));
         let c = start(d.path(), clock.clone());
         let (tx, rx) = channel();
@@ -537,7 +537,7 @@ mod tests {
 
     #[test]
     fn a_save_told_superseded_hears_it() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let c = start(d.path(), Arc::new(FakeClock::new(1)));
         let (tx, rx) = channel();
         c.save(job("folder:/a", "1", tx.clone()));
@@ -554,7 +554,7 @@ mod tests {
 
     #[test]
     fn forget_all_deletes_the_files_and_leaves_an_empty_cache() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let c = start(d.path(), Arc::new(FakeClock::new(1)));
         let (tx, rx) = channel();
         c.save(job("folder:/a", "1", tx));
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn switching_the_setting_off_forgets_and_stops_saving() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let c = start(d.path(), Arc::new(FakeClock::new(1)));
         let (tx, rx) = channel();
         c.save(job("folder:/a", "1", tx.clone()));
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn a_damaged_map_is_dropped_when_it_fails_to_load() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let c = start(d.path(), Arc::new(FakeClock::new(1)));
         let (tx, rx) = channel();
         c.save(job("folder:/a", "1", tx));
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn a_busy_file_means_no_cache_for_this_run() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let p = d.path().join("cache.db");
         drop(start(d.path(), Arc::new(FakeClock::new(1))));
         let holder = rusqlite::Connection::open(&p).unwrap();
@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn an_unwritable_folder_means_no_cache_and_one_note() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let blocker = d.path().join("file");
         std::fs::write(&blocker, b"x").unwrap();
         let s = Cache::start(
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn views_round_trip_through_the_writer() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let clock = Arc::new(FakeClock::new(77));
         let c = start(d.path(), clock.clone());
         c.put_view("counters", 1, "[1,2]".into());

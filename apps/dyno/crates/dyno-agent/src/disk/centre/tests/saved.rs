@@ -53,7 +53,7 @@ fn scanned_and_saved(fs: &Arc<FakeFs>, dir: &Path, identity: Option<&str>) -> Ri
 fn a_finished_scan_is_saved_when_its_pass_ends() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let r = rig(fs.clone(), vec![vol("Macintosh HD", &fs.root(), VolumeLocation::Internal)]);
     let cache = attach(&r, d.path(), Arc::new(Roomy), CacheSettings::default());
     assert!(cache.list().is_empty());
@@ -82,7 +82,7 @@ fn a_cancelled_scan_is_saved_and_says_it_is_partial() {
             g.pass();
         }
     });
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let mut v = vol("Macintosh HD", &fs.root(), VolumeLocation::Internal);
     v.volume.rotational = Some(true);
     let r = rig(fs.clone(), vec![v]);
@@ -105,7 +105,7 @@ fn a_cancelled_scan_is_saved_and_says_it_is_partial() {
 fn a_saved_map_is_offered_at_start_without_loading_its_tree_and_loads_on_the_first_level() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let first = scanned_and_saved(&fs, d.path(), None);
     let before = {
         let s = first.centre.scans();
@@ -134,7 +134,7 @@ fn a_saved_map_is_offered_at_start_without_loading_its_tree_and_loads_on_the_fir
 fn a_saved_map_has_the_net_change_in_used_space_since_it_was_scanned() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let mut v = vol("Macintosh HD", &fs.root(), VolumeLocation::Internal);
     v.volume.capacity = Some(1000 * MB);
     v.volume.free = Some(400 * MB);
@@ -226,7 +226,7 @@ fn sixteen(dir: &Path) -> Vec<String> {
 
 #[test]
 fn sixteen_saved_maps_are_all_listed_and_each_answers_in_turn_without_one_ever_being_removed() {
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     sixteen(d.path());
     let fs = Arc::new(FakeFs::new());
     let r = rig(fs.clone(), vec![]);
@@ -252,7 +252,7 @@ fn sixteen_saved_maps_are_all_listed_and_each_answers_in_turn_without_one_ever_b
 
 #[test]
 fn saved_maps_are_unloaded_under_the_node_budget() {
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     sixteen(d.path());
     let fs = Arc::new(FakeFs::new());
     let r = rig(fs.clone(), vec![]);
@@ -282,7 +282,7 @@ impl FreeSpace for Parked {
 fn a_save_does_not_hold_the_index_so_a_query_on_the_same_scan_completes_meanwhile() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let r = rig(fs.clone(), vec![vol("Macintosh HD", &fs.root(), VolumeLocation::Internal)]);
     let gate = Gate::new();
     let cache = attach(&r, d.path(), Arc::new(Parked(gate.clone())), CacheSettings::default());
@@ -311,7 +311,7 @@ fn a_finished_scan_with_a_saved_row_is_unloaded_not_removed_and_loads_again() {
         fs.file(&root, "big", 5 * MB + n as u64);
         volumes.push(vol(&format!("V{n}"), &root, VolumeLocation::Internal));
     }
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let r = rig(fs.clone(), volumes);
     let cache = attach(&r, d.path(), Arc::new(Roomy), CacheSettings::default());
     let mut scans = Vec::new();
@@ -339,7 +339,7 @@ fn a_finished_scan_with_a_saved_row_is_unloaded_not_removed_and_loads_again() {
 fn rescan_keeps_the_saved_map_until_the_new_pass_is_done_and_then_replaces_it() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let first = scanned_and_saved(&fs, d.path(), None);
     let (r, cache) = restarted(first, &fs, d.path(), None);
     let old = r.centre.scans()[0].clone();
@@ -385,7 +385,7 @@ fn rescan_keeps_the_saved_map_until_the_new_pass_is_done_and_then_replaces_it() 
 fn a_cancelled_rescan_keeps_the_saved_map_and_saves_nothing() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let first = scanned_and_saved(&fs, d.path(), None);
     let (r, cache) = restarted(first, &fs, d.path(), None);
     let old = r.centre.scans()[0].clone();
@@ -418,7 +418,7 @@ fn a_cancelled_rescan_keeps_the_saved_map_and_saves_nothing() {
 fn a_map_of_a_different_disk_is_not_offered_and_comes_back_with_its_disk() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let first = scanned_and_saved(&fs, d.path(), Some("DISK-A"));
     let (r, cache) = restarted(first, &fs, d.path(), Some("DISK-B"));
     r.centre.volumes();
@@ -437,7 +437,7 @@ fn a_map_of_a_different_disk_is_not_offered_and_comes_back_with_its_disk() {
 
 #[test]
 fn forgetting_removes_the_row_and_the_entry() {
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     sixteen(d.path());
     let fs = Arc::new(FakeFs::new());
     let r = rig(fs.clone(), vec![]);
@@ -456,7 +456,7 @@ fn forgetting_removes_the_row_and_the_entry() {
 fn a_map_too_big_for_the_limit_says_so_in_its_status() {
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let r = rig(fs.clone(), vec![vol("Macintosh HD", &fs.root(), VolumeLocation::Internal)]);
     let cache = attach(
         &r,
@@ -485,7 +485,7 @@ fn a_map_too_big_for_the_limit_says_so_in_its_status() {
 
 #[test]
 fn a_saved_map_cannot_be_retried_only_scanned_again() {
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     sixteen(d.path());
     let fs = Arc::new(FakeFs::new());
     let r = rig(fs.clone(), vec![]);
@@ -496,7 +496,7 @@ fn a_saved_map_cannot_be_retried_only_scanned_again() {
 
 #[test]
 fn a_damaged_saved_map_answers_scan_again_and_is_dropped_alone() {
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     sixteen(d.path());
     {
         let raw = rusqlite::Connection::open(d.path().join("cache.db")).unwrap();
@@ -528,7 +528,7 @@ fn switching_the_setting_off_forgets_every_saved_map_and_on_again_saves_new_ones
     use dyno_core::disk::settings::SavedMapsSettings;
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let first = scanned_and_saved(&fs, d.path(), None);
     let (r, cache) = restarted(first, &fs, d.path(), None);
     assert_eq!(r.centre.scans().len(), 1);
@@ -554,7 +554,7 @@ fn the_size_limit_setting_reaches_the_cache() {
     use dyno_core::disk::settings::SavedMapsSettings;
     let fs = Arc::new(FakeFs::new());
     tree(&fs, &fs.root());
-    let d = tempfile::tempdir().unwrap();
+    let d = paddock_testkit::private_tempdir().unwrap();
     let r = rig(fs.clone(), vec![vol("Macintosh HD", &fs.root(), VolumeLocation::Internal)]);
     let cache = attach(&r, d.path(), Arc::new(Roomy), CacheSettings::default());
     // The smallest limit the setting allows is 64 MB: a small tree fits it, the limit is the setting's, not the default's.

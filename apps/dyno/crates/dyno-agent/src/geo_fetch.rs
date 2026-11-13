@@ -372,7 +372,7 @@ mod tests {
         fetcher: GeoFetcher,
         wire: Arc<FakeWire>,
         clock: FakeClock,
-        dir: tempfile::TempDir,
+        dir: paddock_testkit::PrivateTemp,
     }
 
     fn rig(replies: Vec<Reply>) -> Rig {
@@ -388,7 +388,7 @@ mod tests {
             fetcher: GeoFetcher::new(Arc::new(egress), Arc::new(clock.clone()), crate::intel_fetch::tests::config()),
             wire,
             clock,
-            dir: tempfile::tempdir().unwrap(),
+            dir: paddock_testkit::private_tempdir().unwrap(),
         }
     }
 

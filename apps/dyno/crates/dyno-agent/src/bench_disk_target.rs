@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn a_chosen_folder_is_used_only_when_it_is_on_that_drive() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let mount = d.path().join("vol");
         let inside = mount.join("bench");
         std::fs::create_dir_all(&inside).unwrap();

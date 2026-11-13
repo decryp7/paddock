@@ -2141,12 +2141,12 @@ mod tests {
 
     #[test]
     fn a_real_folder_is_walked_without_following_links_or_double_counting() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         let root = std::fs::canonicalize(t.path()).unwrap();
         std::fs::create_dir_all(root.join("a/deep")).unwrap();
         std::fs::write(root.join("a/x"), vec![1u8; 20_000]).unwrap();
         std::fs::write(root.join("a/deep/y"), vec![1u8; 30_000]).unwrap();
-        let outside = tempfile::tempdir().unwrap();
+        let outside = paddock_testkit::private_tempdir().unwrap();
         std::fs::write(outside.path().join("huge"), vec![0u8; 500_000]).unwrap();
         #[cfg(unix)]
         {

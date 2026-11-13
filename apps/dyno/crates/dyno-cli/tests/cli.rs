@@ -12,12 +12,12 @@ struct Harness {
     running: Option<Running>,
     dirs: Dirs,
     env: Env,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
     fn start() -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         for (pid, name, cpu) in [(100, "busy", 60.0), (101, "calm", 1.0), (102, "launchd", 0.1)] {
@@ -159,7 +159,7 @@ fn an_agent_of_another_protocol_is_refused_with_a_message_and_no_request_is_sent
 
 #[test]
 fn without_a_running_agent_it_says_so_and_a_damaged_file_does_too() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let env = Env {
         data_dir: tmp.path().to_path_buf(),
         supplied: false,
@@ -187,7 +187,7 @@ fn without_a_running_agent_it_says_so_and_a_damaged_file_does_too() {
 
 #[test]
 fn usage_help_and_version_work_without_an_agent() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let env = Env {
         data_dir: tmp.path().to_path_buf(),
         supplied: false,
@@ -203,7 +203,7 @@ fn usage_help_and_version_work_without_an_agent() {
 
 #[test]
 fn commands_that_used_to_change_something_are_gone() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let env = Env {
         data_dir: tmp.path().to_path_buf(),
         supplied: false,

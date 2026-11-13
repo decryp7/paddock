@@ -23,6 +23,7 @@ wgpu = { version = "30", default-features = false, features = ["std", "parking_l
 pollster = "0.4"
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
 
 [lints]

@@ -61,7 +61,7 @@ fn counter(pid: u32, name: &str, bytes_in: u64) -> TrafficCounter {
 struct Rig {
     running: Option<Running>,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Rig {
@@ -72,7 +72,7 @@ impl Rig {
     }
 
     fn start_with(caller: Caller, up: bool, grows: bool) -> Rig {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         let mine = account(caller);

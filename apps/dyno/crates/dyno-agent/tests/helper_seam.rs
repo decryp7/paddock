@@ -74,7 +74,7 @@ struct Rig {
     dirs: Dirs,
     up: std::sync::Arc<std::sync::atomic::AtomicBool>,
     served: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
     /// The agent's log, printed when the test fails; dropped after the agent has stopped.
     _log: agent_log::OnFailure,
 }
@@ -111,7 +111,7 @@ impl Rig {
 
     fn start_full(caller: Caller, host: HelperHost, up: bool, readers: Readers, seed: impl FnOnce(&Fake)) -> Rig {
         let log = agent_log::on_failure();
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         seed(&fake);
@@ -617,7 +617,7 @@ fn another_accounts_socket_stays_hidden_from_a_caller_who_may_not_see_it() {
 #[test]
 fn what_holds_this_file_is_asked_by_device_and_inode_and_answered_for_every_account() {
     use std::os::unix::fs::MetadataExt;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let file = dir.path().join("held.log");
     std::fs::write(&file, "x").unwrap();
     let m = std::fs::metadata(&file).unwrap();
@@ -643,7 +643,7 @@ fn what_holds_this_file_is_asked_by_device_and_inode_and_answered_for_every_acco
 #[cfg(unix)]
 #[test]
 fn without_the_helper_what_holds_this_file_is_the_agents_own_answer_marked_local() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let file = dir.path().join("held.log");
     std::fs::write(&file, "x").unwrap();
     let mine = dyno_core::process::Locker::new(dyno_core::process::ProcessRef { pid: 9, started: None }, "me".into(), None);
@@ -681,7 +681,7 @@ fn the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up() 
 }
 
 fn wol_mode_is_judged_through_the_helper(caller: Caller) {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let readers = Readers {
         wol: Some(WolReply {
             enabled: vec![],
@@ -739,7 +739,7 @@ fn the_rig_refuses_exactly_what_the_helper_server_refuses() {
         for request in sample_requests() {
             // The server's own check, on the caller as the helper's identity code decides it.
             let server = dyno_helper::auth::authorize(&caller.peer(), &helper_rig::owner(), &request);
-            let tmp = tempfile::tempdir().unwrap();
+            let tmp = paddock_testkit::private_tempdir().unwrap();
             let transport = DispatcherTransport::new(dispatcher(HelperHost::Linux, Readers::default(), tmp.path()), caller);
             let rig_refused = matches!(
                 dyno_agent::helper_link::HelperTransport::call(&transport, request.clone()),
@@ -787,7 +787,7 @@ fn another_accounts_holder_is_counted_not_named_for_a_caller_who_may_not_see_it(
             })
         }
     }
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let file = dir.path().join("held.log");
     std::fs::write(&file, "x").unwrap();
     let m = std::fs::metadata(&file).unwrap();

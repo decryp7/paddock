@@ -75,6 +75,22 @@ pub fn check_root_with(root: &Path, supplied: bool) -> Result<(), String> {
     }
 }
 
+/// What a refused data folder may say in a log (ER-27, no user paths and no account ids in logs): the kind of folder ("a folder the user
+/// named" or "the default folder", as [`check_root_with`] says) and the reason class (the words of [`paddock_env::Refusal::reason`],
+/// never the path or the SID that makes it writable), found by looking at the folder again. It makes nothing.
+pub fn refusal_class(dirs: &Dirs) -> (&'static str, &'static str) {
+    use paddock_env::private::PrivateError;
+    if dirs.is_users_own() {
+        return ("the default folder", "it could not be made or is not private");
+    }
+    let class = match paddock_env::private::check_named_folder(dirs.root()) {
+        Err(PrivateError::Refused { why, .. }) => why.reason(),
+        Err(_) => "it could not be inspected",
+        Ok(()) => "it could not be made",
+    };
+    ("a folder the user named", class)
+}
+
 fn refusal_text(why: &str) -> String {
     format!("Dyno did not start: {why}. Nothing was started or changed. Fix the folder, or start Dyno with DYNO_DATA_DIR set to a folder of your own.")
 }
@@ -409,7 +425,7 @@ mod tests {
     #[test]
     fn a_folder_the_user_named_is_refused_when_others_can_write_it_and_left_as_it_was() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let root = tmp.path().join("data");
         std::fs::create_dir(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
@@ -439,7 +455,7 @@ mod tests {
         reason = "a Windows-only test runs icacls on its own temporary folder to set its access list"
     )]
     fn windows_a_named_folder_everyone_can_write_is_refused_and_the_default_is_used() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let root = tmp.path().join("data");
         std::fs::create_dir(&root).unwrap();
         let out = std::process::Command::new("icacls")
@@ -456,7 +472,7 @@ mod tests {
     #[test]
     fn the_app_folders_the_user_supplied_are_refused_like_a_named_data_folder_and_the_os_own_are_not() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let root = tmp.path().join("home");
         std::fs::create_dir(&root).unwrap();
         std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o777)).unwrap();
@@ -487,7 +503,7 @@ mod tests {
     #[test]
     fn a_refused_named_folder_has_nothing_made_inside_it() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let home = tmp.path().join("home");
         std::fs::create_dir(&home).unwrap();
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777)).unwrap();
@@ -511,7 +527,7 @@ mod tests {
     #[test]
     fn a_named_data_folder_is_not_made_when_a_supplied_app_home_is_refused() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let home = tmp.path().join("home");
         std::fs::create_dir(&home).unwrap();
         std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o777)).unwrap();

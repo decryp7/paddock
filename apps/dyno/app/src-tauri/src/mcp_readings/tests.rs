@@ -1105,7 +1105,7 @@ fn all_eight_reading_tools_answer_over_a_real_loopback_socket() {
     server.set_policy(Policy::read_only());
     let keys = Arc::new(paddock_mcp::KeyStore::new());
     let (_, key) = keys.issue("Pitwall", 1).unwrap();
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let listener = Listener::new(server, keys, discovery_path(dir.path()), 2);
     listener.reconcile(true);
     let addr = listener.addr().expect("listening");

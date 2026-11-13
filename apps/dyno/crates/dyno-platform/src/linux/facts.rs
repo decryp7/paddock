@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn gathers_what_is_cheap_and_explains_the_rest() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let r = d.path();
         w(r, "etc/os-release", "NAME=Debian\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\n");
         w(r, "var/run/reboot-required", "");
@@ -192,7 +192,7 @@ mod tests {
 
     #[test]
     fn power_profiles_daemon_wins_and_defaults_are_honest() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let tools = Arc::new(FakeTools::with("powerprofilesctl", "power-saver\n"));
         let f = facts(d.path(), tools).facts();
         assert_eq!(f.os, "Linux");

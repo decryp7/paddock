@@ -15,7 +15,7 @@ struct Rig {
     sys: FakeSystem,
     ctl: FakeSystemd,
     vars: MapVars,
-    data: tempfile::TempDir,
+    data: paddock_testkit::PrivateTemp,
     unit: PathBuf,
 }
 
@@ -30,7 +30,7 @@ impl Rig {
             sys,
             ctl,
             vars,
-            data: tempfile::tempdir().unwrap(),
+            data: paddock_testkit::private_tempdir().unwrap(),
             unit,
         }
     }

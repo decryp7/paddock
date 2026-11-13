@@ -28,6 +28,7 @@ serde_json.workspace = true
 dyno-agent.workspace = true
 # The test doubles (ADR 0033): only here, so a build without test targets cannot name them.
 dyno-platform = { workspace = true, features = ["test-support"] }
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
 
 [lints]

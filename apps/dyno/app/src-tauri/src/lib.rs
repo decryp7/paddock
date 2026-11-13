@@ -819,7 +819,7 @@ mod refusal_tests {
     #[test]
     fn a_named_data_folder_others_can_write_is_refused_with_the_cause_and_the_next_step_and_a_private_one_is_not() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let open = tmp.path().join("open");
         std::fs::create_dir(&open).unwrap();
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
@@ -841,7 +841,7 @@ mod refusal_tests {
     #[test]
     fn start_runs_neither_step_for_a_refused_folder_and_each_once_for_a_usable_one() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let open = tmp.path().join("open");
         std::fs::create_dir(&open).unwrap();
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
@@ -867,7 +867,7 @@ mod refusal_tests {
         reason = "a Windows-only test runs icacls on its own temporary folder to set its access list"
     )]
     fn windows_start_runs_neither_step_for_a_named_folder_everyone_can_write() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let open = tmp.path().join("open");
         std::fs::create_dir(&open).unwrap();
         let out = std::process::Command::new("icacls")
@@ -888,7 +888,7 @@ mod refusal_tests {
     #[test]
     fn a_refused_data_folder_starts_no_link_and_writes_nothing() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let open = tmp.path().join("open");
         std::fs::create_dir(&open).unwrap();
         std::fs::set_permissions(&open, std::fs::Permissions::from_mode(0o777)).unwrap();
