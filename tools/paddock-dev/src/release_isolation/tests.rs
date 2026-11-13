@@ -254,3 +254,92 @@ fn a_node_modules_link_to_another_folder_of_the_job_is_refused() {
         lines(&v)
     );
 }
+
+mod path_door {
+    //! ADR 0021 amendment 2026-11-11: a resolved path is compared only through `PathOps`, with the OS and the resolver injected
+    //! (as `ci_host::build_folder` does with `Os::Windows`), so a verbatim `\\?\` folder is tested on every OS.
+    use super::super::config::inside_tagged_tree;
+    use super::super::verify::PathOps;
+    use paddock_env::Os;
+    use std::collections::BTreeSet;
+    use std::path::{Path, PathBuf};
+
+    fn verbatim(p: &Path) -> std::io::Result<PathBuf> {
+        Ok(PathBuf::from(format!(r"\\?\{}", p.display())))
+    }
+
+    fn windows() -> PathOps {
+        PathOps {
+            os: Os::Windows,
+            resolve: verbatim,
+        }
+    }
+
+    #[test]
+    fn a_verbatim_folder_and_a_plain_spelling_are_the_same_place() {
+        let paths = windows();
+        let folder = paths.real(Path::new(r"C:\ci\ws")).unwrap();
+        assert_eq!(
+            folder,
+            Path::new(r"\\?\C:\ci\ws"),
+            "the injected resolver gives the verbatim spelling"
+        );
+        assert!(paths.same(&folder, Path::new(r"c:\CI\ws")));
+        assert!(paths.starts_with(Path::new(r"\\?\C:\ci\ws\.cargo\config.toml"), Path::new(r"C:\ci\ws")));
+        assert!(!paths.starts_with(Path::new(r"\\?\C:\ci\wsx\a"), Path::new(r"C:\ci\ws")));
+        assert_eq!(
+            paths
+                .strip_prefix(Path::new(r"\\?\C:\ci\ws\.cargo\config.toml"), Path::new(r"C:\ci\ws"))
+                .as_deref(),
+            Some(".cargo/config.toml")
+        );
+    }
+
+    #[test]
+    fn a_config_file_of_the_tagged_tree_is_found_whichever_side_is_verbatim() {
+        let files: BTreeSet<String> = [".cargo/config.toml".to_string()].into();
+        let paths = windows();
+        let clone = paths.real(Path::new(r"C:\ci\ws")).unwrap(); // what `Ctx::folder` returns: verbatim
+        // What a probe resolved on its own may come back plain or verbatim; both are inside the tree.
+        assert!(inside_tagged_tree(
+            &paths,
+            Path::new(r"C:\ci\ws\.cargo\config.toml"),
+            &clone,
+            &files
+        ));
+        assert!(inside_tagged_tree(
+            &paths,
+            Path::new(r"\\?\C:\ci\ws\.cargo\config.toml"),
+            &clone,
+            &files
+        ));
+        assert!(!inside_tagged_tree(
+            &paths,
+            Path::new(r"C:\ci\ws\.cargo\other.toml"),
+            &clone,
+            &files
+        ));
+        assert!(!inside_tagged_tree(
+            &paths,
+            Path::new(r"C:\home\.cargo\config.toml"),
+            &clone,
+            &files
+        ));
+    }
+
+    #[test]
+    fn no_probe_resolves_a_path_through_a_door_that_strips_the_prefix() {
+        // `winpath::real` returns the plain spelling, the folders of the ledger are verbatim: comparing the two with Path methods
+        // failed every Windows verify. Probes resolve through `PathOps` (or `real_verbatim` for a candidate list), nothing else.
+        // pathfind.rs moved to the crate root (src/pathfind.rs) and is still release isolation's program lookup.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/release_isolation");
+        for name in ["config.rs", "links.rs", "verify.rs", "identity.rs", "crates.rs", "../pathfind.rs"] {
+            let text = std::fs::read_to_string(dir.join(name)).unwrap();
+            let code = text.split("#[cfg(test)]").next().unwrap();
+            assert!(
+                !code.contains("winpath::real("),
+                "{name} resolves with winpath::real: use PathOps::real"
+            );
+        }
+    }
+}

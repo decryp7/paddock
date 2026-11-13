@@ -22,13 +22,17 @@ const write = (entries, what) => {
   writeFileSync(file, `${JSON.stringify({ _comment: COMMENT, sites: entries }, null, 1)}\n`);
   console.log(`wrote ${entries.length} ${what} to ${BASELINE_PATH}`);
 };
+const reportMoved = () => {
+  for (const { item, from } of againstBaseline(sites, old.sites, () => true).moved) console.log(`moved: ${from.file} -> ${item.file}  (same text; the entry's file is rewritten, not counted as growth)`);
+};
 if (args.includes('--shrink')) {
   if (!old) {
     console.error('no baseline to shrink');
     process.exit(2);
   }
+  reportMoved();
   const kept = shrinkBaseline(sites, old.sites);
-  write(kept, `known sites (${old.sites.length - kept.length} removed; ${againstBaseline(sites, old.sites).fresh.length} sites are not in the baseline and were not added)`);
+  write(kept, `known sites (${old.sites.length - kept.length} removed; ${againstBaseline(sites, old.sites, () => true).fresh.length} sites are not in the baseline and were not added)`);
   process.exit(0);
 }
 if (!args.includes('--write')) {
@@ -38,7 +42,7 @@ if (!args.includes('--write')) {
   console.log(`${sites.length} sites, ${waived.length} waived, ${noReason.length} waivers without a reason`);
   process.exit(0);
 }
-if (old && !args.includes('--init') && againstBaseline(sites, old.sites).fresh.length) {
+if (old && !args.includes('--init') && againstBaseline(sites, old.sites, () => true).fresh.length) {
   console.error('refusing to grow the baseline: fix or waive the new sites (use --init only with the user\'s approval), or --shrink');
   process.exit(1);
 }

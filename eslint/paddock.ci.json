@@ -1,0 +1,7 @@
+{
+  "$comment": "The CI contract of @decryp7/paddock-eslint (ADR 0038 §1; ci.yml's `eslint-preset` job): RuleTester cases per rule and the preset run through ESLint on temp files.",
+  "tests": [
+    "cd eslint",
+    "npm test"
+  ]
+}

@@ -371,7 +371,7 @@ fn sigterm_ends_the_command_and_everything_it_started_and_releases() {
     let gc = ProcessId::of(grandchild).expect("grandchild runs");
     assert!(ask(ProcessId::of(g.pid()).expect("heavy runs")));
     assert_eq!(g.finish().code(), Some(143));
-    wait_until("the grandchild to end", || !gc.is_alive());
+    wait_until("the grandchild to end", || gc.has_ended());
     assert!(!w.lock_dir().exists());
     assert_eq!(w.count("pitcrew-heavy.ticket."), 0);
 }

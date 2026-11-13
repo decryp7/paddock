@@ -83,7 +83,7 @@ test('the pre-push reader sees a second command', () => {
 
 // ER-24: a cargo build in a git hook takes its turn on the machine-wide heavy slot, like the pre-push gate's heavy steps
 // (`./dev heavy` calls `heavy_prefix` in tools/paddock-dev/src/pre_push/exec.rs, which also finds a heavy.sh off PATH).
-export const HEAVY = '../../dev heavy --';
+export const HEAVY = 'env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE ../../dev heavy --';
 
 /** The pre-commit commands that run cargo and do not go through the heavy slot. */
 export function unslotted(cmds) {

@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # The paddock-ci image: ./dev (the schedule-skip step) runs there.
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     outputs:
       run: ${{ steps.plan.outputs.run }}
     defaults:
@@ -84,14 +84,16 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    env:
+      # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run,
+      # `./dev` building itself first included. RUSTUP_TOOLCHAIN outranks the file and is set for every step of the job.
+      RUSTUP_TOOLCHAIN: stable
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/cache@v4
         with:

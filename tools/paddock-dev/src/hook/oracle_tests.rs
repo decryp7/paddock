@@ -127,6 +127,13 @@ const RESIDUAL: &[(&str, &str)] = &[
     ("no-force-push", "alias gp='git push -f'; gp"),
     ("no-pgrep-wait", "P='pgrep -f'; while $P x; do sleep 1; done"),
     ("no-pgrep-wait", "w() { pgrep -f x; }; while w; do sleep 1; done"),
+    // Name lookups that reach `kill` through a variable, a loop or a longer pipeline, and wrappers the lexer does not know.
+    ("no-kill-by-name", "for p in $(pgrep x); do kill $p; done"),
+    ("no-kill-by-name", "P=$(pgrep x); kill $P"),
+    ("no-kill-by-name", "pgrep x | head -1 | xargs kill"),
+    ("no-kill-by-name", "ps aux | grep x | awk '{print $2}' | xargs kill"),
+    ("no-kill-by-name", "doas pkill x"),
+    ("no-kill-by-name", "busybox pkill x"),
 ];
 
 fn rows(corpus: &str) -> Vec<(bool, String)> {
@@ -191,7 +198,16 @@ fn no_force_push_decides_the_corpus_as_the_shell_hook_did() {
 #[test]
 fn the_rules_are_registered_in_this_order() {
     let ids: Vec<&str> = rules::all().iter().map(|r| r.id()).collect();
-    assert_eq!(ids, ["no-pgrep-wait", "no-force-push", "no-unbounded-wait", "no-unscoped-cleanup"]);
+    assert_eq!(
+        ids,
+        [
+            "no-pgrep-wait",
+            "no-force-push",
+            "no-unbounded-wait",
+            "no-unscoped-cleanup",
+            "no-kill-by-name"
+        ]
+    );
 }
 
 #[test]

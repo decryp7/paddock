@@ -231,7 +231,7 @@ pub fn resolve_root(repo: &Repo, arg: Option<&Path>, env: &dyn Fn(&str) -> Optio
         return Ok(v.into());
     }
     Err(CliError::usage("No worktree root is set, so there is no safe place to make the worktree.")
-        .with_hint("Pass --root <folder>, or run `git config paddock.worktreeRoot <folder>` once, or set PADDOCK_WORKTREE_ROOT (for example /Volumes/d7sst7/dev-targets/wt)."))
+        .with_hint("Pass --root <folder>, or run `git config paddock.worktreeRoot <folder>` once, or set PADDOCK_WORKTREE_ROOT (the folder is the machine's choice: put worktrees on the volume meant for them)."))
 }
 
 fn known<'a>(list: &'a [WorktreeInfo], k: &str) -> Option<&'a WorktreeInfo> {
@@ -360,6 +360,13 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         ))
         .with_hint(format!("Run `./dev worktree claim {k}` as the agent that works in it."))
     })?;
+    // A full worktree has no `conformance/node_modules`, and the conformance gate then says "check broken" (C111, the yaml package):
+    // install them here, bounded and logged; a failure is a warning with the next step, never a failed `add`.
+    let deps_note = if req.branch.is_some() {
+        conformance_deps_note(Path::new(&k), &npm_ci)
+    } else {
+        String::new()
+    };
     let head = Git::at(Path::new(&k))
         .text(&["rev-parse", "HEAD"])
         .map(|s| s.trim().to_string())
@@ -380,13 +387,77 @@ pub fn add(repo: &Repo, caller: &Caller, req: &AddRequest<'_>) -> Result<Report,
         json!({"path": k, "branch": req.branch, "head": head, "owner": req.owner, "locked": true, "note": note,
                "claimed_by": caller.agent.as_ref().map(|a| a.id.clone()), "attached": attach.describe(), "drift": drift.as_ref().map(Drift::json)}),
         format!(
-            "Made {k} ({}{}), locked: {note}{record_note}",
+            "Made {k} ({}{}), locked: {note}{record_note}{deps_note}",
             req.branch.map_or("detached".to_string(), |b| format!("branch {b}")),
             attach
                 .describe()
                 .map_or(String::new(), |d| format!(", attached to the existing {d}"))
         ) + &drift.as_ref().map_or(String::new(), |d| format!("\n{}", d.text(req.base))),
     ))
+}
+
+/// How long `npm ci -w conformance` may take. Measured 2026-11-13 in a fresh worktree: 0.4 s with a warm npm cache and 0.5 s with an
+/// empty one (2 packages, the registry reachable). The cap is 60 s: over a hundred times the measurement, so a slow registry still
+/// finishes, and a hung one is stopped and reported rather than waited for (ER-12: from a measurement, not a guess).
+const NPM_CI_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The arguments of the install: `conformance` is a member of the root npm workspace (it has no lockfile of its own), so the install
+/// is made from the root, for that member only.
+const NPM_CI_ARGS: [&str; 5] = ["ci", "--ignore-scripts", "--no-audit", "--no-fund", "-w=conformance"];
+
+/// The conformance gates need their own dependencies (the `yaml` package of C111); a fresh worktree has none. `Ok` is the log line, `Err`
+/// why it failed. The real runner is [`npm_ci`]; tests pass a fake.
+type DepsRunner<'a> = &'a dyn Fn(&Path) -> Result<String, String>;
+
+/// Installs `conformance/`'s dependencies in the new worktree `k` (from its root, where `package-lock.json` is) and returns the line
+/// for the report: what happened and how long it took, or a warning that names the exact command to run by hand. A tree without a
+/// root `package-lock.json` or a `conformance/` folder is left alone.
+fn conformance_deps_note(k: &Path, run: DepsRunner<'_>) -> String {
+    if !k.join("package-lock.json").is_file() || !k.join("conformance/package.json").is_file() {
+        return String::new();
+    }
+    let started = std::time::Instant::now();
+    match run(k) {
+        Ok(_) => format!(
+            "\nconformance dependencies installed (`npm ci --ignore-scripts -w conformance`, {:.1} s).",
+            started.elapsed().as_secs_f64()
+        ),
+        Err(e) => format!(
+            "\nWarning: the conformance dependencies were not installed ({e}, after {:.1} s). The conformance gate says \"check broken\" until they are. Next: cd {} && npm ci --ignore-scripts -w conformance",
+            started.elapsed().as_secs_f64(),
+            k.display()
+        ),
+    }
+}
+
+/// The real runner: `npm ci --ignore-scripts -w conformance` in the worktree root, bounded by [`NPM_CI_TIMEOUT`], its environment listed.
+fn npm_ci(dir: &Path) -> Result<String, String> {
+    npm_ci_with("npm", dir)
+}
+
+/// [`npm_ci`] with the program named (a test passes a fake npm).
+fn npm_ci_with(program: &str, dir: &Path) -> Result<String, String> {
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    let ran = crate::ci_tool::ToolCall::new(program)
+        .args(NPM_CI_ARGS)
+        .cwd(dir)
+        .pass(
+            crate::ci_tool::NETWORK_ENV
+                .iter()
+                .copied()
+                .chain(["npm_config_*", "NPM_CONFIG_*", "NODE_*"]),
+        )
+        .timeout(NPM_CI_TIMEOUT)
+        .run(&env, &mut std::io::sink())?;
+    if ran.success {
+        Ok(ran.how)
+    } else {
+        Err(format!(
+            "{}: {}",
+            ran.how,
+            crate::ci_tool::tail(&ran.stderr, 3).trim().replace('\n', " | ")
+        ))
+    }
 }
 
 /// Never inside, or around, the primary, another worktree, an owner-map path or a path another `add` has reserved. Run under
@@ -666,6 +737,57 @@ pub fn drop_own(repo: &Repo, caller: &Caller, path: &Path) -> Result<Report, Cli
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_new_worktree_gets_the_conformance_dependencies_and_a_failure_is_a_warning_with_the_command() {
+        let d = tempfile::tempdir().unwrap();
+        let k = d.path();
+        // No root package-lock.json (another repository, a sparse tree): nothing to say, nothing run. A conformance/ folder with a
+        // lockfile of its own is not what this repository has: the lock is the root's.
+        assert_eq!(super::conformance_deps_note(k, &|_| panic!("must not run")), "");
+        std::fs::create_dir_all(k.join("conformance")).unwrap();
+        std::fs::write(k.join("conformance/package.json"), "{}").unwrap();
+        assert_eq!(super::conformance_deps_note(k, &|_| panic!("must not run")), "", "no root lockfile");
+        std::fs::write(k.join("package-lock.json"), "{}").unwrap();
+        let ran = std::cell::RefCell::new(Vec::new());
+        let ok = super::conformance_deps_note(k, &|dir| {
+            ran.borrow_mut().push(dir.to_path_buf());
+            Ok("exit 0".into())
+        });
+        assert!(ok.contains("installed (`npm ci --ignore-scripts -w conformance`"), "{ok}");
+        assert_eq!(ran.borrow().as_slice(), [k.to_path_buf()], "run from the worktree root");
+        let bad = super::conformance_deps_note(k, &|_| Err("timed out after 60 s".into()));
+        assert!(bad.contains("Warning:") && bad.contains("timed out after 60 s"), "{bad}");
+        assert!(
+            bad.contains(&format!("Next: cd {} && npm ci --ignore-scripts -w conformance", k.display())),
+            "{bad}"
+        );
+    }
+
+    /// The real runner against a fake npm: the command line and the folder it runs in are the ones the message names.
+    #[cfg(unix)]
+    #[test]
+    fn the_runner_calls_npm_ci_for_the_conformance_member_from_the_root_and_reports_its_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let log = d.path().join("log");
+        let fake = d.path().join("npm");
+        std::fs::write(
+            &fake,
+            format!("#!/bin/sh\necho \"$PWD $*\" >> '{}'\nexit ${{FAKE_NPM_EXIT:-0}}\n", log.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let root = d.path().join("wt");
+        std::fs::create_dir(&root).unwrap();
+        assert!(super::npm_ci_with(fake.to_str().unwrap(), &root).is_ok());
+        let line = std::fs::read_to_string(&log).unwrap();
+        let canon = paddock_env::winpath::real(&root).unwrap();
+        assert_eq!(
+            line.trim(),
+            format!("{} ci --ignore-scripts --no-audit --no-fund -w=conformance", canon.display())
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -676,5 +798,53 @@ mod tests {
         assert!(inside.to_string().contains("current folder"), "{inside}");
         let unknown = not_in_use(k, Err("no lsof".into())).unwrap_err();
         assert!(unknown.to_string().contains("cannot be checked"), "{unknown}");
+    }
+}
+
+#[cfg(test)]
+mod root_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn repo_with(config: Option<&str>) -> (tempfile::TempDir, Repo) {
+        let d = tempfile::tempdir().unwrap();
+        let git = Git::at(d.path());
+        git.text(&["init", "-q"]).unwrap();
+        if let Some(v) = config {
+            git.text(&["config", "paddock.worktreeRoot", v]).unwrap();
+        }
+        let repo = Repo::discover(d.path()).unwrap();
+        (d, repo)
+    }
+
+    fn env_with(v: Option<&'static str>) -> impl Fn(&str) -> Option<String> {
+        move |k| (k == "PADDOCK_WORKTREE_ROOT").then(|| v.map(String::from)).flatten()
+    }
+
+    #[test]
+    fn the_flag_beats_git_config_and_the_environment() {
+        let (_d, repo) = repo_with(Some("/cfg"));
+        let got = resolve_root(&repo, Some(Path::new("/flag")), &env_with(Some("/env"))).unwrap();
+        assert_eq!(got, PathBuf::from("/flag"));
+    }
+
+    #[test]
+    fn git_config_beats_the_environment() {
+        let (_d, repo) = repo_with(Some("/cfg"));
+        assert_eq!(resolve_root(&repo, None, &env_with(Some("/env"))).unwrap(), PathBuf::from("/cfg"));
+    }
+
+    #[test]
+    fn the_environment_is_used_when_git_config_is_unset_and_empty_is_ignored() {
+        let (_d, repo) = repo_with(None);
+        assert_eq!(resolve_root(&repo, None, &env_with(Some("/env"))).unwrap(), PathBuf::from("/env"));
+        assert!(resolve_root(&repo, None, &env_with(Some(""))).is_err());
+    }
+
+    #[test]
+    fn with_nothing_set_it_refuses_and_names_no_machine_path() {
+        let (_d, repo) = repo_with(None);
+        let err = resolve_root(&repo, None, &env_with(None)).unwrap_err();
+        assert!(err.text().contains("No worktree root") && !err.text().contains("/Volumes/"));
     }
 }

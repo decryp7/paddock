@@ -60,12 +60,14 @@ impl Procs for OsProcs {
         if pid == 0 || i32::try_from(pid).is_err() {
             return Presence::Gone;
         }
-        let start = paddock_proc::ProcessId::of(pid).map(|p| p.started().as_micros());
+        let id = paddock_proc::ProcessId::of(pid);
+        let start = id.map(|p| p.started().as_micros());
         if !crate::probe::exists(pid) {
             return Presence::Gone;
         }
         // A zombie shows a start time but is not running (a container whose PID 1 never reaps would hold the lock forever).
-        if start.is_some() && !paddock_proc::is_alive(pid) {
+        // An unreadable process (pid 1 to a non-root macOS user) is unknown, not gone: `Presence::may_be_alive` counts unknown as alive.
+        if id.is_some_and(|p| !p.presence().may_be_alive()) {
             return Presence::Gone;
         }
         Presence::Present { start_micros: start }
@@ -110,5 +112,17 @@ impl FakeProcs {
 impl Procs for FakeProcs {
     fn probe(&self, pid: u32) -> Presence {
         self.0.lock().ok().and_then(|m| m.get(&pid).copied()).unwrap_or(Presence::Gone)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    /// Pid 1 exists on every Unix and a non-root user may be refused a look at it (macOS lists it with no start time or
+    /// status): "unknown" must read as present, or a lock held by it is broken as stale.
+    #[test]
+    fn pid_one_probes_as_present() {
+        assert!(matches!(OsProcs.probe(1), Presence::Present { .. }), "{:?}", OsProcs.probe(1));
     }
 }

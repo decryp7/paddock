@@ -61,7 +61,7 @@ fn a_slots_port_and_kept_folder_on_a_windows_host() {
 fn one_folder_has_one_key_however_it_is_spelled() {
     let (d, _home, _tables) = scratch();
     let (home, tables) = (d.path().join("ci"), d.path().join("tables"));
-    let work = d.path().canonicalize().unwrap().join("work");
+    let work = paddock_env::winpath::real(d.path()).unwrap().join("work");
     std::fs::create_dir_all(&work).unwrap();
     let plain = work.to_string_lossy().trim_start_matches(r"\\?\").to_string();
     let forward = plain.replace('\\', "/");

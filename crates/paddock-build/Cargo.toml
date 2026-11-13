@@ -14,6 +14,8 @@ tauri-build = ["dep:tauri-build"]
 [dependencies]
 tauri-build = { version = "2.7", optional = true }
 serde_json = "1"
+# `cargo_layout`: the profile folder above `OUT_DIR` in both of cargo's build-folder layouts.
+paddock-env = { path = "../paddock-env", version = "0.1.0", registry = "decryp7" }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]

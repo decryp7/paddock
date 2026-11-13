@@ -178,6 +178,7 @@ impl Key {
     }
 
     /// Deletes a value; `true` when it is gone.
+    #[must_use = "false means the value is still in the registry"]
     pub fn delete_value(&self, name: &str) -> bool {
         let wide = to_wide(name);
         // SAFETY: NUL-terminated name.

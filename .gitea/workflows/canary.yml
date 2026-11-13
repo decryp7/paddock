@@ -30,7 +30,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: .
@@ -63,6 +63,9 @@ jobs:
         # Every app's UI is `app/` and its Rust side `app/src-tauri/` (the family layout).
         app: [pitwall, debrief, pitcrew, spotter, dyno]
     env:
+      # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
+      # RUSTUP_TOOLCHAIN outranks the file and covers every step, `./dev` building itself included.
+      RUSTUP_TOOLCHAIN: stable
       CARGO_TERM_COLOR: always
     steps:
       - name: Paddock (the candidate)

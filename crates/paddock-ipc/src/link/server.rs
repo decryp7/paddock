@@ -290,7 +290,7 @@ impl LinkServer {
     pub fn stop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         if let Some(t) = self.accept.take() {
-            paddock_proc::cleanup::join("the link server's accept thread", t);
+            paddock_proc::cleanup::join_warn("the link server's accept thread", t);
         }
         for p in lock(&self.shared.peers).drain(..) {
             p.close();

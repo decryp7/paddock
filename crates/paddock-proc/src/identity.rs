@@ -72,24 +72,43 @@ impl ProcessId {
 
     /// Whether a process that may be this one runs: its pid is alive and started [near](StartTime::is_near) this start
     /// time, or that cannot be told ([`ProcessId::presence_near`] is `Unknown`). For decisions that err towards "still
-    /// there", such as keeping a folder its owner may still use; never for a kill ([`ProcessId::is_alive`] compares
+    /// there", such as keeping a folder its owner may still use; never for a kill ([`ProcessId::confirmed_running`] compares
     /// exactly).
     pub fn may_be_alive(self) -> bool {
         self.presence_near().may_be_alive()
     }
 
-    /// Whether this process still runs: its pid is alive and still belongs to it. **Unknown counts as not alive** (the process
-    /// table or its start time could not be read): right for code that ends or waits for a process, wrong for code that
-    /// deletes a file, takes a lock over or starts a second copy on "gone". Those use [`ProcessId::presence`] or
-    /// [`ProcessId::recorded_presence`] and treat [`Presence::Unknown`] as running (rule 53).
-    pub fn is_alive(self) -> bool {
-        holder(self, crate::sys::start_time(self.pid)) == Holder::Same
-            && crate::tree::is_alive(self.pid)
+    /// Whether this process is **confirmed** running: its pid is alive and still belongs to it. **Unknown is `false`** (the
+    /// process table or its start time could not be read), so this is the right question only for code that acts on a
+    /// running process (end it, wait while it runs). Never ask `!confirmed_running()` to mean "gone": use
+    /// [`ProcessId::has_ended`] for a wait that must not pass on a failed read, and [`ProcessId::may_be_alive`] or
+    /// [`ProcessId::presence`] (`Unknown` is running) before deleting a file, taking a lock over or starting a second copy
+    /// (rule 53).
+    pub fn confirmed_running(self) -> bool {
+        confirmed_by(self.presence())
+    }
+
+    /// Whether this process is **confirmed gone**: nothing runs under its pid, or the pid was handed on. **Unknown is
+    /// `false`**, so a wait on it never passes because the process table could not be read. `Unknown` can persist (a root
+    /// process whose start time a non-root user cannot read stays unknown for its whole life), so every wait on this is bounded
+    /// by a deadline and fails or reports when it expires.
+    pub fn has_ended(self) -> bool {
+        ended_by(self.presence())
     }
 }
 
+/// [`ProcessId::confirmed_running`] over a look: only `Running` counts.
+fn confirmed_by(look: Presence) -> bool {
+    look == Presence::Running
+}
+
+/// [`ProcessId::has_ended`] over a look: only `Gone` counts.
+fn ended_by(look: Presence) -> bool {
+    look == Presence::Gone
+}
+
 impl ProcessId {
-    /// The three-valued [`ProcessId::is_alive`]: `Unknown` when the process table or the holder's start time cannot be read.
+    /// The three-valued [`ProcessId::confirmed_running`]: `Unknown` when the process table or the holder's start time cannot be read.
     pub fn presence(self) -> Presence {
         self.presence_given(
             crate::tree::presence(self.pid),
@@ -310,7 +329,10 @@ mod tests {
             !off(2_000_000).may_be_alive(),
             "two seconds off is another process"
         );
-        assert!(!off(500).is_alive(), "a kill still compares exactly");
+        assert!(
+            !off(500).confirmed_running(),
+            "a kill still compares exactly"
+        );
     }
 
     #[test]
@@ -352,10 +374,10 @@ mod tests {
             Unknown,
             "running, but its start time cannot be read"
         );
-        assert!(
-            !id.is_alive(),
-            "is_alive stays false for an unknown or absent process"
-        );
+        // Neither bool answers for an unknown look: a wait on `has_ended` never passes, a guard on `confirmed_running` never acts.
+        assert!(!confirmed_by(Unknown) && !ended_by(Unknown));
+        assert!(confirmed_by(Running) && !ended_by(Running));
+        assert!(!confirmed_by(Gone) && ended_by(Gone));
     }
 
     #[test]
@@ -426,7 +448,7 @@ mod tests {
             Some(me),
             "the same process always gives the same start time"
         );
-        assert!(me.is_alive());
+        assert!(me.confirmed_running());
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -442,7 +464,7 @@ mod tests {
                 me.pid(),
                 StartTime::from_micros(me.started().as_micros() + 1)
             )
-            .is_alive()
+            .confirmed_running()
         );
     }
 

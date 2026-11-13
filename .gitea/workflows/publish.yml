@@ -28,6 +28,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     env:
+      # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
+      # RUSTUP_TOOLCHAIN outranks the file and covers every step, `./dev` building itself included.
+      RUSTUP_TOOLCHAIN: stable
       # A release job (v* tag): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
       PADDOCK_DEV_DOWNLOAD: "0"
     steps:
@@ -67,6 +70,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     env:
+      # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
+      # RUSTUP_TOOLCHAIN outranks the file and covers every step, `./dev` building itself included.
+      RUSTUP_TOOLCHAIN: stable
       # A release job (v* tag): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
       PADDOCK_DEV_DOWNLOAD: "0"
     steps:

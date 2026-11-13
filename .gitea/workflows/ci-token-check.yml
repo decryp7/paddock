@@ -18,7 +18,7 @@ jobs:
     name: the job token reads a run's jobs and a job's log
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - name: HTTP status of the job list and of the log
         env:

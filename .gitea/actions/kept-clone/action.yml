@@ -19,4 +19,4 @@ runs:
         NAME: ${{ inputs.name }}
         PROFILE: ${{ inputs.profile }}
         FRESH: ${{ inputs.fresh }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/kept-clone.sh"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host kept-clone "$NAME" "$PROFILE" "$FRESH"

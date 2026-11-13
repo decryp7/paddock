@@ -13,7 +13,7 @@ fn fixtures() -> PathBuf {
 }
 
 fn repo_root() -> PathBuf {
-    crate::full_tree(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap())
+    crate::full_tree(&paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap())
 }
 
 /// What the scan must find in the fixture tree: `(file, call)`, one per site.

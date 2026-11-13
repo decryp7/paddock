@@ -243,7 +243,7 @@ fn stream(
     // silent: the watcher has already ended when its receiver is gone (the tool ended or was stopped); the join below judges it
     #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
     let _ = done_tx.send(());
-    paddock_proc::cleanup::join("the tool watcher", watcher);
+    paddock_proc::cleanup::join_warn("the tool watcher", watcher);
     if timed_out.load(Ordering::SeqCst) {
         return Err(PlatformError::Timeout(format!(
             "{program} did not finish within {} s.",
@@ -418,18 +418,20 @@ pub(crate) mod tests {
     fn cancel_ends_the_whole_tree_of_a_streamed_tool_not_just_its_first_process() {
         // The tool says the pid of its helper as its first line; Cancel comes when that line has been handed over.
         let hand = Hand::default();
-        let mut helper: Option<u32> = None;
+        let mut helper: Option<paddock_proc::ProcessId> = None;
         let started = Instant::now();
         let err = run_streaming(shell("sleep 30 & echo $!; wait"), Duration::from_secs(60), &hand, |line| {
-            helper = line.trim().parse().ok();
+            // Read while the helper lives: the identity (pid and start time), never the bare pid (rule 53).
+            helper = line.trim().parse().ok().and_then(paddock_proc::ProcessId::of);
             hand.cancel();
         })
         .unwrap_err();
         assert!(matches!(&err, PlatformError::Failed(m) if m.contains("stopped")), "{err:?}");
         assert!(started.elapsed() < Duration::from_secs(10));
-        let pid = helper.expect("the first line was the helper's pid");
+        let helper = helper.expect("the first line was the pid of a running helper");
+        let pid = helper.pid();
         for _ in 0..200 {
-            if !paddock_proc::is_alive(pid) {
+            if helper.has_ended() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(25));

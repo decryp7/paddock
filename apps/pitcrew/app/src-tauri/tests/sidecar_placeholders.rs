@@ -5,9 +5,8 @@
 
 #[test]
 fn the_build_leaves_no_empty_sidecar_in_the_build_folder() {
-    // target/<profile>/deps/<this test> -> target/<profile>
-    let exe = std::env::current_exe().unwrap();
-    let profile_dir = exe.parent().and_then(std::path::Path::parent).unwrap();
+    // target/<profile>, whichever build-folder layout this cargo uses (before 1.100: deps/<test>; after: build/<package>/<hash>/out/<test>)
+    let profile_dir = paddock_testkit::cargo_layout::profile_dir();
     let ext = if cfg!(windows) { ".exe" } else { "" };
     let path = profile_dir.join(format!("pitcrew-service{ext}"));
     // Absent is fine (this run did not build that binary); present must be a real program.

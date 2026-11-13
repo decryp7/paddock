@@ -158,6 +158,22 @@ review_by = 2026-12-27
 approved = "coordinator"
 
 [[report_only]]
+id = "C118"
+reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C118-floating-tools.mjs and the mode to gate. 16 floating-tool warnings today (7 cargo install without a pinned version, 5 dtolnay/rust-toolchain at a channel ref, 2 taiki-e/install-action refs without a digest, 1 install-action tool without @x.y.z, 1 npx --yes of a package that is not in the lockfile); an npx of a binary of a top-level package-lock.json package is not a finding"
+owner = "ER-26 (2026-11-13)"
+since = 2026-11-12
+review_by = 2026-12-10
+approved = "user"
+
+[[report_only]]
+id = "C119"
+reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C119-dev-before-toolchain.mjs (and its Rust port, tools/paddock-dev/src/check/c119.rs) and the mode to gate. Today's findings are the plan jobs of ci.yml, debrief.yml, dyno-release.yml and pitcrew-release.yml, the commits job and tag.yml's check job (they run ./dev before any setup-rust; their compiler is the image's)"
+owner = "CI-in-Rust WP-3 review (2026-11-13)"
+since = 2026-11-13
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[report_only]]
 id = "C14"
 reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
 owner = "Rule 40 follow-up"
@@ -565,6 +581,16 @@ review_by = 2027-01-10
 approved = "coordinator"
 
 [[ignored]]
+path = "apps/debrief/crates/debrief-store-duck/tests/bench_waits.rs"
+tests = ["what_the_wait_logs_cost_a_store_call"]
+gate = "measurement"
+reason = "env-gated (DEBRIEF_BENCH_WAITS=<calls>): measures what the wait phase logs cost a store call, run by hand with --release --nocapture; its results block is in apps/debrief/docs/performance.md"
+owner = "Debrief 1.2"
+since = 2026-11-12
+review_by = 2027-01-10
+approved = "coordinator"
+
+[[ignored]]
 path = "apps/debrief/crates/debrief-plugins/tests/it/perf_plugins.rs"
 tests = ["idle_plugins"]
 gate = "not-gated"
@@ -945,10 +971,10 @@ review_by = 2026-12-20
 approved = "coordinator"
 
 [[ignored]]
-path = "tools/paddock-dev/src/fds.rs"
+path = "crates/paddock-proc/src/detach.rs"
 tests = ["last_resort_child"]
 gate = "not-gated"
-reason = "a child probe: a parent test starts it with PADDOCK_DEV_FDS_CHILD set; it returns at once otherwise"
+reason = "a child probe: a parent test starts it with PADDOCK_PROC_DETACH_CHILD set; it returns at once otherwise"
 owner = "ADR 0060 WP-9"
 since = 2026-11-08
 review_by = 2026-12-20

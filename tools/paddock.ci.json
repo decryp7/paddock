@@ -1,0 +1,18 @@
+{
+  "$comment": "The CI contract of the shared CI actions' scripts and the dev and host tools (ADR 0038 §1; ci.yml's `tools` job calls `./dev ci run tools <phase>`, one phase per step). The draw.io fetch of the SVG drift check stays a YAML step (the image from v3 on has it).",
+  "tests": [
+    "node --test tools/test/*.test.mjs"
+  ],
+  "scripts": [
+    "node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs scripts/demo/*.test.mjs scripts/shell-demo/*.test.mjs"
+  ],
+  "vm-smoke": [
+    "node --test scripts/vm-smoke/*.test.mjs"
+  ],
+  "affected": [
+    "node --test scripts/affected.test.mjs"
+  ],
+  "svg-drift": [
+    "node scripts/svg-drift.mjs"
+  ]
+}

@@ -57,7 +57,7 @@ if [ "${RUSTC_WRAPPER:-}" != "sccache" ] || [ -z "${CARGO_BUILD_JOBS:-}" ]; then
 
 Add to your shell profile (~/.zshenv on macOS), between builds:
   export RUSTC_WRAPPER=sccache
-  export SCCACHE_DIR=<a folder on the big volume>   # Mac mini: /Volumes/d8sst7/dev-targets/sccache
+  export SCCACHE_DIR=<a folder on the big volume>   # Mac mini: /Volumes/d7sst7/dev-targets/sccache; not d8, which holds the VMs
   export SCCACHE_CACHE_SIZE=60G
   export CARGO_BUILD_JOBS=2
 EOF

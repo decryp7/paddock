@@ -34,7 +34,7 @@ pub(crate) use ipc::OP_HEADER;
 pub use ipc::{current_op, logged, OpId};
 pub use logger::{breadcrumbs, ActivityLogger};
 #[cfg(test)]
-pub(crate) use logger::{captured, test_capture, Captured};
+pub(crate) use logger::{captured, install_test_logger, test_capture, Captured};
 pub use steps::steps;
 
 /// `SourceContext` of every activity entry (UI and Rust), the filter of Help ▸ Show activity log.

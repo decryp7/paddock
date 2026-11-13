@@ -4,7 +4,7 @@
 
 use std::path::{Component, Path, PathBuf};
 
-/// The absolute, symlink-resolved form of `p`: the deepest existing ancestor is canonicalised, the rest appended as written.
+/// The absolute, symlink-resolved form of `p`: the deepest existing ancestor is resolved (paddock_env::winpath::real: no verbatim prefix), the rest appended as written.
 pub fn abs_path(p: &str, home: Option<&Path>, cwd: &Path) -> PathBuf {
     let mut path = if p == "~" {
         home.map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from(p))
@@ -27,7 +27,7 @@ pub fn abs_path(p: &str, home: Option<&Path>, cwd: &Path) -> PathBuf {
             _ => break,
         }
     }
-    let mut out = std::fs::canonicalize(&base).unwrap_or(base);
+    let mut out = paddock_env::winpath::real(&base).unwrap_or(base);
     for n in rest.iter().rev() {
         out.push(n);
     }

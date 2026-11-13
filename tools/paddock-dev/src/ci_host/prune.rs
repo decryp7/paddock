@@ -497,7 +497,7 @@ mod tests {
 
     fn ci() -> Ci {
         let d = crate::ci_host::canonical_tempdir();
-        let home = std::fs::canonicalize(d.path()).unwrap().join("home");
+        let home = paddock_env::winpath::real(d.path()).unwrap().join("home");
         std::fs::create_dir_all(home.join(".paddock-ci")).unwrap();
         Ci { d, home }
     }
@@ -554,7 +554,7 @@ mod tests {
     #[test]
     fn anything_else_is_left_alone_with_a_notice() {
         let c = ci();
-        let outside = std::fs::canonicalize(c.d.path()).unwrap().join("outside");
+        let outside = paddock_env::winpath::real(c.d.path()).unwrap().join("outside");
         big(&outside, "target-x/debug/incremental", 3000);
         let real = c.home.join(".paddock-ci/target-real-s1");
         big(&real, "debug/incremental", 3000);

@@ -168,6 +168,7 @@ impl Removal {
 /// Removes a file, a link (not its target) or a folder with everything in it. Whatever cannot be deleted is recorded in `out` and
 /// left in place, together with the folders that contain it. Returns whether `path` is gone. Stops early (returning false) once
 /// `run` reports Cancel.
+#[must_use = "false means the path is still there (or the run was cancelled): the caller decides whether that matters"]
 pub fn remove(path: &Path, run: &dyn Run, out: &mut Removal) -> bool {
     remove_at(path, run, out, 0)
 }

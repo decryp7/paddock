@@ -72,11 +72,14 @@ function job(fx, sha, { os = 'macOS', slot = 's1', env = {}, hash = Math.random(
   git(ws, fx.root, '-c', 'advice.detachedHead=false', 'checkout', '-q', '--detach', sha);
   const ghEnv = join(fx.root, `github-env-${hash}`);
   writeFileSync(ghEnv, '');
-  const r = spawnSync('bash', [SCRIPT], {
-    cwd: ws,
-    encoding: 'utf8',
-    env: { ...ENV(fx.root), RUNNER_OS: os, PADDOCK_CI_SLOT: slot, GITHUB_WORKSPACE: ws, GITHUB_ENV: ghEnv, GITHUB_ACTION_PATH: join(PADDOCK, '.gitea', 'actions', 'kept-clone'), NAME: 'decryp7/paddock-crate', PROFILE: profile, KEPT_CLONE_PROFILES: join(fx.root, 'profiles.txt'), ...env },
-  });
+  const jobEnv = { ...ENV(fx.root), RUNNER_OS: os, PADDOCK_CI_SLOT: slot, GITHUB_WORKSPACE: ws, GITHUB_ENV: ghEnv, GITHUB_ACTION_PATH: join(PADDOCK, '.gitea', 'actions', 'kept-clone'), NAME: 'decryp7/paddock-crate', PROFILE: profile, KEPT_CLONE_PROFILES: join(fx.root, 'profiles.txt'), ...env };
+  // KEPT_CLONE_CMD: the Rust command (a paddock-dev binary) is the unit under test instead of the script (the plan's oracle rule,
+  // docs/plans/ci-in-rust.md section 7, WP-5): the same cases hold both. The script's inputs NAME, PROFILE and FRESH become its flags.
+  const rust = process.env.KEPT_CLONE_CMD;
+  const r = rust
+    ? spawnSync(rust, ['ci', 'kept-clone', '--name', jobEnv.NAME, '--profile', jobEnv.PROFILE, ...(jobEnv.FRESH === 'true' ? ['--fresh'] : [])], { cwd: ws, encoding: 'utf8', env: { ...jobEnv, PADDOCK_CI_TABLES: join(PADDOCK, 'conformance', 'ci') } })
+    : spawnSync('bash', [SCRIPT], { cwd: ws, encoding: 'utf8', env: jobEnv });
+  if (process.env.KC_DEBUG) console.log(r.stdout + r.stderr);
   return { ...r, ws, ghEnv, out: r.stdout + r.stderr, stable: (s = slot) => join(fx.root, 'home', '.paddock-ci', 'src', `decryp7_paddock-crate-${s}`) };
 }
 

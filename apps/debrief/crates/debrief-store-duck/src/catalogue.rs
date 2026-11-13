@@ -1005,7 +1005,10 @@ impl crate::DuckStore {
         let service = self.inner.catalogue.as_ref().ok_or_else(|| engine("the store has no catalogue"))?;
         let conn = self.inner.conn()?;
         // Under the write lock and in one transaction, so it cannot interleave with a catalogue commit.
-        let _writing = lock(&self.inner.write_lock);
+        let _writing = debrief_core::wait_log::lock_watched(
+            &self.inner.write_lock,
+            "store write lock (held by the catalogue, the indexer or another write)",
+        );
         conn.execute_batch("BEGIN TRANSACTION").map_err(engine)?;
         let deleted = DELETE_SQL.iter().try_for_each(|sql| conn.execute(sql, params![source]).map(|_| ()));
         match deleted {

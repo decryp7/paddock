@@ -111,6 +111,9 @@ pub struct Sources {
     pub actions: BTreeMap<String, String>,
     /// `apps/<app>/paddock.ci.json` by app name.
     pub contracts: BTreeMap<String, String>,
+    /// `<project>/paddock.ci.json` of the root projects (`crates`, `ui`, `conformance`, `tools`, `icons`, `eslint`): the commands of
+    /// `./dev ci run <project> <phase>` (ADR 0038 §1).
+    pub root_contracts: BTreeMap<String, String>,
     /// The register's `[vars]` (repository variables as CI sets them).
     pub vars: BTreeMap<String, String>,
 }
@@ -694,6 +697,7 @@ struct Walker<'a> {
     wf: &'a BTreeMap<String, Workflow>,
     actions: &'a BTreeMap<String, Action>,
     contracts: &'a BTreeMap<String, Json>,
+    root_contracts: &'a BTreeMap<String, Json>,
     vars: &'a BTreeMap<String, String>,
     root: String,
     lines: BTreeMap<LineKey, RunLine>,
@@ -1119,6 +1123,46 @@ impl Walker<'_> {
             }
             return;
         }
+        // `./dev ci run <project> <phase>`: the lines of that phase of the project's contract are the commands, run from the
+        // repository root (ADR 0038 §1; the executor's own rules, tools/paddock-dev/src/ci_run).
+        if depth < 12
+            && let Some((project, phase)) = dev_ci_run(&expanded)
+        {
+            let contract = self.contracts.get(&project).or_else(|| self.root_contracts.get(&project));
+            let lines = contract
+                .ok_or_else(|| format!("no contract for `{project}`"))
+                .and_then(|c| crate::ci_run::contract::phase_lines(c, &project, &phase));
+            match lines {
+                Ok(list) => {
+                    let origin = crate::ci_run::contract::repo_path_of(&project);
+                    let mut env = env.clone();
+                    if project == "conformance"
+                        && let Some(a) = contract.and_then(|c| crate::ci_run::contract::conformance_args(c).ok())
+                    {
+                        env.insert("PADDOCK_CONFORMANCE_ARGS".into(), a[1..].join(" "));
+                    }
+                    for c in shell::commands(&list.join("\n"), Some(String::new())) {
+                        self.emit(
+                            file,
+                            line,
+                            &c.text,
+                            c.cwd.clone(),
+                            report || c.report_only,
+                            conditional || c.conditional,
+                            unresolved,
+                            acc,
+                            &env,
+                            scope,
+                            sc,
+                            Some(origin.clone()),
+                            12,
+                        );
+                    }
+                    return;
+                }
+                Err(e) => self.problems.push((format!("{file}:{line}"), format!("`{expanded}`: {e}"))),
+            }
+        }
         let in_command_position = expanded
             .split_whitespace()
             .next()
@@ -1165,6 +1209,19 @@ struct StepCtx {
     app: Option<String>,
     os: Option<String>,
     job: String,
+}
+
+/// `(project, phase)` of a `./dev ci run <project> <phase>` command (quotes around the words allowed), else `None`.
+fn dev_ci_run(text: &str) -> Option<(String, String)> {
+    let words: Vec<&str> = text.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
+    match words.as_slice() {
+        [dev, "ci", "run", project, phase, ..]
+            if matches!(*dev, "./dev" | "dev") && !project.starts_with('-') && !phase.starts_with('-') =>
+        {
+            Some((project.to_string(), phase.to_string()))
+        }
+        _ => None,
+    }
 }
 
 fn base_scope_clone<'a>(s: &Scope<'a>) -> Scope<'a> {
@@ -1299,6 +1356,17 @@ pub fn build(src: &Sources) -> CiModel {
                 .push((format!("apps/{app}/paddock.ci.json"), format!("not valid JSON: {e}"))),
         }
     }
+    let mut root_contracts = BTreeMap::new();
+    for (project, t) in &src.root_contracts {
+        match serde_json::from_str::<Json>(t) {
+            Ok(j) => {
+                root_contracts.insert(project.clone(), j);
+            }
+            Err(e) => model
+                .problems
+                .push((format!("{project}/paddock.ci.json"), format!("not valid JSON: {e}"))),
+        }
+    }
     let mut lines: BTreeMap<LineKey, RunLine> = BTreeMap::new();
     let mut workflows = Reach::new();
     let mut action_reach = Reach::new();
@@ -1314,6 +1382,7 @@ pub fn build(src: &Sources) -> CiModel {
                 wf: &wf,
                 actions: &actions,
                 contracts: &contracts,
+                root_contracts: &root_contracts,
                 vars: &src.vars,
                 root: path.clone(),
                 lines: BTreeMap::new(),

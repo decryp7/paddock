@@ -683,7 +683,8 @@ mod tests {
                 code_of(between(
                     include_str!("../../../../../../crates/paddock-proc/src/cleanup.rs"),
                     "pub fn report(",
-                    "/// Waits for a helper thread",
+                    // The first item after `logged` (the private helpers of join and the removals follow it).
+                    "/// The message of a panic payload",
                 )),
             ),
             // The OS log: on Windows the event log (native.rs, checked by the test above) or standard error; the journal branch,

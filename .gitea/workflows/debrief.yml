@@ -71,7 +71,7 @@ jobs:
     name: plan
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: .
@@ -175,7 +175,7 @@ jobs:
     if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["rust-lint"]'), 'rust-lint')
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
@@ -215,7 +215,7 @@ jobs:
     if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["rust-test"]'), 'rust-test')
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
@@ -411,7 +411,7 @@ jobs:
     if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["plugin-sdk"]'), 'plugin-sdk')
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # setup-rust runs ./dev (docs/plans/ci-in-rust.md): the read credential, and a tag or release run builds the tool from source.
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
@@ -458,7 +458,7 @@ jobs:
     if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["licences"]'), 'licences')
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -512,7 +512,7 @@ jobs:
     if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["frontend"]'), 'frontend')
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: apps/debrief/app
@@ -602,7 +602,7 @@ jobs:
     if: needs.plan.outputs.run == 'true' && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["e2e"]'), 'e2e')
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     strategy:
       fail-fast: false
       matrix:
@@ -672,7 +672,7 @@ jobs:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
     # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     timeout-minutes: 60
     defaults:
       run:
@@ -880,7 +880,10 @@ jobs:
       # The start-up benchmark (Paddock rule 16; startup_timings.rs): five everyday starts of the built app after a
       # first run, each one's "Startup timings" line read and the medians checked against scripts/ci/startup-budgets.json.
       # Nightly and manual runs only. macOS has measured budgets; Linux reports until its first nightly numbers are in.
+      # ER-33 / ADR 0089: a start counts only at host load <= 12 (DEBRIEF_BENCH_MAX_LOAD) before and after; too few quiet
+      # starts is NOT MEASURED, exit 6, a red step with an ::error:: (never a pass); over budget still exits 1.
       - name: Start-up benchmark (macOS)
+        timeout-minutes: 20
         if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'macOS'
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/apps/debrief
         run: |
@@ -944,7 +947,7 @@ jobs:
       # A release or installer job builds the tool from source: it never runs a prebuilt binary (ADR 0022, release jobs bypass every cache).
       PADDOCK_DEV_DOWNLOAD: "0"
     # Linux legs run in the paddock-ci image; Windows and macOS run on the host.
-    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v3' || '' }}
     defaults:
       run:
         shell: bash
@@ -1217,7 +1220,7 @@ jobs:
     if: (startsWith(github.ref, 'refs/tags/debrief-v') || github.event_name == 'workflow_dispatch') && contains(fromJSON(needs.plan.outputs.rerun_jobs || '["keychain"]'), 'keychain')
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
 
@@ -1231,7 +1234,7 @@ jobs:
     needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, keychain]
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       # A release job: ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
       PADDOCK_DEV_DOWNLOAD: "0"
@@ -1321,7 +1324,7 @@ jobs:
     if: github.event_name == 'schedule' && success() && needs.plan.outputs.run == 'true'
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     defaults:
       run:
         working-directory: .

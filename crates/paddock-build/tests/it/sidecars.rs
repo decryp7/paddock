@@ -50,9 +50,15 @@ fn a_config_that_is_not_an_object_is_replaced() {
 }
 
 #[test]
-fn the_profile_folder_is_three_levels_above_out_dir() {
+fn the_profile_folder_is_above_out_dir_in_both_of_cargo_s_build_folder_layouts() {
+    // Cargo before 1.100: <profile>/build/<package>-<hash>/out.
     assert_eq!(
         profile_dir(Path::new("/t/debug/build/app-1a2b/out")),
+        Some(PathBuf::from("/t/debug"))
+    );
+    // Cargo 1.100 (build.build-dir-new-layout, always on): <profile>/build/<package>/<hash>/out.
+    assert_eq!(
+        profile_dir(Path::new("/t/debug/build/app/1a2b3c4d/out")),
         Some(PathBuf::from("/t/debug"))
     );
     assert_eq!(profile_dir(Path::new("")), None);

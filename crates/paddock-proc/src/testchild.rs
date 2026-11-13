@@ -176,7 +176,8 @@ fn helper_main() {
 /// moment before the process shows as a zombie, so a check made right after EOF has to wait for that state (a deadline, not a sleep).
 pub(crate) fn is_gone(pid: u32) -> bool {
     let end_at = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while crate::is_alive(pid) {
+    // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
+    while crate::presence(pid) != crate::Presence::Gone {
         if std::time::Instant::now() >= end_at {
             return false;
         }

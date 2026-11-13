@@ -287,7 +287,7 @@ impl LinkClient {
             p.close();
         }
         if let Some(t) = self.thread.take() {
-            paddock_proc::cleanup::join("the link client thread", t);
+            paddock_proc::cleanup::join_warn("the link client thread", t);
         }
         self.shared.set(LinkState::Stopped, None);
     }

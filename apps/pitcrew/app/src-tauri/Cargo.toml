@@ -60,5 +60,9 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
 
+[dev-dependencies]
+# `cargo_layout::profile_dir`, the build folder in both of cargo's layouts (sidecar_placeholders).
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+
 [lints]
 workspace = true

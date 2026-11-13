@@ -148,8 +148,7 @@ fn an_error_names_a_service_outage_only_while_that_service_is_down() {
 /// limit. It is built only when it is missing (a
 /// `cargo test -p debrief-app` without a workspace build).
 fn built_store_worker() -> std::path::PathBuf {
-    let test_exe = std::env::current_exe().unwrap();
-    let profile_dir = test_exe.parent().and_then(std::path::Path::parent).unwrap().to_path_buf();
+    let profile_dir = paddock_testkit::cargo_layout::profile_dir();
     let release = profile_dir.file_name().is_some_and(|n| n == "release");
     store_worker_in(&profile_dir, || {
         let mut build = debrief_plugin_api::process::quiet_command(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));

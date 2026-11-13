@@ -201,7 +201,7 @@ fn start_owner(
 fn a_fake_browser_ends_when_its_owner_dies_even_without_a_guardian() {
     let d = tempfile::tempdir().unwrap();
     let (mut owner, browser, _profile) = start_owner(d.path(), false, false);
-    assert!(browser.is_alive());
+    assert!(browser.confirmed_running());
     owner.kill().unwrap();
     owner.wait().unwrap();
     let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
@@ -291,7 +291,7 @@ fn running_the_guardian_entry_as_a_plain_test_does_not_start_a_guardian_of_the_w
 fn a_browser_whose_owner_is_killed_is_ended_and_its_throwaway_profile_removed() {
     let d = tempfile::tempdir().unwrap();
     let (mut owner, browser, profile) = start_owner(d.path(), true, false);
-    assert!(profile.exists() && browser.is_alive());
+    assert!(profile.exists() && browser.confirmed_running());
     // SIGKILL through the handle of this process's own child: none of the owner's own clean-up runs.
     owner.kill().unwrap();
     owner.wait().unwrap();
@@ -325,13 +325,14 @@ fn the_launch_command_line_is_the_one_built_and_the_profile_goes_with_the_browse
     assert_eq!(args.last().map(String::as_str), Some(START_PAGE));
     assert!(!args.iter().any(|a| a == "--no-sandbox"));
     let (dir, pid) = (b.profile_dir().to_path_buf(), b.pid().unwrap());
+    let id = paddock_proc::ProcessId::of(pid).expect("a running browser has an identity");
     assert!(dir.exists() && b.is_running());
     assert_eq!(b.exe(), &f.exe());
     assert_eq!(b.ended_by(), EndedBy::Nothing);
     // conformance: hang-guard — the exit is waited for on the condition; a loaded runner needs more than the grace
     assert!(b.close_gracefully(CLOSE_GUARD), "it exited by itself");
     assert!(!dir.exists(), "the throwaway profile is gone");
-    assert!(!paddock_proc::is_alive(pid));
+    assert!(id.has_ended());
     assert!(f.fake.calls().contains(&"Browser.close".to_string()));
     // conformance: grace-free — the first close already ended the browser, so this one waits out no grace
     assert!(b.close(), "a second close finds it ended");

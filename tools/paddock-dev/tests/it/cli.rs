@@ -50,7 +50,7 @@ fn a_wrong_command_line_is_usage_exit_2_and_json_mode_gets_one_error_object() {
 fn self_hash_prints_one_object_with_the_hash_and_the_compiler() {
     // A repository of its own (ER-14): the checkout may be a worktree whose .git names a path this machine lacks.
     let d = tempfile::tempdir().unwrap();
-    let root = d.path().canonicalize().unwrap();
+    let root = paddock_env::winpath::real(d.path()).unwrap();
     std::fs::create_dir_all(root.join("tools/paddock-dev")).unwrap();
     std::fs::write(root.join("tools/paddock-dev/inputs.txt"), "# x\ntools/paddock-dev\n").unwrap();
     crate::golden::git(&root, &["init", "-q", "-b", "main"]);

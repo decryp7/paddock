@@ -198,7 +198,7 @@ fn the_tray_popup_reaches_exactly_its_commands() {
     assert!(edit.windows().contains(paddock_commands::WindowClass::Dialog));
 }
 
-const REGENERATE: &str = "cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test shell";
+const REGENERATE: &str = "cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test it shell";
 
 /// The UI's command names are generated from the table, so a typo in a dialog contract is a compile error.
 #[test]

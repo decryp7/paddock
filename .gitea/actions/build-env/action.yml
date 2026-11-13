@@ -1,7 +1,7 @@
 name: build-env
-description: "Sets PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE for the following steps, so the About page can show them (paddock-updater reads them with option_env!)."
+description: "Sets PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE for the following steps, so the About page can show them (paddock-updater reads them with option_env!). `./dev ci build-env`, through conformance/ci/kit.sh: a tag run and a run that never downloads the tool keep conformance/ci/build-env.mjs until the release-path lane; tools/paddock-dev/tests/it/build_env.rs holds the two equal."
 runs:
   using: composite
   steps:
     - shell: bash
-      run: node "${{ github.action_path }}/../../../conformance/ci/build-env.mjs"
+      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" build-env

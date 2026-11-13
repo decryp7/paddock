@@ -154,7 +154,7 @@ mod waited_tests {
         paddock_testkit::wait_until_within(
             "the grandchild to be gone",
             Duration::from_secs(10),
-            || !grandchild.is_alive(),
+            || grandchild.has_ended(),
         );
     }
 
@@ -178,7 +178,7 @@ mod waited_tests {
         paddock_testkit::wait_until_within(
             "the grandchild to be gone after the timeout",
             Duration::from_secs(10),
-            || !grandchild.is_alive(),
+            || grandchild.has_ended(),
         );
     }
 }

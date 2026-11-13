@@ -1,0 +1,24 @@
+{
+  "$comment": "The CI contract of the shared Rust crates (ADR 0038 §1; ci.yml's `crates` job calls `./dev ci run crates <phase>`, one phase per step). Coverage: merged line coverage over all test binaries, adapters included; native glue files are left out (crates/README.md: never logic, reviewed by hand) with the exclusions the regex names; the gate (scripts/coverage-gate.mjs) leaves out only the `#[tauri::command]` attribute lines.",
+  "fmt": [
+    "cd crates",
+    "cargo fmt --all --check"
+  ],
+  "hakari": [
+    "cd crates",
+    "cargo hakari generate --diff && cargo hakari manage-deps --dry-run && cargo hakari verify"
+  ],
+  "machete": [
+    "cd crates",
+    "cargo machete $(ls -d paddock-*/ | grep -v '^paddock-workspace-hack/$')"
+  ],
+  "coverage": [
+    "cd crates",
+    "cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src|paddock-power/src)/native\\.rs$|paddock-proc/src/testchild\\.rs$|paddock-setup/src/(main\\.rs|native/.*)$|paddock-chromium/src/fake\\.rs$|paddock-ipc/src/bin/test_child\\.rs$|paddock-ipc/src/testing/.*\\.rs$|paddock-dialogs/src/probe\\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\\.rs$|paddock-plugin-api/src/entry\\.rs$|paddock-plugin-test/src/process\\.rs$|cargo-paddock-plugin/src/main\\.rs$|paddock-ipc/src/endpoint/(unix|windows)\\.rs$|paddock-service/src/privileged/trust_real/windows\\.rs$' --lcov --output-path lcov.info",
+    "node ../scripts/coverage-gate.mjs lcov.info 90"
+  ],
+  "deny": [
+    "cd crates",
+    "cargo deny check"
+  ]
+}

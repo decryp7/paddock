@@ -52,6 +52,14 @@ const ALLOWED: &[(&str, &str)] = &[
         "FOLLOW-UP: the CI host steps' guarded remove (feat/ci-in-rust-wp4) and safe_remove become one mechanism",
     ),
     ("tools/heavy/src/lock.rs", "heavy.sh's lock folders, not work folders"),
+    (
+        "tools/paddock-dev/src/ci_host/guardian_as_user.rs",
+        "its own private scratch folder, made and removed by the same step (ci guardian-as-user)",
+    ),
+    (
+        "tools/paddock-dev/src/ci_host/kept_clone.rs",
+        "an empty hooks folder it made itself (remove_dir, never recursive), not a work folder",
+    ),
 ];
 
 const PATTERNS: &[&str] = &["remove_dir_all", "fs::remove_dir(", "\"worktree\", \"remove\""];

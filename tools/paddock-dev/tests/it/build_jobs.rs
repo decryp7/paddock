@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn repo() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
 #[derive(Debug, PartialEq, Eq)]

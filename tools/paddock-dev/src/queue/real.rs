@@ -539,6 +539,9 @@ impl Train for GitTrain {
                 commit: Some("HEAD".into()),
                 branch: None,
                 target: None,
+                // The queue runs no code of any pull request (docs/plans/merge-queue.md); the generator checks run the
+                // registry's commands in the tree, so they are the landing gates' job, not the queue's.
+                generators: false,
             };
             match (self.merge_check)(&req) {
                 Ok(_) => merged.push(pr.number),

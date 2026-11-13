@@ -31,7 +31,7 @@
 // other is an error. The baseline may only shrink (a listed site that is gone is a warning; an entry the merge base's baseline lacks is
 // an error); `node conformance/bin/paddock-cleanup-baseline.mjs` lists the sites, `--shrink` removes stale entries.
 import { error, warn } from '../finding.mjs';
-import { againstBaseline, baselineGrowth, lineHash } from './C71-test-timing.mjs';
+import { againstBaseline, baselineGrowth, growthMovedWarning, lineHash, movedWarning, sourceGone } from './C71-test-timing.mjs';
 
 export const BASELINE_PATH = 'conformance/baselines/C115.json';
 const WAIVER = /conformance:\s*scoped-cleanup\s*[—–-]+\s*(\S.{2,})/;
@@ -255,7 +255,8 @@ export default {
     let baseline = { sites: [] };
     const raw = ctx.read(BASELINE_PATH);
     if (raw) baseline = JSON.parse(raw);
-    const { fresh, stale } = againstBaseline(sites, baseline.sites);
+    const { fresh, stale, moved } = againstBaseline(sites, baseline.sites, sourceGone(ctx));
+    for (const m of moved) out.push(movedWarning('C115', 2, BASELINE_PATH, m));
     for (const s of fresh) out.push(error('C115', 2, s.file, s.line, `${s.what} (ER-2, ER-14): ${s.text.trim().slice(0, 100)}`, s.fix));
     for (const e of stale) out.push(warn('C115', 2, e.file, e.line ?? 1, `${BASELINE_PATH} lists a site that is gone (hash ${e.hash}); the baseline may only shrink`, 'Remove the entry (`node conformance/bin/paddock-cleanup-baseline.mjs --shrink`).'));
     if (waived.length) {
@@ -265,7 +266,8 @@ export default {
     if (baseline.sites.length) {
       const g = baselineGrowth(ctx, baseline.sites, BASELINE_PATH);
       if (g.reason) out.push(warn('C115', 2, BASELINE_PATH, 1, `the baseline's shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
-      else if (g.added.length) out.push(error('C115', 2, BASELINE_PATH, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and scope the cleanups (an owned prefix, `"${VAR:?}"`, or `// conformance: scoped-cleanup — <why>`). Growing the baseline needs the user\'s approval.'));
+      else for (const m of g.moved) out.push(growthMovedWarning('C115', 2, BASELINE_PATH, m));
+      if (!g.reason && g.added.length) out.push(error('C115', 2, BASELINE_PATH, 1, `the baseline grew: ${g.added.length} entr${g.added.length === 1 ? 'y is' : 'ies are'} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and scope the cleanups (an owned prefix, `"${VAR:?}"`, or `// conformance: scoped-cleanup — <why>`). Growing the baseline needs the user\'s approval.'));
     }
     return out;
   },

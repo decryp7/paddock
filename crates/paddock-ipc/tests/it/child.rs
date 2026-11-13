@@ -17,8 +17,14 @@ fn spec(mode: &[&str]) -> ChildSpec {
     s
 }
 
-fn gone(pid: u32) -> bool {
-    !paddock_proc::is_alive(pid)
+/// The identity of a running child, read while it lives: the wait for its end is on that identity reading `Gone`, never on a
+/// failed read (rule 53).
+fn identity(pid: u32) -> paddock_proc::ProcessId {
+    paddock_proc::ProcessId::of(pid).expect("a running child has an identity")
+}
+
+fn gone(id: paddock_proc::ProcessId) -> bool {
+    id.has_ended()
 }
 
 #[test]
@@ -49,9 +55,9 @@ fn a_child_connects_authenticates_answers_and_is_gone_after_drop() {
     assert_eq!(child.in_job(), cfg!(windows));
     assert_eq!(child.memory_peak(), 0);
     assert_eq!(child.stopped_over_memory(), None);
-    let pid = child.pid();
+    let id = identity(child.pid());
     drop(child);
-    assert!(gone(pid));
+    assert!(gone(id));
 }
 
 #[test]
@@ -69,9 +75,10 @@ fn stop_ends_a_child_that_ignores_its_lifeline() {
     let child = launch(&spec(&["stubborn"]), Arc::new(NoCalls)).unwrap();
     assert_eq!(child.peer().call(b"x".to_vec(), T).unwrap(), b"x");
     // A short grace that the child sits out: it is ended after it.
+    let id = identity(child.pid());
     child.stop(Duration::from_millis(30));
     assert!(child.exited());
-    assert!(gone(child.pid()));
+    assert!(gone(id));
 }
 
 #[test]

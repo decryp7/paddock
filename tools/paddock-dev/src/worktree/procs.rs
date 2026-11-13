@@ -77,7 +77,7 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn this_process_is_found_in_its_own_folder() {
-        let here = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let here = paddock_env::winpath::real(&std::env::current_dir().unwrap()).unwrap();
         let folders = process_folders().unwrap();
         assert!(any_inside(&folders, &here), "{here:?} not among {} folders", folders.len());
     }

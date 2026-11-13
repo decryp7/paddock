@@ -32,7 +32,10 @@ impl ImportSession {
         let p = progress.clone();
         let handle = std::thread::Builder::new()
             .name("debrief-import".into())
-            .spawn(move || work(&p))
+            .spawn(move || {
+                let _job = crate::wait_log::activity("import job runs");
+                work(&p)
+            })
             .map_err(|e| StoreError::Engine(format!("could not start the import: {e}")))?;
         Ok(ImportSession {
             progress: Progress::Local(progress),
@@ -81,6 +84,7 @@ impl ImportSession {
 
     /// Waits for the end of the import. A crash of the job is an error, not a panic here.
     pub fn wait(self) -> StoreResult<ImportReport> {
+        let _w = crate::wait_log::activity("waiting for the import job to end");
         self.handle.join().unwrap_or_else(|payload| {
             Err(StoreError::Engine(format!(
                 "the import crashed: {}",

@@ -249,6 +249,7 @@ fn read_marker(file: &VersionedFile<MarkerBody>) -> (MarkerState, bool) {
 
 /// Removes the folders of separate instances seen to be gone, and any left with this process's PID, which can only be
 /// stale. An unreadable process table keeps every folder. Folders whose name is not a PID are left alone. Returns how many were removed. Never fails.
+#[must_use = "the count of removed folders: a caller that expects stale ones can notice when none went"]
 pub fn prune_instances(data: &Path, own_pid: u32, probe: Probe<'_>) -> usize {
     let Ok(entries) = std::fs::read_dir(data.join(INSTANCES_DIR)) else {
         return 0;

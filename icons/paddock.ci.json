@@ -1,0 +1,10 @@
+{
+  "$comment": "The CI contract of the family icons (ADR 0038 §1; ci.yml's `icons` job): the pipeline's tests, and the check that every installed copy in the apps and the docs equals the build.",
+  "tests": [
+    "cd icons",
+    "npm test"
+  ],
+  "installed": [
+    "node icons/tools/install.mjs --check"
+  ]
+}

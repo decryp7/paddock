@@ -1,8 +1,10 @@
 # Git hooks for the whole monorepo (https://lefthook.dev; lefthook reads only this root file). Install once with
 # `npx lefthook install`. Each app's checks run in its own folder (`root:`) and only on its staged files; CI runs the
 # full gates (scripts/affected.mjs). The apps' own lefthook.yml files were merged here at their import (ADR 0014).
-# Cargo steps take their turn on the machine-wide heavy slot (ER-24), as the pre-push gate's heavy steps do: `./dev heavy` finds the slot tool the way
-# the push gate does (PADDOCK_HEAVY, PATH, the engineering-rules checkout) and warns once when there is none. Rustfmt and eslint stay parallel and light.
+# Cargo steps take their turn on the machine-wide heavy slot (ER-24), as the pre-push gate's heavy steps do: `./dev heavy` uses the
+# push gate's resolver (PADDOCK_HEAVY, heavy.sh or heavy on PATH, else the heavy built from tools/heavy) and fails with the next step
+# when there is none, never an unthrottled run. A git hook sets GIT_DIR, which makes `git rev-parse --show-toplevel` (what ./dev uses to find
+# the tree) answer with the app folder, so the variables are unset for it. Rustfmt and eslint stay parallel and light.
 pre-commit:
   parallel: true
   commands:
@@ -13,7 +15,7 @@ pre-commit:
     debrief-clippy:
       root: "apps/debrief/"
       glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
+      run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     debrief-eslint:
       root: "apps/debrief/app/"
       glob: "*.{ts,html}"
@@ -25,7 +27,7 @@ pre-commit:
     dyno-clippy:
       root: "apps/dyno/"
       glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
+      run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     dyno-eslint:
       root: "apps/dyno/app/"
       glob: "*.{ts,html}"
@@ -37,7 +39,7 @@ pre-commit:
     pitcrew-clippy:
       root: "apps/pitcrew/"
       glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
+      run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     pitcrew-eslint:
       root: "apps/pitcrew/app/"
       glob: "*.{ts,html}"
@@ -49,7 +51,7 @@ pre-commit:
     pitwall-clippy:
       root: "apps/pitwall/"
       glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
+      run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     pitwall-eslint:
       root: "apps/pitwall/app/"
       glob: "*.{ts,html}"
@@ -61,7 +63,7 @@ pre-commit:
     spotter-clippy:
       root: "apps/spotter/"
       glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
+      run: env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     spotter-eslint:
       root: "apps/spotter/app/"
       glob: "*.{ts,html}"

@@ -1343,3 +1343,26 @@ UPDATE ... FROM over a staging table, a read of the names the source did not hav
 trigrams. What is left of the 213 ms is the 250,000 trigram rows of 10,000 new names (a tail of text lines brings a few
 dozen names, not thousands). Cost per tail read: the events appended since the last read (read once, with their ids), plus
 a pass over the source's catalogue rows for the update join; never the source's other events.
+
+## The wait phase logs on a store call (2026-11-12, `debrief_core::wait_log`)
+
+Every store call now opens a few watches (`DuckStore::conn()`: one for the borrow of the connection, more only when a lock is
+contended), so the cost of one watch and its effect on a call were measured, before (`origin/main`, b519fd27a) and after
+(branch `fix/debrief-store-phase-logs`, with the review fixes: a registry in 16 shards, no allocation for a static label, a
+`Thread` handle in place of a name, a watchdog that sleeps with no timeout while nothing is open). The test is
+`what_the_wait_logs_cost_a_store_call` in `tests/bench_waits.rs` of `debrief-store-duck` (`DEBRIEF_BENCH_WAITS=1000`, the
+samples store of about 28k events, `--release`, Mac mini). Load was 10 to 21 (other agents were building; the target of
+under 12 held only for the first pair), so the noise is as large as any effect. Two runs each, alternating, per-call averages:
+
+| per call | before, run 1 | before, run 2 | after, run 1 | after, run 2 |
+|---|---|---|---|---|
+| `summary()`, 1 thread | 7,577 us | 6,612 us | 6,258 us | 6,281 us |
+| `summary()`, 8 threads | 2,022 us | 1,899 us | 1,609 us | 1,722 us |
+| `page(500)`, 1 thread | 15,706 us | 15,492 us | 14,887 us | 15,203 us |
+| `page(500)`, 8 threads | 3,559 us | 2,992 us | 2,982 us | 3,082 us |
+
+One watch alone (open, drop, a static label): 176 to 184 ns on one thread, 214 to 226 ns per watch with eight threads at once.
+A call is 1,600 to 15,000 us here, so three watches (under 1 us) are under the noise: no slower call was measured, and the
+"after" numbers are not faster for any reason of ours. The `format!` labels of `sync::blocking` (about 350 ns more, per shell
+request, next to a thread-pool hand-off) are not on the store's hot path. An earlier debug-build run (one run each) showed the
+same: within the noise.

@@ -43,7 +43,7 @@ test('the reader finds the paths a node --test command names', () => {
 test('every test file under scripts, conformance and tools is run by a CI step or a package script', () => {
   const git = (...a) => execFileSync('git', ['-C', PADDOCK, ...a], { encoding: 'utf8', maxBuffer: 1 << 26 }).split('\n').filter(Boolean);
   const files = git('ls-files', '--', 'scripts/**/*.test.mjs', 'scripts/*.test.mjs', 'conformance/**/*.test.mjs', 'tools/**/*.test.mjs');
-  const runners = git('ls-files', '--', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'package.json', '*/package.json');
+  const runners = git('ls-files', '--', '.gitea/workflows/*.yml', '.gitea/actions/*/action.yml', 'package.json', '*/package.json', '*/paddock.ci.json');
   const patterns = runners.flatMap((f) => nodeTestPatterns(readFileSync(join(PADDOCK, f), 'utf8')));
   assert.ok(files.length > 50 && patterns.length > 5, `found ${files.length} test files and ${patterns.length} patterns`);
   const unrun = files.filter((f) => !covered(f, patterns) && !(f in UNRUN));

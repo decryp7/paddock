@@ -514,6 +514,32 @@ fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Conn
 
 #[cfg(test)]
 mod tests {
+    /// The value `f` returns once it is `Some`, polled for at most ten seconds (a condition, not a delay).
+    #[cfg(unix)]
+    fn poll_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
+        let end = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(v) = f() {
+                return v;
+            }
+            assert!(Instant::now() < end, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(20)); // conformance: hang-guard — polling for a condition, bound 10 s
+        }
+    }
+
+    /// Whether `f` turns true within ten seconds.
+    #[cfg(unix)]
+    fn poll_for_ok(mut f: impl FnMut() -> bool) -> bool {
+        let end = Instant::now() + Duration::from_secs(10);
+        while !f() {
+            if Instant::now() >= end {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50)); // conformance: hang-guard — polling for a condition, bound 10 s
+        }
+        true
+    }
+
     use super::*;
 
     /// Unit tests start fake browsers: no window system is needed for them.
@@ -708,21 +734,22 @@ mod tests {
         };
         let mut o = headless(base.path());
         o.start_limit = Duration::from_secs(3);
-        let e = Chromium::launch(&exe, &o).err().unwrap().to_string();
+        // `exec sleep` drops the profile folder from the command line, so the process is found by the pid the script wrote, and
+        // its identity (pid and start time) is read the moment that file appears: after the failed start it is gone, and a bare
+        // pid of an ended process reads the same as a failed look (rule 53).
+        let (e, id) = std::thread::scope(|s| {
+            let run = s.spawn(|| Chromium::launch(&exe, &o).err().unwrap().to_string());
+            let id = poll_for("the stand-in's pid file", || {
+                let pid = std::fs::read_to_string(base.path().join("pid")).ok()?.trim().parse::<u32>().ok()?;
+                paddock_proc::ProcessId::of(pid)
+            });
+            (run.join().unwrap(), id)
+        });
         assert!(
             e.contains("still running but not ready") && e.contains("pid ") && e.contains("still warming up"),
             "{e}"
         );
-        // `exec sleep` drops the profile folder from the command line, so the process is found by the pid the script wrote.
-        let pid: u32 = std::fs::read_to_string(base.path().join("pid"))
-            .expect("the stand-in wrote no pid before the start guard fired")
-            .trim()
-            .parse()
-            .unwrap();
-        assert!(
-            paddock_proc::ProcessId::of(pid).is_none_or(|id| !id.is_alive()),
-            "the silent browser (pid {pid}) was left running"
-        );
+        assert!(id.has_ended(), "the silent browser (pid {}) was left running", id.pid());
         assert_eq!(
             std::fs::read_dir(base.path())
                 .unwrap()
@@ -772,17 +799,25 @@ mod tests {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
         };
-        let e = Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string();
+        // The helper's identity (pid and start time) is read the moment its pid file appears: after the failed start it is gone,
+        // and a bare pid of an ended process reads the same as a failed look (rule 53).
+        let (e, helper) = std::thread::scope(|s| {
+            let run = s.spawn(|| Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string());
+            let helper = poll_for("the helper's pid file", || {
+                let pid = std::fs::read_to_string(base.path().join("helper"))
+                    .ok()?
+                    .trim()
+                    .parse::<u32>()
+                    .ok()?;
+                paddock_proc::ProcessId::of(pid)
+            });
+            (run.join().unwrap(), helper)
+        });
         assert!(e.contains("exit status: 3"), "{e}");
-        let pid: u32 = std::fs::read_to_string(base.path().join("helper")).unwrap().trim().parse().unwrap();
-        let end = Instant::now() + Duration::from_secs(10);
-        while paddock_proc::ProcessId::of(pid).is_some_and(|id| id.is_alive()) && Instant::now() < end {
-            std::thread::sleep(Duration::from_millis(50)); // conformance: hang-guard — polling for the helper to be gone, bound 10 s
-        }
-        let helper = paddock_proc::ProcessId::of(pid);
-        if let Some(id) = helper.filter(|id| id.is_alive()) {
-            paddock_proc::kill_tree(id);
-            panic!("the helper (pid {pid}) of an exited browser was left running");
+        let gone = poll_for_ok(|| helper.has_ended());
+        if !gone {
+            paddock_proc::kill_tree(helper);
+            panic!("the helper (pid {}) of an exited browser was left running", helper.pid());
         }
     }
 

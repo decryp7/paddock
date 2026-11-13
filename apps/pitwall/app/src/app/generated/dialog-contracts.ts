@@ -1,4 +1,4 @@
-// Generated from the dialog table of Pitwall (paddock-dialogs `dialogs!`, ADR 0026 §3). Do not edit: cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test shell.
+// Generated from the dialog table of Pitwall (paddock-dialogs `dialogs!`, ADR 0026 §3). Do not edit: cd app/src-tauri && PADDOCK_WRITE_TS=1 cargo test --test it shell.
 
 /** Every dialog's contract as Rust declares it: `defineDialog(DIALOG_CONTRACTS['<id>'], { title, result, load })`. */
 export const DIALOG_CONTRACTS = {

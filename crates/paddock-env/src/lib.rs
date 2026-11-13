@@ -11,12 +11,14 @@
 //!   folder, which is per user and verified, never a shared fixed path.
 //! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state; [`write_atomic_created`] where
 //!   the caller creates the temporary file (an owner-only, unshared file for a secret on Windows).
+//! - [`cargo_layout`]: the profile folder above a test program or `OUT_DIR`, in cargo's old and 1.100 build-folder layouts.
 //! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
 //!
 //! Tests use temporary folders only and never read or write the user's real folders.
 
 mod app;
 mod atomic;
+pub mod cargo_layout;
 pub mod dev_override;
 mod dirs;
 mod error;

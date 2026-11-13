@@ -509,24 +509,25 @@ mod tests {
     fn a_waited_run_is_bounded_ends_its_tree_and_a_file_run_keeps_its_output() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("out.txt");
-        let pid_file = dir.path().join("grandchild.pid");
+        let report = dir.path().join("grandchild.identity");
         let env = parent(&[("PATH", "/usr/bin:/bin")]);
-        let ran = ToolCall::new("sh")
+        // The grandchild reports its own identity (pid and start time) when it runs: after the run it is gone, and a bare pid of
+        // an ended process reads the same as a failed look (rule 53).
+        let call = ToolCall::new("sh")
             .args([
                 "-c".to_string(),
-                format!("echo started; sleep 60 & echo $! > '{}'; wait", pid_file.display()),
+                format!("echo started; {} & wait", crate::test_sleeper::shell_command()),
             ])
+            .env(crate::test_sleeper::FILE_VAR, report.display().to_string())
             .timeout(Duration::from_millis(500))
-            .output(Output::File(file))
-            .run(&env, &mut Vec::new())
-            .unwrap();
+            .output(Output::File(file));
+        let ran = call.run(&env, &mut Vec::new()).unwrap();
         assert!(!ran.success);
         assert!(ran.how.starts_with("timed out"), "{}", ran.how);
         assert_eq!(ran.stderr, "started\n");
-        let pid: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
-        paddock_testkit::wait_until_within("the grandchild to be gone", Duration::from_secs(10), || {
-            !paddock_proc::is_alive(pid)
-        });
+        let grandchild =
+            crate::test_sleeper::reported(&report).expect("the grandchild reported its identity before the limit ended the run");
+        paddock_testkit::wait_until_within("the grandchild to be gone", Duration::from_secs(10), || grandchild.has_ended());
         let missing = ToolCall::new("paddock-no-such-program")
             .output(Output::Stream)
             .run(&env, &mut Vec::new());

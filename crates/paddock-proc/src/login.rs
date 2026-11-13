@@ -284,12 +284,9 @@ mod tests {
             assert_eq!(ask_shell(&hang, Duration::from_millis(400)), None);
             let left: Vec<crate::ProcessId> = crate::processes_mentioning(&marker)
                 .into_iter()
-                .filter(|p| p.is_alive())
+                .filter(|p| !p.has_ended())
                 .collect();
-            assert!(
-                left.iter().all(|p| !p.is_alive()) && left.is_empty(),
-                "left behind: {left:?}"
-            );
+            assert!(left.is_empty(), "left behind: {left:?}");
         }
     }
 }

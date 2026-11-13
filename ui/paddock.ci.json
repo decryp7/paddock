@@ -1,0 +1,47 @@
+{
+  "$comment": "The CI contract of the shared UI package and its reference apps (ADR 0038 §1; ci.yml's `ui` and `e2e` jobs call `./dev ci run ui <phase>`, one phase per step). Commands run from the repo root, one per line; one `cd` holds for the lines after it (tools/paddock-dev/src/ci_run).",
+  "tokens": [
+    "cd ui",
+    "npm run test:tokens"
+  ],
+  "lint": [
+    "cd ui",
+    "npm run lint"
+  ],
+  "specs": [
+    "cd ui",
+    "npm test"
+  ],
+  "scripts": [
+    "cd ui",
+    "npm run test:scripts"
+  ],
+  "build": [
+    "cd ui",
+    "npm run build"
+  ],
+  "i18n": [
+    "cd ui",
+    "npm run i18n:check"
+  ],
+  "build-e2e": [
+    "cd ui",
+    "npm run build:e2e"
+  ],
+  "shell-demo": [
+    "cd ui",
+    "npm run shell-demo:build"
+  ],
+  "workbench-demo": [
+    "cd ui",
+    "npm run workbench-demo:build"
+  ],
+  "publish-dry-run": [
+    "cd ui",
+    "node ../scripts/publish.mjs --skip-build"
+  ],
+  "e2e": [
+    "cd ui",
+    "npx playwright test --shard=$E2E_SHARD"
+  ]
+}

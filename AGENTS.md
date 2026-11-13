@@ -38,7 +38,11 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   `--sparse` is only for a `--detach` review copy, and `-b <branch>` attaches to a branch that already exists.
   Never work in the main checkout; never `git stash`.
 - **Build folders.** One `CARGO_TARGET_DIR` per app per worktree, kept between tasks for the same app (reusing it is
-  what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1).
+  what makes rebuilds fast; sccache gives almost nothing across worktrees, ADR 0014 §1). Worktrees and build folders go on
+  the d7 volume (`/Volumes/d7sst7/dev-targets/`), never d8, which holds the test VMs (a d8 build stalled the Windows VM's
+  disk, 2026-11-13). The worktree root is machine config, not code: `git config paddock.worktreeRoot
+  /Volumes/d7sst7/dev-targets/wt` (repo-local, so it covers every worktree), or `PADDOCK_WORKTREE_ROOT`, or `--root`; the
+  flag wins, then git config, then the variable. Existing worktrees on d8 keep working.
 - **Cargo.** There is no root Cargo workspace: `crates/` and each app are their own workspaces, so each app builds with
   its own features and lockfile. Shared crates are path dependencies (`../../../../crates/<crate>` from
   `apps/<app>/app/src-tauri`). Run cargo inside the repo: it reads the root `.cargo/config.toml` (the `decryp7` registry,

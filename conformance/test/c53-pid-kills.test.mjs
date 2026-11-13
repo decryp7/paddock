@@ -111,6 +111,21 @@ test('C53 through the runner: a liveness site is an error unless the baseline li
   assert.ok(by('warn').includes('crates/a/src/gone.rs'), 'a stale entry is a warning');
 });
 
+test('C53 through the runner: a line deleted in one file and added in a new file is an error; a move from a gone file is a warning', async () => {
+  const line = '    paddock_proc::is_alive(pid)';
+  const src = `fn a(pid: u32) -> bool {\n${line}\n}\n`;
+  const git = () => { throw new Error('no git'); };
+  // storage.rs still exists, its site is deleted; the same line appears in new.rs (the reviewer's probe)
+  const probe = makeApp({ 'crates/a/src/storage.rs': 'fn b() {}\n', 'crates/a/src/new.rs': src, [LIVENESS_BASELINE]: JSON.stringify({ sites: [entry('crates/a/src/storage.rs', line)] }) });
+  const f = await findingsOf('C53', probe, { options: { git } });
+  assert.ok(f.some((x) => x.severity === 'error' && x.file === 'crates/a/src/new.rs'), 'the new site is an error');
+  // the source file is gone: a move, reported as a warning naming both files
+  const gone = makeApp({ 'crates/a/src/new.rs': src, [LIVENESS_BASELINE]: JSON.stringify({ sites: [entry('crates/a/src/old.rs', line)] }) });
+  const g = await findingsOf('C53', gone, { options: { git } });
+  assert.deepEqual(g.filter((x) => x.severity === 'error'), []);
+  assert.ok(g.some((x) => x.severity === 'warn' && /moved from crates\/a\/src\/old\.rs to crates\/a\/src\/new\.rs/.test(x.message)));
+});
+
 test('C53 through the runner: a baseline that grew against the merge base is an error', async () => {
   const src = 'fn a(pid: u32) -> bool {\n    paddock_proc::is_alive(pid)\n}\n';
   const grown = JSON.stringify({ sites: [entry('crates/a/src/k.rs', '    paddock_proc::is_alive(pid)')] });

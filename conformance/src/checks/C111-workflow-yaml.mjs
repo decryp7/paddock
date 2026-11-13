@@ -32,7 +32,7 @@ export default {
     try {
       ({ parseDocument } = await import('yaml'));
     } catch (e) {
-      return [unwaivable(error('C111', 3, 'conformance/package.json', 1, `check broken: the yaml package cannot be loaded (${e.code ?? e.message})`, 'Run `npm ci --ignore-scripts` in conformance/ (its package-lock.json pins yaml 2).'))];
+      return [unwaivable(error('C111', 3, 'conformance/package.json', 1, `check broken: the yaml package cannot be loaded (${e.code ?? e.message})`, 'Run `npm ci --ignore-scripts -w conformance` at the repository root (conformance is a member of the root workspace, whose package-lock.json pins yaml 2); `./dev worktree add` does it for a new worktree.'))];
     }
     const files = ctx.files().filter((f) => FILE.test(f));
     if (files.length === 0) {

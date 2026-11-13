@@ -54,35 +54,51 @@ macro_rules! id_type {
 
 id_type!(
     /// A requirement id from the tracker or Pacenotes: opaque text. `#` is reserved for [`AcceptanceRef`].
-    RequirementId, "requirement id", |c| id_char(c) && c != '#'
+    RequirementId,
+    "requirement id",
+    |c| id_char(c) && c != '#'
 );
 id_type!(
     /// The id of a test case.
-    CaseId, "case id", id_char
+    CaseId,
+    "case id",
+    id_char
 );
 id_type!(
     /// The name of a screen a plan expects.
-    ScreenName, "screen name", id_char
+    ScreenName,
+    "screen name",
+    id_char
 );
 id_type!(
     /// The id of a plan.
-    PlanId, "plan id", id_char
+    PlanId,
+    "plan id",
+    id_char
 );
 id_type!(
     /// The name of a data table.
-    DataName, "data table name", id_char
+    DataName,
+    "data table name",
+    id_char
 );
 id_type!(
     /// A free tag on a case.
-    Tag, "tag", id_char
+    Tag,
+    "tag",
+    id_char
 );
 id_type!(
     /// A column of a data table, used as `{{data.COLUMN}}`.
-    Column, "column name", |c| c.is_ascii_alphanumeric() || c == '_'
+    Column,
+    "column name",
+    |c| c.is_ascii_alphanumeric() || c == '_'
 );
 id_type!(
     /// The name of a secret: the only way a secret appears in a file. Resolved by the app, never by this crate.
-    SecretRef, "secret name", |c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'
+    SecretRef,
+    "secret name",
+    |c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'
 );
 
 /// One acceptance criterion of a requirement: `REQ-142#AC-1`, the first entry of that requirement's `acceptance` list.
