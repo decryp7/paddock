@@ -54,6 +54,7 @@ pub mod disk;
 mod fds;
 pub mod full_tree;
 pub mod gates;
+pub mod heavy_cmd;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;

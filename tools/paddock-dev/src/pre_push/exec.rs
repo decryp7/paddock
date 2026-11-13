@@ -276,7 +276,10 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
 
 /// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_HEAVY` as given, else `heavy.sh` or `heavy`
 /// on PATH. Empty when there is none (the caller says so).
-pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
+///
+/// Last, `sibling` (see [`sibling_heavy`]) names a `heavy.sh` that is not on PATH, so a caller whose PATH lacks it (a git hook) still
+/// takes its turn.
+pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool, sibling: &dyn Fn() -> Option<String>) -> Vec<String> {
     if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
         return h.split_whitespace().map(str::to_string).collect();
     }
@@ -286,7 +289,25 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -
     if has("heavy") {
         return ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
     }
-    Vec::new()
+    sibling().into_iter().collect()
+}
+
+/// Where a `heavy.sh` may sit when PATH has none: `$ENGINEERING_RULES/scripts/heavy.sh`, else the `engineering-rules` checkout beside
+/// the main checkout of this repository (a worktree's `.git` file leads to it). The first candidate that is a file.
+pub fn sibling_heavy(root: &Path, env: &HashMap<String, String>) -> Option<String> {
+    let mut dirs: Vec<PathBuf> = env
+        .get("ENGINEERING_RULES")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .into_iter()
+        .collect();
+    if let Ok(repo) = crate::worktree::git::Repo::discover(root) {
+        dirs.extend(repo.primary.parent().map(|p| p.join("engineering-rules")));
+    }
+    dirs.into_iter()
+        .map(|d| d.join("scripts/heavy.sh"))
+        .find(|f| f.is_file())
+        .map(|f| f.to_string_lossy().into_owned())
 }
 
 /// The real machine: processes through [`ToolCall`] (bounded, environment listed, output in a file per gate).
@@ -333,7 +354,7 @@ fn slug(id: &str) -> String {
 impl RealExec {
     fn call(&self, gate: &Gate, left: Duration, log: &Path, label: Option<&str>) -> ToolCall {
         let heavy = if gate.heavy {
-            heavy_prefix(&self.env, &|p| self.has_tool(p))
+            heavy_prefix(&self.env, &|p| self.has_tool(p), &|| sibling_heavy(&self.root, &self.env))
         } else {
             Vec::new()
         };
@@ -494,11 +515,14 @@ mod tests {
     #[test]
     fn heavy_is_found_when_the_variable_is_not_set() {
         let env = HashMap::new();
-        assert!(heavy_prefix(&env, &|_| false).is_empty());
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy.sh"), ["heavy.sh"]);
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy"), ["heavy", "run", "pre-push", "--"]);
+        let none = || None;
+        assert!(heavy_prefix(&env, &|_| false, &none).is_empty());
+        assert_eq!(heavy_prefix(&env, &|p| p == "heavy.sh", &none), ["heavy.sh"]);
+        assert_eq!(heavy_prefix(&env, &|p| p == "heavy", &none), ["heavy", "run", "pre-push", "--"]);
+        // not on PATH: the sibling checkout's script is used
+        assert_eq!(heavy_prefix(&env, &|_| false, &|| Some("/x/heavy.sh".into())), ["/x/heavy.sh"]);
         let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
-        assert_eq!(heavy_prefix(&set, &|_| true), ["my-heavy", "--x"]);
+        assert_eq!(heavy_prefix(&set, &|_| true, &none), ["my-heavy", "--x"]);
     }
 
     #[cfg(unix)]

@@ -1,6 +1,6 @@
 use crate::{
-    brief_check, check, ci_build_jobs, ci_host, ci_isolation, ci_runs, ci_setup_rust, disk, gates, hook, input_hash, ipc_endpoints, load,
-    locks, merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
+    brief_check, check, ci_build_jobs, ci_host, ci_isolation, ci_runs, ci_setup_rust, disk, gates, heavy_cmd, hook, input_hash,
+    ipc_endpoints, load, locks, merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -33,6 +33,8 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
+    /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
+    Heavy(heavy_cmd::HeavyArgs),
     /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of d7 and d8 and the CI queue (ER-24).
     Load(load::LoadArgs),
     /// Briefs to agents: check one for the required fields and the known-bad patterns (templates/agents/brief-template.md).
@@ -523,6 +525,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
         Command::Wait(a) => wait::command(&a),
+        Command::Heavy(a) => heavy_cmd::command(&a),
         Command::Load(a) => load::command(&a),
         Command::Brief { command } => brief_check::command(command),
         Command::Locks {
