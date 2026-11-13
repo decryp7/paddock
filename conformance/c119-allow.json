@@ -1,0 +1,5 @@
+{
+  "allow": [
+    { "path": "conformance/test/", "reason": "tests of the conformance checks of workflows: the workflow text is their subject, not data read for another purpose" }
+  ]
+}
