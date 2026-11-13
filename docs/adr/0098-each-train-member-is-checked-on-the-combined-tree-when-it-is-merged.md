@@ -1,6 +1,9 @@
 # 98. Each train member is checked on the combined tree when it is merged, and tests read registries through their accessors
 
-- Status: Proposed 2026-11-13. Drafted at the coordinator's request after the user approved starting this redesign on
+- Status: **Accepted 2026-11-13 by the user** (decision relayed by the coordinator the same day): D1 (b) the member gate at
+  each merge, per-member blame, and the reader rule with its report-only check; D2 (b) also a trial onto the open train
+  before approval; D3 (a) members are sent back only after the gate's first green run. WP-1 to WP-4, about 2.5 agent-days.
+  History: Proposed 2026-11-13. Drafted at the coordinator's request after the user approved starting this redesign on
   2026-11-13 (ER-21: one class, eight checked instances and three earlier ones, below). Nothing here is built yet. ER-23
   does not apply (no drawings). Revision 2 (2026-11-13) answers the one review round: the mechanism moved from "a trial
   before approval" to "a gate on each member at merge time", the instance timing is counted, and the conflicted trial
@@ -170,7 +173,8 @@ another crate (`11c365fc4`) are not linted (no cheap, low-noise check); the rule
 
 ### What this does not build
 
-No new queue, bot, workflow, label or ref namespace; no per-member CI run; no gate before approval. The queue's slices 4 to
+No new queue, bot, workflow or label; no per-member CI run. The pre-approval trial (D2 (b), WP-4) adds one scratch ref
+namespace, `trial/*`. The queue's slices 4 to
 6 stay as planned.
 
 ## Parallelism and cost (ER-20, ER-24)
@@ -195,14 +199,17 @@ No new queue, bot, workflow, label or ref namespace; no per-member CI run; no ga
 |---|---|---|
 | WP-1 | `./dev merge check --gates`: after the detectors, run `./dev check --pre-push` on the merge commit with `--base <merge>^1` and add its rows (report-only: printed, exit unchanged, until its first green run on a real train is recorded here by train head); `./dev ci triage <run> --members <train-base>`: the read-only blame the queue already computes (`Train::affected` per first-parent merge plus new failures), for hand-built trains. Tests with two fake members that only fail together | 0.75 |
 | WP-2 | The rule (docs/rules.md, next free number, and the ER copy) and the accessor fix: `./dev ci conformance-args` prints `ci_line::conformance_args`, the generator entry calls it; the report-only conformance check with its allow list, its first count recorded | 0.5 |
-| WP-3 | Docs: the integrator's train checklist (member gate, take out and send back), ER-8's text names the member gate, a lessons entry for train 8 | 0.25 |
+| WP-3 | Docs: the integrator's train checklist (member gate, take out and send back), ER-8's text names the member gate, a lessons entry for train 8; rule 50 (a) says the branch run is the WP-4 trial run | 0.25 |
+| WP-4 | The trial before approval (D2 (b)): `./dev ci dispatch ci.yml --trial <branch>` merges the branch head `--no-ff` onto the open train's head (origin/main when no train is open) in its own clone with hooks off (the queue's `real.rs` git setup, not `Train::build`, which needs a ledger `Pull` and writes a marker), runs the merge check in process, reports a conflict with its files instead of dispatching, pushes `trial/<branch>` and dispatches with `base` = the target's sha through the runner-busy wait. It replaces the branch's one CI run (rule 50 (a)), so it adds no run; `trial/*` refs of landed branches are deleted at landing. Report-only for the reviewer until its first green trial run is recorded here | 1 |
 
-**Total 1.5 agent-days.** Baseline: 0 days on GitHub or GitLab (a setting). On Gitea the cheapest form of the merge-time
+**Accepted scope: WP-1 to WP-4, 2.5 agent-days.** The cost of the options as compared before the decision: Baseline: 0 days on GitHub or GitLab (a setting). On Gitea the cheapest form of the merge-time
 check is WP-1 plus WP-3, about 1 day. WP-2 (0.5 day) goes beyond that floor; it is offered separately because three of the
 eight instances are kind 2 and would also break on main without a train (they fail whenever the other area changes), and
 because `bddd2947c` was a second reader of data that already had an accessor, rule 55's class.
 
-## Decisions for the user
+## Decisions
+
+Decided by the user on 2026-11-13: **D1 (b), D2 (b), D3 (a)**. The options as they were put:
 
 - **D1. Scope.** (a) WP-1 and WP-3: the member gate at each merge and the blame command, about 1 day (recommended: the
   cheapest option that covers the merge-time case; it sees 4 of 8 at the merge and blames the rest in the train's run).
