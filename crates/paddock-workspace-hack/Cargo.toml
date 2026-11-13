@@ -132,3 +132,7 @@ thiserror = { version = "2" }
 windows-sys-b21d60becc0929df = { package = "windows-sys", version = "0.52", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_SystemInformation"] }
 
 ### END HAKARI SECTION
+
+# A hakari file lists every dependency its members may unify; cargo 1.100 reports those it does not itself use.
+[lints.cargo]
+unused_dependencies = "allow"

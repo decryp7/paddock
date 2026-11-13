@@ -136,6 +136,41 @@ describe('guard rails', () => {
     assert.match(r.stderr, /vm-win\.sh start/);
   });
 
+  test('vm-win.sh run takes only --ci-like and a command, and needs a running VM', () => {
+    const a = noTargetRun('vm-win.sh', ['run', 'echo', 'hi'], 'RunNoMode');
+    assert.notEqual(a.status, 0);
+    const b = noTargetRun('vm-win.sh', ['run', '--ci-like'], 'RunNoCmd');
+    assert.notEqual(b.status, 0);
+  });
+
+  test('ci-like.ps1 sets what the runner sets and stops as not measured when a control fails', () => {
+    const ps = read('vm-win/ci-like.ps1');
+    for (const needle of ['S-1-5-11', 'C:\\gitea-runner\\work\\', 'core.autocrlf', '--noprofile --norc -e -o pipefail', "'TMPDIR'", 'RUNNER_TEMP', 'PADDOCK_JOB_TEMP', 'exit 75', 'trap {', '-band 0xff', 'CI_LIKE_DIR'])
+      assert.ok(ps.includes(needle), `ci-like.ps1 lacks ${needle}`);
+  });
+
+  test('vm-win.sh builds the ci-like bundle in a temporary repository with alternates and writes no ref in the user repository', () => {
+    const sh = read('vm-win.sh');
+    assert.match(sh, /info\/alternates/);
+    assert.equal(/git -C "\$here" update-ref/.test(sh), false);
+    // The same commands in a scratch repository: the bundle carries the tree and the source repository gets no ref.
+    const src = join(scratch, 'bundle-src');
+    const g = (cwd, ...a) => spawnSync('git', a, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    mkdirSync(src, { recursive: true });
+    g(src, 'init', '-q'); writeFileSync(join(src, 'a.txt'), 'x\n'); g(src, 'add', '.'); g(src, 'commit', '-qm', 'one');
+    const before = g(src, 'for-each-ref').stdout;
+    const tmp = join(scratch, 'bundle-tmp');
+    g(scratch, 'init', '-q', '--bare', tmp);
+    writeFileSync(join(tmp, 'objects/info/alternates'), join(src, '.git/objects') + '\n');
+    const tree = g(src, 'rev-parse', 'HEAD^{tree}').stdout.trim();
+    const commit = g(tmp, 'commit-tree', tree, '-m', 'x').stdout.trim();
+    assert.ok(commit);
+    g(tmp, 'update-ref', 'refs/vm-ci-like/head', commit);
+    const b = g(tmp, 'bundle', 'create', join(scratch, 'x.bundle'), 'refs/vm-ci-like/head');
+    assert.equal(b.status, 0, b.stderr);
+    assert.equal(g(src, 'for-each-ref').stdout, before);
+  });
+
   test('vm-win.sh says what to do when the VM is not prepared', () => {
     const fusion = join(scratch, 'NoneFusion.app');
     mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });

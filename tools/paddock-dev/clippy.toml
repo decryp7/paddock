@@ -1,5 +1,8 @@
 # The family's clippy preset (lint/clippy.toml): programs start through paddock-proc.
 disallowed-methods = [
+    # ADR 0021 amendment 2026-11-11 (D-P2): a canonical path keeps Windows' verbatim `\\?\` prefix and later meets git, cargo, text or a plain path. Go through paddock_env::winpath.
+    { path = "std::fs::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },
+    { path = "std::path::Path::canonicalize", reason = "use paddock_env::winpath::real_for_tools (programs), real (display, Rust file APIs) or real_verbatim (Win32 long paths, compared only with verbatim paths); ADR 0021 amendment 2026-11-11" },
     { path = "std::process::Command::new", reason = "use paddock-proc: no console window on Windows, always bounded and killed with its parent" },
     { path = "std::env::temp_dir", reason = "tests use a scratch folder (tempfile) and production code uses an explicit folder" },
     # ADR 0033: nothing is ended by a bare pid. A pid may name another process by the time it is signalled; end it through

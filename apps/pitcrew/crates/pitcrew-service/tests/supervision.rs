@@ -18,7 +18,7 @@ use pitcrew_core::update::{LocalMoment, TimeOfDay, Weekday};
 use pitcrew_service::launcher::OsLauncher;
 use pitcrew_service::supervisor::{Env, Msg, Supervisor};
 use pitcrew_service::work::Sources;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -26,26 +26,12 @@ use std::time::{Duration, Instant};
 
 const EXE: &str = std::env::consts::EXE_SUFFIX;
 
-/// The cargo profile folder (`<target>/<profile>`, where cargo puts `examples/`) that a test program runs from, in
-/// both build-folder layouts: `<profile>/deps/<test>` (cargo before 1.100) and `<profile>/build/<package>/<hash>/out/<test>`
-/// (cargo 1.100 made `build.build-dir-new-layout` always on). None for any other shape: guessing sent every test into its
-/// own `cargo build` of the fake runner, which timed out all of them on the Windows runner (CI run 8027).
-fn profile_dir(test_exe: &Path) -> Option<PathBuf> {
-    let dir = test_exe.parent()?;
-    if dir.file_name()? == "deps" {
-        return Some(dir.parent()?.to_path_buf());
-    }
-    let build = dir.parent()?.parent()?.parent()?;
-    (dir.file_name()? == "out" && build.file_name()? == "build").then(|| build.parent().map(Path::to_path_buf))?
-}
-
 fn fake_runner() -> PathBuf {
     static BUILT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
     BUILT
         .get_or_init(|| {
-            let exe = std::env::current_exe().unwrap();
-            let profile = profile_dir(&exe).unwrap_or_else(|| panic!("no cargo profile folder above {}", exe.display()));
-            let path = profile.join("examples").join(format!("fake_runner{EXE}"));
+            // Both build-folder layouts (cargo before 1.100 and after), or a loud refusal (CI run 8027).
+            let path = paddock_testkit::cargo_layout::example_bin("fake_runner");
             // `cargo test` and `cargo nextest run` build examples, `cargo test --test supervision` does not. Build it only
             // when it is missing: nextest runs every test in a process of its own, and one `cargo build` per test queued
             // on cargo's build lock until the tests ran out of time (and missed a build folder set by `--config`).
@@ -60,25 +46,6 @@ fn fake_runner() -> PathBuf {
             path
         })
         .clone()
-}
-
-#[test]
-fn the_profile_folder_is_found_in_both_cargo_build_folder_layouts() {
-    let root = Path::new("/w/target");
-    // Cargo before 1.100: <profile>/deps/<test>.
-    assert_eq!(profile_dir(&root.join("debug/deps/supervision-0123abcd")), Some(root.join("debug")));
-    // Cargo 1.100 and later (`build.build-dir-new-layout`, always on): <profile>/build/<package>/<hash>/out/<test>.
-    assert_eq!(
-        profile_dir(&root.join("debug/build/pitcrew-service/2cb3f58e32e5ee48/out/supervision-2cb3f58e32e5ee48")),
-        Some(root.join("debug"))
-    );
-    // A package called `build` or `deps` does not confuse it.
-    assert_eq!(
-        profile_dir(&root.join("ci/build/build/0123abcd/out/t-0123abcd")),
-        Some(root.join("ci"))
-    );
-    // Any other shape is not guessed.
-    assert_eq!(profile_dir(Path::new("/usr/local/bin/supervision")), None);
 }
 
 /// The folder the harness puts each test's runner in. The runner is started disclaimed, so it is its own responsible

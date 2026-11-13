@@ -81,7 +81,7 @@ fn free(ci: &Path, n: u32) -> bool {
 fn job_isolation_sh_acquires_uses_releases_and_sweeps_with_the_real_binary() {
     let d = tempfile::tempdir().unwrap();
     // The CI home is resolved (ci-home.sh), so the scratch root must be too (macOS: /var is /private/var).
-    let job = Job::new(&d.path().canonicalize().unwrap());
+    let job = Job::new(&paddock_env::winpath::real(d.path()).unwrap());
     // An idle slot above the kept one, left by an earlier job: due, so the acquire's sweep removes it under its lock.
     std::fs::create_dir_all(job.ci.join("target-old-s3")).unwrap();
 

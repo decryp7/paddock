@@ -25,11 +25,15 @@
 //! through `paddock_proc` after the identity check (rule 53). The folders of the job (its slot, the kept folders) come from
 //! `ci isolation` in process.
 
+pub mod boot_volume;
 pub mod build_folder;
 pub mod cleanup;
+pub mod guardian_as_user;
 pub mod host_tools;
+pub mod kept_clone;
 pub mod links;
 pub mod node_caches;
+pub mod phase;
 pub mod prune;
 pub mod safe_remove;
 pub mod sccache_stats;
@@ -40,7 +44,7 @@ use crate::ci_tool::error_line;
 use clap::Subcommand;
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The host steps, as subcommands of `dev ci`.
 #[derive(Subcommand)]
@@ -52,8 +56,16 @@ pub enum HostStep {
     NodeCaches(node_caches::Args),
     /// The pinned cargo-nextest on every OS: kept in the CI home on a host, checked everywhere (the port of the host-tools action).
     HostTools,
+    /// Brings the job slot's kept git clone to the job's commit and sets PADDOCK_WORKSPACE (the port of conformance/ci/kept-clone.sh).
+    /// Never fails the job for lack of a clone.
+    KeptClone(kept_clone::Args),
+    /// Runs the orphan guardian's acting tests as a non-root user (Linux crates job; the port of conformance/ci/guardian-as-user.sh).
+    GuardianAsUser(guardian_as_user::Args),
     /// Prints sccache's statistics and stops the job's own server (the port of the sccache-stats action).
     SccacheStats,
+    /// Is a folder on an external volume (macOS), and the boot volume's temp folder for programs that are their own responsible process
+    /// (the port of conformance/ci/boot-volume.sh).
+    BootVolume(boot_volume::Args),
     /// A job's Rust build folder as cargo configuration, `<workspace>/.cargo/ci.toml` (the port of conformance/ci/build-folder.sh).
     BuildFolder(build_folder::Args),
     /// Caps this job's kept build folder (`$PADDOCK_BUILD_FOLDER`, only a target-* folder of the job's slot): the CI form of
@@ -76,8 +88,11 @@ pub fn run(step: &HostStep, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     match step {
         HostStep::StableWorkspace(a) => stable_workspace::run(&env, windows, a, out),
         HostStep::NodeCaches(a) => node_caches::run(&env, windows, a, out),
+        HostStep::GuardianAsUser(_) => guardian_as_user::run(&env, out),
         HostStep::HostTools => host_tools::run(&env, windows, out),
+        HostStep::KeptClone(a) => kept_clone::run(&env, windows, a, out, err),
         HostStep::SccacheStats => sccache_stats::run(&env, out),
+        HostStep::BootVolume(a) => boot_volume::run(&env, a, out, err),
         HostStep::BuildFolder(a) => build_folder::run(&env, windows, a, out),
         HostStep::PruneBuildFolder(a) => prune::run_ci(&env, windows, a, out),
         HostStep::PruneFolder(a) => prune::run_folder(&env, a, out, err),
@@ -159,6 +174,15 @@ pub fn isolation_full(env: &HashMap<String, String>, windows: bool, args: &[&str
     let code = ci_isolation::dispatch(&ctx, &argv, &mut Sinks { out: &mut o, err: &mut e });
     let text = |b: Vec<u8>| String::from_utf8_lossy(&b).trim_end_matches(['\n', '\r']).to_string();
     (code, text(o), text(e))
+}
+
+/// The job's temp folder from its own environment (`TMPDIR`, `RUNNER_TEMP`, `TEMP`, `TMP`), never the process default (production code
+/// uses an explicit folder, ER-14).
+pub fn temp_folder(env: &HashMap<String, String>) -> Option<PathBuf> {
+    ["TMPDIR", "RUNNER_TEMP", "TEMP", "TMP"]
+        .iter()
+        .find_map(|k| env.get(*k).filter(|v| !v.is_empty()))
+        .map(PathBuf::from)
 }
 
 /// `text` with every character outside `[A-Za-z0-9._-]` replaced by `_` (`tr -c 'A-Za-z0-9._-' '_'`).

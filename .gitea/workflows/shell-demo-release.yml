@@ -33,6 +33,9 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
     env:
+      # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
+      # RUSTUP_TOOLCHAIN outranks the file and covers every step, `./dev` building itself included.
+      RUSTUP_TOOLCHAIN: stable
       # A release job (tag, or the dispatch that builds bundles: rule 54): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
       PADDOCK_DEV_DOWNLOAD: "0"
     steps:
@@ -104,6 +107,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+
+      # The Linux leg runs in the garage image (only `stable`): use it as it is, instead of downloading the pinned version named by
+      # rust-toolchain.toml on every run. First, because build-jobs and job-isolation build ./dev (RUSTUP_TOOLCHAIN outranks the file).
+      - if: runner.os == 'Linux'
+        run: echo "RUSTUP_TOOLCHAIN=stable" >> "$GITHUB_ENV"
 
       - name: Git bash on PATH (Windows)
         if: runner.os == 'Windows'
@@ -188,7 +196,7 @@ jobs:
     name: C99 (no Keychain in a macOS build)
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     steps:
       - uses: actions/checkout@v4
 

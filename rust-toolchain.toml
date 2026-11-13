@@ -5,6 +5,6 @@
 # Upgrading Rust is one change: bump `channel` here, rebuild the CI image, re-capture the Rust-tool rows (ADR 0090) and
 # reformat with the new rustfmt.
 [toolchain]
-channel = "1.99.1"
+channel = "1.100.0"
 profile = "minimal"
 components = ["rustfmt", "clippy"]

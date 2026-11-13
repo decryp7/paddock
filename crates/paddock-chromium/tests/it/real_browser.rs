@@ -513,7 +513,7 @@ fn close_by_itself(b: &mut Chromium) -> (bool, Duration) {
 /// Whether the browser `id` named is gone. A pid alone is not the browser: on a busy machine the OS hands an ended
 /// browser's pid to another process at once, which a pid check reads as the browser still running (rule 53).
 fn browser_gone(id: paddock_proc::ProcessId) -> bool {
-    !id.is_alive()
+    id.has_ended()
 }
 
 /// A pid that another process holds now is not the browser that ended: the identity (pid and start time) says gone where
@@ -526,11 +526,7 @@ fn a_reused_pid_is_not_the_browser_that_ended() {
     let earlier =
         paddock_proc::StartTime::from_micros(me.started().as_micros().saturating_sub(5_000_000));
     let ended_browser = paddock_proc::ProcessId::new(me.pid(), earlier);
-    assert!(
-        // conformance: pid-liveness — the test's own process
-        paddock_proc::is_alive(me.pid()),
-        "the pid is held (by this test)"
-    );
+    assert!(me.confirmed_running(), "the pid is held (by this test)");
     assert!(
         browser_gone(ended_browser),
         "a pid handed on to another process is not the browser"

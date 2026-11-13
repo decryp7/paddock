@@ -615,7 +615,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 9,
       "message": "asks `up` about a raw pid: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -624,7 +624,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 9,
       "message": "asks `presence` about a raw pid: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -633,7 +633,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 13,
       "message": "checks a raw pid with `kill(pid, 0)`: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -642,7 +642,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 17,
       "message": "opens a process by its raw pid with `OpenProcess`: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -651,7 +651,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 18,
       "message": "looks a raw pid up in sysinfo: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -660,7 +660,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 19,
       "message": "checks a raw pid with `kill(pid, 0)`: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -669,7 +669,7 @@
       "file": "crates/a/src/c53_liveness_glob.rs",
       "line": 4,
       "message": "asks `may_be_alive` about a raw pid: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",

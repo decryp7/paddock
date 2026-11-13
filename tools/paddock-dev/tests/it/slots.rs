@@ -335,7 +335,7 @@ fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on
         let _ = tx.send((out.status.code(), String::from_utf8_lossy(&out.stdout).trim().to_string()));
     });
     let (code, said) = rx
-        .recv_timeout(Duration::from_secs(60))
+        .recv_timeout(paddock_testkit::HANG_GUARD)
         .expect("the step's pipe stayed open: the holder inherited it");
     assert_eq!(code, Some(0));
     let token = said.split_whitespace().nth(1).unwrap().to_string();

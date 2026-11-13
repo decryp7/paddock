@@ -3,6 +3,8 @@
 //! - [`Scratch`]: a temporary folder per test (work, home and tmp folders) whose `tmp` folder must be empty when the
 //!   test ends: code that leaves files in "the temp folder" fails the test that ran it. Replaces `std::env::temp_dir()`
 //!   in tests (clippy forbids it, `lint/clippy.toml`).
+//! - [`canonical_tempdir`]: one plain temporary folder whose path is canonical (macOS `/var` is `/private/var`), for a test
+//!   that compares it with a path the code under test resolved.
 //! - [`private_tempdir`]: the drop-in for `tempfile::tempdir()` for a folder given to code that refuses a data folder other accounts can
 //!   write: owner-only on Windows too, whatever the temp folder's access list is (CI runners' is open to Authenticated Users).
 //! - [`EnvLock`]: one process-wide lock for tests that read or write environment variables, restoring every variable it
@@ -23,11 +25,14 @@
 //!   `paddock-proc`'s start judge, and `paddock-proc`'s own tests use this kit, so the kit cannot depend on it.
 //! - [`boot_volume`]: [`boot_volume::boot_volume_temp`], the folder for programs a test starts as their own responsible
 //!   process (disclaimed or by launchd): never on an external volume, where macOS prompts (TCC, Removable Volumes).
+//! - [`cargo_layout`]: `profile_dir()`, `sibling_bin` and `example_bin`, the programs cargo built for this test, found in both
+//!   build-folder layouts (before cargo 1.100 and after) and refusing any other shape.
 //!
 //! Nothing here touches the user's folders or starts a process, except [`boot_volume`], which runs the shared rule
 //! (`conformance/ci/boot-volume.sh`) once per process on macOS; the only real time is [`wait`]'s poll interval.
 
 pub mod boot_volume;
+pub mod cargo_layout;
 pub mod env;
 pub mod golden;
 pub mod hostile;
@@ -45,7 +50,9 @@ pub use paddock_env::winpath::{real_or_given, same};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use private_temp::{PrivateTemp, private_tempdir};
 pub use runner::{Call, FakeRunner, Reply};
-pub use scratch::{Leftovers, Scratch, ScratchError};
+pub use scratch::{
+    CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,
+};
 pub use wait::{
     HANG_GUARD, Progress, StallGuard, guarded, poll_for, poll_until_within, recv, recv_within,
     retry_within, wait_for, wait_for_within, wait_until, wait_until_within,

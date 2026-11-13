@@ -32,7 +32,7 @@ pub fn binary_name() -> &'static str {
 /// Where the bundled plugins binary lives: next to the application executable (Tauri puts `externalBin`
 /// sidecars there). `DEBRIEF_PLUGINS` overrides it in a debug build only: a release build ignores it (and logs its name
 /// once), because the environment must not decide which program runs, possibly elevated. A test binary (in cargo's
-/// `deps` folder) finds the one cargo built next to that folder.
+/// `deps` folder, or `build/<package>/<hash>/out` since cargo 1.100) finds the one cargo built in the profile folder.
 pub fn default_binary() -> PathBuf {
     default_binary_with(cfg!(debug_assertions), std::env::var_os(PLUGINS_VAR))
 }
@@ -49,13 +49,16 @@ fn default_binary_with(debug: bool, env: Option<std::ffi::OsString>) -> PathBuf 
         .ok()
         .and_then(|e| e.parent().map(PathBuf::from))
         .unwrap_or_default();
-    binary_in(&dir)
+    binary_in(&dir, debug)
 }
 
-fn binary_in(dir: &Path) -> PathBuf {
+fn binary_in(dir: &Path, debug: bool) -> PathBuf {
     let here = dir.join(binary_name());
-    match dir.parent() {
-        Some(up) if !here.exists() && dir.file_name().is_some_and(|n| n == "deps") => up.join(binary_name()),
+    // A release build never guesses a program path: the plugins are beside the executable. A development build run as a test
+    // program is in cargo's `deps` folder, or in `build/<package>/<hash>/out` since cargo 1.100: the plugins cargo built are
+    // in the profile folder above either.
+    match paddock_env::cargo_layout::profile_dir_of_dir(dir) {
+        Some(profile) if debug && !here.exists() => profile.join(binary_name()),
         _ => here,
     }
 }
@@ -236,10 +239,30 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let deps = t.path().join("deps");
         std::fs::create_dir(&deps).unwrap();
-        assert_eq!(binary_in(&deps), t.path().join(binary_name()));
+        assert_eq!(binary_in(&deps, true), t.path().join(binary_name()));
         std::fs::write(deps.join(binary_name()), b"").unwrap();
-        assert_eq!(binary_in(&deps), deps.join(binary_name()));
-        assert_eq!(binary_in(t.path()), t.path().join(binary_name()));
+        assert_eq!(binary_in(&deps, true), deps.join(binary_name()));
+        assert_eq!(binary_in(t.path(), true), t.path().join(binary_name()));
+    }
+
+    #[test]
+    fn a_test_binary_in_cargo_1_100_s_build_folder_finds_the_one_cargo_built_beside_the_profile() {
+        let t = tempfile::tempdir().unwrap();
+        let out = t.path().join("build").join("debrief-app").join("2cb3f58e32e5ee48").join("out");
+        std::fs::create_dir_all(&out).unwrap();
+        // Not built: the profile folder's name for it, never a file inside `out`.
+        assert_eq!(binary_in(&out, true), t.path().join(binary_name()));
+        std::fs::write(out.join(binary_name()), b"").unwrap();
+        assert_eq!(binary_in(&out, true), out.join(binary_name()));
+    }
+
+    #[test]
+    fn a_release_build_never_looks_in_the_profile_folder_above_its_own() {
+        let t = tempfile::tempdir().unwrap();
+        for dir in [t.path().join("deps"), t.path().join("build").join("p").join("0123abcd").join("out")] {
+            std::fs::create_dir_all(&dir).unwrap();
+            assert_eq!(binary_in(&dir, false), dir.join(binary_name()));
+        }
     }
 
     #[test]

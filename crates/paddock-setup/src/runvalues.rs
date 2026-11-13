@@ -58,12 +58,14 @@ pub trait RunPort {
     /// The values of `HKLM\...\Run` in the 64-bit and the 32-bit view, each with the view's label.
     fn machine_values(&mut self) -> Vec<(&'static str, Vec<RunValue>)>;
     /// Deletes a machine value in a view.
+    #[must_use = "false means the value is still in the registry"]
     fn delete_machine(&mut self, view: &str, name: &str) -> bool;
     /// The subkeys of `HKU`.
     fn hives(&mut self) -> Vec<String>;
     /// The `Run` values of one hive.
     fn user_values(&mut self, hive: &str) -> Vec<RunValue>;
     /// Deletes a value in one hive.
+    #[must_use = "false means the value is still in the registry"]
     fn delete_user(&mut self, hive: &str, name: &str) -> bool;
 }
 

@@ -1,0 +1,1008 @@
+# The commands CI ran before the gate executor (the `gates model` of ci.yml and app-gates at 11c365fc4, before CI-in-Rust WP-3):
+# `job` rows are every command of a root job, `app` rows the commands an app contract adds to its legs. The executor's contracts must
+# produce exactly these (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_ci_ran_before_the_executor`).
+# Two deliberate changes since then (WP-3 review): C119 joined the conformance list, and the setup-rust and sccache-stats actions' own lines are rows of the five jobs that now run it first (ui, e2e, tools, icons, eslint-preset). Since train 9: the setup-rust action settles the image's pinned toolchain and stable (Rust 1.100, chore/rust-1-100) and prints the cargo build-dir layout opt-out on Windows (fix/spotter-win-cmdline-1-100).
+# kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
+app	dyno	macos-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
+app	dyno	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app dyno --root apps/dyno --only C13 --paddock .
+app	dyno	ubuntu-latest		npm run build -w ui
+app	dyno	ubuntu-latest		npm run build:e2e -w ui
+app	dyno	ubuntu-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
+app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target aarch64-apple-darwin
+app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target x86_64-apple-darwin
+app	dyno	ubuntu-latest	apps/dyno	cargo fetch --locked --target x86_64-pc-windows-msvc
+app	dyno	ubuntu-latest	apps/dyno	cargo test --locked -p dyno-agent --test helper_wiring
+app	dyno	ubuntu-latest	apps/dyno	cargo test --locked -p dyno-platform --test no_ungated_doubles
+app	dyno	ubuntu-latest	apps/dyno	node --test docs/diagrams/src/*.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-capabilities.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-logon-entry.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-pe-subsystem.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-release-notes.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-shipped.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node --test scripts/check-wording.test.mjs
+app	dyno	ubuntu-latest	apps/dyno	node scripts/check-capabilities.mjs
+app	dyno	ubuntu-latest	apps/dyno	node scripts/check-release-notes.mjs
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=$((4359 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=1/2
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=$((4359 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=2/2
+app	dyno	ubuntu-latest	apps/dyno/app	PW_PORT=4362 npx playwright test --project=webkit --workers=1
+app	dyno	ubuntu-latest	apps/dyno/app	TZ=Pacific/Auckland npx ng test --watch=false
+app	dyno	ubuntu-latest	apps/dyno/app	node ../../../conformance/ci/check-index.mjs dist/dyno-app/browser/index.html
+app	dyno	ubuntu-latest	apps/dyno/app	npm audit --omit=dev --audit-level=high
+app	dyno	ubuntu-latest	apps/dyno/app	npx ng build
+app	dyno	ubuntu-latest	apps/dyno/app	npx ng lint
+app	dyno	ubuntu-latest	apps/dyno/app	npx ng test --watch=false --coverage
+app	dyno	windows-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
+app	pitcrew	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app pitcrew --root apps/pitcrew --only C13 --paddock .
+app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm audit --omit=dev --audit-level=high
+app	pitcrew	ubuntu-latest	apps/pitcrew/app	npm run lint
+app	pitcrew	ubuntu-latest	apps/pitcrew/app	npx ng build
+app	pitcrew	ubuntu-latest	apps/pitcrew/app	npx ng test --watch=false --coverage
+app	pitwall	ubuntu-latest		git fetch --no-tags --depth=1 origin '+refs/tags/pitwall-v*:refs/tags/pitwall-v*'
+app	pitwall	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app pitwall --root apps/pitwall --only C13,C85 --paddock .
+app	pitwall	ubuntu-latest		npm run build -w ui
+app	pitwall	ubuntu-latest		npm run build:e2e -w ui
+app	pitwall	ubuntu-latest	apps/pitwall	TZ=Pacific/Auckland cargo nextest run -p pitwall-core -p pitwall-server --profile ci
+app	pitwall	ubuntu-latest	apps/pitwall	bash scripts/ci/privacy-check.sh
+app	pitwall	ubuntu-latest	apps/pitwall	cargo llvm-cov nextest -p pitwall-core --profile ci --summary-only --fail-under-lines 99
+app	pitwall	ubuntu-latest	apps/pitwall	node --test scripts/ci/*.test.mjs docs/diagrams/src/*.test.mjs
+app	pitwall	ubuntu-latest	apps/pitwall	node scripts/ci/check-icons.mjs
+app	pitwall	ubuntu-latest	apps/pitwall/app	PW_E2E_PREBUILT=1 PW_E2E_PORT=$((4390 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=1/2
+app	pitwall	ubuntu-latest	apps/pitwall/app	PW_E2E_PREBUILT=1 PW_E2E_PORT=$((4390 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=2/2
+app	pitwall	ubuntu-latest	apps/pitwall/app	PW_E2E_PREBUILT=1 PW_E2E_PORT=4393 npx playwright test --project=webkit --workers=1
+app	pitwall	ubuntu-latest	apps/pitwall/app	node ../scripts/ci/ui-coverage-guard.mjs --min 80 --dir coverage
+app	pitwall	ubuntu-latest	apps/pitwall/app	npm audit --omit=dev --audit-level=high
+app	pitwall	ubuntu-latest	apps/pitwall/app	npm run check:index
+app	pitwall	ubuntu-latest	apps/pitwall/app	npm run lint
+app	pitwall	ubuntu-latest	apps/pitwall/app	npx ng build
+app	pitwall	ubuntu-latest	apps/pitwall/app	npx ng test --watch=false --coverage
+app	shell-demo	ubuntu-latest		node scripts/demo-release.mjs shell-demo icons
+app	shell-demo	ubuntu-latest		node scripts/demo-release.mjs shell-demo notes "$RUNNER_TEMP/notes.md"
+app	shell-demo	ubuntu-latest		node scripts/demo-release.mjs shell-demo version
+app	shell-demo	ubuntu-latest		npm run shell-demo:build -w ui
+app	spotter	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app spotter --root apps/spotter --only C13 --paddock .
+app	spotter	ubuntu-latest		npm run build -w ui
+app	spotter	ubuntu-latest	apps/spotter	node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs scripts/style-guard.test.mjs scripts/ci/check-icons.test.mjs
+app	spotter	ubuntu-latest	apps/spotter	node scripts/ci/check-icons.mjs
+app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=$((4369 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=1/2
+app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=$((4369 + E2E_INDEX)) npx playwright test --project=chromium --workers=1 --fully-parallel --shard=2/2
+app	spotter	ubuntu-latest	apps/spotter/app	PW_PORT=4372 npx playwright test --project=webkit --workers=1
+app	spotter	ubuntu-latest	apps/spotter/app	npm audit --omit=dev --audit-level=high
+app	spotter	ubuntu-latest	apps/spotter/app	npm run lint
+app	spotter	ubuntu-latest	apps/spotter/app	npx ng build
+app	spotter	ubuntu-latest	apps/spotter/app	npx ng test --watch=false --coverage
+app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo icons
+app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo notes "$RUNNER_TEMP/notes.md"
+app	workbench-demo	ubuntu-latest		node scripts/demo-release.mjs workbench-demo version
+app	workbench-demo	ubuntu-latest		npm run workbench-demo:build -w ui
+job	conformance			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	conformance			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
+job	conformance			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
+job	conformance			*[!0-9]*) TOTAL=40
+job	conformance			./dev gates check
+job	conformance			BIN=sccache
+job	conformance			BIN=sccache.exe
+job	conformance			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+job	conformance			DIR="$(bash "$iso" path sccache)"
+job	conformance			DIR="$(cygpath -w "$DIR")"
+job	conformance			DIR="$MOUNT"
+job	conformance			DIR="${RUNNER_TEMP:-/tmp}/sccache"
+job	conformance			EXT=tar.gz
+job	conformance			EXT=zip
+job	conformance			GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	conformance			GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	conformance			Linux-aarch64
+job	conformance			Linux-arm64) T=aarch64-unknown-linux-musl
+job	conformance			Linux-x86_64)            T=x86_64-unknown-linux-musl
+job	conformance			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
+job	conformance			NAME="sccache-v$VERSION-$T"
+job	conformance			PATH="$PINNED:$PATH"
+job	conformance			PER=$((TOTAL / SLOTS
+job	conformance			PER=2
+job	conformance			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	conformance			PORT="$(bash "$iso" port sccache)"
+job	conformance			PORT=4227
+job	conformance			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
+job	conformance			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
+job	conformance			SETTINGS=(
+job	conformance			SIZE="${PER}G"
+job	conformance			SIZE=20G
+job	conformance			SLOTS="$(bash "$iso" slots)"
+job	conformance			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
+job	conformance			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+job	conformance			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
+job	conformance			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	conformance			TOOLCHAIN=${TOOLCHAIN:-stable
+job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+job	conformance			VERSION=0.19.0
+job	conformance			Windows-x86_64)          T=x86_64-pc-windows-msvc
+job	conformance			args+=(--component "$c"
+job	conformance			args+=(--target "$t"
+job	conformance			args=(--profile minimal
+job	conformance			bash "conformance/ci/kit.sh" build-jobs
+job	conformance			bash "conformance/ci/kit.sh" host sccache-stats
+job	conformance			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	conformance			cargo --version
+job	conformance			case "$RUNNER_OS-$(uname -m)" in
+job	conformance			case "$TOTAL" in ''
+job	conformance			case "local" in auto
+job	conformance			chmod +x "$DEST/$BIN.part.$$"
+job	conformance			continue
+job	conformance			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+job	conformance			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+job	conformance			dl=$(mktemp -d
+job	conformance			do
+job	conformance			echo "$DEST" >> "$GITHUB_PATH"
+job	conformance			echo "$kv"
+job	conformance			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
+job	conformance			echo "::error::rustup is not installed on this runner"
+job	conformance			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
+job	conformance			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
+job	conformance			echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."
+job	conformance			echo "::warning::could not download sccache $VERSION; building without the compile cache."
+job	conformance			echo "::warning::sccache is not available on this runner; building without the compile cache."
+job	conformance			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+job	conformance			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	conformance			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
+job	conformance			echo "CARGO_INCREMENTAL=0"
+job	conformance			echo "RUSTC_WRAPPER=sccache"
+job	conformance			echo "Rust toolchain  (from rust-toolchain.toml)"
+job	conformance			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	conformance			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+job	conformance			echo "SCCACHE_SERVER_PORT=$PORT"
+job	conformance			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
+job	conformance			echo "kit=$kit" >> "$GITHUB_OUTPUT"
+job	conformance			echo "sccache: local disk $DIR"
+job	conformance			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	conformance			echo "setup-rust: compile cache through the $kit implementation"
+job	conformance			else
+job	conformance			exit 0
+job	conformance			exit 1
+job	conformance			export PADDOCK_DEV_DOWNLOAD=0
+job	conformance			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+job	conformance			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+job	conformance			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	conformance			for c in 
+job	conformance			for kv in "${SETTINGS[@]}"
+job	conformance			for name in "" stable
+job	conformance			for t in 
+job	conformance			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	conformance			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
+job	conformance			iso="conformance/ci/job-isolation.sh"
+job	conformance			kit="$(bash "conformance/ci/kit.sh" which)"
+job	conformance			local
+job	conformance			macOS-arm64)             T=aarch64-apple-darwin
+job	conformance			missing=0
+job	conformance			missing=1
+job	conformance			mkdir -p "$DEST"
+job	conformance			mkdir -p "$DIR"
+job	conformance			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	conformance			node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115,C116,C117,C118,C119 --strict C36
+job	conformance			npm ci --ignore-scripts -w conformance
+job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+job	conformance			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
+job	conformance			printf '%s\n' "$installed"
+job	conformance			rc=$?
+job	conformance			rc=0
+job	conformance			redis
+job	conformance			rm -rf "$dl"
+job	conformance			rustc --version
+job	conformance			rustup default ""
+job	conformance			rustup toolchain install "" "${args[@]}" --no-self-update
+job	conformance			rustup toolchain list 2>/dev/null
+job	conformance			sccache --show-stats >/dev/null 2>&1
+job	conformance			sccache --start-server
+job	conformance			sccache --stop-server >/dev/null 2>&1
+job	conformance			sccache --version
+job	conformance			settle ""
+job	conformance			settle "$name"
+job	conformance			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
+job	conformance			then
+job	conformance			unzip -q "$dl/$NAME.$EXT" -d "$dl"
+job	conformance			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+job	conformance			why="exit $rc"
+job	conformance			{
+job	conformance			} >> "$GITHUB_ENV"
+job	conformance		conformance	npm test
+job	crates			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	crates			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
+job	crates			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
+job	crates			*[!0-9]*) TOTAL=40
+job	crates			BIN=sccache
+job	crates			BIN=sccache.exe
+job	crates			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+job	crates			DIR="$(bash "$iso" path sccache)"
+job	crates			DIR="$(cygpath -w "$DIR")"
+job	crates			DIR="$MOUNT"
+job	crates			DIR="${RUNNER_TEMP:-/tmp}/sccache"
+job	crates			EXT=tar.gz
+job	crates			EXT=zip
+job	crates			GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	crates			GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	crates			Linux-aarch64
+job	crates			Linux-arm64) T=aarch64-unknown-linux-musl
+job	crates			Linux-x86_64)            T=x86_64-unknown-linux-musl
+job	crates			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
+job	crates			NAME="sccache-v$VERSION-$T"
+job	crates			PATH="$PINNED:$PATH"
+job	crates			PER=$((TOTAL / SLOTS
+job	crates			PER=2
+job	crates			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	crates			PORT="$(bash "$iso" port sccache)"
+job	crates			PORT=4227
+job	crates			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
+job	crates			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
+job	crates			SETTINGS=(
+job	crates			SIZE="${PER}G"
+job	crates			SIZE=20G
+job	crates			SLOTS="$(bash "$iso" slots)"
+job	crates			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
+job	crates			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+job	crates			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
+job	crates			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	crates			TOOLCHAIN=${TOOLCHAIN:-stable
+job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+job	crates			VERSION=0.19.0
+job	crates			Windows-x86_64)          T=x86_64-pc-windows-msvc
+job	crates			args+=(--component "$c"
+job	crates			args+=(--target "$t"
+job	crates			args=(--profile minimal
+job	crates			bash "conformance/ci/kit.sh" build-jobs
+job	crates			bash "conformance/ci/kit.sh" host sccache-stats
+job	crates			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	crates			cargo --version
+job	crates			case "$RUNNER_OS-$(uname -m)" in
+job	crates			case "$TOTAL" in ''
+job	crates			case "local" in auto
+job	crates			chmod +x "$DEST/$BIN.part.$$"
+job	crates			continue
+job	crates			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+job	crates			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+job	crates			dl=$(mktemp -d
+job	crates			do
+job	crates			echo "$DEST" >> "$GITHUB_PATH"
+job	crates			echo "$kv"
+job	crates			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
+job	crates			echo "::error::rustup is not installed on this runner"
+job	crates			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
+job	crates			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
+job	crates			echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."
+job	crates			echo "::warning::could not download sccache $VERSION; building without the compile cache."
+job	crates			echo "::warning::sccache is not available on this runner; building without the compile cache."
+job	crates			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+job	crates			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	crates			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
+job	crates			echo "CARGO_INCREMENTAL=0"
+job	crates			echo "RUSTC_WRAPPER=sccache"
+job	crates			echo "Rust toolchain  (from rust-toolchain.toml)"
+job	crates			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	crates			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+job	crates			echo "SCCACHE_SERVER_PORT=$PORT"
+job	crates			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
+job	crates			echo "kit=$kit" >> "$GITHUB_OUTPUT"
+job	crates			echo "sccache: local disk $DIR"
+job	crates			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	crates			echo "setup-rust: compile cache through the $kit implementation"
+job	crates			else
+job	crates			exit 0
+job	crates			exit 1
+job	crates			export PADDOCK_DEV_DOWNLOAD=0
+job	crates			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+job	crates			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+job	crates			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	crates			for c in 
+job	crates			for kv in "${SETTINGS[@]}"
+job	crates			for name in "" stable
+job	crates			for t in 
+job	crates			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	crates			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
+job	crates			iso="conformance/ci/job-isolation.sh"
+job	crates			kit="$(bash "conformance/ci/kit.sh" which)"
+job	crates			local
+job	crates			macOS-arm64)             T=aarch64-apple-darwin
+job	crates			missing=0
+job	crates			missing=1
+job	crates			mkdir -p "$DEST"
+job	crates			mkdir -p "$DIR"
+job	crates			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	crates			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+job	crates			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
+job	crates			printf '%s\n' "$installed"
+job	crates			rc=$?
+job	crates			rc=0
+job	crates			redis
+job	crates			rm -rf "$dl"
+job	crates			rustc --version
+job	crates			rustup default ""
+job	crates			rustup toolchain install "" "${args[@]}" --no-self-update
+job	crates			rustup toolchain list 2>/dev/null
+job	crates			sccache --show-stats >/dev/null 2>&1
+job	crates			sccache --start-server
+job	crates			sccache --stop-server >/dev/null 2>&1
+job	crates			sccache --version
+job	crates			settle ""
+job	crates			settle "$name"
+job	crates			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
+job	crates			then
+job	crates			unzip -q "$dl/$NAME.$EXT" -d "$dl"
+job	crates			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+job	crates			why="exit $rc"
+job	crates			{
+job	crates			} >> "$GITHUB_ENV"
+job	crates		crates	bash ../conformance/ci/kit.sh host guardian-as-user
+job	crates		crates	cargo deny check
+job	crates		crates	cargo fmt --all --check
+job	crates		crates	cargo hakari generate --diff
+job	crates		crates	cargo hakari manage-deps --dry-run
+job	crates		crates	cargo hakari verify
+job	crates		crates	cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex '(paddock-window/src/tauri|paddock-panels/src/tauri|paddock-updater/src/tauri|paddock-secrets/src/os|paddock-diag/src/tauri|paddock-files/src/tauri|paddock-service/src|paddock-watch/src|paddock-metrics/src|paddock-health/src/tauri|paddock-siblings/src|paddock-power/src)/native\.rs$|paddock-proc/src/testchild\.rs$|paddock-setup/src/(main\.rs|native/.*)$|paddock-chromium/src/fake\.rs$|paddock-ipc/src/bin/test_child\.rs$|paddock-ipc/src/testing/.*\.rs$|paddock-dialogs/src/probe\.rs$|paddock-plugin-test/src/bin/(fixture|fixture_v1|misbehaving)\.rs$|paddock-plugin-api/src/entry\.rs$|paddock-plugin-test/src/process\.rs$|cargo-paddock-plugin/src/main\.rs$|paddock-ipc/src/endpoint/(unix|windows)\.rs$|paddock-service/src/privileged/trust_real/windows\.rs$' --lcov --output-path lcov.info
+job	crates		crates	cargo machete $(ls -d paddock-*/ | grep -v '^paddock-workspace-hack/$'
+job	crates		crates	node ../scripts/coverage-gate.mjs lcov.info 90
+job	e2e			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	e2e			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
+job	e2e			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
+job	e2e			*[!0-9]*) TOTAL=40
+job	e2e			BIN=sccache
+job	e2e			BIN=sccache.exe
+job	e2e			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+job	e2e			DIR="$(bash "$iso" path sccache)"
+job	e2e			DIR="$(cygpath -w "$DIR")"
+job	e2e			DIR="$MOUNT"
+job	e2e			DIR="${RUNNER_TEMP:-/tmp}/sccache"
+job	e2e			EXT=tar.gz
+job	e2e			EXT=zip
+job	e2e			GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	e2e			GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	e2e			Linux-aarch64
+job	e2e			Linux-arm64) T=aarch64-unknown-linux-musl
+job	e2e			Linux-x86_64)            T=x86_64-unknown-linux-musl
+job	e2e			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
+job	e2e			NAME="sccache-v$VERSION-$T"
+job	e2e			PATH="$PINNED:$PATH"
+job	e2e			PER=$((TOTAL / SLOTS
+job	e2e			PER=2
+job	e2e			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	e2e			PORT="$(bash "$iso" port sccache)"
+job	e2e			PORT=4227
+job	e2e			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
+job	e2e			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
+job	e2e			SETTINGS=(
+job	e2e			SIZE="${PER}G"
+job	e2e			SIZE=20G
+job	e2e			SLOTS="$(bash "$iso" slots)"
+job	e2e			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
+job	e2e			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+job	e2e			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
+job	e2e			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	e2e			TOOLCHAIN=${TOOLCHAIN:-stable
+job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+job	e2e			VERSION=0.19.0
+job	e2e			Windows-x86_64)          T=x86_64-pc-windows-msvc
+job	e2e			args+=(--component "$c"
+job	e2e			args+=(--target "$t"
+job	e2e			args=(--profile minimal
+job	e2e			bash "conformance/ci/kit.sh" build-jobs
+job	e2e			bash "conformance/ci/kit.sh" host node-caches "ui" "e2e-1"
+job	e2e			bash "conformance/ci/kit.sh" host node-caches "ui" "e2e-2"
+job	e2e			bash "conformance/ci/kit.sh" host sccache-stats
+job	e2e			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	e2e			cargo --version
+job	e2e			case "$RUNNER_OS-$(uname -m)" in
+job	e2e			case "$TOTAL" in ''
+job	e2e			case "local" in auto
+job	e2e			chmod +x "$DEST/$BIN.part.$$"
+job	e2e			continue
+job	e2e			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+job	e2e			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+job	e2e			dl=$(mktemp -d
+job	e2e			do
+job	e2e			echo "$DEST" >> "$GITHUB_PATH"
+job	e2e			echo "$kv"
+job	e2e			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
+job	e2e			echo "::error::rustup is not installed on this runner"
+job	e2e			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
+job	e2e			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
+job	e2e			echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."
+job	e2e			echo "::warning::could not download sccache $VERSION; building without the compile cache."
+job	e2e			echo "::warning::sccache is not available on this runner; building without the compile cache."
+job	e2e			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+job	e2e			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	e2e			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
+job	e2e			echo "CARGO_INCREMENTAL=0"
+job	e2e			echo "RUSTC_WRAPPER=sccache"
+job	e2e			echo "Rust toolchain  (from rust-toolchain.toml)"
+job	e2e			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	e2e			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+job	e2e			echo "SCCACHE_SERVER_PORT=$PORT"
+job	e2e			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
+job	e2e			echo "kit=$kit" >> "$GITHUB_OUTPUT"
+job	e2e			echo "sccache: local disk $DIR"
+job	e2e			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	e2e			echo "setup-rust: compile cache through the $kit implementation"
+job	e2e			else
+job	e2e			exit 0
+job	e2e			exit 1
+job	e2e			export PADDOCK_DEV_DOWNLOAD=0
+job	e2e			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+job	e2e			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+job	e2e			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	e2e			for c in 
+job	e2e			for kv in "${SETTINGS[@]}"
+job	e2e			for name in "" stable
+job	e2e			for t in 
+job	e2e			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	e2e			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
+job	e2e			iso="conformance/ci/job-isolation.sh"
+job	e2e			kit="$(bash "conformance/ci/kit.sh" which)"
+job	e2e			local
+job	e2e			macOS-arm64)             T=aarch64-apple-darwin
+job	e2e			missing=0
+job	e2e			missing=1
+job	e2e			mkdir -p "$DEST"
+job	e2e			mkdir -p "$DIR"
+job	e2e			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	e2e			npm ci
+job	e2e			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+job	e2e			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
+job	e2e			printf '%s\n' "$installed"
+job	e2e			rc=$?
+job	e2e			rc=0
+job	e2e			redis
+job	e2e			rm -rf "$dl"
+job	e2e			rustc --version
+job	e2e			rustup default ""
+job	e2e			rustup toolchain install "" "${args[@]}" --no-self-update
+job	e2e			rustup toolchain list 2>/dev/null
+job	e2e			sccache --show-stats >/dev/null 2>&1
+job	e2e			sccache --start-server
+job	e2e			sccache --stop-server >/dev/null 2>&1
+job	e2e			sccache --version
+job	e2e			settle ""
+job	e2e			settle "$name"
+job	e2e			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
+job	e2e			then
+job	e2e			unzip -q "$dl/$NAME.$EXT" -d "$dl"
+job	e2e			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+job	e2e			why="exit $rc"
+job	e2e			{
+job	e2e			} >> "$GITHUB_ENV"
+job	e2e		ui	npx playwright test --shard=1/2
+job	e2e		ui	npx playwright test --shard=2/2
+job	eslint-preset			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	eslint-preset			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
+job	eslint-preset			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
+job	eslint-preset			*[!0-9]*) TOTAL=40
+job	eslint-preset			BIN=sccache
+job	eslint-preset			BIN=sccache.exe
+job	eslint-preset			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+job	eslint-preset			DIR="$(bash "$iso" path sccache)"
+job	eslint-preset			DIR="$(cygpath -w "$DIR")"
+job	eslint-preset			DIR="$MOUNT"
+job	eslint-preset			DIR="${RUNNER_TEMP:-/tmp}/sccache"
+job	eslint-preset			EXT=tar.gz
+job	eslint-preset			EXT=zip
+job	eslint-preset			GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	eslint-preset			GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	eslint-preset			Linux-aarch64
+job	eslint-preset			Linux-arm64) T=aarch64-unknown-linux-musl
+job	eslint-preset			Linux-x86_64)            T=x86_64-unknown-linux-musl
+job	eslint-preset			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
+job	eslint-preset			NAME="sccache-v$VERSION-$T"
+job	eslint-preset			PATH="$PINNED:$PATH"
+job	eslint-preset			PER=$((TOTAL / SLOTS
+job	eslint-preset			PER=2
+job	eslint-preset			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	eslint-preset			PORT="$(bash "$iso" port sccache)"
+job	eslint-preset			PORT=4227
+job	eslint-preset			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
+job	eslint-preset			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
+job	eslint-preset			SETTINGS=(
+job	eslint-preset			SIZE="${PER}G"
+job	eslint-preset			SIZE=20G
+job	eslint-preset			SLOTS="$(bash "$iso" slots)"
+job	eslint-preset			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
+job	eslint-preset			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+job	eslint-preset			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
+job	eslint-preset			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	eslint-preset			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	eslint-preset			TOOLCHAIN=${TOOLCHAIN:-stable
+job	eslint-preset			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+job	eslint-preset			VERSION=0.19.0
+job	eslint-preset			Windows-x86_64)          T=x86_64-pc-windows-msvc
+job	eslint-preset			args+=(--component "$c"
+job	eslint-preset			args+=(--target "$t"
+job	eslint-preset			args=(--profile minimal
+job	eslint-preset			bash "conformance/ci/kit.sh" build-jobs
+job	eslint-preset			bash "conformance/ci/kit.sh" host node-caches "" "${{ github.job }}"
+job	eslint-preset			bash "conformance/ci/kit.sh" host sccache-stats
+job	eslint-preset			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	eslint-preset			cargo --version
+job	eslint-preset			case "$RUNNER_OS-$(uname -m)" in
+job	eslint-preset			case "$TOTAL" in ''
+job	eslint-preset			case "local" in auto
+job	eslint-preset			chmod +x "$DEST/$BIN.part.$$"
+job	eslint-preset			continue
+job	eslint-preset			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+job	eslint-preset			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+job	eslint-preset			dl=$(mktemp -d
+job	eslint-preset			do
+job	eslint-preset			echo "$DEST" >> "$GITHUB_PATH"
+job	eslint-preset			echo "$kv"
+job	eslint-preset			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
+job	eslint-preset			echo "::error::rustup is not installed on this runner"
+job	eslint-preset			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
+job	eslint-preset			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
+job	eslint-preset			echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."
+job	eslint-preset			echo "::warning::could not download sccache $VERSION; building without the compile cache."
+job	eslint-preset			echo "::warning::sccache is not available on this runner; building without the compile cache."
+job	eslint-preset			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+job	eslint-preset			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	eslint-preset			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
+job	eslint-preset			echo "CARGO_INCREMENTAL=0"
+job	eslint-preset			echo "RUSTC_WRAPPER=sccache"
+job	eslint-preset			echo "Rust toolchain  (from rust-toolchain.toml)"
+job	eslint-preset			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	eslint-preset			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+job	eslint-preset			echo "SCCACHE_SERVER_PORT=$PORT"
+job	eslint-preset			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
+job	eslint-preset			echo "kit=$kit" >> "$GITHUB_OUTPUT"
+job	eslint-preset			echo "sccache: local disk $DIR"
+job	eslint-preset			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	eslint-preset			echo "setup-rust: compile cache through the $kit implementation"
+job	eslint-preset			else
+job	eslint-preset			exit 0
+job	eslint-preset			exit 1
+job	eslint-preset			export PADDOCK_DEV_DOWNLOAD=0
+job	eslint-preset			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+job	eslint-preset			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+job	eslint-preset			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	eslint-preset			for c in 
+job	eslint-preset			for kv in "${SETTINGS[@]}"
+job	eslint-preset			for name in "" stable
+job	eslint-preset			for t in 
+job	eslint-preset			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	eslint-preset			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
+job	eslint-preset			iso="conformance/ci/job-isolation.sh"
+job	eslint-preset			kit="$(bash "conformance/ci/kit.sh" which)"
+job	eslint-preset			local
+job	eslint-preset			macOS-arm64)             T=aarch64-apple-darwin
+job	eslint-preset			missing=0
+job	eslint-preset			missing=1
+job	eslint-preset			mkdir -p "$DEST"
+job	eslint-preset			mkdir -p "$DIR"
+job	eslint-preset			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	eslint-preset			npm ci
+job	eslint-preset			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+job	eslint-preset			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
+job	eslint-preset			printf '%s\n' "$installed"
+job	eslint-preset			rc=$?
+job	eslint-preset			rc=0
+job	eslint-preset			redis
+job	eslint-preset			rm -rf "$dl"
+job	eslint-preset			rustc --version
+job	eslint-preset			rustup default ""
+job	eslint-preset			rustup toolchain install "" "${args[@]}" --no-self-update
+job	eslint-preset			rustup toolchain list 2>/dev/null
+job	eslint-preset			sccache --show-stats >/dev/null 2>&1
+job	eslint-preset			sccache --start-server
+job	eslint-preset			sccache --stop-server >/dev/null 2>&1
+job	eslint-preset			sccache --version
+job	eslint-preset			settle ""
+job	eslint-preset			settle "$name"
+job	eslint-preset			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
+job	eslint-preset			then
+job	eslint-preset			unzip -q "$dl/$NAME.$EXT" -d "$dl"
+job	eslint-preset			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+job	eslint-preset			why="exit $rc"
+job	eslint-preset			{
+job	eslint-preset			} >> "$GITHUB_ENV"
+job	eslint-preset		eslint	npm test
+job	icons			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	icons			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
+job	icons			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
+job	icons			*[!0-9]*) TOTAL=40
+job	icons			BIN=sccache
+job	icons			BIN=sccache.exe
+job	icons			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+job	icons			DIR="$(bash "$iso" path sccache)"
+job	icons			DIR="$(cygpath -w "$DIR")"
+job	icons			DIR="$MOUNT"
+job	icons			DIR="${RUNNER_TEMP:-/tmp}/sccache"
+job	icons			EXT=tar.gz
+job	icons			EXT=zip
+job	icons			GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	icons			GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	icons			Linux-aarch64
+job	icons			Linux-arm64) T=aarch64-unknown-linux-musl
+job	icons			Linux-x86_64)            T=x86_64-unknown-linux-musl
+job	icons			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
+job	icons			NAME="sccache-v$VERSION-$T"
+job	icons			PATH="$PINNED:$PATH"
+job	icons			PER=$((TOTAL / SLOTS
+job	icons			PER=2
+job	icons			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	icons			PORT="$(bash "$iso" port sccache)"
+job	icons			PORT=4227
+job	icons			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
+job	icons			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
+job	icons			SETTINGS=(
+job	icons			SIZE="${PER}G"
+job	icons			SIZE=20G
+job	icons			SLOTS="$(bash "$iso" slots)"
+job	icons			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
+job	icons			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+job	icons			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
+job	icons			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	icons			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	icons			TOOLCHAIN=${TOOLCHAIN:-stable
+job	icons			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+job	icons			VERSION=0.19.0
+job	icons			Windows-x86_64)          T=x86_64-pc-windows-msvc
+job	icons			args+=(--component "$c"
+job	icons			args+=(--target "$t"
+job	icons			args=(--profile minimal
+job	icons			bash "conformance/ci/kit.sh" build-jobs
+job	icons			bash "conformance/ci/kit.sh" host node-caches "ui" "${{ github.job }}"
+job	icons			bash "conformance/ci/kit.sh" host sccache-stats
+job	icons			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	icons			cargo --version
+job	icons			case "$RUNNER_OS-$(uname -m)" in
+job	icons			case "$TOTAL" in ''
+job	icons			case "local" in auto
+job	icons			chmod +x "$DEST/$BIN.part.$$"
+job	icons			continue
+job	icons			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+job	icons			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+job	icons			dl=$(mktemp -d
+job	icons			do
+job	icons			echo "$DEST" >> "$GITHUB_PATH"
+job	icons			echo "$kv"
+job	icons			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
+job	icons			echo "::error::rustup is not installed on this runner"
+job	icons			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
+job	icons			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
+job	icons			echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."
+job	icons			echo "::warning::could not download sccache $VERSION; building without the compile cache."
+job	icons			echo "::warning::sccache is not available on this runner; building without the compile cache."
+job	icons			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+job	icons			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	icons			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
+job	icons			echo "CARGO_INCREMENTAL=0"
+job	icons			echo "RUSTC_WRAPPER=sccache"
+job	icons			echo "Rust toolchain  (from rust-toolchain.toml)"
+job	icons			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	icons			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+job	icons			echo "SCCACHE_SERVER_PORT=$PORT"
+job	icons			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
+job	icons			echo "kit=$kit" >> "$GITHUB_OUTPUT"
+job	icons			echo "sccache: local disk $DIR"
+job	icons			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	icons			echo "setup-rust: compile cache through the $kit implementation"
+job	icons			else
+job	icons			exit 0
+job	icons			exit 1
+job	icons			export PADDOCK_DEV_DOWNLOAD=0
+job	icons			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+job	icons			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+job	icons			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	icons			for c in 
+job	icons			for kv in "${SETTINGS[@]}"
+job	icons			for name in "" stable
+job	icons			for t in 
+job	icons			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	icons			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
+job	icons			iso="conformance/ci/job-isolation.sh"
+job	icons			kit="$(bash "conformance/ci/kit.sh" which)"
+job	icons			local
+job	icons			macOS-arm64)             T=aarch64-apple-darwin
+job	icons			missing=0
+job	icons			missing=1
+job	icons			mkdir -p "$DEST"
+job	icons			mkdir -p "$DIR"
+job	icons			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	icons			node icons/tools/install.mjs --check
+job	icons			npm ci
+job	icons			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+job	icons			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
+job	icons			printf '%s\n' "$installed"
+job	icons			rc=$?
+job	icons			rc=0
+job	icons			redis
+job	icons			rm -rf "$dl"
+job	icons			rustc --version
+job	icons			rustup default ""
+job	icons			rustup toolchain install "" "${args[@]}" --no-self-update
+job	icons			rustup toolchain list 2>/dev/null
+job	icons			sccache --show-stats >/dev/null 2>&1
+job	icons			sccache --start-server
+job	icons			sccache --stop-server >/dev/null 2>&1
+job	icons			sccache --version
+job	icons			settle ""
+job	icons			settle "$name"
+job	icons			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
+job	icons			then
+job	icons			unzip -q "$dl/$NAME.$EXT" -d "$dl"
+job	icons			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+job	icons			why="exit $rc"
+job	icons			{
+job	icons			} >> "$GITHUB_ENV"
+job	icons		icons	npm test
+job	tools			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	tools			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
+job	tools			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
+job	tools			*[!0-9]*) TOTAL=40
+job	tools			BIN=sccache
+job	tools			BIN=sccache.exe
+job	tools			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+job	tools			DIR="$(bash "$iso" path sccache)"
+job	tools			DIR="$(cygpath -w "$DIR")"
+job	tools			DIR="$MOUNT"
+job	tools			DIR="${RUNNER_TEMP:-/tmp}/sccache"
+job	tools			EXT=tar.gz
+job	tools			EXT=zip
+job	tools			GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	tools			GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	tools			Linux-aarch64
+job	tools			Linux-arm64) T=aarch64-unknown-linux-musl
+job	tools			Linux-x86_64)            T=x86_64-unknown-linux-musl
+job	tools			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
+job	tools			NAME="sccache-v$VERSION-$T"
+job	tools			PATH="$PINNED:$PATH"
+job	tools			PER=$((TOTAL / SLOTS
+job	tools			PER=2
+job	tools			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	tools			PORT="$(bash "$iso" port sccache)"
+job	tools			PORT=4227
+job	tools			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
+job	tools			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
+job	tools			SETTINGS=(
+job	tools			SIZE="${PER}G"
+job	tools			SIZE=20G
+job	tools			SLOTS="$(bash "$iso" slots)"
+job	tools			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
+job	tools			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+job	tools			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
+job	tools			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	tools			TOOLCHAIN=${TOOLCHAIN:-stable
+job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+job	tools			VERSION=0.19.0
+job	tools			Windows-x86_64)          T=x86_64-pc-windows-msvc
+job	tools			args+=(--component "$c"
+job	tools			args+=(--target "$t"
+job	tools			args=(--profile minimal
+job	tools			bash "conformance/ci/kit.sh" build-jobs
+job	tools			bash "conformance/ci/kit.sh" host sccache-stats
+job	tools			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	tools			bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb"
+job	tools			cargo --version
+job	tools			case "$RUNNER_OS-$(uname -m)" in
+job	tools			case "$TOTAL" in ''
+job	tools			case "local" in auto
+job	tools			chmod +x "$DEST/$BIN.part.$$"
+job	tools			continue
+job	tools			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+job	tools			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+job	tools			dl=$(mktemp -d
+job	tools			do
+job	tools			dpkg-deb -x "$RUNNER_TEMP/drawio.deb" "$RUNNER_TEMP/drawio"
+job	tools			echo "$DEST" >> "$GITHUB_PATH"
+job	tools			echo "$kv"
+job	tools			echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."
+job	tools			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
+job	tools			echo "::error::rustup is not installed on this runner"
+job	tools			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
+job	tools			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
+job	tools			echo "::error::unpacking draw.io $v failed. Fix: run dpkg-deb -x on the same file in the paddock-ci image to see why."
+job	tools			echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."
+job	tools			echo "::notice::the CI image has no draw.io yet (it comes with the next image rebuild, ci-image/README.md); unpacking the pinned $v"
+job	tools			echo "::warning::could not download sccache $VERSION; building without the compile cache."
+job	tools			echo "::warning::sccache is not available on this runner; building without the compile cache."
+job	tools			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+job	tools			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	tools			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
+job	tools			echo "CARGO_INCREMENTAL=0"
+job	tools			echo "DRAWIO=$RUNNER_TEMP/drawio/opt/drawio/drawio" >> "$GITHUB_ENV"
+job	tools			echo "RUSTC_WRAPPER=sccache"
+job	tools			echo "Rust toolchain  (from rust-toolchain.toml)"
+job	tools			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	tools			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+job	tools			echo "SCCACHE_SERVER_PORT=$PORT"
+job	tools			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
+job	tools			echo "kit=$kit" >> "$GITHUB_OUTPUT"
+job	tools			echo "sccache: local disk $DIR"
+job	tools			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	tools			echo "setup-rust: compile cache through the $kit implementation"
+job	tools			else
+job	tools			exit 0
+job	tools			exit 1
+job	tools			export PADDOCK_DEV_DOWNLOAD=0
+job	tools			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+job	tools			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+job	tools			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	tools			for c in 
+job	tools			for kv in "${SETTINGS[@]}"
+job	tools			for name in "" stable
+job	tools			for t in 
+job	tools			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	tools			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
+job	tools			iso="conformance/ci/job-isolation.sh"
+job	tools			kit="$(bash "conformance/ci/kit.sh" which)"
+job	tools			local
+job	tools			macOS-arm64)             T=aarch64-apple-darwin
+job	tools			missing=0
+job	tools			missing=1
+job	tools			mkdir -p "$DEST"
+job	tools			mkdir -p "$DIR"
+job	tools			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	tools			node --test scripts/affected.test.mjs
+job	tools			node --test scripts/new-app.test.mjs scripts/coverage-gate.test.mjs scripts/demo/*.test.mjs scripts/shell-demo/*.test.mjs
+job	tools			node --test scripts/vm-smoke/*.test.mjs
+job	tools			node --test tools/test/*.test.mjs
+job	tools			node scripts/svg-drift.mjs
+job	tools			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+job	tools			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
+job	tools			printf '%s\n' "$installed"
+job	tools			rc=$?
+job	tools			rc=0
+job	tools			redis
+job	tools			rm -rf "$dl"
+job	tools			rustc --version
+job	tools			rustup default ""
+job	tools			rustup toolchain install "" "${args[@]}" --no-self-update
+job	tools			rustup toolchain list 2>/dev/null
+job	tools			sccache --show-stats >/dev/null 2>&1
+job	tools			sccache --start-server
+job	tools			sccache --stop-server >/dev/null 2>&1
+job	tools			sccache --version
+job	tools			settle ""
+job	tools			settle "$name"
+job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1
+job	tools			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
+job	tools			then
+job	tools			unzip -q "$dl/$NAME.$EXT" -d "$dl"
+job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1
+job	tools			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+job	tools			why="exit $rc"
+job	tools			{
+job	tools			} >> "$GITHUB_ENV"
+job	ui			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	ui			*) echo "::error::sccache-backend must be auto, redis or local (got 'local')"
+job	ui			*) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."
+job	ui			*[!0-9]*) TOTAL=40
+job	ui			BIN=sccache
+job	ui			BIN=sccache.exe
+job	ui			DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
+job	ui			DIR="$(bash "$iso" path sccache)"
+job	ui			DIR="$(cygpath -w "$DIR")"
+job	ui			DIR="$MOUNT"
+job	ui			DIR="${RUNNER_TEMP:-/tmp}/sccache"
+job	ui			EXT=tar.gz
+job	ui			EXT=zip
+job	ui			GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	ui			GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1
+job	ui			Linux-aarch64
+job	ui			Linux-arm64) T=aarch64-unknown-linux-musl
+job	ui			Linux-x86_64)            T=x86_64-unknown-linux-musl
+job	ui			MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"
+job	ui			NAME="sccache-v$VERSION-$T"
+job	ui			PATH="$PINNED:$PATH"
+job	ui			PER=$((TOTAL / SLOTS
+job	ui			PER=2
+job	ui			PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
+job	ui			PORT="$(bash "$iso" port sccache)"
+job	ui			PORT=4227
+job	ui			SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE"
+job	ui			SETTINGS+=("SCCACHE_REDIS_ENDPOINT=${{ vars.SCCACHE_REDIS_ENDPOINT }}" "SCCACHE_REDIS_DB=${REDIS_DB:-5}"
+job	ui			SETTINGS=(
+job	ui			SIZE="${PER}G"
+job	ui			SIZE=20G
+job	ui			SLOTS="$(bash "$iso" slots)"
+job	ui			SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1
+job	ui			SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d
+job	ui			SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af
+job	ui			SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd
+job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
+job	ui			TOOLCHAIN=${TOOLCHAIN:-stable
+job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
+job	ui			VERSION=0.19.0
+job	ui			Windows-x86_64)          T=x86_64-pc-windows-msvc
+job	ui			args+=(--component "$c"
+job	ui			args+=(--target "$t"
+job	ui			args=(--profile minimal
+job	ui			bash "conformance/ci/kit.sh" build-jobs
+job	ui			bash "conformance/ci/kit.sh" host node-caches "ui" "${{ github.job }}"
+job	ui			bash "conformance/ci/kit.sh" host sccache-stats
+job	ui			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	ui			cargo --version
+job	ui			case "$RUNNER_OS-$(uname -m)" in
+job	ui			case "$TOTAL" in ''
+job	ui			case "local" in auto
+job	ui			chmod +x "$DEST/$BIN.part.$$"
+job	ui			continue
+job	ui			cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
+job	ui			curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"
+job	ui			dl=$(mktemp -d
+job	ui			do
+job	ui			echo "$DEST" >> "$GITHUB_PATH"
+job	ui			echo "$kv"
+job	ui			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
+job	ui			echo "::error::rustup is not installed on this runner"
+job	ui			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
+job	ui			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
+job	ui			echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."
+job	ui			echo "::warning::could not download sccache $VERSION; building without the compile cache."
+job	ui			echo "::warning::sccache is not available on this runner; building without the compile cache."
+job	ui			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+job	ui			echo "::warning::the sccache server did not start; the build runs without the compile cache."
+job	ui			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
+job	ui			echo "CARGO_INCREMENTAL=0"
+job	ui			echo "RUSTC_WRAPPER=sccache"
+job	ui			echo "Rust toolchain  (from rust-toolchain.toml)"
+job	ui			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
+job	ui			echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
+job	ui			echo "SCCACHE_SERVER_PORT=$PORT"
+job	ui			echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"
+job	ui			echo "kit=$kit" >> "$GITHUB_OUTPUT"
+job	ui			echo "sccache: local disk $DIR"
+job	ui			echo "sccache: shared backend ${{ vars.SCCACHE_REDIS_ENDPOINT }} db ${REDIS_DB:-5}"
+job	ui			echo "setup-rust: compile cache through the $kit implementation"
+job	ui			else
+job	ui			exit 0
+job	ui			exit 1
+job	ui			export PADDOCK_DEV_DOWNLOAD=0
+job	ui			export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
+job	ui			export SCCACHE_REDIS_ENDPOINT="${{ vars.SCCACHE_REDIS_ENDPOINT }}" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
+job	ui			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
+job	ui			for c in 
+job	ui			for kv in "${SETTINGS[@]}"
+job	ui			for name in "" stable
+job	ui			for t in 
+job	ui			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	ui			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
+job	ui			iso="conformance/ci/job-isolation.sh"
+job	ui			kit="$(bash "conformance/ci/kit.sh" which)"
+job	ui			local
+job	ui			macOS-arm64)             T=aarch64-apple-darwin
+job	ui			missing=0
+job	ui			missing=1
+job	ui			mkdir -p "$DEST"
+job	ui			mkdir -p "$DIR"
+job	ui			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
+job	ui			npm ci
+job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
+job	ui			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
+job	ui			printf '%s\n' "$installed"
+job	ui			rc=$?
+job	ui			rc=0
+job	ui			redis
+job	ui			rm -rf "$dl"
+job	ui			rustc --version
+job	ui			rustup default ""
+job	ui			rustup toolchain install "" "${args[@]}" --no-self-update
+job	ui			rustup toolchain list 2>/dev/null
+job	ui			sccache --show-stats >/dev/null 2>&1
+job	ui			sccache --start-server
+job	ui			sccache --stop-server >/dev/null 2>&1
+job	ui			sccache --version
+job	ui			settle ""
+job	ui			settle "$name"
+job	ui			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
+job	ui			then
+job	ui			unzip -q "$dl/$NAME.$EXT" -d "$dl"
+job	ui			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+job	ui			why="exit $rc"
+job	ui			{
+job	ui			} >> "$GITHUB_ENV"
+job	ui		ui	node ../scripts/publish.mjs --skip-build
+job	ui		ui	npm run build
+job	ui		ui	npm run build:e2e
+job	ui		ui	npm run i18n:check
+job	ui		ui	npm run lint
+job	ui		ui	npm run shell-demo:build
+job	ui		ui	npm run test:scripts
+job	ui		ui	npm run test:tokens
+job	ui		ui	npm run workbench-demo:build
+job	ui		ui	npm test

@@ -67,6 +67,7 @@ pub mod text_format;
 pub mod threads;
 pub mod tiles;
 pub mod timestamp_issue;
+pub mod wait_log;
 pub mod watch;
 pub mod words;
 pub mod workspace;

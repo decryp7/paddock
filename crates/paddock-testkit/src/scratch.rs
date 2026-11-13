@@ -55,6 +55,55 @@ impl fmt::Display for Leftovers {
 
 impl std::error::Error for Leftovers {}
 
+/// A temporary folder whose path is already canonical, deleted on drop.
+///
+/// `tempfile::tempdir()` returns a path under `TMPDIR`, which on macOS is `/var/folders/...` while the operating system
+/// resolves it to `/private/var/folders/...`. A test that compares that path with one the code under test produced
+/// (`current_dir`, `canonicalize`, a path read back from a child) then fails on macOS only. Use this where a test needs
+/// one plain temporary folder; use [`Scratch`] where it also needs the `work`/`home`/`tmp` layout and the leftover check.
+#[derive(Debug)]
+pub struct CanonicalTempDir {
+    path: PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+impl CanonicalTempDir {
+    /// The canonical path of the folder (no `/var` to `/private/var` drift, no Windows `\\?\` prefix).
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for CanonicalTempDir {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl std::ops::Deref for CanonicalTempDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// A new temporary folder with a canonical path, or why it could not be made.
+pub fn try_canonical_tempdir() -> io::Result<CanonicalTempDir> {
+    let dir = tempfile::Builder::new()
+        .prefix("paddock-testkit-")
+        .tempdir()?;
+    let path = paddock_env::winpath::real(dir.path())?;
+    Ok(CanonicalTempDir { path, _dir: dir })
+}
+
+/// A new temporary folder with a canonical path.
+///
+/// # Panics
+/// When the operating system cannot make a temporary folder (the test cannot run).
+pub fn canonical_tempdir() -> CanonicalTempDir {
+    try_canonical_tempdir().expect("cannot make a temporary folder")
+}
+
 /// A temporary folder for one test, made of three folders: [`work`](Scratch::work) (what the code under test is given),
 /// [`home`](Scratch::home) (a stand-in for the user's home) and [`tmp`](Scratch::tmp) (a stand-in for the shared temp
 /// folder, see [`crate::EnvLock::hermetic`]). It is deleted on drop. **`tmp` must be empty when the test ends**: if code

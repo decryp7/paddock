@@ -276,7 +276,7 @@ pub(crate) fn git(dir: &Path, args: &[&str]) {
 /// The fixture repository: the overlay over the fixture is commit `fixture-base`, the fixture alone (overlay-only files removed) is `fixture-head`.
 pub(crate) fn fixture_repo() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = paddock_env::winpath::real(dir.path()).unwrap();
     git(&root, &["init", "-q", "-b", "main"]);
     copy_tree(&golden_dir().join("fixture"), &root);
     copy_tree(&golden_dir().join("base-overlay"), &root);
@@ -666,7 +666,7 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
         }
     }
     let common = String::from_utf8(git(src, &["rev-parse", "--git-common-dir"])).unwrap();
-    let objects = src.join(common.trim()).join("objects").canonicalize().unwrap();
+    let objects = paddock_env::winpath::real(&src.join(common.trim()).join("objects")).unwrap();
     std::fs::create_dir_all(dst).unwrap();
     git(dst, &["init", "-q"]);
     // `input` stores LF whatever the host's checkout wrote, and checkouts in the copy write what is stored: LF.
