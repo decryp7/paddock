@@ -1074,6 +1074,8 @@ jobs:
       - name: Generated files of the train are current (./dev gen check)
         env:
           TRAIN_BASE: ${{ github.event.inputs.base }}
+          # Generator builds go outside the checkout and the home folder (tools/paddock-dev generators/run.rs), as in nightly.yml.
+          PADDOCK_DEV_TARGET_DIR: /var/tmp/paddock-gen-builds
         run: ./dev gen check --base "$TRAIN_BASE"
 
       - uses: ./.gitea/actions/sccache-stats
@@ -1350,6 +1352,17 @@ jobs:
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/paddock-dev
         run: cargo clippy --all-targets --locked -- -D warnings
+
+      # The inputs and generator tests read the cargo metadata of tools/heavy and tools/wiki offline: their packages must be in
+      # the job's cargo home, not only paddock-dev's (heavy's paddock-env dependency was missing on 2026-11-13, run 8050).
+      - name: Fetch the other tools' dependencies
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools
+        run: |
+          for t in heavy wiki; do
+            (cd "$t" && cargo fetch --locked) || {
+              echo "::error::cargo fetch --locked failed in tools/$t, so the offline metadata tests cannot read it. Next step: run it on the runner to see why"; exit 1; }
+          done
 
       - name: Tests
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' }}
