@@ -67,7 +67,8 @@ fn materialize() -> tempfile::TempDir {
 fn options(root: &Path) -> RunOptions {
     RunOptions {
         root: root.to_path_buf(),
-        app: "fixture".into(),
+        config: paddock_dev::check::config::Config::bare("fixture"),
+        scope: None,
         only: Some(vec!["C39".into(), "C53".into()]),
         files: None,
         today: "2026-11-10".into(),
@@ -97,8 +98,10 @@ fn fixture_findings_equal_the_recorded_js_findings_exactly() {
         serde_json::to_string_pretty(&want).unwrap()
     );
     assert!(
-        r.errors() > 40 && r.waived.len() == 3,
-        "the fixture must exercise many findings and the waivers"
+        r.errors() > 40
+            && r.waived.iter().filter(|w| w.expires != "inline").count() == 3
+            && r.waived.iter().filter(|w| w.expires == "inline").count() == 10,
+        "the fixture must exercise many findings, the dated waivers and the inline ones (listed under waived, ER-33)"
     );
 }
 
@@ -256,7 +259,8 @@ fn live_tree_findings_equal_the_js_host() {
         let root = root.clone();
         move |progress| {
             let opts = RunOptions {
-                app: "paddock".into(),
+                config: paddock_dev::check::config::Config::bare("paddock"),
+                scope: None,
                 today: paddock_dev::check::today_utc(),
                 base_ref: None,
                 ..options(&root)
@@ -913,7 +917,7 @@ fn live_token_soup_findings_equal_the_js_host() {
         ))
         .unwrap();
         let mut o = options(d.path());
-        o.app = "soup".into();
+        o.config = paddock_dev::check::config::Config::bare("soup");
         let r = run_checks(&o, &legacy_registry()).unwrap();
         assert_eq!(shared_part(&r.json())["findings"], js["findings"], "seed {seed}");
         assert!(
@@ -1209,7 +1213,7 @@ process.stdout.write(JSON.stringify(r));
 fn c121_options(root: &Path, app: &str) -> RunOptions {
     RunOptions {
         only: Some(vec!["C121".into()]),
-        app: app.into(),
+        config: paddock_dev::check::config::Config::bare(app),
         ..options(root)
     }
 }

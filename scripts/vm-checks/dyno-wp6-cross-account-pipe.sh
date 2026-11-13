@@ -29,6 +29,7 @@ $V start >"$O/start.log" 2>&1 </dev/null || die "the VM did not start; next step
 ph "status $($V status)"
 g 'New-Item -ItemType Directory -Force C:\paddock-test\dv | Out-Null; "up"' >/dev/null
 # The test program is in deps/ (cargo before 1.100) or build/<package>/<hash>/out/ (1.100): whichever layout built it.
+# conformance: layout-guess — searches `deps` and `build` both, so it finds the test binary in either cargo layout
 find_test() { find "$1/deps" "$1/build" -type f -name "$2" 2>/dev/null | head -1; }
 for p in "$(find_test "$A" "$IT") ipc_it.exe" "$(find_test "$M" "$IT") ipc_it_mut.exe" "$A/paddock-ipc-test-child.exe child.exe"; do
   set -- $p; [ -f "$1" ] || die "missing build output $1; next step: build it (see the header)"

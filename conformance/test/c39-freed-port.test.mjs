@@ -42,8 +42,8 @@ test('C39 good: a listener kept, served, moved or dropped after its last use', (
 
 test('C39 waivers: with a reason the site passes, without one it is reported', () => {
   const site = '    let p = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();';
-  assert.equal(freedPorts(wrap(`    // conformance: freed-port — the child process binds it and the start retries on a taken port\n${site}`))[0].waived, 'reason');
-  assert.equal(freedPorts(wrap(`${site} // conformance: freed-port`))[0].waived, 'no-reason');
+  assert.equal(freedPorts(wrap(`    // conformance: freed-port — the child process binds it and the start retries on a taken port\n${site}`))[0].waived.state, 'reason');
+  assert.equal(freedPorts(wrap(`${site} // conformance: freed-port`))[0].waived.state, 'no-reason');
 });
 
 test('maskRust: char literals and raw strings do not open strings that never end', () => {

@@ -10,64 +10,17 @@
 // The fix: `paddock_testkit::net::HeldPort` keeps the port taken (it hangs up or resets), and a test that needs "refused"
 // injects a connector or tests the error mapping. A justified case carries `// conformance: freed-port — <reason>` on the
 // line or the line above.
+import { applyInlineWaiver, commentView } from '../util/inline-waiver.mjs';
 import { error } from '../finding.mjs';
+import { maskRust } from '../util/mask-rust.mjs';
 
-const WAIVER = /conformance:\s*freed-port\s*[—–-]+\s*(\S.{2,})/;
-const BARE_WAIVER = /conformance:\s*freed-port/;
+export { maskRust };
+
 /** `TcpListener::bind(` and `TcpSocket::bind(`, under their own names and any `use ... as Alias` of them; `Socket::new(` (socket2). */
 function bindPattern(clean) {
   const names = ['TcpListener', 'TcpSocket'];
   for (const a of clean.matchAll(/\b(?:TcpListener|TcpSocket)\s+as\s+(\w+)/g)) names.push(a[1]);
   return new RegExp(`\\b(?:(?:${names.join('|')})::bind|Socket::new)\\s*\\(`, 'g');
-}
-
-/**
- * `text` with comments and the insides of string, raw-string and char literals blanked (newlines kept). Unlike C30's mask it
- * knows raw strings (`r#"..."#`) and char literals (`'"'`), which would otherwise open a string that never ends.
- */
-export function maskRust(text) {
-  let out = '';
-  const blank = (s) => s.replace(/[^\n]/g, ' ');
-  for (let i = 0; i < text.length; ) {
-    const rest = text.slice(i, i + 12);
-    const raw = /^b?r(#*)"/.exec(rest);
-    const prev = text[i - 1] ?? ' ';
-    if (raw && !/\w/.test(prev)) {
-      const close = `"${raw[1]}`;
-      const end = text.indexOf(close, i + raw[0].length);
-      const stop = end < 0 ? text.length : end + close.length;
-      out += raw[0] + blank(text.slice(i + raw[0].length, stop - close.length)) + close;
-      i = stop;
-    } else if (text.startsWith('//', i)) {
-      const end = text.indexOf('\n', i);
-      const stop = end < 0 ? text.length : end;
-      out += ' '.repeat(stop - i);
-      i = stop;
-    } else if (text.startsWith('/*', i)) {
-      const end = text.indexOf('*/', i + 2);
-      const stop = end < 0 ? text.length : end + 2;
-      out += blank(text.slice(i, stop));
-      i = stop;
-    } else if (text[i] === '"') {
-      let j = i + 1;
-      while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
-      out += `"${blank(text.slice(i + 1, j))}"`;
-      i = j + 1;
-    } else if (text[i] === "'") {
-      const ch = /^'(?:\\u\{[0-9a-fA-F]+\}|\\.|[^\\'\n])'/.exec(text.slice(i, i + 12));
-      if (ch) {
-        out += `'${' '.repeat(ch[0].length - 2)}'`;
-        i += ch[0].length;
-      } else {
-        out += "'";
-        i++;
-      }
-    } else {
-      out += text[i];
-      i++;
-    }
-  }
-  return out;
 }
 
 /** Index of the bracket closing the one at `open` in masked text, or -1. */
@@ -113,16 +66,15 @@ function skipTail(text, i) {
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** The freed ports in a Rust source: [{ line, kind, waived: false | 'no-reason' | 'reason' }]. */
+/** The freed ports in a Rust source: [{ line, kind, waived: inlineWaiver(...) }]. */
 export function freedPorts(text) {
   const clean = maskRust(text);
-  const raw = text.split('\n');
+  const view = commentView(text, 'rust');
   const out = [];
   const lineOf = (i) => clean.slice(0, i).split('\n').length;
   const push = (i, kind) => {
     const line = lineOf(i);
-    const here = `${raw[line - 1] ?? ''}\n${raw[line - 2] ?? ''}`;
-    const waived = WAIVER.test(here) ? 'reason' : BARE_WAIVER.test(here) ? 'no-reason' : false;
+    const waived = view.waiver(line, 'freed-port');
     out.push({ line, kind, waived });
   };
   for (const m of clean.matchAll(bindPattern(clean))) {
@@ -181,9 +133,8 @@ export default {
       if (!text || !/::bind\s*\(/.test(text)) continue;
       for (const p of freedPorts(text)) {
         const what = { chain: 'reads the port of a listener it drops at once', block: 'returns the port of a listener the block drops', drop: 'drops a listener whose port it read' }[p.kind];
-        if (p.waived === 'reason') continue;
-        if (p.waived === 'no-reason') out.push(error('C39', 40, f, p.line, `the freed-port waiver gives no reason`, 'Write `// conformance: freed-port — <why the port may be freed>`.'));
-        else out.push(error('C39', 40, f, p.line, `${what}: another process may be given the port before the test uses it`, fix));
+        const site = error('C39', 40, f, p.line, `${what}: another process may be given the port before the test uses it`, fix);
+        out.push(applyInlineWaiver(p.waived, site, () => error('C39', 40, f, p.line, `the freed-port waiver gives no reason`, 'Write `// conformance: freed-port — <why the port may be freed>`.')));
       }
     }
     return out;

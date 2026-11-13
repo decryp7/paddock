@@ -18,6 +18,7 @@
 //!
 //! Deletions go through [`safe_remove`](super::safe_remove): only under the folder being capped, never through a link.
 
+// conformance: file-layout-guess — the prune code never names `deps`; its tests use it only as filler data for a build folder to prune
 use super::Step;
 use super::safe_remove::{self, RemoveError};
 use clap::Args as ClapArgs;

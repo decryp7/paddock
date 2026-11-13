@@ -29,7 +29,7 @@ test('list --json bad: a check without scope or mode is listed as undefined, whi
 test('the report-only checks are the ones that only warn', () => {
   assert.deepEqual(
     listChecks().filter((c) => c.mode === 'report-only').map((c) => c.id),
-    ['C14', 'C29', 'C36', 'C51', 'C61', 'C62', 'C85', 'C117', 'C118', 'C119', 'C121'],
+    ['C14', 'C29', 'C36', 'C51', 'C61', 'C62', 'C85', 'C117', 'C118', 'C119', 'C120', 'C121'],
   );
 });
 

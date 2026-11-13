@@ -1,0 +1,5 @@
+// Zażółć gęślą jaźń 😀 — a line of non-ASCII text before the hit
+fn café() {
+    let s = "日本語 😀"; let d = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap();
+    let e = "x/deps/y";
+}

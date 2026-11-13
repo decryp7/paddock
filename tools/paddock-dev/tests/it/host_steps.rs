@@ -561,6 +561,7 @@ fn prune_folder_removes_the_incremental_caches_first_then_the_folder_and_never_f
     let layout = |incremental: usize, deps: usize| {
         move |fx: &Fx| {
             fx.big("ci/build/debug/incremental", incremental);
+            // conformance: layout-guess — the prune code never names `deps`; its tests use it only as filler data for a build folder to prune
             fx.big("ci/build/debug/deps", deps);
         }
     };
@@ -1394,18 +1395,25 @@ fn guardian_machine(fx: &Fx, proc_exit: i32) {
     std::fs::create_dir_all(fx.p("tmp")).unwrap();
     fx.shim(
         "cargo",
-        "echo '   Compiling paddock-proc v0.1.0'\n\
-         echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)' >&2\n\
-         echo '  Executable tests/it/main.rs (target/debug/deps/it-ff)' >&2\n\
-         echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)' >&2",
+        concat!(
+            "echo '   Compiling paddock-proc v0.1.0'\n",
+            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
+            "echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)' >&2\n",
+            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
+            "echo '  Executable tests/it/main.rs (target/debug/deps/it-ff)' >&2\n",
+            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
+            "echo '  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)' >&2"
+        ),
     );
     fx.script(
+        // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
         "crates/target/debug/deps/paddock_proc-0123abcd",
         &format!(
             "echo \"proc tests: $*\"\n\
              [ {proc_exit} = 0 ] || {{ echo 'guardian said no' > \"$PADDOCK_PROC_GUARDIAN_LOG\"; exit {proc_exit}; }}"
         ),
     );
+    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
     fx.script("crates/target/debug/deps/paddock_chromium-9f8e7d", "echo \"chromium tests: $*\"");
 }
 

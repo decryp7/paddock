@@ -1,5 +1,5 @@
 //! `./dev check run`: the host of Paddock's repository checks in Rust (RT-5, ADR 0022's conformance rules engine). It runs the
-//! checks ported so far ([`c39`], [`c53`]) over a tree, with
+//! checks ported so far ([`c39`], [`c53`], [`c120`]) over a tree, with
 //!
 //! - findings and a report JSON in the shape of `conformance/src/report.mjs`'s result (`app`, `checks`, `findings`, `waived`,
 //!   `errors`, `warnings`), so the conformance job can merge or diff the two hosts, plus `runs`, the run records;
@@ -13,35 +13,91 @@
 //! `tests/it/check.rs` diffs them on the tree and on `tests/fixtures/check`. The wiring is listed in the RT-5 hand-off, not done here.
 
 pub mod baseline;
-pub mod c119;
-pub mod c121;
-pub mod c39;
-pub mod c53;
 pub mod c53_liveness;
+pub mod config;
+pub mod conformance;
 pub mod finding;
+pub mod inline_waiver;
 pub mod jsre;
+pub mod lex;
 pub mod mask;
+pub mod outcome;
 pub mod record;
+pub mod report;
 pub mod tree;
+pub mod util;
 pub mod waivers;
 
+/// Registers checks: one line per check, `module::Type`. It declares the module and adds the check to [`registry`], in the order of
+/// `conformance/src/checks/index.mjs`. Nothing else names a check: the host, `--only`, `list` and the parity tests read the registry.
+macro_rules! register_checks {
+    ($($module:ident :: $check:ident),+ $(,)?) => {
+        $(pub mod $module;)+
+
+        /// The checks the host has, in the order of `conformance/src/checks/index.mjs`.
+        pub fn registry() -> Vec<Box<dyn Check>> {
+            vec![$(Box::new($module::$check)),+]
+        }
+
+        /// `(check id, source file)` of every registered check, for `list --json`.
+        pub fn sources() -> Vec<(&'static str, &'static str)> {
+            vec![$(($module::$check.id(), concat!("tools/paddock-dev/src/check/", stringify!($module), ".rs"))),+]
+        }
+    };
+}
+
+register_checks! {
+    c39::C39,
+    c53::C53,
+    c119::C119,
+    c120::C120,
+    c121::C121,
+}
+
+use config::Config;
 use finding::{Finding, Severity, Waived};
+use outcome::Outcome;
 use paddock_cli::{CliError, Exit, Report};
 use record::{Precondition, RunRecord, Scope};
 use serde_json::{Value, json};
+use std::cell::OnceCell;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use tree::Tree;
 
-/// What a check sees: the tree, narrowed to the run's files.
+/// What a check sees: the tree, narrowed to the run's files, and the run's inputs.
 pub struct Ctx<'a> {
     tree: &'a Tree,
     scoped: Rc<Vec<String>>,
     base_ref: Option<String>,
+    config: &'a Config,
+    scope: Option<String>,
+    today: String,
+    workflows: OnceCell<Rc<Vec<util::workflows::Workflow>>>,
 }
 
-impl Ctx<'_> {
+impl<'a> Ctx<'a> {
+    /// A context over `tree` for the files `scoped`, with the run's config, `--scope` and today's date.
+    pub fn new(
+        tree: &'a Tree,
+        scoped: Rc<Vec<String>>,
+        base_ref: Option<String>,
+        config: &'a Config,
+        scope: Option<String>,
+        today: String,
+    ) -> Ctx<'a> {
+        Ctx {
+            tree,
+            scoped,
+            base_ref,
+            config,
+            scope,
+            today,
+            workflows: OnceCell::new(),
+        }
+    }
+
     /// The files this run looks at (all of the tree, or the `--files` that the tree knows), sorted.
     pub fn files(&self) -> Rc<Vec<String>> {
         self.scoped.clone()
@@ -69,6 +125,51 @@ impl Ctx<'_> {
     pub fn read(&self, rel: &str) -> Option<Rc<String>> {
         self.tree.read(rel)
     }
+
+    /// Whether the path exists in the tree.
+    pub fn exists(&self, rel: &str) -> bool {
+        self.tree.exists(rel)
+    }
+
+    /// Whether the path is a folder of the tree.
+    pub fn is_dir(&self, rel: &str) -> bool {
+        self.tree.is_dir(rel)
+    }
+
+    /// The run's config (`paddock.conformance.json` over the defaults, the app name).
+    pub fn config(&self) -> &Config {
+        self.config
+    }
+
+    /// `--scope apps/<app>` (C99), if given.
+    pub fn scope(&self) -> Option<&str> {
+        self.scope.as_deref()
+    }
+
+    /// Today, `YYYY-MM-DD` (UTC).
+    pub fn today(&self) -> &str {
+        &self.today
+    }
+
+    /// The workflow files (`<workflowsDir>/*.yml|yaml`) with their jobs and steps, read once.
+    pub fn workflows(&self) -> Rc<Vec<util::workflows::Workflow>> {
+        self.workflows
+            .get_or_init(|| {
+                let dir = format!("{}/", self.config.str("workflowsDir"));
+                Rc::new(
+                    self.tree
+                        .files()
+                        .iter()
+                        .filter(|f| f.starts_with(&dir) && (f.ends_with(".yml") || f.ends_with(".yaml")))
+                        .map(|f| {
+                            let text = self.tree.read(f).map(|t| t.to_string()).unwrap_or_default();
+                            util::workflows::read(f, &text)
+                        })
+                        .collect(),
+                )
+            })
+            .clone()
+    }
 }
 
 /// What a check returns to the host.
@@ -81,6 +182,22 @@ pub struct CheckOutput {
     pub completed: bool,
     /// What its input had to be.
     pub precondition: Precondition,
+}
+
+impl CheckOutput {
+    /// A check that does not apply to this run (C119 judges the Paddock repository only): no findings, and no error for having
+    /// looked at nothing. It counts as one probe so the host does not call the run empty; the precondition says why it is empty.
+    pub fn not_applicable(why: &str) -> CheckOutput {
+        CheckOutput {
+            findings: Vec::new(),
+            probes: 1,
+            completed: true,
+            precondition: Precondition {
+                met: true,
+                detail: format!("not applicable: {why}"),
+            },
+        }
+    }
 }
 
 /// A check's positive control (ER-33): a small tree and the findings the check must report on it, as `(file, line)`. The host runs
@@ -104,19 +221,91 @@ pub trait Check {
     fn run(&self, ctx: &Ctx) -> CheckOutput;
     /// Its positive control.
     fn control(&self) -> Control;
+    /// Where it runs: the repository root, the apps, or both (`scope` of `listChecks`).
+    fn scope(&self) -> CheckScope {
+        CheckScope::Both
+    }
+    /// Whether its findings can fail a run (`mode` of `listChecks`).
+    fn mode(&self) -> Mode {
+        Mode::Gate
+    }
+    /// What an app needs for the check to apply (`needs` of `listChecks`).
+    fn needs(&self) -> Needs {
+        Needs::All
+    }
 }
 
-/// The checks the host has, in the order of `conformance/src/checks/index.mjs`.
-pub fn registry() -> Vec<Box<dyn Check>> {
-    vec![Box::new(c39::C39), Box::new(c53::C53), Box::new(c119::C119), Box::new(c121::C121)]
+/// Where a check runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CheckScope {
+    /// The repository root only.
+    Root,
+    /// Apps only.
+    Apps,
+    /// Both.
+    Both,
+}
+
+impl CheckScope {
+    /// The name in `list --json`.
+    pub fn name(self) -> &'static str {
+        match self {
+            CheckScope::Root => "root",
+            CheckScope::Apps => "apps",
+            CheckScope::Both => "both",
+        }
+    }
+}
+
+/// Whether a check's findings can fail a run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// Errors fail the run.
+    Gate,
+    /// Reported only (warnings; `--strict` makes them fail).
+    ReportOnly,
+}
+
+impl Mode {
+    /// The name in `list --json`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Gate => "gate",
+            Mode::ReportOnly => "report-only",
+        }
+    }
+}
+
+/// What an app needs for a check to apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Needs {
+    /// Nothing.
+    All,
+    /// A Rust workspace.
+    Rust,
+    /// A UI.
+    Ui,
+}
+
+impl Needs {
+    /// The name in `list --json`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Needs::All => "all",
+            Needs::Rust => "rust",
+            Needs::Ui => "ui",
+        }
+    }
 }
 
 /// The inputs of a run.
 pub struct RunOptions {
     /// The repository root.
     pub root: PathBuf,
-    /// The app name in the report (`paddock` for the monorepo itself).
-    pub app: String,
+    /// The run's config: the app name in the report (`paddock` for the monorepo itself) and the keys of `paddock.conformance.json`.
+    pub config: Config,
+    /// `--scope apps/<app>` (C99), or none.
+    pub scope: Option<String>,
     /// Only these check ids (upper case), or all.
     pub only: Option<Vec<String>>,
     /// Only these files (repository-relative, POSIX), or the whole tree.
@@ -265,15 +454,17 @@ fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 fn control_holds(check: &dyn Check) -> bool {
     let c = check.control();
     let tree = Tree::in_memory(&c.files);
-    let ctx = Ctx {
-        tree: &tree,
-        scoped: tree.files(),
-        base_ref: None,
-    };
+    let config = Config::bare("paddock");
+    let ctx = Ctx::new(&tree, tree.files(), None, &config, None, String::new());
     let Ok(out) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx))) else {
         return false;
     };
-    let mut got: Vec<(String, usize)> = out.findings.iter().map(|f| (f.file.clone(), f.line)).collect();
+    let mut got: Vec<(String, usize)> = out
+        .findings
+        .iter()
+        .filter(|f| f.inline_waiver.is_none() || f.unwaivable)
+        .map(|f| (f.file.clone(), f.line))
+        .collect();
     got.sort();
     let mut want: Vec<(String, usize)> = c.expect.iter().map(|(f, l)| (f.to_string(), *l)).collect();
     want.sort();
@@ -311,11 +502,14 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
             (Rc::new(known.clone()), Scope::Files(known), unknown)
         }
     };
-    let ctx = Ctx {
+    let ctx = Ctx::new(
         tree,
-        scoped: scoped.clone(),
-        base_ref: opts.base_ref.clone(),
-    };
+        scoped.clone(),
+        opts.base_ref.clone(),
+        &opts.config,
+        opts.scope.clone(),
+        opts.today.clone(),
+    );
 
     let mut findings: Vec<Finding> = unknown_files
         .iter()
@@ -331,6 +525,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         })
         .collect();
     let mut runs = Vec::new();
+    let mut inline_waived: Vec<Waived> = Vec::new();
     for check in &selected {
         let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check.run(&ctx)));
         let control = control_holds(check.as_ref());
@@ -350,7 +545,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
             os: RunRecord::this_os(),
             matched: Vec::new(),
         };
-        let mut found = match attempt {
+        let found = match attempt {
             Ok(out) => {
                 record.completed = out.completed;
                 record.precondition = out.precondition;
@@ -362,6 +557,16 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
                 Vec::new()
             }
         };
+        // A finding waived by a comment at its site is waived, not found (the JavaScript runner does the same).
+        let (inline, mut found): (Vec<Finding>, Vec<Finding>) = found.into_iter().partition(|f| f.inline_waiver.is_some() && !f.unwaivable);
+        inline_waived.extend(inline.into_iter().map(|f| {
+            let reason = f.inline_waiver.clone().unwrap_or_default();
+            Waived {
+                finding: f,
+                reason,
+                expires: "inline".into(),
+            }
+        }));
         record.matched = found
             .iter()
             .filter(|f| !f.file.is_empty())
@@ -370,7 +575,12 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         let raw = found.len();
         // ER-33: the record decides its status and the error together; the error is added whatever else the check found, and no
         // waiver covers it (a waived finding next to an unreadable file must not read as a pass).
-        if let (_, Some(message)) = record.judge(false) {
+        if let (status, Some(message)) = record.judge(false) {
+            let outcome = if status == record::Status::CheckBroken || record.crash.is_some() {
+                Outcome::CheckBroken
+            } else {
+                Outcome::NotMeasured
+            };
             found.push(
                 Finding::error(
                     check.id(),
@@ -380,7 +590,8 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
                     message,
                     "Fix the check or its input; a run that did not look is not a pass.",
                 )
-                .unwaivable(),
+                .unwaivable()
+                .with_outcome(outcome),
             );
         }
         findings.extend(found);
@@ -399,7 +610,7 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
                 .iter()
                 .any(|f| waivers::path_matches(w.path.as_deref().unwrap_or_default(), f))
     };
-    let (kept, waived) = waivers::apply(waivers::Applying {
+    let (kept, mut waived) = waivers::apply(waivers::Applying {
         findings,
         waivers: &parsed,
         problems: &problems,
@@ -407,11 +618,12 @@ pub fn run_checks_in(tree: &Tree, opts: &RunOptions, registry: &[Box<dyn Check>]
         checks_run: &checks_run,
         skip_unused: &skip_unused,
     });
+    waived.extend(inline_waived);
     for e in &mut runs {
         e.kept = kept.iter().filter(|f| f.check == e.record.check).count();
     }
     Ok(RunResult {
-        app: opts.app.clone(),
+        app: opts.config.app().to_string(),
         checks: checks_run,
         findings: kept,
         waived,
@@ -468,9 +680,11 @@ fn find_root(given: Option<PathBuf>) -> Result<PathBuf, CliError> {
 /// `./dev check run`: runs the checks and reports. Exit 5 (findings) when an error was found.
 pub fn command(args: Args) -> Result<Report, CliError> {
     let root = find_root(args.root)?;
+    let config = Config::load(&root, Some(&args.app)).map_err(CliError::failure)?;
     let opts = RunOptions {
         root,
-        app: args.app,
+        config,
+        scope: None,
         only: args.only.map(|v| v.iter().map(|s| s.trim().to_uppercase()).collect()),
         files: args.files,
         today: today_utc(),
@@ -533,7 +747,8 @@ mod tests {
         let tree = Tree::in_memory_with_unlisted(&[("a.rs", "x")], unlisted);
         let opts = RunOptions {
             root: PathBuf::new(),
-            app: "t".into(),
+            config: Config::bare("t"),
+            scope: None,
             only: None,
             files,
             today: "2026-11-10".into(),

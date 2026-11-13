@@ -16,7 +16,8 @@
 //! UTF-16 offsets, as in the JavaScript, so a hit orders the same way next to non-ASCII text.
 
 use super::finding::Finding;
-use super::jsre::{has_reason, line_at, rx, units};
+use super::inline_waiver::{CommentView, InlineWaiver, Kind};
+use super::jsre::{line_at, rx, units};
 use super::mask::mask_units;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -27,8 +28,6 @@ use std::sync::LazyLock;
 const IMPLEMENTATION: [&str; 1] = ["crates/paddock-proc/src/sys.rs"];
 
 /// The marker up to its dashes; a reason must follow ([`has_reason`]).
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*pid-kill\s*([—–-]+)"));
-static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*pid-kill"));
 static VENDORED: LazyLock<Regex> = LazyLock::new(|| rx(r"^apps/[^/]+/vendor/"));
 static PREFILTER: LazyLock<Regex> =
     LazyLock::new(|| rx(r"kill|Stop-Process|Terminate(?:Process|JobObject)|ADR 0033 WP-|disallowed_methods")); // conformance: pid-kill — a pattern that finds these words in source text; nothing here ends a process
@@ -60,7 +59,7 @@ pub struct PidKill {
     /// What it does, in a sentence.
     pub what: String,
     /// The waiver comment: `Some(true)` with a reason, `Some(false)` without one, `None` for no comment (a follow-up marker never has one).
-    pub waived: Option<bool>,
+    pub waived: InlineWaiver,
 }
 
 struct Hit {
@@ -74,7 +73,7 @@ struct Hit {
 pub fn pid_kills(text: &str) -> Vec<PidKill> {
     let mask_u = mask_units(&text.encode_utf16().collect::<Vec<u16>>());
     let masked = String::from_utf16_lossy(&mask_u);
-    let lines: Vec<&str> = text.split('\n').collect();
+    let view = CommentView::of(text, Kind::Rust);
     let mut hits: Vec<Hit> = Vec::new();
     for (re, what) in WIN32.iter() {
         for m in re.find_iter(&masked) {
@@ -125,24 +124,11 @@ pub fn pid_kills(text: &str) -> Vec<PidKill> {
     hits.sort_by_key(|h| h.index);
     hits.into_iter()
         .map(|h| {
-            let near = format!(
-                "{}\n{}",
-                lines.get(h.line - 1).copied().unwrap_or(""),
-                if h.line >= 2 {
-                    lines.get(h.line - 2).copied().unwrap_or("")
-                } else {
-                    ""
-                }
-            );
             // A follow-up marker is waived only in paddock.waivers.toml (dated), never inline.
             let waived = if h.follow_up {
-                None
-            } else if has_reason(&near, &WAIVER) {
-                Some(true)
-            } else if BARE_WAIVER.is_match(&near) {
-                Some(false)
+                InlineWaiver::No
             } else {
-                None
+                view.waiver(h.line, "pid-kill")
             };
             PidKill {
                 line: h.line,
@@ -214,33 +200,35 @@ impl Check for C53 {
                 continue;
             }
             for k in pid_kills(&text) {
-                match k.waived {
-                    Some(true) => {}
-                    Some(false) => findings.push(Finding::error(
-                        "C53",
-                        53,
-                        f,
-                        k.line,
-                        "the pid-kill waiver gives no reason",
-                        "Write `// conformance: pid-kill — <why this pid cannot have been handed on>`.",
-                    )),
-                    None if k.what.starts_with("an open") || k.what.starts_with("allows") => findings.push(Finding::error(
+                let site = if k.what.starts_with("an open") || k.what.starts_with("allows") {
+                    Finding::error(
                         "C53",
                         53,
                         f,
                         k.line,
                         k.what,
                         "Fix the site through paddock_proc (ADR 0033), or give it a dated waiver in paddock.waivers.toml.",
-                    )),
-                    None => findings.push(Finding::error(
+                    )
+                } else {
+                    Finding::error(
                         "C53",
                         53,
                         f,
                         k.line,
                         format!("{}: the pid may belong to another process by now", k.what),
                         fix,
-                    )),
-                }
+                    )
+                };
+                findings.push(k.waived.apply(site, || {
+                    Finding::error(
+                        "C53",
+                        53,
+                        f,
+                        k.line,
+                        "the pid-kill waiver gives no reason",
+                        "Write `// conformance: pid-kill — <why this pid cannot have been handed on>`.",
+                    )
+                }));
             }
         }
         let live = super::c53_liveness::liveness_findings(ctx, ctx.root());

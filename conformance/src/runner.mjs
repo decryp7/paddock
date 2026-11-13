@@ -19,6 +19,7 @@ export async function runChecks({ root, app, only = null, options = {}, registry
   if (unknown.length) throw new Error(`unknown check: ${unknown.join(', ')}`);
 
   let findings = [];
+  const inlineWaived = [];
   const looked = new Set(); // checks whose result is a real result (a waiver for the others is not "stale", it is unmeasured)
   const validFinding = (f) => f !== null && typeof f === 'object' && ['error', 'warn'].includes(f.severity) && typeof f.message === 'string';
   const outcomes = [];
@@ -42,7 +43,14 @@ export async function runChecks({ root, app, only = null, options = {}, registry
     } else if (outcome.status === 'check-broken') {
       findings.push(unwaivable(error(check.id, check.rule, '', 1, outcome.reason, outcome.next)));
     } else {
-      findings.push(...outcome.findings);
+      // A finding the check marked `inlineWaiver: <reason>` (and that is not `unwaivable`: no comment covers a check that could not look) is waived at its site (a comment): it counts as waived, never as a finding,
+      // and stays in the report (ER-33). `expires` is 'inline': there is no date.
+      for (const f of outcome.findings) {
+        if (typeof f.inlineWaiver === 'string' && !f.unwaivable) {
+          const { inlineWaiver, ...rest } = f;
+          inlineWaived.push({ ...rest, waiver: { reason: inlineWaiver, expires: 'inline' } });
+        } else findings.push(f);
+      }
       looked.add(check.id);
     }
   }
@@ -56,7 +64,7 @@ export async function runChecks({ root, app, only = null, options = {}, registry
     checks: selected.map((c) => c.id),
     outcomes,
     findings,
-    waived: applied.waived,
+    waived: [...applied.waived, ...inlineWaived],
     errors: findings.filter((f) => f.severity === 'error').length,
     warnings: findings.filter((f) => f.severity === 'warn').length,
   };

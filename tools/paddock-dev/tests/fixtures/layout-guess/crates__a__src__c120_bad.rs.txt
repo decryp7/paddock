@@ -1,0 +1,31 @@
+fn parents() {
+    let d = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap().to_path_buf();
+}
+
+fn split_over_lines() {
+    let out = PathBuf::from(env!("OUT_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+}
+
+fn dots() {
+    let d = std::env::current_exe().unwrap().join("../..");
+    let e = Path::new(env!("OUT_DIR")).join("..").join("..");
+}
+
+fn literal() {
+    let p = root.join("target/debug/deps/foo");
+    let w = r"C:\build\debug\deps\foo.exe";
+    let q = base.join("deps");
+    let mut v = PathBuf::new();
+    v.push("deps");
+}
+
+fn ancestors_and_path_ends() {
+    let d = std::env::current_exe().unwrap().ancestors().nth(2).unwrap().to_path_buf();
+    let e = Path::new(env!("OUT_DIR")).ancestors().nth(4);
+    let p = "target/debug/deps";
+    let q = format!("{}/deps", root.display());
+}

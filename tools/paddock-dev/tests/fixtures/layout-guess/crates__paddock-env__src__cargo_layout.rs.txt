@@ -1,0 +1,4 @@
+fn the_one_implementation() {
+    let d = std::env::current_exe().unwrap().parent().unwrap().parent().unwrap();
+    let p = "target/debug/deps/x";
+}
