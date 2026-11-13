@@ -1983,3 +1983,16 @@ for a step's pipe after the step ends and then ends every process of the step's 
 `acquire` clears the inherit flag of every handle it has before it starts the holder, and refuses to start one when it cannot
 (`tools/paddock-dev/src/fds.rs`). Lesson: a process meant to outlive its step must carry nothing of the step; on Windows that
 means the whole handle table, and a check of the standard handles alone passes while the real chain fails.
+
+## A test child that inherits the machine's environment reads the machine (tests, 2026-11-13)
+Twice in one day a new environment lookup in a tool reached real machine state through tests: the pre-push integration tests ran
+the real heavy steps (`PATH` found `heavy.sh`), and on `fix/precommit-heavy-slot` the helper `dev()` found the real
+engineering-rules `heavy.sh` through `ENGINEERING_RULES` and the checkout beside the repository, and took machine-wide slots in
+`~/.cache/heavy-slots` (ER-14). Patching each test (`2ff5f5072`) leaves every other spawn site open for the next lookup, because
+a deny-list never contains the variable that bites next. Fix (ADR 0100): `paddock_testkit::TestCommand` starts `./dev`, `cargo` and
+`node` from an empty environment plus an allow-list (`allowed_names()`), with a private `HOME` and temp folder and a curated
+`PATH`; check C123 (report-only) flags a test that starts one of them any other way. Two things the cleaner environment exposed
+at once, both real: `lsof` lives in `/usr/sbin`, which a curated `PATH` must name, and `ps -o lstart=` prints another date format
+in a clean locale, so a test that compares a stamp must start `ps` through the same builder as the program that reads it.
+Lesson: give a test child what the test names and nothing else; Cargo's own test support removes a list of variables and
+keeps the rest, which is the shape that failed here.

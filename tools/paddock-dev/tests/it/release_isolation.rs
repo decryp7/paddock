@@ -3,12 +3,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_dev::release_isolation::fixture::{Fixture, Leak};
-use std::process::{Command, Output};
+use paddock_testkit::TestCommand;
+use std::process::Output;
 
 // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn dev(f: &Fixture, args: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.args(["ci", "release-isolation"]).args(args).env_clear();
     for (k, v) in &f.env.0 {
         cmd.env(k, v);
@@ -87,7 +88,7 @@ fn setup_prints_the_environment_and_refuses_to_run_twice() {
     std::fs::create_dir_all(&temp).unwrap();
     let envfile = dir.path().join("github-env");
     let run = || {
-        Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["ci", "release-isolation", "setup", "--env-file"])
             .arg(&envfile)
             .env_clear()

@@ -4,15 +4,16 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::Command;
 
 const CHANGE: &str = "crates/paddock-proc/src/lib.rs";
 
 /// A folder with a `cargo` that lets `metadata` through to the real one (the planner reads the graph with it) and answers every
 /// other call from `script`; the PATH of the run is that folder plus the system's, which has no cargo-xwin and no docker.
 fn fake_bin(dir: &Path, script: &str) -> String {
+    // conformance: test-env — only the path of the real cargo is written into the stand-in's script; no process starts here
     let real = std::env::var("CARGO").unwrap();
     let real_dir = Path::new(&real).parent().unwrap().display().to_string();
     let cargo = format!("#!/bin/sh\ncase \"$1\" in metadata) PATH=\"{real_dir}:$PATH\" exec \"{real}\" \"$@\";; esac\n{script}\n");
@@ -30,7 +31,7 @@ fn dev(path: &str, args: &[&str]) -> (i32, String, String) {
 #[allow(clippy::disallowed_methods)]
 fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> (i32, String, String) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["check", "--pre-push", "--base", "HEAD", "--files", CHANGE])
         .args(args)
         .current_dir(root)
@@ -42,6 +43,11 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
         .env(
             "PADDOCK_DEV_HOME",
             path.split(':').next().unwrap_or("/nonexistent").to_string() + "/home",
+        )
+        // A named engineering-rules folder with no heavy.sh is the only place `dev` looks: the machine's own checkout is not found.
+        .env(
+            "ENGINEERING_RULES",
+            path.split(':').next().unwrap_or("/nonexistent").to_string() + "/no-engineering-rules",
         )
         .output()
         .unwrap();
@@ -140,4 +146,53 @@ fn heavy_off_without_the_test_variable_is_an_override_and_not_measured() {
     assert_eq!(code, 6, "{err}{out}");
     assert!(out.starts_with("OVERRIDE SET") || out.contains("\nOVERRIDE SET"), "{out}");
     assert!(out.contains("NOT MEASURED  clippy crates"), "{out}");
+}
+
+/// Every name a run of `./dev` started by a test may carry (ADR 0100): what the process builder lists, plus this file's own
+/// named additions (`PADDOCK_DEV_HOME`, `PADDOCK_HEAVY`, `PADDOCK_TEST_HEAVY_OFF`, `ENGINEERING_RULES`) and what `dev` itself sets for its gates (`CARGO_BUILD_JOBS`).
+fn listed(name: &str) -> bool {
+    const NAMED: &[&str] = &[
+        "PADDOCK_DEV_HOME",
+        "PADDOCK_HEAVY",
+        "PADDOCK_TEST_HEAVY_OFF",
+        "ENGINEERING_RULES",
+        "CARGO_BUILD_JOBS",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+    ];
+    paddock_testkit::process::allowed_names().contains(&name) || NAMED.contains(&name)
+}
+
+/// ER-14, ADR 0100: a test run never reaches the machine through the environment. The machine here has the real slot tool
+/// (`ENGINEERING_RULES`, `HEAVY_LOCK_DIR`) and an ambient variable; the child must not see any of them, so no slot is taken
+/// and the fake cargo's environment holds only listed names.
+#[test]
+fn a_run_never_sees_the_machines_environment_or_takes_a_real_slot() {
+    let mut env = paddock_testkit::env_lock();
+    let d = tempfile::tempdir().unwrap();
+    let rules = d.path().join("rules");
+    std::fs::create_dir_all(rules.join("scripts")).unwrap();
+    let marker = d.path().join("real-heavy-ran");
+    let script = rules.join("scripts/heavy.sh");
+    std::fs::write(&script, format!("#!/bin/sh\ntouch {}\nexec \"$@\"\n", marker.display())).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let slots = d.path().join("slots");
+    env.set("ENGINEERING_RULES", &rules);
+    env.set("HEAVY_LOCK_DIR", &slots);
+    env.set("PADDOCK_ENV_CANARY", "1");
+    let envlog = d.path().join("envlog");
+    let path = fake_bin(d.path(), &format!("env >> {}; exit 0", envlog.display()));
+    let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None, false);
+    let seen = std::fs::read_to_string(&envlog).unwrap_or_default();
+    assert!(!marker.exists(), "the machine's heavy.sh ran (exit {code}): {err}{out}");
+    assert!(!slots.exists(), "a machine-wide slot folder was made (ER-14)");
+    let unlisted: Vec<&str> = seen
+        .lines()
+        .filter_map(|l| l.split_once('='))
+        .map(|(k, _)| k)
+        .filter(|k| !listed(k))
+        .collect();
+    assert!(unlisted.is_empty(), "the child saw variables nobody listed: {unlisted:?}");
 }

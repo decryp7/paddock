@@ -5,12 +5,13 @@
 #![cfg(windows)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Output;
 
 #[allow(clippy::disallowed_methods)]
 fn run(home: &Path, tables: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["ci", "isolation"])
         .args(args)
         .env_clear()

@@ -151,8 +151,8 @@ fn built_store_worker() -> std::path::PathBuf {
     let profile_dir = paddock_testkit::cargo_layout::profile_dir();
     let release = profile_dir.file_name().is_some_and(|n| n == "release");
     store_worker_in(&profile_dir, || {
-        let mut build = debrief_plugin_api::process::quiet_command(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        build.args(["build", "-q", "-p", "debrief-store-worker"]);
+        let mut build = paddock_testkit::TestCommand::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        build.cargo_target_dir().args(["build", "-q", "-p", "debrief-store-worker"]);
         if release {
             build.arg("--release");
         }

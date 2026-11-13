@@ -308,22 +308,23 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool, s
     sibling().into_iter().collect()
 }
 
-/// Where a `heavy.sh` may sit when PATH has none: `$ENGINEERING_RULES/scripts/heavy.sh`, else the `engineering-rules` checkout beside
-/// the main checkout of this repository (a worktree's `.git` file leads to it). The first candidate that is a file. None on Windows:
+/// Where a `heavy.sh` may sit when PATH has none: `$ENGINEERING_RULES/scripts/heavy.sh` when that variable is set (and nowhere else),
+/// else the `engineering-rules` checkout beside the main checkout of this repository (a worktree's `.git` file leads to it). None on Windows:
 /// `heavy.sh` is a shell script that CreateProcess cannot start.
 pub fn sibling_heavy(root: &Path, env: &HashMap<String, String>) -> Option<String> {
     if cfg!(windows) {
         return None;
     }
-    let mut dirs: Vec<PathBuf> = env
-        .get("ENGINEERING_RULES")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
-        .into_iter()
-        .collect();
-    if let Ok(repo) = crate::worktree::git::Repo::discover(root) {
-        dirs.extend(repo.primary.parent().map(|p| p.join("engineering-rules")));
-    }
+    let named = env.get("ENGINEERING_RULES").filter(|d| !d.is_empty());
+    let dirs: Vec<PathBuf> = match named {
+        // A named folder is the only place: one without heavy.sh means none, not "try the checkout beside this repository".
+        Some(d) => vec![PathBuf::from(d)],
+        None => crate::worktree::git::Repo::discover(root)
+            .ok()
+            .and_then(|repo| repo.primary.parent().map(|p| p.join("engineering-rules")))
+            .into_iter()
+            .collect(),
+    };
     dirs.into_iter()
         .map(|d| d.join("scripts/heavy.sh"))
         .find(|f| f.is_file())
@@ -635,6 +636,28 @@ mod tests {
         // no such checkout beside it: nothing
         std::fs::remove_file(t.path().join("engineering-rules/scripts/heavy.sh")).unwrap();
         assert_eq!(sibling_heavy(&main, &HashMap::new()), None);
+    }
+
+    /// A named `ENGINEERING_RULES` is the only place looked in: a folder without `heavy.sh` means "none", never "try the checkout
+    /// beside this repository" (ADR 0100: a test names an empty folder so the machine's own checkout is not found).
+    #[cfg(unix)]
+    #[test]
+    fn a_named_engineering_rules_folder_is_the_only_place_looked_in() {
+        let t = tempfile::tempdir().unwrap();
+        let main = t.path().join("repo");
+        std::fs::create_dir_all(t.path().join("engineering-rules/scripts")).unwrap();
+        std::fs::write(t.path().join("engineering-rules/scripts/heavy.sh"), "#!/bin/sh\n").unwrap();
+        std::fs::create_dir(&main).unwrap();
+        assert!(
+            paddock_proc::command("git")
+                .args(["init", "-q"])
+                .current_dir(&main)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let named = HashMap::from([("ENGINEERING_RULES".to_string(), t.path().join("empty").display().to_string())]);
+        assert_eq!(sibling_heavy(&main, &named), None, "the checkout beside the repository was used");
     }
 
     #[test]

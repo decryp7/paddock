@@ -4,10 +4,10 @@
 // windows-twin: none: it runs a shell script that only runs on Linux and macOS
 #![cfg(unix)]
 use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
+use paddock_testkit::TestCommand;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -110,10 +110,6 @@ impl Run {
 }
 
 /// Runs the publish script (with `bash -x`, so a leaked secret would show in the trace) in a fixture against `store`.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the script under test; nothing here ends a process by pid"
-)]
 fn publish(store: &Store) -> Run {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
@@ -134,7 +130,7 @@ fn publish(store: &Store) -> Run {
     .unwrap();
     let (consumer_hash, _) = f.both(&[("RUSTC", shims.join("rustc").display().to_string())]);
     let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
-    let out = Command::new("bash")
+    let out = TestCommand::new("bash")
         .arg("-x")
         .arg(&script)
         .current_dir(f.root())

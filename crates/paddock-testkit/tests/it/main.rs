@@ -9,6 +9,7 @@ mod golden;
 mod hostile;
 mod limits;
 mod net;
+mod process;
 mod runner;
 mod scratch;
 #[cfg(windows)]

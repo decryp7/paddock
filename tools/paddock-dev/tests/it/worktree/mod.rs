@@ -12,6 +12,7 @@ mod ops;
 mod oracle;
 mod primary;
 
+use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -98,7 +99,7 @@ impl Fixture {
 
     /// The tool as a command: run in `cwd`, with the test's git config (ER-14: never the user's), the worktree root set to
     /// this fixture's folder and no agent identity in the environment.
-    pub fn cmd(&self, cwd: &Path, args: &[&str]) -> Command {
+    pub fn cmd(&self, cwd: &Path, args: &[&str]) -> TestCommand {
         let mut c = self.cmd_text(cwd, args);
         c.arg("--json");
         c
@@ -107,8 +108,8 @@ impl Fixture {
     /// Like [`Fixture::cmd`] without `--json` (the text a person reads).
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    pub fn cmd_text(&self, cwd: &Path, args: &[&str]) -> Command {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    pub fn cmd_text(&self, cwd: &Path, args: &[&str]) -> TestCommand {
+        let mut c = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         c.args(args)
             .current_dir(cwd)
             .env("GIT_CONFIG_GLOBAL", &self.gitconfig)

@@ -1,6 +1,7 @@
 //! `./dev pr` end to end: the real binary and curl against a fake Gitea on 127.0.0.1 (never the real server), in a throw-away
 //! repository. Checks what reaches the server (method, path, token header, JSON body) and that the token is printed nowhere.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -169,7 +170,7 @@ fn repo() -> tempfile::TempDir {
 fn dev(root: &Path, server: &str, args: &[&str]) -> (i32, String, String) {
     // The common flags go right after `pr <command>`: `pr label` takes every later word as a change.
     let at = args.iter().position(|a| *a == "pr").unwrap() + 2;
-    let out = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(&args[..at])
         .args(["--server", server, "--repo", "o/r", "--root"])
         .arg(root)
@@ -249,7 +250,7 @@ fn sync_open_label_and_list_against_a_local_fake_gitea() {
 
 #[test]
 fn no_token_is_a_usage_error_that_says_what_to_do() {
-    let out = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["pr", "list", "--server", "http://127.0.0.1:9"])
         .env_remove("GITEA_TOKEN")
         .output()

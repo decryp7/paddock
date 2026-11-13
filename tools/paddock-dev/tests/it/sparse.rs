@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 #![cfg(unix)]
 // windows-twin: none: owed; the test came Unix-only with the worktree gates profile (73fad2308) and has no Windows run yet
+use paddock_testkit::TestCommand;
 use std::path::Path;
 use std::process::Command;
 
@@ -49,7 +50,7 @@ fn sparse_fixture() -> tempfile::TempDir {
 // Starts the tool under test by its cargo-built path (a throw-away fixture), never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn dev(dir: &Path, args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(args)
         .current_dir(dir)
         .env_remove("GITHUB_ACTIONS")

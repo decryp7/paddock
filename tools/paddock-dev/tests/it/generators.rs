@@ -2,6 +2,7 @@
 //! `./dev gen check` and the generator step of `./dev merge check` run real (harmless) commands in an invented repository.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::generators::registry::Registry;
+use paddock_testkit::TestCommand;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -53,8 +54,8 @@ impl Repo {
 
     // Starts git and the tool under test.
     #[allow(clippy::disallowed_methods)]
-    fn cmd(&self, program: &str) -> Command {
-        let mut c = Command::new(program);
+    fn cmd(&self, program: &str) -> TestCommand {
+        let mut c = TestCommand::new(program);
         let empty = if cfg!(windows) { "NUL" } else { "/dev/null" };
         c.current_dir(self.dir.path())
             .env("GIT_CONFIG_NOSYSTEM", "1")
@@ -64,6 +65,11 @@ impl Repo {
             .env("GIT_COMMITTER_NAME", "t")
             .env("GIT_COMMITTER_EMAIL", "t@example.invalid");
         c
+    }
+
+    /// The tool under test, started like git above.
+    fn dev_cmd(&self) -> TestCommand {
+        self.cmd(env!("CARGO_BIN_EXE_paddock-dev"))
     }
 
     fn git(&self, args: &[&str]) -> String {
@@ -96,7 +102,7 @@ impl Repo {
 
     fn dev(&self, args: &[&str]) -> (i32, String) {
         let out = self
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .dev_cmd()
             .env("PADDOCK_DEV_TARGET_DIR", self.builds.path())
             .env("HOME", self.home.path())
             .args(args)
@@ -284,7 +290,7 @@ fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depen
         .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
         .unwrap();
     for tool in ["tools/paddock-dev", "tools/heavy", "tools/wiki"] {
-        let out = Command::new(env!("CARGO"))
+        let out = TestCommand::new(env!("CARGO"))
             .args([
                 "metadata",
                 "--format-version",

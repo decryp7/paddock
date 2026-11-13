@@ -1,6 +1,7 @@
 //! `inputs.txt` lists exactly what decides the binary: the tool's folder, the folders of its path dependencies (normal and
 //! build dependencies only; dev-dependencies change the hash only through Cargo.lock) and the files that configure the build.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -27,7 +28,7 @@ fn host_triple() -> String {
 
 fn metadata(tool: &str) -> Value {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(tool);
-    let out = Command::new(env!("CARGO"))
+    let out = TestCommand::new(env!("CARGO"))
         .args([
             "metadata",
             "--format-version",

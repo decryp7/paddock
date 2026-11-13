@@ -14,6 +14,7 @@
 
 pub mod baseline;
 pub mod c119;
+pub mod c123;
 pub mod c39;
 pub mod c53;
 pub mod c53_liveness;
@@ -107,7 +108,7 @@ pub trait Check {
 
 /// The checks the host has, in the order of `conformance/src/checks/index.mjs`.
 pub fn registry() -> Vec<Box<dyn Check>> {
-    vec![Box::new(c39::C39), Box::new(c53::C53), Box::new(c119::C119)]
+    vec![Box::new(c39::C39), Box::new(c53::C53), Box::new(c119::C119), Box::new(c123::C123)]
 }
 
 /// The inputs of a run.

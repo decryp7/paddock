@@ -148,7 +148,7 @@ fn tree_has(krate: &str, target: &str) -> Result<bool, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let manifest = root().join("apps/dyno/Cargo.toml");
     let started = std::time::Instant::now();
-    let mut cmd = dyno_platform::process::command(&cargo);
+    let mut cmd = paddock_testkit::TestCommand::new(&cargo);
     cmd.args([
         "tree",
         "--offline",
@@ -163,6 +163,7 @@ fn tree_has(krate: &str, target: &str) -> Result<bool, String> {
         "--manifest-path",
     ])
     .arg(&manifest);
+    let (cmd, _private) = cmd.into_parts();
     let out =
         dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(120)).map_err(|e| format!("cargo tree could not run: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout);

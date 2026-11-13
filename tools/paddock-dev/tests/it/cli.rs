@@ -1,5 +1,6 @@
 //! The command line contract: one JSON object with --json, stable exit codes, help and errors that name the next step.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::process::Command;
 
@@ -9,7 +10,7 @@ fn dev(args: &[&str]) -> (i32, String, String) {
 
 /// Runs `dev` in `dir` (the process's own folder when `None`): a test that reads a repository gives it one of its own.
 fn dev_in(dir: Option<&std::path::Path>, args: &[&str]) -> (i32, String, String) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.args(args);
     if let Some(d) = dir {
         cmd.current_dir(d);
@@ -116,7 +117,7 @@ fn graph_affected_with_nothing_to_plan_is_usage() {
 fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step() {
     let d = tempfile::tempdir().unwrap();
     let run = |dir: &std::path::Path| {
-        let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["self", "hash"])
             .current_dir(dir)
             .env("GIT_CEILING_DIRECTORIES", d.path().parent().unwrap())
@@ -137,7 +138,7 @@ fn self_hash_outside_a_repository_or_without_an_input_list_names_the_next_step()
 
 /// `dev plan --commit-range|--commit-flags` in a repository with two commits, the event passed as the workflow passes it.
 fn plan_lint(repo: &std::path::Path, mode: &str, env: &[(&str, &str)]) -> (i32, String, String) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.current_dir(repo)
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
@@ -225,7 +226,7 @@ fn plan_refuses_json_mentions_commit_flags_in_its_usage_and_annotates_errors_in_
     let (code, _, err) = dev(&["--json", "plan", "--all"]);
     assert_eq!(code, 2);
     assert!(err.contains("no --json mode"), "{err}");
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["plan", "--nope"])
         .env("GITHUB_ACTIONS", "true")
         .output()

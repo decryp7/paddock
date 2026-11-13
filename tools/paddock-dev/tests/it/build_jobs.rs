@@ -9,9 +9,9 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
@@ -85,7 +85,7 @@ impl Scratch {
     #[allow(clippy::disallowed_methods)]
     fn shell(&self, split: Option<&str>, vars: &[(&str, &str)], with_env_file: bool) -> Result {
         self.reset();
-        let mut cmd = Command::new("bash");
+        let mut cmd = TestCommand::new("bash");
         cmd.args(["-e", "-o", "pipefail"]).arg(repo().join("conformance/ci/build-jobs.sh"));
         cmd.args(split);
         let out = cmd.env_clear().envs(self.base_env(vars, with_env_file)).output().unwrap();
@@ -95,7 +95,7 @@ impl Scratch {
     #[allow(clippy::disallowed_methods)]
     fn rust(&self, split: Option<&str>, vars: &[(&str, &str)], with_env_file: bool) -> Result {
         self.reset();
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         cmd.args(["ci", "build-jobs"]).args(split).current_dir(repo());
         let out = cmd.env_clear().envs(self.base_env(vars, with_env_file)).output().unwrap();
         self.collect(out)
@@ -346,7 +346,7 @@ fn on_a_windows_host_github_env_is_read_as_a_drive_path() {
     let mut vars = host("Windows", "16", "32768");
     vars.push(("PADDOCK_CI_ASSUME_WINDOWS", "1"));
     vars.push(("GITHUB_ENV", "/c/paddock-build-jobs-test-no-such-folder/env"));
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.args(["ci", "build-jobs"]).current_dir(repo());
     let out = cmd.env_clear().envs(s.base_env(&vars, false)).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);

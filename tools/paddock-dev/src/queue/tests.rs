@@ -9,6 +9,7 @@ use crate::ci_runs::verdict::Verdict;
 use crate::pr::fake::FakeGitea;
 use crate::pr::gitea::{Api, Pull};
 use crate::pr::labels;
+use paddock_testkit::TestCommand;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -1354,7 +1355,7 @@ fn a_train_full_of_things_that_run_executes_nothing_during_a_tick() {
     w.approve(1, &head);
     // Positive control: the files do run when something runs them, so the sentinel can see a violation.
     git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
-    let ran = paddock_proc::command("sh")
+    let ran = TestCommand::new("sh")
         .arg("scripts/gate.sh")
         .current_dir(&w.repos.author)
         .status()
@@ -1850,7 +1851,7 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
         std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     let path = format!("{}:{}", shim.path().display(), std::env::var("PATH").unwrap_or_default());
-    let out = paddock_proc::command("sh")
+    let out = TestCommand::new("sh")
         .args(["-ec", &script])
         .current_dir(repo_root())
         .env("PATH", path)
@@ -1945,7 +1946,7 @@ fn the_commits_job_lints_a_real_train_with_the_base_the_tick_dispatches() {
     assert_eq!(range.range, format!("{base}..{head}"));
     git(&w.repos.queue, &["fetch", "--quiet", "origin"]);
     let lint = repo_root().join("conformance/bin/paddock-conformance.mjs");
-    let out = paddock_proc::command("node")
+    let out = TestCommand::new("node")
         .arg(&lint)
         .args(["commit-lint", "--range", &range.range])
         .current_dir(&w.repos.queue)
@@ -2507,7 +2508,7 @@ static PLANNER_DIRS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec:
 /// it is given. Run in a pull request's tree it would execute the pull request.
 fn cargo_planner(trusted: &Path, _main: &str, _head: &str) -> Result<serde_json::Value, String> {
     PLANNER_DIRS.lock().unwrap().push(trusted.to_path_buf());
-    let _ = paddock_proc::command("cargo")
+    let _ = TestCommand::new("cargo")
         .args(["check", "--offline", "--quiet"])
         .current_dir(trusted)
         .output();
@@ -2524,7 +2525,7 @@ fn the_planner_runs_cargo_only_in_the_checkout_of_main_never_in_the_merge_clone(
     w.approve(1, &head);
     // Positive control: cargo check in the pull request's own tree runs its build script and its toolchain wrapper.
     git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
-    let _ = paddock_proc::command("cargo")
+    let _ = TestCommand::new("cargo")
         .args(["check", "--offline", "--quiet"])
         .current_dir(&w.repos.author)
         .output();

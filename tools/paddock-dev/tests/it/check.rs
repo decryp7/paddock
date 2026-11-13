@@ -10,6 +10,7 @@
 use paddock_dev::check::mask::mask_rust;
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
+use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -48,7 +49,7 @@ fn skip(reason: &str) {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 fn has_node() -> bool {
-    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    TestCommand::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
 /// The fixture cases materialized into a scratch tree (`a__b__c.rs.txt` is `a/b/c.rs`).
@@ -142,7 +143,7 @@ fn fixture_masks_equal_the_recorded_js_masks() {
 )]
 /// Runs a node program (an ES module given on the command line) in the repository and returns its standard output.
 fn node(driver: &str, env: &[(&str, String)]) -> String {
-    let mut c = Command::new("node");
+    let mut c = TestCommand::new("node");
     c.args(["--input-type=module", "-e", driver]).current_dir(repo_root());
     // The parity runs measure growth against `origin/main` of their own repository, whatever the caller's environment says.
     c.env_remove("PADDOCK_BASE_REF");
@@ -169,7 +170,7 @@ const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
 /// around the call.
 fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
     use std::io::{BufRead, Read};
-    let mut c = Command::new("node");
+    let mut c = TestCommand::new("node");
     c.args(["--input-type=module", "-e", driver])
         .current_dir(repo_root())
         .stdout(std::process::Stdio::piped())
@@ -473,7 +474,7 @@ fn the_report_has_the_js_shape_and_the_run_records() {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 fn dev(args: &[&str]) -> (i32, String, String) {
-    let o = Command::new(env!("CARGO_BIN_EXE_paddock-dev")).args(args).output().unwrap();
+    let o = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev")).args(args).output().unwrap();
     (
         o.status.code().unwrap(),
         String::from_utf8_lossy(&o.stdout).into_owned(),

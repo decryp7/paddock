@@ -5,8 +5,8 @@
 //! unit tests of `ci_host` with an injected link maker and by the Windows jobs themselves.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 struct Run {
     code: i32,
@@ -18,7 +18,7 @@ struct Run {
 #[allow(clippy::disallowed_methods)]
 fn dev(dir: &Path, args: &[&str], vars: &[(&str, String)]) -> Run {
     let env_file: PathBuf = dir.join("github-env");
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.arg("ci").args(args).current_dir(dir).env_clear();
     for key in [
         "PATH",

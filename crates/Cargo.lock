@@ -3932,6 +3932,7 @@ dependencies = [
  "paddock-siblings",
  "paddock-startup",
  "paddock-storage",
+ "paddock-testkit",
  "paddock-updater",
  "paddock-window",
  "paddock-workspace-hack",

@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_cli::Exit;
 use paddock_dev::locks::{Kind, Ran, Runner, check_all, plan, skipped, sync_all};
+use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
@@ -129,7 +130,7 @@ fn run(dir: &Path, program: &str, args: &[&str]) {
 /// `./dev --json locks <sub>` in `root`, with cargo and npm kept away from the user's homes.
 #[allow(clippy::disallowed_methods)] // the binary under test
 fn dev(root: &Path, home: &Path, sub: &str) -> (i32, Value, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["--json", "locks", sub, "--root"])
         .arg(root)
         .env("CARGO_HOME", home.join("cargo"))

@@ -7,6 +7,7 @@
 //! one real job made these tests fail or time out on a loaded runner (CI run 6628).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods, missing_docs)]
 
+use paddock_testkit::TestCommand;
 use pitcrew_core::health::RunnerStatus;
 use pitcrew_core::history::HistoryEvent;
 use pitcrew_core::history::HistoryKind;
@@ -36,7 +37,8 @@ fn fake_runner() -> PathBuf {
             // when it is missing: nextest runs every test in a process of its own, and one `cargo build` per test queued
             // on cargo's build lock until the tests ran out of time (and missed a build folder set by `--config`).
             if !path.exists() {
-                let status = std::process::Command::new(env!("CARGO"))
+                let status = TestCommand::new(env!("CARGO"))
+                    .cargo_target_dir()
                     .args(["build", "--quiet", "-p", "pitcrew-service", "--example", "fake_runner"])
                     .status()
                     .unwrap();

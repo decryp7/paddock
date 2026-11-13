@@ -4,10 +4,10 @@
 // windows-twin: none: it runs the ./dev shell wrapper, which Windows runs through Git bash on every job
 #![cfg(unix)]
 use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
+use paddock_testkit::TestCommand;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -100,14 +100,10 @@ fn published_tool(hash: &str) -> Vec<u8> {
         .into_bytes()
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the shell script under test; paddock-proc is the production kill path, nothing here is killed"
-)]
 fn sha256_of(bytes: &[u8], scratch: &Path) -> String {
     let p = scratch.join("sum-input");
     std::fs::write(&p, bytes).unwrap();
-    let out = Command::new("sh")
+    let out = TestCommand::new("sh")
         .args(["-c", "(sha256sum \"$1\" 2>/dev/null || shasum -a 256 \"$1\") | cut -d' ' -f1"])
         .arg("x")
         .arg(&p)
@@ -149,15 +145,11 @@ impl Setup {
     }
 
     /// Runs `./dev hello` with a stand-in cargo. `env` is added to a base that downloads from `server`.
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "a test starts the shell script under test; paddock-proc is the production kill path, nothing here is killed"
-    )]
     fn run(&self, server: &Server, env: &[(&str, &str)]) -> (i32, String, String) {
         let shims = self.f.cargo_home.path().join("shims");
         write_script(&shims.join("cargo"), &shim_cargo(0));
         let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
-        let mut cmd = Command::new("sh");
+        let mut cmd = TestCommand::new("sh");
         cmd.arg(self.f.root().join("dev"))
             .arg("hello")
             .current_dir(self.f.root())
@@ -418,8 +410,7 @@ fn a_shell_trace_of_a_download_never_prints_the_token() {
     let shims = s.f.cargo_home.path().join("shims");
     write_script(&shims.join("cargo"), &shim_cargo(0));
     let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
-    #[expect(clippy::disallowed_methods, reason = "a test starts the wrapper under test with sh -x")]
-    let out = Command::new("sh")
+    let out = TestCommand::new("sh")
         .arg("-x")
         .arg(s.f.root().join("dev"))
         .arg("hello")
