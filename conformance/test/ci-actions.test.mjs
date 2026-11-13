@@ -218,11 +218,20 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
       '',
     ].join('\n'),
   );
-  for (const tool of ['rustc', 'cargo']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} "\${FAKE_RUSTC:-0.1.0}"\n`);
-  for (const f of ['rustup', 'rustc', 'cargo']) chmodSync(join(dir, 'bin', f), 0o755);
+  for (const tool of ['rustc', 'cargo', 'rustfmt']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} "\${FAKE_RUSTC:-0.1.0}"\n`);
+  for (const f of ['rustup', 'rustc', 'cargo', 'rustfmt']) chmodSync(join(dir, 'bin', f), 0o755);
   writeFileSync(join(dir, 'step.sh'), body);
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
-    env: { PATH: `${join(dir, 'bin')}:/usr/bin:/bin`, HOME: dir, RUNNER_OS: 'Windows', TOOLCHAIN: 'stable', COMPONENTS: 'clippy rustfmt', TARGETS: '', ...env },
+    env: {
+      PATH: `${join(dir, 'bin')}:/usr/bin:/bin`,
+      HOME: dir,
+      RUNNER_OS: 'Windows',
+      TOOLCHAIN: 'stable',
+      COMPONENTS: 'clippy rustfmt',
+      TARGETS: '',
+      PADDOCK_DEV_SCRIPT: join(PADDOCK, 'dev'),
+      ...env,
+    },
     encoding: 'utf8',
   });
   return { status: r.status, out: r.stdout + r.stderr, calls: existsSync(calls) ? read(calls) : '' };
@@ -345,6 +354,11 @@ test('a failed toolchain install fails the step with a message that names the ca
   assert.equal(failed.status, 1, failed.out);
   assert.match(failed.out, /::error::rustup could not install the stable toolchain \(exit 1\)/);
   assert.doesNotMatch(failed.out, /NTSTATUS/);
+  // ER-26 (CI run 8060): a failed or half install is uninstalled and tried once more before the step gives up, and the error says
+  // what to run on the runner.
+  assert.match(failed.calls, /toolchain install stable [^\n]*\ntoolchain uninstall stable\ntoolchain install stable /);
+  assert.match(failed.out, /rustup toolchain uninstall stable/);
+  assert.equal((failed.out.match(/::error::/g) ?? []).length, 1, 'one error line (ER-27)');
 });
 
 // docs/plans/ci-in-rust.md, step 1: setup-rust runs ./dev ci setup-rust, except on the release path until its own lane. A tag run

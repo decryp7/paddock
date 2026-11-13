@@ -503,6 +503,8 @@ fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf
             rustup_body.replace("MARKER", &marker.display().to_string())
         ),
     );
+    // The install is checked by running cargo and the components the file asks for (clippy here); a test may replace this one.
+    write_script(&shims.join("cargo"), "echo cargo 1.90.0");
     (shims, log)
 }
 
@@ -584,6 +586,115 @@ fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
         !String::from_utf8_lossy(&second.stderr).contains("installing"),
         "{}",
         String::from_utf8_lossy(&second.stderr)
+    );
+}
+
+/// A rustup whose first install leaves the toolchain half installed (rustc runs, `cargo clippy` does not), as the Windows runner's
+/// 1.100.0 after two jobs installed it at once (CI run 8060: "could not remove component file cargo.exe", then "the cargo-clippy
+/// binary is not applicable to the toolchain"). An uninstall repairs it when `repairable`. Returns the shims and rustup's log.
+#[cfg(unix)]
+fn rustup_half_installing(f: &Fixture, repairable: bool) -> (PathBuf, PathBuf) {
+    let repaired = f.cargo_home.path().join("repaired");
+    let uninstall = if repairable {
+        format!("touch '{}'", repaired.display())
+    } else {
+        String::new()
+    };
+    let (shims, log) = rustup_without_toolchain(
+        f,
+        &format!(
+            "case \"$1 $2\" in 'toolchain install') touch 'MARKER' ;; 'toolchain uninstall') rm -f 'MARKER'; {uninstall} ;; esac; exit 0"
+        ),
+    );
+    write_script(
+        &shims.join("cargo"),
+        &format!(
+            "if [ \"$1 $2\" = 'clippy --version' ]; then [ -e '{}' ] || {{ echo \"error: the 'cargo-clippy' binary is not applicable to the toolchain\" >&2; exit 1; }}; fi\necho cargo 1.90.0",
+            repaired.display()
+        ),
+    );
+    (shims, log)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::Output {
+    // Run from outside any repository: the setup-rust action calls this mode before anything else is set up.
+    let outside = tempfile::tempdir().unwrap();
+    Command::new("sh")
+        .arg(f.root().join("dev"))
+        .arg("--install-toolchain")
+        .args(args)
+        .current_dir(outside.path())
+        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
+        .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
+        .env_remove("RUSTUP_TOOLCHAIN")
+        .output()
+        .unwrap()
+}
+
+/// ER-26 (runs 8027, 8028, 8060): a toolchain whose install succeeded but whose cargo, clippy or rustfmt does not run is uninstalled
+/// and installed again, inside the install lock, and the job goes on.
+#[cfg(unix)]
+#[test]
+fn a_half_installed_toolchain_is_uninstalled_and_installed_again_under_the_lock() {
+    let f = Fixture::new();
+    let (shims, log) = rustup_half_installing(&f, true);
+    let out = install_toolchain(&f, &shims, &["1.90.0", "clippy", ""]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{err}");
+    assert!(err.contains("cargo clippy does not run") && err.contains("repaired"), "{err}");
+    let log = std::fs::read_to_string(log).unwrap();
+    let calls: Vec<&str> = log.lines().map(|l| l.split_once(": ").map_or(l, |(_, c)| c)).collect();
+    assert_eq!(
+        calls,
+        [
+            "toolchain install 1.90.0 --profile minimal --component clippy --no-self-update",
+            "toolchain uninstall 1.90.0",
+            "toolchain install 1.90.0 --profile minimal --component clippy --no-self-update",
+        ],
+        "{log}"
+    );
+    // The lock is released: a second run takes it at once.
+    assert!(!f.cargo_home.path().join("rustup/.paddock-install-1.90.0.lock").exists());
+    // ./dev's own install (a runner whose rustc does not run) checks and repairs the same way.
+    let g = Fixture::new();
+    let (shims, _) = rustup_half_installing(&g, true);
+    let ensure = Command::new("sh")
+        .arg(g.root().join("dev"))
+        .arg("--ensure-toolchain")
+        .current_dir(g.root())
+        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
+        .env("CARGO_HOME", g.cargo_home.path())
+        .env("RUSTUP_HOME", g.cargo_home.path().join("rustup"))
+        .env_remove("RUSTC")
+        .env_remove("CARGO_BUILD_RUSTC")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&ensure.stderr);
+    assert_eq!(ensure.status.code(), Some(0), "{err}");
+    assert!(err.contains("cargo clippy does not run") && err.contains("repaired"), "{err}");
+}
+
+/// A toolchain that a reinstall does not repair is an error with the next step (ER-27), never a job that runs on a broken compiler.
+#[cfg(unix)]
+#[test]
+fn a_toolchain_a_reinstall_does_not_repair_is_an_error_with_the_next_step() {
+    let f = Fixture::new();
+    let (shims, _) = rustup_half_installing(&f, false);
+    let out = install_toolchain(&f, &shims, &["1.90.0", "clippy", ""]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code(), Some(0), "{err}");
+    assert!(
+        err.contains("::error::") && err.contains("cargo clippy does not run") && err.contains("rustup toolchain uninstall 1.90.0"),
+        "{err}"
+    );
+    assert!(
+        !f.cargo_home.path().join("rustup/.paddock-install-1.90.0.lock").exists(),
+        "the lock is released on failure too"
     );
 }
 

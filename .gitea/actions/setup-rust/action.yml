@@ -31,6 +31,8 @@ runs:
         TOOLCHAIN: ${{ inputs.toolchain }}
         COMPONENTS: ${{ inputs.components }}
         TARGETS: ${{ inputs.targets }}
+        # The install itself is ./dev's (the repository root's wrapper, present in every checkout): one install per runner at a time.
+        PADDOCK_DEV_SCRIPT: ${{ github.action_path }}/../../../dev
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
@@ -71,20 +73,11 @@ runs:
             fi
           done
         fi
-        args=(--profile minimal)
-        for c in $COMPONENTS; do args+=(--component "$c"); done
-        for t in $TARGETS; do args+=(--target "$t"); done
-        rc=0
-        rustup toolchain install "$TOOLCHAIN" "${args[@]}" --no-self-update || rc=$?
-        if [ "$rc" != 0 ]; then
-          why="exit $rc"
-          # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
-          if [ "$rc" = 127 ] && [ "$RUNNER_OS" = Windows ]; then
-            why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-          fi
-          echo "::error::rustup could not install the $TOOLCHAIN toolchain ($why). Run 'rustup toolchain install $TOOLCHAIN' on the runner to see why."
-          exit 1
-        fi
+        # One install of a toolchain at a time per runner (a lock in RUSTUP_HOME, shared with ./dev's own install), then a check that
+        # rustc, cargo and the components really run; a half-installed or conflicted toolchain is uninstalled and installed again inside
+        # the lock (CI run 8060: two Windows jobs installed 1.100.0 at once and left cargo-clippy "not applicable"; ER-26). It prints the
+        # one ::error:: line with the cause and the next step itself.
+        sh "$PADDOCK_DEV_SCRIPT" --install-toolchain "$TOOLCHAIN" "$COMPONENTS" "$TARGETS" || exit 1
         rustup default "$TOOLCHAIN"
         settle "$TOOLCHAIN"
         rustc --version

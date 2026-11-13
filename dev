@@ -16,6 +16,145 @@ set -eu
 restarted=${PADDOCK_DEV_RESTARTED:-}
 unset PADDOCK_DEV_RESTARTED
 
+# run_bounded <seconds> <command...>: runs it in the background and ends it at the limit (ER-32: no wait without a maximum). The
+# command is ended by the pid this function started, never by a name.
+run_bounded() {
+  _lim=$1
+  shift
+  "$@" &
+  _pid=$!
+  _t=0
+  while kill -0 "$_pid" 2>/dev/null; do
+    if [ "$_t" -ge "$_lim" ]; then
+      kill "$_pid" 2>/dev/null || true
+      wait "$_pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    _t=$((_t + 1))
+  done
+  wait "$_pid"
+}
+
+# proc_stamp <pid>: the start time of a process, empty when it is not running ("-" when it runs and the platform's ps cannot say when).
+proc_stamp() {
+  kill -0 "$1" 2>/dev/null || return 0
+  _st=$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//') || _st=
+  printf '%s\n' "${_st:--}"
+}
+
+# toolchain_lock <acquire|release> <pin>: one `rustup toolchain install` of a pin at a time on a host (two installs of one pin
+# in one RUSTUP_HOME corrupt each other). A `mkdir` lock in RUSTUP_HOME with the owner's pid and start time. A lock whose owner is gone,
+# or whose pid now belongs to another process (another start time), is taken over; a lock is never judged by its age (rule 53).
+# The wait for a live owner is bounded by the install time limit.
+toolchain_lock() {
+  _lk="${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}/.paddock-install-$2.lock"
+  if [ "$1" = release ]; then rm -rf "${_lk:?}" || true; return 0; fi
+  _w0=$(date +%s)
+  while ! mkdir "$_lk" 2>/dev/null; do
+    _op=$(sed -n 1p "$_lk/owner" 2>/dev/null || true)
+    _os=$(sed -n 2p "$_lk/owner" 2>/dev/null || true)
+    if [ -n "$_op" ] && [ "$(proc_stamp "$_op")" != "$_os" ]; then
+      echo "dev: the toolchain install lock $_lk belongs to a process ($_op) that is gone; taking it over." >&2
+      rm -rf "${_lk:?}" || true
+      continue
+    fi
+    if [ $(($(date +%s) - _w0)) -ge "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" ]; then
+      echo "::error::./dev: another install of the toolchain $2 (pid ${_op:-unknown}) holds $_lk and did not finish within ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s. Wait for it, or if no install runs on this host, delete $_lk and run ./dev again." >&2
+      return 1
+    fi
+    sleep 1
+  done
+  printf '%s\n%s\n' "$$" "$(proc_stamp "$$")" >"$_lk/owner"
+  return 0
+}
+
+# toolchain_broken <name> <components>: prints the first part of the toolchain that does not run (rustc, cargo, cargo clippy, rustfmt;
+# clippy and rustfmt only when asked for), nothing when all run. Each check is bounded (ER-32).
+toolchain_broken() {
+  if ! run_bounded 60 env RUSTUP_TOOLCHAIN="$1" rustc --version >/dev/null 2>&1; then echo rustc; return 0; fi
+  if ! run_bounded 60 env RUSTUP_TOOLCHAIN="$1" cargo --version >/dev/null 2>&1; then echo cargo; return 0; fi
+  for _c in $2; do
+    case $_c in
+      clippy) run_bounded 60 env RUSTUP_TOOLCHAIN="$1" cargo clippy --version >/dev/null 2>&1 || { echo "cargo clippy"; return 0; } ;;
+      rustfmt) run_bounded 60 env RUSTUP_TOOLCHAIN="$1" rustfmt --version >/dev/null 2>&1 || { echo rustfmt; return 0; } ;;
+    esac
+  done
+  return 0
+}
+
+# toolchain_install_checked <name> <components> <install-function>: with the install lock held, installs the toolchain and checks that
+# rustc, cargo and the clippy and rustfmt it should have really run. When the install failed or they do not (a half install; two jobs
+# that installed it at once, CI run 8060: "could not remove component file cargo.exe", then "cargo-clippy is not applicable to the
+# toolchain"), it uninstalls the toolchain and installs it once more (ER-26). A run out of time is uninstalled and not retried. Returns
+# 0 when it runs; otherwise sets toolchain_why and returns the install's exit code (124: the time limit; 3: installed, but it still
+# does not run).
+toolchain_install_checked() {
+  toolchain_why=
+  _ti=0
+  "$3" || _ti=$?
+  if [ "$_ti" -eq 124 ]; then
+    echo "dev: the install ran out of time; removing the half-installed toolchain $1." >&2
+    run_bounded 120 rustup toolchain uninstall "$1" >&2 || true
+    toolchain_why="exit 124"
+    return 124
+  fi
+  _bad=
+  if [ "$_ti" -eq 0 ]; then
+    _bad=$(toolchain_broken "$1" "$2")
+    [ -n "$_bad" ] || return 0
+    _what="$_bad does not run after the install"
+  else
+    _what="the install failed with exit $_ti"
+  fi
+  echo "dev: the toolchain $1 is half installed or in conflict ($_what); uninstalling it and installing it again." >&2
+  run_bounded 300 rustup toolchain uninstall "$1" >&2 || true
+  _ti=0
+  "$3" || _ti=$?
+  if [ "$_ti" -ne 0 ]; then
+    toolchain_why="exit $_ti"
+    return "$_ti"
+  fi
+  _bad=$(toolchain_broken "$1" "$2")
+  if [ -n "$_bad" ]; then
+    toolchain_why="$_bad does not run after a reinstall"
+    return 3
+  fi
+  echo "dev: repaired the toolchain $1 by installing it again." >&2
+  return 0
+}
+
+# --install-toolchain <toolchain> [<components>] [<targets>] (space-separated lists): the setup-rust action's install, before anything
+# else of the job (no repository or compiler needed). One install of a toolchain at a time per rustup home (toolchain_lock, shared with
+# ensure_toolchain below), checked and repaired by toolchain_install_checked, bounded by PADDOCK_DEV_TOOLCHAIN_TIMEOUT (default 900 s).
+# On failure one ::error:: line with the cause and the next step (ER-27), exit 1.
+if [ "${1:-}" = "--install-toolchain" ]; then
+  _name=${2:-}
+  [ -n "$_name" ] || { echo "::error::usage: ./dev --install-toolchain <toolchain> [<components>] [<targets>]" >&2; exit 2; }
+  _comps=${3:-}
+  _args="--profile minimal"
+  for _c in $_comps; do _args="$_args --component $_c"; done
+  for _t in ${4:-}; do _args="$_args --target $_t"; done
+  _args="$_args --no-self-update"
+  # shellcheck disable=SC2086,SC2329 # the lists are words; called through toolchain_install_checked
+  _install_named() { run_bounded "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" rustup toolchain install "$_name" $_args >&2; }
+  mkdir -p "${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}" 2>/dev/null || true
+  toolchain_lock acquire "$_name" || exit 1
+  _rc=0
+  toolchain_install_checked "$_name" "$_comps" _install_named || _rc=$?
+  toolchain_lock release "$_name"
+  if [ "$_rc" -ne 0 ]; then
+    _why=$toolchain_why
+    # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
+    if [ "$_rc" -eq 127 ] && [ "${RUNNER_OS:-}" = Windows ]; then
+      _why="$_why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
+    fi
+    echo "::error::rustup could not install the $_name toolchain ($_why). Next step: on the runner, with no job running, run 'rustup toolchain uninstall $_name' and then 'rustup toolchain install $_name' to see why." >&2
+    exit 1
+  fi
+  exit 0
+fi
+
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
 tool="$root/tools/paddock-dev"
 [ -f "$tool/inputs.txt" ] || {
@@ -102,59 +241,6 @@ toolchain_file() {
   done
 }
 
-# run_bounded <seconds> <command...>: runs it in the background and ends it at the limit (ER-32: no wait without a maximum). The
-# command is ended by the pid this function started, never by a name.
-run_bounded() {
-  _lim=$1
-  shift
-  "$@" &
-  _pid=$!
-  _t=0
-  while kill -0 "$_pid" 2>/dev/null; do
-    if [ "$_t" -ge "$_lim" ]; then
-      kill "$_pid" 2>/dev/null || true
-      wait "$_pid" 2>/dev/null || true
-      return 124
-    fi
-    sleep 1
-    _t=$((_t + 1))
-  done
-  wait "$_pid"
-}
-
-# proc_stamp <pid>: the start time of a process, empty when it is not running ("-" when it runs and the platform's ps cannot say when).
-proc_stamp() {
-  kill -0 "$1" 2>/dev/null || return 0
-  _st=$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//') || _st=
-  printf '%s\n' "${_st:--}"
-}
-
-# toolchain_lock <acquire|release> <pin>: one `rustup toolchain install` of a pin at a time on a host (two installs of one pin
-# in one RUSTUP_HOME corrupt each other). A `mkdir` lock in RUSTUP_HOME with the owner's pid and start time. A lock whose owner is gone,
-# or whose pid now belongs to another process (another start time), is taken over; a lock is never judged by its age (rule 53).
-# The wait for a live owner is bounded by the install time limit.
-toolchain_lock() {
-  _lk="${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}/.paddock-install-$2.lock"
-  if [ "$1" = release ]; then rm -rf "${_lk:?}" || true; return 0; fi
-  _w0=$(date +%s)
-  while ! mkdir "$_lk" 2>/dev/null; do
-    _op=$(sed -n 1p "$_lk/owner" 2>/dev/null || true)
-    _os=$(sed -n 2p "$_lk/owner" 2>/dev/null || true)
-    if [ -n "$_op" ] && [ "$(proc_stamp "$_op")" != "$_os" ]; then
-      echo "dev: the toolchain install lock $_lk belongs to a process ($_op) that is gone; taking it over." >&2
-      rm -rf "${_lk:?}" || true
-      continue
-    fi
-    if [ $(($(date +%s) - _w0)) -ge "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" ]; then
-      echo "::error::./dev: another install of the toolchain $2 (pid ${_op:-unknown}) holds $_lk and did not finish within ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s. Wait for it, or if no install runs on this host, delete $_lk and run ./dev again." >&2
-      return 1
-    fi
-    sleep 1
-  done
-  printf '%s\n%s\n' "$$" "$(proc_stamp "$$")" >"$_lk/owner"
-  return 0
-}
-
 # ensure_toolchain: the toolchain the repository pins (rust-toolchain.toml, with the profile and components it asks for) is installed.
 # rustup 1.28 no longer installs a pinned toolchain by itself, so a runner that has rustup but not yet that version has a `rustc` shim
 # that cannot run (run 8034: build-jobs ran ./dev before setup-rust, and the wrapper fell back to an old cached tool). Only when rustc
@@ -174,23 +260,21 @@ ensure_toolchain() {
   [ -n "$pin" ] || pin=$(tr -d '\r' <"$tf" | head -n 1)
   _i0=$(date +%s)
   mkdir -p "${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}" 2>/dev/null || true
+  comps=$(sed -n 's/^[[:space:]]*components[[:space:]]*=[[:space:]]*\[\(.*\)\].*/\1/p' "$tf" | head -n 1 | tr -d '",\r')
   toolchain_lock acquire "$pin" || return 1
   # The holder before us may have installed it.
-  if (cd "$tool" && rustc -vV >/dev/null 2>&1); then
+  if (cd "$tool" && rustc -vV >/dev/null 2>&1) && [ -z "$(toolchain_broken "$pin" "$comps")" ]; then
     toolchain_lock release "$pin"
     echo "dev: the toolchain $pin was installed by another run meanwhile." >&2
     return 0
   fi
   echo "dev: rustc does not run here; installing the toolchain $tf pins ($pin) with rustup (at most ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s)." >&2
+  _install_pinned() { (cd "$tool" && run_bounded "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" rustup toolchain install >&2); }
   _rc=0
-  (cd "$tool" && run_bounded "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" rustup toolchain install >&2) || _rc=$?
-  if [ "$_rc" -eq 124 ]; then
-    echo "dev: the install ran out of time; removing the half-installed toolchain $pin." >&2
-    (cd "$tool" && run_bounded 120 rustup toolchain uninstall "$pin" >&2) || true
-  fi
+  toolchain_install_checked "$pin" "$comps" _install_pinned || _rc=$?
   toolchain_lock release "$pin"
   if [ "$_rc" -ne 0 ]; then
-    echo "::error::./dev: 'rustup toolchain install' for $tf failed (exit $_rc, $(($(date +%s) - _i0)) s; 124 means the time limit). Run it by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
+    echo "::error::./dev: 'rustup toolchain install' for $tf failed ($toolchain_why, $(($(date +%s) - _i0)) s; exit 124 means the time limit). Run 'rustup toolchain uninstall $pin' and then 'rustup toolchain install' by hand in tools/paddock-dev to see why (network, disk, a proxy, another job using the toolchain), then run ./dev again." >&2
     return 1
   fi
   echo "dev: installed the pinned toolchain in $(($(date +%s) - _i0)) s." >&2
