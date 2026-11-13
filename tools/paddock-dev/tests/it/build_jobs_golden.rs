@@ -21,7 +21,7 @@ fn build_jobs(vars: &[(&str, &str)], split: Option<&str>, with_env_file: bool) -
     let dir = tempfile::tempdir().unwrap();
     let env_file: PathBuf = dir.path().join("github-env");
     let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
-    cmd.args(["ci", "build-jobs"]).args(split).env_clear();
+    cmd.args(["ci", "build-jobs"]).args(split);
     // What a program needs to start on every OS; never a token.
     for key in ["PATH", "SystemRoot", "SYSTEMROOT", "TEMP", "TMP", "NUMBER_OF_PROCESSORS", "HOME"] {
         if let Ok(v) = std::env::var(key) {

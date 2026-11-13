@@ -6,6 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_proc::ProcessId;
+use paddock_testkit::TestCommand;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::channel;
 use std::time::Duration;
@@ -68,15 +69,11 @@ fn wait_ready(agent: &mut Agent, mut ready: impl FnMut() -> bool, guard: Duratio
     }
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the test starts the real agent binary, with a temporary data folder and no console"
-)]
 fn start(dir: &std::path::Path) -> Agent {
     // Its standard error goes to a file beside the data folder, one per agent, for `evidence` (the line a forced end writes).
     let stderr = std::fs::File::create(stderr_file(dir, &format!("{}", next_agent()))).expect("the stderr file");
     Agent(Some(
-        Command::new(env!("CARGO_BIN_EXE_dyno-agent"))
+        TestCommand::new(env!("CARGO_BIN_EXE_dyno-agent"))
             .arg("run")
             .env("DYNO_DATA_DIR", dir)
             .stdin(Stdio::null())

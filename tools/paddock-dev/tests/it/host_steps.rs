@@ -241,7 +241,7 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
             .args(step.shell[1..].iter().map(|a| fill(a, fx)));
     }
     let cwd = step.cwd.map_or_else(repo, |c| fx.p(c));
-    cmd.current_dir(cwd).env_clear();
+    cmd.current_dir(cwd);
     for (k, v) in base_env(fx)
         .into_iter()
         .chain(step.env.iter().map(|(k, v)| (k.to_string(), fill(v, fx))))
@@ -827,7 +827,6 @@ fn host_cleanup_ends_a_real_process_of_the_job_and_only_that_one() {
     let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["ci", "host-cleanup", "--id", "pitwall", "--process-pattern", "{tmp}[/\\\\]marker-x"])
         .current_dir(fx.p("work"))
-        .env_clear()
         .envs(env)
         .output()
         .unwrap();

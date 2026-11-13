@@ -88,7 +88,7 @@ impl Scratch {
         let mut cmd = TestCommand::new("bash");
         cmd.args(["-e", "-o", "pipefail"]).arg(repo().join("conformance/ci/build-jobs.sh"));
         cmd.args(split);
-        let out = cmd.env_clear().envs(self.base_env(vars, with_env_file)).output().unwrap();
+        let out = cmd.envs(self.base_env(vars, with_env_file)).output().unwrap();
         self.collect(out)
     }
 
@@ -97,7 +97,7 @@ impl Scratch {
         self.reset();
         let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         cmd.args(["ci", "build-jobs"]).args(split).current_dir(repo());
-        let out = cmd.env_clear().envs(self.base_env(vars, with_env_file)).output().unwrap();
+        let out = cmd.envs(self.base_env(vars, with_env_file)).output().unwrap();
         self.collect(out)
     }
 
@@ -348,7 +348,7 @@ fn on_a_windows_host_github_env_is_read_as_a_drive_path() {
     vars.push(("GITHUB_ENV", "/c/paddock-build-jobs-test-no-such-folder/env"));
     let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.args(["ci", "build-jobs"]).current_dir(repo());
-    let out = cmd.env_clear().envs(s.base_env(&vars, false)).output().unwrap();
+    let out = cmd.envs(s.base_env(&vars, false)).output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(out.status.code(), Some(1), "{stdout}");
     assert!(

@@ -36,3 +36,12 @@ test('C123: no Rust test file is check broken, never a pass', async () => {
   assert.equal(f[0].severity, 'error');
   assert.equal(f[0].unwaivable, true);
 });
+
+test('C123: any CARGO_BIN_EXE binary, also through a name bound to it, and the machine PATH spliced into a TestCommand', () => {
+  assert.deepEqual(lines('fn t() {\n    Command::new(env!("CARGO_BIN_EXE_heavy")).output();\n}\n'), [2]);
+  assert.deepEqual(lines('pub const BIN: &str = env!("CARGO_BIN_EXE_heavy");\nfn t() {\n    let mut c = command(BIN);\n    Command::new(&BIN);\n}\n'), [3, 4]);
+  // handed to the code under test, which starts it itself: not a test's Command
+  assert.deepEqual(lines('fn t() {\n    let s = SpawnSpec::new(env!("CARGO_BIN_EXE_fake-child"), "x");\n}\n'), []);
+  assert.deepEqual(lines('fn t() {\n    let p = std::env::var("PATH").unwrap();\n    TestCommand::new("x").env("PATH", p);\n}\n'), [2]);
+  assert.deepEqual(lines('fn t() {\n    let p = std::env::var("PATH").unwrap();\n    check(p);\n}\n'), []);
+});

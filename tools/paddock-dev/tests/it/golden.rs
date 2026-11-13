@@ -371,7 +371,7 @@ fn the_recorded_cases_cover_what_the_review_asked_for() {
 // The command line: `dev plan` against what `affected.mjs` answered (recorded) and against the script itself (live)
 
 /// What a caller of the planner sees of one run, with commit ids masked (they differ per run). Mirrors `generate.mjs`.
-fn run_cli(program: &mut Command, root: &Path, case: &Value) -> Value {
+fn run_cli(program: &mut TestCommand, root: &Path, case: &Value) -> Value {
     let dir = tempfile::tempdir().unwrap();
     let head = String::from_utf8(
         Command::new("git")

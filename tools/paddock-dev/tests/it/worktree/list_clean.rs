@@ -321,8 +321,8 @@ fn clean_deletes_a_branch_only_at_the_head_it_looked_at() {
     assert_eq!(kept, Some("gone"));
 }
 
-fn run_with_path(fx: &Fixture, args: &[&str], path: &str) -> super::Run {
-    let out = fx.cmd(&fx.primary, args).env("PATH", path).output().unwrap();
+fn run_with_path(fx: &Fixture, args: &[&str], path: &std::path::Path) -> super::Run {
+    let out = fx.cmd(&fx.primary, args).path_first(path).output().unwrap();
     let text = String::from_utf8_lossy(&out.stdout);
     super::Run {
         code: out.status.code().unwrap(),

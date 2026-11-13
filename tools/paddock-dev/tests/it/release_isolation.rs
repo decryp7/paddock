@@ -10,7 +10,7 @@ use std::process::Output;
 #[allow(clippy::disallowed_methods)]
 fn dev(f: &Fixture, args: &[&str]) -> Output {
     let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
-    cmd.args(["ci", "release-isolation"]).args(args).env_clear();
+    cmd.args(["ci", "release-isolation"]).args(args);
     for (k, v) in &f.env.0 {
         cmd.env(k, v);
     }
@@ -91,7 +91,6 @@ fn setup_prints_the_environment_and_refuses_to_run_twice() {
         TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["ci", "release-isolation", "setup", "--env-file"])
             .arg(&envfile)
-            .env_clear()
             .env("RUNNER_TEMP", &temp)
             .output()
             .unwrap()

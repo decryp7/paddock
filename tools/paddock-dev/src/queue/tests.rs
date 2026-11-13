@@ -1850,11 +1850,11 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
-    let path = format!("{}:{}", shim.path().display(), std::env::var("PATH").unwrap_or_default());
+    let shims_dir = shim.path().to_path_buf();
     let out = TestCommand::new("sh")
         .args(["-ec", &script])
         .current_dir(repo_root())
-        .env("PATH", path)
+        .path_first(&shims_dir)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));

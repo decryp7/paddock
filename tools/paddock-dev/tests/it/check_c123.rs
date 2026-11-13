@@ -76,7 +76,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     ]);
     let (a, b) = (js(d.path()), rust(d.path()));
     assert_eq!(a, b);
-    assert_eq!(a["warnings"], 6, "bad.rs 4, lib.rs 1, the bare waiver 1: {a}");
+    assert_eq!(a["warnings"], 9, "bad.rs 4, bound.rs 3, lib.rs 1, the bare waiver 1: {a}");
 }
 
 #[test]

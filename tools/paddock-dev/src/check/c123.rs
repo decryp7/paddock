@@ -3,10 +3,11 @@
 //! quietly reaches real machine state (the pre-push tests ran the real heavy steps; `dev()` found the real engineering-rules `heavy.sh`
 //! through ENGINEERING_RULES and took machine-wide slots, fix/precommit-heavy-slot, 2ff5f5072). Judged per Rust test file (a path
 //! under `tests/`, a `tests.rs` or `*_test.rs` file, or the part of any file after `#[cfg(test)]`): (1) a constructor (`Command::new`,
-//! `paddock_proc::command`, `quiet_command`, `<crate>::process::command`) whose first argument is the paddock-dev binary, cargo, `"node"`
+//! `paddock_proc::command`, `quiet_command`, `<crate>::process::command`) whose first argument is a built binary (`env!("CARGO_BIN_EXE_*")` or a name bound to one in the file), cargo, `"node"`
 //! or `"dev"` / `"./dev"`, and in tools/paddock-dev also `"sh"` / `"bash"` (the wrapper script `./dev` and the CI scripts run under one);
 //! (2) any other use of the paddock-dev binary or of cargo's path (`env!("CARGO_BIN_EXE_paddock-dev")`, `env!("CARGO")`,
-//! `env::var("CARGO")`) in a function whose text does not name `TestCommand`.
+//! `env::var("CARGO")`) in a function whose text does not name `TestCommand`; (3) the machine's `PATH` read in a function that builds a
+//! `TestCommand` (use `path_first`).
 //! A justified case carries `conformance: test-env — <why>` on the line or above. JavaScript tests are not judged. Report-only for now
 //! (ER-41).
 //!
@@ -19,14 +20,16 @@ use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
 
-const ARG: &str =
-    "env!\\(\"CARGO_BIN_EXE_paddock-dev\"\\)|env!\\(\"CARGO\"\\)|\"(?:cargo|node|dev|\\./dev)\"|(?:std::)?env::var(?:_os)?\\(\"CARGO\"\\)";
+const ARG: &str = "env!\\(\"CARGO_BIN_EXE_[0-9A-Za-z_-]+\"\\)|env!\\(\"CARGO\"\\)|\"(?:cargo|node|dev|\\./dev)\"|(?:std::)?env::var(?:_os)?\\(\"CARGO\"\\)";
 fn ctor(arg: &str) -> Regex {
     rx(&format!("(?:\\bCommand::new|\\b(?:\\w+::)*(?:quiet_)?command)\\(\\s*({arg})"))
 }
+static BOUND: LazyLock<Regex> =
+    LazyLock::new(|| rx("(?:const|static|let(?:\\s+mut)?)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?::[^=;]*)?=\\s*[^;]*?env!\\(\"CARGO_BIN_EXE_"));
 static CTOR: LazyLock<Regex> = LazyLock::new(|| ctor(ARG));
 /// In the tests of paddock-dev a shell starts the wrapper script `./dev` and the CI scripts, so a shell is one of the programs judged.
 static CTOR_SHELL: LazyLock<Regex> = LazyLock::new(|| ctor(&format!("{ARG}|\"(?:sh|bash)\"")));
+static PATH_VAR: LazyLock<Regex> = LazyLock::new(|| rx("\\b(?:env::)?var(?:_os)?\\(\"PATH\"\\)"));
 static DEV_BIN: LazyLock<Regex> =
     LazyLock::new(|| rx("env!\\(\"CARGO_BIN_EXE_paddock-dev\"\\)|env!\\(\"CARGO\"\\)|\\b(?:env::)?var(?:_os)?\\(\"CARGO\"\\)"));
 static FN_LINE: LazyLock<Regex> = LazyLock::new(|| rx("^(\\s*)(?:pub(?:\\([^)]*\\))?\\s+)?(?:async\\s+)?(?:unsafe\\s+)?fn\\s+\\w"));
@@ -96,12 +99,19 @@ pub fn spawn_sites(text: &str, path: &str) -> Vec<Site> {
     let comment = |i: usize| lines[i].trim_start().starts_with("//");
     let mut out = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
-    let ctor = if path.starts_with("tools/paddock-dev/") {
-        &*CTOR_SHELL
+    let bound: Vec<String> = BOUND.captures_iter(text).map(|m| m[1].to_string()).collect();
+    let shell = path.starts_with("tools/paddock-dev/");
+    let dynamic;
+    let judged: &Regex = if !bound.is_empty() {
+        let base = if shell { format!("{ARG}|\"(?:sh|bash)\"") } else { ARG.to_string() };
+        dynamic = ctor(&format!("{base}|&?(?:{})\\b", bound.join("|")));
+        &dynamic
+    } else if shell {
+        &CTOR_SHELL
     } else {
-        &*CTOR
+        &CTOR
     };
-    for m in ctor.captures_iter(text) {
+    for m in judged.captures_iter(text) {
         let whole_match = m.get(0).map_or(0, |g| g.start());
         let i = line_of(&starts, whole_match);
         if comment(i) || !in_test(i) {
@@ -121,6 +131,20 @@ pub fn spawn_sites(text: &str, path: &str) -> Vec<Site> {
             continue;
         }
         if function_text(&lines, i).contains("TestCommand") {
+            continue;
+        }
+        out.push(Site {
+            line: i + 1,
+            what: m.as_str().to_string(),
+            waived: waiver(i),
+        });
+    }
+    for m in PATH_VAR.find_iter(text) {
+        let i = line_of(&starts, m.start());
+        if comment(i) || !in_test(i) || seen.contains(&i) {
+            continue;
+        }
+        if !function_text(&lines, i).contains("TestCommand") {
             continue;
         }
         out.push(Site {
@@ -247,6 +271,23 @@ mod tests {
         assert_eq!(lines(handed, "tools/x/tests/it/a.rs"), vec![2]);
         let built = "fn t() {\n    let bin = env!(\"CARGO_BIN_EXE_paddock-dev\");\n    TestCommand::new(\"sh\").arg(bin);\n}\n";
         assert!(lines(built, "tools/x/tests/it/a.rs").is_empty());
+    }
+
+    #[test]
+    fn any_built_binary_a_bound_name_and_a_spliced_machine_path_are_sites() {
+        let t = "crates/a/tests/it/x.rs";
+        assert_eq!(
+            lines("fn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_heavy\")).output();\n}\n", t),
+            vec![2]
+        );
+        let bound =
+            "pub const BIN: &str = env!(\"CARGO_BIN_EXE_heavy\");\nfn t() {\n    let mut c = command(BIN);\n    Command::new(&BIN);\n}\n";
+        assert_eq!(lines(bound, t), vec![3, 4]);
+        let handed = "fn t() {\n    let s = SpawnSpec::new(env!(\"CARGO_BIN_EXE_child\"), \"x\");\n}\n";
+        assert!(lines(handed, t).is_empty());
+        let spliced = "fn t() {\n    let p = std::env::var(\"PATH\").unwrap();\n    TestCommand::new(\"x\").env(\"PATH\", p);\n}\n";
+        assert_eq!(lines(spliced, t), vec![2]);
+        assert!(lines("fn t() {\n    let p = std::env::var(\"PATH\").unwrap();\n    check(p);\n}\n", t).is_empty());
     }
 
     #[test]

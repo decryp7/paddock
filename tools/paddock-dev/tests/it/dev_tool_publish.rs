@@ -129,12 +129,12 @@ fn publish(store: &Store) -> Run {
     )
     .unwrap();
     let (consumer_hash, _) = f.both(&[("RUSTC", shims.join("rustc").display().to_string())]);
-    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let shims_dir = shims.to_path_buf();
     let out = TestCommand::new("bash")
         .arg("-x")
         .arg(&script)
         .current_dir(f.root())
-        .env("PATH", path)
+        .path_first(&shims_dir)
         .env("CARGO_HOME", f.cargo_home.path())
         .env("PADDOCK_DEV_PACKAGES", format!("http://{}/generic", store.addr))
         .env("PUBLISH_TOKEN", SECRET)

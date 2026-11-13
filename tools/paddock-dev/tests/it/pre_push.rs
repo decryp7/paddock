@@ -185,7 +185,13 @@ fn a_run_never_sees_the_machines_environment_or_takes_a_real_slot() {
     let envlog = d.path().join("envlog");
     let path = fake_bin(d.path(), &format!("env >> {}; exit 0", envlog.display()));
     let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None, false);
-    let seen = std::fs::read_to_string(&envlog).unwrap_or_default();
+    // Not vacuous: the fake cargo ran (its environment was logged) and the run ended as the fake gates say.
+    assert_eq!(code, 0, "{err}{out}");
+    let seen = std::fs::read_to_string(&envlog).expect("the fake cargo never ran, so no environment was checked");
+    assert!(
+        seen.lines().any(|l| l.starts_with("PATH=")),
+        "the logged environment is empty or cut: {seen:?}"
+    );
     assert!(!marker.exists(), "the machine's heavy.sh ran (exit {code}): {err}{out}");
     assert!(!slots.exists(), "a machine-wide slot folder was made (ER-14)");
     let unlisted: Vec<&str> = seen

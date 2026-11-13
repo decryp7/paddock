@@ -38,7 +38,7 @@ fn fake_runner() -> PathBuf {
             // on cargo's build lock until the tests ran out of time (and missed a build folder set by `--config`).
             if !path.exists() {
                 let status = TestCommand::new(env!("CARGO"))
-                    .cargo_target_dir()
+                    .cargo_build()
                     .args(["build", "--quiet", "-p", "pitcrew-service", "--example", "fake_runner"])
                     .status()
                     .unwrap();

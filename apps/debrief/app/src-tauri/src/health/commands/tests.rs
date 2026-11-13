@@ -152,7 +152,7 @@ fn built_store_worker() -> std::path::PathBuf {
     let release = profile_dir.file_name().is_some_and(|n| n == "release");
     store_worker_in(&profile_dir, || {
         let mut build = paddock_testkit::TestCommand::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-        build.cargo_target_dir().args(["build", "-q", "-p", "debrief-store-worker"]);
+        build.cargo_build().args(["build", "-q", "-p", "debrief-store-worker"]);
         if release {
             build.arg("--release");
         }

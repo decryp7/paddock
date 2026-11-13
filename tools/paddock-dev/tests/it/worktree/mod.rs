@@ -131,11 +131,11 @@ impl Fixture {
     }
 
     /// A `git` script first on the PATH (the seam that slows or fails one git call): `body` is shell run before the real git
-    /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the PATH.
+    /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the folder, for `path_first`.
     #[cfg(unix)]
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    pub fn fake_git(&self, name: &str, body: &str) -> String {
+    pub fn fake_git(&self, name: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
         let bin = self.root.join(format!("fakebin-{name}"));
@@ -143,15 +143,15 @@ impl Fixture {
         let script = format!("#!/bin/sh\nREAL={}\n{body}\nexec \"$REAL\" \"$@\"\n", real.trim());
         std::fs::write(bin.join("git"), script).unwrap();
         std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())
+        bin
     }
 
     /// A fake `git` whose `worktree add` tells the test it has been reached, then holds for three seconds. The tool reserves
     /// the path before it starts git, so the signal means the reservation is in place; the test waits on it instead of
-    /// polling the owner map (ER-12). Returns the `PATH` to give the tool and the receiver of the signal.
+    /// polling the owner map (ER-12). Returns the folder to put first on the tool's `PATH` and the receiver of the signal.
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    pub fn fake_slow_add(&self, name: &str) -> (String, std::sync::mpsc::Receiver<()>) {
+    pub fn fake_slow_add(&self, name: &str) -> (PathBuf, std::sync::mpsc::Receiver<()>) {
         let fifo = self.root.join(format!("reached-{name}.fifo"));
         assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
         let body = format!(

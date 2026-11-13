@@ -21,9 +21,9 @@
 //! The command derefs to [`std::process::Command`], so `args`, `current_dir`, `output`, `spawn` and the rest are the usual ones.
 
 use std::ffi::{OsStr, OsString};
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 
 /// Variables copied from the test process when it has them: the toolchain cargo and rustup need to find themselves, and what
 /// Windows needs to start any program. Nothing ambient (no tokens, proxies, `CI`, `GITHUB_*`, `PADDOCK_*`, user variables).
@@ -40,6 +40,20 @@ pub const PASSED_THROUGH: &[&str] = &[
     "ComSpec",
     "PATHEXT",
     "PROCESSOR_ARCHITECTURE",
+];
+
+/// The variables that decide how a child `cargo build` compiles: a test that builds a program must compile it as the run that
+/// started the test does (coverage instrumentation, flags, a compiler wrapper), or the program under test differs from the run's.
+/// Named additions made by [`TestCommand::cargo_build`], not part of a fresh command.
+pub const BUILD_VARS: &[&str] = &[
+    "RUSTFLAGS",
+    "CARGO_ENCODED_RUSTFLAGS",
+    "RUSTC_WRAPPER",
+    "RUSTC_WORKSPACE_WRAPPER",
+    "LLVM_PROFILE_FILE",
+    "CARGO_LLVM_COV",
+    "CARGO_LLVM_COV_TARGET_DIR",
+    "CARGO_INCREMENTAL",
 ];
 
 /// Fixed values every command carries, so git runs the same on every machine and never reads the user's or the system's config.
@@ -88,6 +102,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 #[derive(Debug)]
 pub struct TestCommand {
     cmd: Command,
+    /// The environment a fresh command carries: what [`TestCommand::env_clear`] goes back to.
+    base: Vec<(OsString, OsString)>,
     private: PrivateDir,
 }
 
@@ -186,7 +202,11 @@ impl TestCommand {
             }
         }
         cmd.env("PATH", curated_path(&[]));
-        TestCommand { cmd, private }
+        let base = cmd
+            .get_envs()
+            .filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string())))
+            .collect();
+        TestCommand { cmd, base, private }
     }
 
     /// The private folder of this command: `home/` and `tmp/` are in it.
@@ -201,8 +221,7 @@ impl TestCommand {
         self.private.path().join("home")
     }
 
-    /// Puts `dir` first on the child's `PATH` (a folder of stand-in programs); the curated folders follow. Chain it before the
-    /// `Command` methods (`env` and `args` return the plain `Command`); a second call puts its folder in front of the first.
+    /// Puts `dir` first on the child's `PATH` (a folder of stand-in programs); the curated folders follow. A second call puts its folder in front of the first.
     pub fn path_first(&mut self, dir: &Path) -> &mut TestCommand {
         let mut first: Vec<PathBuf> = vec![dir.to_path_buf()];
         if let Some((_, Some(v))) = self.cmd.get_envs().find(|(k, _)| *k == "PATH") {
@@ -213,7 +232,7 @@ impl TestCommand {
     }
 
     /// Sets `CARGO_TARGET_DIR` to the build folder this test program was built into, for a child `cargo build` that must put its
-    /// output where the test looks for it (`cargo_layout::example_bin`, `sibling_bin`). Chain it before the `Command` methods.
+    /// output where the test looks for it (`cargo_layout::example_bin`, `sibling_bin`).
     ///
     /// # Panics
     ///
@@ -225,6 +244,119 @@ impl TestCommand {
             .unwrap_or_else(|| panic!("{} has no target folder", profile.display()))
             .to_path_buf();
         self.cmd.env("CARGO_TARGET_DIR", target);
+        self
+    }
+
+    /// Adds an argument.
+    pub fn arg(&mut self, arg: impl AsRef<OsStr>) -> &mut TestCommand {
+        self.cmd.arg(arg);
+        self
+    }
+
+    /// Adds arguments.
+    pub fn args<I, S>(&mut self, args: I) -> &mut TestCommand
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        self.cmd.args(args);
+        self
+    }
+
+    /// Sets the child's working folder.
+    pub fn current_dir(&mut self, dir: impl AsRef<Path>) -> &mut TestCommand {
+        self.cmd.current_dir(dir);
+        self
+    }
+
+    /// A named addition to the child's environment (or a replacement of a listed value, `PATH` included).
+    pub fn env(&mut self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) -> &mut TestCommand {
+        self.cmd.env(key, value);
+        self
+    }
+
+    /// Named additions.
+    pub fn envs<I, K, V>(&mut self, vars: I) -> &mut TestCommand
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: AsRef<OsStr>,
+        V: AsRef<OsStr>,
+    {
+        self.cmd.envs(vars);
+        self
+    }
+
+    /// Removes a variable from the child's environment (a listed one, or an addition made earlier).
+    pub fn env_remove(&mut self, key: impl AsRef<OsStr>) -> &mut TestCommand {
+        self.cmd.env_remove(key);
+        self
+    }
+
+    /// Goes back to the environment a fresh command carries: the additions made so far are dropped, the listed set is never
+    /// erased (a plain `Command::env_clear` would empty it, and the child would then read the machine's `PATH` for its lookups).
+    pub fn env_clear(&mut self) -> &mut TestCommand {
+        self.cmd.env_clear();
+        for (k, v) in &self.base {
+            self.cmd.env(k, v);
+        }
+        self
+    }
+
+    /// The child's standard input.
+    pub fn stdin(&mut self, cfg: impl Into<Stdio>) -> &mut TestCommand {
+        self.cmd.stdin(cfg);
+        self
+    }
+
+    /// The child's standard output.
+    pub fn stdout(&mut self, cfg: impl Into<Stdio>) -> &mut TestCommand {
+        self.cmd.stdout(cfg);
+        self
+    }
+
+    /// The child's standard error.
+    pub fn stderr(&mut self, cfg: impl Into<Stdio>) -> &mut TestCommand {
+        self.cmd.stderr(cfg);
+        self
+    }
+
+    /// Runs the child to its end and collects its output.
+    ///
+    /// # Errors
+    ///
+    /// When the program cannot be started.
+    pub fn output(&mut self) -> std::io::Result<Output> {
+        self.cmd.output()
+    }
+
+    /// Runs the child to its end with inherited standard streams.
+    ///
+    /// # Errors
+    ///
+    /// When the program cannot be started.
+    pub fn status(&mut self) -> std::io::Result<ExitStatus> {
+        self.cmd.status()
+    }
+
+    /// Starts the child. The private folder goes when this command drops, so keep the command (or use
+    /// [`TestCommand::new_in`]) for as long as the child runs.
+    ///
+    /// # Errors
+    ///
+    /// When the program cannot be started.
+    pub fn spawn(&mut self) -> std::io::Result<Child> {
+        self.cmd.spawn()
+    }
+
+    /// For a child `cargo build` of the program a test looks for: [`cargo_target_dir`](TestCommand::cargo_target_dir) and the
+    /// [`BUILD_VARS`] the test run has (`RUSTFLAGS`, `RUSTC_WRAPPER`, the coverage variables).
+    pub fn cargo_build(&mut self) -> &mut TestCommand {
+        self.cargo_target_dir();
+        for k in BUILD_VARS {
+            if let Some(v) = std::env::var_os(k) {
+                self.cmd.env(k, v);
+            }
+        }
         self
     }
 
@@ -256,12 +388,6 @@ impl Deref for TestCommand {
     }
 }
 
-impl DerefMut for TestCommand {
-    fn deref_mut(&mut self) -> &mut Command {
-        &mut self.cmd
-    }
-}
-
 /// The user's home folder as this process sees it (read once for the toolchain folders; never given to a child as `HOME`).
 fn real_home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
@@ -284,6 +410,19 @@ fn curated_path(first: &[PathBuf]) -> OsString {
             .filter(|d| !d.as_os_str().is_empty())
         {
             dirs.push(d.to_path_buf());
+        }
+    }
+    #[cfg(windows)]
+    if let Some(git_dir) = Path::new(&resolve(OsStr::new("git"), ambient.as_deref()))
+        .parent()
+        .and_then(Path::parent)
+    {
+        // Git for Windows keeps `sh`, `bash`, `ps`, `sed` and the other tools its scripts need in `usr/bin`, not beside `git.exe`.
+        for sub in ["usr/bin", "bin"] {
+            let d = git_dir.join(sub);
+            if d.is_dir() {
+                dirs.push(d);
+            }
         }
     }
     dirs.extend(system_dirs());

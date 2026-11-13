@@ -6,19 +6,12 @@
 
 use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
-fn run(program: &mut Command, sha: Option<&str>, env_file: &Path) -> (i32, String, String) {
-    program.env_clear();
-    for k in ["PATH", "HOME", "SystemRoot", "TMPDIR", "TEMP"] {
-        if let Ok(v) = std::env::var(k) {
-            program.env(k, v);
-        }
-    }
+fn run(program: &mut TestCommand, sha: Option<&str>, env_file: &Path) -> (i32, String, String) {
     program.env("GITHUB_ENV", env_file).current_dir(repo());
     if let Some(s) = sha {
         program.env("GITHUB_SHA", s);

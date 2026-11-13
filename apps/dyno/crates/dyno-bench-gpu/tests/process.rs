@@ -5,12 +5,12 @@
 
 use dyno_core::bench::wire::{parse_line, Line};
 use dyno_core::bench::BenchStatus;
-use std::process::Command;
+use paddock_testkit::TestCommand;
 
 // The runner under test, started on purpose (the family's process helpers are for the agent, not for this test).
 #[allow(clippy::disallowed_methods)]
-fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_dyno-bench-gpu"))
+fn bin() -> TestCommand {
+    TestCommand::new(env!("CARGO_BIN_EXE_dyno-bench-gpu"))
 }
 
 #[test]

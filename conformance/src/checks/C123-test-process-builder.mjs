@@ -5,11 +5,15 @@
 // `TestCommand` starts every child from an empty environment plus a listed one. Judged per Rust test file (a path under `tests/`, a
 // `tests.rs` or `*_test.rs` file, or the part of any file after `#[cfg(test)]`):
 //   1. a constructor (`Command::new`, `paddock_proc::command`, `quiet_command`, `<crate>::process::command`) whose first argument is the
-//      paddock-dev binary (`env!("CARGO_BIN_EXE_paddock-dev")`), cargo (`"cargo"`, `env!("CARGO")`, `env::var("CARGO")`), `"node"` or
+//      binary cargo built for the test (`env!("CARGO_BIN_EXE_<name>")`, any of them: the tool, the slot tool, an app's program), cargo (`"cargo"`, `env!("CARGO")`, `env::var("CARGO")`), `"node"` or
 //      `"dev"` / `"./dev"`; in tools/paddock-dev also `"sh"` / `"bash"` (the wrapper script `./dev` and the CI scripts run under one);
+//      (a name bound in the same file to `env!("CARGO_BIN_EXE_<name>")` counts as that argument; a binary handed to the code under
+//      test, which starts it through its own spawn API (`SpawnSpec`, `WorkerConfig`), is not a test's own Command and is not judged);
 //   2. any other use of the paddock-dev binary or of cargo's path (`env!("CARGO_BIN_EXE_paddock-dev")`, `env!("CARGO")`,
 //      `env::var("CARGO")`: handed to a shell, a helper or a variable that starts it) in a function whose text does not name
-//      `TestCommand`.
+//      `TestCommand`;
+//   3. the machine's `PATH` (`env::var("PATH")`) read in a function that builds a `TestCommand`: it splices the machine back into the
+//      curated `PATH`; use `path_first(dir)` with an explicit folder.
 // A justified case carries `conformance: test-env — <why>` (any comment form) on the line or the line above. JavaScript tests are not
 // judged here (their spawn sites are listed in ADR 0100 as the open follow-up). ER-41: report-only (warnings) until its first green run
 // on main; flip SEVERITY to `error` and `mode` to 'gate' then (docs/gates.toml, C123). The Rust host has the same check
@@ -21,12 +25,14 @@ import { warn, error, unwaivable } from '../finding.mjs';
 export const SEVERITY = warn;
 const WAIVER = /conformance:\s*test-env[ \t]*[—–-]+[ \t]*(\S.{2,})/;
 const BARE_WAIVER = /conformance:\s*test-env/;
-const ARG = String.raw`env!\("CARGO_BIN_EXE_paddock-dev"\)|env!\("CARGO"\)|"(?:cargo|node|dev|\./dev)"|(?:std::)?env::var(?:_os)?\("CARGO"\)`;
+const ARG = String.raw`env!\("CARGO_BIN_EXE_[0-9A-Za-z_-]+"\)|env!\("CARGO"\)|"(?:cargo|node|dev|\./dev)"|(?:std::)?env::var(?:_os)?\("CARGO"\)`;
 const ctor = (arg) => new RegExp(String.raw`(?:\bCommand::new|\b(?:\w+::)*(?:quiet_)?command)\(\s*(${arg})`, 'g');
 const CTOR = ctor(ARG);
 /** In the tests of paddock-dev a shell starts the wrapper script `./dev` and the CI scripts, so a shell is one of the programs judged. */
 const CTOR_SHELL = ctor(`${ARG}|"(?:sh|bash)"`);
+const BOUND = /(?:const|static|let(?:\s+mut)?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=;]*)?=\s*[^;]*?env!\("CARGO_BIN_EXE_/g;
 const SHELL_SCOPE = /^tools\/paddock-dev\//;
+const PATH_VAR = /\b(?:env::)?var(?:_os)?\("PATH"\)/g;
 const DEV_BIN = /env!\("CARGO_BIN_EXE_paddock-dev"\)|env!\("CARGO"\)|\b(?:env::)?var(?:_os)?\("CARGO"\)/g;
 const FN_LINE = /^(\s*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+\w/;
 const TEST_PATH = /(?:^|\/)tests?\/|(?:^|\/)tests?\.rs$|_tests?\.rs$/;
@@ -53,7 +59,10 @@ export function spawnSites(text, path) {
   };
   const comment = (i) => lines[i].trimStart().startsWith('//');
   const seen = new Set();
-  for (const m of text.matchAll(SHELL_SCOPE.test(path) ? CTOR_SHELL : CTOR)) {
+  const bound = [...text.matchAll(BOUND)].map((m) => m[1]);
+  const base = SHELL_SCOPE.test(path) ? `${ARG}|"(?:sh|bash)"` : ARG;
+  const ctorRe = bound.length ? ctor(`${base}|&?(?:${bound.join('|')})\\b`) : SHELL_SCOPE.test(path) ? CTOR_SHELL : CTOR;
+  for (const m of text.matchAll(ctorRe)) {
     const i = lineOf(m.index);
     if (comment(i) || !inTest(i)) continue;
     seen.add(i);
@@ -64,6 +73,12 @@ export function spawnSites(text, path) {
     const i = lineOf(m.index);
     if (comment(i) || !inTest(i) || seen.has(i)) continue;
     if (functionText(lines, i).includes('TestCommand')) continue;
+    out.push({ line: i + 1, what: m[0], waived: waiver(i) });
+  }
+  for (const m of text.matchAll(PATH_VAR)) {
+    const i = lineOf(m.index);
+    if (comment(i) || !inTest(i) || seen.has(i)) continue;
+    if (!functionText(lines, i).includes('TestCommand')) continue;
     out.push({ line: i + 1, what: m[0], waived: waiver(i) });
   }
   return out.sort((a, b) => a.line - b.line);

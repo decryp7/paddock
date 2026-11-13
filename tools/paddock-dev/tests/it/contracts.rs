@@ -123,7 +123,6 @@ fn pattern_command(pattern: &str, env: &[(&str, String)]) -> std::process::Outpu
     cmd.arg("-c")
         .arg(r#"exec bash "$0" pattern "$PADDOCK_TEST_PATTERN""#)
         .arg(root().join("conformance/ci/job-isolation.sh"))
-        .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("PADDOCK_TEST_PATTERN", pattern);
     if let Ok(v) = std::env::var("SYSTEMROOT") {

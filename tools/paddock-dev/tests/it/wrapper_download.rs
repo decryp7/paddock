@@ -148,12 +148,12 @@ impl Setup {
     fn run(&self, server: &Server, env: &[(&str, &str)]) -> (i32, String, String) {
         let shims = self.f.cargo_home.path().join("shims");
         write_script(&shims.join("cargo"), &shim_cargo(0));
-        let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+        let shims_dir = shims.to_path_buf();
         let mut cmd = TestCommand::new("sh");
         cmd.arg(self.f.root().join("dev"))
             .arg("hello")
             .current_dir(self.f.root())
-            .env("PATH", path)
+            .path_first(&shims_dir)
             .env("PADDOCK_DEV_HOME", self.scratch.path().join("home"))
             .env("PADDOCK_DEV_TARGET_DIR", self.f.cargo_home.path().join("target"))
             .env("CARGO_HOME", self.f.cargo_home.path())
@@ -409,13 +409,13 @@ fn a_shell_trace_of_a_download_never_prints_the_token() {
     let server = Server::start(vec![(s.route("paddock-dev-test-host.sha256"), Reply::Status("401 Unauthorized"))]);
     let shims = s.f.cargo_home.path().join("shims");
     write_script(&shims.join("cargo"), &shim_cargo(0));
-    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let shims_dir = shims.to_path_buf();
     let out = TestCommand::new("sh")
         .arg("-x")
         .arg(s.f.root().join("dev"))
         .arg("hello")
         .current_dir(s.f.root())
-        .env("PATH", path)
+        .path_first(&shims_dir)
         .env("PADDOCK_DEV_HOME", s.scratch.path().join("home"))
         .env("PADDOCK_DEV_TARGET_DIR", s.f.cargo_home.path().join("target"))
         .env("CARGO_HOME", s.f.cargo_home.path())

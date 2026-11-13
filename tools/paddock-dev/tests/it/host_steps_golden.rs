@@ -19,7 +19,7 @@ struct Run {
 fn dev(dir: &Path, args: &[&str], vars: &[(&str, String)]) -> Run {
     let env_file: PathBuf = dir.join("github-env");
     let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
-    cmd.arg("ci").args(args).current_dir(dir).env_clear();
+    cmd.arg("ci").args(args).current_dir(dir);
     for key in [
         "PATH",
         "SystemRoot",

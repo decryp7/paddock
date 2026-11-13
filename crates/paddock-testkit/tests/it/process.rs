@@ -136,3 +136,50 @@ fn a_bare_program_name_is_resolved_once_from_the_test_process() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "ok");
 }
+
+#[test]
+fn env_clear_goes_back_to_the_listed_environment_and_never_erases_it() {
+    let mut c = env_program();
+    c.env("PADDOCK_TEST_NAMED", "yes").env_clear();
+    let seen = child_env(&mut c);
+    assert!(
+        !seen.contains_key("PADDOCK_TEST_NAMED"),
+        "an addition survived env_clear: {seen:?}"
+    );
+    assert!(
+        seen.contains_key("PATH"),
+        "env_clear erased the curated PATH: {seen:?}"
+    );
+    assert!(
+        seen.contains_key("HOME"),
+        "env_clear erased the private home: {seen:?}"
+    );
+}
+
+#[test]
+fn a_build_child_gets_the_runs_target_folder_and_build_variables_but_a_plain_one_does_not() {
+    let mut env = env_lock();
+    env.set("RUSTFLAGS", "-Cinstrument-coverage");
+    env.set("RUSTC_WRAPPER", "sccache");
+    let plain = env_program().environment();
+    assert!(
+        !plain
+            .iter()
+            .any(|(k, _)| k == "RUSTFLAGS" || k == "RUSTC_WRAPPER" || k == "CARGO_TARGET_DIR"),
+        "{plain:?}"
+    );
+    let mut c = env_program();
+    let built = c.cargo_build().environment();
+    let get = |k: &str| {
+        built
+            .iter()
+            .find(|(n, _)| n == k)
+            .map(|(_, v)| v.to_string_lossy().into_owned())
+    };
+    assert_eq!(get("RUSTFLAGS").as_deref(), Some("-Cinstrument-coverage"));
+    assert_eq!(get("RUSTC_WRAPPER").as_deref(), Some("sccache"));
+    assert!(
+        get("CARGO_TARGET_DIR").is_some_and(|t| std::path::Path::new(&t).is_dir()),
+        "{built:?}"
+    );
+}

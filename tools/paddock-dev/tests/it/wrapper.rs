@@ -382,12 +382,12 @@ fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, 
 fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)], cargo: &str) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
     write_script(&shims.join("cargo"), cargo);
-    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let shims_dir = shims.to_path_buf();
     let mut cmd = TestCommand::new("sh");
     cmd.arg(f.root().join("dev"))
         .arg("hello")
         .current_dir(f.root())
-        .env("PATH", path)
+        .path_first(&shims_dir)
         .env("PADDOCK_DEV_HOME", home)
         .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
         .env("CARGO_HOME", f.cargo_home.path())
@@ -576,13 +576,13 @@ fn a_failed_or_stuck_toolchain_install_is_an_error_with_the_next_step_and_runs_n
 fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
     let f = Fixture::new();
     let (shims, _) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
-    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let shims_dir = shims.to_path_buf();
     let run = || {
         TestCommand::new("sh")
             .arg(f.root().join("dev"))
             .arg("--ensure-toolchain")
             .current_dir(f.root())
-            .env("PATH", &path)
+            .path_first(&shims_dir)
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
             .env_remove("RUSTC")
@@ -727,14 +727,13 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
     write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
-    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let run = |extra: &[(&str, &Path)]| {
         let mut cmd = TestCommand::new("sh");
         cmd.arg(f.root().join("dev"))
             .arg("hello")
             .current_dir(f.root())
-            .env_clear()
-            .env("PATH", &path)
+            .path_first(&shims_dir)
             .env("HOME", scratch.path().join("home"))
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTC", &rustc)
@@ -782,16 +781,17 @@ fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (te
     std::fs::create_dir_all(&mount).unwrap();
     std::fs::create_dir_all(&barrier).unwrap();
     write_script(&f.cargo_home.path().join("shims/cargo"), &barrier_cargo());
-    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let children: Vec<_> = rustcs
         .iter()
-        .map(|rustc| {
-            let mut cmd = TestCommand::new("sh");
+        .enumerate()
+        .map(|(i, rustc)| {
+            // The child outlives this closure: its private folder is the test's, removed with `scratch`.
+            let mut cmd = TestCommand::new_in("sh", &scratch.path().join(format!("child-{i}")));
             cmd.arg(f.root().join("dev"))
                 .arg("hello")
                 .current_dir(f.root())
-                .env_clear()
-                .env("PATH", &path)
+                .path_first(&shims_dir)
                 .env("HOME", scratch.path().join("home"))
                 .env("CARGO_HOME", f.cargo_home.path())
                 .env("RUSTC", rustc)
@@ -933,7 +933,7 @@ trait SpawnPiped {
 }
 
 #[cfg(unix)]
-impl SpawnPiped for Command {
+impl SpawnPiped for TestCommand {
     fn output_child(&mut self) -> std::process::Child {
         use std::process::Stdio;
         self.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap()
@@ -947,11 +947,11 @@ fn a_failed_build_names_the_hash_and_the_next_step_in_an_annotation() {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     write_script(&f.cargo_home.path().join("shims/cargo"), "echo boom >&2; exit 101");
-    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let out = TestCommand::new("sh")
         .arg(f.root().join("dev"))
         .current_dir(f.root())
-        .env("PATH", path)
+        .path_first(&shims_dir)
         .env("PADDOCK_DEV_HOME", scratch.path().join("home"))
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
@@ -972,11 +972,11 @@ fn a_ci_run_without_a_kept_mount_says_so() {
     let scratch = tempfile::tempdir().unwrap();
     let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
     write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
-    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
     let out = TestCommand::new("sh")
         .arg(f.root().join("dev"))
         .current_dir(f.root())
-        .env("PATH", path)
+        .path_first(&shims_dir)
         .env("HOME", scratch.path().join("home"))
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
@@ -1020,11 +1020,11 @@ fn print_binary_names_the_cached_tool_without_running_it() {
     let (code, out, err) = {
         let mut cmd = TestCommand::new("sh");
         write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
-        let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+        let shims_dir = f.cargo_home.path().join("shims").to_path_buf();
         cmd.arg(f.root().join("dev"))
             .arg("--print-binary")
             .current_dir(f.root())
-            .env("PATH", path)
+            .path_first(&shims_dir)
             .env("PADDOCK_DEV_HOME", &home)
             .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
             .env("CARGO_HOME", f.cargo_home.path())

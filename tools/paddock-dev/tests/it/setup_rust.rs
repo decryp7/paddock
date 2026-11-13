@@ -147,7 +147,6 @@ impl Runner {
             let r = TestCommand::new("bash")
                 .args(["-e", "-o", "pipefail"])
                 .arg(&script)
-                .env_clear()
                 .envs(self.base_env(extra))
                 .env("BACKEND", input.backend)
                 .env("REDIS_ENDPOINT", input.endpoint)
@@ -179,7 +178,6 @@ impl Runner {
                 if input.tauri { "true" } else { "false" },
             ])
             .current_dir(repo())
-            .env_clear()
             .envs(self.base_env(extra))
             .env("PADDOCK_SCCACHE_REDIS_ENDPOINT", input.endpoint)
             .output()
