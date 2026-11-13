@@ -248,7 +248,7 @@ mod tests {
     #[test]
     fn a_file_event_in_the_parent_folder_checks_again() {
         let clock = Arc::new(FakeClock::default());
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let checks = Arc::new(AtomicUsize::new(0));
         let counter = checks.clone();
         let w = Watch::new(

@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn a_broken_helper_is_explained_by_the_report_alone() {
-        let root = tempfile::tempdir().unwrap();
+        let root = paddock_testkit::private_tempdir().unwrap();
         let lifecycle = root.path().join("helper-lifecycle.log");
         std::fs::write(
             &lifecycle,
@@ -706,7 +706,7 @@ mod tests {
 
     #[test]
     fn windows_has_no_lifecycle_file_and_says_where_to_look_instead() {
-        let root = tempfile::tempdir().unwrap();
+        let root = paddock_testkit::private_tempdir().unwrap();
         let agent = Arc::new(Agent {
             files: Ok(DiagnosticsFiles::default()),
             status: Ok(status()),
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn what_cannot_be_read_becomes_a_note_not_a_missing_section() {
-        let root = tempfile::tempdir().unwrap();
+        let root = paddock_testkit::private_tempdir().unwrap();
         let agent = Arc::new(Agent {
             files: Err("no agent".into()),
             status: Err("no agent".into()),
@@ -766,7 +766,7 @@ mod tests {
 
     #[test]
     fn the_agents_files_become_report_files_with_json_kept_structured() {
-        let root = tempfile::tempdir().unwrap();
+        let root = paddock_testkit::private_tempdir().unwrap();
         let files = DiagnosticsFiles {
             files: vec![
                 DiagnosticsFile::new("alarms/open.json", "Alarms", r#"{"apiKey":"sk-invented"}"#.into()),
@@ -790,7 +790,7 @@ mod tests {
 
     #[test]
     fn the_startup_report_keeps_only_dynos_entries_and_says_where_it_runs_from() {
-        let root = tempfile::tempdir().unwrap();
+        let root = paddock_testkit::private_tempdir().unwrap();
         let tools = Arc::new(Tools {
             calls: Mutex::new(vec![]),
             answer: |_| {
@@ -813,7 +813,7 @@ mod tests {
 
     #[test]
     fn the_installers_log_and_the_rotated_one_are_in_the_report() {
-        let root = tempfile::tempdir().unwrap();
+        let root = paddock_testkit::private_tempdir().unwrap();
         let install = root.path().join("Dyno");
         std::fs::create_dir_all(install.join("updates")).unwrap();
         std::fs::write(install.join("updates").join("setup.log"), "step 3 failed\n").unwrap();
@@ -832,7 +832,7 @@ mod tests {
     /// real zip and opened again. Prints the listing so a run shows what a bundle holds (`--nocapture`).
     #[test]
     fn a_bundle_of_a_broken_helper_holds_what_explains_it_and_nothing_hostile() {
-        let root = tempfile::tempdir().unwrap();
+        let root = paddock_testkit::private_tempdir().unwrap();
         let d = dirs(root.path());
         for p in [d.logs(), d.config(), d.data()] {
             std::fs::create_dir_all(p).unwrap();

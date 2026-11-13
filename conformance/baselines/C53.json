@@ -7,11 +7,6 @@
    "hash": "838846096f9e4c57"
   },
   {
-   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
-   "line": 490,
-   "hash": "a3da0f865e197fdc"
-  },
-  {
    "file": "apps/debrief/app/src-tauri/src/engine/mod.rs",
    "line": 446,
    "hash": "47706c5a2530c14a"
@@ -117,11 +112,6 @@
    "hash": "b51a490e2f6996ea"
   },
   {
-   "file": "apps/dyno/crates/dyno-platform/src/process.rs",
-   "line": 432,
-   "hash": "0d7b138dae16f8b0"
-  },
-  {
    "file": "apps/dyno/crates/dyno-platform/src/processes.rs",
    "line": 356,
    "hash": "f74be927529d7e92"
@@ -192,19 +182,9 @@
    "hash": "8d664b6e43f512f9"
   },
   {
-   "file": "crates/paddock-chromium/src/launch/tests.rs",
-   "line": 334,
-   "hash": "f038ffd7a7b2c171"
-  },
-  {
    "file": "crates/paddock-ipc/src/endpoint/windows_peer.rs",
    "line": 226,
    "hash": "ff8de6ea64d31b18"
-  },
-  {
-   "file": "crates/paddock-ipc/tests/it/child.rs",
-   "line": 21,
-   "hash": "7f50e4038b5e6dcd"
   },
   {
    "file": "crates/paddock-proc/src/installed/native.rs",
@@ -215,21 +195,6 @@
    "file": "crates/paddock-proc/src/installed/native.rs",
    "line": 368,
    "hash": "6fcff80839eb5410"
-  },
-  {
-   "file": "crates/paddock-proc/src/supervised.rs",
-   "line": 619,
-   "hash": "308d5ffe76f06a68"
-  },
-  {
-   "file": "crates/paddock-proc/src/supervised.rs",
-   "line": 666,
-   "hash": "cef5ad846972de45"
-  },
-  {
-   "file": "crates/paddock-proc/src/testchild.rs",
-   "line": 179,
-   "hash": "c5cbe73b676f117a"
   },
   {
    "file": "crates/paddock-proc/src/tree.rs",
@@ -260,36 +225,6 @@
    "file": "crates/paddock-proc/src/tree.rs",
    "line": 854,
    "hash": "e67051af6cd450c9"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 981,
-   "hash": "9fb35627705ea408"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 982,
-   "hash": "ec452942fcc0aafb"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 1013,
-   "hash": "1a75df762c593087"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 1058,
-   "hash": "5c75568cac5aebb2"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 1090,
-   "hash": "5cf4327a1ee25137"
-  },
-  {
-   "file": "crates/paddock-proc/src/tree.rs",
-   "line": 1090,
-   "hash": "5cf4327a1ee25137"
   },
   {
    "file": "crates/paddock-proc/src/usage.rs",
@@ -330,21 +265,6 @@
    "file": "tools/heavy/src/probe.rs",
    "line": 17,
    "hash": "39d9704acaf0a279"
-  },
-  {
-   "file": "tools/heavy/src/probe.rs",
-   "line": 26,
-   "hash": "e9226d6cfecaa06b"
-  },
-  {
-   "file": "tools/heavy/src/procs.rs",
-   "line": 68,
-   "hash": "0605b5ab273f8fba"
-  },
-  {
-   "file": "tools/paddock-dev/src/ci_tool.rs",
-   "line": 528,
-   "hash": "7f50e4038b5e6dcd"
   }
  ]
 }

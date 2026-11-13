@@ -68,36 +68,11 @@ fn ours(ctx: &Ctx, b: &str) -> bool {
         .is_some_and(|rest| rest.starts_with("pd-") && !rest.contains('/'))
 }
 
-/// On macOS: does `diskutil` say the volume holding the folder is not internal?
+/// On macOS: does `diskutil` say the volume holding the folder is not internal? The one rule is `ci_host::boot_volume` (ER-22): the
+/// folder's nearest existing parent, links resolved, its mount from `df`, `Internal=false` in `diskutil info -plist`.
 fn volume_is_external(folder: &str) -> bool {
-    let Ok(df) = paddock_proc::command("df").arg("-P").arg(folder).output() else {
-        return false;
-    };
-    let text = String::from_utf8_lossy(&df.stdout).into_owned();
-    let Some(line) = text.lines().nth(1) else { return false };
-    // The mount point is everything after the fifth field (it may hold spaces).
-    let mut rest = line;
-    for _ in 0..5 {
-        rest = rest.trim_start().split_once(char::is_whitespace).map_or("", |(_, r)| r);
-    }
-    let mount = rest.trim();
-    if mount.is_empty() {
-        return false;
-    }
-    let Ok(info) = paddock_proc::command("diskutil").args(["info", "-plist", mount]).output() else {
-        return false;
-    };
-    if !info.status.success() {
-        return false;
-    }
-    let plist = String::from_utf8_lossy(&info.stdout).into_owned();
-    let mut lines = plist.lines();
-    while let Some(l) = lines.next() {
-        if l.contains("<key>Internal</key>") && lines.next().is_some_and(|n| n.contains("<false/>")) {
-            return true;
-        }
-    }
-    false
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    crate::ci_host::boot_volume::external_on_this_machine(&env, folder)
 }
 
 fn append_env(file: &str, lines: &[String]) -> R<()> {

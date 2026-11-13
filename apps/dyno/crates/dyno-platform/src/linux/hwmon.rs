@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn reads_hwmon_chips_with_labels_critical_values_and_fans() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let r = d.path();
         w(r, "class/hwmon/hwmon0/name", "coretemp\n");
         w(r, "class/hwmon/hwmon0/temp1_input", "52000\n");
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn falls_back_to_thermal_zones_and_survives_nothing() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let r = d.path();
         assert_eq!(read(r), Readings::default());
         w(r, "class/thermal/thermal_zone0/temp", "47000\n");

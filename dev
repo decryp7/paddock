@@ -12,6 +12,10 @@
 # GITHUB_TOKEN; sent through curl's stdin config, never on a command line), PADDOCK_DEV_DOWNLOAD_TIMEOUT (seconds per file, default 60).
 set -eu
 
+# Set by a restart (restart_or_fail) for this run only: the tool and anything it starts, a nested ./dev included, must not inherit it.
+restarted=${PADDOCK_DEV_RESTARTED:-}
+unset PADDOCK_DEV_RESTARTED
+
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
 tool="$root/tools/paddock-dev"
 [ -f "$tool/inputs.txt" ] || {
@@ -85,18 +89,130 @@ if [ -z "$rustc_cmd" ] && [ -n "$configs" ]; then
 $configs
 EOF
 fi
-if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [ -z "$vv" ]; then
-  # Without a compiler the hash cannot be computed, but a binary built earlier still works.
-  newest=$(ls -t "$home/$binroot"/*/paddock-dev-*"$exe" 2>/dev/null | head -n 1)
-  if [ -n "$newest" ] && runs "$newest"; then
-    if [ "${GITHUB_ACTIONS:-}" = true ]; then
-      echo "::warning::./dev: rustc is not available on this runner, so the tool's hash cannot be computed; running the newest cached binary ($newest), which may not match this commit's inputs." >&2
-    else
-      echo "dev: rustc is not available; running the newest cached tool binary ($newest)." >&2
+# toolchain_file: the rust-toolchain(.toml) rustup reads for the tool's folder, found the way rustup finds it (the closest one above).
+toolchain_file() {
+  d=$tool
+  while :; do
+    for f in rust-toolchain.toml rust-toolchain; do
+      if [ -f "$d/$f" ]; then printf '%s\n' "$d/$f"; return 0; fi
+    done
+    parent=$(dirname "$d")
+    [ "$parent" = "$d" ] && return 1
+    d=$parent
+  done
+}
+
+# run_bounded <seconds> <command...>: runs it in the background and ends it at the limit (ER-32: no wait without a maximum). The
+# command is ended by the pid this function started, never by a name.
+run_bounded() {
+  _lim=$1
+  shift
+  "$@" &
+  _pid=$!
+  _t=0
+  while kill -0 "$_pid" 2>/dev/null; do
+    if [ "$_t" -ge "$_lim" ]; then
+      kill "$_pid" 2>/dev/null || true
+      wait "$_pid" 2>/dev/null || true
+      return 124
     fi
-    exec "$newest" "$@"
+    sleep 1
+    _t=$((_t + 1))
+  done
+  wait "$_pid"
+}
+
+# proc_stamp <pid>: the start time of a process, empty when it is not running ("-" when it runs and the platform's ps cannot say when).
+proc_stamp() {
+  kill -0 "$1" 2>/dev/null || return 0
+  _st=$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//') || _st=
+  printf '%s\n' "${_st:--}"
+}
+
+# toolchain_lock <acquire|release> <pin>: one `rustup toolchain install` of a pin at a time on a host (two installs of one pin
+# in one RUSTUP_HOME corrupt each other). A `mkdir` lock in RUSTUP_HOME with the owner's pid and start time. A lock whose owner is gone,
+# or whose pid now belongs to another process (another start time), is taken over; a lock is never judged by its age (rule 53).
+# The wait for a live owner is bounded by the install time limit.
+toolchain_lock() {
+  _lk="${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}/.paddock-install-$2.lock"
+  if [ "$1" = release ]; then rm -rf "${_lk:?}" || true; return 0; fi
+  _w0=$(date +%s)
+  while ! mkdir "$_lk" 2>/dev/null; do
+    _op=$(sed -n 1p "$_lk/owner" 2>/dev/null || true)
+    _os=$(sed -n 2p "$_lk/owner" 2>/dev/null || true)
+    if [ -n "$_op" ] && [ "$(proc_stamp "$_op")" != "$_os" ]; then
+      echo "dev: the toolchain install lock $_lk belongs to a process ($_op) that is gone; taking it over." >&2
+      rm -rf "${_lk:?}" || true
+      continue
+    fi
+    if [ $(($(date +%s) - _w0)) -ge "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" ]; then
+      echo "::error::./dev: another install of the toolchain $2 (pid ${_op:-unknown}) holds $_lk and did not finish within ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s. Wait for it, or if no install runs on this host, delete $_lk and run ./dev again." >&2
+      return 1
+    fi
+    sleep 1
+  done
+  printf '%s\n%s\n' "$$" "$(proc_stamp "$$")" >"$_lk/owner"
+  return 0
+}
+
+# ensure_toolchain: the toolchain the repository pins (rust-toolchain.toml, with the profile and components it asks for) is installed.
+# rustup 1.28 no longer installs a pinned toolchain by itself, so a runner that has rustup but not yet that version has a `rustc` shim
+# that cannot run (run 8034: build-jobs ran ./dev before setup-rust, and the wrapper fell back to an old cached tool). Only when rustc
+# does not run, rustup exists, no compiler was named by RUSTC or a cargo config, a toolchain file exists and an earlier step of the job
+# did not already fail to install it (PADDOCK_TOOLCHAIN_FAILED). One install of a pin at a time per host (toolchain_lock), bounded by
+# PADDOCK_DEV_TOOLCHAIN_TIMEOUT (seconds, default 900), logged with its duration; a failure says the next step, and a timeout
+# uninstalls the half-installed toolchain. Returns 0 when the install finished.
+ensure_toolchain() {
+  [ -z "${rustc_cmd:-}" ] || return 1
+  command -v rustup >/dev/null 2>&1 || return 1
+  tf=$(toolchain_file) || return 1
+  if [ "${PADDOCK_TOOLCHAIN_FAILED:-}" = 1 ]; then
+    echo "dev: not installing the toolchain $tf pins again: an earlier step of this job failed to (PADDOCK_TOOLCHAIN_FAILED=1)." >&2
+    return 1
   fi
-  echo "dev: rustc was not found (${rustc_cmd:-rustc}). Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2
+  pin=$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' "$tf" | head -n 1 | tr -d '\r')
+  [ -n "$pin" ] || pin=$(tr -d '\r' <"$tf" | head -n 1)
+  _i0=$(date +%s)
+  mkdir -p "${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}" 2>/dev/null || true
+  toolchain_lock acquire "$pin" || return 1
+  # The holder before us may have installed it.
+  if (cd "$tool" && rustc -vV >/dev/null 2>&1); then
+    toolchain_lock release "$pin"
+    echo "dev: the toolchain $pin was installed by another run meanwhile." >&2
+    return 0
+  fi
+  echo "dev: rustc does not run here; installing the toolchain $tf pins ($pin) with rustup (at most ${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900} s)." >&2
+  _rc=0
+  (cd "$tool" && run_bounded "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" rustup toolchain install >&2) || _rc=$?
+  if [ "$_rc" -eq 124 ]; then
+    echo "dev: the install ran out of time; removing the half-installed toolchain $pin." >&2
+    (cd "$tool" && run_bounded 120 rustup toolchain uninstall "$pin" >&2) || true
+  fi
+  toolchain_lock release "$pin"
+  if [ "$_rc" -ne 0 ]; then
+    echo "::error::./dev: 'rustup toolchain install' for $tf failed (exit $_rc, $(($(date +%s) - _i0)) s; 124 means the time limit). Run it by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
+    return 1
+  fi
+  echo "dev: installed the pinned toolchain in $(($(date +%s) - _i0)) s." >&2
+  return 0
+}
+
+if [ "${1:-}" = "--ensure-toolchain" ]; then
+  # For conformance/ci/kit.sh and setup steps: succeeds when the compiler runs (installed if need be).
+  rustc_cmd=${RUSTC:-${CARGO_BUILD_RUSTC:-}}
+  (cd "$tool" && "${rustc_cmd:-rustc}" -vV >/dev/null 2>&1) && exit 0
+  ensure_toolchain && (cd "$tool" && "${rustc_cmd:-rustc}" -vV >/dev/null 2>&1) && exit 0
+  echo "::error::./dev --ensure-toolchain: no Rust compiler runs here. Install Rust with rustup (https://rustup.rs) or the toolchain rust-toolchain.toml pins, then run ./dev again." >&2
+  exit 2
+fi
+
+if ! vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r') || [ -z "$vv" ]; then
+  if ensure_toolchain; then vv=$(cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r' || true); fi
+fi
+if [ -z "${vv:-}" ]; then
+  # Without a compiler the hash cannot be computed, and no cached binary is run in its place: it may be older than this commit's
+  # tool and lack the subcommand asked for (run 8034: it exited 2 on `ci build-jobs`). Fail closed (ER-33).
+  echo "::error::./dev: no Rust compiler runs here (${rustc_cmd:-rustc}), so the tool's hash cannot be computed and no cached paddock-dev is run in its place (it may lack this command). Install Rust with rustup (https://rustup.rs) or the toolchain rust-toolchain.toml pins (rustup toolchain install, in tools/paddock-dev), then run ./dev again; rustc was not found." >&2
   exit 2
 fi
 compiler=$(printf '%s\n' "$vv" | grep -E '^(commit-hash|release):' || true)
@@ -105,6 +221,15 @@ if ! printf '%s\n' "$compiler" | grep -q '^release:'; then
   exit 2
 fi
 host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
+# The compiler's own key (its commit, else its release): a build folder is never shared between two compilers, because cargo
+# keeps rlibs of the old one beside the new ones and a half-replaced toolchain reads them as E0514 (run 8027, pitwall-mac).
+ckey=$(printf '%s\n' "$compiler" | sed -n 's/^commit-hash: //p' | cut -c1-12)
+[ -n "$ckey" ] || ckey=$(printf '%s\n' "$compiler" | sed -n 's/^release: //p' | tr -c 'A-Za-z0-9.\n' '_')
+
+# compiler_now: the `compiler` lines of the compiler as it is now (empty when it does not run), asked the way it was asked above.
+compiler_now() {
+  (cd "$tool" && "${rustc_cmd:-rustc}" -vV 2>/dev/null | tr -d '\r' | grep -E '^(commit-hash|release):') || true
+}
 
 # only_build_folder <file>: the config sets nothing but the build folder (`target-dir` in `[build]`, or a top-level
 # `build.target-dir`), besides blank lines and comments. The build folder never changes the binary (CARGO_TARGET_DIR is not
@@ -168,14 +293,30 @@ refuse_build_target() {
   }
 }
 
-build() { # build <target dir>: the binary ends up in <target dir>/release/paddock-dev
+# build <target dir> [hash]: the binary ends up in <target dir>/release/paddock-dev. Returns 0, 1 (failed, said aloud) or 75 (the
+# compiler changed during the build: the caller starts over once, see restart_or_fail).
+build() {
   refuse_build_target
   (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet) || {
     code=$?
-    echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2
-    exit 1
+    toolchain_changed "$code" || return $?
+    echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code, build folder $1). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2
+    return 1
   }
+  toolchain_changed 0 || return $?
   built_check "$1"
+}
+# The compiler is the one the hash named, or the build is not trusted: a rustup update during the build (the toolchain folder is
+# replaced in place) gives cargo errors that look like a broken build (E0514, a missing rustc.exe on Windows) and a binary the
+# hash does not describe. Once per run the wrapper starts over with the new compiler (a new hash, a new build folder); the second
+# time it says so and fails.
+toolchain_changed() { # toolchain_changed <cargo exit code>
+  now=$(compiler_now)
+  [ "$now" = "$compiler" ] && return 0
+  echo "::warning::./dev: the Rust compiler changed while paddock-dev was building (it was: $(printf '%s' "$compiler" | tr '\n' ' '); now: $(printf '%s' "${now:-not found}" | tr '\n' ' '); cargo exit $1), probably a rustup update on this host." >&2
+  if [ -z "$restarted" ]; then return 75; fi
+  echo "::error::./dev: the Rust compiler changed again during the second build, so paddock-dev was not built. Wait for the toolchain update on this host to finish, then run ./dev again (see 'rustup show')." >&2
+  return 1
 }
 # A `build.target` in a cargo config (or --target in cargo's own settings) puts the binary under <target>/<triple>/: say so
 # instead of failing later on a missing file.
@@ -257,6 +398,18 @@ download_prebuilt() {
   return 0
 }
 
+# restart_or_fail <build status> <the wrapper's arguments>: 75 starts the wrapper over once (the compiler changed under the build),
+# anything else ends it (the failure was said aloud).
+restart_or_fail() {
+  _rc=$1
+  shift
+  if [ "$_rc" -eq 75 ]; then
+    echo "dev: starting over once with the compiler that is installed now." >&2
+    PADDOCK_DEV_RESTARTED=1 exec /bin/sh "$0" "$@"
+  fi
+  exit 1
+}
+
 if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
   refuse_build_target
   fresh=$(mktemp -d)
@@ -273,8 +426,11 @@ if [ -n "$dirty" ]; then
     echo "dev: --print-binary: the tool's inputs have uncommitted changes, so there is no cached binary to name." >&2
     exit 3
   fi
-  build "${PADDOCK_DEV_TARGET_DIR:-$tool/target}" dirty
-  exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
+  # One folder per compiler: cargo's rlibs of another compiler are never in it. Cargo's own lock on the folder serialises two
+  # builds of the same compiler; the tool built here is nobody's cached tool.
+  dirty_target="${PADDOCK_DEV_TARGET_DIR:-$tool/target}/rustc-$ckey"
+  build "$dirty_target" dirty || restart_or_fail $? "$@"
+  exec "$dirty_target/release/paddock-dev$exe" "$@"
 fi
 
 cache="$home/$binroot/$hash"
@@ -287,33 +443,51 @@ if [ ! -x "$cache/$name" ]; then
   fetched=
   if download_enabled && download_prebuilt; then fetched=1; fi
   if [ -z "$fetched" ]; then
-    if [ -n "$kept_target" ]; then
-      # A folder of this process: a second job of the same hash on the mount builds in its own, so neither deletes the other's.
-      mkdir -p "$home"
-      target=$(mktemp -d "$home/target-$hash.XXXXXX")
-    else
-      target=${PADDOCK_DEV_TARGET_DIR:-$tool/target}
-      if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
-        echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
-      fi
+    # One build folder per compiler (never one that spans two): cargo's own lock on it serialises builds of one compiler, a
+    # change to an input rebuilds only the tool's own crate (warm), and a build of another compiler cannot meet its rlibs (run 8027:
+    # E0514). It sits next to the cache in a kept mount, else inside PADDOCK_DEV_TARGET_DIR (or the tool's own target folder).
+    if [ -n "$kept_target" ]; then tbase=$home; else tbase=${PADDOCK_DEV_TARGET_DIR:-$tool/target}; fi
+    if [ -z "$kept_target" ] && [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+      echo "::notice::./dev builds paddock-dev in this job: the runner has no writable $ci_mount, so nothing is kept between runs (cold build, about a minute or two)." >&2
     fi
-    _b0=$(date +%s)
-    build "$target" "$hash"
-    mkdir -p "$cache"
-    # A name of our own in the cache folder (never a PID: the folder may be shared by containers whose PIDs repeat), checked for the
-    # hash it was built for before it replaces anything, then published by an atomic rename.
-    tmp=$(mktemp "$cache/$name.XXXXXX")
-    cp "$target/release/paddock-dev$exe" "$tmp"
-    chmod +x "$tmp"
-    if ! "$tmp" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
-      rm -f "$tmp"
-      echo "::error::./dev built a paddock-dev that is not for hash $hash (another job replaced the build folder, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, delete $target." >&2
+    target=$tbase/rustc-$ckey
+    if ! mkdir -p "$target"; then
+      echo "::error::./dev cannot make the build folder $target. Make $tbase writable or set PADDOCK_DEV_TARGET_DIR to a folder you can write, then run ./dev again." >&2
       exit 1
     fi
-    mv -f "$tmp" "$cache/$name"
+    _b0=$(date +%s)
+    # A name of our own in the cache folder (never a PID: the folder may be shared by containers whose PIDs repeat), checked for the
+    # hash it was built for before it replaces anything, then published by an atomic rename. Another build of this compiler (another
+    # hash, one folder) can replace the binary between cargo's end and the copy: then the copy names the wrong hash and the build is
+    # run again, at most three times.
+    _try=0
+    while :; do
+      _try=$((_try + 1))
+      touch "$target" 2>/dev/null || true
+      echo "dev: building paddock-dev $hash in $target (compiler $ckey, try $_try)." >&2
+      build "$target" "$hash" || restart_or_fail $? "$@"
+      mkdir -p "$cache"
+      tmp=$(mktemp "$cache/$name.XXXXXX")
+      cp "$target/release/paddock-dev$exe" "$tmp"
+      chmod +x "$tmp"
+      if "$tmp" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then break; fi
+      rm -f "$tmp"
+      if [ "$_try" -ge 3 ]; then
+        echo "::error::./dev built a paddock-dev that is not for hash $hash three times in a row (another run builds in $target, or the build ignored PADDOCK_DEV_HASH). Run ./dev again; if it repeats, report it with this log." >&2
+        exit 1
+      fi
+    done
+    if ! mv -f "$tmp" "$cache/$name"; then
+      # Windows cannot replace a tool that another job is running: the same hash, so that tool is as good as ours.
+      rm -f "$tmp"
+      if runs "$cache/$name" && "$cache/$name" self hash 2>/dev/null | grep -q "^embedded $hash\$"; then
+        echo "dev: another run published paddock-dev $hash first; using it." >&2
+      else
+        echo "::error::./dev could not publish paddock-dev $hash into $cache. Close programs that use it or delete the folder, then run ./dev again." >&2
+        exit 1
+      fi
+    fi
     echo "dev: built paddock-dev $hash in $(($(date +%s) - _b0)) s (not downloaded)." >&2
-    # The per-hash build folder is about 465 MB; the verified tool is all a later run needs.
-    if [ -n "$kept_target" ]; then rm -rf "$target" || true; fi
   fi
   # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A tool used within the last
   # day is never removed: a job on the same mount (several runners share a host's tools folder) runs it again at its end, when its
@@ -324,14 +498,21 @@ if [ ! -x "$cache/$name" ]; then
       [ -d "$home/bin/$old" ] || [ -d "$home/bin-source/$old" ] || rm -rf "${home:?}/target-$old" "${home:?}/target-$old".* || true
     fi
   done
-  # A build folder whose tool was never published (the build or the hash check failed) goes when an hour old: a build in
-  # progress has no tool yet either, and cargo does not touch the folder itself while it runs.
-  for t in "$home"/target-*; do
+  # Build folders of compilers no longer installed go a week after their last build (each build touches its own folder). A build
+  # is never judged by the age of a folder: the folder of the compiler in use is never removed, and nothing else is built in a
+  # `rustc-*` folder of another compiler by this wrapper. Legacy per-hash folders (`target-<hash>.*`, an earlier wrapper) go
+  # when a day old and their hash was never published; they have no owner record, so nothing younger is touched.
+  for t in "$home"/rustc-* "${PADDOCK_DEV_TARGET_DIR:-$tool/target}"/rustc-*; do
+    [ -d "$t" ] || continue
+    [ "${t##*/}" = "rustc-$ckey" ] && continue
+    if [ -n "$(find "$t" -maxdepth 0 -mtime +7 2>/dev/null)" ]; then rm -rf "${t:?}" || true; fi
+  done
+  for t in "$home"/target-* "${PADDOCK_DEV_TARGET_DIR:-$tool/target}"/target-*; do
     [ -d "$t" ] || continue
     h=${t##*/target-}; h=${h%%.*}
     [ -d "$home/bin/$h" ] && continue
     [ -d "$home/bin-source/$h" ] && continue
-    if [ -n "$(find "$t" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then rm -rf "$t" || true; fi
+    if [ -n "$(find "$t" -maxdepth 0 -mmin +1440 2>/dev/null)" ]; then rm -rf "${t:?}" || true; fi
   done
 fi
 # A hit counts as use: the prune keeps the newest-used tools, so main's hash outlives a stream of branch hashes.

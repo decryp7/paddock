@@ -2,6 +2,7 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod boot_volume;
+mod canonical_tempdir;
 mod cargo_layout;
 mod env;
 mod golden;
@@ -10,3 +11,5 @@ mod limits;
 mod net;
 mod runner;
 mod scratch;
+#[cfg(windows)]
+mod scratch_private;

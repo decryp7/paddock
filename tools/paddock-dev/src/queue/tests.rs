@@ -1321,12 +1321,18 @@ fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
     put("src/lib.rs", "", false);
     put(
         "build.rs",
-        &format!("fn main() {{ std::fs::write(\"{}\", \"x\").unwrap(); }}\n", sentinel.display()),
+        &format!(
+            "fn main() {{ std::fs::write({:?}, \"x\").unwrap(); }}\n",
+            sentinel.to_string_lossy()
+        ),
         false,
     );
     put(
         "crates/x/build.rs",
-        &format!("fn main() {{ std::fs::write(\"{}\", \"x\").unwrap(); }}\n", sentinel.display()),
+        &format!(
+            "fn main() {{ std::fs::write({:?}, \"x\").unwrap(); }}\n",
+            sentinel.to_string_lossy()
+        ),
         false,
     );
     git(&w.repos.author, &["add", "-A"]);
@@ -1717,6 +1723,11 @@ fn a_train_whose_main_moved_is_rebuilt_even_when_its_pull_requests_did_not_chang
 
 // ---- the gates the tick no longer runs are jobs of the dispatched workflow ------------------------------------------------------------
 
+/// ci.yml as the tests read it: a Windows checkout has CRLF line endings (`core.autocrlf`), and every search below is for `\n`.
+fn ci_yml() -> String {
+    include_str!("../../../../.gitea/workflows/ci.yml").replace("\r\n", "\n")
+}
+
 fn job_block(yml: &str, job: &str) -> String {
     let head = format!("\n  {job}:\n");
     let start = yml.find(&head).unwrap_or_else(|| panic!("ci.yml has no job {job}")) + 1;
@@ -1747,14 +1758,15 @@ fn job_block(yml: &str, job: &str) -> String {
 
 #[test]
 fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a_token() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
-    let gates = job_block(ci, "train-gates");
+    let ci = ci_yml();
+    let gates = job_block(&ci, "train-gates");
     for needle in [
         "./dev gates check",
-        "paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS",
+        "./dev ci run conformance paddock",
         "cargo hakari generate --diff",
         "cargo metadata --locked --format-version 1",
         "node scripts/publish.mjs --offline",
+        "./dev gen check --base \"$TRAIN_BASE\"",
         "github.event.inputs.base != ''",
         "needs: [plan]",
     ] {
@@ -1764,19 +1776,27 @@ fn the_local_gates_are_the_first_jobs_of_a_trains_dispatch_run_and_run_without_a
         !gates.contains("secrets.") && !gates.to_lowercase().contains("token"),
         "the gates job holds no token"
     );
-    // The conformance line is in one place, read by both jobs that run it.
-    assert_eq!(ci.matches("--only C06").count(), 1, "the conformance arguments are written once");
-    assert!(job_block(ci, "conformance").contains("paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"));
-    assert!(ci.contains("\nenv:\n  PADDOCK_CONFORMANCE_ARGS: \"--app paddock"));
+    // The conformance list is in one place, the contract (conformance/paddock.ci.json), run by both jobs through the executor.
+    assert_eq!(
+        ci.matches("--only C06").count(),
+        0,
+        "ci.yml holds no copy of the conformance arguments"
+    );
+    assert!(job_block(&ci, "conformance").contains("./dev ci run conformance paddock"));
+    assert!(
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../conformance/paddock.ci.json"))
+            .unwrap()
+            .contains("\"only\": [")
+    );
     // The commit lint is the commits job, which runs on every dispatch.
-    assert!(job_block(ci, "commits").contains("commit-lint"));
+    assert!(job_block(&ci, "commits").contains("commit-lint"));
     // The planner's table knows the job, so a rerun of its failure plans it.
     assert!(crate::plan_gitea::CI_JOBS.iter().any(|(j, _)| *j == "train-gates"));
 }
 
 #[test]
 fn ci_yml_is_read_only_and_its_checkouts_keep_no_credentials() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let ci = ci_yml();
     let top = ci.split("\njobs:\n").next().unwrap();
     assert!(
         top.contains("\npermissions:\n  contents: read\n  actions: read\n"),
@@ -1809,14 +1829,14 @@ fn step_run(block: &str, name: &str) -> String {
 }
 
 fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap()
+    paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
 #[test]
 fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_no_fixture() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
+    let ci = ci_yml();
     let script = step_run(
-        &job_block(ci, "train-gates"),
+        &job_block(&ci, "train-gates"),
         "Lockfiles are current (cargo metadata of every workspace)",
     );
     // The real loop, on the real repository, with a cargo that only says where it was run.
@@ -1848,14 +1868,38 @@ fn the_lockfile_loop_of_the_train_gates_runs_on_the_real_repository_and_visits_n
     );
     // And every folder it visits is one `cargo metadata` can resolve, not a fixture a test makes.
     for l in visited.lines() {
-        assert!(Path::new(l).join("Cargo.toml").exists(), "{l} has no Cargo.toml");
+        let dir = if cfg!(windows) { native_path_of_bash(l) } else { l.to_string() };
+        assert!(
+            Path::new(&dir).join("Cargo.toml").exists(),
+            "{l} has no Cargo.toml (looked at {dir})"
+        );
     }
+}
+
+/// What Git bash's `pwd` prints on Windows (`/c/Users/x`) as the path Windows itself reads (`C:/Users/x`); any other path is unchanged.
+/// Rust's `Path::exists` cannot resolve the first form, so the CI job on Windows (run 8034) reported "has no Cargo.toml" for a full tree.
+fn native_path_of_bash(p: &str) -> String {
+    let b = p.as_bytes();
+    if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b'/' {
+        return format!("{}:{}", b[1].to_ascii_uppercase() as char, &p[2..]);
+    }
+    p.to_string()
+}
+
+#[test]
+fn a_git_bash_path_is_read_as_the_windows_path_it_names() {
+    assert_eq!(
+        native_path_of_bash("/c/Users/x/paddock-checkout-Windows-s1/apps/debrief"),
+        "C:/Users/x/paddock-checkout-Windows-s1/apps/debrief"
+    );
+    assert_eq!(native_path_of_bash("/Volumes/d7/x"), "/Volumes/d7/x");
+    assert_eq!(native_path_of_bash("C:/x"), "C:/x");
 }
 
 #[test]
 fn the_publish_dry_run_of_the_train_gates_installs_and_builds_what_it_needs() {
-    let ci = include_str!("../../../../.gitea/workflows/ci.yml");
-    let gates = job_block(ci, "train-gates");
+    let ci = ci_yml();
+    let gates = job_block(&ci, "train-gates");
     let publish = gates.find("node scripts/publish.mjs").expect("a publish dry run");
     assert!(
         !gates[publish..].lines().next().unwrap().contains("--skip-build"),

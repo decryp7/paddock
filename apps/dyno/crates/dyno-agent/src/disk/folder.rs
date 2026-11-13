@@ -22,7 +22,7 @@ mod tests {
 
     #[test]
     fn paths_are_validated() {
-        let t = tempfile::tempdir().unwrap();
+        let t = paddock_testkit::private_tempdir().unwrap();
         std::fs::write(t.path().join("b"), b"x").unwrap();
         assert!(check("relative/path").is_err());
         assert!(check(&format!("{}/a/../b", t.path().display())).is_err());

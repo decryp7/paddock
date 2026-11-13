@@ -656,7 +656,7 @@ fn ci_text(conf: &str) -> String {
 
 fn scratch() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let root = dir.path().canonicalize().unwrap();
+    let root = paddock_env::winpath::real(dir.path()).unwrap();
     sh(&root, &["init", "-q", "-b", "main"]);
     std::fs::create_dir_all(root.join(".gitea/workflows")).unwrap();
     std::fs::write(root.join(".gitea/workflows/ci.yml"), ci_text("node a")).unwrap();

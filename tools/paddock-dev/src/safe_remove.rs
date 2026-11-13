@@ -18,6 +18,7 @@ use crate::disk::record;
 use crate::worktree::git::{Git, Repo, key, worktrees};
 use crate::worktree::owners::OwnerStore;
 use crate::worktree::procs;
+use paddock_env::winpath;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -80,17 +81,18 @@ fn under_root(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, Refusal> {
     if !meta.is_dir() {
         return Err("it is not a folder".into());
     }
-    let real = path.canonicalize().map_err(|e| format!("its real path cannot be resolved ({e})"))?;
+    // Both sides of every comparison below are `real_verbatim`: the same spelling, whatever the prefix.
+    let real = winpath::real_verbatim(path).map_err(|e| format!("its real path cannot be resolved ({e})"))?;
     let parent_real = path
         .parent()
-        .and_then(|p| p.canonicalize().ok())
+        .and_then(|p| winpath::real_verbatim(p).ok())
         .ok_or_else(|| "its parent cannot be resolved".to_string())?;
     if real.parent() != Some(parent_real.as_path()) || real.file_name() != path.file_name() {
         return Err("its path goes through a symlink".into());
     }
     let allowed = roots
         .iter()
-        .filter_map(|r| r.canonicalize().ok())
+        .filter_map(|r| winpath::real_verbatim(r).ok())
         .any(|r| real.starts_with(&r) && real != r);
     if !allowed {
         return Err("it is not strictly below an allowed root".into());
@@ -229,13 +231,23 @@ pub fn remove_with(path: &Path, roots: &[PathBuf], processes: ProcessFolders) ->
         repo.git()
             .text(&["worktree", "remove", &k])
             .map_err(|e| format!("git would not remove it: {}", e.stderr.trim()))?;
-        let _ = OwnerStore::open(&repo.common_dir).update(|m| m.remove(&k));
+        if let Some(warning) = forget_owner(&repo.common_dir, &k) {
+            eprintln!("{warning}");
+        }
     } else {
         std::fs::remove_dir_all(path).map_err(|e| format!("it could not be removed: {e}"))?; // the one deleting call
     }
     Ok(Removed {
         path: path.to_path_buf(),
         proof,
+    })
+}
+
+/// Drops the removed worktree's entry from the owner map. A map that cannot be updated leaves a stale entry behind, which
+/// is returned as the `::warning::` line to print (the removal itself already happened).
+fn forget_owner(common_dir: &Path, key: &str) -> Option<String> {
+    OwnerStore::open(common_dir).update(|m| m.remove(key)).err().map(|e| {
+        format!("::warning::the worktree {key} was removed but its owner-map entry could not be dropped ({e}); `./dev worktree list` shows it until the map is repaired")
     })
 }
 
@@ -344,5 +356,16 @@ mod tests {
         std::fs::write(root.join("a/x/.git"), "gitdir: /nowhere").unwrap();
         let found = find_repos(&root, WALK_LIMIT, WALK_ENTRIES).unwrap();
         assert_eq!(found, vec![root.join("a/b/c"), root.join("a/x")]);
+    }
+
+    #[test]
+    fn an_owner_map_that_cannot_be_updated_is_a_warning_not_a_silent_leftover() {
+        let d = tempfile::tempdir().unwrap();
+        let not_a_folder = d.path().join("file");
+        std::fs::write(&not_a_folder, b"x").unwrap();
+        let w = forget_owner(&not_a_folder, "/some/worktree").expect("a warning");
+        assert!(w.starts_with("::warning::"), "{w}");
+        assert!(w.contains("/some/worktree"), "{w}");
+        assert!(forget_owner(d.path(), "/some/worktree").is_none());
     }
 }

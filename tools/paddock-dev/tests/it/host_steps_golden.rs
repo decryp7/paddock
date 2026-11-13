@@ -52,7 +52,7 @@ fn dev(dir: &Path, args: &[&str], vars: &[(&str, String)]) -> Run {
 
 fn scratch() -> (tempfile::TempDir, PathBuf) {
     let d = tempfile::tempdir().unwrap();
-    let root = d.path().canonicalize().unwrap();
+    let root = paddock_env::winpath::real(d.path()).unwrap();
     // `canonicalize` gives `\\?\C:\...` on Windows; the tool prints plain paths.
     let root = PathBuf::from(root.display().to_string().trim_start_matches(r"\\?\"));
     std::fs::create_dir_all(root.join("home")).unwrap();
@@ -95,7 +95,7 @@ fn build_folder_in_a_container_builds_in_target_and_a_config_without_the_include
     let r = dev(&root, &["build-folder", &wsarg, "spotter-rust"], &[("RUNNER_OS", "Linux".into())]);
     assert_eq!(r.code, 0, "{}", r.stdout);
     assert!(!ws.join(".cargo/ci.toml").exists(), "an old ci.toml is removed in a container");
-    let canon = forward(&ws.canonicalize().unwrap()).replace("//?/", "");
+    let canon = paddock_env::winpath::real_for_tools(&ws).unwrap();
     assert_eq!(r.github_env, format!("PADDOCK_BUILD_FOLDER={canon}/target\n"));
     assert_eq!(r.stdout, format!("build folder: {canon}/target\n"));
     std::fs::write(ws.join(".cargo/config.toml"), "[alias]\n").unwrap();
@@ -117,6 +117,7 @@ fn build_folder_in_a_container_builds_in_target_and_a_config_without_the_include
 fn prune_folder_caps_a_folder_incremental_caches_first_and_refuses_a_bad_cap() {
     let (_d, root) = scratch();
     let dir = root.join("ci").join("build");
+    // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
     for (rel, kb) in [("debug/incremental", 400usize), ("debug/deps", 50)] {
         std::fs::create_dir_all(dir.join(rel)).unwrap();
         let data: Vec<u8> = (0..kb * 1024).map(|i| (i.wrapping_mul(2_654_435_761usize) >> 7) as u8).collect();
@@ -126,6 +127,7 @@ fn prune_folder_caps_a_folder_incremental_caches_first_and_refuses_a_bad_cap() {
     let r = dev(&root, &["prune-folder", &a, "300"], &[("PADDOCK_PRUNE_UNIT", "kb".into())]);
     assert_eq!(r.code, 0);
     assert!(r.stdout.contains("removing incremental caches"), "{}", r.stdout);
+    // conformance: layout-guess — prunes the `deps` folder of a build folder on purpose (a build artifact folder in both layouts); not a layout guess
     assert!(!dir.join("debug/incremental").exists() && dir.join("debug/deps/blob").exists());
     assert_eq!(dev(&root, &["prune-folder", &a, "many"], &[]).code, 2);
 }

@@ -3,10 +3,11 @@
 // supervision tests, CI run 8027; Debrief's plugins tests, run 8028; paddock-build). The one reader of both layouts is
 // `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` for tests). In Rust and shell under `crates/`, `tools/`, `apps/` and
 // `scripts/`, outside those two files, this flags
-// - `current_exe()` or `OUT_DIR` followed, in the same statement, by two or more `.parent()` calls or two `..` hops (`"../.."`, two
-//   `join("..")`); in shell, `OUT_DIR` with `../..` or two `dirname` on the line;
-// - a literal `/deps/` or `\deps\` path segment, and `.join("deps")` / `.push("deps")`.
-// Lines that start with a comment (`//`, `#`) are not read. Limits: a statement split by `;` (`let e = current_exe()?; e.parent()...`) is not
+// - `current_exe()` or `OUT_DIR` followed, in the same statement, by two or more `.parent()` calls, `.ancestors().nth(n)` with n >= 2, or
+//   two `..` hops (`"../.."`, two `join("..")`); in shell, `OUT_DIR` with `../..` or two `dirname` on the line, in either order;
+// - a literal `/deps/` or `\deps\` path segment, a path that ends in `/deps` (`target/debug/deps"`), and `.join("deps")` / `.push("deps")`.
+// Not read: lines that start with a comment (`//`, `#`), a trailing comment (white space then `//`, or `#` in shell), and a `deps` in a URL
+// (`https?://`) or a `node_modules/` path. Limits: a statement split by `;` (`let e = current_exe()?; e.parent()...`) is not
 // followed; a block comment or a trailing comment is read as code. A justified site carries `// conformance: layout-guess — <why>`
 // (`# conformance: ...` in shell) on the line or the line above. Rust host: tools/paddock-dev/src/check/c120.rs (same findings, line for line).
 import { warn } from '../finding.mjs';
@@ -19,23 +20,30 @@ const WAIVER = /conformance:\s*layout-guess\s*[—–-]+\s*(\S.{2,})/;
 const BARE_WAIVER = /conformance:\s*layout-guess/;
 
 const START = '(?:current_exe\\s*\\(|\\bOUT_DIR\\b)';
+/** A `deps` path segment: in the middle (`/deps/`) or at the end of a path (`/deps"`, `/deps` at the end of a line). */
+const DEPS = '[/\\\\]deps(?:[/\\\\]|["\'`)\\r\\n]|$)';
+/** The token (up to the last white space or quote) before `index` on its line: a URL or a `node_modules/` path is not a layout. */
+const TOKEN_TAIL = /[^\s"'`]*$/;
+const NOT_A_LAYOUT = /https?:\/\/|node_modules[/\\]/;
+
 export const RUST_PATTERNS = [
   { src: `${START}[^;]*?\\.parent\\s*\\([^;]*?\\.parent\\s*\\(`, what: 'reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`' },
+  { src: `${START}[^;]*?\\.ancestors\\s*\\(\\)[^;]*?\\.nth\\s*\\(\\s*(?:[2-9]|[1-9][0-9]+)\\s*\\)`, what: 'reaches the profile folder by `.ancestors().nth(n)` with n of 2 or more from `current_exe()` or `OUT_DIR`' },
   { src: `${START}[^;]*?(?:"\\.\\.[/\\\\]+\\.\\."|"\\.\\."[^;]*?"\\.\\.")`, what: 'reaches the profile folder by two or more `..` hops from `current_exe()` or `OUT_DIR`' },
-  { src: '[/\\\\]deps[/\\\\]|\\.(?:join|push)\\s*\\(\\s*"deps"\\s*\\)', what: 'names the `deps` folder of a build folder' },
+  { src: DEPS + '|\\.(?:join|push)\\s*\\(\\s*"deps"\\s*\\)', what: 'names the `deps` folder of a build folder' },
 ];
 export const SHELL_PATTERNS = [
-  { src: '\\bOUT_DIR\\b[^\\n]*?(?:\\.\\.[/\\\\]+\\.\\.|dirname[^\\n]*dirname)', what: 'reaches the profile folder by two or more hops from `OUT_DIR`' },
-  { src: '[/\\\\]deps[/\\\\]', what: 'names the `deps` folder of a build folder' },
+  { src: '\\bOUT_DIR\\b[^\\n]*?(?:\\.\\.[/\\\\]+\\.\\.|dirname[^\\n]*dirname)|dirname[^\\n]*dirname[^\\n]*\\bOUT_DIR\\b', what: 'reaches the profile folder by two or more hops from `OUT_DIR`' },
+  { src: DEPS, what: 'names the `deps` folder of a build folder' },
 ];
-
 const lineAt = (text, index) => text.slice(0, index).split('\n').length;
 
-/** `text` with the lines that start with `prefix` (after white space) emptied; the line count stays. */
+/** `text` with the lines that start with `prefix` (after white space) emptied and a trailing comment (white space, then `prefix`) cut off; the line count stays. */
 export function withoutCommentLines(text, prefix) {
+  const trailing = new RegExp(`\\s${prefix === '#' ? '#' : '//'}[^\\n]*$`);
   return text
     .split('\n')
-    .map((l) => (l.trim().startsWith(prefix) ? '' : l))
+    .map((l) => (l.trim().startsWith(prefix) ? '' : l.replace(trailing, '')))
     .join('\n');
 }
 
@@ -51,6 +59,8 @@ export function layoutGuesses(text, shell = false) {
   const seen = new Set();
   const out = [];
   for (const { index, what } of hits) {
+    const lineStart = code.lastIndexOf('\n', index - 1) + 1;
+    if (NOT_A_LAYOUT.test(TOKEN_TAIL.exec(code.slice(lineStart, index))[0])) continue;
     const line = lineAt(code, index);
     if (seen.has(line)) continue;
     seen.add(line);

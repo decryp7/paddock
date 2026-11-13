@@ -5,3 +5,5 @@ other="$(dirname "$(dirname "$OUT_DIR")")/x"
 test_exe=target/debug/deps/foo-1234
 # conformance: layout-guess — a fixture of the old layout
 old=target/debug/deps/bar
+up="$(dirname "$(dirname "$x")")/$OUT_DIR"
+ls target/debug/deps

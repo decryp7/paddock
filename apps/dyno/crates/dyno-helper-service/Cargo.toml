@@ -22,4 +22,5 @@ log = { version = "0.4", features = ["kv"] }
 workspace = true
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true

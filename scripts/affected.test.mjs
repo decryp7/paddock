@@ -949,7 +949,7 @@ describe('contracts', () => {
     assert.match(leg.rust_checks, /cargo llvm-cov nextest -p pitwall-core/);
     assert.equal(leg.rust, true);
     for (const l of matrix(run('apps/pitwall/crates/pitwall-core/src/lib.rs'), graph).filter((l) => l.os !== LINUX)) assert.equal(l.rust_checks, '', 'host legs run the Rust gates only');
-    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /if: \$\{\{ !cancelled\(\) && steps\.prepare\.outcome != 'failure' && inputs\.rust-checks != '' && inputs\.rust == 'true' \}\}/, 'the action skips them with the Rust half');
+    assert.match(readFileSync(join(ROOT, '.gitea/actions/app-gates/action.yml'), 'utf8'), /if: \$\{\{ !cancelled\(\) && env\.PADDOCK_JOB_ABORTED != '1' && steps\.prepare\.outcome != 'failure' && inputs\.rust-checks != '' && inputs\.rust == 'true' \}\}/, 'the action skips them with the Rust half');
   });
 
   test('host rust checks reach only the Windows and macOS legs, and run with the Rust half', () => {

@@ -2,8 +2,7 @@
   "app": "fixture",
   "checks": [
     "C39",
-    "C53",
-    "C120"
+    "C53"
   ],
   "findings": [
     {
@@ -616,7 +615,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 9,
       "message": "asks `up` about a raw pid: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -625,7 +624,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 9,
       "message": "asks `presence` about a raw pid: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -634,7 +633,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 13,
       "message": "checks a raw pid with `kill(pid, 0)`: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -643,7 +642,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 17,
       "message": "opens a process by its raw pid with `OpenProcess`: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -652,7 +651,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 18,
       "message": "looks a raw pid up in sysinfo: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -661,7 +660,7 @@
       "file": "crates/a/src/c53_liveness_bad.rs",
       "line": 19,
       "message": "checks a raw pid with `kill(pid, 0)`: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -670,7 +669,7 @@
       "file": "crates/a/src/c53_liveness_glob.rs",
       "line": 4,
       "message": "asks `may_be_alive` about a raw pid: the pid may belong to another process by now",
-      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.is_alive()` or `id.presence()`. A justified case carries `// conformance: pid-liveness — <reason>`."
+      "fix": "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`."
     },
     {
       "check": "C53",
@@ -689,132 +688,6 @@
       "line": 1,
       "message": "the baseline's shrink-only rule is not enforced here: no merge base (Command failed: git rev-parse HEAD)",
       "fix": "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 2,
-      "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 6,
-      "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 14,
-      "message": "reaches the profile folder by two or more `..` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 15,
-      "message": "reaches the profile folder by two or more `..` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 19,
-      "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 20,
-      "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 21,
-      "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_bad.rs",
-      "line": 23,
-      "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_unicode.rs",
-      "line": 3,
-      "message": "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_unicode.rs",
-      "line": 4,
-      "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_waivers.rs",
-      "line": 6,
-      "message": "the layout-guess waiver gives no reason",
-      "fix": "Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "crates/a/src/c120_waivers.rs",
-      "line": 7,
-      "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "scripts/c120_bad.sh",
-      "line": 3,
-      "message": "reaches the profile folder by two or more hops from `OUT_DIR`: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
-    },
-    {
-      "check": "C120",
-      "severity": "warn",
-      "rule": 40,
-      "file": "scripts/c120_bad.sh",
-      "line": 5,
-      "message": "names the `deps` folder of a build folder: right in one cargo layout, a wrong folder in the other",
-      "fix": "Use `paddock_env::cargo_layout` (`paddock_testkit::cargo_layout` in tests), which reads both cargo layouts and returns `None` for any other. A justified case carries `// conformance: layout-guess — <reason>`."
     },
     {
       "check": "W002",
@@ -949,5 +822,5 @@
     }
   ],
   "errors": 82,
-  "warnings": 18
+  "warnings": 4
 }

@@ -2,7 +2,8 @@
 //! what this push changes, run here first, in parallel, bounded by the machine's load (ER-24).
 //!
 //! - [`gates`]: the plan and the changed files become gates (pure).
-//! - [`ci_line`]: the conformance command, read from ci.yml in this one place.
+//! - the conformance command comes from `conformance/paddock.ci.json` ([`crate::ci_run::contract::conformance_args_at`]): the one copy
+//!   of the check list, which CI's conformance and train-gates jobs run through `./dev ci run conformance paddock` (ADR 0038 §1).
 //! - [`exec`]: running them, with a fake for tests.
 //!
 //! What is checked. With `--refs-from-stdin` (the hook) exactly the commit being pushed: it is checked out in a throw-away worktree
@@ -20,9 +21,9 @@
 //! `PADDOCK_ACCEPT_NOT_MEASURED=<full row ids>` (or `--accept-not-measured`) lets those not-measured rows pass the push; it is
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
-pub mod ci_line;
 pub mod exec;
 pub mod gates;
+pub mod heavy_tool;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -30,6 +31,7 @@ use clap::Args;
 use exec::{BUDGET, RealExec, RunOpts, Verdict, parse_load, run_all_with, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
+use paddock_env::winpath;
 use paddock_repo_graph::GitHistory;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -44,9 +46,10 @@ pub struct PrePushArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     pub root: Option<PathBuf>,
-    /// The base the push is measured from (default: origin/main).
-    #[arg(long, default_value = "origin/main")]
-    pub base: String,
+    /// The base every push is measured from. Default: for an existing remote ref its old commit; for a new one the nearest remote
+    /// branch the pushed commit descends from (its tracking upstream, then a `train/*` branch, then main); origin/main when none.
+    #[arg(long)]
+    pub base: Option<String>,
     /// Only the gates whose row starts with one of these words (for example `fmt,clippy`); the hook always runs them all.
     #[arg(long, value_delimiter = ',')]
     pub only: Vec<String>,
@@ -123,8 +126,8 @@ fn sweep_stale(main: &Path, trees: &Path, alive: &dyn Fn(u32, u64) -> bool) -> u
         let wt = PathBuf::from(gitdir.trim()).parent().map(Path::to_path_buf).unwrap_or_default();
         let ours = wt
             .parent()
-            .and_then(|p| p.canonicalize().ok())
-            .is_some_and(|p| Some(p) == trees.canonicalize().ok())
+            .and_then(|p| winpath::real(p).ok())
+            .is_some_and(|p| Some(p) == winpath::real(trees).ok())
             && wt
                 .file_name()
                 .is_some_and(|n| stale_trees(&[n.to_string_lossy().to_string()], alive).len() == 1);
@@ -179,12 +182,11 @@ fn refuse_home(path: &Path, home: Option<&str>) -> Result<(), CliError> {
     // anything is created, so a refused folder is never made.
     let ancestor = path.ancestors().find(|a| a.exists()).unwrap_or(path);
     let rest = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
-    let resolved = ancestor
-        .canonicalize()
+    let resolved = winpath::real(ancestor)
         .map_err(|e| CliError::failure(format!("{} cannot be resolved: {e}.", ancestor.display())))?
         .join(rest);
     if let Some(h) = home.filter(|h| !h.is_empty() && *h != "/") {
-        let home_resolved = Path::new(h).canonicalize().unwrap_or_else(|_| PathBuf::from(h));
+        let home_resolved = winpath::real(Path::new(h)).unwrap_or_else(|_| PathBuf::from(h));
         if resolved.starts_with(&home_resolved) {
             return Err(CliError::refused(format!(
                 "{} is inside the home folder {}.",
@@ -250,16 +252,23 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let stop = Arc::new(AtomicBool::new(false));
     stop_on_signals(&stop);
     let state = state_dir(&root);
-    let pushed = if args.refs_from_stdin {
-        parse_refs(&read_stdin()?)
+    let pushes = if args.refs_from_stdin {
+        parse_push(&read_stdin()?)
     } else {
         Vec::new()
     };
-    let (change, mut notes, extra) = discover(&root, &args.base, &args.files, &pushed)?;
+    let pushed: Vec<String> = pushes.iter().map(|p| p.sha.clone()).collect();
+    let (base, base_why) = match (&args.base, pushes.first()) {
+        (Some(b), _) => (b.clone(), format!("--base {b} was given")),
+        (None, Some(first)) => choose_base(&root, first, DEFAULT_BASE),
+        (None, None) => (DEFAULT_BASE.to_string(), "no push to look at (a person's run)".to_string()),
+    };
+    let (change, mut notes, extra) = discover(&root, &base, &args.files, &pushed)?;
+    notes.insert(0, format!("base: {base} ({base_why})"));
     if change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
-            json!({"gates": [], "changed": 0}),
-            format!("pre-push: nothing changed since {}; nothing to check.", args.base),
+            json!({"gates": [], "changed": 0, "base": base}),
+            format!("pre-push: base {base} ({base_why}); nothing changed since; nothing to check."),
         ));
     }
     if !accept.is_empty() {
@@ -312,6 +321,8 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         env: env.clone(),
         logs: state.join("logs"),
         stop: Arc::clone(&stop),
+        built_heavy: Default::default(),
+        budget_end: std::time::Instant::now() + BUDGET,
     };
     let history = GitHistory::new(&work, GIT_TIMEOUT);
     let req = Request {
@@ -344,13 +355,19 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     }
     let load = uptime_load(&real);
     let n = workers(load, std::thread::available_parallelism().map_or(1, |n| n.get()));
-    if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
-        notes.push("PADDOCK_HEAVY is not set and no heavy.sh or heavy is on PATH: compiles run without the machine-wide slot (CARGO_BUILD_JOBS=2 still applies)".into());
+    let mut overridden = String::new();
+    if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") && !env.contains_key(exec::TEST_HEAVY_OFF) {
+        overridden =
+            "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
+                .into();
+    } else if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
+        notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}); {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
+        base,
+        base_why,
         change.files.len(),
-        args.base,
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
         BUDGET.as_secs() / 60,
@@ -405,7 +422,7 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
 const SECOND_SIGNAL_EXIT: i32 = 130;
 
 #[cfg(unix)]
-fn stop_on_signals(stop: &Arc<AtomicBool>) {
+pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
     use signal_hook::consts::{SIGINT, SIGTERM};
     for sig in [SIGINT, SIGTERM] {
         // Registered first, so it sees the flag the second signal finds set: the first signal only sets the flag (the gates end,
@@ -417,7 +434,7 @@ fn stop_on_signals(stop: &Arc<AtomicBool>) {
 
 /// Windows: Ctrl+C reaches the whole console group; the handler sets the same flag so the table prints and the gates end.
 #[cfg(windows)]
-fn stop_on_signals(stop: &Arc<AtomicBool>) {
+pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
     let flag = Arc::clone(stop);
     let _ = ctrlc::set_handler(move || {
         if flag.swap(true, Ordering::SeqCst) {
@@ -454,6 +471,144 @@ fn read_stdin() -> Result<String, CliError> {
         .read_to_string(&mut text)
         .map_err(|e| CliError::failure(format!("Standard input could not be read: {e}.")))?;
     Ok(text)
+}
+
+/// The base a push is measured from when `--base` is not given.
+const DEFAULT_BASE: &str = "origin/main";
+
+/// One ref of a push, from a line of git's pre-push input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pushed {
+    /// The local ref (`refs/heads/x`).
+    pub local_ref: String,
+    /// The commit being pushed.
+    pub sha: String,
+    /// The ref on the remote.
+    pub remote_ref: String,
+    /// The commit the remote ref has now: all zeros for a new ref.
+    pub remote_sha: String,
+}
+
+/// The refs of a push that send a commit (deletions are left out), once per commit.
+pub fn parse_push(input: &str) -> Vec<Pushed> {
+    let mut out: Vec<Pushed> = Vec::new();
+    for l in input.lines() {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        if let [local_ref, sha, remote_ref, remote_sha] = f[..]
+            && sha.chars().any(|c| c != '0')
+            && !out.iter().any(|p| p.sha == sha)
+        {
+            out.push(Pushed {
+                local_ref: local_ref.into(),
+                sha: sha.into(),
+                remote_ref: remote_ref.into(),
+                remote_sha: remote_sha.into(),
+            });
+        }
+    }
+    out
+}
+
+/// Where a push is measured from, and why (printed at the top of the run). An existing remote ref: its old commit, so exactly what the
+/// push adds. A new one: the remote branch the pushed commit descends from that is nearest to it, preferring the branch's tracking
+/// upstream, then a `train/*` branch, then main on a tie (a fix branch cut from a train is measured against the train, not main). When
+/// no remote branch is an ancestor, `fallback` (origin/main).
+pub fn choose_base(root: &Path, p: &Pushed, fallback: &str) -> (String, String) {
+    let git = |args: &[&str]| git_text(root, args);
+    let short = |s: &str| s[..s.len().min(12)].to_string();
+    if p.remote_sha.chars().any(|c| c != '0') {
+        if git(&["cat-file", "-e", &format!("{}^{{commit}}", p.remote_sha)]).is_some() {
+            return (
+                p.remote_sha.clone(),
+                format!("{} exists on the remote: its old commit {}", p.remote_ref, short(&p.remote_sha)),
+            );
+        }
+        let why = format!(
+            "{} is on the remote at {}, which is not here (fetch it)",
+            p.remote_ref,
+            short(&p.remote_sha)
+        );
+        let (b, w) = nearest_remote_branch(root, p, fallback);
+        return (b, format!("{why}; {w}"));
+    }
+    nearest_remote_branch(root, p, fallback)
+}
+
+/// The most `train/*` branches whose distance is counted (the newest by name): bounds the search on a remote with hundreds of branches.
+const MAX_TRAINS: usize = 40;
+
+fn nearest_remote_branch(root: &Path, p: &Pushed, fallback: &str) -> (String, String) {
+    let started = std::time::Instant::now();
+    let git = |args: &[&str]| git_text(root, args);
+    let branch = p.remote_ref.strip_prefix("refs/heads/").unwrap_or(&p.remote_ref);
+    let upstream = p
+        .local_ref
+        .strip_prefix("refs/heads/")
+        .and_then(|b| git(&["rev-parse", "--symbolic-full-name", &format!("{b}@{{upstream}}")]))
+        .map(|t| t.trim().to_string())
+        .filter(|t| t.starts_with("refs/remotes/"));
+    // One process lists every remote branch the pushed commit descends from; the distance is counted only for the few that can be a
+    // base: its tracking upstream, the `train/*` branches and main (a repository with hundreds of branches made this search spawn
+    // about 1,100 git processes before).
+    let merged = git(&["for-each-ref", "--merged", &p.sha, "--format=%(refname)", "refs/remotes"]).unwrap_or_default();
+    let ancestors: Vec<&str> = merged
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.ends_with("/HEAD"))
+        .collect();
+    let on_remote = |full: &str| {
+        let name = full.strip_prefix("refs/remotes/").unwrap_or(full);
+        name.split_once('/').map_or(name, |(_, rest)| rest).to_string()
+    };
+    let mut pool: Vec<&str> = ancestors.iter().copied().filter(|f| on_remote(f) != branch).collect();
+    pool.sort_by(|a, b| b.cmp(a));
+    let (mut trains, mut others): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
+    for f in pool {
+        let name = on_remote(f);
+        if upstream.as_deref() == Some(f) || name == "main" {
+            others.push(f);
+        } else if name.starts_with("train/") && trains.len() < MAX_TRAINS {
+            trains.push(f);
+        }
+    }
+    // (distance, priority, name): the nearest wins; on a tie the tracking upstream, then a train, then main.
+    let mut cands: Vec<(u32, u8, String)> = Vec::new();
+    for full in trains.into_iter().chain(others) {
+        let name = on_remote(full);
+        let dist = git(&["rev-list", "--count", &format!("{full}..{}", p.sha)])
+            .and_then(|t| t.trim().parse().ok())
+            .unwrap_or(u32::MAX);
+        let prio = if upstream.as_deref() == Some(full) {
+            0
+        } else if name.starts_with("train/") {
+            1
+        } else {
+            2
+        };
+        cands.push((dist, prio, full.strip_prefix("refs/remotes/").unwrap_or(full).to_string()));
+    }
+    cands.sort();
+    let took = format!(
+        "searched {} ancestor branch(es), counted {} in {} ms",
+        ancestors.len(),
+        cands.len(),
+        started.elapsed().as_millis()
+    );
+    match cands.first() {
+        Some((dist, prio, name)) => (
+            name.clone(),
+            format!(
+                "new remote ref {branch}: the nearest of its upstream, the train branches and main that it descends from, {dist} commit(s) ahead{}; {took}",
+                if *prio == 0 { " (its tracking upstream)" } else { "" }
+            ),
+        ),
+        None => (
+            fallback.to_string(),
+            format!(
+                "new remote ref {branch}: no tracking upstream, train branch or main is an ancestor of the pushed commit, so {fallback}; {took}"
+            ),
+        ),
+    }
 }
 
 /// The commits a push sends, from git's pre-push input: the local sha of every ref that is not a deletion.
@@ -525,6 +680,7 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
     let mut text = format!("{head}\n");
     let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
     let mut data = Vec::new();
+    let (mut unmeasured_ids, mut failed_ids): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for (id, v) in rows {
         let (line, kind) = match v {
             Verdict::Passed { secs } => {
@@ -537,6 +693,7 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
             }
             Verdict::NotMeasured { reason, next } => {
                 unmeasured += 1;
+                unmeasured_ids.push(id);
                 (format!("NOT MEASURED  {id:<34} {reason}. Next: {next}"), "not measured")
             }
             Verdict::Accepted { reason } => {
@@ -548,6 +705,7 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
             }
             Verdict::Failed { cause, tail, next, secs } => {
                 fail += 1;
+                failed_ids.push(id);
                 let shown = if tail.is_empty() {
                     String::new()
                 } else {
@@ -581,6 +739,13 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
             "Safe to push.".to_string()
         }
     ));
+    // The ids once more, on the last lines: output that gets cut (a hook's long table) still ends with what the author has to act on.
+    if fail > 0 {
+        text.push_str(&format!("\nFAILED ({fail}): {}", failed_ids.join("; ")));
+    }
+    if unmeasured > 0 {
+        text.push_str(&format!("\nNOT MEASURED ({unmeasured}): {}", unmeasured_ids.join("; ")));
+    }
     // 7 beats 5 and 6, and 5 beats 6: the worst finding decides.
     let exit = if broken > 0 {
         Exit::CheckBroken
@@ -672,11 +837,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     Ok((Change { files: changed, ranges }, notes, extra))
 }
 
-/// What the repository says that the plan does not: ci.yml's conformance line, the apps that lint Windows, the CI image.
+/// What the repository says that the plan does not: the conformance contract's check list, the apps that lint Windows, the CI image.
 fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts {
-    let ci = std::fs::read_to_string(root.join(".gitea/workflows/ci.yml"))
-        .map_err(|e| format!("ci.yml cannot be read: {e}"))
-        .and_then(|t| ci_line::conformance_args(&t));
+    let ci = crate::ci_run::contract::conformance_args_at(root);
     let mut windows = std::collections::BTreeSet::new();
     for ws in gates::workspaces(plan) {
         let Some(app) = ws.strip_prefix("apps/").and_then(|r| r.split('/').next()) else {

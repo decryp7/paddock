@@ -1164,3 +1164,42 @@ above (every app linted, one gate at a time at a load of 25) took over 14 minute
 to workspaces with their own changes is what makes a shared-crate push fit the 15 minute budget. Not measured: the same run at a
 load of 25 or more (the load was 11 at the start; with one gate at a time the three Clippy runs would add up to about 5 minutes
 at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).
+
+## Orphan guardian step, Linux crates job (2026-11-13, feat/ci-in-rust-wp5)
+
+- **Command:** `./dev ci timings --json --limit 15 --no-logs` (Gitea API, no token printed), the `ci.yml (push)` section, job `crates (fmt, workspace hack, unused deps, coverage, deny)`, which runs `./dev ci guardian-as-user` (the shell script before)
+- **Corpus:** 7 successful push runs of ci.yml, all on 2026-11-12, runner d-gtr9 (Linux)
+- **Numbers:** the whole job: 2 m 13 s median, 3 m 13 s p90 (193 s). The step "Orphan guardian as a user (Linux)": 5 s median (it is in the job's biggest steps; its build is a cache hit after the workspace tests, its two test runs take about a second each). The coverage step, the largest, is 86 s.
+- **Decision:** the two bounds are new (the shell had none, ER-32), not raised. Build: `PADDOCK_GUARDIAN_BUILD_TIMEOUT` default 600 s, about three times the p90 of the whole job, so a cold compile cache still fits and a hang ends. Test run: `PADDOCK_GUARDIAN_TEST_TIMEOUT` default 300 s, 60 times the step's median. Both only end a hang.
+- **Not measured:** a cold-cache run of the build (the job's runs all had a warm sccache); the step's maximum (the summary gives medians and p90 of jobs only).
+
+## sccache and cargo 1.100's build-dir layout on Windows (2026-11-13, fix/spotter-win-cmdline-1-100)
+
+### 2026-11-13, rustc spawn under sccache with and without the legacy build-dir layout (fix/spotter-win-cmdline-1-100)
+
+- **Commit:** 4c581a781 (the fix: `__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1` beside `RUSTC_WRAPPER=sccache` on Windows)
+- **Machine:** the local Windows 11 Arm test VM (VMware Fusion on the Mac mini, `scripts/vm-win.sh`), from `clean-baseline`, under the
+  test-machines lock (231 s), reverted afterwards
+- **Load:** host 1-minute load 9 to 34 during the session (other agents' builds); a pass/fail result, not a timing
+- **Build:** debug; rustc and cargo 1.100.0 (`aarch64-pc-windows-msvc` dist components, checksums verified), sccache 0.19.0
+  (`sccache-v0.19.0-aarch64-pc-windows-msvc.zip`, sha256 66d20f1e...), local disk cache, `CARGO_BUILD_JOBS=2`, `CARGO_INCREMENTAL=0`
+- **Corpus:** a synthetic workspace of 450 leaf crates `c000..c449`, 20 middle crates `h00..h19` (each depends on a slice of the
+  leaves), `hub` (depends on the 20) and `top` (depends on `hub`): every leaf is an indirect dependency of `hub` and `top`, so
+  cargo 1.100 passes one `-L dependency=<build-dir>\debug\build\<pkg>\<hash>\out` per leaf. No build scripts or proc macros (no
+  linker needed). Build folder under `C:\Users\paddock-test\paddock-cl-repro\a-deliberately-long-folder-like-the-ci-build-folder`.
+  On the Mac the same shape with 400 leaves gave 420 `-L` and a 44,916-character rustc line for `top` with the new layout, 1 `-L`
+  and 862 characters with the opt-out
+- **Command:** `cargo build --offline -v -p top --target-dir <folder>\t-<case>`, once per case, each in a fresh target folder
+- **Runs:** single run per case (deterministic pass/fail)
+- **Numbers:**
+
+  | Case | `RUSTC_WRAPPER` | opt-out variable | Result |
+  |---|---|---|---|
+  | before the fix | sccache | unset | exit 101: `sccache: error: failed to spawn Command` ... `The filename or extension is too long. (os error 206)` (crate `hub`) |
+  | with the opt-out | sccache | `1` | builds (exit 0) |
+  | without sccache | unset | unset | builds (exit 0): cargo's own `@argfile` fallback works |
+
+- **Memory measure:** not measured
+- **Notes:** reproduces CI run 8027, job 37099 (spotter_app_lib: 307 `-L`, about 37,000 characters). The cause is sccache 0.19
+  expanding cargo's `@argfile` (mozilla/sccache#2787; fixes #2789 and #3026 open). Raw output and the generator were kept outside
+  the repository (the session's build folder on d7), not committed.

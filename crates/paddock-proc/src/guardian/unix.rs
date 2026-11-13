@@ -721,7 +721,7 @@ fn serve(input: impl BufRead) -> i32 {
     let mut checked = check_owner(
         owner,
         crate::sys::parent_pid(),
-        owner.is_alive(),
+        owner.confirmed_running(),
         crate::sys::exe_of(owner.pid()).as_deref(),
         me.as_deref(),
     );

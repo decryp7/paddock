@@ -35,7 +35,7 @@ mod tests {
 
     #[test]
     fn the_password_store_is_an_owner_only_file_in_the_folder_it_is_given() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         // The agent's data folder is the user's own; a temp folder on a CI runner may let others create files (run 7821).
         paddock_secrets::make_folder_private(dir.path()).unwrap();
         let store = FileSecrets::new(dir.path().join("secrets"));
@@ -57,7 +57,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn on_macos_the_os_choice_is_the_file_store_never_the_keychain() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let store = os_store(&dir.path().join("secrets"));
         let name = Name::new("wol", "secure-on-8").unwrap();
         store.set(&name, &Secret::new("0a:0b:0c:0d:0e:0f").unwrap()).unwrap();

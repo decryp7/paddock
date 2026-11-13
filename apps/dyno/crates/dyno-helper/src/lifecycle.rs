@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn lines_append_keep_the_newest_and_are_world_readable() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let p = dir.path().join("lifecycle.log");
         for i in 0..(MAX_LINES + 5) {
             append(&p, &line(1_762_333_200, &format!("e{i}"), 7, "1.1.0")).unwrap();
@@ -185,7 +185,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_hard_link_a_planted_folder_and_a_huge_file_are_handled() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         // A hard link to a file elsewhere: refused, the other file is untouched.
         let other = dir.path().join("other");
         std::fs::write(&other, "keep\n").unwrap();
@@ -218,7 +218,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_kernel_refuses_a_link_even_when_the_checks_before_the_open_are_skipped() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let target = dir.path().join("elsewhere");
         std::fs::write(&target, "keep\n").unwrap();
         let p = dir.path().join("lifecycle.log");
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn the_read_is_bounded_to_the_newest_part_at_a_line() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let p = dir.path().join("big.log");
         std::fs::write(&p, "t=1 starting pid=1 version=1\n".repeat(50_000)).unwrap();
         let mut f = std::fs::File::open(&p).unwrap();
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     #[allow(unsafe_code)]
     fn a_pipe_in_the_place_of_the_file_does_not_hang_the_start() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let p = dir.path().join("lifecycle.log");
         let c = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
         // SAFETY: a NUL-terminated path that outlives the call.
@@ -276,7 +276,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_link_is_never_written_through() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let target = dir.path().join("elsewhere");
         std::fs::write(&target, "keep\n").unwrap();
         let p = dir.path().join("lifecycle.log");

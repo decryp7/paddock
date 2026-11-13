@@ -42,7 +42,7 @@ impl ProcessSource for Helped {
 
 #[test]
 fn the_live_push_carries_who_read_the_processes_and_the_helpers_others_total() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     fake.add_process(dyno_platform::fake::process(100, "busy", 60.0));

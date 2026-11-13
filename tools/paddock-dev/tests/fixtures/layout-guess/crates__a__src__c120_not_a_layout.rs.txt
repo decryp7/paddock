@@ -1,0 +1,8 @@
+fn not_layouts() {
+    let a = std::env::current_exe().unwrap().ancestors().nth(1);
+    let u = "https://example.invalid/target/debug/deps/x";
+    let n = "node_modules/pkg/deps/index.js";
+    let c = 1; // see target/debug/deps/ and \deps\
+    let d = 2; /* not a trailing // comment */
+    let e = "a/dependencies/b";
+}

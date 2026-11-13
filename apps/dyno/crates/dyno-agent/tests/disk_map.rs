@@ -86,8 +86,8 @@ impl AccessProbe for NoAccess {
 /// What the agent was asked to show in the file manager.
 type Shown = Arc<Mutex<Vec<PathBuf>>>;
 
-fn start() -> (Running, Dirs, tempfile::TempDir, Shown) {
-    let tmp = tempfile::tempdir().unwrap();
+fn start() -> (Running, Dirs, paddock_testkit::PrivateTemp, Shown) {
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     let shown: Shown = Arc::default();
@@ -368,7 +368,7 @@ fn a_folder_that_was_refused_is_read_again_by_a_retry_and_full_disk_access_is_no
 
 #[test]
 fn the_volume_list_is_asked_for_in_the_background_and_never_holds_other_requests() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     let open = Arc::new((Mutex::new(false), std::sync::Condvar::new()));

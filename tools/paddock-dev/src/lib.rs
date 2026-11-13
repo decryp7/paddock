@@ -13,6 +13,8 @@
 //!   ([`ipc_endpoints`], ADR 0072);
 //! - `hook pre-tool-use` and `hooks install`: Claude Code's PreToolUse guard and its installer ([`hook`], ADR 0083);
 //! - `merge check`: did a merge silently drop one side's hunks or tests? ([`merge_check`], ADR 0089 outcomes);
+//! - `gen check`: the checks of the generated and pinned files a change touches, from `docs/generators.toml`
+//!   ([`generators`], ER-40); `merge check` runs the ones a merge makes due;
 //! - `graph affected`: the affected closure of a change set, the first consumer of `paddock-repo-graph` ([`plan`], with the
 //!   `.gitea` narrowing in [`plan_gitea`] and the git reader in [`plan_repo`]);
 //! - `plan`: the CI planner, the whole command line of `scripts/affected.mjs` (`<base> [<head>]`, `--files`, `--all`, `--ci
@@ -43,17 +45,19 @@
 pub mod brief_check;
 pub mod check;
 pub mod child_env;
+pub mod ci_build_env;
 pub mod ci_build_jobs;
 pub mod ci_host;
 pub mod ci_isolation;
+pub mod ci_run;
 pub mod ci_runs;
 pub mod ci_setup_rust;
 pub mod ci_tool;
 mod cli;
 pub mod disk;
-mod fds;
 pub mod full_tree;
 pub mod gates;
+pub mod generators;
 pub mod hook;
 pub mod input_hash;
 pub mod ipc_endpoints;
@@ -62,6 +66,7 @@ pub mod locks;
 pub mod log_text;
 pub mod merge_check;
 pub mod nextest_log;
+pub mod pathfind;
 pub mod plan;
 pub mod plan_ci;
 pub mod plan_cmd;
@@ -74,6 +79,9 @@ pub mod queue;
 pub mod release_isolation;
 pub mod safe_remove;
 pub mod slots;
+// Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
+#[cfg(all(test, unix))]
+mod test_sleeper;
 pub mod wait;
 pub mod wait_lock;
 pub mod worktree;

@@ -6,6 +6,8 @@ use super::config;
 use super::crates;
 use super::identity::identity_of;
 use super::ledger::{Kind, Ledger, Mode};
+use paddock_env::Os;
+use paddock_env::winpath;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -124,9 +126,54 @@ impl Finding {
     }
 }
 
+/// How the probes resolve and compare paths: the one door (ADR 0021 amendment 2026-11-11). A resolved path is only compared
+/// through these methods (`winpath::same`, `starts_with`, `strip_prefix`: lexical, per component, any verbatim prefix), never
+/// with `==`, `Path::starts_with` or `Path::strip_prefix`, which fail on Windows when the two sides are spelled differently.
+/// `resolve` and `os` are injected so a test can give a verbatim folder on any OS.
+#[derive(Debug, Clone, Copy)]
+pub struct PathOps {
+    /// The OS whose spelling rules compare.
+    pub os: Os,
+    /// Resolves a path (symlinks followed): the running OS's `winpath::real_verbatim`.
+    pub resolve: fn(&Path) -> std::io::Result<PathBuf>,
+}
+
+impl Default for PathOps {
+    fn default() -> PathOps {
+        PathOps {
+            os: Os::current(),
+            resolve: winpath::real_verbatim,
+        }
+    }
+}
+
+impl PathOps {
+    /// The resolved path.
+    pub fn real(&self, p: &Path) -> std::io::Result<PathBuf> {
+        (self.resolve)(p)
+    }
+
+    /// Both paths are the same place by spelling.
+    pub fn same(&self, a: &Path, b: &Path) -> bool {
+        winpath::same(a, b, self.os)
+    }
+
+    /// `path` is `prefix` or below it.
+    pub fn starts_with(&self, path: &Path, prefix: &Path) -> bool {
+        winpath::starts_with(path, prefix, self.os)
+    }
+
+    /// What is left of `path` below `prefix`, `/`-separated.
+    pub fn strip_prefix(&self, path: &Path, prefix: &Path) -> Option<String> {
+        winpath::strip_prefix(path, prefix, self.os)
+    }
+}
+
 /// What `verify` is asked.
 #[derive(Debug, Clone)]
 pub struct VerifyOptions {
+    /// How paths are resolved and compared (tests inject a Windows spelling).
+    pub paths: PathOps,
     /// The ledger file.
     pub ledger: PathBuf,
     /// The kinds the job must have recorded.
@@ -162,6 +209,7 @@ impl VerifyOptions {
             sccache_stats: None,
             tauri_pins: None,
             allow_unpinned_tauri: false,
+            paths: PathOps::default(),
             walk_stop: None,
             slack_ns: 1_000_000_000,
             skip: Vec::new(),
@@ -226,7 +274,7 @@ impl Ctx<'_> {
         if e.mode == Mode::Off.name() {
             return None;
         }
-        Path::new(&e.path).canonicalize().ok()
+        self.opts.paths.real(Path::new(&e.path)).ok()
     }
 }
 
@@ -383,7 +431,11 @@ fn dev_tool_name(ctx: &mut Ctx, e: &super::ledger::Entry) {
 /// built into the dev-tool folder before `setup` runs. A birth time never changes for an object, so it is also compared for
 /// equality with the recorded one. A file system that reports no birth time makes the check broken.
 fn identity_probe(ctx: &mut Ctx) {
-    let root = ctx.ledger.job_root.canonicalize().unwrap_or_else(|_| ctx.ledger.job_root.clone());
+    let root = ctx
+        .opts
+        .paths
+        .real(&ctx.ledger.job_root)
+        .unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let started = ctx.ledger.started_ns;
     for e in ctx.ledger.entries.clone() {
         let (Some(mode), Some(recorded)) = (Mode::parse(&e.mode), e.id) else {
@@ -392,7 +444,7 @@ fn identity_probe(ctx: &mut Ctx) {
         if mode == Mode::Off {
             continue;
         }
-        let canonical = match Path::new(&e.path).canonicalize() {
+        let canonical = match ctx.opts.paths.real(Path::new(&e.path)) {
             Ok(p) => p,
             Err(err) => {
                 ctx.add(
@@ -403,7 +455,7 @@ fn identity_probe(ctx: &mut Ctx) {
                 continue;
             }
         };
-        if mode == Mode::Job && !canonical.starts_with(&root) {
+        if mode == Mode::Job && !ctx.opts.paths.starts_with(&canonical, &root) {
             ctx.add(
                 Probe::Identity,
                 format!(
@@ -461,7 +513,7 @@ fn identity_probe(ctx: &mut Ctx) {
         }
     }
     if let (Some(t), Some(target)) = (ctx.folder(Kind::TauriTools), ctx.folder(Kind::Target))
-        && !t.starts_with(&target)
+        && !ctx.opts.paths.starts_with(&t, &target)
     {
         ctx.add(
             Probe::Identity,
@@ -471,13 +523,17 @@ fn identity_probe(ctx: &mut Ctx) {
     }
 }
 
-fn same(a: &str, b: &Path) -> bool {
-    Path::new(a).canonicalize().map(|p| p == b).unwrap_or(false)
+fn same(paths: &PathOps, a: &str, b: &Path) -> bool {
+    paths.real(Path::new(a)).map(|p| paths.same(&p, b)).unwrap_or(false)
 }
 
 fn pointers_probe(ctx: &mut Ctx) {
     let env = ctx.env;
-    let root = ctx.ledger.job_root.canonicalize().unwrap_or_else(|_| ctx.ledger.job_root.clone());
+    let root = ctx
+        .opts
+        .paths
+        .real(&ctx.ledger.job_root)
+        .unwrap_or_else(|_| ctx.ledger.job_root.clone());
     let expected = |k: Kind| ctx.opts.expect.contains(&k) || ctx.ledger.get(k).is_some();
     if expected(Kind::CargoHome) {
         match (env.get("CARGO_HOME"), ctx.folder(Kind::CargoHome)) {
@@ -489,7 +545,7 @@ fn pointers_probe(ctx: &mut Ctx) {
                 ),
                 "Export the CARGO_HOME that `setup` printed (append it to $GITHUB_ENV).",
             ),
-            (Some(v), Some(f)) if !same(v, &f) => ctx.add(
+            (Some(v), Some(f)) if !same(&ctx.opts.paths, v, &f) => ctx.add(
                 Probe::Pointers,
                 format!("CARGO_HOME is {v}, not the folder {} that the ledger holds.", f.display()),
                 "A step overrides CARGO_HOME: remove it in release mode.",
@@ -498,7 +554,7 @@ fn pointers_probe(ctx: &mut Ctx) {
         }
     }
     if let (Some(v), Some(f)) = (env.get("CARGO_TARGET_DIR"), ctx.folder(Kind::Target))
-        && !same(v, &f)
+        && !same(&ctx.opts.paths, v, &f)
     {
         ctx.add(
             Probe::Pointers,
@@ -517,7 +573,7 @@ fn pointers_probe(ctx: &mut Ctx) {
                 ),
                 "Export the npm_config_cache that `setup` printed.",
             ),
-            (Some(v), Some(f)) if !same(v, &f) => ctx.add(
+            (Some(v), Some(f)) if !same(&ctx.opts.paths, v, &f) => ctx.add(
                 Probe::Pointers,
                 format!("npm_config_cache is {v}, not the folder {} of the ledger.", f.display()),
                 "A step overrides the npm cache: remove it in release mode.",
@@ -526,7 +582,12 @@ fn pointers_probe(ctx: &mut Ctx) {
         }
     }
     if let Some(v) = env.get("SCCACHE_DIR") {
-        let inside = Path::new(v).canonicalize().map(|p| p.starts_with(&root)).unwrap_or(false);
+        let inside = ctx
+            .opts
+            .paths
+            .real(Path::new(v))
+            .map(|p| ctx.opts.paths.starts_with(&p, &root))
+            .unwrap_or(false);
         if !inside {
             ctx.add(
                 Probe::Pointers,

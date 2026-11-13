@@ -155,7 +155,7 @@ fn contract_exit_code_is_reported(l: &dyn Launcher, exits: &dyn Fn(i32)) {
 #[cfg(unix)]
 #[test]
 fn the_process_launcher_keeps_the_launcher_contract() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let exe = script(dir.path(), "slow-agent", "exec sleep 600");
     let starts = Arc::new(AtomicUsize::new(0));
     let counted = starts.clone();
@@ -228,7 +228,7 @@ fn an_older_agent_that_cannot_read_the_tray_level_gets_the_summary() {
 
 #[test]
 fn the_agent_program_is_next_to_the_app_or_overridden() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let app = dir.path().join("dyno-app");
     let name = if cfg!(windows) { "dyno-agent.exe" } else { "dyno-agent" };
     assert!(agent_exe(&app, None).unwrap_err().contains("missing"));
@@ -396,7 +396,7 @@ struct Rig {
     sink: Arc<Recorder>,
     statuses: Receiver<AgentStatus>,
     launcher: Arc<InProcessLauncher>,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 struct Shared(Arc<InProcessLauncher>);
@@ -432,7 +432,7 @@ fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
 
 /// A rig whose app asks for the build `key` (see `dyno_agent::build_id::build_key`).
 fn rig_keyed(fail: bool, tuning: super::machine::Tuning, key: &str) -> Rig {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let (tx, rx) = channel();
     let sink = Recorder::new(tx);
@@ -675,8 +675,13 @@ impl Launcher for SlowShared {
     }
 }
 
-fn slow_rig() -> (Arc<AgentLink>, Arc<SlowLauncher>, Receiver<AgentStatus>, tempfile::TempDir) {
-    let tmp = tempfile::tempdir().unwrap();
+fn slow_rig() -> (
+    Arc<AgentLink>,
+    Arc<SlowLauncher>,
+    Receiver<AgentStatus>,
+    paddock_testkit::PrivateTemp,
+) {
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let (tx, rx) = channel();
     let sink = Recorder::new(tx);
@@ -1071,7 +1076,7 @@ struct StubRig {
     link: Arc<AgentLink>,
     launcher: Arc<StubLauncher>,
     statuses: Receiver<AgentStatus>,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 fn stub_rig(after_launch: Child) -> StubRig {
@@ -1080,7 +1085,7 @@ fn stub_rig(after_launch: Child) -> StubRig {
 
 /// [`stub_rig`] with other counts (see `machine::Tuning`).
 fn stub_rig_tuned(after_launch: Child, tuning: super::machine::Tuning) -> StubRig {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let (tx, rx) = channel();
     let sink = Recorder::new(tx);
@@ -1452,7 +1457,7 @@ impl Sink for BlockedSink {
 
 #[test]
 fn a_quit_is_taken_at_once_while_the_shell_is_blocked_on_a_notification() {
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
     let launcher = StubLauncher::new(Child::Running { pid: held_pid() });
     let link = AgentLink::paced(
@@ -1554,7 +1559,7 @@ impl Launcher for LoggingLauncher {
 #[test]
 fn the_first_runs_registration_is_done_before_the_first_launch() {
     const GRACE: Duration = Duration::from_millis(300);
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let log = Arc::new(Mutex::new(Vec::new()));
     let (launched_tx, launched_rx) = channel();
     let (status_tx, _status_rx) = channel();
@@ -1626,7 +1631,7 @@ fn an_agent_of_another_build_of_the_same_version_is_asked_to_exit_and_the_new_on
 #[test]
 fn the_wanted_key_follows_a_replaced_agent_file_and_keeps_the_last_answer_when_it_cannot_be_read() {
     use dyno_agent::build_id::build_key;
-    let dir = tempfile::tempdir().unwrap();
+    let dir = paddock_testkit::private_tempdir().unwrap();
     let path = dir.path().join("dyno-agent");
     std::fs::write(&path, b"build one").unwrap();
     let there = std::sync::Arc::new(AtomicBool::new(true));

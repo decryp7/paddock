@@ -465,8 +465,8 @@ mod tests {
         )
     }
 
-    fn setup() -> (tempfile::TempDir, LaunchAgents) {
-        let dir = tempfile::tempdir().unwrap();
+    fn setup() -> (paddock_testkit::PrivateTemp, LaunchAgents) {
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let user = dir.path().join("user");
         let system = dir.path().join("system");
         std::fs::create_dir_all(&user).unwrap();

@@ -586,7 +586,7 @@ mod tests {
         sweep();
         let id = unique_name("readers");
         let _tree = own_tree(&id);
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
 
         let run = create(&format!(r"Software\{id}\User\Run"));
         set(&run, "Plain", REG_SZ, &utf16z("\"C:\\Tools\\plain.exe\" --x"));

@@ -1,10 +1,10 @@
 //! [`Scratch`]: one temporary folder per test with a leftover check.
 
+use crate::private_temp::PrivateTemp;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use tempfile::TempDir;
 
 /// The environment variable that keeps the folder of a failed test for inspection (any non-empty value except `0`).
 pub const KEEP_VAR: &str = "PADDOCK_TESTKIT_KEEP";
@@ -55,6 +55,55 @@ impl fmt::Display for Leftovers {
 
 impl std::error::Error for Leftovers {}
 
+/// A temporary folder whose path is already canonical, deleted on drop.
+///
+/// `tempfile::tempdir()` returns a path under `TMPDIR`, which on macOS is `/var/folders/...` while the operating system
+/// resolves it to `/private/var/folders/...`. A test that compares that path with one the code under test produced
+/// (`current_dir`, `canonicalize`, a path read back from a child) then fails on macOS only. Use this where a test needs
+/// one plain temporary folder; use [`Scratch`] where it also needs the `work`/`home`/`tmp` layout and the leftover check.
+#[derive(Debug)]
+pub struct CanonicalTempDir {
+    path: PathBuf,
+    _dir: tempfile::TempDir,
+}
+
+impl CanonicalTempDir {
+    /// The canonical path of the folder (no `/var` to `/private/var` drift, no Windows `\\?\` prefix).
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl AsRef<Path> for CanonicalTempDir {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl std::ops::Deref for CanonicalTempDir {
+    type Target = Path;
+    fn deref(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// A new temporary folder with a canonical path, or why it could not be made.
+pub fn try_canonical_tempdir() -> io::Result<CanonicalTempDir> {
+    let dir = tempfile::Builder::new()
+        .prefix("paddock-testkit-")
+        .tempdir()?;
+    let path = paddock_env::winpath::real(dir.path())?;
+    Ok(CanonicalTempDir { path, _dir: dir })
+}
+
+/// A new temporary folder with a canonical path.
+///
+/// # Panics
+/// When the operating system cannot make a temporary folder (the test cannot run).
+pub fn canonical_tempdir() -> CanonicalTempDir {
+    try_canonical_tempdir().expect("cannot make a temporary folder")
+}
+
 /// A temporary folder for one test, made of three folders: [`work`](Scratch::work) (what the code under test is given),
 /// [`home`](Scratch::home) (a stand-in for the user's home) and [`tmp`](Scratch::tmp) (a stand-in for the shared temp
 /// folder, see [`crate::EnvLock::hermetic`]). It is deleted on drop. **`tmp` must be empty when the test ends**: if code
@@ -62,7 +111,7 @@ impl std::error::Error for Leftovers {}
 /// [`finish`](Scratch::finish) returns them as an error for a test that wants to assert it.
 #[derive(Debug)]
 pub struct Scratch {
-    dir: Option<TempDir>,
+    dir: Option<PrivateTemp>,
     root: PathBuf,
     checked: bool,
 }
@@ -78,24 +127,16 @@ impl Scratch {
 
     /// A new scratch folder, or why it could not be made.
     pub fn try_new() -> Result<Scratch, ScratchError> {
-        Scratch::make(
-            tempfile::Builder::new()
-                .prefix("paddock-testkit-")
-                .tempdir()?,
-        )
+        Scratch::make(PrivateTemp::with_prefix("paddock-testkit-", None)?)
     }
 
     /// A new scratch folder under `parent` instead of the system temp folder (for a test of the folder's own group, and for a
     /// scratch on a chosen disk).
     pub fn try_new_in(parent: &Path) -> Result<Scratch, ScratchError> {
-        Scratch::make(
-            tempfile::Builder::new()
-                .prefix("paddock-testkit-")
-                .tempdir_in(parent)?,
-        )
+        Scratch::make(PrivateTemp::with_prefix("paddock-testkit-", Some(parent))?)
     }
 
-    fn make(dir: TempDir) -> Result<Scratch, ScratchError> {
+    fn make(dir: PrivateTemp) -> Result<Scratch, ScratchError> {
         // Canonical, so paths compare equal to what the code under test resolves (macOS /var vs /private/var).
         let root = paddock_env::winpath::real(dir.path())?;
         // A new folder takes its parent's group on macOS (and on Linux under a setgid parent): on a disk whose folders are

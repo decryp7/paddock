@@ -1,4 +1,0 @@
-#!/bin/sh
-out="$OUT_DIR/generated"
-here="$(dirname "$0")"
-dependencies=/opt/dependencies/x

@@ -29,9 +29,30 @@ pub async fn blocking<T: Send + 'static, E: From<CmdError> + Send + 'static>(
     what: &str,
     f: impl FnOnce() -> Result<T, E> + Send + 'static,
 ) -> Result<T, E> {
-    tauri::async_runtime::spawn_blocking(f)
-        .await
-        .map_err(|e| E::from(CmdError::new(ErrorCode::Internal, format!("{what} stopped unexpectedly ({e})"))))?
+    blocking_on(debrief_core::wait_log::global(), what, f).await
+}
+
+/// [`blocking`] with the set of watches that logs its phases (tests pass their own, with a short period).
+///
+/// Two phases, one correlation id: queued on the blocking pool (a wait), then running (an activity, long when healthy)
+/// (ER-27). A request that never finishes shows in the log as the phase that stayed open, with the other open waits
+/// beside it. The labels are formatted per request, which is nothing next to the pool hand-off; the hot path of the
+/// store (`conn()`) uses static labels.
+pub(crate) async fn blocking_on<T: Send + 'static, E: From<CmdError> + Send + 'static>(
+    waits: &'static debrief_core::wait_log::Waits,
+    what: &str,
+    f: impl FnOnce() -> Result<T, E> + Send + 'static,
+) -> Result<T, E> {
+    let queued = waits.watch(format!("{what}: queued on the blocking pool"));
+    let id = queued.id();
+    let what_run = what.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        drop(queued);
+        let _running = waits.activity(format!("{what_run}: running (request #{id})"));
+        f()
+    })
+    .await
+    .map_err(|e| E::from(CmdError::new(ErrorCode::Internal, format!("{what} stopped unexpectedly ({e})"))))?
 }
 
 /// [`blocking`] for work that fails with `anyhow` (its whole chain becomes the message).
@@ -67,5 +88,51 @@ mod tests {
             Err(anyhow::anyhow!("inner").context("outer"))
         }));
         assert!(failed.unwrap_err().contains("outer: inner"));
+    }
+
+    /// A request that is long on the blocking pool leaves its phase in the log: `running` is an activity, so the watchdog
+    /// reports it as "still open" at info with the request id, never at warn (the log has a daily byte budget), and its
+    /// end is at debug (ER-27).
+    #[test]
+    fn a_long_request_logs_its_phase_at_info_and_ends_at_debug() {
+        use debrief_core::wait_log::Waits;
+        let (tx, lines) = std::sync::mpsc::channel::<(log::Level, String)>();
+        let tx = Mutex::new(tx);
+        // The period is the set's own, not a process-wide setting: nothing here depends on one test per process.
+        let waits: &'static Waits = Box::leak(Box::new(Waits::new_tracing(
+            std::time::Duration::from_millis(20),
+            std::sync::Arc::new(move |l, s| {
+                let _ = lock(&tx).send((l, s));
+            }),
+        )));
+        let (held_tx, held_rx) = std::sync::mpsc::channel::<()>();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let request = std::thread::spawn(move || {
+            crate::test_support::block(blocking_on::<u8, CmdError>(
+                waits,
+                "reading the parsers of the sources",
+                move || {
+                    held_tx.send(()).unwrap();
+                    // Held until the test has seen the line: the condition, bounded.
+                    release_rx.recv_timeout(paddock_testkit::HANG_GUARD).unwrap();
+                    Ok(1)
+                },
+            ))
+        });
+        held_rx.recv_timeout(paddock_testkit::HANG_GUARD).unwrap();
+        let next = |needle: &str| loop {
+            let (level, text) = lines.recv_timeout(paddock_testkit::HANG_GUARD).expect("the line never came");
+            if text.contains(needle) {
+                break (level, text);
+            }
+        };
+        let (level, text) = next("still open");
+        assert_eq!(level, log::Level::Info, "{text}");
+        assert!(text.contains("reading the parsers of the sources: running (request #"), "{text}");
+        release_tx.send(()).unwrap();
+        assert_eq!(request.join().unwrap().unwrap(), 1);
+        let (level, text) = next("running (request #");
+        assert_eq!(level, log::Level::Debug, "{text}");
+        assert!(text.contains("ended after"), "{text}");
     }
 }

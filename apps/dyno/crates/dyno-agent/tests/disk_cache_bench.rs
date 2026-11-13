@@ -230,7 +230,7 @@ fn measure(nodes: u32) -> (f64, f64, f64, f64) {
     // The save into cache.db, then the start-up listing and the load of a first level, per setting.
     let mut out = (0.0, 0.0, 0.0, 0.0);
     for (label, compress) in [("raw", false), ("deflate 1", true)] {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let Opened::Ready(mut db, _) = CacheDb::open(&dir.path().join("cache.db")).unwrap() else {
             panic!("busy")
         };

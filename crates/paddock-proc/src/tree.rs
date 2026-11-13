@@ -154,7 +154,7 @@ pub(crate) fn kill_tree_on(
 /// (rule 53). True when the group was signalled.
 #[cfg(unix)]
 pub(crate) fn end_pinned_group(group: u32, keeper: ProcessId) -> bool {
-    keeper.is_alive()
+    keeper.confirmed_running()
         && crate::sys::group_of(keeper.pid()) == Some(group)
         && crate::sys::signal_group(group, crate::sys::SIGKILL)
 }
@@ -310,20 +310,12 @@ pub enum Presence {
     Unknown,
 }
 
-/// Whether `pid` is a running process (a zombie that only waits to be reaped is not). Says nothing about which process:
-/// use [`ProcessId::is_alive`] for that. **Unknown counts as not running**: this is the answer for code that ends or waits
-/// for a process (`terminate`: an unreadable table never makes it kill or wait). Code that deletes anything on "gone" (a
-/// profile folder, a discovery file) must use [`may_be_alive`] or [`presence`] instead.
-pub fn is_alive(pid: u32) -> bool {
+/// Whether the process table shows a running process under `pid`. Tests only: it says nothing about which process and maps
+/// "could not look" to "not running", so the public answer for a raw pid is only [`presence`] (rule 53).
+#[cfg(all(test, unix))]
+pub(crate) fn is_alive(pid: u32) -> bool {
     // conformance: pid-liveness — this is the raw-pid function itself; callers hold a ProcessId
     presence(pid) == Presence::Running
-}
-
-/// Whether `pid` might be a running process: false only when the OS said it is gone. **Unknown counts as alive**, so a
-/// sweep that removes the files of dead processes removes nothing when the process table cannot be read.
-pub fn may_be_alive(pid: u32) -> bool {
-    // conformance: pid-liveness — this is the raw-pid function itself; callers hold a ProcessId
-    presence(pid).may_be_alive()
 }
 
 impl Presence {
@@ -1014,8 +1006,10 @@ mod tests {
         );
         assert!(Presence::Running.may_be_alive());
         assert!(!Presence::Gone.may_be_alive());
-        assert!(may_be_alive(me));
-        assert!(!may_be_alive(u32::MAX - 1));
+        // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
+        assert!(presence(me).may_be_alive());
+        // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
+        assert!(!presence(u32::MAX - 1).may_be_alive());
         assert!(processes_mentioning_with("anything", broken).is_empty());
     }
 
@@ -1046,7 +1040,8 @@ mod tests {
         let mut ch = c.spawn().unwrap();
         let id = ProcessId::of(ch.id()).expect("an unreaped child has an identity");
         ch.wait().unwrap();
-        assert!(!is_alive(id.pid()) && !id.is_alive());
+        // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
+        assert!(presence(id.pid()) == Presence::Gone && id.has_ended());
         assert_eq!(terminate(id, Duration::from_secs(1)), Terminated::Gone);
         assert_eq!(end(id), Ending::Gone); // harmless
         assert!(!ask(id));
@@ -1091,7 +1086,8 @@ mod tests {
             terminate(id, Duration::from_secs(60)),
             Terminated::Gracefully
         );
-        assert!(!is_alive(id.pid()));
+        // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
+        assert_eq!(presence(id.pid()), Presence::Gone);
     }
 
     #[test]
@@ -1123,6 +1119,7 @@ mod tests {
                 .and_then(|p| p.trim().parse::<u32>().ok());
         }
         let grand = grand.unwrap();
+        // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns
         assert!(is_alive(grand) && is_alive(s.id().unwrap()));
         kill_tree(s.process().unwrap());
         // Both ends of the shared stdout pipe are closed only when the whole tree is dead.
@@ -1148,7 +1145,7 @@ mod tests {
         let found = processes_mentioning(&marker);
         assert!(found.contains(&s.process().unwrap()), "{found:?}");
         s.kill();
-        assert!(processes_mentioning(&marker).iter().all(|p| !p.is_alive()));
+        assert!(processes_mentioning(&marker).iter().all(|p| p.has_ended()));
     }
 
     #[test]
@@ -1181,7 +1178,7 @@ mod tests {
             "another start time is another process"
         );
         assert!(!ask(stale));
-        assert!(grand.is_alive(), "the grandchild was left alone");
+        assert!(grand.confirmed_running(), "the grandchild was left alone");
         s.kill();
     }
 

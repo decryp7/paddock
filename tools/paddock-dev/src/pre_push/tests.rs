@@ -115,7 +115,10 @@ fn a_crates_change_reaches_every_gate_of_ci_er_9() {
             .join(" ")
             .contains("--image registry/paddock-ci:v7 --platform linux/amd64")
     );
-    assert_eq!(by("conformance").args.last().unwrap(), "C06");
+    assert_eq!(
+        (by("conformance").program.as_str(), by("conformance").args.join(" ")),
+        ("/x/dev", "ci run conformance paddock".to_string())
+    );
     assert_eq!(
         by("commit-lint").args.join(" "),
         "conformance/bin/paddock-conformance.mjs commit-lint --range abc..HEAD"
@@ -350,18 +353,32 @@ fn a_docker_failure_names_its_cause() {
 }
 
 #[test]
-fn only_the_ci_line_of_this_repository_is_read() {
-    // Parity on the real tree: the line the gate runs is the one CI runs.
-    let ci = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.gitea/workflows/ci.yml")).unwrap();
-    let args = super::ci_line::conformance_args(&ci).unwrap();
-    assert!(
-        args.contains(&"--strict".to_string()) && args.iter().any(|a| a.starts_with("C06,")),
-        "{args:?}"
+fn the_conformance_gate_runs_the_contracts_list_and_a_broken_contract_is_broken_never_a_pass() {
+    // The real tree: the arguments the gate runs are the contract's (the one copy CI's `./dev ci run conformance paddock` runs).
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let args = crate::ci_run::contract::conformance_args_at(&root).unwrap();
+    let f = Facts {
+        conformance: Some(Ok(args.clone())),
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
+    let g = run_gates(&planned).into_iter().find(|g| g.id == "conformance").unwrap();
+    assert_eq!(
+        (g.program.as_str(), g.args.clone()),
+        ("/x/dev", ["ci", "run", "conformance", "paddock"].map(String::from).to_vec()),
+        "through the executor, like CI"
     );
-    // The line is in ci.yml as it is, or (the env form) its script on the step and its arguments in PADDOCK_CONFORMANCE_ARGS.
+    assert!(!args.is_empty());
+    // An unreadable contract: the gate is BROKEN (exit 7), it does not silently run nothing.
+    let f = Facts {
+        conformance: Some(Err("conformance/paddock.ci.json cannot be read".into())),
+        ..facts()
+    };
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &f);
     assert!(
-        ci.contains(&args.join(" "))
-            || (ci.contains(&format!("node {} $PADDOCK_CONFORMANCE_ARGS", args[0])) && ci.contains(&args[1..].join(" ")))
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::Broken { id, .. } if id == "conformance"))
     );
 }
 
@@ -670,6 +687,8 @@ fn a_pushed_commit_is_checked_out_in_a_throw_away_worktree_that_is_removed() {
     git(&["init", "-q", "-b", "main"]);
     git(&["config", "user.email", "t@t"]);
     git(&["config", "user.name", "t"]);
+    // The test is about which commit is checked out, not line endings: a Windows machine's `core.autocrlf=true` would give CRLF.
+    git(&["config", "core.autocrlf", "false"]);
     std::fs::write(main.join("a.txt"), "pushed\n").unwrap();
     git(&["add", "a.txt"]);
     git(&["commit", "-q", "-m", "one"]);
@@ -840,4 +859,187 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
     let through_link = link.join("also-never");
     assert!(refuse_home(&through_link, Some(h)).is_err());
     assert!(!home.join("work/also-never").exists());
+}
+
+/// A scratch repository with a helper to commit and to fake remote-tracking refs (no network).
+struct Repo {
+    _d: tempfile::TempDir,
+    root: std::path::PathBuf,
+}
+
+impl Repo {
+    fn new() -> Repo {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("r");
+        std::fs::create_dir(&root).unwrap();
+        let r = Repo { _d: d, root };
+        r.git(&["init", "-q", "-b", "main"]);
+        r.git(&["config", "user.email", "t@t"]);
+        r.git(&["config", "user.name", "t"]);
+        r
+    }
+
+    fn git(&self, args: &[&str]) -> String {
+        crate::plan_repo::git_text(&self.root, args).unwrap_or_else(|| panic!("git {args:?}"))
+    }
+
+    /// A commit that changes `file`, on the current branch; its sha.
+    fn commit(&self, file: &str) -> String {
+        std::fs::write(self.root.join(file), "x\n").unwrap();
+        self.git(&["add", file]);
+        self.git(&["commit", "-q", "-m", file]);
+        self.git(&["rev-parse", "HEAD"]).trim().to_string()
+    }
+
+    fn remote(&self, name: &str, sha: &str) {
+        self.git(&["update-ref", &format!("refs/remotes/origin/{name}"), sha]);
+    }
+}
+
+fn new_ref(local: &str, sha: &str) -> super::Pushed {
+    let zero = "0".repeat(40);
+    super::Pushed {
+        local_ref: format!("refs/heads/{local}"),
+        sha: sha.into(),
+        remote_ref: format!("refs/heads/{local}"),
+        remote_sha: zero,
+    }
+}
+
+#[test]
+fn a_new_branch_cut_from_a_train_is_measured_against_the_train_not_main() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.git(&["checkout", "-q", "-b", "train"]);
+    r.commit("t1");
+    let t2 = r.commit("t2");
+    r.remote("main", &c1);
+    r.remote("train/2026-11-12-7", &t2);
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    let f1 = r.commit("f1");
+    let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
+    assert_eq!(base, "origin/train/2026-11-12-7", "{why}");
+    assert!(
+        why.contains("the nearest of") && why.contains("1 commit(s) ahead") && why.contains(" ms"),
+        "{why}"
+    );
+}
+
+#[test]
+fn an_existing_remote_ref_is_measured_from_its_old_commit() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.remote("main", &c1);
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    let f1 = r.commit("f1");
+    let f2 = r.commit("f2");
+    let p = super::Pushed {
+        local_ref: "refs/heads/fix".into(),
+        sha: f2,
+        remote_ref: "refs/heads/fix".into(),
+        remote_sha: f1.clone(),
+    };
+    let (base, why) = super::choose_base(&r.root, &p, "origin/main");
+    assert_eq!(base, f1);
+    assert!(why.contains("exists on the remote"), "{why}");
+    // Its old commit is not here: say so and fall back to a remote branch it descends from.
+    let gone = super::Pushed {
+        remote_sha: "1".repeat(40),
+        ..p
+    };
+    let (base, why) = super::choose_base(&r.root, &gone, "origin/main");
+    assert_eq!(base, "origin/main");
+    assert!(why.contains("not here (fetch it)"), "{why}");
+}
+
+#[test]
+fn with_no_remote_branch_to_descend_from_the_base_is_main_and_says_so() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    let (base, why) = super::choose_base(&r.root, &new_ref("main", &c1), "origin/main");
+    assert_eq!(base, "origin/main");
+    assert!(why.contains("is an ancestor of the pushed commit, so origin/main"), "{why}");
+    // An unrelated remote branch is not an ancestor either.
+    r.git(&["checkout", "-q", "--orphan", "other"]);
+    let o1 = r.commit("o");
+    r.git(&["checkout", "-q", "main"]);
+    r.remote("other", &o1);
+    let (base, _) = super::choose_base(&r.root, &new_ref("main", &c1), "origin/main");
+    assert_eq!(base, "origin/main");
+}
+
+#[test]
+fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.remote("main", &c1);
+    r.git(&["checkout", "-q", "-b", "train"]);
+    let t1 = r.commit("t1");
+    r.remote("train/x", &t1);
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    let f1 = r.commit("f1");
+    // Tracking origin/main, but the train is nearer: the nearest wins, the upstream only breaks a tie.
+    r.git(&["config", "remote.origin.url", "/nowhere"]);
+    r.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    r.git(&["config", "branch.fix.remote", "origin"]);
+    r.git(&["config", "branch.fix.merge", "refs/heads/main"]);
+    let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
+    assert_eq!(
+        base, "origin/train/x",
+        "an upstream that is main must not beat a nearer train: {why}"
+    );
+    // At the same distance the tracking upstream wins.
+    let r3 = Repo::new();
+    let c3 = r3.commit("a");
+    r3.remote("main", &c3);
+    r3.remote("train/z", &c3);
+    r3.git(&["config", "remote.origin.url", "/nowhere"]);
+    r3.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+    r3.git(&["checkout", "-q", "-b", "fix"]);
+    let f3 = r3.commit("f");
+    r3.git(&["config", "branch.fix.remote", "origin"]);
+    r3.git(&["config", "branch.fix.merge", "refs/heads/main"]);
+    let (base, why) = super::choose_base(&r3.root, &new_ref("fix", &f3), "origin/main");
+    assert_eq!(
+        (base.as_str(), why.contains("its tracking upstream")),
+        ("origin/main", true),
+        "{why}"
+    );
+    // Same distance to main and to a train: the train.
+    let r2 = Repo::new();
+    let c = r2.commit("a");
+    r2.remote("main", &c);
+    r2.remote("train/y", &c);
+    r2.git(&["checkout", "-q", "-b", "fix"]);
+    let f = r2.commit("f");
+    assert_eq!(super::choose_base(&r2.root, &new_ref("fix", &f), "origin/main").0, "origin/train/y");
+}
+
+#[test]
+fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output() {
+    use super::exec::Verdict;
+    let zero = "0".repeat(40);
+    let input = format!("refs/heads/a aaa refs/heads/a {zero}\nrefs/heads/gone {zero} refs/heads/gone bbb\nbad line\n");
+    let got = super::parse_push(&input);
+    assert_eq!(got.len(), 1);
+    assert_eq!((got[0].sha.as_str(), got[0].remote_ref.as_str()), ("aaa", "refs/heads/a"));
+    let nm = |id: &str| {
+        (
+            id.to_string(),
+            Verdict::NotMeasured {
+                reason: "r".into(),
+                next: "n".into(),
+            },
+        )
+    };
+    let report = render(
+        "h",
+        &[
+            nm("clippy-windows apps/dyno"),
+            ("fmt crates".into(), Verdict::Passed { secs: 1.0 }),
+            nm("clippy crates"),
+        ],
+    );
+    let last = report.text.lines().last().unwrap();
+    assert_eq!(last, "NOT MEASURED (2): clippy-windows apps/dyno; clippy crates");
 }

@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn a_folder_is_recorded_when_made_and_removed_and_forgotten_when_dropped() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let rec = d.path().join("rec.json");
         let p = d.path().join(".dyno-bench-1");
         let f = ScratchFolder::create(&p, &rec).unwrap();
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn a_folder_that_exists_is_never_taken_over() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let p = d.path().join(".dyno-bench-1");
         std::fs::create_dir(&p).unwrap();
         std::fs::write(p.join("theirs"), b"x").unwrap();
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn restart_cleanup_removes_a_folder_whose_identity_matches() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let rec = d.path().join("rec.json");
         let p = d.path().join(".dyno-bench-2");
         // The agent died: the folder and its record stay (forget = no drop).
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn restart_cleanup_leaves_a_folder_whose_identity_does_not_match() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let rec = d.path().join("rec.json");
         let p = d.path().join(".dyno-bench-3");
         std::mem::forget(ScratchFolder::create(&p, &rec).unwrap());
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn restart_cleanup_refuses_a_name_that_is_not_ours_even_with_a_matching_identity() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let rec = d.path().join("rec.json");
         let p = d.path().join("Documents");
         std::fs::create_dir(&p).unwrap();
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn damaged_records_mean_none() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         let rec = d.path().join("rec.json");
         std::fs::write(&rec, b"not json").unwrap();
         assert!(read_records(&rec).is_empty());

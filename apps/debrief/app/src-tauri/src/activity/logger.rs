@@ -230,7 +230,7 @@ impl log::Log for ActivityLogger {
 }
 
 #[cfg(test)]
-pub(crate) use test_support::{captured, test_capture, test_lock, Captured};
+pub(crate) use test_support::{captured, install_test_logger, test_capture, test_lock, Captured};
 
 #[cfg(test)]
 mod test_support {
@@ -264,6 +264,11 @@ mod test_support {
                 message: record.args().to_string(),
                 props: props.0,
             });
+            // The wait phases and every warning also go to stderr, which nextest keeps for a failed or hung test
+            // (ER-27: a hang in a test must leave the wait it was in).
+            if record.target() == "debrief_core::wait_log" || record.level() <= log::Level::Warn {
+                eprintln!("[{}] {}: {}", record.level(), record.target(), record.args());
+            }
             // On to `tracing`, as in the app (see `crate::logging`): tests with a subscriber see the file output.
             crate::logging::TracingBridge.log(record);
         }
@@ -276,12 +281,21 @@ mod test_support {
         crate::sync::lock(&LOCK)
     }
 
+    /// Installs the test logger (once per process; [`test_capture`] shares it) at `Debug`, so that the wait phases of
+    /// `debrief_core::wait_log` reach the test's captured stderr.
+    pub fn install_test_logger() {
+        static INSTALLED: OnceLock<bool> = OnceLock::new();
+        INSTALLED.get_or_init(|| log::set_boxed_logger(Box::new(ActivityLogger::new(Box::new(Capture)))).is_ok());
+        if log::max_level() < log::LevelFilter::Debug {
+            log::set_max_level(log::LevelFilter::Debug);
+        }
+    }
+
     /// Installs the activity logger over a capturing logger (once per process), clears what it captured,
     /// and holds the test lock.
     pub fn test_capture() -> MutexGuard<'static, ()> {
         let guard = test_lock();
-        static INSTALLED: OnceLock<bool> = OnceLock::new();
-        INSTALLED.get_or_init(|| log::set_boxed_logger(Box::new(ActivityLogger::new(Box::new(Capture)))).is_ok());
+        install_test_logger();
         log::set_max_level(log::LevelFilter::Trace);
         crate::sync::lock(sink()).clear();
         guard

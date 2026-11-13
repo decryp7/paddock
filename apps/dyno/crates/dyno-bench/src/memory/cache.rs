@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn linux_counts_each_shared_last_level_cache_once() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         // Two sockets with an L3 of 32M shared by CPUs 0-1 and 2-3; private L1/L2 below.
         for cpu in 0..4_u32 {
             let shared = if cpu < 2 { "0-1" } else { "2-3" };
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn linux_without_a_cache_tree_says_nothing() {
-        let d = tempfile::tempdir().unwrap();
+        let d = paddock_testkit::private_tempdir().unwrap();
         assert_eq!(linux_total(d.path()), None);
         assert_eq!(linux_total(&d.path().join("missing")), None);
     }

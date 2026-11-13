@@ -25,12 +25,12 @@ struct Harness {
     running: Option<Running>,
     fake: Fake,
     dirs: Dirs,
-    tmp: tempfile::TempDir,
+    tmp: paddock_testkit::PrivateTemp,
 }
 
 impl Harness {
     fn start(setup: impl FnOnce(&Fake)) -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         let fake = Fake::new();
         fake.add_process(process(100, "calm", 1.0));
@@ -171,7 +171,7 @@ fn a_file_hash_is_computed_here_and_the_virustotal_address_holds_only_the_hash()
 
 #[test]
 fn a_running_process_is_hashed_from_the_file_it_runs_from() {
-    let tmp_exe = tempfile::tempdir().unwrap();
+    let tmp_exe = paddock_testkit::private_tempdir().unwrap();
     let exe = tmp_exe.path().join("runner.bin");
     std::fs::write(&exe, b"abc").unwrap();
     let mut p = process(300, "runner", 1.0);

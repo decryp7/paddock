@@ -47,7 +47,7 @@ struct Harness {
     udp: Arc<FakeUdp>,
     secrets: Arc<MemorySecrets>,
     dirs: Dirs,
-    _tmp: tempfile::TempDir,
+    _tmp: paddock_testkit::PrivateTemp,
 }
 
 #[derive(Default)]
@@ -62,7 +62,7 @@ impl Harness {
     }
 
     fn start_with(scripts: Scripts) -> Harness {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = paddock_testkit::private_tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         std::fs::create_dir_all(dirs.root()).unwrap();
         let udp = Arc::new(FakeUdp::default());
@@ -471,7 +471,7 @@ fn mode(p: &std::path::Path) -> u32 {
 #[test]
 fn the_password_folder_is_made_owner_only_when_missing_and_an_existing_one_is_used_as_it_is() {
     use std::os::unix::fs::PermissionsExt;
-    let t = tempfile::tempdir().unwrap();
+    let t = paddock_testkit::private_tempdir().unwrap();
     let nested = t.path().join("a").join("b");
     dyno_agent::wol::prepare_folder(&nested).unwrap();
     assert_eq!(mode(&nested), 0o700, "a missing folder is created owner-only, whatever the umask");
@@ -489,7 +489,7 @@ fn the_password_folder_is_made_owner_only_when_missing_and_an_existing_one_is_us
 #[cfg(target_os = "macos")]
 #[test]
 fn on_macos_the_agent_prepares_its_password_folder_private_and_out_of_backups() {
-    let t = tempfile::tempdir().unwrap();
+    let t = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(t.path().join("data"));
     dyno_agent::wol::prepare_password_folder(&dirs);
     let folder = dirs.secrets_folder();
@@ -503,7 +503,7 @@ fn on_macos_the_agent_prepares_its_password_folder_private_and_out_of_backups() 
 
 #[test]
 fn a_data_folder_that_is_a_file_does_not_stop_the_agent_from_starting() {
-    let t = tempfile::tempdir().unwrap();
+    let t = paddock_testkit::private_tempdir().unwrap();
     let file = t.path().join("data");
     std::fs::write(&file, "not a folder").unwrap();
     dyno_agent::wol::prepare_password_folder(&Dirs::at(&file));

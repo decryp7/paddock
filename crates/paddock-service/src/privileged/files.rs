@@ -290,7 +290,7 @@ impl ProtectedFiles for RealFiles {
 
     fn write_program(&mut self, bytes: &[u8], to: &Path, mode: u32) -> io::Result<String> {
         let tmp = temp_name(to);
-        paddock_proc::cleanup::remove_file(&tmp);
+        paddock_proc::cleanup::remove_file_warn(&tmp);
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -315,13 +315,13 @@ impl ProtectedFiles for RealFiles {
                     std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
                 }
                 if let Err(e) = std::fs::rename(&tmp, to) {
-                    paddock_proc::cleanup::remove_file(&tmp);
+                    paddock_proc::cleanup::remove_file_warn(&tmp);
                     return Err(e);
                 }
                 Ok(hash)
             }
             Err(e) => {
-                paddock_proc::cleanup::remove_file(&tmp);
+                paddock_proc::cleanup::remove_file_warn(&tmp);
                 Err(e)
             }
         }

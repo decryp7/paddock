@@ -415,7 +415,7 @@ mod tests {
     struct Rig {
         d: Dispatcher,
         gone: Arc<AtomicBool>,
-        _dir: tempfile::TempDir,
+        _dir: paddock_testkit::PrivateTemp,
     }
 
     fn rig(host: HelperHost, traffic: Result<Vec<TrafficCounter>, PlatformError>) -> Rig {
@@ -443,7 +443,7 @@ mod tests {
         wol: Box<dyn dyno_core::wake::WolReader>,
         processes: Box<dyn ProcessSweeper>,
     ) -> Rig {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let gone = Arc::new(AtomicBool::new(false));
         let flag = gone.clone();
         let d = Dispatcher::new(Parts {
@@ -840,7 +840,7 @@ mod tests {
 
     #[test]
     fn a_log_that_cannot_be_written_means_nothing_is_removed() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let d = Dispatcher::new(Parts {
             info: HelperInfo {
                 version: "1".into(),

@@ -79,7 +79,7 @@ impl Listener {
                     });
                 }
                 Err(e) => {
-                    paddock_proc::cleanup::remove_dir_all(&dir);
+                    paddock_proc::cleanup::remove_dir_all_warn(&dir);
                     last = e;
                 }
             }
@@ -112,7 +112,7 @@ impl Listener {
         let ready = std::fs::set_permissions(path, std::fs::Permissions::from_mode(access.mode))
             .and_then(|_| listener.set_nonblocking(true));
         if let Err(e) = ready {
-            paddock_proc::cleanup::remove_file(std::path::Path::new(path));
+            paddock_proc::cleanup::remove_file_warn(std::path::Path::new(path));
             return Err(e);
         }
         Ok(Listener {
@@ -192,10 +192,10 @@ impl Drop for Listener {
     fn drop(&mut self) {
         match &self.cleanup {
             Cleanup::Dir(d) => {
-                paddock_proc::cleanup::remove_dir_all(d);
+                paddock_proc::cleanup::remove_dir_all_warn(d);
             }
             Cleanup::File(f) => {
-                paddock_proc::cleanup::remove_file(f);
+                paddock_proc::cleanup::remove_file_warn(f);
             }
         }
     }

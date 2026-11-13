@@ -241,6 +241,10 @@ runs:
           echo "CARGO_INCREMENTAL=0"
           echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
           echo "SCCACHE_SERVER_PORT=$PORT"
+          # Windows: cargo's legacy build-dir layout. Cargo 1.100 passes one -L per indirect dependency and falls back to an @argfile
+          # past CreateProcessW's 32,767 characters; sccache 0.19 expands that file and cannot start rustc (os error 206, run 8027,
+          # mozilla/sccache#2787). The same line as LEGACY_BUILD_DIR_LAYOUT in tools/paddock-dev/src/ci_setup_rust.rs.
+          if [ "$RUNNER_OS" = Windows ]; then echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"; fi
           for kv in "${SETTINGS[@]}"; do echo "$kv"; done
         } >> "$GITHUB_ENV"
     - name: Linux dependencies for Tauri

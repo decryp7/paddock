@@ -114,7 +114,7 @@ fn bounded<T>(
         .map_err(|e| IpcError::Spawn(format!("cannot start a handshake watchdog: {e}")))?;
     let result = f(stream);
     done.cancel();
-    paddock_proc::cleanup::join("the handshake watchdog", watchdog);
+    paddock_proc::cleanup::join_warn("the handshake watchdog", watchdog);
     if fired.load(Ordering::SeqCst) {
         return Err(IpcError::Timeout);
     }

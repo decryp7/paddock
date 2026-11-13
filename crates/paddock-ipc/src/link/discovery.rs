@@ -70,7 +70,7 @@ impl Discovery {
         if let Found::Live(d) | Found::Stale(d) = read(path, |_| true)
             && d.pid == pid
         {
-            paddock_proc::cleanup::remove_file(path);
+            paddock_proc::cleanup::remove_file_warn(path);
         }
     }
 }

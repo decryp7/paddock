@@ -7,6 +7,7 @@
 #   kit.sh which                     prints dev or shell (the reason goes to stderr)
 #   kit.sh isolation <args>          `./dev ci isolation <args>` (or job-isolation.sh <args>)
 #   kit.sh build-jobs [<split>]      `./dev ci build-jobs [<split>]` (or build-jobs.sh [<split>])
+#   kit.sh build-env                 `./dev ci build-env` (or node build-env.mjs): PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE
 #   kit.sh host <step> <args>        a host-runner step (WP-4), in Rust or in the shell it had:
 #     stable-workspace <name>                     ci stable-workspace --name | host/stable-workspace.sh (NAME)
 #     node-caches <angular-dir> <name>            ci node-caches --angular-dir --name | host/node-caches.sh (ANGULAR_DIR, NAME)
@@ -15,6 +16,10 @@
 #     prune-build-folder <max-gb> [drop-bundles]  ci prune-build-folder --max-gb [--drop-bundles] | tools/prune-ci-build-folder.sh
 #     prune-folder <folder> <max-gb>              ci prune-folder | tools/prune-build-folders.sh
 #     host-cleanup <host-cleanup options>         ci host-cleanup | tools/host-cleanup.sh
+#     kept-clone <name> <profile> [<fresh>]       ci kept-clone --name --profile [--fresh] | kept-clone.sh (NAME, PROFILE, FRESH)
+#     guardian-as-user                            ci guardian-as-user | guardian-as-user.sh (the Linux crates job, from crates/)
+#   (`ci boot-volume external|temp` has no shim route: job-tmpdir.sh sources boot-volume.sh, and paddock_testkit and Dyno's
+#   check-bundle.sh run it; the Rust copy is job-tmpdir's rule in process. WP-5, docs/plans/ci-in-rust.md.)
 #
 # The shell is used for: PADDOCK_CI_KIT=shell (the fallback switch: one variable away, plan section 7), a tag run, a run that never
 # downloads the tool (PADDOCK_DEV_DOWNLOAD=0: release and rule 54 jobs), a checkout without tools/paddock-dev (another repository
@@ -51,8 +56,28 @@ kit_choice() {
   if [ -z "$top" ] || [ ! -f "$top/tools/paddock-dev/Cargo.toml" ]; then echo "shell no tools/paddock-dev in this checkout"; return; fi
   if [ ! -f "$root/dev" ]; then echo "shell no ./dev wrapper beside this script"; return; fi
   if ! command -v rustc >/dev/null 2>&1; then echo "shell no rustc on PATH"; return; fi
+  # A rustup shim passes `command -v` and still cannot run when the pinned toolchain is missing: the steps that must always work
+  # (host-cleanup, prune, release) then use the shell kit instead of exiting 2 and hiding it behind `|| true`.
+  if [ "${PADDOCK_TOOLCHAIN_FAILED:-}" = 1 ] || ! (cd "$top/tools/paddock-dev" && rustc -vV >/dev/null 2>&1); then
+    echo "shell rustc does not run in this checkout (the pinned toolchain is not installed)"
+    return
+  fi
   echo "dev ./dev ci steps are available"
 }
+
+# The toolchain the repository pins is installed before the first ./dev or rustc call of the job (run 8034: on Windows build-jobs ran
+# before setup-rust, the pinned version was not there yet, `rustc` could not run and the wrapper fell back). `./dev --ensure-toolchain`
+# installs it with rustup when rustc does not run (bounded, logged); a machine without rustup is left to the choice below.
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${PADDOCK_TOOLCHAIN_FAILED:-}" != 1 ] && command -v rustup >/dev/null 2>&1 && [ -f "$root/dev" ] && [ -f "$root/tools/paddock-dev/Cargo.toml" ]; then
+  if ! bash "$root/dev" --ensure-toolchain; then
+    # Remembered for the rest of the job: later steps do not try again (900 s each) and use the shell kit, which needs no Rust.
+    PADDOCK_TOOLCHAIN_FAILED=1
+    PADDOCK_CI_KIT=shell
+    export PADDOCK_TOOLCHAIN_FAILED PADDOCK_CI_KIT
+    if [ -n "${GITHUB_ENV:-}" ]; then printf 'PADDOCK_TOOLCHAIN_FAILED=1\nPADDOCK_CI_KIT=shell\n' >> "$GITHUB_ENV" || true; fi
+    echo "::warning::kit.sh: the pinned Rust toolchain could not be installed (see above); the rest of this job uses the shell kit, and steps that need Rust will fail with their own message." >&2
+  fi
+fi
 
 choice=$(kit_choice)
 kit=${choice%% *}
@@ -89,9 +114,9 @@ dev_isolation() {
       if [ -n "$bin" ]; then
         PADDOCK_DEV="$bin"
         export PADDOCK_DEV
-        exec "$bin" ci isolation acquire
+        job_setup "$bin" ci isolation acquire
       fi
-      exec bash "$root/dev" ci isolation acquire
+      job_setup bash "$root/dev" ci isolation acquire
       ;;
     *)
       # The pinned tool when the job has one (acquire pinned it), else the wrapper.
@@ -100,6 +125,18 @@ dev_isolation() {
       exec bash "$root/dev" ci isolation "$@"
       ;;
   esac
+}
+
+# job_setup <command>: runs a job's setup step (build-jobs, the isolation acquire) and never returns. When it fails the job must not go
+# on: later steps that run after a failure (`if: !cancelled()`, so one run reports every failed check) would test without the
+# job's slot, temp folders or core share (run 8027, crate on Windows ran its tests after ./dev could not be built). The failure
+# is written to GITHUB_ENV as PADDOCK_JOB_ABORTED=1, which those steps test, and said once as an annotation.
+job_setup() {
+  "$@" && exit 0
+  rc=$?
+  echo "::error::A job setup step failed (exit $rc: $*). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job." >&2
+  if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || true; fi
+  exit "$rc"
 }
 
 # first_build_jobs: the core limit for the tool's own first build (see the header: build-jobs).
@@ -118,7 +155,7 @@ dev_run() {
 }
 
 host_usage() {
-  echo "usage: kit.sh host stable-workspace <name> | node-caches <angular-dir> <name> | host-tools | sccache-stats | build-folder <workspace> <name> | prune-build-folder <max-gb> [drop-bundles] | prune-folder <folder> <max-gb> | host-cleanup <options>" >&2
+  echo "usage: kit.sh host stable-workspace <name> | node-caches <angular-dir> <name> | host-tools | sccache-stats | build-folder <workspace> <name> | prune-build-folder <max-gb> [drop-bundles] | prune-folder <folder> <max-gb> | host-cleanup <options> | kept-clone <name> <profile> [<fresh>] | guardian-as-user" >&2
   exit 2
 }
 
@@ -130,14 +167,18 @@ kit_host() {
   # Nothing to do, so no tool is fetched or built for it: a Linux container has a fixed workspace, and without sccache there are no
   # statistics.
   case "$step" in
-    stable-workspace) [ "${RUNNER_OS:-}" != Linux ] || exit 0 ;;
+    stable-workspace | kept-clone) [ "${RUNNER_OS:-}" != Linux ] || exit 0 ;;
     sccache-stats) command -v sccache >/dev/null 2>&1 || exit 0 ;;
   esac
   if [ "$kit" = dev ]; then
     case "$step" in
       stable-workspace) dev_run stable-workspace --name "${1:?stable-workspace needs a name}" ;;
       node-caches) dev_run node-caches --angular-dir "${1-}" --name "${2:?node-caches needs a name}" ;;
-      host-tools | sccache-stats) dev_run "$step" ;;
+      host-tools | sccache-stats | guardian-as-user) dev_run "$step" ;;
+      kept-clone)
+        if [ "${3:-}" = true ]; then dev_run kept-clone --name "${1:?kept-clone needs a name}" --profile "${2:?kept-clone needs a profile}" --fresh; fi
+        dev_run kept-clone --name "${1:?kept-clone needs a name}" --profile "${2:?kept-clone needs a profile}"
+        ;;
       build-folder | prune-folder | host-cleanup) dev_run "$step" "$@" ;;
       prune-build-folder)
         if [ "${2:-}" = true ]; then dev_run prune-build-folder --max-gb "${1:-20}" --drop-bundles; fi
@@ -150,6 +191,8 @@ kit_host() {
     stable-workspace) NAME="${1:?stable-workspace needs a name}" exec bash -e -o pipefail "$here/host/stable-workspace.sh" ;;
     node-caches) ANGULAR_DIR="${1-}" NAME="${2:?node-caches needs a name}" exec bash -e -o pipefail "$here/host/node-caches.sh" ;;
     host-tools | sccache-stats) exec bash -e -o pipefail "$here/host/$step.sh" ;;
+    kept-clone) NAME="${1:?kept-clone needs a name}" PROFILE="${2:?kept-clone needs a profile}" FRESH="${3:-false}" exec bash "$here/kept-clone.sh" ;;
+    guardian-as-user) exec bash "$here/guardian-as-user.sh" ;;
     build-folder) exec bash "$here/build-folder.sh" "$@" ;;
     prune-folder) exec bash "$root/tools/prune-build-folders.sh" "$@" ;;
     host-cleanup) exec bash "$root/tools/host-cleanup.sh" "$@" ;;
@@ -180,12 +223,16 @@ case "${1:-}" in
       dev_env
       tools_home
       first_build_jobs
-      exec bash "$root/dev" ci build-jobs "$@"
+      job_setup bash "$root/dev" ci build-jobs "$@"
     fi
-    exec bash "$here/build-jobs.sh" "$@"
+    job_setup bash "$here/build-jobs.sh" "$@"
+    ;;
+  build-env)
+    if [ "$kit" = dev ]; then dev_run build-env; fi
+    exec node "$here/build-env.mjs"
     ;;
   *)
-    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | host <step> <args>" >&2
+    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | build-env | host <step> <args>" >&2
     exit 2
     ;;
 esac

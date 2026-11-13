@@ -379,14 +379,20 @@ pub(crate) fn shim_cargo(slow: u32) -> String {
 }
 
 /// Runs the whole wrapper (not just `--wrapper-hash`) with a scratch cache and a stand-in `cargo` that "builds" a script.
+#[cfg(unix)]
+fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
+    run_wrapper_with_cargo(f, home, extra_env, &shim_cargo(0))
+}
+
+/// [`run_wrapper`] with a `cargo` of the test's own.
 #[expect(
     clippy::disallowed_methods,
     reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
 )]
 #[cfg(unix)]
-fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
+fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)], cargo: &str) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
-    write_script(&shims.join("cargo"), &shim_cargo(0));
+    write_script(&shims.join("cargo"), cargo);
     let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
     let mut cmd = Command::new("sh");
     cmd.arg(f.root().join("dev"))
@@ -396,6 +402,8 @@ fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, 
         .env("PADDOCK_DEV_HOME", home)
         .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
         .env("CARGO_HOME", f.cargo_home.path())
+        // The toolchain install lock lives in RUSTUP_HOME: never the user's.
+        .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTC")
         .env_remove("CARGO_BUILD_RUSTC")
         // `dev` changes its messages and defaults on a CI runner; a test opts in through `extra_env`.
@@ -432,9 +440,16 @@ fn a_cached_binary_that_does_not_run_is_replaced_and_a_good_one_is_used_as_it_is
     assert!(!f.cargo_home.path().join("target").exists(), "no second build");
 }
 
+/// A cached tool that answers `--version` and otherwise says it ran (what an old cached binary would do).
+#[cfg(unix)]
+fn cached_tool(path: &Path) {
+    write_script(path, r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#);
+}
+
 #[cfg(unix)]
 #[test]
-fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
+fn without_a_compiler_no_cached_binary_is_run_and_the_error_names_the_next_step() {
+    // Run 8034: an old cached tool without `ci build-jobs` ran in place of the one for this commit and exited 2. Fail closed (ER-33).
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let home = scratch.path().join("home");
@@ -442,63 +457,134 @@ fn without_a_compiler_the_wrapper_runs_a_cached_binary_or_points_at_rustup() {
     let (code, _, err) = run_wrapper(&f, &home, &missing);
     assert_eq!(code, 2);
     assert!(err.contains("rustup") && err.contains("rustc was not found"), "{err}");
+    for root in ["bin", "bin-source"] {
+        cached_tool(&home.join(root).join("some-hash/paddock-dev-test-host"));
+    }
+    for extra in [
+        vec![],
+        vec![("GITHUB_ACTIONS", "true".to_string())],
+        vec![("PADDOCK_DEV_DOWNLOAD", "0".to_string())],
+    ] {
+        let env: Vec<_> = missing.iter().cloned().chain(extra).collect();
+        let (code, out, err) = run_wrapper(&f, &home, &env);
+        assert_eq!(code, 2, "{out}{err}");
+        assert!(!out.contains("cached ran"), "{out}");
+        assert!(
+            err.contains("::error::./dev: no Rust compiler runs here") && err.contains("rustup toolchain install"),
+            "{err}"
+        );
+    }
+}
+
+/// A Windows-shaped runner: rustup is there, its `rustc` shim cannot run until the pinned toolchain is installed, no RUSTC is set.
+/// Returns the folder of the shims and the log of the fake rustup.
+#[cfg(unix)]
+fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf) {
+    std::fs::write(
+        f.root().join("rust-toolchain.toml"),
+        "[toolchain]\nchannel = \"1.90.0\"\nprofile = \"minimal\"\ncomponents = [\"clippy\"]\n",
+    )
+    .unwrap();
+    let shims = f.cargo_home.path().join("shims");
+    let marker = f.cargo_home.path().join("installed");
+    let log = f.cargo_home.path().join("rustup.log");
     write_script(
-        &home.join("bin/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#,
+        &shims.join("rustc"),
+        &format!(
+            "[ -e '{}' ] || {{ echo \"error: toolchain '1.90.0' is not installed\" >&2; exit 1; }}\nprintf 'rustc 1.90.0\\nbinary: rustc\\ncommit-hash: aaaa\\ncommit-date: d\\nhost: test-host\\nrelease: 1.90.0\\nLLVM version: 1\\n'",
+            marker.display()
+        ),
     );
-    let (code, out, err) = run_wrapper(&f, &home, &missing);
-    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
-    assert!(err.contains("running the newest cached tool binary"), "{err}");
-    // A cached file that does not run is not used either.
-    write_script(&home.join("bin/some-hash/paddock-dev-test-host"), "exit 1");
-    assert_eq!(run_wrapper(&f, &home, &missing).0, 2);
+    write_script(
+        &shims.join("rustup"),
+        &format!(
+            "echo \"$PWD: $*\" >> '{}'\n{}",
+            log.display(),
+            rustup_body.replace("MARKER", &marker.display().to_string())
+        ),
+    );
+    (shims, log)
 }
 
 #[cfg(unix)]
 #[test]
-fn without_a_compiler_a_ci_runner_gets_a_warning_annotation_for_the_cached_binary() {
+fn a_runner_with_rustup_but_without_the_pinned_toolchain_installs_it_before_building() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
-    let home = scratch.path().join("home");
-    let env = [
-        ("RUSTC", scratch.path().join("no-such-rustc").display().to_string()),
-        ("GITHUB_ACTIONS", "true".to_string()),
-    ];
-    write_script(
-        &home.join("bin/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "cached ran $*"; fi"#,
+    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let (code, out, err) = run_wrapper(
+        &f,
+        &scratch.path().join("home"),
+        &[("GITHUB_ACTIONS", "true".to_string()), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())],
     );
-    let (code, out, err) = run_wrapper(&f, &home, &env);
-    assert_eq!((code, out.trim()), (0, "cached ran hello"), "{err}");
-    assert!(err.contains("::warning::./dev: rustc is not available on this runner"), "{err}");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), "built-by-shim");
+    assert!(
+        err.contains("installing the toolchain") && err.contains("installed the pinned toolchain in"),
+        "{err}"
+    );
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(
+        log.contains("tools/paddock-dev: toolchain install"),
+        "rustup ran in the tool's folder, so it reads the file: {log}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn without_a_compiler_a_run_that_never_downloads_does_not_run_a_tool_from_the_shared_cache() {
+fn a_failed_or_stuck_toolchain_install_is_an_error_with_the_next_step_and_runs_no_cached_tool() {
+    for (body, timeout, want) in [
+        ("exit 1", "30", "exit 1"),
+        ("[ \"$1 $2\" = 'toolchain install' ] && exec sleep 30; exit 0", "1", "exit 124"),
+    ] {
+        let f = Fixture::new();
+        let scratch = tempfile::tempdir().unwrap();
+        let home = scratch.path().join("home");
+        cached_tool(&home.join("bin/some-hash/paddock-dev-test-host"));
+        rustup_without_toolchain(&f, body);
+        let (code, out, err) = run_wrapper(&f, &home, &[("PADDOCK_DEV_TOOLCHAIN_TIMEOUT", timeout.to_string())]);
+        assert_eq!(code, 2, "{out}{err}");
+        assert!(
+            err.contains("::error::./dev: 'rustup toolchain install'") && err.contains(want) && err.contains("by hand"),
+            "{err}"
+        );
+        assert!(!out.contains("cached ran"), "{out}");
+    }
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+#[test]
+fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
     let f = Fixture::new();
-    let scratch = tempfile::tempdir().unwrap();
-    let home = scratch.path().join("home");
-    let no_rustc = scratch.path().join("no-such-rustc").display().to_string();
-    let env = [("RUSTC", no_rustc), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())];
-    // A binary only in bin/ (the shared cache, which downloads write): a release run must not run it.
-    write_script(
-        &home.join("bin/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "shared ran"; fi"#,
+    let (shims, _) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let path = format!("{}:{}", shims.display(), std::env::var("PATH").unwrap());
+    let run = || {
+        Command::new("sh")
+            .arg(f.root().join("dev"))
+            .arg("--ensure-toolchain")
+            .current_dir(f.root())
+            .env("PATH", &path)
+            .env("CARGO_HOME", f.cargo_home.path())
+            .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
+            .env_remove("RUSTC")
+            .env_remove("CARGO_BUILD_RUSTC")
+            .output()
+            .unwrap()
+    };
+    let first = run();
+    assert_eq!(first.status.code(), Some(0), "{}", String::from_utf8_lossy(&first.stderr));
+    // Second time the compiler runs: nothing is installed again.
+    let second = run();
+    assert_eq!(second.status.code(), Some(0));
+    assert!(
+        !String::from_utf8_lossy(&second.stderr).contains("installing"),
+        "{}",
+        String::from_utf8_lossy(&second.stderr)
     );
-    let (code, out, err) = run_wrapper(&f, &home, &env);
-    assert_eq!(code, 2, "{out}{err}");
-    assert!(!out.contains("shared ran") && err.contains("rustc was not found"), "{out}{err}");
-    // One a source-only run built is its own, and in CI the fallback is an annotation.
-    write_script(
-        &home.join("bin-source/some-hash/paddock-dev-test-host"),
-        r#"if [ "$1" = "--version" ]; then echo 0; else echo "source ran"; fi"#,
-    );
-    let (code, out, err) = run_wrapper(&f, &home, &env);
-    assert_eq!((code, out.trim()), (0, "source ran"), "{err}");
-    let ci = [env[0].clone(), env[1].clone(), ("GITHUB_ACTIONS", "true".to_string())];
-    let (_, _, err) = run_wrapper(&f, &home, &ci);
-    assert!(err.contains("::warning::./dev: rustc is not available"), "{err}");
 }
 
 #[cfg(unix)]
@@ -674,7 +760,7 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
 #[cfg(unix)]
 fn barrier_cargo() -> String {
     format!(
-        r#"{}; touch "$BARRIER/built-$PADDOCK_DEV_HASH-$$"; n=0; while [ ! -e "$BARRIER/go" ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n+1)); done"#,
+        r#"{}; echo "$CARGO_TARGET_DIR" >> "$BARRIER.dirs"; touch "$BARRIER/built-$PADDOCK_DEV_HASH-$$"; n=0; while [ ! -e "$BARRIER/go" ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n+1)); done"#,
         shim_cargo(0)
     )
 }
@@ -685,7 +771,7 @@ fn barrier_cargo() -> String {
     reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
 )]
 #[cfg(unix)]
-fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<std::process::Output>, Fixture) {
+fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (tempfile::TempDir, Vec<std::process::Output>, Fixture) {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let mount = scratch.path().join("mount");
@@ -697,8 +783,8 @@ fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<
     let children: Vec<_> = rustcs
         .iter()
         .map(|rustc| {
-            Command::new("sh")
-                .arg(f.root().join("dev"))
+            let mut cmd = Command::new("sh");
+            cmd.arg(f.root().join("dev"))
                 .arg("hello")
                 .current_dir(f.root())
                 .env_clear()
@@ -709,8 +795,12 @@ fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<
                 .env("GITHUB_ACTIONS", "true")
                 .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
                 .env("PADDOCK_CI_MOUNT", &mount)
-                .env("BARRIER", &barrier)
-                .output_child()
+                .env("BARRIER", &barrier);
+            // A host runner's fixed build folder (conformance/ci/job-isolation.sh sets PADDOCK_DEV_TARGET_DIR for every job).
+            if shared_target {
+                cmd.env("PADDOCK_DEV_TARGET_DIR", scratch.path().join("shared-target"));
+            }
+            cmd.output_child()
         })
         .collect();
     assert!(
@@ -765,7 +855,7 @@ fn two_wrappers_with_different_hashes_on_one_kept_mount_each_cache_their_own_bin
     let (hash_b, _) = probe.both(&[("RUSTC", b.clone())]);
     assert_ne!(hash_a, hash_b);
     // Both builds are inside cargo at once, so a shared build folder would hold the later binary when the earlier one is copied.
-    let (scratch, outs, _f) = run_overlapping(&[&a, &b], 2);
+    let (scratch, outs, _f) = run_overlapping(&[&a, &b], 2, false);
     for o in &outs {
         assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
     }
@@ -781,7 +871,7 @@ fn two_wrappers_with_the_same_hash_on_one_kept_mount_both_succeed_and_leave_one_
     let tmp = tempfile::tempdir().unwrap();
     let (a, _) = rustcs(tmp.path());
     let (hash, _) = probe.both(&[("RUSTC", a.clone())]);
-    let (scratch, outs, _f) = run_overlapping(&[&a, &a], 2);
+    let (scratch, outs, _f) = run_overlapping(&[&a, &a], 2, false);
     for o in &outs {
         assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
         assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "built-by-shim");
@@ -791,7 +881,7 @@ fn two_wrappers_with_the_same_hash_on_one_kept_mount_both_succeed_and_leave_one_
 
 #[cfg(unix)]
 #[test]
-fn a_cache_hit_counts_as_use_and_a_build_folder_without_a_published_tool_goes_when_old() {
+fn a_cache_hit_counts_as_use_and_an_orphaned_legacy_build_folder_goes() {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let home = scratch.path().join("home");
@@ -828,7 +918,10 @@ fn a_cache_hit_counts_as_use_and_a_build_folder_without_a_published_tool_goes_wh
         "an old build folder with no tool is removed"
     );
     assert!(home.join("target-orphan-new").exists(), "a fresh one may be a build in progress");
-    assert!(home.join(&kept_target).exists(), "a build folder with a tool is the tool's");
+    assert!(
+        home.join(&kept_target).exists(),
+        "a legacy build folder whose tool was published is the tool's"
+    );
 }
 
 #[cfg(unix)]
@@ -1011,4 +1104,307 @@ fn print_binary_refuses_a_build_with_uncommitted_inputs() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn builds_of_two_compilers_on_one_explicit_build_folder_get_a_folder_each() {
+    let probe = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let (a, b) = rustcs(tmp.path());
+    let (hash_a, _) = probe.both(&[("RUSTC", a.clone())]);
+    let (hash_b, _) = probe.both(&[("RUSTC", b.clone())]);
+    // Run 8027: two jobs of one host built in the fixed folder at once and broke each other's compiler outputs. Both builds are
+    // inside cargo at once; a shared folder would hold the later binary when the earlier one is copied, and cargo would be told
+    // the same CARGO_TARGET_DIR twice.
+    let (scratch, outs, _f) = run_overlapping(&[&a, &b], 2, true);
+    for o in &outs {
+        assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+    }
+    for hash in [&hash_a, &hash_b] {
+        assert_cached(&scratch.path().join("mount"), hash);
+    }
+    let dirs = std::fs::read_to_string(scratch.path().join("barrier.dirs")).unwrap();
+    let set: std::collections::HashSet<&str> = dirs.lines().collect();
+    assert_eq!(set.len(), 2, "each build is given a folder of its own: {dirs}");
+    // One folder per compiler, kept for the next build (warm), named by the compiler.
+    let mut left: Vec<String> = std::fs::read_dir(scratch.path().join("shared-target"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    left.sort();
+    assert_eq!(left, ["rustc-aaaa", "rustc-bbbb"], "{left:?}");
+}
+
+/// A compiler whose commit follows the number of cargo runs so far (capped), as a toolchain updated by rustup mid-build does.
+#[cfg(unix)]
+fn updating_rustc(dir: &Path, cap: u32) -> String {
+    let state = dir.join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let body = format!(
+        "n=$(wc -l < '{s}/cargo-runs' 2>/dev/null || echo 0); n=$((n+0)); [ $n -gt {cap} ] && n={cap}; printf 'rustc 1.9%s.0\\nbinary: rustc\\ncommit-hash: c%s\\ncommit-date: d\\nhost: test-host\\nrelease: 1.9%s.0\\nLLVM version: 1\\n' $n $n $n",
+        s = state.display()
+    );
+    let p = dir.join("rustc-updating");
+    write_script(&p, &body);
+    p.display().to_string()
+}
+
+#[cfg(unix)]
+fn run_with_updating_compiler(cap: u32) -> (i32, String, String, tempfile::TempDir) {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = updating_rustc(scratch.path(), cap);
+    let state = scratch.path().join("state");
+    let cargo = format!("echo run >> '{}/cargo-runs'; {}", state.display(), shim_cargo(0));
+    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);
+    (code, out, err, scratch)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_compiler_that_changes_during_the_build_starts_the_wrapper_over_once() {
+    let (code, out, err, scratch) = run_with_updating_compiler(1);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), "built-by-shim");
+    assert!(
+        err.contains("::warning::./dev: the Rust compiler changed while paddock-dev was building"),
+        "{err}"
+    );
+    assert!(err.contains("starting over once"), "{err}");
+    // Only the tool built by the compiler that is installed now is published; the build folder of the first try is gone.
+    let bins: Vec<_> = std::fs::read_dir(scratch.path().join("home/bin")).unwrap().flatten().collect();
+    assert_eq!(bins.len(), 1, "{bins:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_compiler_that_changes_again_during_the_second_build_is_a_clear_error() {
+    let (code, _, err, scratch) = run_with_updating_compiler(9);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("::error::./dev: the Rust compiler changed again"), "{err}");
+    assert!(err.contains("rustup show"), "{err}");
+    assert!(
+        !scratch.path().join("home/bin").exists(),
+        "nothing is published from a build the compiler changed under"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_uncommitted_input_builds_in_a_folder_of_its_own_compiler() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let a = fake_rustc(scratch.path(), "rustc-a", "1.90.0", "aaaa1111bbbb2222", "test-host");
+    let b = fake_rustc(scratch.path(), "rustc-b", "1.91.0", "cccc3333dddd4444", "test-host");
+    std::fs::write(f.root().join("tools/paddock-dev/src/new.rs"), "// uncommitted\n").unwrap();
+    for rustc in [&a, &b] {
+        let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[("RUSTC", rustc.clone())]);
+        assert_eq!(code, 0, "{err}");
+    }
+    let target = f.cargo_home.path().join("target");
+    assert!(
+        target.join("rustc-aaaa1111bbbb/release/paddock-dev").exists(),
+        "{:?}",
+        std::fs::read_dir(&target).map(|r| r.flatten().count())
+    );
+    assert!(target.join("rustc-cccc3333dddd/release/paddock-dev").exists());
+}
+
+/// A `cargo` that builds a tool printing `what` (which may read the environment), after running `pre`.
+#[cfg(unix)]
+fn cargo_building(pre: &str, what: &str) -> String {
+    format!(
+        r#"{pre}
+mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\nif [ "$1" = self ]; then echo "embedded %s"; exit 0; fi\n{what}\n' "$PADDOCK_DEV_HASH" > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev""#
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn the_restart_marker_is_not_passed_on_to_the_tool_so_a_nested_dev_can_restart() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = updating_rustc(scratch.path(), 1);
+    let state = scratch.path().join("state");
+    let cargo = cargo_building(
+        &format!("echo run >> '{}/cargo-runs'", state.display()),
+        "echo restarted=${PADDOCK_DEV_RESTARTED:-unset}",
+    );
+    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("starting over once"), "the run did restart: {err}");
+    assert_eq!(out.trim(), "restarted=unset");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_changed_input_builds_warm_in_the_folder_of_the_same_compiler() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa1111bbbb2222", "test-host");
+    let home = scratch.path().join("home");
+    let first = cargo_building("touch \"$CARGO_TARGET_DIR/warm-marker\"", "echo first");
+    let (code, _, err) = run_wrapper_with_cargo(&f, &home, &[("RUSTC", rustc.clone())], &first);
+    assert_eq!(code, 0, "{err}");
+    // A new commit under an input path: a new hash, the same compiler, so the same folder with what the first build left in it.
+    std::fs::write(f.root().join("tools/paddock-dev/src/main.rs"), "fn main() { /* changed */ }\n").unwrap();
+    git(f.root(), &["commit", "-q", "-am", "chore: change an input"]);
+    let second = cargo_building(
+        "[ -e \"$CARGO_TARGET_DIR/warm-marker\" ] || { echo cold >&2; exit 101; }",
+        "echo second",
+    );
+    let (code, out, err) = run_wrapper_with_cargo(&f, &home, &[("RUSTC", rustc)], &second);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), "second");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_binary_replaced_by_another_build_before_the_copy_is_built_again() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let tries = scratch.path().join("tries");
+    // The first run of cargo leaves a tool for another hash (a build of another input in the same folder got there first).
+    let cargo = format!(
+        r#"echo t >> '{t}'; if [ "$(wc -l < '{t}')" -eq 1 ]; then export PADDOCK_DEV_HASH=somebody-elses; fi
+{b}"#,
+        t = tries.display(),
+        b = shim_cargo(0)
+    );
+    let (code, out, err) = run_wrapper_with_cargo(&f, &scratch.path().join("home"), &[("RUSTC", rustc)], &cargo);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), "built-by-shim");
+    assert!(err.contains("try 2"), "{err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn build_folders_of_old_compilers_go_after_a_week_and_the_one_in_use_never() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let target = f.cargo_home.path().join("target");
+    let days = |d: u64| std::time::SystemTime::now() - std::time::Duration::from_secs(d * 86400);
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    for (name, age) in [("rustc-old", 30), ("rustc-recent", 2), ("rustc-aaaa", 30)] {
+        std::fs::create_dir_all(target.join(name)).unwrap();
+        std::fs::File::open(target.join(name)).unwrap().set_modified(days(age)).unwrap();
+    }
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!(code, 0, "{err}");
+    assert!(!target.join("rustc-old").exists(), "another compiler's folder, a month unused");
+    assert!(target.join("rustc-recent").exists());
+    assert!(
+        target.join("rustc-aaaa").exists(),
+        "the compiler in use keeps its folder whatever its age"
+    );
+}
+
+/// The start time of a running process as the wrapper records it.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+fn stamp_of(pid: u32) -> String {
+    let out = Command::new("ps").args(["-o", "lstart=", "-p", &pid.to_string()]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(unix)]
+fn install_lock(f: &Fixture, owner_pid: u32, stamp: &str) -> PathBuf {
+    let lock = f.cargo_home.path().join("rustup/.paddock-install-1.90.0.lock");
+    std::fs::create_dir_all(&lock).unwrap();
+    std::fs::write(lock.join("owner"), format!("{owner_pid}\n{stamp}\n")).unwrap();
+    lock
+}
+
+#[cfg(unix)]
+#[test]
+fn a_timed_out_install_is_uninstalled_so_no_half_toolchain_is_left() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && exec sleep 30; exit 0");
+    let (code, _, err) = run_wrapper(
+        &f,
+        &scratch.path().join("home"),
+        &[("PADDOCK_DEV_TOOLCHAIN_TIMEOUT", "1".to_string())],
+    );
+    assert_eq!(code, 2, "{err}");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(log.contains("toolchain uninstall 1.90.0"), "{log}");
+    assert!(
+        !f.cargo_home.path().join("rustup/.paddock-install-1.90.0.lock").exists(),
+        "the lock is released"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_install_waits_for_a_live_holder_of_the_lock_and_never_runs_beside_it() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    // This test process is a live owner (pid and start time match), however old the lock is.
+    let me = std::process::id();
+    let lock = install_lock(&f, me, &stamp_of(me));
+    let (code, _, err) = run_wrapper(
+        &f,
+        &scratch.path().join("home"),
+        &[("PADDOCK_DEV_TOOLCHAIN_TIMEOUT", "2".to_string())],
+    );
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("holds") && err.contains(&me.to_string()), "{err}");
+    assert!(lock.exists(), "a live holder's lock is not taken");
+    assert!(
+        !log.exists() || !std::fs::read_to_string(log).unwrap().contains("toolchain install"),
+        "no install beside the holder"
+    );
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts a short-lived sh to get a pid that has ended; nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+#[test]
+fn a_lock_of_a_gone_owner_or_of_a_reused_pid_is_taken_over_whatever_its_age() {
+    let me = std::process::id();
+    let dead = {
+        let mut c = Command::new("sh").args(["-c", "exit 0"]).spawn().unwrap();
+        let pid = c.id();
+        c.wait().unwrap();
+        pid
+    };
+    for (pid, stamp) in [
+        (dead, "Mon Jan 1 00:00:00 2001".to_string()),
+        (me, "Mon Jan 1 00:00:00 2001".to_string()),
+    ] {
+        let f = Fixture::new();
+        let scratch = tempfile::tempdir().unwrap();
+        let (_, log) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+        install_lock(&f, pid, &stamp);
+        let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[("PADDOCK_DEV_DOWNLOAD", "0".to_string())]);
+        assert_eq!(code, 0, "pid {pid}: {err}");
+        assert!(err.contains("taking it over"), "{err}");
+        assert!(std::fs::read_to_string(log).unwrap().contains("toolchain install"));
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn after_a_failed_install_earlier_in_the_job_no_second_install_is_tried() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (_, log) = rustup_without_toolchain(&f, "exit 1");
+    let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &[("PADDOCK_TOOLCHAIN_FAILED", "1".to_string())]);
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("an earlier step of this job failed to"), "{err}");
+    assert!(!log.exists(), "rustup was not run at all");
 }

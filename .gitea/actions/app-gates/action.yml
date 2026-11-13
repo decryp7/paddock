@@ -1,5 +1,5 @@
 name: app-gates
-description: "One app's matrix leg in the monorepo (ADR 0014 §6): the app's own commands from apps/<app>/paddock.ci.json (prepare, checks, UI checks), and the Rust gates of its Cargo workspace (fmt, clippy, nextest, doc tests, deny), only for the halves the change reaches. On Windows and macOS legs (paddock.ci.json `os`) the Rust half skips what one OS decides for all: fmt and deny run on Linux only, clippy not on Windows (as the crates leg). The caller checks out, sets up Rust and runs `npm ci` at the root; the inputs come from the plan job's matrix (scripts/affected.mjs)."
+description: "One app's matrix leg in the monorepo (ADR 0014 §6): the app's own commands from apps/<app>/paddock.ci.json (prepare, checks, UI checks), run by `./dev ci run <app> <phase>` (ADR 0038 §1; the command lists are read from the contract, the inputs only say which halves this leg runs), and the Rust gates of its Cargo workspace (fmt, clippy, nextest, doc tests, deny), only for the halves the change reaches. On Windows and macOS legs (paddock.ci.json `os`) the Rust half skips what one OS decides for all: fmt and deny run on Linux only, clippy not on Windows (as the crates leg). The caller checks out, sets up Rust and runs `npm ci` at the root; the inputs come from the plan job's matrix (scripts/affected.mjs)."
 inputs:
   app:
     description: The app (its folder under apps/).
@@ -64,44 +64,44 @@ runs:
       shell: bash
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
-        COMMANDS: ${{ inputs.prepare }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
+        APP: ${{ inputs.app }}
+      run: ./dev ci run "$APP" prepare
 
     - name: Checks (${{ inputs.app }})
       if: inputs.checks != ''
       shell: bash
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
-        COMMANDS: ${{ inputs.checks }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
+        APP: ${{ inputs.app }}
+      run: ./dev ci run "$APP" checks
 
     # Third-party notices (Rust through cargo-about, npm through the root lock) are generated output: the committed file must equal
     # what the dependencies produce now (a new dependency or a version bump changes it).
     - name: Install cargo-about (${{ inputs.app }})
-      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}
+      if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}
       uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2
       with:
         tool: cargo-about@0.9.2
 
     - name: Check the notices (${{ inputs.app }})
-      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}
+      if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}
       shell: bash
       env:
         APP: ${{ inputs.app }}
       run: bash "${{ github.action_path }}/../../../scripts/notices.sh" "$APP" --check
 
     - name: Rust checks (${{ inputs.app }})
-      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.rust-checks != '' && inputs.rust == 'true' }}
+      if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && steps.prepare.outcome != 'failure' && inputs.rust-checks != '' && inputs.rust == 'true' }}
       shell: bash
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
-        COMMANDS: ${{ inputs.rust-checks }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
+        APP: ${{ inputs.app }}
+      run: ./dev ci run "$APP" rustChecks
 
     # Every step of the Rust half runs even after another failed (clippy and nextest each name what broke), and the steps after a
     # failed check (`checks`, `rust-checks`) still run, so one run reports every failure (`!cancelled()`).
     - name: Rust (${{ inputs.app }}; fmt, clippy, tests on the mock runtime, doc tests, deny)
-      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.rust == 'true' && inputs.cargo != '' }}
+      if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && steps.prepare.outcome != 'failure' && inputs.rust == 'true' && inputs.cargo != '' }}
       shell: bash
       # The stable checkout path on a host runner (stable-workspace), so sccache sees the same working folder every run.
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ inputs.cargo }}
@@ -161,29 +161,29 @@ runs:
     # After the Rust step, in the same job and with the same preparation (toolchain, caches, `prepare`), on the host legs only: a build with
     # no test targets, which clippy --all-targets and nextest never make (Dyno ADR 0033 section 3.2).
     - name: Host Rust checks (${{ inputs.app }})
-      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.host-rust-checks != '' && inputs.rust == 'true' && runner.os != 'Linux' }}
+      if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && steps.prepare.outcome != 'failure' && inputs.host-rust-checks != '' && inputs.rust == 'true' && runner.os != 'Linux' }}
       shell: bash
       # The stable checkout path of a host leg (stable-workspace), like the Rust step: sccache keys a compile on its working folder.
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
-        COMMANDS: ${{ inputs.host-rust-checks }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
+        APP: ${{ inputs.app }}
+      run: ./dev ci run "$APP" hostRustChecks
 
     - name: UI (${{ inputs.app }})
-      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.ui == 'true' && inputs.ui-checks != '' }}
+      if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && steps.prepare.outcome != 'failure' && inputs.ui == 'true' && inputs.ui-checks != '' }}
       shell: bash
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
-        COMMANDS: ${{ inputs.ui-checks }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
+        APP: ${{ inputs.app }}
+      run: ./dev ci run "$APP" ui
 
     - name: End-to-end tests (${{ inputs.app }} ${{ inputs.e2e-shard }})
-      if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.e2e-checks != '' }}
+      if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && steps.prepare.outcome != 'failure' && inputs.e2e-checks != '' }}
       shell: bash
       working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
-        COMMANDS: ${{ inputs.e2e-checks }}
+        APP: ${{ inputs.app }}
         E2E_SHARD: ${{ inputs.e2e-shard }}
-      run: |
-        export E2E_INDEX="${E2E_SHARD%%/*}"
-        bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"
+        # A shard (i/N) runs the Chromium list, the leg without one the WebKit list; `./dev ci run` derives E2E_INDEX from E2E_SHARD.
+        E2E_PHASE: ${{ inputs.e2e-shard != '' && 'e2e' || 'e2eWebkit' }}
+      run: ./dev ci run "$APP" "$E2E_PHASE"

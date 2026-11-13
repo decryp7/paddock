@@ -20,6 +20,7 @@
 //! phase, and each phase logs its duration (ER-27). Any other problem only costs cache hits and never fails the job.
 
 use super::links::{Links, OsLinks};
+use super::phase::{Phase, bounded};
 use super::safe_remove::{self, RemoveError};
 use super::{Step, folder_name, isolation_full, tail_flat};
 use crate::ci_isolation::home;
@@ -29,8 +30,7 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// `dev ci stable-workspace`.
 #[derive(ClapArgs, Debug)]
@@ -91,7 +91,7 @@ impl Ops for RealOps {
         #[cfg(not(unix))]
         {
             // The drive (or share) of the physical path: the part before the first separator, lower-cased.
-            let c = std::fs::canonicalize(p).ok()?;
+            let c = paddock_env::winpath::real(p).ok()?;
             match c.components().next()? {
                 std::path::Component::Prefix(pre) => Some(pre.as_os_str().to_string_lossy().to_lowercase()),
                 _ => None,
@@ -132,42 +132,6 @@ impl Ops for RealOps {
             windows: self.windows,
         }
         .link_dir(target, link)
-    }
-}
-
-/// Why a bounded phase ended without a value.
-enum Phase {
-    /// It did not finish in time.
-    Timeout,
-    /// It failed with this message.
-    Failed(String),
-}
-
-/// Runs `f` for at most `limit`, logging `label ...` before and `label: done|failed in N s` after (the shell's `bounded`).
-/// A phase that overruns is left behind (the step ends and the process with it).
-fn bounded<T: Send + 'static>(
-    step: &mut Step<'_>,
-    label: &str,
-    limit: Duration,
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> Result<T, Phase> {
-    let start = Instant::now();
-    step.say(format!("{}: {label} ...", step.name));
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        let _ = tx.send(f());
-    });
-    let secs = |s: Instant| s.elapsed().as_secs();
-    match rx.recv_timeout(limit) {
-        Ok(Ok(v)) => {
-            step.say(format!("{}: {label}: done in {} s", step.name, secs(start)));
-            Ok(v)
-        }
-        Ok(Err(e)) => {
-            step.say(format!("{}: {label}: failed (exit 1) in {} s", step.name, secs(start)));
-            Err(Phase::Failed(e))
-        }
-        Err(_) => Err(Phase::Timeout),
     }
 }
 
@@ -560,7 +524,10 @@ mod tests {
     }
 
     fn kept(sc: &Scene) -> String {
-        format!("{}/.paddock-ci/src/decryp7_paddock-crate-s1", sc.dir.path().join("home").display())
+        format!(
+            "{}/.paddock-ci/src/decryp7_paddock-crate-s1",
+            crate::ci_host::fwd(&sc.dir.path().join("home"))
+        )
     }
 
     #[test]

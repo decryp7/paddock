@@ -591,7 +591,7 @@ fn with_report<T>(temp: &Path, produce: impl FnOnce(&Path) -> T) -> std::io::Res
     let file = dir.join("battery-report.xml");
     let made = produce(&file);
     let text = read_report(&file);
-    paddock_proc::cleanup::remove_dir_all(&dir);
+    paddock_proc::cleanup::remove_dir_all_warn(&dir);
     Ok((made, text))
 }
 
@@ -765,9 +765,7 @@ mod tests {
 
     fn temp(name: &str) -> PathBuf {
         // A fresh folder the test removes itself (the callers end with `remove_dir_all`).
-        tempfile::Builder::new()
-            .prefix(&format!("dyno-it-hw-{name}-"))
-            .tempdir()
+        paddock_testkit::PrivateTemp::with_prefix(&format!("dyno-it-hw-{name}-"), None)
             .unwrap()
             .keep()
     }

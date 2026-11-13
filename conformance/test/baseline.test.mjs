@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { baselineGrowth, enforceShrinkOnly } from '../src/util/baseline.mjs';
+import { baselineGrowth, enforceShrinkOnly, reconcile } from '../src/util/baseline.mjs';
 
 const gitWith = (base) => (args) => {
   if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? 'def\n' : 'abc\n';
@@ -33,4 +33,13 @@ test('enforceShrinkOnly: added entries throw; fixed entries only warn', () => {
   assert.throws(() => enforceShrinkOnly(opts(base, ['a', 'z'])), /grew.*z/);
   assert.doesNotThrow(() => enforceShrinkOnly({ ...opts(base, []), gone: ['a'] }));
   assert.doesNotThrow(() => enforceShrinkOnly({ ...opts(base, ['a']), git: () => { throw new Error('x'); } }));
+});
+
+test('reconcile: the exact key first, then the loose key; counts per key', () => {
+  const exact = (e) => `${e.f}:${e.h}`;
+  const loose = (e) => e.h;
+  const a = { f: 'a', h: 1 };
+  assert.deepEqual(reconcile([{ f: 'b', h: 1 }], [a], exact, loose), { fresh: [], stale: [], moved: [{ item: { f: 'b', h: 1 }, from: a }] });
+  assert.equal(reconcile([{ f: 'b', h: 1 }], [a], exact).fresh.length, 1, 'without a loose key a move is new');
+  assert.equal(reconcile([{ f: 'a', h: 1 }, { f: 'b', h: 1 }], [a], exact, loose).fresh.length, 1, 'a copy is new');
 });

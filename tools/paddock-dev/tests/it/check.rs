@@ -14,6 +14,11 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The checks the recorded JS findings cover (C39 and C53); later checks have their own parity tests (check_c119.rs).
+fn legacy_registry() -> Vec<Box<dyn paddock_dev::check::Check>> {
+    registry().into_iter().filter(|c| matches!(c.id(), "C39" | "C53")).collect()
+}
+
 fn manifest() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
@@ -63,9 +68,10 @@ fn options(root: &Path) -> RunOptions {
     RunOptions {
         root: root.to_path_buf(),
         app: "fixture".into(),
-        only: Some(vec!["C39".into(), "C53".into(), "C120".into()]),
+        only: Some(vec!["C39".into(), "C53".into()]),
         files: None,
         today: "2026-11-10".into(),
+        base_ref: Some("origin/main".into()),
     }
 }
 
@@ -81,7 +87,7 @@ fn shared_part(v: &Value) -> Value {
 #[test]
 fn fixture_findings_equal_the_recorded_js_findings_exactly() {
     let tree = materialize();
-    let r = run_checks(&options(tree.path()), &registry()).unwrap();
+    let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
     let got = shared_part(&r.json());
     let want = shared_part(&read_json(&fixtures().join("expected.json")));
     // Same values and, as text, the same key order and finding order.
@@ -138,6 +144,8 @@ fn fixture_masks_equal_the_recorded_js_masks() {
 fn node(driver: &str, env: &[(&str, String)]) -> String {
     let mut c = Command::new("node");
     c.args(["--input-type=module", "-e", driver]).current_dir(repo_root());
+    // The parity runs measure growth against `origin/main` of their own repository, whatever the caller's environment says.
+    c.env_remove("PADDOCK_BASE_REF");
     for (k, v) in env {
         c.env(k, v);
     }
@@ -206,7 +214,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
 const now = process.env.RT5_NOW ? new Date(process.env.RT5_NOW) : undefined;
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53', 'C120'], options: { now } });
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53'], options: { now } });
 process.stdout.write(JSON.stringify(r));
 "#;
 
@@ -225,7 +233,7 @@ fn live_fixture_findings_equal_the_js_host() {
         ],
     ))
     .unwrap();
-    let r = run_checks(&options(tree.path()), &registry()).unwrap();
+    let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
     assert_eq!(shared_part(&r.json()), shared_part(&js));
 }
 
@@ -250,10 +258,11 @@ fn live_tree_findings_equal_the_js_host() {
             let opts = RunOptions {
                 app: "paddock".into(),
                 today: paddock_dev::check::today_utc(),
+                base_ref: None,
                 ..options(&root)
             };
             let tree = Tree::open(&root).with_progress(move || progress.tick());
-            run_checks_in(&tree, &opts, &registry()).unwrap()
+            run_checks_in(&tree, &opts, &legacy_registry()).unwrap()
         }
     });
     let (got, want) = (shared_part(&r.json()), shared_part(&js));
@@ -336,11 +345,11 @@ fn only_selects_checks_and_an_unknown_id_is_refused() {
     let tree = materialize();
     let mut o = options(tree.path());
     o.only = Some(vec!["C53".into()]);
-    let r = run_checks(&o, &registry()).unwrap();
+    let r = run_checks(&o, &legacy_registry()).unwrap();
     assert_eq!(r.checks, ["C53"]);
     assert!(r.findings.iter().all(|f| f.check != "C39"));
     o.only = Some(vec!["C39".into(), "C999".into()]);
-    assert_eq!(run_checks(&o, &registry()).err().unwrap().0, ["C999"]);
+    assert_eq!(run_checks(&o, &legacy_registry()).err().unwrap().0, ["C999"]);
 }
 
 #[test]
@@ -352,7 +361,7 @@ fn files_scopes_the_run_and_the_record_says_so() {
         "./crates/a/tests/c39_good.rs".into(),
         "crates/a/src/gone.rs".into(),
     ]);
-    let r = run_checks(&o, &registry()).unwrap();
+    let r = run_checks(&o, &legacy_registry()).unwrap();
     let files: std::collections::BTreeSet<&str> = r
         .findings
         .iter()
@@ -385,7 +394,7 @@ fn a_scoped_run_that_reads_no_rust_file_is_not_applicable_and_not_an_error() {
     let mut o = options(tree.path());
     o.only = Some(vec!["C39".into()]);
     o.files = Some(vec!["notes.md".into()]);
-    let r = run_checks(&o, &registry()).unwrap();
+    let r = run_checks(&o, &legacy_registry()).unwrap();
     for e in &r.runs {
         assert_eq!(e.record.status(e.kept > 0).name(), "not applicable", "{}", e.record.check);
     }
@@ -399,7 +408,7 @@ fn files_that_are_all_unknown_are_an_unwaivable_error_and_each_is_a_warning() {
     let mut o = options(tree.path());
     o.only = Some(vec!["C39".into()]);
     o.files = Some(vec!["typo/one.rs".into(), "typo/two.rs".into()]);
-    let r = run_checks(&o, &registry()).unwrap();
+    let r = run_checks(&o, &legacy_registry()).unwrap();
     assert_eq!(r.warnings(), 2, "one counted warning per unknown entry: {:?}", r.findings);
     let broken: Vec<_> = r.findings.iter().filter(|f| f.unwaivable).collect();
     assert_eq!(broken.len(), 1, "{:?}", r.findings);
@@ -417,9 +426,9 @@ fn a_whole_tree_run_that_looks_at_nothing_is_an_error_no_waiver_covers() {
         "[[waiver]]\ncheck = \"C39\"\npath = \"*\"\nreason = \"try\"\nexpires = \"2099-01-01\"\n",
     )
     .unwrap();
-    let r = run_checks(&options(d.path()), &registry()).unwrap();
+    let r = run_checks(&options(d.path()), &legacy_registry()).unwrap();
     let broken: Vec<_> = r.findings.iter().filter(|f| f.unwaivable).collect();
-    assert_eq!(broken.len(), 3, "{:?}", r.findings);
+    assert_eq!(broken.len(), 2, "{:?}", r.findings);
     assert!(broken[0].message.starts_with("not measured"));
     assert!(r.waived.is_empty());
     assert_eq!(r.runs[0].record.status(true).name(), "not measured");
@@ -428,7 +437,7 @@ fn a_whole_tree_run_that_looks_at_nothing_is_an_error_no_waiver_covers() {
 #[test]
 fn an_empty_tree_fails_the_precondition() {
     let d = tempfile::tempdir().unwrap();
-    let r = run_checks(&options(d.path()), &registry()).unwrap();
+    let r = run_checks(&options(d.path()), &legacy_registry()).unwrap();
     assert!(r.runs.iter().all(|e| !e.record.precondition.met));
     assert!(r.errors() >= 2);
 }
@@ -436,7 +445,7 @@ fn an_empty_tree_fails_the_precondition() {
 #[test]
 fn the_report_has_the_js_shape_and_the_run_records() {
     let tree = materialize();
-    let v = run_checks(&options(tree.path()), &registry()).unwrap().json();
+    let v = run_checks(&options(tree.path()), &legacy_registry()).unwrap().json();
     for k in ["app", "checks", "findings", "waived", "errors", "warnings", "runs"] {
         assert!(v.get(k).is_some(), "{k}");
     }
@@ -713,7 +722,7 @@ fn an_unreadable_file_next_to_a_waived_finding_fails_the_run() {
     let readable_anyway = std::fs::read(d.path().join("b.rs")).is_ok(); // root ignores the mode (CI containers)
     let mut o = options(d.path());
     o.only = Some(vec!["C53".into()]);
-    let r = run_checks(&o, &registry()).unwrap();
+    let r = run_checks(&o, &legacy_registry()).unwrap();
     std::fs::set_permissions(d.path().join("b.rs"), std::fs::Permissions::from_mode(0o644)).unwrap();
     assert_eq!(r.waived.len(), 1);
     if readable_anyway {
@@ -733,24 +742,24 @@ fn an_unreadable_file_next_to_a_waived_finding_fails_the_run() {
 fn zero_probes_with_a_rust_file_present_and_no_rust_file_at_all_are_both_not_measured() {
     let d = tempfile::tempdir().unwrap();
     std::fs::write(d.path().join("empty.rs"), "").unwrap();
-    let r = run_checks(&options(d.path()), &registry()).unwrap();
+    let r = run_checks(&options(d.path()), &legacy_registry()).unwrap();
     assert!(r.runs.iter().all(|e| e.record.precondition.met && e.record.probes == 0));
     assert!(
         r.findings.iter().filter(|f| f.unwaivable).all(|f| f.message.contains("no file")),
         "{:?}",
         r.findings
     );
-    assert_eq!(r.errors(), 3);
+    assert_eq!(r.errors(), 2);
     let d = tempfile::tempdir().unwrap();
     std::fs::write(d.path().join("readme.md"), "x").unwrap();
-    let r = run_checks(&options(d.path()), &registry()).unwrap();
+    let r = run_checks(&options(d.path()), &legacy_registry()).unwrap();
     assert!(r.runs.iter().all(|e| !e.record.precondition.met), "no .rs file in the tree");
 }
 
 #[test]
 fn the_real_checks_pass_their_controls_through_the_host() {
     let tree = materialize();
-    let r = run_checks(&options(tree.path()), &registry()).unwrap();
+    let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
     assert!(
         r.runs.iter().all(|e| e.record.control),
         "C39 and C53 must see their control sites through the prefilter and the file loop"
@@ -768,7 +777,7 @@ fn files_accepts_backslashes_and_reports_entries_the_tree_does_not_have() {
         "crates/a/src/typo.rs".into(),
         "./crates/a/src/c53_good.rs".into(),
     ]);
-    let r = run_checks(&o, &registry()).unwrap();
+    let r = run_checks(&o, &legacy_registry()).unwrap();
     assert_eq!(r.unknown_files, ["crates/a/src/typo.rs"]);
     assert!(r.findings.iter().any(|f| f.file == "crates/a/src/c53_bad.rs"));
     assert!(r.text().contains("::warning::--files names 1 file(s)"));
@@ -782,7 +791,7 @@ fn files_accepts_backslashes_and_reports_entries_the_tree_does_not_have() {
 #[test]
 fn the_record_carries_raw_and_kept_counts_and_the_matched_keys() {
     let tree = materialize();
-    let v = run_checks(&options(tree.path()), &registry()).unwrap().json();
+    let v = run_checks(&options(tree.path()), &legacy_registry()).unwrap().json();
     let c39 = &v["runs"][0];
     assert!(c39["found"]["raw"].as_u64().unwrap() > c39["found"]["kept"].as_u64().unwrap() - 1);
     assert!(
@@ -905,7 +914,7 @@ fn live_token_soup_findings_equal_the_js_host() {
         .unwrap();
         let mut o = options(d.path());
         o.app = "soup".into();
-        let r = run_checks(&o, &registry()).unwrap();
+        let r = run_checks(&o, &legacy_registry()).unwrap();
         assert_eq!(shared_part(&r.json())["findings"], js["findings"], "seed {seed}");
         assert!(
             js["findings"].as_array().unwrap().len() > 20,
@@ -940,11 +949,17 @@ fn git(root: &Path, args: &[&str]) {
 /// The fixture tree as a git repository whose merge base holds a baseline with one entry fewer than the working tree's (the baseline
 /// GREW by one entry): `origin/main` is the first commit, `topic` the second.
 fn grown_baseline_repo() -> tempfile::TempDir {
+    baseline_repo(|sites| sites.truncate(1))
+}
+
+/// Like [`grown_baseline_repo`], with the merge base's baseline entries edited by `edit` first.
+fn baseline_repo(edit: impl FnOnce(&mut Vec<Value>)) -> tempfile::TempDir {
     let tree = materialize();
     let root = tree.path();
     let full = std::fs::read_to_string(root.join(BASELINE)).unwrap();
     let mut doc: Value = serde_json::from_str(&full).unwrap();
-    let kept = doc["sites"].as_array().unwrap()[..1].to_vec();
+    let mut kept = doc["sites"].as_array().unwrap().clone();
+    edit(&mut kept);
     doc["sites"] = Value::Array(kept);
     std::fs::write(root.join(BASELINE), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
     git(root, &["init", "-q", "-b", "main"]);
@@ -980,11 +995,95 @@ fn live_baseline_growth_equals_the_js_host_in_a_git_repository() {
         ],
     ))
     .unwrap();
-    let r = run_checks(&options(tree.path()), &registry()).unwrap();
+    let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
     assert_eq!(shared_part(&r.json()), shared_part(&js));
     let grew = baseline_findings(&r);
     assert_eq!(grew.len(), 1, "{grew:?}");
     assert!(grew[0].contains("the baseline grew: 1 entry is"), "{grew:?}");
+}
+
+/// The merge base lists the first site under another file (the code moved since): same hash, so not growth, on both hosts.
+#[test]
+fn a_moved_site_is_not_growth_on_either_host_but_a_new_one_beside_it_is() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let move_first = |sites: &mut Vec<Value>| sites[0]["file"] = json!("crates/a/src/old_home.rs");
+    for (name, tree, grew) in [
+        ("moved only", baseline_repo(move_first), 0),
+        (
+            "moved and one new",
+            baseline_repo(|sites| {
+                move_first(sites);
+                sites.truncate(1);
+            }),
+            1,
+        ),
+    ] {
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN,
+            &[
+                ("RT5_ROOT", tree.path().display().to_string()),
+                ("RT5_APP", "fixture".into()),
+                ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
+            ],
+        ))
+        .unwrap();
+        let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
+        assert_eq!(shared_part(&r.json()), shared_part(&js), "{name}: the hosts agree");
+        let msgs = baseline_findings(&r);
+        let grown: Vec<_> = msgs.iter().filter(|m| m.contains("the baseline grew")).collect();
+        assert_eq!(grown.len(), grew, "{name}: {msgs:?}");
+        if grew == 1 {
+            assert!(grown[0].contains("the baseline grew: 1 entry is"), "{name}: {msgs:?}");
+        }
+        assert!(
+            msgs.iter().any(|m| m.starts_with("moved: ")),
+            "{name}: the move is reported as a warning: {msgs:?}"
+        );
+    }
+}
+
+/// The site check is exact: a baseline entry whose file still exists does not cover the same line in another file (a deleted line in
+/// one file, added in a new one, is an error); an entry whose file is gone does, as a warning that names both files. Both hosts agree.
+#[test]
+fn a_site_moved_from_a_live_file_is_an_error_and_from_a_gone_file_a_warning_on_both_hosts() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    for (name, from, errors) in [
+        ("old file still exists", "crates/a/src/c53_good.rs", true),
+        ("old file is gone", "crates/a/src/renamed_away.rs", false),
+    ] {
+        let tree = materialize();
+        let mut doc: Value = read_json(&tree.path().join(BASELINE));
+        doc["sites"][0]["file"] = json!(from);
+        std::fs::write(tree.path().join(BASELINE), serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN,
+            &[
+                ("RT5_ROOT", tree.path().display().to_string()),
+                ("RT5_APP", "fixture".into()),
+                ("RT5_NOW", "2026-11-10T12:00:00Z".into()),
+            ],
+        ))
+        .unwrap();
+        let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
+        assert_eq!(shared_part(&r.json()), shared_part(&js), "{name}: the hosts agree");
+        let site = r
+            .findings
+            .iter()
+            .filter(|f| f.file == "crates/a/src/c53_liveness_bad.rs" && f.line == 5);
+        let (errs, warns): (Vec<_>, Vec<_>) = site.partition(|f| f.json()["severity"] == "error");
+        assert_eq!(!errs.is_empty(), errors, "{name}: {errs:?}");
+        assert_eq!(
+            warns.iter().any(|f| f
+                .message
+                .contains(&format!("moved from {from} to crates/a/src/c53_liveness_bad.rs"))),
+            !errors,
+            "{name}: {warns:?}"
+        );
+    }
 }
 
 #[test]
@@ -992,7 +1091,7 @@ fn a_scoped_run_over_the_baseline_catches_growth_and_reports_stale_as_not_measur
     let tree = grown_baseline_repo();
     let mut o = options(tree.path());
     o.files = Some(vec![BASELINE.into()]);
-    let r = run_checks(&o, &registry()).unwrap();
+    let r = run_checks(&o, &legacy_registry()).unwrap();
     let c53 = r.runs.iter().find(|e| e.record.check == "C53").unwrap();
     assert!(
         baseline_findings(&r).iter().any(|m| m.contains("the baseline grew: 1 entry is")),
@@ -1014,7 +1113,7 @@ fn a_scoped_run_over_the_baseline_catches_growth_and_reports_stale_as_not_measur
     // Not in scope: the baseline is left alone (as before): a scoped run on one Rust file says nothing about it.
     let mut other = options(tree.path());
     other.files = Some(vec!["crates/a/src/c53_good.rs".into()]);
-    let r = run_checks(&other, &registry()).unwrap();
+    let r = run_checks(&other, &legacy_registry()).unwrap();
     assert!(baseline_findings(&r).is_empty());
 }
 
@@ -1023,7 +1122,7 @@ fn an_invalid_baseline_fails_closed_with_one_error_on_both_hosts() {
     let tree = materialize();
     for bad in ["{ not json", "{\"sites\": 3}", "[]"] {
         std::fs::write(tree.path().join(BASELINE), bad).unwrap();
-        let r = run_checks(&options(tree.path()), &registry()).unwrap();
+        let r = run_checks(&options(tree.path()), &legacy_registry()).unwrap();
         let msgs = baseline_findings(&r);
         assert_eq!(msgs.len(), 1, "{bad}: {msgs:?}");
         assert!(msgs[0].contains("is not JSON with a `sites` list"), "{msgs:?}");

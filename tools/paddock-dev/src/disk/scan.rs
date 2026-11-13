@@ -233,7 +233,7 @@ mod tests {
                     .strip_prefix(d.path().join("dev-targets"))
                     .unwrap()
                     .to_string_lossy()
-                    .to_string()
+                    .replace('\\', "/")
             })
             .collect();
         assert_eq!(names, ["app-target", "mystery", "wt/old-worktree"]);

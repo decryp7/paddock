@@ -17,9 +17,9 @@ fn add_plugin(root: &Path, id: &str) {
     std::fs::write(dir.join("plugin.toml"), toml).unwrap();
 }
 
-fn host_with(ids: &[&str], tweak: impl FnOnce(&mut HostConfig)) -> (PluginHost, tempfile::TempDir) {
+fn host_with(ids: &[&str], tweak: impl FnOnce(&mut HostConfig)) -> (PluginHost, paddock_testkit::PrivateTemp) {
     // The `dyno-it-` prefix is what CI's host clean-up anchors on to end a plugin a failed run left behind.
-    let root = tempfile::Builder::new().prefix("dyno-it-plugins-").tempdir().unwrap();
+    let root = paddock_testkit::PrivateTemp::with_prefix("dyno-it-plugins-", None).unwrap();
     for id in ids {
         add_plugin(root.path(), id);
     }

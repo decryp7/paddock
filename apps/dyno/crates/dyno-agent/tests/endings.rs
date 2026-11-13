@@ -27,7 +27,7 @@ fn scenario(s: Scenario) -> Result<(Observed, Expect), &'static str> {
     if !applies {
         return Err("this scenario is not driven by the agent rig; if it does not apply, declare it in [[not_applicable]]");
     }
-    let tmp = tempfile::tempdir().unwrap();
+    let tmp = paddock_testkit::private_tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let fake = Fake::new();
     let from = agent_log::lines().len();

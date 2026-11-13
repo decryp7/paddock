@@ -487,7 +487,7 @@ mod tests {
             let (dir, pid) = research_step(&r);
             r.renderers.current("main").unwrap().handed_off.store(true, Ordering::SeqCst);
             assert_eq!(r.renderers.finish("main"), Finish::KeptOpen(TookPart::PageNeededThem));
-            assert!(paddock_proc::is_alive(pid) && dir.exists());
+            assert!(paddock_proc::ProcessId::of(pid).is_some_and(|id| id.confirmed_running()) && dir.exists());
             assert!(r.renderers.close("main"), "the user's Close");
             assert!(gone(pid));
             assert!(!dir.exists());

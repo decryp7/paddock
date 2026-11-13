@@ -1,0 +1,8 @@
+#!/bin/sh
+out="$OUT_DIR/generated"
+here="$(dirname "$0")"
+dependencies=/opt/dependencies/x
+echo hi # target/debug/deps/ and $OUT_DIR/../..
+url=https://example.invalid/deps/x
+nm=node_modules/a/deps/b
+echo "${#x}" 

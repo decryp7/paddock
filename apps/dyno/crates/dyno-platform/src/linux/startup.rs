@@ -210,7 +210,7 @@ mod tests {
     }
 
     struct Env {
-        _dir: tempfile::TempDir,
+        _dir: paddock_testkit::PrivateTemp,
         user: PathBuf,
         system: PathBuf,
         tools: Arc<FakeTools>,
@@ -218,7 +218,7 @@ mod tests {
     }
 
     fn env() -> Env {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = paddock_testkit::private_tempdir().unwrap();
         let user = dir.path().join("home/.config/autostart");
         let system = dir.path().join("etc/xdg/autostart");
         let tools = Arc::new(FakeTools::default());

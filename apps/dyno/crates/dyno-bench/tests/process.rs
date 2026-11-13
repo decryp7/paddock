@@ -83,8 +83,8 @@ fn gpu_is_reported_unavailable_with_a_reason() {
 }
 
 /// A folder for the disk tests inside the target directory: the tests never write to the user's own folders (ER-14).
-fn target_dir() -> tempfile::TempDir {
-    tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap()
+fn target_dir() -> paddock_testkit::PrivateTemp {
+    paddock_testkit::PrivateTemp::new_in(std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))).unwrap()
 }
 
 #[test]

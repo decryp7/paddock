@@ -154,14 +154,25 @@ pub fn slot_cache_size(total_gb: Option<&str>, slots: u64) -> String {
     format!("{per}G")
 }
 
-/// The lines for `$GITHUB_ENV`, in the shell's order.
-pub fn env_lines(port: &str, settings: &[(String, String)]) -> Vec<String> {
+/// Cargo's switch back to its legacy build-dir layout (one `-L dependency=<deps>` instead of one per indirect dependency), read
+/// in cargo 1.100's `is_new_build_dir_layout_opt_out` (src/workspace/features.rs). Windows needs it under sccache: cargo falls
+/// back to an `@argfile` for a command line over CreateProcessW's 32,767 characters, and sccache 0.19 expands that file and starts
+/// rustc with the whole command line again, which fails with os error 206 (run 8027, job 37099: 313 `-L` for spotter_app_lib;
+/// mozilla/sccache#2787, open fixes #2789 and #3026). sccache hashes `CARGO_*` variables only, so this one leaves its keys alone.
+/// Remove it once the pinned sccache passes a response file to rustc; cargo may drop the variable in a later release.
+pub const LEGACY_BUILD_DIR_LAYOUT: &str = "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1";
+
+/// The lines for `$GITHUB_ENV`, in the shell's order: on Windows [`LEGACY_BUILD_DIR_LAYOUT`] follows the wrapper settings.
+pub fn env_lines(port: &str, settings: &[(String, String)], windows: bool) -> Vec<String> {
     let mut lines = vec![
         "RUSTC_WRAPPER=sccache".to_string(),
         "CARGO_INCREMENTAL=0".to_string(),
         "SCCACHE_IGNORE_SERVER_IO_ERROR=1".to_string(),
         format!("SCCACHE_SERVER_PORT={port}"),
     ];
+    if windows {
+        lines.push(LEGACY_BUILD_DIR_LAYOUT.to_string());
+    }
     lines.extend(settings.iter().map(|(k, v)| format!("{k}={v}")));
     lines
 }
@@ -550,7 +561,8 @@ impl Step<'_> {
         }
         // sccache itself is the wrapper, never a script around it (Windows starts a .cmd through cmd.exe, whose 8191-character
         // command line rustc's arguments for a large crate exceed). Cached builds are not incremental.
-        self.append("GITHUB_ENV", &env_lines(&port, &settings))
+        let windows = self.os() == "Windows";
+        self.append("GITHUB_ENV", &env_lines(&port, &settings, windows))
     }
 
     /// The local disk cache: a host slot's kept folder with its share of the budget, else the container's mount (or a folder
@@ -766,6 +778,7 @@ mod tests {
         let lines = env_lines(
             "4228",
             &[("SCCACHE_DIR".into(), "/d".into()), ("SCCACHE_CACHE_SIZE".into(), "10G".into())],
+            false,
         );
         assert_eq!(
             lines,
@@ -778,6 +791,20 @@ mod tests {
                 "SCCACHE_CACHE_SIZE=10G"
             ]
         );
+    }
+
+    // Run 8027 (job 37099): under cargo 1.100's build-dir layout, rustc for spotter_app_lib had 313 `-L dependency=` arguments, about
+    // 38,000 characters; cargo fell back to an @argfile, sccache 0.19 expanded it and could not start rustc (os error 206).
+    #[test]
+    fn on_windows_the_wrapper_comes_with_cargos_legacy_build_dir_layout() {
+        let windows = env_lines("4227", &[], true);
+        assert!(
+            windows.contains(&"__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1".to_string()),
+            "{windows:?}"
+        );
+        assert_eq!(windows[0], "RUSTC_WRAPPER=sccache");
+        let unix = env_lines("4227", &[], false);
+        assert!(!unix.iter().any(|l| l.starts_with("__CARGO")), "{unix:?}");
     }
 
     #[test]
@@ -805,7 +832,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         for os in ["macOS", "Windows"] {
             let dir = tempfile::tempdir().unwrap();
-            let root = dir.path().canonicalize().unwrap();
+            let root = paddock_env::winpath::real(dir.path()).unwrap();
             let exe = if os == "Windows" { "sccache.exe" } else { "sccache" };
             let name = format!("sccache-v{SCCACHE_VERSION}-test-target");
             let stage = root.join("stage").join(&name);

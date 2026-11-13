@@ -244,6 +244,7 @@ function hostCheckout() {
   mkdirSync(join(c.root, 'tools'), { recursive: true });
   for (const step of ['stable-workspace', 'node-caches', 'host-tools', 'sccache-stats']) exe(join(c.root, 'conformance', 'ci', 'host', `${step}.sh`), note(`host/${step}.sh`));
   exe(join(c.root, 'conformance', 'ci', 'build-folder.sh'), note('build-folder.sh'));
+  for (const s of ['kept-clone.sh', 'guardian-as-user.sh']) exe(join(c.root, 'conformance', 'ci', s), note(s));
   for (const s of ['prune-build-folders.sh', 'prune-ci-build-folder.sh', 'host-cleanup.sh']) exe(join(c.root, 'tools', s), note(s));
   return c;
 }
@@ -258,6 +259,9 @@ test('kit.sh host runs a host step as ./dev ci <step> off the release path, with
     assert.deepEqual(dev(['node-caches', 'ui', 'e2e-1']), ['dev ci node-caches --angular-dir ui --name e2e-1']);
     assert.deepEqual(dev(['node-caches', '', 'e2e-1']), ['dev ci node-caches --angular-dir  --name e2e-1'], 'an empty angular dir keeps only npm');
     assert.deepEqual(dev(['host-tools']), ['dev ci host-tools']);
+    assert.deepEqual(dev(['kept-clone', 'org/repo-job', 'lean', 'false']), ['dev ci kept-clone --name org/repo-job --profile lean']);
+    assert.deepEqual(dev(['kept-clone', 'org/repo-job', 'bundle', 'true']), ['dev ci kept-clone --name org/repo-job --profile bundle --fresh'], 'a tag run asks for a new clone');
+    assert.deepEqual(dev(['guardian-as-user'], { RUNNER_OS: 'Linux' }), ['dev ci guardian-as-user']);
     assert.deepEqual(dev(['build-folder', '/ws', 'app-job']), ['dev ci build-folder /ws app-job']);
     assert.deepEqual(dev(['prune-build-folder', '20', 'false']), ['dev ci prune-build-folder --max-gb 20']);
     assert.deepEqual(dev(['prune-build-folder', '5', 'true']), ['dev ci prune-build-folder --max-gb 5 --drop-bundles']);
@@ -279,6 +283,8 @@ test('kit.sh host runs the shell a step had on a tag run, a run that never downl
       assert.equal(sh(['node-caches', 'ui', 'e2e-1']), 'host/node-caches.sh  name=e2e-1 angular=ui');
       assert.equal(sh(['node-caches', '', 'e2e-1']), 'host/node-caches.sh  name=e2e-1 angular=');
       assert.match(sh(['host-tools']), /^host\/host-tools\.sh /);
+      assert.equal(sh(['kept-clone', 'org/repo-job', 'lean', 'true']), 'kept-clone.sh  name=org/repo-job angular=unset', 'NAME, PROFILE and FRESH are the script\'s inputs');
+      assert.match(sh(['guardian-as-user'], { RUNNER_OS: 'Linux' }), /^guardian-as-user\.sh /);
       assert.match(sh(['build-folder', '/ws', 'app-job']), /^build-folder\.sh \/ws app-job /);
       assert.match(sh(['prune-folder', '/x', '7']), /^prune-build-folders\.sh \/x 7 /);
       assert.match(sh(['host-cleanup', '--id', 'x']), /^host-cleanup\.sh --id x /);
@@ -294,11 +300,97 @@ test('kit.sh host fetches no tool for what has nothing to do: a Linux container 
   const c = hostCheckout();
   try {
     assert.equal(c.run(['host', 'stable-workspace', 'x'], { RUNNER_OS: 'Linux' }).log, '', 'neither the tool nor the script ran');
+    assert.equal(c.run(['host', 'kept-clone', 'x', 'lean', 'false'], { RUNNER_OS: 'Linux' }).log, '', 'a Linux container has a fixed workspace');
     assert.equal(c.run(['host', 'sccache-stats']).log, '', 'no sccache on PATH');
     exe(join(c.root, 'bin', 'sccache'), 'exit 0');
     assert.match(c.run(['host', 'sccache-stats']).log, /^dev ci sccache-stats/m, 'with sccache the step runs');
     assert.equal(c.run(['host', 'bogus']).status, 2, 'an unknown step is a usage error');
     assert.equal(c.run(['host']).status, 2);
+  } finally {
+    c.done();
+  }
+});
+
+test('a failed setup step (build-jobs, isolation acquire) marks the job aborted in GITHUB_ENV and says so; a good one leaves it alone', () => {
+  const c = checkout();
+  try {
+    const env = join(c.root, 'github-env');
+    writeFileSync(env, '');
+    // The wrapper could not build the tool (run 8027: crate on Windows went on to run its tests without isolation).
+    exe(join(c.root, 'dev'), 'exit 1');
+    for (const args of [['build-jobs'], ['isolation', 'acquire']]) {
+      writeFileSync(env, '');
+      const r = c.run(args, { GITHUB_ENV: env });
+      assert.equal(r.status, 1, `${args}: ${r.stderr}`);
+      assert.match(r.stderr, /::error::A job setup step failed \(exit 1/, `${args}: ${r.stderr}`);
+      assert.equal(readFileSync(env, 'utf8'), 'PADDOCK_JOB_ABORTED=1\n', `${args} marks the job`);
+    }
+    exe(join(c.root, 'dev'), 'case "$*" in "--print-binary") echo "$0-none" ;; esac');
+    writeFileSync(env, '');
+    const ok = c.run(['build-jobs'], { GITHUB_ENV: env });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(readFileSync(env, 'utf8'), '', 'a good setup step marks nothing');
+  } finally {
+    c.done();
+  }
+});
+
+test('on a CI host with rustup the pinned toolchain is ensured before the first step runs, and not without rustup or off CI', () => {
+  const c = checkout();
+  try {
+    // dev logs its arguments; the kit must call `--ensure-toolchain` first (run 8034: build-jobs ran before the pinned Rust was installed).
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    let r = c.run(['build-jobs'], { GITHUB_TOKEN: 't' });
+    const lines = r.log.trim().split('\n');
+    assert.match(lines[0], /^dev --ensure-toolchain /, r.log);
+    assert.match(r.log, /^dev ci build-jobs /m, r.log);
+    // A failed install is a warning, not the end: the step runs and fails with its own message if Rust is missing.
+    exe(join(c.root, 'dev'), 'echo "dev $*" >> "' + join(c.root, 'log') + '"; case "$1" in --ensure-toolchain) exit 2 ;; esac');
+    r = c.run(['which']);
+    assert.match(r.stderr, /::warning::kit\.sh: the pinned Rust toolchain could not be installed/, r.stderr);
+    // No rustup, or not a CI job: ./dev is not asked.
+    rmSync(join(c.root, 'bin', 'rustup'));
+    assert.doesNotMatch(c.run(['which']).log, /ensure-toolchain/);
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    assert.doesNotMatch(c.run(['which'], { GITHUB_ACTIONS: '' }).log, /ensure-toolchain/);
+  } finally {
+    c.done();
+  }
+});
+
+test('a rustup shim that cannot run is not rustc: the shell kit is chosen (run 8034 review)', () => {
+  const c = checkout();
+  try {
+    exe(join(c.root, 'bin', 'rustc'), 'echo "error: toolchain is not installed" >&2; exit 1');
+    const r = c.run(['which']);
+    assert.equal(r.stdout.trim(), 'shell');
+    assert.match(r.stderr, /rustc does not run in this checkout/);
+    exe(join(c.root, 'bin', 'rustc'), 'exit 0');
+    assert.equal(c.run(['which']).stdout.trim(), 'dev', 'a rustc that runs keeps the Rust kit');
+  } finally {
+    c.done();
+  }
+});
+
+test('after a failed toolchain install the job is marked, later steps neither retry nor use ./dev, and cleanup still runs in shell', () => {
+  const c = checkout();
+  try {
+    const env = join(c.root, 'github-env');
+    writeFileSync(env, '');
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    exe(join(c.root, 'bin', 'rustc'), 'exit 1');
+    exe(join(c.root, 'dev'), `echo "dev $*" >> "${join(c.root, 'log')}"; case "$1" in --ensure-toolchain) exit 2 ;; esac`);
+    let r = c.run(['build-jobs'], { GITHUB_ENV: env, GITHUB_TOKEN: 't' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(env, 'utf8'), 'PADDOCK_TOOLCHAIN_FAILED=1\nPADDOCK_CI_KIT=shell\n');
+    assert.match(r.log, /^dev --ensure-toolchain/m);
+    assert.match(r.log, /^build-jobs\.sh /m, 'the step itself ran in shell');
+    // The next steps of the job see the variables the runner took from GITHUB_ENV.
+    const later = { PADDOCK_TOOLCHAIN_FAILED: '1', PADDOCK_CI_KIT: 'shell', GITHUB_ENV: env };
+    for (const args of [['build-jobs'], ['isolation', 'release'], ['host', 'sccache-stats'], ['host', 'host-cleanup', '--id', 'x']]) {
+      r = c.run(args, later);
+      assert.doesNotMatch(r.log, /ensure-toolchain|^dev/m, `${args}: no second install attempt, no ./dev: ${r.log}`);
+    }
   } finally {
     c.done();
   }

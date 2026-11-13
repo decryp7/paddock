@@ -8,7 +8,7 @@
 //! comment are not read; a justified site carries `// conformance: layout-guess — <reason>` on the line or the line above.
 
 use super::finding::Finding;
-use super::jsre::{has_reason, line_at, rx, trim};
+use super::jsre::{WS, has_reason, line_at, rx, trim};
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
@@ -29,6 +29,9 @@ static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"current_exe|OUT_DIR|de
 
 const START: &str = r"(?:current_exe\s*\(|\bOUT_DIR\b)";
 
+/// A `deps` path segment: in the middle (`/deps/`) or at the end of a path (`/deps"`, `/deps` at the end of a line).
+const DEPS: &str = r#"[/\\]deps(?:[/\\]|["'`)\r\n]|$)"#;
+
 /// The Rust patterns, in the order of the JavaScript's `RUST_PATTERNS` (the order breaks ties at one position).
 static RUST_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
@@ -37,11 +40,17 @@ static RUST_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
             "reaches the profile folder by two or more `.parent()` hops from `current_exe()` or `OUT_DIR`",
         ),
         (
+            rx(&format!(
+                r"{START}[^;]*?\.ancestors\s*\(\)[^;]*?\.nth\s*\(\s*(?:[2-9]|[1-9][0-9]+)\s*\)"
+            )),
+            "reaches the profile folder by `.ancestors().nth(n)` with n of 2 or more from `current_exe()` or `OUT_DIR`",
+        ),
+        (
             rx(&format!(r#"{START}[^;]*?(?:"\.\.[/\\]+\.\."|"\.\."[^;]*?"\.\.")"#)),
             "reaches the profile folder by two or more `..` hops from `current_exe()` or `OUT_DIR`",
         ),
         (
-            rx(r#"[/\\]deps[/\\]|\.(?:join|push)\s*\(\s*"deps"\s*\)"#),
+            rx(&format!(r#"{DEPS}|\.(?:join|push)\s*\(\s*"deps"\s*\)"#)),
             "names the `deps` folder of a build folder",
         ),
     ]
@@ -49,12 +58,17 @@ static RUST_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
 static SHELL_PATTERNS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
         (
-            rx(r"\bOUT_DIR\b[^\n]*?(?:\.\.[/\\]+\.\.|dirname[^\n]*dirname)"),
+            rx(r"\bOUT_DIR\b[^\n]*?(?:\.\.[/\\]+\.\.|dirname[^\n]*dirname)|dirname[^\n]*dirname[^\n]*\bOUT_DIR\b"),
             "reaches the profile folder by two or more hops from `OUT_DIR`",
         ),
-        (rx(r"[/\\]deps[/\\]"), "names the `deps` folder of a build folder"),
+        (rx(DEPS), "names the `deps` folder of a build folder"),
     ]
 });
+/// The token (up to the last white space or quote) before a hit on its line; a URL or a `node_modules/` path is not a layout.
+static TOKEN_TAIL: LazyLock<Regex> = LazyLock::new(|| rx(&format!("[^{WS}\"'`]*$")));
+static NOT_A_LAYOUT: LazyLock<Regex> = LazyLock::new(|| rx(r"https?://|node_modules[/\\]"));
+static TRAILING_SLASHES: LazyLock<Regex> = LazyLock::new(|| rx(r"\s//[^\n]*$"));
+static TRAILING_HASH: LazyLock<Regex> = LazyLock::new(|| rx(r"\s#[^\n]*$"));
 
 /// One layout guess in a source.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,10 +81,18 @@ pub struct Guess {
     pub waived: Option<bool>,
 }
 
-/// `text` with the lines that start with `prefix` (after white space) emptied; the line count stays.
+/// `text` with the lines that start with `prefix` (after white space) emptied and a trailing comment (white space, then `prefix`) cut
+/// off; the line count stays.
 pub fn without_comment_lines(text: &str, prefix: &str) -> String {
+    let trailing = if prefix == "#" { &TRAILING_HASH } else { &TRAILING_SLASHES };
     text.split('\n')
-        .map(|l| if trim(l).starts_with(prefix) { "" } else { l })
+        .map(|l| {
+            if trim(l).starts_with(prefix) {
+                String::new()
+            } else {
+                trailing.replace(l, "").into_owned()
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -90,6 +112,13 @@ pub fn layout_guesses(text: &str, shell: bool) -> Vec<Guess> {
     let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::new();
     for (index, _, what) in hits {
+        let line_start = code[..index].rfind('\n').map_or(0, |p| p + 1);
+        if TOKEN_TAIL
+            .find(&code[line_start..index])
+            .is_some_and(|t| NOT_A_LAYOUT.is_match(t.as_str()))
+        {
+            continue;
+        }
         let line = line_at(&code, index);
         if !seen.insert(line) {
             continue;

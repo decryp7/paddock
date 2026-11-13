@@ -16,7 +16,10 @@ changes here, every app's copy is updated in the same change.
 4. **When CI fails:** fix and re-run only the failed tests locally, push once; never push fix by fix to see what CI says.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
-   sleeps), never silently skipped.
+   sleeps or raised timeouts), never silently skipped. No limit (timeout, retry, wait, budget, tolerance, cap) is
+   raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
+   check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
+   gate is defined (ER-41).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
    `cargo mutants --in-diff <diff> -p <crate> --timeout-multiplier 3` with `CARGO_BUILD_JOBS=2` (install once with
    `cargo install cargo-mutants --locked`); for TypeScript, revert the fix and run the new test. The review reports whether
