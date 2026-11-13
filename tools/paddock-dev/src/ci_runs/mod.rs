@@ -368,6 +368,19 @@ pub fn flakes(a: &FlakesArgs) -> Result<Report, CliError> {
     Ok(Report::new(report.json(), report.text()).with_exit(exit))
 }
 
+/// The verdict of `workflow` on `sha` from the family's server: the one reader (`ci verdict` and the pre-push shortcut). Without a
+/// token it is NotMeasured, never green.
+pub fn ci_verdict(workflow: &str, sha: &str) -> verdict::Verdict {
+    match token() {
+        Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
+        Ok(token) => {
+            let mut http = CurlHttp;
+            let mut client = Client::new(&mut http, SERVER, "decryp7/paddock", &token);
+            verdict::verdict(&mut client, workflow, sha)
+        }
+    }
+}
+
 /// `ci verdict`: is there a full green run of the workflow on the commit (exit 0), a red or only partial one (5), or is it not
 /// measured (6; also without a token)? The token is read from `GITEA_TOKEN`.
 pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {

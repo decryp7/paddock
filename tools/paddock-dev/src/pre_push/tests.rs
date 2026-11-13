@@ -845,39 +845,267 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
     assert!(!home.join("work/also-never").exists());
 }
 
-/// Bug 2026-11-13: a commit already on a remote branch was measured from origin/main and rebuilt everything.
-#[test]
-fn a_push_of_a_commit_already_on_a_remote_branch_has_nothing_to_check() {
+mod known_commit {
+    use super::super::known::{self, Evidence, Lookups};
+    use super::super::{PrePushArgs, command_in, node_env_problem};
     use crate::plan_repo::git_text;
-    let d = tempfile::tempdir().unwrap();
-    let r = d.path().join("r");
-    std::fs::create_dir(&r).unwrap();
-    let git = |args: &[&str]| git_text(&r, args).unwrap_or_else(|| panic!("git {args:?}"));
-    git(&["init", "-q", "-b", "main"]);
-    git(&["config", "user.email", "t@t"]);
-    git(&["config", "user.name", "t"]);
-    std::fs::write(r.join("a.txt"), "1\n").unwrap();
-    git(&["add", "a.txt"]);
-    git(&["commit", "-q", "-m", "one"]);
-    let one = git(&["rev-parse", "HEAD"]).trim().to_string();
-    git(&["update-ref", "refs/remotes/origin/main", &one]);
-    std::fs::write(r.join("a.txt"), "2\n").unwrap();
-    git(&["commit", "-q", "-am", "two"]);
-    let two = git(&["rev-parse", "HEAD"]).trim().to_string();
-    // No remote branch holds `two` yet: measured from the base.
-    assert_eq!(super::known_remote_branch(&r, std::slice::from_ref(&two)), None);
-    assert_eq!(super::known_remote_branch(&r, &[]), None);
-    git(&["update-ref", "refs/remotes/origin/train", &two]);
-    // The push target is main, the sha is the tip of origin/train.
-    assert_eq!(
-        super::known_remote_branch(&r, std::slice::from_ref(&two)).as_deref(),
-        Some("origin/train")
-    );
-    // One pushed commit that no branch holds keeps the check running.
-    std::fs::write(r.join("a.txt"), "3\n").unwrap();
-    git(&["commit", "-q", "-am", "three"]);
-    let three = git(&["rev-parse", "HEAD"]).trim().to_string();
-    assert_eq!(super::known_remote_branch(&r, &[two, three]), None);
+    use paddock_cli::Exit;
+    use std::path::{Path, PathBuf};
+
+    struct Fake {
+        ls: Option<String>,
+        ci: Result<u64, String>,
+        asked: std::cell::RefCell<Vec<String>>,
+    }
+    impl Lookups for Fake {
+        fn ls_remote(&self, remote: &str) -> Option<String> {
+            self.asked.borrow_mut().push(format!("ls-remote {remote}"));
+            self.ls.clone()
+        }
+        fn ci_green(&self, sha: &str) -> Result<u64, String> {
+            self.asked.borrow_mut().push(format!("ci {sha}"));
+            self.ci.clone()
+        }
+    }
+    fn fake(ls: Option<&str>, ci: Result<u64, &str>) -> Fake {
+        Fake {
+            ls: ls.map(String::from),
+            ci: ci.map_err(String::from),
+            asked: Default::default(),
+        }
+    }
+
+    fn args() -> PrePushArgs {
+        PrePushArgs {
+            root: None,
+            base: None,
+            remote: Some("origin".into()),
+            only: vec![],
+            dry_run: false,
+            files: vec![],
+            refs_from_stdin: true,
+            linux: false,
+            accept_not_measured: vec![],
+        }
+    }
+
+    /// A repository with two commits; main is at the first, origin/train at the second (the 2026-11-13 shape).
+    fn repo() -> (tempfile::TempDir, PathBuf, String, String) {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path().join("r");
+        std::fs::create_dir(&r).unwrap();
+        let git = |a: &[&str]| git_text(&r, a).unwrap_or_else(|| panic!("git {a:?}"));
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(r.join("a.txt"), "1\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&["commit", "-q", "-m", "one"]);
+        let one = git(&["rev-parse", "HEAD"]).trim().to_string();
+        git(&["update-ref", "refs/remotes/origin/main", &one]);
+        std::fs::write(r.join("a.txt"), "2\n").unwrap();
+        git(&["commit", "-q", "-am", "two"]);
+        let two = git(&["rev-parse", "HEAD"]).trim().to_string();
+        git(&["update-ref", "refs/remotes/origin/train", &two]);
+        (d, r, one, two)
+    }
+
+    fn state(r: &Path) -> PathBuf {
+        r.join(".git/paddock-pre-push")
+    }
+
+    fn push_line(sha: &str) -> String {
+        format!("refs/heads/x {sha} refs/heads/main {}\n", "0".repeat(40))
+    }
+
+    #[test]
+    fn a_commit_on_a_remote_branch_without_evidence_is_checked_not_passed() {
+        let (_d, r, _one, two) = repo();
+        let l = fake(None, Err("no run"));
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        assert!(found.is_none(), "origin/train holds it, but that is no evidence");
+    }
+
+    #[test]
+    fn a_pass_record_of_the_exact_sha_and_tree_is_the_evidence() {
+        let (_d, r, one, two) = repo();
+        let l = fake(None, Err("no run"));
+        known::write_record(&r, &state(&r), &two, "origin/main", &["fmt crates".into()], 1_700_000_000).unwrap();
+        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        assert_eq!(
+            found,
+            Some(vec![Evidence::Record {
+                id: format!("{}@1700000000", &two[..12])
+            }])
+        );
+        assert!(trail[0].contains("pass record"), "{trail:?}");
+        // The record of another sha is no evidence; a record whose tree changed is none either.
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&one), &l);
+        assert!(found.is_none());
+        std::fs::copy(
+            state(&r).join("records").join(format!("{two}.json")),
+            state(&r).join("records").join(format!("{one}.json")),
+        )
+        .unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, &[one], &l);
+        assert!(found.is_none(), "a record is read only for its own sha");
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let text = std::fs::read_to_string(&rec).unwrap();
+        let tree = text.split("\"tree\":\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        std::fs::write(&rec, text.replace(&tree, &"0".repeat(40))).unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, &[two], &l);
+        assert!(found.is_none(), "the tree id no longer matches");
+    }
+
+    #[test]
+    fn a_complete_green_ci_run_counts_only_when_the_pushed_remote_has_the_sha_as_a_tip() {
+        let (_d, r, _one, two) = repo();
+        let tip = format!("{two}\trefs/heads/train/x\n");
+        let green = fake(Some(&tip), Ok(8053));
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), std::slice::from_ref(&two), &green);
+        assert_eq!(found, Some(vec![Evidence::CiRun { run: 8053 }]));
+        assert!(trail.iter().any(|t| t.contains("git ls-remote origin (live)")), "{trail:?}");
+        for (ls, remote) in [
+            (None, Some("origin")),
+            (Some("1111\trefs/heads/other\n"), Some("origin")),
+            (Some(tip.as_str()), None),
+        ] {
+            let l = fake(ls, Ok(8053));
+            let (found, _) = known::find(&r, &state(&r), remote, std::slice::from_ref(&two), &l);
+            assert!(found.is_none(), "{ls:?} {remote:?}");
+            assert!(
+                !l.asked.borrow().iter().any(|a| a.starts_with("ci ")),
+                "no CI lookup without a confirmed tip"
+            );
+        }
+        let red = fake(Some(&tip), Err("red or partial"));
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), &[two], &red);
+        assert!(
+            found.is_none() && trail.last().unwrap().contains("no complete green CI run"),
+            "{trail:?}"
+        );
+    }
+
+    #[test]
+    fn evidence_applies_only_to_the_hooks_push_with_nothing_overridden() {
+        let pushed = vec!["a".repeat(40)];
+        assert!(known::applicable(&args(), &pushed));
+        assert!(!known::applicable(&args(), &[]), "a delete-only push has no commit");
+        for tweak in [
+            (|a: &mut PrePushArgs| a.base = Some("origin/main".into())) as fn(&mut PrePushArgs),
+            |a| a.files = vec!["x".into()],
+            |a| a.only = vec!["fmt".into()],
+            |a| a.dry_run = true,
+            |a| a.refs_from_stdin = false,
+        ] {
+            let mut a = args();
+            tweak(&mut a);
+            assert!(!known::applicable(&a, &pushed));
+            // Only the no-stdin tweak is a full run (a person's working-tree run may leave a record); every other tweak is partial.
+            assert_eq!(
+                known::recordable(&a, 0, 0, Exit::Ok),
+                !a.refs_from_stdin,
+                "no record from a partial run"
+            );
+        }
+        assert!(known::recordable(&args(), 0, 0, Exit::Ok));
+        assert!(!known::recordable(&args(), 1, 0, Exit::Ok) && !known::recordable(&args(), 0, 1, Exit::Ok));
+        assert!(!known::recordable(&args(), 0, 0, Exit::NotMeasured) && !known::recordable(&args(), 0, 0, Exit::Findings));
+    }
+
+    #[test]
+    fn the_known_commit_report_is_its_own_verdict_and_says_not_re_checked() {
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5).unwrap();
+        let rep = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &push_line(&two),
+            &fake(None, Err("x")),
+        )
+        .unwrap();
+        assert_eq!(rep.exit, Exit::Ok);
+        assert_eq!(rep.data["verdict"], "known_commit");
+        assert_eq!(rep.data["not_rechecked"], true);
+        assert_eq!(rep.data["commits"][0]["sha"], two.as_str());
+        assert_eq!(rep.data["commits"][0]["evidence"]["kind"], "record");
+        assert_eq!(rep.data["remote"], "origin");
+        assert!(rep.data.get("passed").is_none(), "it is not a measured pass: {}", rep.data);
+        assert!(rep.text.starts_with("pre-push: not re-checked: known commit"), "{}", rep.text);
+        let log = std::fs::read_to_string(state(&r).join("known-commits.log")).unwrap();
+        assert!(
+            log.contains(&two) && log.contains("remote=origin") && log.contains("pass record"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_delete_only_push_and_an_explicit_base_never_use_evidence() {
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5).unwrap();
+        let l = fake(None, Err("x"));
+        let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
+        let got = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &delete,
+            &l,
+        );
+        assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            base: Some("origin/main".into()),
+            ..args()
+        };
+        let got = command_in(&a, &r, &push_line(&two), &l);
+        assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+    }
+
+    fn reads<'a>(files: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |p| files.iter().find(|(n, _)| *n == p).map(|(_, t)| t.to_string())
+    }
+    const MANIFEST: &str = r#"{"dependencies":{"yaml":"^2.9.1"}}"#;
+    const LOCK: &str = r#"{"packages":{"node_modules/yaml":{"version":"2.9.1"}}}"#;
+
+    #[test]
+    fn the_node_install_is_stale_when_a_version_differs_missing_or_unreadable_and_ready_when_equal() {
+        let ok = [
+            ("node_modules/.package-lock.json", LOCK),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        assert_eq!(node_env_problem(false, &reads(&ok)), None);
+        let old = r#"{"packages":{"node_modules/yaml":{"version":"2.8.0"}}}"#;
+        let stale = [
+            ("node_modules/.package-lock.json", old),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        let why = node_env_problem(false, &reads(&stale)).unwrap();
+        assert!(why.contains("2.8.0") && why.contains("2.9.1"), "{why}");
+        let gone = [
+            ("node_modules/.package-lock.json", r#"{"packages":{}}"#),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        assert!(node_env_problem(false, &reads(&gone)).unwrap().contains("missing"));
+        assert!(node_env_problem(false, &reads(&[])).unwrap().contains("nothing is installed"));
+        assert!(
+            node_env_problem(false, &reads(&ok[..2])).is_some(),
+            "an unreadable manifest is a problem, not a pass"
+        );
+        assert!(
+            node_env_problem(true, &reads(&ok))
+                .unwrap()
+                .contains("throw-away worktree has no node_modules")
+        );
+    }
 }
 
 /// A stale npm install made conformance fail with "yaml cannot be loaded", which counted as a finding (2026-11-13).

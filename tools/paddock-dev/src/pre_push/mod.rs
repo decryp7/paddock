@@ -23,6 +23,7 @@
 pub mod ci_line;
 pub mod exec;
 pub mod gates;
+pub mod known;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -44,9 +45,12 @@ pub struct PrePushArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     pub root: Option<PathBuf>,
-    /// The base the push is measured from (default: origin/main).
-    #[arg(long, default_value = "origin/main")]
-    pub base: String,
+    /// The base the push is measured from (default: origin/main). Naming it also turns off the known-commit shortcut.
+    #[arg(long)]
+    pub base: Option<String>,
+    /// The remote being pushed to (git's first pre-push argument; the hook passes it): the only remote evidence is looked up on.
+    #[arg(long)]
+    pub remote: Option<String>,
     /// Only the gates whose row starts with one of these words (for example `fmt,clippy`); the hook always runs them all.
     #[arg(long, value_delimiter = ',')]
     pub only: Vec<String>,
@@ -234,6 +238,31 @@ impl Drop for Detached {
     }
 }
 
+impl PrePushArgs {
+    /// The base: the one named, or origin/main.
+    pub fn base(&self) -> &str {
+        self.base.as_deref().unwrap_or("origin/main")
+    }
+}
+
+/// The lookups that leave the machine: git's `ls-remote` and the shared CI verdict reader.
+struct RealLookups {
+    root: PathBuf,
+}
+
+impl known::Lookups for RealLookups {
+    fn ls_remote(&self, remote: &str) -> Option<String> {
+        git_text(&self.root, &["ls-remote", "--", remote])
+    }
+    fn ci_green(&self, sha: &str) -> Result<u64, String> {
+        match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
+            crate::ci_runs::verdict::Verdict::Green { run } => Ok(run),
+            crate::ci_runs::verdict::Verdict::Red { reason, .. } => Err(format!("red or partial: {reason}")),
+            crate::ci_runs::verdict::Verdict::NotMeasured(why) => Err(format!("not measured: {why}")),
+        }
+    }
+}
+
 /// The command.
 pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let root = match &args.root {
@@ -245,27 +274,34 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
                 .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))?
         }
     };
+    let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
+    command_in(args, &root, &stdin, &RealLookups { root: root.clone() })
+}
+
+/// [`command`] with the repository, git's pre-push lines and the outside lookups given.
+fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lookups) -> Result<Report, CliError> {
+    let root = root.to_path_buf();
     let env: HashMap<String, String> = std::env::vars().collect();
     let accept = accepted_ids(&args.accept_not_measured, &env);
     let stop = Arc::new(AtomicBool::new(false));
     stop_on_signals(&stop);
     let state = state_dir(&root);
-    let pushed = if args.refs_from_stdin {
-        parse_refs(&read_stdin()?)
-    } else {
-        Vec::new()
-    };
-    if let Some(branch) = known_remote_branch(&root, &pushed) {
-        return Ok(Report::new(
-            json!({"gates": [], "changed": 0, "already_on": branch}),
-            format!("pre-push: already on {branch}; nothing new to check."),
-        ));
+    let pushed = if args.refs_from_stdin { parse_refs(stdin) } else { Vec::new() };
+    let mut lookup_notes = Vec::new();
+    if known::applicable(args, &pushed) {
+        let (found, trail) = known::find(&root, &state, args.remote.as_deref(), &pushed, look);
+        log_known(&state, &pushed, args.remote.as_deref(), &trail);
+        if let Some(ev) = found {
+            return Ok(known::report(&pushed, args.remote.as_deref(), &ev));
+        }
+        lookup_notes = trail;
     }
-    let (change, mut notes, extra) = discover(&root, &args.base, &args.files, &pushed)?;
+    let (change, mut notes, extra) = discover(&root, args.base(), &args.files, &pushed)?;
+    notes.extend(lookup_notes.into_iter().map(|l| format!("known-commit lookup: {l}")));
     if change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
             json!({"gates": [], "changed": 0}),
-            format!("pre-push: nothing changed since {}; nothing to check.", args.base),
+            format!("pre-push: nothing changed since {}; nothing to check.", args.base()),
         ));
     }
     if !accept.is_empty() {
@@ -333,6 +369,12 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
             .with_hint("Run `./dev plan --files <a,b>` to see the same error.")
     })?;
     let mut facts = read_facts(&work, &plan, &env);
+    // A dry run lists and runs nothing, so it needs no install; a real run in a throw-away tree on Windows has no node_modules.
+    facts.conformance_env = if args.dry_run {
+        None
+    } else {
+        node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
+    };
     facts.linux = args.linux;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
@@ -356,7 +398,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let head = format!(
         "pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
         change.files.len(),
-        args.base,
+        args.base(),
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
         BUDGET.as_secs() / 60,
@@ -377,6 +419,21 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let mut report = render(head.trim_end(), &rows);
     if stop.load(Ordering::SeqCst) {
         report = report.with_exit(Exit::Interrupted);
+    }
+    // A complete passing run is the evidence a later push of the same commit may rest on (known::find).
+    let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
+    if let Some(sha) = checked.filter(|_| known::recordable(args, accept.len(), extra.len(), report.exit)) {
+        let passed: Vec<String> = rows
+            .iter()
+            .filter(|(_, v)| matches!(v, Verdict::Passed { .. }))
+            .map(|(id, _)| id.clone())
+            .collect();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        if let Err(e) = known::write_record(&root, &state, &sha, args.base(), &passed, now) {
+            eprintln!("::warning::pre-push: the pass record of {sha} was not written: {e}. A later push of it is checked again.");
+        }
     }
     Ok(report)
 }
@@ -605,27 +662,6 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
     .with_exit(exit)
 }
 
-/// The remote-tracking branch that already holds every pushed commit (`git branch -r --contains`), or None. Such a push adds
-/// nothing the remote does not have, so the change to check is empty and measured, not skipped; with no pushed commit, or one
-/// that no remote branch holds, the check runs from the base as before.
-fn known_remote_branch(root: &Path, pushed: &[String]) -> Option<String> {
-    let mut common: Option<Vec<String>> = None;
-    for sha in pushed {
-        let out = git_text(root, &["branch", "-r", "--contains", sha])?;
-        let here: Vec<String> = out
-            .lines()
-            .map(str::trim)
-            .filter(|l| !l.is_empty() && !l.contains("->"))
-            .map(str::to_string)
-            .collect();
-        common = Some(match common {
-            None => here,
-            Some(c) => c.into_iter().filter(|b| here.contains(b)).collect(),
-        });
-    }
-    common.and_then(|c| c.into_iter().next())
-}
-
 /// The change, notes for the header and the pushed commits beyond the first. Without pushed refs: files since the merge base
 /// (committed, modified, untracked) and the range to HEAD. With them: the files and range of the first pushed commit only (the run
 /// checks that commit in a worktree of its own, so a dirty tree is not part of it).
@@ -732,16 +768,9 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         })
         .unwrap_or_default();
     tests.sort();
-    // The throw-away worktree links this checkout's node_modules in; a stale install fails inside conformance as "yaml cannot be
-    // loaded", which reads as a finding. Look before the budget starts and say it is the environment.
-    let conformance_env = if root.join("node_modules/yaml/package.json").is_file() {
-        None
-    } else {
-        Some("conformance's dependencies are not installed here (node_modules/yaml is missing)".to_string())
-    };
     Facts {
         conformance: Some(ci),
-        conformance_env,
+        conformance_env: None,
         windows_clippy: windows,
         image: Some(image),
         linux: false,
@@ -750,6 +779,63 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
         dev_exe: std::env::current_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
     }
+}
+
+/// Why conformance's npm install is not usable (the environment is not ready), or None when it is. The throw-away worktree links
+/// this checkout's `node_modules` in (Unix only); a stale install fails inside conformance as "yaml cannot be loaded", which reads as
+/// a finding, so each dependency's version in `node_modules/.package-lock.json` is compared with `package-lock.json` first.
+fn node_env_problem(windows_throwaway: bool, read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    if windows_throwaway {
+        return Some("the throw-away worktree has no node_modules (it is linked in on Unix only, not on Windows)".into());
+    }
+    let json = |p: &str| read(p).and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let Some(installed) = json("node_modules/.package-lock.json") else {
+        return Some("node_modules/.package-lock.json cannot be read (nothing is installed here)".into());
+    };
+    let (Some(lock), Some(manifest)) = (json("package-lock.json"), json("conformance/package.json")) else {
+        return Some("package-lock.json or conformance/package.json cannot be read".into());
+    };
+    let names = ["dependencies", "devDependencies"]
+        .iter()
+        .filter_map(|k| manifest[k].as_object())
+        .flat_map(|o| o.keys().cloned())
+        .collect::<Vec<_>>();
+    for name in names {
+        for place in [format!("node_modules/{name}"), format!("conformance/node_modules/{name}")] {
+            let Some(want) = lock["packages"][&place]["version"].as_str() else {
+                continue;
+            };
+            let have = installed["packages"][&place]["version"].as_str();
+            if have != Some(want) {
+                return Some(format!(
+                    "{place} is {} in node_modules but {want} in package-lock.json",
+                    have.map_or("missing".to_string(), str::to_string)
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// One line per decision about a known commit, in the state folder: the shas, the remote, how fresh the ref lookup was and which
+/// evidence decided (ER-27). A failed write is not an error of the push.
+fn log_known(state: &Path, pushed: &[String], remote: Option<&str>, trail: &[String]) {
+    use std::io::Write;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let line = format!(
+        "{now} shas={} remote={} | {}\n",
+        pushed.join(","),
+        remote.unwrap_or("-"),
+        trail.join(" | ")
+    );
+    let _ = std::fs::create_dir_all(state);
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(state.join("known-commits.log"))
+        .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
 fn uptime_load(exec: &RealExec) -> Option<f64> {
