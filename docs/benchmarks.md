@@ -1172,3 +1172,19 @@ at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).
 - **Numbers:** the whole job: 2 m 13 s median, 3 m 13 s p90 (193 s). The step "Orphan guardian as a user (Linux)": 5 s median (it is in the job's biggest steps; its build is a cache hit after the workspace tests, its two test runs take about a second each). The coverage step, the largest, is 86 s.
 - **Decision:** the two bounds are new (the shell had none, ER-32), not raised. Build: `PADDOCK_GUARDIAN_BUILD_TIMEOUT` default 600 s, about three times the p90 of the whole job, so a cold compile cache still fits and a hang ends. Test run: `PADDOCK_GUARDIAN_TEST_TIMEOUT` default 300 s, 60 times the step's median. Both only end a hang.
 - **Not measured:** a cold-cache run of the build (the job's runs all had a warm sccache); the step's maximum (the summary gives medians and p90 of jobs only).
+=======
+## Trial merges and the train-gates job (2026-11-13, ADR 0098)
+
+Mac mini (14 cores), 1-minute load 9 to 12, warm git objects. One run each; quoted by ADR 0098.
+
+| What | Time |
+| --- | ---: |
+| `git merge-tree --write-tree <merge>^1 <merge>^2` for train 8's merges `047a6d05f`, `10b6b88f0` (in memory, no checkout) | 0.01 s each |
+| the same for `ad6bc2e9b` (`feat/generator-registry`) | 0.03 s |
+| the conformance line (`node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS`, origin/main `f7bbe2b86`) | 20.8 s |
+| CI: the `train gates` job of run 8053 (ci.yml dispatch on `train/2026-11-13-8` at `3a342cb42`, Linux runner, green), from the jobs API `started_at` to `completed_at` | 288 s |
+| CI: run 8053 as a whole, `started_at` to `completed_at` | 13 min 20 s |
+
+The per-gate times of `./dev check --pre-push` on a shared-crate change (about 100 s of wall time with warm build folders) are in
+"`./dev check --pre-push` run times" above.
+>>>>>>> origin/docs/adr-combined-tree-before-approval
