@@ -1,6 +1,6 @@
 # 99. Tests compare paths as paths, through one testkit helper
 
-- Status: Accepted 2026-11-13 (user, afternoon): D1 (a) the full check, D2 (a) baseline the 65 sites, D3 (b) ban raw
+- Status: Accepted 2026-11-13 (user, afternoon): D1 (a) the full check, D2 (b) migrate the sites now (changed by the user, 2026-11-13, "better to build complete right for foundation"; first chosen (a) baseline the 65 sites), D3 (b) ban raw
   `canonicalize` in the apps' preset as foundation work (WP-4). Nothing is built yet. History: proposed 2026-11-13;
   drafting approved by the user on 2026-11-13 (ER-21).
   ER-23 does not apply (no drawings). Revision 2 (same day) answers the coordinator's one review round of revision 1
@@ -137,7 +137,7 @@ lite helper plus the Clippy bans; see "Recall"). Item 4 below (the apps' preset)
      warning so reviewers see it.
    Clippy cannot express rules A-C (`disallowed-methods` bans calls everywhere, not patterns in tests), so the host is the
    right place. Per ER-41 the check is report-only until its first green run on the real tree, recorded by run id where it
-   is defined; then rules A and B block with a shrink-only baseline of the sites left (D2).
+   is defined; then rules A and B block; with D2 (b) no site is left, so there is no baseline.
 3. **TypeScript: no helper now.** The class has no recorded TS instance: `git log -i --grep=windows -- '*.mjs' '*.ts'`
    since 2026-10-15 finds product fixes (`ed1b0cba5`, `affected.mjs` cargo keys) but no test that compared path text, and the
    `node --test` and conformance jobs in `ci.yml` run on the Linux image. A TS twin is added only when a TS instance
@@ -184,7 +184,7 @@ with mixed separators, so not every flagged site is a latent failure (precision 
 | WP-3b | Instead of 3a: migrate all 65 sites now (Debrief and Dyno sites after their current tags) | 0.75 |
 | WP-4 | Foundation work, after train 10, app by app (Pitwall 2 sites, Pitcrew 5, Dyno 42, Debrief 114; Spotter has none): the two `canonicalize` entries in the app's `clippy.toml`, every site of that app through `winpath` (no blanket `#[expect]`), the app's Windows tests run; the last app adds the entries to `lint/clippy.toml` so C13 then holds them for every app | about 1.5 (estimate) |
 
-Chosen 2026-11-13: WP-0, WP-1, WP-2, WP-3a and WP-4, about 2.6 days (1.1 plus 1.5); WP-1-lite and WP-3b are not built.
+Chosen 2026-11-13: WP-0, WP-1, WP-2, WP-3b and WP-4, about 3.25 days (1.75 plus 1.5; the user moved D2 from (a) to (b) the same day); WP-1-lite and WP-3a are not built.
 
 ## Decisions (the user, 2026-11-13)
 
@@ -192,8 +192,12 @@ Chosen 2026-11-13: WP-0, WP-1, WP-2, WP-3a and WP-4, about 2.6 days (1.1 plus 1.
   (b) Common practice plus the bans: WP-0 and WP-1-lite, 0.25 day; recall 2 of 5 (the same instances (a) catches, through
   Clippy). Recommended in revision 2: (b). **Chosen 2026-11-13 by the user: (a).** The check adds no instance the bans miss, and the three uncaught instances are not a
   syntactic pattern; revisit (a) only if a later instance is one rule A or B would have caught and Clippy would not.
-- **D2. Existing sites** (only with D1 (a)). (a) Shrink-only baseline, fix on touch (WP-3a). (b) Migrate all 65 now
-  (WP-3b, +0.65 day). Recommended: (a). **Chosen 2026-11-13 by the user: (a)** (the default with D1 (a)).
+- **D2. Existing sites** (only with D1 (a)). (a) Shrink-only baseline, fix on touch (WP-3a). (b) Migrate all sites now
+  (WP-3b, +0.65 day). Recommended: (a). First chosen 2026-11-13 by the user: (a). **Changed 2026-11-13 by the user to (b)**
+  ("better to build complete right for foundation"): every site is migrated onto `paddock_testkit::path` (or, where a site
+  is no path comparison, waived inline with `// conformance: path-text — <why>`), so the check starts with an empty
+  baseline and needs no baseline file. The count at build time was 63 rule A and B sites (the measurement on `main` counted 65; train 8
+  had already fixed some, and the check's own scanner differs slightly from the throwaway regex).
 - **D3. The apps' preset.** (a) Leave `lint/clippy.toml` as it is now; the apps' raw `canonicalize` calls move through the
   existing `verbatim-path` copy rows by their delete-by dates. (b) WP-4 after the current tags, about 1.5 days (over the
   1-day line; needs a yes). Recommended in revision 2: (a); none of the five instances was in an app. **Chosen 2026-11-13
