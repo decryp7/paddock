@@ -1310,11 +1310,16 @@ mod member_gate {
     const FAKE_GATES: &str = r#"#!/bin/sh
 # argv: check --pre-push --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
 echo "$* HEAD=$(git rev-parse HEAD)" >> "$GATES_LOG"
+# What the real push gate prints with --json: an outcome whose evidence names this checkout's commit and tree (ADR 0089 WP-T5).
+sha=$(git rev-parse HEAD); tree=$(git rev-parse 'HEAD^{tree}')
+ev="{\"check\":\"pre-push\",\"subject\":{\"kind\":\"commit\",\"sha\":\"$sha\",\"tree\":\"$tree\"},\"tool\":\"fake\",\"at\":1}"
 if [ -f a.txt ] && [ -f b.txt ]; then
   echo "clippy FAILED: a.txt and b.txt together"
+  printf '{"outcome":{"status":"findings","findings":[{"message":"clippy","failing":true}],"evidence":%s}}\n' "$ev"
   exit "${GATES_EXIT:-5}"
 fi
 echo "fmt ok; clippy ok"
+printf '{"outcome":{"status":"clean","evidence":%s}}\n' "$ev"
 exit 0
 "#;
 
@@ -1375,6 +1380,27 @@ exit 0
         assert_eq!(code, 0, "{out}");
         assert!(out.contains("member gate: passed"), "{out}");
         assert!(!out.contains("FAILED"), "{out}");
+    }
+
+    /// Row 7 of the ADR 0089 amendment, through the real binary: a stand-in gate that exits 0 and prints no outcome, or an outcome
+    /// whose evidence is for another commit, is not a pass; enforced it would be exit 6. (Report-only here, so the exit is 0 and
+    /// the step says NOT MEASURED, never "passed".)
+    #[test]
+    fn a_gate_that_exits_0_without_an_outcome_for_this_merge_is_not_a_pass() {
+        let t = train(false);
+        let script = |body: &str| {
+            let p = t.gates.path().join("gates");
+            fs::write(&p, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let stale = r#"printf '{"outcome":{"status":"clean","evidence":{"check":"pre-push","subject":{"kind":"commit","sha":"0000000000000000000000000000000000000001","tree":"0000000000000000000000000000000000000002"},"tool":"x","at":1}}}\n'"#;
+        for body in ["echo fine", "echo '{\"outcome\":{\"status\":\"clean\"}}'", stale] {
+            script(body);
+            let (code, out) = t.run(&["--gates", "--json", "HEAD"], "0");
+            assert_eq!(code, 0, "report-only keeps the exit: {out}");
+            assert!(out.contains("NOT MEASURED") || out.contains("not measured"), "{body}: {out}");
+            assert!(!out.contains("member gate: passed"), "{body}: {out}");
+        }
     }
 
     #[test]

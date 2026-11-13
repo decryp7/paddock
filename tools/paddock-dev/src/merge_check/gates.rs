@@ -1,8 +1,10 @@
 //! The member gate of `./dev merge check --gates` (ADR 0098 WP-1, D1 (b)): after the detectors, the fast gates of
 //! `./dev check --pre-push` run on the merge commit with `--base` the train before the merge (`<merge>^1`), so the plan is the
 //! member's own change and the gates see the combined tree: Clippy (the canonicalize ban), conformance (C53, C71), commit-lint,
-//! lockfiles and the generator checks. `pre_push` does the work; this module only starts it and reads its exit code, so nothing
-//! here depends on its internals.
+//! lockfiles and the generator checks. `pre_push` does the work; this module only starts it (`--json`) and reads the outcome it
+//! prints, through `Outcome::from_wire` against the merge's commit and tree (ADR 0089 amendment, WP-T5). The exit code alone is
+//! never read as a pass: exit 0 also means "nothing to check" and, on its own branch, "a known commit", and neither says this
+//! merge was measured. A `known-commit` is refused here (this asks about the merged tree, not about a commit proven earlier).
 //!
 //! The checkout must be the merge result (the gates run in it, as the generator step does): the integrator has just merged the
 //! member in their own worktree, so HEAD is the merge. Any other checkout is NOT MEASURED, never a pass (ER-33).
@@ -14,8 +16,8 @@
 
 use super::generator_step::{Step, checkout_problem};
 use super::{Merge, git::Git, short};
-use paddock_cli::Exit;
-use paddock_proc::{Limits, Outcome, command, run_bounded};
+use paddock_cli::{Exit, Outcome, Severity, Subject};
+use paddock_proc::{Limits, command, run_bounded};
 use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
@@ -33,6 +35,8 @@ pub struct GateRun {
     pub code: Option<i32>,
     /// What it printed (standard output, then standard error), trimmed.
     pub text: String,
+    /// The first JSON object on its standard output (`--json`), when it printed one.
+    pub wire: Option<serde_json::Value>,
 }
 
 /// Starts the fast gates of a checkout against a base.
@@ -55,18 +59,24 @@ pub struct Real;
 impl Gates for Real {
     fn run(&self, root: &Path, base: &str) -> Result<GateRun, String> {
         let mut cmd = command(program()?);
-        cmd.args(["check", "--pre-push", "--base", base, "--root"])
+        cmd.args(["--json", "check", "--pre-push", "--base", base, "--root"])
             .arg(root)
             .current_dir(root);
         let out = run_bounded(cmd, Limits::new(TIMEOUT)).map_err(|e| format!("`check --pre-push` could not run: {e}"))?;
         let code = match out.outcome {
-            Outcome::Exited(st) => st.code(),
+            paddock_proc::Outcome::Exited(st) => st.code(),
             _ => None,
         };
-        let text = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), out.stderr_text());
+        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+        let wire = stdout
+            .lines()
+            .find(|l| l.starts_with('{'))
+            .and_then(|l| serde_json::from_str(l).ok());
+        let text = format!("{}\n{}", stdout, out.stderr_text());
         Ok(GateRun {
             code,
             text: text.trim().to_string(),
+            wire,
         })
     }
 }
@@ -106,7 +116,7 @@ pub fn run(root: &Path, git: &Git, merge: &Merge, gates: &dyn Gates, enforced: b
             "",
         );
     }
-    interpret(gates.run(root, base), short(base), enforced)
+    interpret(gates.run(root, base), short(base), enforced, &merge.subject())
 }
 
 /// What a failure costs: nothing while report-only, the exit code once enforced.
@@ -125,65 +135,69 @@ fn wording(enforced: bool) -> (&'static str, String) {
     }
 }
 
-/// The step for what `check --pre-push` answered.
-fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool) -> Step {
+fn passed(base: &str, run: &GateRun) -> Step {
+    step(
+        Exit::Ok,
+        "passed",
+        base,
+        vec![format!("member gate: passed (`check --pre-push --base {base}`)"), run.text.clone()],
+        &run.text,
+    )
+}
+
+/// The step for what `check --pre-push` answered: its outcome object, read for this merge's commit and tree. A pass is only an
+/// outcome that says `clean` with evidence for exactly this subject; findings are only findings with evidence for it too; the exit
+/// code decides nothing by itself, and every other answer (no object, no evidence, another commit, a known commit, not applicable, a
+/// broken check, a bound that ended the run) is not measured.
+fn interpret(answer: Result<GateRun, String>, base: &str, enforced: bool, subject: &Subject) -> Step {
     let (level, report_only) = wording(enforced);
-    match answer {
-        Err(why) => step(
-            report(enforced, Exit::NotMeasured),
-            "not measured",
-            base,
-            vec![format!(
-                "{level}::member gate NOT MEASURED: {why}. Next step: run `./dev check --pre-push --base {base}` yourself in this worktree; a member whose gates did not run is not a member that passed.{report_only}"
-            )],
-            "",
-        ),
-        Ok(GateRun { code: Some(0), text }) => step(
-            Exit::Ok,
-            "passed",
-            base,
-            vec![format!("member gate: passed (`check --pre-push --base {base}`)"), text.clone()],
-            &text,
-        ),
-        Ok(GateRun { code: Some(6), text }) => step(
-            report(enforced, Exit::NotMeasured),
-            "not measured",
-            base,
-            vec![
-                text.clone(),
-                format!(
-                    "{level}::member gate NOT MEASURED: some gate of `check --pre-push --base {base}` could not look. Next step: fix what its rows name and run it again; a gate that did not look is not a gate that passed.{report_only}"
-                ),
-            ],
-            &text,
-        ),
-        Ok(GateRun { code: Some(5), text }) => step(
+    let not_measured = |why: String, text: Vec<String>, rows: &str| {
+        let mut lines = text;
+        lines.push(format!(
+            "{level}::member gate NOT MEASURED: {why}. Next step: run `./dev check --pre-push --base {base}` yourself in this worktree and fix what it prints; a member whose gates did not give a verdict on this merge is not a member that passed, and not a member that failed.{report_only}"
+        ));
+        step(report(enforced, Exit::NotMeasured), "not measured", base, lines, rows)
+    };
+    let run = match answer {
+        Err(why) => return not_measured(why, Vec::new(), ""),
+        Ok(run) => run,
+    };
+    let Some(wire) = run.wire.as_ref().and_then(|w| w.get("outcome")) else {
+        let how = run
+            .code
+            .map_or("was ended before it finished".to_string(), |c| format!("exited {c}"));
+        return not_measured(
+            format!("`check --pre-push --base {base}` {how} and printed no outcome (an exit code alone proves nothing)"),
+            vec![run.text.clone()],
+            &run.text,
+        );
+    };
+    match Outcome::from_wire(wire, subject, false) {
+        // The exit must agree with the object: a pass that exited non-zero, or findings that exited 0, is an answer that contradicts itself.
+        Outcome::Clean(_) if run.code == Some(0) => passed(base, &run),
+        Outcome::Findings(f) if run.code == Some(0) && !f.findings().as_slice().iter().any(|x| x.severity == Severity::Failing) => {
+            passed(base, &run)
+        }
+        Outcome::Findings(f) if run.code == Some(5) && f.findings().as_slice().iter().any(|x| x.severity == Severity::Failing) => step(
             report(enforced, Exit::Findings),
             "failed",
             base,
             vec![
-                text.clone(),
+                run.text.clone(),
                 format!(
-                    "{level}::member gate FAILED: `check --pre-push --base {base}` exited 5; the merge of this member fails on the combined tree. Next step: take the member out (reset the train to {base} in your own worktree) and send it back to its author with the rows above; do not fix it on the train.{report_only}"
+                    "{level}::member gate FAILED: `check --pre-push --base {base}` found problems on the combined tree. Next step: take the member out (reset the train to {base} in your own worktree) and send it back to its author with the rows above; do not fix it on the train.{report_only}"
                 ),
             ],
-            &text,
+            &run.text,
         ),
-        // Any other exit (a broken check 7, a usage error 2, a crash) or a run ended by the bound: the gates did not give an answer.
-        Ok(GateRun { code, text }) => {
-            let how = code.map_or("was ended before it finished".to_string(), |c| format!("exited {c}"));
-            step(
-                report(enforced, Exit::NotMeasured),
-                "not measured",
-                base,
-                vec![
-                    text.clone(),
-                    format!(
-                        "{level}::member gate NOT MEASURED: `check --pre-push --base {base}` {how} without a verdict on the merge. Next step: run it yourself in this worktree and fix what it prints; a tool that failed is not a member that failed, and not a member that passed.{report_only}"
-                    ),
-                ],
-                &text,
-            )
+        other => {
+            let said = match &other {
+                Outcome::Clean(_) | Outcome::Findings(_) => {
+                    format!("its outcome ({}) and its exit code ({:?}) disagree", other.name(), run.code)
+                }
+                _ => other.detail(),
+            };
+            not_measured(said, vec![run.text.clone()], &run.text)
         }
     }
 }
@@ -195,6 +209,9 @@ const _: () = assert!(!ENFORCED);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paddock_cli::outcome::{Sha, ToolVersion, TreeId, UnixSeconds};
+    use paddock_cli::{CheckId, Finding, measure};
+    use serde_json::Value;
 
     struct Fake(Result<GateRun, String>);
     impl Gates for Fake {
@@ -203,11 +220,39 @@ mod tests {
         }
     }
 
-    fn run_of(code: Option<i32>) -> Fake {
+    fn subject() -> Subject {
+        Subject::Commit {
+            sha: Sha::new("m1"),
+            tree: TreeId::new("t1"),
+        }
+    }
+
+    /// An outcome the way the push gate makes it: through `measure`, for `subject`.
+    fn made(subject: Subject, findings: Vec<Finding>) -> Value {
+        measure(CheckId::new("pre-push"), subject, ToolVersion::new("t"), UnixSeconds(1), || {
+            Ok(findings)
+        })
+        .json()
+    }
+
+    fn answer(code: Option<i32>, outcome: Option<Value>) -> Fake {
         Fake(Ok(GateRun {
             code,
             text: "fmt ok\nclippy FAILED".into(),
+            wire: outcome.map(|o| serde_json::json!({ "outcome": o })),
         }))
+    }
+
+    fn clean() -> Option<Value> {
+        Some(made(subject(), Vec::new()))
+    }
+
+    fn failing() -> Option<Value> {
+        Some(made(subject(), vec![Finding::failing("clippy")]))
+    }
+
+    fn nm() -> Option<Value> {
+        Some(serde_json::json!({"status": "not-measured", "reason": "no docker"}))
     }
 
     // The checkout precondition and the two-member merge are covered through the real binary in tests/it/merge_check.rs; here
@@ -215,7 +260,7 @@ mod tests {
     #[test]
     fn a_failing_gate_changes_the_exit_only_when_enforced() {
         for (enforced, want) in [(false, Exit::Ok), (true, Exit::Findings)] {
-            let s = map(&run_of(Some(5)), enforced);
+            let s = map(&answer(Some(5), failing()), enforced);
             assert_eq!(s.exit, want, "enforced={enforced}");
             let text = s.text.join("\n");
             assert!(
@@ -232,23 +277,65 @@ mod tests {
 
     #[test]
     fn a_gate_that_could_not_look_is_not_a_pass_even_while_report_only() {
-        let s = map(&run_of(Some(6)), false);
+        let s = map(&answer(Some(6), nm()), false);
         assert_eq!(s.exit, Exit::Ok);
         assert!(s.text.join("\n").contains("NOT MEASURED"));
-        assert_eq!(map(&run_of(Some(6)), true).exit, Exit::NotMeasured);
+        assert_eq!(map(&answer(Some(6), nm()), true).exit, Exit::NotMeasured);
         assert_eq!(map(&Fake(Err("no tool".into())), true).exit, Exit::NotMeasured);
-        // Only exit 5 (findings) is a failed gate. A broken tool (7), a usage error (2), any other exit and a run ended by the bound
-        // or a signal did not look: a member is never sent back for the tool's own failure.
+        // Only findings with evidence for this merge are a failed gate. A broken tool (7), a usage error (2), any other exit and a
+        // run ended by the bound or a signal did not look: a member is never sent back for the tool's own failure.
         for code in [Some(7), Some(2), Some(1), Some(137), None] {
-            let s = map(&run_of(code), true);
+            let s = map(&answer(code, None), true);
             assert_eq!(s.exit, Exit::NotMeasured, "{code:?}");
             assert!(!s.text.join("\n").contains("member gate FAILED"), "{code:?}");
         }
-        assert_eq!(map(&run_of(Some(5)), true).exit, Exit::Findings);
+        assert_eq!(map(&answer(Some(5), failing()), true).exit, Exit::Findings);
+    }
+
+    /// A pass is an outcome with evidence for this merge, and only that.
+    #[test]
+    fn a_pass_needs_evidence_for_this_merge_and_an_exit_code_alone_is_never_one() {
+        let s = map(&answer(Some(0), clean()), true);
+        assert_eq!((s.exit, s.data["outcome"].as_str()), (Exit::Ok, Some("passed")));
+    }
+
+    /// "Skip the gate": a stand-in that exits 0 with no JSON, JSON without evidence, evidence for another commit, a known commit,
+    /// a not-applicable run and an outcome that contradicts the exit are all not measured.
+    #[test]
+    fn skipping_the_gate_cannot_pass() {
+        let other = Subject::Commit {
+            sha: Sha::new("m2"),
+            tree: TreeId::new("t1"),
+        };
+        let known =
+            serde_json::json!({"status": "known-commit", "not_rechecked": true, "evidence": made(subject(), Vec::new())["evidence"]});
+        let standins: Vec<Fake> = vec![
+            answer(Some(0), None),
+            answer(Some(0), Some(serde_json::json!({"status": "clean"}))),
+            answer(Some(0), Some(serde_json::json!({"status": "passed"}))),
+            answer(Some(0), Some(made(other, Vec::new()))),
+            answer(Some(0), Some(known)),
+            answer(
+                Some(0),
+                Some(serde_json::json!({"status": "not-applicable", "reason": "nothing changed"})),
+            ),
+            answer(Some(5), clean()),
+            answer(Some(0), failing()),
+            Fake(Ok(GateRun {
+                code: Some(0),
+                text: "ok".into(),
+                wire: Some(serde_json::json!({"gates": []})),
+            })),
+        ];
+        for g in &standins {
+            let s = map(g, true);
+            assert_eq!(s.exit, Exit::NotMeasured, "{:?}", g.0);
+            assert_ne!(s.data["outcome"], "passed", "{:?}", g.0);
+        }
     }
 
     /// The mapping without the checkout precondition.
     fn map(g: &Fake, enforced: bool) -> Step {
-        interpret(g.0.clone(), "abc1234", enforced)
+        interpret(g.0.clone(), "abc1234", enforced, &subject())
     }
 }
