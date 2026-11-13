@@ -167,11 +167,7 @@ const STATEMENTS: [(&str, &str, &str); 11] = [
         r"(?i)newest train head",
         "say shared-tooling branches are based on the newest train head, not main, and name the in-flight mechanisms",
     ),
-    (
-        "no-check-new-id",
-        r"check new-id",
-        "say check IDs come from `./dev check new-id`",
-    ),
+    ("no-check-new-id", r"check new-id", "say check IDs come from `./dev check new-id`"),
 ];
 
 /// A pattern of this file (literals, checked by the tests).
