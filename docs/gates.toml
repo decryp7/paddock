@@ -190,6 +190,14 @@ review_by = 2027-01-07
 approved = "user"
 
 [[report_only]]
+id = "C124"
+reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0089 (amendment 2026-11-13, WP-T6), then flip the warnings to errors in C124-gate-outcomes.mjs and the mode to gate. First count 2026-11-13: 18 files, every one listed with a reason in conformance/c124-allow.json (a shrink-only seed that empties as each gate migrates); it flags a gate result built by hand outside paddock_cli::Outcome"
+owner = "ADR 0089 amendment WP-T6"
+since = 2026-11-13
+review_by = 2027-01-07
+approved = "user"
+
+[[report_only]]
 id = "C14"
 reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
 owner = "Rule 40 follow-up"

@@ -1,0 +1,76 @@
+{
+  "allow": [
+    {
+      "path": "crates/paddock-bench/src/check.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the bench check names its result in JSON beside the shared outcomes; the \"withinBudget\" and rows stay as a report format (WP-T7 done, this key is the consumer-facing summary)"
+    },
+    {
+      "path": "tools/paddock-dev/src/check/outcome.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the Rust conformance host still has its own two-value Outcome (WP-T2 Rust half: replace with paddock_cli::Outcome)"
+    },
+    {
+      "path": "tools/paddock-dev/src/check/record.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the run record Status (Clean, NotMeasured) of the Rust host (WP-T2 Rust half)"
+    },
+    {
+      "path": "tools/paddock-dev/src/ci_runs/triage.rs",
+      "reason": "Seed 2026-11-13 (shrink only): a JSON status of the triage report, not a gate result"
+    },
+    {
+      "path": "tools/paddock-dev/src/ci_runs/verdict.rs",
+      "reason": "Seed 2026-11-13 (shrink only): ci verdict Verdict{Green,Red,NotMeasured} and its Evidence::ci_run owner (WP-T4)"
+    },
+    {
+      "path": "tools/paddock-dev/src/disk/mod.rs",
+      "reason": "Seed 2026-11-13 (shrink only): a disk cleanliness state, not a gate result"
+    },
+    {
+      "path": "tools/paddock-dev/src/generators/mod.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the gen check JSON keeps its verdict word beside the outcome (WP-T7 done)"
+    },
+    {
+      "path": "tools/paddock-dev/src/load.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the machine-load verdict, not a gate result"
+    },
+    {
+      "path": "tools/paddock-dev/src/merge_check/gates.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the member-gate step data keeps its outcome word (WP-T5 done; migrate the step to Outcome::json)"
+    },
+    {
+      "path": "tools/paddock-dev/src/merge_check/generator_step.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the generator step data keeps its outcome word"
+    },
+    {
+      "path": "tools/paddock-dev/src/merge_check/mod.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the merge check JSON keeps \"outcome\": \"clean\" beside \"result\""
+    },
+    {
+      "path": "tools/paddock-dev/src/pre_push/exec.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the pre-push row type exec::Verdict (WP-T3 part: rows fold into outcomes at the boundary; the row type stays)"
+    },
+    {
+      "path": "tools/paddock-dev/src/pre_push/gates.rs",
+      "reason": "Seed 2026-11-13 (shrink only): Planned::NotMeasured, a planning row for the table (WP-T3)"
+    },
+    {
+      "path": "tools/paddock-dev/src/pre_push/known.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the known-commit report keeps its verdict word; the owner of the CI evidence call until WP-T4"
+    },
+    {
+      "path": "tools/paddock-dev/src/pre_push/mod.rs",
+      "reason": "Seed 2026-11-13 (shrink only): per-gate verdict words in the table JSON (WP-T3)"
+    },
+    {
+      "path": "tools/paddock-dev/src/release_isolation/verify.rs",
+      "reason": "Seed 2026-11-13 (shrink only): release isolation (ADR 0089 section 8), its own Leak/Probe types"
+    },
+    {
+      "path": "tools/paddock-dev/src/worktree/mod.rs",
+      "reason": "Seed 2026-11-13 (shrink only): a worktree state (clean or dirty), not a gate result"
+    },
+    {
+      "path": "tools/paddock-dev/src/worktree/primary.rs",
+      "reason": "Seed 2026-11-13 (shrink only): the primary checkout probe (RT-3), its own not-measured state"
+    }
+  ]
+}
