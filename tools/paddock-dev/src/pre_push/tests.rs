@@ -29,6 +29,7 @@ fn facts() -> Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
             .map(String::from)
             .to_vec())),
+        conformance_env: None,
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         image: Some(Ok("registry/paddock-ci:v7".into())),
         linux: true,
@@ -861,6 +862,444 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
     assert!(!home.join("work/also-never").exists());
 }
 
+mod known_commit {
+    use super::super::known::{self, Evidence, Lookups};
+    use super::super::{PrePushArgs, command_in, node_env_problem};
+    use crate::plan_repo::git_text;
+    use paddock_cli::Exit;
+    use std::path::{Path, PathBuf};
+
+    struct Fake {
+        ls: Option<String>,
+        ci: Result<u64, String>,
+        asked: std::cell::RefCell<Vec<String>>,
+    }
+    impl Lookups for Fake {
+        fn ls_remote(&self, remote: &str) -> Option<String> {
+            self.asked.borrow_mut().push(format!("ls-remote {remote}"));
+            self.ls.clone()
+        }
+        fn ci_green(&self, sha: &str) -> Result<u64, String> {
+            self.asked.borrow_mut().push(format!("ci {sha}"));
+            self.ci.clone()
+        }
+    }
+    fn fake(ls: Option<&str>, ci: Result<u64, &str>) -> Fake {
+        Fake {
+            ls: ls.map(String::from),
+            ci: ci.map_err(String::from),
+            asked: Default::default(),
+        }
+    }
+
+    fn args() -> PrePushArgs {
+        PrePushArgs {
+            root: None,
+            base: None,
+            remote: Some("origin".into()),
+            only: vec![],
+            dry_run: false,
+            files: vec![],
+            refs_from_stdin: true,
+            linux: false,
+            accept_not_measured: vec![],
+        }
+    }
+
+    /// A repository with two commits; main is at the first, origin/train at the second (the 2026-11-13 shape).
+    fn repo() -> (tempfile::TempDir, PathBuf, String, String) {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path().join("r");
+        std::fs::create_dir(&r).unwrap();
+        let git = |a: &[&str]| git_text(&r, a).unwrap_or_else(|| panic!("git {a:?}"));
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(r.join("a.txt"), "1\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&["commit", "-q", "-m", "one"]);
+        let one = git(&["rev-parse", "HEAD"]).trim().to_string();
+        git(&["update-ref", "refs/remotes/origin/main", &one]);
+        std::fs::write(r.join("a.txt"), "2\n").unwrap();
+        git(&["commit", "-q", "-am", "two"]);
+        let two = git(&["rev-parse", "HEAD"]).trim().to_string();
+        git(&["update-ref", "refs/remotes/origin/train", &two]);
+        (d, r, one, two)
+    }
+
+    fn state(r: &Path) -> PathBuf {
+        r.join(".git/paddock-pre-push")
+    }
+
+    fn push_line(sha: &str) -> String {
+        format!("refs/heads/x {sha} refs/heads/main {}\n", "0".repeat(40))
+    }
+
+    #[test]
+    fn a_commit_on_a_remote_branch_without_evidence_is_checked_not_passed() {
+        let (_d, r, _one, two) = repo();
+        let l = fake(None, Err("no run"));
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        assert!(found.is_none(), "origin/train holds it, but that is no evidence");
+    }
+
+    #[test]
+    fn a_pass_record_of_the_exact_sha_and_tree_is_the_evidence() {
+        let (_d, r, one, two) = repo();
+        let l = fake(None, Err("no run"));
+        known::write_record(&r, &state(&r), &two, "origin/main", &["fmt crates".into()], 1_700_000_000).unwrap();
+        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        assert_eq!(
+            found,
+            Some(vec![Evidence::Record {
+                id: format!("{}@1700000000", &two[..12])
+            }])
+        );
+        assert!(trail[0].contains("pass record"), "{trail:?}");
+        // The record of another sha is no evidence; a record whose tree changed is none either.
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&one), &l);
+        assert!(found.is_none());
+        std::fs::copy(
+            state(&r).join("records").join(format!("{two}.json")),
+            state(&r).join("records").join(format!("{one}.json")),
+        )
+        .unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, &[one], &l);
+        assert!(found.is_none(), "a record is read only for its own sha");
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let text = std::fs::read_to_string(&rec).unwrap();
+        let tree = text.split("\"tree\":\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        std::fs::write(&rec, text.replace(&tree, &"0".repeat(40))).unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, &[two], &l);
+        assert!(found.is_none(), "the tree id no longer matches");
+    }
+
+    #[test]
+    fn a_complete_green_ci_run_counts_only_when_the_pushed_remote_has_the_sha_as_a_tip() {
+        let (_d, r, _one, two) = repo();
+        let tip = format!("{two}\trefs/heads/train/x\n");
+        let green = fake(Some(&tip), Ok(8053));
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), std::slice::from_ref(&two), &green);
+        assert_eq!(found, Some(vec![Evidence::CiRun { run: 8053 }]));
+        assert!(trail.iter().any(|t| t.contains("git ls-remote origin (live)")), "{trail:?}");
+        for (ls, remote) in [
+            (None, Some("origin")),
+            (Some("1111\trefs/heads/other\n"), Some("origin")),
+            (Some(tip.as_str()), None),
+        ] {
+            let l = fake(ls, Ok(8053));
+            let (found, _) = known::find(&r, &state(&r), remote, std::slice::from_ref(&two), &l);
+            assert!(found.is_none(), "{ls:?} {remote:?}");
+            assert!(
+                !l.asked.borrow().iter().any(|a| a.starts_with("ci ")),
+                "no CI lookup without a confirmed tip"
+            );
+        }
+        let red = fake(Some(&tip), Err("red or partial"));
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), &[two], &red);
+        assert!(
+            found.is_none() && trail.last().unwrap().contains("no complete green CI run"),
+            "{trail:?}"
+        );
+    }
+
+    #[test]
+    fn evidence_applies_only_to_the_hooks_push_with_nothing_overridden() {
+        let pushed = vec!["a".repeat(40)];
+        assert!(known::applicable(&args(), &pushed));
+        assert!(!known::applicable(&args(), &[]), "a delete-only push has no commit");
+        for tweak in [
+            (|a: &mut PrePushArgs| a.base = Some("origin/main".into())) as fn(&mut PrePushArgs),
+            |a| a.files = vec!["x".into()],
+            |a| a.only = vec!["fmt".into()],
+            |a| a.dry_run = true,
+            |a| a.refs_from_stdin = false,
+        ] {
+            let mut a = args();
+            tweak(&mut a);
+            assert!(!known::applicable(&a, &pushed));
+            // Only the no-stdin tweak is a full run (a person's working-tree run may leave a record); every other tweak is partial.
+            assert_eq!(
+                known::recordable(&a, 0, 0, Exit::Ok),
+                !a.refs_from_stdin,
+                "no record from a partial run"
+            );
+        }
+        assert!(known::recordable(&args(), 0, 0, Exit::Ok));
+        assert!(!known::recordable(&args(), 1, 0, Exit::Ok) && !known::recordable(&args(), 0, 1, Exit::Ok));
+        assert!(!known::recordable(&args(), 0, 0, Exit::NotMeasured) && !known::recordable(&args(), 0, 0, Exit::Findings));
+    }
+
+    #[test]
+    fn the_known_commit_report_is_its_own_verdict_and_says_not_re_checked() {
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5).unwrap();
+        let rep = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &push_line(&two),
+            &fake(None, Err("x")),
+        )
+        .unwrap();
+        assert_eq!(rep.exit, Exit::Ok);
+        assert_eq!(rep.data["verdict"], "known_commit");
+        assert_eq!(rep.data["not_rechecked"], true);
+        assert_eq!(rep.data["commits"][0]["sha"], two.as_str());
+        assert_eq!(rep.data["commits"][0]["evidence"]["kind"], "record");
+        assert_eq!(rep.data["remote"], "origin");
+        assert!(rep.data.get("passed").is_none(), "it is not a measured pass: {}", rep.data);
+        assert!(rep.text.starts_with("pre-push: not re-checked: known commit"), "{}", rep.text);
+        let log = std::fs::read_to_string(state(&r).join("known-commits.log")).unwrap();
+        assert!(
+            log.contains(&two) && log.contains("remote=origin") && log.contains("pass record"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn a_delete_only_push_and_an_explicit_base_never_use_evidence() {
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5).unwrap();
+        let l = fake(None, Err("x"));
+        let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
+        let got = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &delete,
+            &l,
+        );
+        assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            base: Some("origin/main".into()),
+            ..args()
+        };
+        let got = command_in(&a, &r, &push_line(&two), &l);
+        assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+    }
+
+    fn reads<'a>(files: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |p| files.iter().find(|(n, _)| *n == p).map(|(_, t)| t.to_string())
+    }
+    const MANIFEST: &str = r#"{"dependencies":{"yaml":"^2.9.1"}}"#;
+    const LOCK: &str = r#"{"packages":{"node_modules/yaml":{"version":"2.9.1"}}}"#;
+
+    #[test]
+    fn the_node_install_is_stale_when_a_version_differs_missing_or_unreadable_and_ready_when_equal() {
+        let ok = [
+            ("node_modules/.package-lock.json", LOCK),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        assert_eq!(node_env_problem(false, &reads(&ok)), None);
+        let old = r#"{"packages":{"node_modules/yaml":{"version":"2.8.0"}}}"#;
+        let stale = [
+            ("node_modules/.package-lock.json", old),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        let why = node_env_problem(false, &reads(&stale)).unwrap();
+        assert!(why.contains("2.8.0") && why.contains("2.9.1"), "{why}");
+        let gone = [
+            ("node_modules/.package-lock.json", r#"{"packages":{}}"#),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        assert!(node_env_problem(false, &reads(&gone)).unwrap().contains("missing"));
+        assert!(node_env_problem(false, &reads(&[])).unwrap().contains("nothing is installed"));
+        assert!(
+            node_env_problem(false, &reads(&ok[..2])).is_some(),
+            "an unreadable manifest is a problem, not a pass"
+        );
+        assert!(
+            node_env_problem(true, &reads(&ok))
+                .unwrap()
+                .contains("throw-away worktree has no node_modules")
+        );
+    }
+}
+
+/// A stale npm install made conformance fail with "yaml cannot be loaded", which counted as a finding (2026-11-13).
+#[test]
+fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pass() {
+    let mut f = facts();
+    f.conformance_env = Some("node_modules/yaml is missing".into());
+    let planned = plan_gates(&plan(), &change(&["conformance/a.mjs"]), &f);
+    let Some(Planned::Broken { cause, next, .. }) = planned
+        .iter()
+        .find(|p| matches!(p, Planned::Broken { id, .. } if id == "conformance"))
+    else {
+        panic!("conformance must be Broken, not run: {planned:?}");
+    };
+    assert!(cause.starts_with("environment not ready"), "{cause}");
+    assert!(next.contains("npm ci --ignore-scripts -w conformance"), "{next}");
+    assert!(!ids(&planned).contains(&"conformance".to_string()), "it does not run");
+}
+
+mod base_choice {
+    use super::super::known::Lookups;
+    use super::super::{PrePushArgs, Pushed, command_in};
+    use crate::plan_repo::git_text;
+    use std::path::{Path, PathBuf};
+
+    /// A new ref `w` at `tip` pushed to `remote`: the shape most tests here need.
+    fn choose_base(root: &Path, remote: Option<&str>, tip: &str, look: &dyn Lookups) -> (String, String) {
+        let p = Pushed {
+            local_ref: "refs/heads/w".into(),
+            sha: tip.into(),
+            remote_ref: "refs/heads/w".into(),
+            remote_sha: "0".repeat(40),
+        };
+        super::super::choose_base(root, &p, remote, "origin/main", look)
+    }
+
+    /// `git ls-remote` as the remote would answer it: a fixed text or unreachable.
+    pub struct Remote(Option<String>);
+    impl Lookups for Remote {
+        fn ls_remote(&self, _: &str) -> Option<String> {
+            self.0.clone()
+        }
+        fn ci_green(&self, _: &str) -> Result<u64, String> {
+            Err("no run".into())
+        }
+    }
+    /// The remote's branches as `ls-remote` text, from refs/remotes/origin/* of the fixture (the sha each ref points at).
+    pub fn live(r: &Path) -> Remote {
+        let refs = git_text(r, &["for-each-ref", "--format=%(objectname)\t%(refname)", "refs/remotes/origin/"]).unwrap();
+        Remote(Some(
+            refs.lines()
+                .map(|l| l.replacen("refs/remotes/origin/", "refs/heads/", 1) + "\n")
+                .collect(),
+        ))
+    }
+
+    /// main: m1; train (origin/train/t): m1-t1-t2.
+    fn repo() -> (tempfile::TempDir, PathBuf) {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path().join("r");
+        std::fs::create_dir(&r).unwrap();
+        for a in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.email", "t@t"],
+            &["config", "user.name", "t"],
+        ] {
+            git_text(&r, a).unwrap();
+        }
+        commit(&r, "m1");
+        git_text(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
+        git_text(&r, &["checkout", "-q", "-b", "train"]).unwrap();
+        commit(&r, "t1");
+        commit(&r, "t2");
+        git_text(&r, &["update-ref", "refs/remotes/origin/train/t", "HEAD"]).unwrap();
+        (d, r)
+    }
+    fn commit(r: &Path, f: &str) {
+        std::fs::write(r.join(f), f).unwrap();
+        git_text(r, &["add", f]).unwrap();
+        git_text(r, &["commit", "-q", "-m", f]).unwrap();
+    }
+    fn sha(r: &Path, rev: &str) -> String {
+        git_text(r, &["rev-parse", rev]).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn a_branch_made_from_a_train_branch_is_measured_from_the_trains_live_tip() {
+        let (_d, r) = repo();
+        let train = sha(&r, "origin/train/t");
+        commit(&r, "w1");
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        assert_eq!(base, train, "{why}");
+        assert!(
+            why.contains("train/t") && why.contains("fewest new commits, 1") && why.contains("live"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn a_branch_made_from_main_is_measured_from_main() {
+        let (_d, r) = repo();
+        let main = sha(&r, "origin/main");
+        git_text(&r, &["checkout", "-q", "-b", "w", "origin/main"]).unwrap();
+        commit(&r, "w1");
+        let (base, _) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        // Main and the train are equally far (one new commit): the train wins the tie, and both give main as the merge base.
+        let mb = git_text(&r, &["merge-base", &base, "HEAD"]).unwrap();
+        assert_eq!(mb.trim(), main);
+    }
+
+    #[test]
+    fn main_merged_into_a_train_based_branch_is_still_measured_from_the_train() {
+        let (_d, r) = repo();
+        let train = sha(&r, "origin/train/t");
+        git_text(&r, &["checkout", "-q", "main"]).unwrap();
+        commit(&r, "m2");
+        git_text(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
+        git_text(&r, &["checkout", "-q", "-b", "w", "origin/train/t"]).unwrap();
+        commit(&r, "w1");
+        git_text(&r, &["merge", "-q", "--no-edit", "origin/main"]).unwrap();
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        assert_eq!(base, train, "{why}");
+    }
+
+    #[test]
+    fn an_unreachable_remote_or_no_remote_falls_back_to_origin_main_and_says_so() {
+        let (_d, r) = repo();
+        commit(&r, "w1");
+        let tip = sha(&r, "HEAD");
+        let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
+        assert_eq!(base, "origin/main");
+        assert!(
+            why.contains("could not be read") && why.contains("measuring from origin/main"),
+            "{why}"
+        );
+        let (base, why) = choose_base(&r, None, &tip, &live(&r));
+        assert_eq!((base.as_str(), why.contains("no remote was named")), ("origin/main", true));
+        // Tips this clone has no object for are skipped.
+        let (base, why) = choose_base(
+            &r,
+            Some("origin"),
+            &tip,
+            &Remote(Some(format!("{}\trefs/heads/x\n", "1".repeat(40)))),
+        );
+        assert_eq!(base, "origin/main", "{why}");
+    }
+
+    #[test]
+    fn every_pushed_commit_already_on_the_remote_is_never_an_empty_pass_it_measures_from_origin_main() {
+        let (_d, r) = repo();
+        let two = sha(&r, "origin/train/t");
+        let (base, why) = choose_base(&r, Some("origin"), &two, &live(&r));
+        assert_eq!(base, "origin/main", "{why}");
+        assert!(why.contains("already on origin's train/t") && why.contains("no evidence"), "{why}");
+    }
+
+    #[test]
+    fn a_push_already_on_the_remote_without_evidence_runs_the_checks_instead_of_nothing_to_check() {
+        let (_d, r) = repo();
+        let two = sha(&r, "origin/train/t");
+        let args = PrePushArgs {
+            root: Some(r.clone()),
+            base: None,
+            remote: Some("origin".into()),
+            only: vec![],
+            dry_run: true,
+            files: vec![],
+            refs_from_stdin: true,
+            linux: false,
+            accept_not_measured: vec![],
+        };
+        let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
+        let got = command_in(&args, &r, &line, &live(&r));
+        assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
+    }
+}
+
 /// A scratch repository with a helper to commit and to fake remote-tracking refs (no network).
 struct Repo {
     _d: tempfile::TempDir,
@@ -894,6 +1333,15 @@ impl Repo {
     fn remote(&self, name: &str, sha: &str) {
         self.git(&["update-ref", &format!("refs/remotes/origin/{name}"), sha]);
     }
+
+    /// What `git ls-remote origin` would print for the branches faked with [`Repo::remote`].
+    fn live(&self) -> base_choice::Remote {
+        base_choice::live(&self.root)
+    }
+
+    fn choose(&self, p: &super::Pushed) -> (String, String) {
+        super::choose_base(&self.root, p, Some("origin"), "origin/main", &self.live())
+    }
 }
 
 fn new_ref(local: &str, sha: &str) -> super::Pushed {
@@ -917,10 +1365,10 @@ fn a_new_branch_cut_from_a_train_is_measured_against_the_train_not_main() {
     r.remote("train/2026-11-12-7", &t2);
     r.git(&["checkout", "-q", "-b", "fix"]);
     let f1 = r.commit("f1");
-    let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
-    assert_eq!(base, "origin/train/2026-11-12-7", "{why}");
+    let (base, why) = r.choose(&new_ref("fix", &f1));
+    assert_eq!(base, t2, "{why}");
     assert!(
-        why.contains("the nearest of") && why.contains("1 commit(s) ahead") && why.contains(" ms"),
+        why.contains("train/2026-11-12-7") && why.contains("fewest new commits, 1") && why.contains(" ms"),
         "{why}"
     );
 }
@@ -939,32 +1387,36 @@ fn an_existing_remote_ref_is_measured_from_its_old_commit() {
         remote_ref: "refs/heads/fix".into(),
         remote_sha: f1.clone(),
     };
-    let (base, why) = super::choose_base(&r.root, &p, "origin/main");
+    let (base, why) = r.choose(&p);
     assert_eq!(base, f1);
     assert!(why.contains("exists on the remote"), "{why}");
-    // Its old commit is not here: say so and fall back to a remote branch it descends from.
+    // Its old commit is not here: say so and measure from the nearest live remote branch tip (main here).
     let gone = super::Pushed {
         remote_sha: "1".repeat(40),
         ..p
     };
-    let (base, why) = super::choose_base(&r.root, &gone, "origin/main");
-    assert_eq!(base, "origin/main");
+    let (base, why) = r.choose(&gone);
+    assert_eq!(base, c1);
     assert!(why.contains("not here (fetch it)"), "{why}");
 }
 
 #[test]
-fn with_no_remote_branch_to_descend_from_the_base_is_main_and_says_so() {
+fn with_no_usable_remote_branch_the_base_is_main_and_says_so() {
     let r = Repo::new();
     let c1 = r.commit("a");
-    let (base, why) = super::choose_base(&r.root, &new_ref("main", &c1), "origin/main");
+    // Nothing listed by the remote: origin/main, said so.
+    let (base, why) = r.choose(&new_ref("main", &c1));
     assert_eq!(base, "origin/main");
-    assert!(why.contains("is an ancestor of the pushed commit, so origin/main"), "{why}");
-    // An unrelated remote branch is not an ancestor either.
+    assert!(
+        why.contains("no tracking upstream, train branch or main") && why.contains("measuring from origin/main"),
+        "{why}"
+    );
+    // A sibling feature branch is no candidate either.
     r.git(&["checkout", "-q", "--orphan", "other"]);
     let o1 = r.commit("o");
     r.git(&["checkout", "-q", "main"]);
     r.remote("other", &o1);
-    let (base, _) = super::choose_base(&r.root, &new_ref("main", &c1), "origin/main");
+    let (base, _) = r.choose(&new_ref("main", &c1));
     assert_eq!(base, "origin/main");
 }
 
@@ -983,11 +1435,8 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     r.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
     r.git(&["config", "branch.fix.remote", "origin"]);
     r.git(&["config", "branch.fix.merge", "refs/heads/main"]);
-    let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
-    assert_eq!(
-        base, "origin/train/x",
-        "an upstream that is main must not beat a nearer train: {why}"
-    );
+    let (base, why) = r.choose(&new_ref("fix", &f1));
+    assert_eq!(base, t1, "an upstream that is main must not beat a nearer train: {why}");
     // At the same distance the tracking upstream wins.
     let r3 = Repo::new();
     let c3 = r3.commit("a");
@@ -999,10 +1448,13 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     let f3 = r3.commit("f");
     r3.git(&["config", "branch.fix.remote", "origin"]);
     r3.git(&["config", "branch.fix.merge", "refs/heads/main"]);
-    let (base, why) = super::choose_base(&r3.root, &new_ref("fix", &f3), "origin/main");
+    let (base, why) = r3.choose(&new_ref("fix", &f3));
     assert_eq!(
-        (base.as_str(), why.contains("its tracking upstream")),
-        ("origin/main", true),
+        (
+            base.as_str(),
+            why.contains("main (read live") && why.contains("its tracking upstream")
+        ),
+        (c3.as_str(), true),
         "{why}"
     );
     // Same distance to main and to a train: the train.
@@ -1012,7 +1464,8 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     r2.remote("train/y", &c);
     r2.git(&["checkout", "-q", "-b", "fix"]);
     let f = r2.commit("f");
-    assert_eq!(super::choose_base(&r2.root, &new_ref("fix", &f), "origin/main").0, "origin/train/y");
+    let why = r2.choose(&new_ref("fix", &f)).1;
+    assert!(why.contains("train/y (read live"), "{why}");
 }
 
 #[test]
@@ -1042,4 +1495,29 @@ fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output
     );
     let last = report.text.lines().last().unwrap();
     assert_eq!(last, "NOT MEASURED (2): clippy-windows apps/dyno; clippy crates");
+}
+
+#[test]
+fn a_branch_that_merged_its_train_in_is_measured_from_the_train_not_its_own_old_tip() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    let f1 = r.commit("f1");
+    // The train moves on after the branch was pushed; the branch then merges it in and adds a commit.
+    r.git(&["checkout", "-q", "-b", "train", &c1]);
+    r.commit("t1");
+    let t2 = r.commit("t2");
+    r.remote("main", &c1);
+    r.remote("train/9", &t2);
+    r.git(&["checkout", "-q", "fix"]);
+    r.git(&["merge", "-q", "--no-edit", "train"]);
+    let m = r.commit("f2");
+    let p = super::Pushed {
+        local_ref: "refs/heads/fix".into(),
+        sha: m,
+        remote_ref: "refs/heads/fix".into(),
+        remote_sha: f1,
+    };
+    let (base, why) = r.choose(&p);
+    assert_eq!(base, t2, "the old tip would count t1 and t2 as new: {why}");
 }

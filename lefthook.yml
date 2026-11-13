@@ -88,4 +88,4 @@ pre-push:
       # git's pre-push lines on standard input: the gate checks out the commit being pushed in a throw-away worktree and checks that,
       # so a dirty tree cannot change the answer (several refs in one push: one is checked, the others are "not measured").
       use_stdin: true
-      run: ./dev check --pre-push --refs-from-stdin
+      run: ./dev check --pre-push --refs-from-stdin --remote {1}
