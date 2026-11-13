@@ -69,46 +69,35 @@ toolchain_lock() {
   return 0
 }
 
-# toolchain_broken <name> <components>: prints the first part of the toolchain that does not run (rustc, cargo, cargo clippy, rustfmt;
-# clippy and rustfmt only when asked for), nothing when all run. Each check is bounded (ER-32).
+# toolchain_broken <name> <components>: prints the first part of the toolchain that does not work, nothing when all do: rustc, cargo,
+# a one-line program with std (a toolchain whose std went missing still answers --version; run 8063), and `cargo clippy` and
+# `rustfmt` when asked for. Each check is bounded (ER-32).
 toolchain_broken() {
-  if ! run_bounded 60 env RUSTUP_TOOLCHAIN="$1" rustc --version >/dev/null 2>&1; then echo rustc; return 0; fi
-  if ! run_bounded 60 env RUSTUP_TOOLCHAIN="$1" cargo --version >/dev/null 2>&1; then echo cargo; return 0; fi
+  if ! run_bounded 60 env RUSTUP_TOOLCHAIN="$1" rustc --version >/dev/null 2>&1; then echo "rustc does not run"; return 0; fi
+  if ! run_bounded 60 env RUSTUP_TOOLCHAIN="$1" cargo --version >/dev/null 2>&1; then echo "cargo does not run"; return 0; fi
+  _tb=$(mktemp -d 2>/dev/null) || { echo "no temporary folder for the std check"; return 0; }
+  printf 'fn main() { println!("{}", std::env::args().count()); }\n' >"$_tb/t.rs"
+  _tbok=0
+  _tx=
+  case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) _tx=.exe ;; esac
+  run_bounded 120 env RUSTUP_TOOLCHAIN="$1" rustc --edition 2021 -o "$_tb/t$_tx" "$_tb/t.rs" >/dev/null 2>&1 || _tbok=1
+  rm -rf "${_tb:?}"
+  if [ "$_tbok" -ne 0 ]; then echo "a std program does not compile"; return 0; fi
   for _c in $2; do
     case $_c in
-      clippy) run_bounded 60 env RUSTUP_TOOLCHAIN="$1" cargo clippy --version >/dev/null 2>&1 || { echo "cargo clippy"; return 0; } ;;
-      rustfmt) run_bounded 60 env RUSTUP_TOOLCHAIN="$1" rustfmt --version >/dev/null 2>&1 || { echo rustfmt; return 0; } ;;
+      clippy) run_bounded 60 env RUSTUP_TOOLCHAIN="$1" cargo clippy --version >/dev/null 2>&1 || { echo "cargo clippy does not run"; return 0; } ;;
+      rustfmt) run_bounded 60 env RUSTUP_TOOLCHAIN="$1" rustfmt --version >/dev/null 2>&1 || { echo "rustfmt does not run"; return 0; } ;;
     esac
   done
   return 0
 }
 
-# toolchain_install_checked <name> <components> <install-function>: with the install lock held, installs the toolchain and checks that
-# rustc, cargo and the clippy and rustfmt it should have really run. When the install failed or they do not (a half install; two jobs
-# that installed it at once, CI run 8060: "could not remove component file cargo.exe", then "cargo-clippy is not applicable to the
-# toolchain"), it uninstalls the toolchain and installs it once more (ER-26). A run out of time is uninstalled and not retried. Returns
-# 0 when it runs; otherwise sets toolchain_why and returns the install's exit code (124: the time limit; 3: installed, but it still
-# does not run).
+# toolchain_install_checked <name> <components> <install-function>: with the install lock held, installs the toolchain and checks it
+# (toolchain_broken). Never uninstalls: on a shared runner other jobs may be compiling with that toolchain (run 8063: a repair's
+# uninstall took std away from four running jobs), so a broken one is repaired by hand with no jobs running. Returns 0 when it works;
+# otherwise sets toolchain_why and returns the install's exit code (124: the time limit), or 3 when it installed but does not work.
 toolchain_install_checked() {
   toolchain_why=
-  _ti=0
-  "$3" || _ti=$?
-  if [ "$_ti" -eq 124 ]; then
-    echo "dev: the install ran out of time; removing the half-installed toolchain $1." >&2
-    run_bounded 120 rustup toolchain uninstall "$1" >&2 || true
-    toolchain_why="exit 124"
-    return 124
-  fi
-  _bad=
-  if [ "$_ti" -eq 0 ]; then
-    _bad=$(toolchain_broken "$1" "$2")
-    [ -n "$_bad" ] || return 0
-    _what="$_bad does not run after the install"
-  else
-    _what="the install failed with exit $_ti"
-  fi
-  echo "dev: the toolchain $1 is half installed or in conflict ($_what); uninstalling it and installing it again." >&2
-  run_bounded 300 rustup toolchain uninstall "$1" >&2 || true
   _ti=0
   "$3" || _ti=$?
   if [ "$_ti" -ne 0 ]; then
@@ -116,17 +105,21 @@ toolchain_install_checked() {
     return "$_ti"
   fi
   _bad=$(toolchain_broken "$1" "$2")
-  if [ -n "$_bad" ]; then
-    toolchain_why="$_bad does not run after a reinstall"
-    return 3
-  fi
-  echo "dev: repaired the toolchain $1 by installing it again." >&2
-  return 0
+  [ -n "$_bad" ] || return 0
+  toolchain_why="$_bad after the install"
+  return 3
+}
+
+# toolchain_repair_step <name> <components>: the manual repair, for the ::error:: lines.
+toolchain_repair_step() {
+  _rs="rustup toolchain install $1 --profile minimal"
+  for _c in $2; do _rs="$_rs --component $_c"; done
+  printf "on the machine, with no jobs running, run 'rustup toolchain uninstall %s' and then '%s'" "$1" "$_rs"
 }
 
 # --install-toolchain <toolchain> [<components>] [<targets>] (space-separated lists): the setup-rust action's install, before anything
 # else of the job (no repository or compiler needed). One install of a toolchain at a time per rustup home (toolchain_lock, shared with
-# ensure_toolchain below), checked and repaired by toolchain_install_checked, bounded by PADDOCK_DEV_TOOLCHAIN_TIMEOUT (default 900 s).
+# ensure_toolchain below), checked by toolchain_install_checked and never uninstalled, bounded by PADDOCK_DEV_TOOLCHAIN_TIMEOUT (default 900 s).
 # On failure one ::error:: line with the cause and the next step (ER-27), exit 1.
 if [ "${1:-}" = "--install-toolchain" ]; then
   _name=${2:-}
@@ -143,13 +136,17 @@ if [ "${1:-}" = "--install-toolchain" ]; then
   _rc=0
   toolchain_install_checked "$_name" "$_comps" _install_named || _rc=$?
   toolchain_lock release "$_name"
+  # Once per job, which rustup and which compiler it got: drift (a rustup self-update, a moved channel) shows in the log (ER-26).
+  _rv=$(run_bounded 30 rustup --version 2>/dev/null | head -n 1) || true
+  _cv=$(run_bounded 30 env RUSTUP_TOOLCHAIN="$_name" rustc -V 2>/dev/null | head -n 1) || true
+  echo "dev: ${_rv:-rustup --version printed nothing}; toolchain $_name: ${_cv:-rustc -V printed nothing}" >&2
   if [ "$_rc" -ne 0 ]; then
     _why=$toolchain_why
     # Git Bash reports 127 for a Windows program that ended with an NTSTATUS crash code, not only for a missing one.
     if [ "$_rc" -eq 127 ] && [ "${RUNNER_OS:-}" = Windows ]; then
       _why="$_why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
     fi
-    echo "::error::rustup could not install the $_name toolchain ($_why). Next step: on the runner, with no job running, run 'rustup toolchain uninstall $_name' and then 'rustup toolchain install $_name' to see why." >&2
+    echo "::error::rustup could not install the $_name toolchain ($_why). CI never uninstalls a toolchain, since other jobs may be using it. Next step: $(toolchain_repair_step "$_name" "$_comps")." >&2
     exit 1
   fi
   exit 0
@@ -246,8 +243,9 @@ toolchain_file() {
 # that cannot run (run 8034: build-jobs ran ./dev before setup-rust, and the wrapper fell back to an old cached tool). Only when rustc
 # does not run, rustup exists, no compiler was named by RUSTC or a cargo config, a toolchain file exists and an earlier step of the job
 # did not already fail to install it (PADDOCK_TOOLCHAIN_FAILED). One install of a pin at a time per host (toolchain_lock), bounded by
-# PADDOCK_DEV_TOOLCHAIN_TIMEOUT (seconds, default 900), logged with its duration; a failure says the next step, and a timeout
-# uninstalls the half-installed toolchain. Returns 0 when the install finished.
+# PADDOCK_DEV_TOOLCHAIN_TIMEOUT (seconds, default 900), logged with its duration; a failure says the next step, a timeout uninstalls
+# its own cut-off install (rustc did not run before, so no job uses it), and a toolchain that installed but does not work is left in
+# place for a manual repair (toolchain_install_checked). Returns 0 when it works.
 ensure_toolchain() {
   [ -z "${rustc_cmd:-}" ] || return 1
   command -v rustup >/dev/null 2>&1 || return 1
@@ -272,9 +270,14 @@ ensure_toolchain() {
   _install_pinned() { (cd "$tool" && run_bounded "${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}" rustup toolchain install >&2); }
   _rc=0
   toolchain_install_checked "$pin" "$comps" _install_pinned || _rc=$?
+  if [ "$_rc" -eq 124 ]; then
+    # Only here, where rustc did not run before (no job can be compiling with this toolchain), is our own cut-off install removed.
+    echo "dev: the install ran out of time; removing the half-installed toolchain $pin." >&2
+    (cd "$tool" && run_bounded 120 rustup toolchain uninstall "$pin" >&2) || true
+  fi
   toolchain_lock release "$pin"
   if [ "$_rc" -ne 0 ]; then
-    echo "::error::./dev: 'rustup toolchain install' for $tf failed ($toolchain_why, $(($(date +%s) - _i0)) s; exit 124 means the time limit). Run 'rustup toolchain uninstall $pin' and then 'rustup toolchain install' by hand in tools/paddock-dev to see why (network, disk, a proxy, another job using the toolchain), then run ./dev again." >&2
+    echo "::error::./dev: 'rustup toolchain install' for $tf failed ($toolchain_why, $(($(date +%s) - _i0)) s; exit 124 means the time limit). ./dev never uninstalls a toolchain, since other jobs may be using it. Next step: $(toolchain_repair_step "$pin" "$comps"), by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
     return 1
   fi
   echo "dev: installed the pinned toolchain in $(($(date +%s) - _i0)) s." >&2

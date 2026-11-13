@@ -354,10 +354,10 @@ test('a failed toolchain install fails the step with a message that names the ca
   assert.equal(failed.status, 1, failed.out);
   assert.match(failed.out, /::error::rustup could not install the stable toolchain \(exit 1\)/);
   assert.doesNotMatch(failed.out, /NTSTATUS/);
-  // ER-26 (CI run 8060): a failed or half install is uninstalled and tried once more before the step gives up, and the error says
-  // what to run on the runner.
-  assert.match(failed.calls, /toolchain install stable [^\n]*\ntoolchain uninstall stable\ntoolchain install stable /);
-  assert.match(failed.out, /rustup toolchain uninstall stable/);
+  // ER-26 (CI runs 8060, 8063): CI never uninstalls a toolchain (other jobs may be compiling with it); the error names the manual
+  // repair, done with no jobs running.
+  assert.doesNotMatch(failed.calls, /uninstall/);
+  assert.match(failed.out, /with no jobs running, run 'rustup toolchain uninstall stable'/);
   assert.equal((failed.out.match(/::error::/g) ?? []).length, 1, 'one error line (ER-27)');
 });
 
