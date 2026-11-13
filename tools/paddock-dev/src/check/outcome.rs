@@ -29,6 +29,8 @@ pub const CLEAN: i32 = 0;
 pub const FINDINGS: i32 = 1;
 /// Exit status 2: a usage error.
 pub const USAGE: i32 = 2;
+/// Exit status 8: a report file (`--out`, `--summary`, the job summary) could not be written; the run's own result is still printed.
+pub const IO_ERROR: i32 = 8;
 /// Exit status 6: a check did not look.
 pub const NOT_MEASURED: i32 = 6;
 /// Exit status 7: a check is broken.

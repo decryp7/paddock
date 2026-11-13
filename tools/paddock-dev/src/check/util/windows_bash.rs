@@ -23,13 +23,13 @@ pub struct BashStep {
 
 static GIT_BASH_STEP: LazyLock<Regex> = LazyLock::new(|| rx(r"Git bash on PATH"));
 static NOT_WINDOWS: LazyLock<Regex> = LazyLock::new(|| rx(r"runner\.os\s*(==\s*'(Linux|macOS)'|!=\s*'Windows')"));
-static COMMENT_LINE: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?m)^\s*#{DOT}*$")));
-static RUNS_ON: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?m)^\s*runs-on:\s*({DOT}*)$")));
+static COMMENT_LINE: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?mR)^\s*#{DOT}*$")));
+static RUNS_ON: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?mR)^\s*runs-on:\s*({DOT}*)$")));
 static WINDOWS_LIKE: LazyLock<Regex> = LazyLock::new(|| rx(r"(?i)windows|matrix|fromJson|\$\{\{"));
-static WORKFLOW_BASH: LazyLock<Regex> = LazyLock::new(|| rx(r"(?m)^defaults:\s*\n\s+run:\s*\n\s+shell:\s*bash\b"));
+static WORKFLOW_BASH: LazyLock<Regex> = LazyLock::new(|| rx(r"(?mR)^defaults:\s*\n\s+run:\s*\n\s+shell:\s*bash\b"));
 static JOB_BASH: LazyLock<Regex> = LazyLock::new(|| rx(r"defaults:\s*\n\s+run:\s*\n\s+shell:\s*bash\b"));
-static IF_LINE: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?m)^\s*if:\s*({DOT}*)$")));
-static SHELL: LazyLock<Regex> = LazyLock::new(|| rx(r"(?m)^\s*shell:\s*(\S+)"));
+static IF_LINE: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?mR)^\s*if:\s*({DOT}*)$")));
+static SHELL: LazyLock<Regex> = LazyLock::new(|| rx(r"(?mR)^\s*shell:\s*(\S+)"));
 
 /// A job may run on a Windows host when its `runs-on` names Windows or comes from a matrix or the plan (any os).
 fn runs_on_windows(job_text: &str) -> bool {
@@ -79,6 +79,13 @@ pub fn bash_before_git_bash(workflow_text: &str) -> Vec<BashStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_runs_on_line_ends_before_a_carriage_return_as_in_javascript_multiline_mode() {
+        assert!(runs_on_windows("  runs-on: windows-latest\r\n  steps:\r\n"));
+        assert!(!runs_on_windows("  runs-on: ubuntu-latest\r\n  steps:\r\n"));
+        assert!(runs_on_windows("  # c\r\n  runs-on: ${{ matrix.os }}\r\n"));
+    }
 
     #[test]
     fn a_windows_job_running_bash_before_git_bash_is_flagged_once_and_a_guard_clears_it() {

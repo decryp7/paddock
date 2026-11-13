@@ -49,8 +49,7 @@ fn workflow_files(root: &Path) -> Vec<String> {
     files_of(root, ".gitea/", |f| f.ends_with(".yml") || f.ends_with(".yaml"))
 }
 
-#[test]
-fn workflow_jobs_steps_and_the_windows_bash_scan_equal_the_javascript_reader_on_every_file() {
+fn workflow_parity(crlf: bool) {
     let root = repo();
     let files = workflow_files(&root);
     assert!(files.len() > 20, "{}", files.len());
@@ -61,20 +60,22 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const w = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/workflows.mjs')).href);
 const b = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/windows-bash.mjs')).href);
-const { files } = JSON.parse(process.env.UTIL_INPUT);
+const { files, crlf } = JSON.parse(process.env.UTIL_INPUT);
 const out = files.map((f) => {
-  const text = readFileSync(f, 'utf8');
+  const raw = readFileSync(f, 'utf8');
+  const text = crlf ? raw.replace(/\n/g, '\r\n') : raw;
   const steps = w.parseSteps(text).map((s) => ({ ...s, env: Object.entries(s.env) }));
   return { file: f, jobs: w.parseJobs(text), steps, bash: b.bashBeforeGitBash(text) };
 });
 process.stdout.write(JSON.stringify(out));
 "#,
-        &json!({ "files": files }),
+        &json!({ "files": files, "crlf": crlf }),
     );
     let rust: Vec<Value> = files
         .iter()
         .map(|f| {
-            let text = std::fs::read_to_string(root.join(f)).unwrap();
+            let raw = std::fs::read_to_string(root.join(f)).unwrap();
+            let text = if crlf { raw.replace('\n', "\r\n") } else { raw };
             let steps: Vec<Value> = workflows::parse_steps(&text)
                 .into_iter()
                 .map(|s| {
@@ -94,6 +95,84 @@ process.stdout.write(JSON.stringify(out));
         })
         .collect();
     assert_eq!(Value::Array(rust), js);
+}
+
+#[test]
+fn workflow_jobs_steps_and_the_windows_bash_scan_equal_the_javascript_reader_on_every_file() {
+    workflow_parity(false);
+}
+
+/// A workflow checked out with CRLF line ends: the line-based reader and the multiline `$` of the scans see `\r` before the end of a line.
+#[test]
+fn crlf_workflows_are_read_as_the_javascript_reads_them() {
+    workflow_parity(true);
+}
+
+#[test]
+fn a_crlf_windows_job_is_scanned_as_the_javascript_scans_it() {
+    let wf = "defaults:\n  run:\n    shell: bash\njobs:\n  w:\n    runs-on: windows-latest # the PC\n    # a comment\n    steps:\n      - name: build\n        if: runner.os == 'Windows'\n        run: make\n  x:\n    runs-on: ubuntu-latest\n    steps:\n      - run: make\n";
+    let wf = wf.replace('\n', "\r\n");
+    let js = node(
+        r#"
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const b = await import(pathToFileURL(join(process.cwd(), 'conformance/src/util/windows-bash.mjs')).href);
+const { text } = JSON.parse(process.env.UTIL_INPUT);
+process.stdout.write(JSON.stringify(b.bashBeforeGitBash(text)));
+"#,
+        &json!({ "text": wf }),
+    );
+    let rust: Vec<Value> = windows_bash::bash_before_git_bash(&wf)
+        .into_iter()
+        .map(|b| json!({"job": b.job, "step": b.step, "line": b.line, "why": b.why}))
+        .collect();
+    // Both hosts see the CRLF file the same way (the line-based step reader finds no `run:` behind a `\r`).
+    assert_eq!(json!(rust), js);
+}
+
+#[test]
+fn crlf_version_files_are_read_as_the_javascript_reads_them() {
+    let d = tempfile::tempdir().unwrap();
+    for (p, t) in [
+        ("web/tauri/tauri.conf.json", "{\r\n  \"version\": \"1.2.3\"\r\n}\r\n"),
+        ("web/package.json", "{\r\n  \"version\": \"1.2.4\"\r\n}\r\n"),
+        (
+            "web/tauri/Cargo.toml",
+            "[package]\r\nname = \"x\"\r\nversion = \"1.2.5\"\r\nedition = \"2021\"\r\n\r\n[dependencies]\r\nversion = \"9.9.9\"\r\n",
+        ),
+        ("CHANGELOG.md", "# Changelog\r\n\r\n## [v1.2.6] - 2026-01-01\r\n"),
+    ] {
+        let f = d.path().join(p);
+        std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+        std::fs::write(f, t).unwrap();
+    }
+    std::fs::write(
+        d.path().join("paddock.conformance.json"),
+        r#"{"app":"fx","appDir":"web","tauriDir":"web/tauri"}"#,
+    )
+    .unwrap();
+    let js = node(
+        r#"
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const at = (p) => import(pathToFileURL(join(process.cwd(), p)).href);
+const ctxm = await at('conformance/src/context.mjs');
+const ver = await at('conformance/src/util/version.mjs');
+const { root } = JSON.parse(process.env.UTIL_INPUT);
+const ctx = ctxm.createContext({ root, config: ctxm.loadConfig(root, undefined) });
+process.stdout.write(JSON.stringify(ver.versionSources(ctx)));
+"#,
+        &json!({ "root": d.path() }),
+    );
+    let config = Config::load(d.path(), None).unwrap();
+    let tree = Tree::open(d.path());
+    let ctx = Ctx::new(&tree, Rc::new(Vec::new()), None, &config, None, String::new());
+    let rust: Vec<Value> = version::version_sources(&ctx)
+        .iter()
+        .map(|s| json!({"file": s.file, "version": s.version}))
+        .collect();
+    assert_eq!(json!(rust), js);
+    assert_eq!(rust.len(), 4, "every source is read, CRLF or not: {rust:?}");
 }
 
 #[test]

@@ -8,10 +8,10 @@ use std::sync::LazyLock;
 
 static SEMVER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$").unwrap_or_else(|e| panic!("{e}")));
-static TOML_VERSION: LazyLock<Regex> = LazyLock::new(|| rx(r#"(?m)^version\s*=\s*"([^"]+)""#));
-static TABLE_START: LazyLock<Regex> = LazyLock::new(|| rx(r"(?m)^\["));
-static WORKSPACE_VERSION: LazyLock<Regex> = LazyLock::new(|| rx(r"(?m)^version\.workspace\s*=\s*true"));
-static CHANGELOG_HEAD: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?m)^##\s+\[?v?(\d+\.\d+\.\d+[^\]{WS}]*)\]?")));
+static TOML_VERSION: LazyLock<Regex> = LazyLock::new(|| rx(r#"(?mR)^version\s*=\s*"([^"]+)""#));
+static TABLE_START: LazyLock<Regex> = LazyLock::new(|| rx(r"(?mR)^\["));
+static WORKSPACE_VERSION: LazyLock<Regex> = LazyLock::new(|| rx(r"(?mR)^version\.workspace\s*=\s*true"));
+static CHANGELOG_HEAD: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"(?mR)^##\s+\[?v?(\d+\.\d+\.\d+[^\]{WS}]*)\]?")));
 
 /// Whether `v` is a semantic version.
 pub fn is_semver(v: &str) -> bool {

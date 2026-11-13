@@ -196,11 +196,21 @@ pub fn run(argv: &[String], out: &mut dyn Write, err: &mut dyn Write, env: &dyn 
     let md = report::format_markdown(&result);
     let json = report::result_json(&result);
     let pretty = serde_json::to_string_pretty(&json).unwrap_or_default();
+    // A report file that cannot be written does not hide the result: the report is printed, the cause and the next step go to
+    // standard error as an annotation, and the run ends with its own status (ER-27).
+    let mut unwritten = false;
+    let mut cannot_write = |err: &mut dyn Write, what: &str, path: &str, e: &std::io::Error| {
+        unwritten = true;
+        let _ = writeln!(
+            err,
+            "::error::paddock-conformance: cannot write the {what} {path}: {e}. Fix: create the folder and make it writable, or give another path to --{what}."
+        );
+    };
     for (key, text) in [("out", format!("{pretty}\n")), ("summary", md.clone())] {
         if let Some(path) = o.value(key)
             && let Err(e) = std::fs::write(path, text)
         {
-            return usage_error(err, &format!("cannot write {path}: {e}"));
+            cannot_write(err, key, path, &e);
         }
     }
     if let Some(path) = env("GITHUB_STEP_SUMMARY").filter(|p| !p.is_empty()) {
@@ -210,7 +220,7 @@ pub fn run(argv: &[String], out: &mut dyn Write, err: &mut dyn Write, env: &dyn 
             .open(&path)
             .and_then(|mut f| writeln!(f, "{md}"));
         if let Err(e) = appended {
-            return usage_error(err, &format!("cannot write {path}: {e}"));
+            cannot_write(err, "summary", &path, &e);
         }
     }
     if o.flag("json") {
@@ -226,7 +236,11 @@ pub fn run(argv: &[String], out: &mut dyn Write, err: &mut dyn Write, env: &dyn 
         .map(|x| x.trim().to_uppercase())
         .filter(|x| !x.is_empty())
         .collect();
-    exit_status(&result.findings, &strict)
+    let status = exit_status(&result.findings, &strict);
+    if unwritten && status != outcome::CHECK_BROKEN {
+        return outcome::IO_ERROR;
+    }
+    status
 }
 
 #[cfg(test)]

@@ -460,7 +460,7 @@ fn control_holds(check: &dyn Check) -> bool {
     let mut got: Vec<(String, usize)> = out
         .findings
         .iter()
-        .filter(|f| f.inline_waiver.is_none())
+        .filter(|f| f.inline_waiver.is_none() || f.unwaivable)
         .map(|f| (f.file.clone(), f.line))
         .collect();
     got.sort();

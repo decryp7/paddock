@@ -107,6 +107,7 @@ fn json_mode_strict_and_the_exit_statuses_agree() {
     let json_run = same(&["--app", "paddock", "--root", root, "--only", "C119,C120", "--json"]);
     assert!(json_run.stdout.trim_start().starts_with('{'));
     // C120 and C119 are report-only: a warning never fails the run, `--strict` makes the named check's warnings fail.
+    // conformance: layout-guess — a shell fixture for the strict-mode test, not a layout this code computes
     let bad = tree(&[("scripts/x.sh", "#!/bin/sh\nd=$(dirname \"$0\")/../deps\ncd \"$d\"\n")]);
     let loose = same(&["--app", "t", "--root", bad.path().to_str().unwrap(), "--only", "C120"]);
     let strict = same(&[
@@ -138,6 +139,28 @@ fn usage_errors_and_a_missing_app_agree() {
     }
 }
 
+#[test]
+fn a_report_file_that_cannot_be_written_is_an_io_error_with_the_cause_and_the_next_step() {
+    let d = tree(&[("crates/a/src/x.rs", "fn a() {}\n")]);
+    let missing = d.path().join("no-such-folder").join("out.json");
+    for flag in ["--out", "--summary"] {
+        let o = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+            .args(["conformance", "--app", "t", "--root"])
+            .arg(d.path())
+            .args(["--only", "C39", flag])
+            .arg(&missing)
+            .output()
+            .unwrap();
+        let (err, out) = (String::from_utf8_lossy(&o.stderr), String::from_utf8_lossy(&o.stdout));
+        assert_eq!(o.status.code(), Some(check::outcome::IO_ERROR), "{flag}: {err}");
+        assert!(
+            err.contains("::error::") && err.contains("out.json") && err.contains("Fix:"),
+            "the cause and the next step: {err}"
+        );
+        assert!(out.contains("t: 1 checks"), "the report is still printed: {out}");
+    }
+}
+
 /// Every kind of inline waiver of the four ported checks, the bare ones, and a dated waiver beside them.
 fn waiver_tree() -> tempfile::TempDir {
     tree(&[
@@ -155,7 +178,12 @@ fn waiver_tree() -> tempfile::TempDir {
         ),
         (
             "crates/a/src/l.rs",
-            "// conformance: file-layout-guess — filler data only\nfn a() { let q = base.join(\"deps\"); }\nfn b() {\n    // conformance: layout-guess — pinned layout\n    let q = base.join(\"deps\");\n}\n",
+            // The file marker is built in two pieces: written whole in this file it would be a live waiver for this file (a marker in a
+            // string literal is read like a comment).
+            concat!(
+                "// conformance: file-",
+                "layout-guess — filler data only\nfn p() { let z = base.join(\"deps\"); }\n#[cfg(test)]\nmod tests {\n    fn a() { let q = base.join(\"deps\"); }\n}\nfn b() {\n    // conformance: layout-guess — pinned layout\n    let q = base.join(\"deps\");\n}\n"
+            ),
         ),
         (
             "crates/a/src/l2.rs",

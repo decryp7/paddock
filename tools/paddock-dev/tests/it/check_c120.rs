@@ -167,7 +167,7 @@ impl paddock_dev::check::Check for Fake {
     fn control(&self) -> paddock_dev::check::Control {
         paddock_dev::check::Control {
             files: vec![("x.rs", "fn a() {}\n")],
-            expect: vec![("x.rs", 1), ("x.rs", 2)],
+            expect: vec![("x.rs", 2)],
         }
     }
 }
@@ -178,7 +178,8 @@ fn an_unwaivable_finding_is_never_waived_by_a_comment_and_an_inline_waived_one_c
     std::fs::write(d.path().join("x.rs"), "fn a() {}\n").unwrap();
     let opts = RunOptions {
         root: d.path().to_path_buf(),
-        app: "x".into(),
+        config: paddock_dev::check::config::Config::bare("x"),
+        scope: None,
         only: None,
         files: None,
         today: "2026-11-13".into(),
