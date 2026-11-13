@@ -93,10 +93,41 @@ fn each_source_alone_moves_the_id() {
     git(&root, &["push", "-q", "origin", "--delete", "c"]);
     git(&root, &["update-ref", "-d", "refs/remotes/origin/c"]);
     assert_eq!(dev(&root, &[]).1["id"], "C31", "origin/b alone");
+    // origin/b is read from the live remote, so the branch leaves the remote too, not only this clone's copy of it.
+    git(&root, &["push", "-q", "origin", "--delete", "b"]);
     git(&root, &["update-ref", "-d", "refs/remotes/origin/b"]);
     assert_eq!(dev(&root, &[]).1["id"], "C21", "local a alone");
     git(&root, &["branch", "-q", "-D", "a"]);
     assert_eq!(dev(&root, &[]).1["id"], "C8", "main alone");
+}
+
+/// A branch another clone pushed after this clone's last fetch still counts: the scan reads the remote's branches live, not
+/// this clone's possibly stale `origin/*` copies (on 2026-11-13 C119, C120 and C121 were each taken twice by parallel branches).
+#[test]
+fn a_branch_pushed_from_another_clone_since_the_last_fetch_counts() {
+    let d = repo();
+    let root = d.path().join("work");
+    let other = d.path().join("other");
+    git(d.path(), &["clone", "-q", d.path().join("origin.git").to_str().unwrap(), "other"]);
+    git(&other, &["checkout", "-q", "-b", "e", "origin/main"]);
+    reserve_file(&other, 60, "e");
+    git(&other, &["add", "-A"]);
+    git(&other, &["commit", "-q", "-m", "chore: reserve"]);
+    git(&other, &["push", "-q", "origin", "e"]);
+    let (code, v, err) = dev(&root, &[]);
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(v["id"], "C61", "origin's branch e, unknown to this clone's refs: {err}");
+}
+
+/// Without the remote the scan cannot see the other branches: that is an error naming the remote, never a guess from the cache.
+#[test]
+fn an_unreachable_remote_is_an_error() {
+    let d = repo();
+    let root = d.path().join("work");
+    git(&root, &["remote", "set-url", "origin", d.path().join("gone.git").to_str().unwrap()]);
+    let (code, _, err) = dev(&root, &[]);
+    assert_ne!(code, 0, "{err}");
+    assert!(err.contains("origin"), "{err}");
 }
 
 #[test]

@@ -6,9 +6,11 @@
 //! `id = "C<n>"` line of `docs/gates.toml`, or a reservation file `conformance/reserved/C<n>-<branch-slug>` (`--reserve <branch>`
 //! creates one file per reservation, so two branches never touch the same file; the commit of that file is the reservation).
 //! Two reservation files with the same id (two branches that reserved it) are an error: the scan lists both branches. The scan reads
-//! the working tree and every distinct tip of every local branch and every `origin/*` branch: one `git for-each-ref`, one
-//! `git ls-tree` per distinct tip, one `git cat-file --batch` for the distinct blobs; no checkout. It is bounded ([`MAX_REFS`])
-//! and logs what it read and how long it took on standard error (ER-27). The id printed is the highest taken plus one.
+//! the working tree, every local branch and every branch of the origin remote as the remote has it now (`git ls-remote`, not this
+//! clone's possibly stale `origin/*` copies; tips this clone lacks are fetched first): one `git for-each-ref`, one `git ls-remote`,
+//! one `git cat-file --batch-check`, at most one `git fetch`, one `git ls-tree` per distinct tip and one `git cat-file --batch` for
+//! the distinct blobs; no checkout. A remote that cannot be read is an error, never a scan of the cache. It is bounded
+//! ([`MAX_REFS`]) and logs what it read and how long it took on standard error (ER-27). The id printed is the highest taken plus one.
 
 use crate::input_hash::{Exec, Real};
 use paddock_cli::{CliError, Report};
@@ -191,12 +193,7 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
     let listing = git(
         exec,
         root,
-        &[
-            "for-each-ref",
-            "--format=%(objectname) %(refname:short)",
-            "refs/heads",
-            "refs/remotes/origin",
-        ],
+        &["for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads"],
         None,
     )?;
     // One name per distinct tip: branches that point at the same commit read the same tree.
@@ -204,11 +201,12 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
     let mut refs = 0usize;
     for line in listing.lines() {
         let Some((sha, name)) = line.split_once(' ') else { continue };
-        if name == "origin" || name.ends_with("/HEAD") {
-            continue;
-        }
         refs += 1;
         tips.entry(sha.to_string()).or_insert_with(|| name.to_string());
+    }
+    for (sha, name) in remote_branches(exec, root)? {
+        refs += 1;
+        tips.entry(sha).or_insert_with(|| format!("{REMOTE}/{name}"));
     }
     if tips.len() > MAX_REFS {
         return Err(CliError::failure(format!(
@@ -217,6 +215,7 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
         ))
         .with_hint("Delete merged branches (`./dev worktree clean`, `git branch -d`) and run it again."));
     }
+    fetch_missing(exec, root, &tips)?;
     // Per tip: the files of the checks folder and the three listed files, as blob ids.
     let mut blobs: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for (sha, name) in &tips {
@@ -261,6 +260,65 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
         refs,
         tips: tips.len(),
         blobs: blobs.len(),
+    })
+}
+
+/// The remote whose branches every parallel branch is pushed to.
+const REMOTE: &str = "origin";
+
+/// The branches of [`REMOTE`] as the remote has them now: `(sha, branch name)` from one `git ls-remote --heads`. A failure is an
+/// error: the cached `origin/*` refs may miss a branch pushed since the last fetch, and a scan without it could hand out its id.
+fn remote_branches(exec: &dyn Exec, root: &Path) -> Result<Vec<(String, String)>, CliError> {
+    let out = git(exec, root, &["ls-remote", "--heads", REMOTE], None).map_err(|e| {
+        CliError::failure(format!(
+            "::error::check new-id: the branches of {REMOTE} could not be read live (git ls-remote --heads {REMOTE}): {e}"
+        ))
+        .with_hint("Check the network and `git remote -v`, then run it again; this clone's origin/* copies may miss a branch pushed since the last fetch.")
+    })?;
+    Ok(out
+        .lines()
+        .filter_map(|l| {
+            let (sha, name) = l.split_once('\t')?;
+            Some((sha.trim().to_string(), name.trim().strip_prefix("refs/heads/")?.to_string()))
+        })
+        .collect())
+}
+
+/// Fetches the remote tips this clone does not have yet (one `git cat-file --batch-check`, then at most one `git fetch` into
+/// their `origin/*` refs), so `ls-tree` can read them. A tip that is still missing afterwards fails the `ls-tree` that follows.
+fn fetch_missing(exec: &dyn Exec, root: &Path, tips: &BTreeMap<String, String>) -> Result<(), CliError> {
+    let prefix = format!("{REMOTE}/");
+    let remote: Vec<(&String, &str)> = tips.iter().filter_map(|(sha, n)| Some((sha, n.strip_prefix(&prefix)?))).collect();
+    if remote.is_empty() {
+        return Ok(());
+    }
+    let input: String = remote.iter().map(|(sha, _)| format!("{sha}^{{commit}}\n")).collect();
+    let out = git(exec, root, &["cat-file", "--batch-check"], Some(input.as_bytes()))?;
+    // Present only when cat-file says so (`<sha> commit <size>`); anything else is fetched.
+    let present: BTreeSet<&str> = out
+        .lines()
+        .filter_map(|l| {
+            let mut w = l.split_whitespace();
+            let sha = w.next()?;
+            (w.next() == Some("commit")).then_some(sha)
+        })
+        .collect();
+    let specs: Vec<String> = remote
+        .iter()
+        .filter(|(sha, _)| !present.contains(sha.as_str()))
+        .map(|(_, name)| format!("+refs/heads/{name}:refs/remotes/{REMOTE}/{name}"))
+        .collect();
+    if specs.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["fetch", "--quiet", "--no-tags", REMOTE];
+    args.extend(specs.iter().map(String::as_str));
+    git(exec, root, &args, None).map(|_| ()).map_err(|e| {
+        CliError::failure(format!(
+            "::error::check new-id: {} branch tip(s) of {REMOTE} are not in this clone and could not be fetched: {e}",
+            specs.len()
+        ))
+        .with_hint("Run `git fetch origin` and run it again.")
     })
 }
 

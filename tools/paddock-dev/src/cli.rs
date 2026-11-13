@@ -149,8 +149,8 @@ enum CheckCommand {
     /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
-    /// The next free conformance check id, read from the working tree, every local and origin branch and
-    /// conformance/reserved/ (ER-21: two branches took the same id four times). `--reserve <branch>` creates the reservation file.
+    /// The next free conformance check id, read from the working tree, every local branch, every branch of origin as the
+    /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id four times). `--reserve <branch>` creates the reservation file.
     NewId {
         /// Create conformance/reserved/C<n>-<branch-slug> (commit it: the commit is the reservation).
         #[arg(long)]
