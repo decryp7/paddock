@@ -4,6 +4,7 @@ import { RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { formatCount, formatDateTime } from '../core/format';
 import { describeError, Logger } from '../core/logger';
+import { LatestRequest } from '../shared/latest-request';
 import { QueryStore } from '../core/workspace/query.store';
 import { SelectionStore } from '../core/workspace/selection.store';
 import { UiPrefsStore } from '../core/workspace/ui-prefs.store';
@@ -103,6 +104,14 @@ export interface PlaceholderVm {
 }
 
 export type GridRowVm = RowVm | PlaceholderVm;
+
+/** How often one jump asks the engine while the query keeps changing under it, before it says so (ADR 0071). */
+export const JUMP_ATTEMPTS = 3;
+
+/** One key for a query and a sort order: a jump's answer is for exactly this view. */
+function viewKey(query: unknown, descending: boolean): string {
+  return JSON.stringify([query, descending]);
+}
 
 @Component({
   selector: 'debrief-events-grid',
@@ -315,6 +324,8 @@ export class EventsGrid {
   protected readonly total = this.rows.total;
   /** Why loading rows failed: a page or a jump to a record. */
   private readonly jumpError = signal<string | null>(null);
+  /** The view (query and order) a jump error is about: a reset to that same view keeps it, another view clears it. */
+  private jumpErrorView: string | null = null;
   protected readonly pageError = computed(() => this.rows.error() ?? this.jumpError());
   protected readonly sortLabel = computed(() => (this.prefs.descending() ? $localize`:@@grid.sort.newest:Newest first` : $localize`:@@grid.sort.oldest:Oldest first`));
   protected readonly emptyMessage = computed(() =>
@@ -345,8 +356,10 @@ export class EventsGrid {
   });
   /** Row to select once its page arrives (keyboard navigation to a page that is not loaded yet). */
   private pendingSelect: number | null = null;
-  /** The latest jump; an older one still waiting for the engine gives way. */
-  private jumpSeq = 0;
+  /** The jump in flight (ADR 0071): a newer jump, the user's selection or destruction makes it stale. */
+  private readonly jumps = new LatestRequest(inject(DestroyRef));
+  /** The "is the selected event still in the result" check of the latest reset. */
+  private readonly selectedCheck = new LatestRequest(inject(DestroyRef));
   /** The scrollTop we last wrote ourselves; scroll events at that position carry no new information. */
   private writtenScroll = Number.NaN;
 
@@ -502,7 +515,8 @@ export class EventsGrid {
 
   private reset(query: Parameters<PagedRowsStore['reset']>[0], descending: boolean): void {
     this.pendingSelect = null;
-    this.jumpError.set(null);
+    // A jump that gave up because the query kept changing reports on the view it ended on: that reset keeps it.
+    if (this.jumpErrorView !== viewKey(query, descending)) this.jumpError.set(null);
     this.selection.set(EMPTY_SELECTION);
     this.setTop(0);
     this.rows.reset(query, descending);
@@ -512,14 +526,13 @@ export class EventsGrid {
   /** Asks the engine whether the event the inspector shows is still in the result, so the inspector can say when it is not. */
   private async checkSelected(query: Parameters<PagedRowsStore['reset']>[0], descending: boolean): Promise<void> {
     const id = untracked(() => this.sel.selected())?.id;
-    if (id === undefined) return;
-    const gen = this.rows.generation;
-    try {
-      const res = await this.backend.queryPage({ query, offset: 0, limit: 1, descending, anchor: id });
-      if (gen === this.rows.generation) this.sel.setSelectedHidden(id, res.anchorIndex === null);
-    } catch {
-      // Unknown: the inspector keeps the event without a note rather than claiming it is hidden.
+    if (id === undefined) {
+      this.selectedCheck.cancel();
+      return;
     }
+    const answer = await this.selectedCheck.run(() => this.backend.queryPage({ query, offset: 0, limit: 1, descending, anchor: id }));
+    // A failed check is unknown: the inspector keeps the event without a note rather than claiming it is hidden.
+    if (answer.status === 'done') this.sel.setSelectedHidden(id, answer.value.anchorIndex === null);
   }
 
   /** Live tail changed the data: refetch what is on screen (old rows stay until the new ones arrive) and keep following. */
@@ -552,31 +565,37 @@ export class EventsGrid {
   }
 
   /**
-   * Jumps to record `id` under the current query. When the query changes while the engine answers (a restored search
-   * box's debounce, smart search), the answer is for the old result: it asks again against the new one instead of
-   * dropping the jump, so the record is still selected (a recovery reload restores query and selection together). A
-   * newer jump supersedes this one.
+   * Jumps to record `id` under the current query and sort order (ADR 0071). When the query changes while the engine
+   * answers (a restored search box's debounce, smart search), the answer is for the old result: it asks again, at most
+   * `JUMP_ATTEMPTS` times in all, then says so. A live refresh does not change the query and does not count. A newer
+   * jump, the user's own selection and the grid's destruction make the jump stale (`LatestRequest`): a stale answer or
+   * error is never acted on.
    */
   private async jumpTo(id: number): Promise<void> {
-    const seq = ++this.jumpSeq;
     for (let attempt = 1; ; attempt++) {
-      const query = this.rows.query ?? this.queryStore.effectiveQuery();
-      const gen = this.rows.generation;
-      let res;
-      try {
-        res = await this.backend.queryPage({ query, offset: 0, limit: 1, descending: this.prefs.descending(), anchor: id });
-      } catch (e) {
-        if (seq === this.jumpSeq && gen === this.rows.generation) this.jumpError.set(describeError(e));
+      const query = untracked(() => this.queryStore.effectiveQuery());
+      const descending = untracked(() => this.prefs.descending());
+      const asked = viewKey(query, descending);
+      const answer = await this.jumps.run(() => this.backend.queryPage({ query, offset: 0, limit: 1, descending, anchor: id }));
+      if (answer.status === 'stale') {
+        this.logger.debug('ui.grid', 'Jump superseded', { Attempt: attempt });
         return;
       }
-      if (seq !== this.jumpSeq) {
-        this.logger.debug('ui.grid', 'Jump superseded by a newer one', { Attempt: attempt });
+      if (asked !== this.viewKeyNow()) {
+        if (attempt < JUMP_ATTEMPTS) {
+          this.logger.info('ui.grid', 'Query changed during a jump; asking again', { Attempt: attempt, Failed: answer.status === 'failed' });
+          continue;
+        }
+        this.logger.warn('ui.grid', 'Jump given up: the query kept changing', { Attempts: attempt });
+        this.failJump($localize`:@@grid.jumpGaveUp:Could not go to the event: the filters kept changing. Try again.`);
         return;
       }
-      if (gen !== this.rows.generation) {
-        this.logger.info('ui.grid', 'Query changed during a jump; asking again', { Attempt: attempt });
-        continue;
+      if (answer.status === 'failed') {
+        this.logger.warn('ui.grid', 'Jump failed', { Attempt: attempt, Error: describeError(answer.error) });
+        this.failJump(describeError(answer.error));
+        return;
       }
+      const res = answer.value;
       this.logger.debug('ui.grid', 'Jump resolved', { Attempt: attempt, Found: res.anchorIndex !== null });
       if (res.anchorIndex === null || !res.rows.length) {
         this.sel.anchorResolved(null);
@@ -588,6 +607,25 @@ export class EventsGrid {
       this.revealRow(res.anchorIndex, 'center', res.total);
       return;
     }
+  }
+
+  /** The query and order the grid shows now (or is about to: the reset effect may not have run yet). */
+  private viewKeyNow(): string {
+    return viewKey(
+      untracked(() => this.queryStore.effectiveQuery()),
+      untracked(() => this.prefs.descending()),
+    );
+  }
+
+  private failJump(text: string): void {
+    this.jumpError.set(text);
+    this.jumpErrorView = this.viewKeyNow();
+  }
+
+  /** The user selected a row: a jump still on its way must not move the selection afterwards. */
+  private selectByUser(row: RecordView): void {
+    this.jumps.cancel();
+    this.sel.select(row);
   }
 
   private revealRow(index: number, mode: 'nearest' | 'center', total = this.total()): void {
@@ -630,7 +668,7 @@ export class EventsGrid {
   /** Dragging a row carries the event to other views (drop it on Notes to write a note on it). */
   protected onRowDragStart(e: DragEvent, row: RecordView): void {
     if (!e.dataTransfer) return;
-    this.sel.select(row);
+    this.selectByUser(row);
     writeEventDrag(e.dataTransfer, row);
   }
 
@@ -648,7 +686,7 @@ export class EventsGrid {
     if (e.shiftKey) this.selection.set(extendTo(sel, index));
     else if (e.ctrlKey || e.metaKey) this.selection.set(toggle(sel, index));
     else this.selection.set(single(index));
-    this.sel.select(row);
+    this.selectByUser(row);
   }
 
   /** Right-click inside the selection acts on all selected rows; elsewhere it selects and acts on that row only. */
@@ -656,7 +694,7 @@ export class EventsGrid {
     e.preventDefault();
     const sel = this.selection();
     this.selection.set(contains(sel, index) ? withFocus(sel, index) : single(index));
-    this.sel.select(row);
+    this.selectByUser(row);
     this.actions.openFor(e, row, { records: this.selectedRecords() });
   }
 
@@ -694,8 +732,9 @@ export class EventsGrid {
     const row = this.rows.rowAt(next);
     if (row) {
       this.pendingSelect = null;
-      this.sel.select(row);
+      this.selectByUser(row);
     } else {
+      this.jumps.cancel();
       this.pendingSelect = next;
       this.rows.ensurePage(this.rows.pageOf(next));
     }
