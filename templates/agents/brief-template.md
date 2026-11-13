@@ -31,12 +31,16 @@ Decisions: <what the user or an accepted ADR already decided, and what was ruled
 ## Checks
 
 Gates: <the exact commands, in order: fmt, clippy on the host and through xwin, the touched tests, `./dev gates check`, commit-lint, and the conformance line if conformance is touched>
-Heavy steps: through /Volumes/d8sst7/dev.decryptology.net/engineering-rules/scripts/heavy.sh, with CARGO_BUILD_JOBS=2 and a private CARGO_TARGET_DIR under /Volumes/d8sst7/dev-targets/build/.
+Heavy steps: through /Volumes/d8sst7/dev.decryptology.net/engineering-rules/scripts/heavy.sh (the slot), with CARGO_BUILD_JOBS=2, NEXTEST_TEST_THREADS=4 and a private CARGO_TARGET_DIR under /Volumes/d8sst7/dev-targets/build/, only while the 5-minute load is under 15.
 
 ## Rules every brief repeats
 
 - Commit subjects are 100 characters or fewer (the commit-msg hook rejects longer ones); put the detail in the body. After a rejected commit run `git diff --cached --stat` so staged files do not ride along with the next one.
 - No attribution anywhere: no Co-Authored-By, no "Generated with", no session trailers, in commits, PRs, code or docs.
+- Run the gates (including `./dev gates check`) and pre-push on the FINAL commit, not on an earlier one.
+- Never filter `git commit` or `git push` output (no grep, head or tail): a hook rejection hidden by a filter went unseen 3 times on 2026-11-13.
+- Base shared-tooling branches on the newest train head, not main, and name the in-flight mechanisms (branches that touch the same tool) in the brief.
+- Check IDs come from `./dev check new-id`, never picked by hand.
 - Scratch files only under /Volumes/d8sst7/dev-targets/. Never /tmp, /var/folders or the internal disk.
 - Never `git stash`. Push your branch once; do not dispatch CI unless this brief says so.
 

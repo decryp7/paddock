@@ -116,7 +116,7 @@ const REQUIRED: [&str; 9] = [
 const REQUIRED_LITE: [&str; 5] = ["role", "agent id", "worktree", "scratch", "report"];
 
 /// Statements every brief makes, as (code, pattern, what to say); the first and second do not apply to a short brief.
-const STATEMENTS: [(&str, &str, &str); 6] = [
+const STATEMENTS: [(&str, &str, &str); 11] = [
     (
         "no-agent-id-export",
         r"PADDOCK_AGENT_ID",
@@ -146,6 +146,31 @@ const STATEMENTS: [(&str, &str, &str); 6] = [
         "no-hand-off",
         r"(?i)tip sha|hand-off|hand off",
         "say what the hand-off reports (the tip SHA, red output, gates run and not run)",
+    ),
+    (
+        "no-final-commit-gates",
+        r"(?i)final commit",
+        "say the gates (including `./dev gates check`) and pre-push run on the FINAL commit",
+    ),
+    (
+        "no-unfiltered-git-output",
+        r"(?i)never filter[^\n]*git (?:commit|push)",
+        "say never to filter `git commit` or `git push` output (a hook rejection hidden by grep)",
+    ),
+    (
+        "no-heavy-caps",
+        r"NEXTEST_TEST_THREADS",
+        "say heavy steps go through the slot with NEXTEST_TEST_THREADS and CARGO_BUILD_JOBS caps",
+    ),
+    (
+        "no-train-base-rule",
+        r"(?i)newest train head",
+        "say shared-tooling branches are based on the newest train head, not main, and name the in-flight mechanisms",
+    ),
+    (
+        "no-check-new-id",
+        r"check new-id",
+        "say check IDs come from `./dev check new-id`",
     ),
 ];
 
@@ -331,7 +356,18 @@ pub fn check(text: &str) -> Vec<Finding> {
         found.extend(order(text));
     }
     for (code, pat, say) in STATEMENTS {
-        if lite && matches!(code, "no-agent-id-export" | "no-subject-limit") {
+        if lite
+            && matches!(
+                code,
+                "no-agent-id-export"
+                    | "no-subject-limit"
+                    | "no-final-commit-gates"
+                    | "no-unfiltered-git-output"
+                    | "no-heavy-caps"
+                    | "no-train-base-rule"
+                    | "no-check-new-id"
+            )
+        {
             continue;
         }
         if !re(pat).is_match(text) {
@@ -721,6 +757,21 @@ mod tests {
     fn a_bad_agent_id_is_refused() {
         let text = filled().replace("Agent id: implementer:dev-load.", "Agent id: dev-load.");
         assert!(codes(&text).contains(&"bad-agent-id"));
+    }
+
+    #[test]
+    fn the_five_tooling_rules_are_required_statements() {
+        for (code, needle) in [
+            ("no-final-commit-gates", "FINAL commit"),
+            ("no-unfiltered-git-output", "Never filter"),
+            ("no-heavy-caps", "NEXTEST_TEST_THREADS"),
+            ("no-train-base-rule", "newest train head"),
+            ("no-check-new-id", "check new-id"),
+        ] {
+            let text: String = filled().lines().filter(|l| !l.contains(needle)).collect::<Vec<_>>().join("\n");
+            assert!(codes(&text).contains(&code), "{code}");
+            assert!(!codes(&filled()).contains(&code), "{code} fires on the template");
+        }
     }
 
     #[test]
