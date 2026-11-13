@@ -83,7 +83,7 @@ pub enum Planned {
 /// What the plan alone cannot say; read from the repository once by the caller.
 #[derive(Debug, Clone, Default)]
 pub struct Facts {
-    /// The conformance command's arguments after `node`, read from ci.yml's one line, or why that failed.
+    /// The conformance command's arguments after `node`, read from conformance/paddock.ci.json, or why that failed.
     pub conformance: Option<Result<Vec<String>, String>>,
     /// Workspace folders whose CI lints Windows too (`apps/<app>`, from `windowsClippy`); `crates` always does.
     pub windows_clippy: BTreeSet<String>,
@@ -419,10 +419,10 @@ fn conformance(plan: &Value, facts: &Facts) -> Planned {
     match &facts.conformance {
         Some(Ok(args)) => Planned::Run(Gate {
             args: args.clone(),
-            ..gate(id, "", "node", &[], 0, "fix the finding it printed; the list of checks is ci.yml's own (\"Paddock itself\" step)".into())
+            ..gate(id, "", "node", &[], 0, "fix the finding it printed; the list of checks is the `conformance` field of conformance/paddock.ci.json (CI's \"Paddock itself\" step runs the same)".into())
         }),
-        Some(Err(e)) => Planned::Broken { id, cause: e.clone(), next: "keep exactly one `node conformance/bin/paddock-conformance.mjs --app paddock ... --only ...` line in .gitea/workflows/ci.yml".into() },
-        None => Planned::Broken { id, cause: "ci.yml was not read".into(), next: "report this: the caller of plan_gates must fill Facts::conformance".into() },
+        Some(Err(e)) => Planned::Broken { id, cause: e.clone(), next: "fix the `conformance` object in conformance/paddock.ci.json (app, root, only, strict)".into() },
+        None => Planned::Broken { id, cause: "the conformance contract was not read".into(), next: "report this: the caller of plan_gates must fill Facts::conformance".into() },
     }
 }
 

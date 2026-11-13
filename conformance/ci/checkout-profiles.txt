@@ -43,7 +43,6 @@ exclude bundle apps/*/docs/screenshots each app's documentation screenshots, reg
 exclude bundle apps/*/docs/images each app's diagrams and posters
 exclude bundle apps/*/docs/design each app's design sheets
 
-mention .gitea/workflows/ci.yml comment on what conformance (Linux) checks
 mention conformance/src/ C24 and its context read the screenshot folders in the conformance job (Linux, full checkout)
 mention docs/generators.toml the icons entry names docs/images paths its check reads (the icons generator's own outputs; its check needs a full checkout and runs locally, not on a lean clone)
 mention paddock.conformance.json names the screenshot folder C24 checks (conformance job, Linux)

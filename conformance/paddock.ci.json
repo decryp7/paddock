@@ -1,0 +1,54 @@
+{
+  "$comment": "The CI contract of the conformance package and of Paddock's own conformance run (ADR 0038 §1). `conformance` is the one copy of the checks Paddock runs on itself (plan X9): ci.yml's conformance job, the merge queue's train-gates job (`./dev ci run conformance paddock`) and `./dev check --pre-push` all read it. Only the checks that apply to a library repository run; the rest are skipped on purpose, each for a reason: C03 icons, C04 macOS signing, C13 Rust lint preset (needs a root Cargo.toml; the crates workspace is crates/), C28 repo baseline (Paddock is the source of templates/repo), C29 window weight (the demo's budgets are not set) are app-only or Paddock owns the source of what they compare; C07 release preflight and C08 release artifacts: Paddock releases through publish.yml, not an app release job; C23 commit lint and doc blocks: Paddock's AGENTS.md is the source of the blocks, and its history predates the 100-character subject rule. C24 needs every committed image reviewed (the REVIEWED.md list beside the images). C37 needs one test binary per crate and every crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 and C30 (wall clock) report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated waiver (paddock.waivers.toml). C71 (tests do not settle on real time) compares its baseline with the merge base's with origin/main, so the job's checkout has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).",
+  "conformance": {
+    "app": "paddock",
+    "root": ".",
+    "only": [
+      "C06",
+      "C14",
+      "C15",
+      "C16",
+      "C23",
+      "C24",
+      "C29",
+      "C30",
+      "C31",
+      "C34",
+      "C35",
+      "C36",
+      "C37",
+      "C39",
+      "C43",
+      "C45",
+      "C48",
+      "C53",
+      "C54",
+      "C56",
+      "C57",
+      "C59",
+      "C71",
+      "C79",
+      "C98",
+      "C104",
+      "C110",
+      "C111",
+      "C112",
+      "C113",
+      "C114",
+      "C115",
+      "C116",
+      "C117",
+      "C118"
+    ],
+    "strict": [
+      "C36"
+    ]
+  },
+  "tests": [
+    "cd conformance",
+    "npm test"
+  ],
+  "paddock": [
+    "node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS"
+  ]
+}

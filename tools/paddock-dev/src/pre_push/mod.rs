@@ -2,7 +2,8 @@
 //! what this push changes, run here first, in parallel, bounded by the machine's load (ER-24).
 //!
 //! - [`gates`]: the plan and the changed files become gates (pure).
-//! - [`ci_line`]: the conformance command, read from ci.yml in this one place.
+//! - the conformance command comes from `conformance/paddock.ci.json` ([`crate::ci_run::contract::conformance_args_at`]): the one copy
+//!   of the check list, which CI's conformance and train-gates jobs run through `./dev ci run conformance paddock` (ADR 0038 §1).
 //! - [`exec`]: running them, with a fake for tests.
 //!
 //! What is checked. With `--refs-from-stdin` (the hook) exactly the commit being pushed: it is checked out in a throw-away worktree
@@ -20,7 +21,6 @@
 //! `PADDOCK_ACCEPT_NOT_MEASURED=<full row ids>` (or `--accept-not-measured`) lets those not-measured rows pass the push; it is
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
-pub mod ci_line;
 pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
@@ -422,7 +422,7 @@ fn accepted_ids(option: &[String], env: &HashMap<String, String>) -> Vec<String>
 const SECOND_SIGNAL_EXIT: i32 = 130;
 
 #[cfg(unix)]
-fn stop_on_signals(stop: &Arc<AtomicBool>) {
+pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
     use signal_hook::consts::{SIGINT, SIGTERM};
     for sig in [SIGINT, SIGTERM] {
         // Registered first, so it sees the flag the second signal finds set: the first signal only sets the flag (the gates end,
@@ -434,7 +434,7 @@ fn stop_on_signals(stop: &Arc<AtomicBool>) {
 
 /// Windows: Ctrl+C reaches the whole console group; the handler sets the same flag so the table prints and the gates end.
 #[cfg(windows)]
-fn stop_on_signals(stop: &Arc<AtomicBool>) {
+pub(crate) fn stop_on_signals(stop: &Arc<AtomicBool>) {
     let flag = Arc::clone(stop);
     let _ = ctrlc::set_handler(move || {
         if flag.swap(true, Ordering::SeqCst) {
@@ -837,11 +837,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     Ok((Change { files: changed, ranges }, notes, extra))
 }
 
-/// What the repository says that the plan does not: ci.yml's conformance line, the apps that lint Windows, the CI image.
+/// What the repository says that the plan does not: the conformance contract's check list, the apps that lint Windows, the CI image.
 fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts {
-    let ci = std::fs::read_to_string(root.join(".gitea/workflows/ci.yml"))
-        .map_err(|e| format!("ci.yml cannot be read: {e}"))
-        .and_then(|t| ci_line::conformance_args(&t));
+    let ci = crate::ci_run::contract::conformance_args_at(root);
     let mut windows = std::collections::BTreeSet::new();
     for ws in gates::workspaces(plan) {
         let Some(app) = ws.strip_prefix("apps/").and_then(|r| r.split('/').next()) else {

@@ -45,9 +45,11 @@
 pub mod brief_check;
 pub mod check;
 pub mod child_env;
+pub mod ci_build_env;
 pub mod ci_build_jobs;
 pub mod ci_host;
 pub mod ci_isolation;
+pub mod ci_run;
 pub mod ci_runs;
 pub mod ci_setup_rust;
 pub mod ci_tool;

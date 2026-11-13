@@ -7,6 +7,7 @@
 #   kit.sh which                     prints dev or shell (the reason goes to stderr)
 #   kit.sh isolation <args>          `./dev ci isolation <args>` (or job-isolation.sh <args>)
 #   kit.sh build-jobs [<split>]      `./dev ci build-jobs [<split>]` (or build-jobs.sh [<split>])
+#   kit.sh build-env                 `./dev ci build-env` (or node build-env.mjs): PADDOCK_BUILD_COMMIT and PADDOCK_BUILD_DATE
 #   kit.sh host <step> <args>        a host-runner step (WP-4), in Rust or in the shell it had:
 #     stable-workspace <name>                     ci stable-workspace --name | host/stable-workspace.sh (NAME)
 #     node-caches <angular-dir> <name>            ci node-caches --angular-dir --name | host/node-caches.sh (ANGULAR_DIR, NAME)
@@ -226,8 +227,12 @@ case "${1:-}" in
     fi
     job_setup bash "$here/build-jobs.sh" "$@"
     ;;
+  build-env)
+    if [ "$kit" = dev ]; then dev_run build-env; fi
+    exec node "$here/build-env.mjs"
+    ;;
   *)
-    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | host <step> <args>" >&2
+    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | build-env | host <step> <args>" >&2
     exit 2
     ;;
 esac
