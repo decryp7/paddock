@@ -1983,3 +1983,14 @@ for a step's pipe after the step ends and then ends every process of the step's 
 `acquire` clears the inherit flag of every handle it has before it starts the holder, and refuses to start one when it cannot
 (`tools/paddock-dev/src/fds.rs`). Lesson: a process meant to outlive its step must carry nothing of the step; on Windows that
 means the whole handle table, and a check of the standard handles alone passes while the real chain fails.
+
+## Eight combination failures on train 8 (2026-11-13, ADR 0098)
+Train 8's integrator made eight fixes after the merges (run 8050: 13 failing tests or jobs, 12 new against main). Each branch
+had passed its own checks against its merge base: a new rule met new code (`cd0c3aa14` canonicalize ban, `6394bc365` and
+`b51ef0308` C71, `ecb6f33ad` the safe_remove allow list), or a test read another area's text or layout (`11c365fc4` a moved
+file, `0308201b4` a span ended at a remembered comment, `bddd2947c` a `sed` over ci.yml while `ci_line::conformance_args`
+existed, `be69a31f6` a hand list that had to equal `cargo metadata`). Three of the eight were siblings in review at the same
+time, so a trial before approval onto the open train could not have seen them; only a check at the merge does. What changed:
+the member gate at each merge (`./dev merge check --gates`), the blame command (`./dev ci triage --members`), the one-reader
+rule 79 with C119 (report-only), and the trial dispatch (`./dev ci dispatch --trial`). **Class: train-time combination
+failures (the queue's Q3 and ER-8 already named it; ADR 0098).**
