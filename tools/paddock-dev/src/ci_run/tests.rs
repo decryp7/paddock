@@ -287,7 +287,10 @@ fn the_contracts_run_exactly_the_commands_ci_ran_before_the_executor() {
             "job {job} has no row in the golden or in the model: the comparison would prove nothing"
         );
     }
-    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+    // The Windows runner checks out with core.autocrlf true: the job headers end in \r\n there.
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml"))
+        .unwrap()
+        .replace("\r\n", "\n");
     let train = ci.split("\n  train-gates:\n").nth(1).unwrap().split("\n  app:\n").next().unwrap();
     assert!(
         train.contains("run: ./dev ci run conformance paddock"),
