@@ -1,0 +1,19 @@
+use paddock_env::cargo_layout;
+
+fn layout() {
+    let d = cargo_layout::profile_dir_of_exe(&std::env::current_exe().unwrap());
+}
+
+// the old guess: current_exe().parent().parent() and the deps/ folder
+/// target/debug/deps/ in a doc comment
+fn one_hop() {
+    let here = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    let n = "dependencies";
+    let s = "a/deps_list/b";
+}
+
+fn statements() {
+    let e = std::env::current_exe().unwrap();
+    let up = e.parent().unwrap();
+    let d = up.parent().unwrap();
+}

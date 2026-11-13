@@ -63,7 +63,7 @@ fn options(root: &Path) -> RunOptions {
     RunOptions {
         root: root.to_path_buf(),
         app: "fixture".into(),
-        only: Some(vec!["C39".into(), "C53".into()]),
+        only: Some(vec!["C39".into(), "C53".into(), "C119".into()]),
         files: None,
         today: "2026-11-10".into(),
     }
@@ -206,7 +206,7 @@ import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
 const now = process.env.RT5_NOW ? new Date(process.env.RT5_NOW) : undefined;
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53'], options: { now } });
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C39', 'C53', 'C119'], options: { now } });
 process.stdout.write(JSON.stringify(r));
 "#;
 
@@ -419,7 +419,7 @@ fn a_whole_tree_run_that_looks_at_nothing_is_an_error_no_waiver_covers() {
     .unwrap();
     let r = run_checks(&options(d.path()), &registry()).unwrap();
     let broken: Vec<_> = r.findings.iter().filter(|f| f.unwaivable).collect();
-    assert_eq!(broken.len(), 2, "{:?}", r.findings);
+    assert_eq!(broken.len(), 3, "{:?}", r.findings);
     assert!(broken[0].message.starts_with("not measured"));
     assert!(r.waived.is_empty());
     assert_eq!(r.runs[0].record.status(true).name(), "not measured");
@@ -740,7 +740,7 @@ fn zero_probes_with_a_rust_file_present_and_no_rust_file_at_all_are_both_not_mea
         "{:?}",
         r.findings
     );
-    assert_eq!(r.errors(), 2);
+    assert_eq!(r.errors(), 3);
     let d = tempfile::tempdir().unwrap();
     std::fs::write(d.path().join("readme.md"), "x").unwrap();
     let r = run_checks(&options(d.path()), &registry()).unwrap();
