@@ -261,6 +261,14 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
     } else {
         read("calls").replace("token=tok-secret", "token=")
     };
+    // The raw output, before `norm`: the harness shows it only for a failing test, where a normalised line (a filtered job-control
+    // note, a replaced spelling) could otherwise hide what the step really printed (ER-27).
+    eprintln!(
+        "---- {} raw output (exit {:?}) ----\n{}",
+        if rust { "Rust" } else { "shell" },
+        out.status,
+        String::from_utf8_lossy(&out.stdout)
+    );
     Seen {
         code: out.status.code().unwrap_or(-1),
         stdout: norm(&String::from_utf8_lossy(&out.stdout), fx),
@@ -868,7 +876,10 @@ fn git(fx: &Fx, dir: &Path, args: &[&str]) -> String {
 
 /// An origin that allows partial clones and fetches by commit (as the Gitea server does) with one commit, and the job's bootstrap
 /// checkout of it at `work/abc/hostexecutor` (what `actions/checkout` leaves, with its credential header), and the profile file.
+/// No git of the fixture or of the step starts background maintenance (`kept_fixture_repos_start_no_background_git_maintenance`): a
+/// detached `git maintenance run --auto` outlives its command and writes into the repositories the test copies and compares.
 fn kept_fixture(fx: &Fx) {
+    fx.write("home/.gitconfig", "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n");
     let (repo, origin) = (fx.p("work-repo"), fx.p("origin.git"));
     std::fs::create_dir_all(&repo).unwrap();
     git(fx, &repo, &["init", "-q"]);
@@ -1278,6 +1289,84 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
     assert!(seen.stdout.contains("did not finish within 1 s"), "{}", seen.stdout);
     assert!(seen.stdout.contains("building from the work folder"), "{}", seen.stdout);
     assert!(!seen.stdout.contains("::error::"), "{}", seen.stdout);
+}
+
+#[test]
+fn kept_fixture_repos_start_no_background_git_maintenance() {
+    // `git commit`, `fetch` and a push's `receive-pack` start `git maintenance run --auto --detach`, which holds
+    // `objects/maintenance.lock` after the command returns. `git clone --bare work-repo origin.git` copies the objects folder file by
+    // file, the lock with it when the commit's maintenance still runs: under load one fixture's origin then carried the lock and the
+    // other's did not (or the copy failed on the vanishing lock), and the parity of the two trees failed. Measured with the fixture's
+    // commit-then-clone, 8 loops in parallel: 104 of 1200 clones copied the lock, 0 of 1200 with `maintenance.auto=false`.
+    let fx = fixture();
+    kept_fixture(&fx);
+    for (dir, path) in [
+        ("work-repo", "/usr/bin:/bin"),
+        ("origin.git", "/usr/bin:/bin"),
+        ("work/abc/hostexecutor", "/usr/bin:/bin"),
+        ("work-repo", &std::env::var("PATH").unwrap()),
+    ] {
+        // The step's environment (a cleared one, the fixture's HOME) and the fixture's own git (the test's PATH).
+        let get = |key: &str| {
+            let out = paddock_proc::command("git")
+                .args(["config", "--get", key])
+                .current_dir(fx.p(dir))
+                .env_clear()
+                .env("PATH", path)
+                .env("HOME", fx.p("home"))
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        assert_eq!(
+            (get("maintenance.auto"), get("gc.auto")),
+            ("false".to_string(), "0".to_string()),
+            "{dir} (PATH {path}): git would start background maintenance in the fixture's repositories"
+        );
+    }
+}
+
+/// `bounded.sh` with a fake clock: `SECONDS` is a plain variable that the fake `sleep` (the poll's wait) moves one second per call,
+/// `pgrep` names a fixed process tree (100 -> 101 -> 102) and `kill` records whom it ends. Prints what the script under test did.
+fn bounded_sh(body: &str) -> String {
+    let script = format!(
+        "unset SECONDS; SECONDS=0\nsleep() {{ SECONDS=$((SECONDS + 1)); }}\n. '{}'\n{body}",
+        repo().join("conformance/ci/bounded.sh").display()
+    );
+    let fx = fixture();
+    fx.script("bin/pgrep", "case \"$2\" in 100) echo 101;; 101) echo 102;; esac");
+    let out = paddock_proc::command("bash")
+        .args(["-c", &script])
+        .env_clear()
+        .env("PATH", format!("{}:/usr/bin:/bin", fx.p("bin").display()))
+        .env("SCRATCH", fx.p("work"))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+#[test]
+fn bounded_sh_never_ends_a_phase_before_its_limit() {
+    // `SECONDS` counts whole seconds: a phase that starts at 0.9 s reads 1 s elapsed at 1.0 s. Ending it at `elapsed >= limit` ended
+    // phases of 0.2 to 1 s as "did not finish within 1 s" (measured: 9 of 20 phases of 0.5 s); `elapsed > limit` means more than
+    // `limit` seconds really passed.
+    let out = bounded_sh(
+        "tool=t limit=3 hint=h scratch=\"$SCRATCH\" BOUNDED_SOFT=1\nhang() { exec /bin/sleep 30; }\nbounded hang hang; echo \"rc=$? ticks=$SECONDS\"",
+    );
+    assert!(
+        out.ends_with("rc=124 ticks=4"),
+        "the phase must outlive its limit (3) by the clock's whole second: {out}"
+    );
+}
+
+#[test]
+fn bounded_sh_ends_a_process_tree_parent_first() {
+    // Ending the children first let the phase's shell see its child killed and write bash's `Killed: 9` note into the phase's error
+    // output, which then stood in the warning's `Last output` (seen under load: 3 of 180 runs of the hung-phase test).
+    let out = bounded_sh("kill() { echo \"killed $2\"; }\nkill_tree 100");
+    assert_eq!(out, "killed 100\nkilled 101\nkilled 102", "a parent is ended before its children");
 }
 
 // ---- boot-volume ----
