@@ -2,8 +2,10 @@
 //! (twice), C113 and C119 were each taken by two parallel branches; `check-ids-unique` sees one tree only).
 //!
 //! An id is taken when any of these names it: a file `conformance/src/checks/C<n>-*.mjs`, an `import C<n>` in that folder's
-//! `index.mjs`, a `| C<n> |` row of `conformance/README.md`, or a line `C<n> <branch> <date>` of `conformance/reserved-ids.txt`
-//! (the reservation file: `--reserve <branch>` appends one line, and the commit of that line is the reservation). The scan reads
+//! `index.mjs`, a `| C<n> |` row of `conformance/README.md`, a Rust check file `tools/paddock-dev/src/check/c<n>*.rs`, an
+//! `id = "C<n>"` line of `docs/gates.toml`, or a reservation file `conformance/reserved/C<n>-<branch-slug>` (`--reserve <branch>`
+//! creates one file per reservation, so two branches never touch the same file; the commit of that file is the reservation).
+//! Two reservation files with the same id (two branches that reserved it) are an error: the scan lists both branches. The scan reads
 //! the working tree and every distinct tip of every local branch and every `origin/*` branch: one `git for-each-ref`, one
 //! `git ls-tree` per distinct tip, one `git cat-file --batch` for the distinct blobs; no checkout. It is bounded ([`MAX_REFS`])
 //! and logs what it read and how long it took on standard error (ER-27). The id printed is the highest taken plus one.
@@ -17,14 +19,16 @@ use std::time::Instant;
 
 /// The folder of the check modules and their `index.mjs`.
 const CHECKS_DIR: &str = "conformance/src/checks";
-/// The reservation file.
-pub const RESERVED: &str = "conformance/reserved-ids.txt";
+/// The folder of the reservation files, one per reservation.
+pub const RESERVED_DIR: &str = "conformance/reserved";
+/// The Rust-hosted checks (`c119.rs`).
+const RUST_DIR: &str = "tools/paddock-dev/src/check";
+/// The gate register, whose `id = "C<n>"` lines name checks too.
+const GATES: &str = "docs/gates.toml";
 /// The README whose table lists every check (Rust-hosted ones too).
 const README: &str = "conformance/README.md";
 /// The most distinct branch tips scanned; more is an error, not a silent cut (a stale-branch cleanup is the next step).
 pub const MAX_REFS: usize = 3000;
-
-const HEADER: &str = "# Reserved conformance check ids: `./dev check new-id --reserve <branch>` appends `C<n> <branch> <date>`; the commit is the reservation.\n";
 
 /// The number of a check id word (`C121` gives 121).
 fn id_number(word: &str) -> Option<u32> {
@@ -35,11 +39,46 @@ fn id_number(word: &str) -> Option<u32> {
     digits.parse().ok()
 }
 
-/// The id of a path in the checks folder (`conformance/src/checks/C121-name.mjs`).
+/// The id of a path that names one: a check module (`conformance/src/checks/C121-name.mjs`), a Rust check
+/// (`tools/paddock-dev/src/check/c121.rs`) or a reservation file (`conformance/reserved/C121-slug`).
 pub fn id_of_path(path: &str) -> Option<u32> {
-    let name = path.strip_prefix(CHECKS_DIR)?.strip_prefix('/')?;
-    let word = name.split(['-', '.']).next()?;
-    id_number(word)
+    if let Some(name) = path.strip_prefix(RUST_DIR).and_then(|n| n.strip_prefix('/')) {
+        let word = name.strip_prefix('c')?.split(['-', '.', '_']).next()?;
+        return id_number(&format!("C{word}"));
+    }
+    let name = path
+        .strip_prefix(CHECKS_DIR)
+        .or_else(|| path.strip_prefix(RESERVED_DIR))?
+        .strip_prefix('/')?;
+    id_number(name.split(['-', '.']).next()?)
+}
+
+/// The branch slug of a reservation file name (`C121-feat-x` gives `feat-x`).
+fn reservation_slug(path: &str) -> Option<&str> {
+    path.strip_prefix(RESERVED_DIR)?.strip_prefix('/')?.split_once('-').map(|s| s.1)
+}
+
+/// A branch name as a file name part: lower-case letters, digits and dots, anything else a single `-`.
+pub fn slug(branch: &str) -> String {
+    let mut s = String::new();
+    for c in branch.chars() {
+        if c.is_ascii_alphanumeric() || c == '.' {
+            s.push(c.to_ascii_lowercase());
+        } else if !s.ends_with('-') {
+            s.push('-');
+        }
+    }
+    s.trim_matches('-').to_string()
+}
+
+/// The ids of `id = "C<n>"` lines (the gate register).
+pub fn ids_of_gates(text: &str) -> Vec<u32> {
+    text.lines()
+        .filter_map(|l| {
+            let v = l.trim().strip_prefix("id")?.trim_start().strip_prefix('=')?.trim();
+            id_number(v.trim_matches('"'))
+        })
+        .collect()
 }
 
 /// The ids imported by an `index.mjs` (`import C121 from ...`).
@@ -63,21 +102,12 @@ pub fn ids_of_readme(text: &str) -> Vec<u32> {
         .collect()
 }
 
-/// The reservations of the file: `(id, branch)`; comments and blank lines are skipped.
-pub fn reservations(text: &str) -> Vec<(u32, String)> {
-    text.lines()
-        .filter(|l| !l.trim_start().starts_with('#'))
-        .filter_map(|l| {
-            let mut w = l.split_whitespace();
-            Some((id_number(w.next()?)?, w.next().unwrap_or("").to_string()))
-        })
-        .collect()
-}
-
 /// Where each taken id was seen (a few source names, for the report).
 #[derive(Default)]
 pub struct Taken {
     by_id: BTreeMap<u32, BTreeSet<String>>,
+    /// Reservation file names per id (two different names for one id are a double reservation).
+    reserved: BTreeMap<u32, BTreeSet<String>>,
 }
 
 impl Taken {
@@ -95,13 +125,22 @@ impl Taken {
         self.by_id.get(&id)?.iter().next().map(String::as_str)
     }
 
+    /// The ids reserved by more than one file: `(id, file names)`.
+    pub fn double_reservations(&self) -> Vec<(u32, Vec<String>)> {
+        self.reserved
+            .iter()
+            .filter(|(_, f)| f.len() > 1)
+            .map(|(i, f)| (*i, f.iter().cloned().collect()))
+            .collect()
+    }
+
     fn add_file(&mut self, path: &str, text: &str, source: &str) {
         let ids: Vec<u32> = if path.ends_with("/index.mjs") {
             ids_of_index(text)
         } else if path == README {
             ids_of_readme(text)
-        } else if path == RESERVED {
-            reservations(text).into_iter().map(|r| r.0).collect()
+        } else if path == GATES {
+            ids_of_gates(text)
         } else {
             vec![]
         };
@@ -131,14 +170,20 @@ pub struct Scan {
 pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
     let mut taken = Taken::default();
     // The working tree: what this checkout has, committed or not.
-    if let Ok(rd) = std::fs::read_dir(root.join(CHECKS_DIR)) {
-        for e in rd.flatten() {
-            if let Some(id) = id_of_path(&format!("{CHECKS_DIR}/{}", e.file_name().to_string_lossy())) {
-                taken.add(id, "working tree");
+    for dir in [CHECKS_DIR, RUST_DIR, RESERVED_DIR] {
+        if let Ok(rd) = std::fs::read_dir(root.join(dir)) {
+            for e in rd.flatten() {
+                let path = format!("{dir}/{}", e.file_name().to_string_lossy());
+                if let Some(id) = id_of_path(&path) {
+                    taken.add(id, "working tree");
+                    if dir == RESERVED_DIR {
+                        taken.reserved.entry(id).or_default().insert(path);
+                    }
+                }
             }
         }
     }
-    for rel in [format!("{CHECKS_DIR}/index.mjs"), README.to_string(), RESERVED.to_string()] {
+    for rel in [format!("{CHECKS_DIR}/index.mjs"), README.to_string(), GATES.to_string()] {
         if let Ok(text) = std::fs::read_to_string(root.join(&rel)) {
             taken.add_file(&rel, &text, "working tree");
         }
@@ -175,14 +220,22 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
     // Per tip: the files of the checks folder and the three listed files, as blob ids.
     let mut blobs: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
     for (sha, name) in &tips {
-        let out = git(exec, root, &["ls-tree", "-r", sha, "--", CHECKS_DIR, README, RESERVED], None)?;
+        let out = git(
+            exec,
+            root,
+            &["ls-tree", "-r", sha, "--", CHECKS_DIR, RUST_DIR, RESERVED_DIR, README, GATES],
+            None,
+        )?;
         for l in out.lines() {
             let Some((meta, path)) = l.split_once('\t') else { continue };
             if let Some(id) = id_of_path(path) {
                 taken.add(id, name);
+                if path.starts_with(RESERVED_DIR) {
+                    taken.reserved.entry(id).or_default().insert(path.to_string());
+                }
             }
             let blob = meta.split_whitespace().nth(2).unwrap_or("");
-            if path.ends_with("/index.mjs") || path == README || path == RESERVED {
+            if path.ends_with("/index.mjs") || path == README || path == GATES {
                 blobs.entry(blob.to_string()).or_default().push((path.to_string(), name.clone()));
             }
         }
@@ -190,7 +243,15 @@ pub fn scan(exec: &dyn Exec, root: &Path) -> Result<Scan, CliError> {
     let wanted: Vec<&String> = blobs.keys().collect();
     let texts = read_blobs(exec, root, &wanted)?;
     for (blob, users) in &blobs {
-        let Some(text) = texts.get(blob) else { continue };
+        let Some(text) = texts.get(blob) else {
+            let at = users.first().map_or("?", |u| u.0.as_str());
+            return Err(CliError::failure(format!(
+                "::error::check new-id: git cat-file returned nothing for {at} (blob {blob}), so its ids were not read."
+            ))
+            .with_hint(
+                "Fetch the repository (`git fetch origin`) or run `git fsck`, then run it again; a partial scan would hand out a taken id.",
+            ));
+        };
         for (path, name) in users {
             taken.add_file(path, text, name);
         }
@@ -258,38 +319,59 @@ pub fn command_with(exec: &dyn Exec, root: Option<PathBuf>, reserve: Option<Stri
     );
     eprintln!("{note}");
     let max = s.taken.max();
+    let doubles = s.taken.double_reservations();
+    if !doubles.is_empty() {
+        let lines: Vec<String> = doubles
+            .iter()
+            .map(|(id, files)| {
+                let who: Vec<&str> = files.iter().map(|f| reservation_slug(f).unwrap_or(f)).collect();
+                format!(
+                    "::error::check new-id: C{id} is reserved by more than one branch ({}).",
+                    who.join(", ")
+                )
+            })
+            .collect();
+        return Err(CliError::refused(lines.join("\n"))
+            .with_hint("The later branch renumbers: delete its file under conformance/reserved/ and run `./dev check new-id --reserve <branch>` again."));
+    }
     let (id, existing) = match reserve.as_deref() {
         Some(branch) => {
-            let file = root.join(RESERVED);
-            let text = std::fs::read_to_string(&file).unwrap_or_default();
-            if let Some((id, _)) = reservations(&text).into_iter().find(|(_, b)| b == branch) {
+            let slug = slug(branch);
+            if slug.is_empty() {
+                return Err(CliError::usage("--reserve needs a branch name with letters or digits.")
+                    .with_hint("Pass the branch that will add the check."));
+            }
+            let dir = root.join(RESERVED_DIR);
+            let mine = std::fs::read_dir(&dir).ok().and_then(|rd| {
+                rd.flatten().find_map(|e| {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    let path = format!("{RESERVED_DIR}/{name}");
+                    (reservation_slug(&path) == Some(slug.as_str()))
+                        .then(|| id_of_path(&path))
+                        .flatten()
+                })
+            });
+            if let Some(id) = mine {
                 (id, true)
             } else {
-                if branch.is_empty() || branch.contains(char::is_whitespace) {
-                    return Err(CliError::usage("--reserve needs a branch name without spaces.")
-                        .with_hint("Pass the branch that will add the check."));
-                }
                 let next = max + 1;
-                let mut body = if text.is_empty() { HEADER.to_string() } else { text };
-                if !body.ends_with('\n') {
-                    body.push('\n');
-                }
-                body.push_str(&format!("C{next} {branch} {today}\n"));
-                if let Some(dir) = file.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-                std::fs::write(&file, body).map_err(|e| {
-                    CliError::failure(format!("::error::check new-id: {RESERVED} cannot be written: {e}."))
-                        .with_hint("Fix the folder's rights and run it again.")
-                })?;
+                std::fs::create_dir_all(&dir)
+                    .and_then(|()| std::fs::write(dir.join(format!("C{next}-{slug}")), format!("C{next} {branch} {today}\n")))
+                    .map_err(|e| {
+                        CliError::failure(format!("::error::check new-id: {RESERVED_DIR} cannot be written: {e}."))
+                            .with_hint("Fix the folder's rights and run it again.")
+                    })?;
                 (next, false)
             }
         }
         None => (max + 1, false),
     };
     let text = match (&reserve, existing) {
-        (Some(b), true) => format!("C{id}\nalready reserved for {b} in {RESERVED}"),
-        (Some(b), false) => format!("C{id}\nreserved for {b}: commit {RESERVED} (the commit is the reservation)"),
+        (Some(b), true) => format!("C{id}\nalready reserved for {b} in {RESERVED_DIR}"),
+        (Some(b), false) => format!(
+            "C{id}\nreserved for {b}: commit {RESERVED_DIR}/C{id}-{} (the commit is the reservation)",
+            slug(b)
+        ),
         (None, _) => format!("C{id}"),
     };
     Ok(Report::new(

@@ -150,9 +150,9 @@ enum CheckCommand {
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
     /// The next free conformance check id, read from the working tree, every local and origin branch and
-    /// conformance/reserved-ids.txt (ER-21: two branches took the same id four times). `--reserve <branch>` appends the reservation line.
+    /// conformance/reserved/ (ER-21: two branches took the same id four times). `--reserve <branch>` creates the reservation file.
     NewId {
-        /// Append `C<n> <branch> <date>` to conformance/reserved-ids.txt (commit it: the commit is the reservation).
+        /// Create conformance/reserved/C<n>-<branch-slug> (commit it: the commit is the reservation).
         #[arg(long)]
         reserve: Option<String>,
         /// The repository root (default: the folder containing .git, found from the current folder).
