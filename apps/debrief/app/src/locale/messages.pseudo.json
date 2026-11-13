@@ -1560,6 +1560,7 @@
     "grid.header.marker": "⟦Ṁááŕķééŕ⟧",
     "grid.header.message": "⟦Ṁééššááĝéé⟧",
     "grid.header.time": "⟦Ţîîɱéé {$DIRECTION}⟧",
+    "grid.jumpGaveUp": "⟦Çööûûļð ñööţ ĝö ţöö ţĥéé ééṽéñţ: ţĥéé ƒîîļţééŕš ķéþţ çĥááñĝîîñĝ. Ţŕý ááĝáîîñ.⟧",
     "grid.loading": "⟦Ļööááðîîñĝ⟧",
     "grid.note": "⟦Ñööţéé⟧",
     "grid.notesMore": "⟦{$note} (+{$more} ɱööŕéé)⟧",
