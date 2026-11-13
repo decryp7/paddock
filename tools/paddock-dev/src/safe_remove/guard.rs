@@ -1,4 +1,4 @@
-//! The one place a host step deletes (ER-14, ER-22): a path goes only when it lies strictly under an explicit root, and the root
+//! The guard under [`remove`](super::remove) and the CI host steps' own deletes (ER-14, ER-22): a path goes only when it lies strictly under an explicit root, and the root
 //! is itself not somewhere a mistake would be a disaster. The shell scripts ran `rm -rf` on computed paths; a wrong variable
 //! there could reach a home folder. Here the guard is checked on every call and refused with a message.
 //!

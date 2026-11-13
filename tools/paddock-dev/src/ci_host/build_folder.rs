@@ -11,7 +11,7 @@
 //! that collect from it) goes to `$GITHUB_ENV`.
 
 use super::Step;
-use super::safe_remove;
+use crate::safe_remove;
 use clap::Args as ClapArgs;
 use paddock_env::{Os, winpath};
 use std::collections::HashMap;

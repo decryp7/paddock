@@ -9,9 +9,9 @@
 //! kept clone of a host job), else `GITHUB_WORKSPACE`.
 
 use super::links::{Links, OsLinks};
-use super::safe_remove;
 use super::{Step, folder_name};
 use crate::ci_isolation::home;
+use crate::safe_remove;
 use clap::Args as ClapArgs;
 use std::collections::HashMap;
 use std::io::Write;

@@ -35,7 +35,6 @@ pub mod links;
 pub mod node_caches;
 pub mod phase;
 pub mod prune;
-pub mod safe_remove;
 pub mod sccache_stats;
 pub mod stable_workspace;
 
@@ -234,7 +233,7 @@ pub fn is_executable(p: &Path) -> bool {
 }
 
 /// A scratch folder whose path is already canonical: on macOS the default temp folder is under `/var`, which is a link to
-/// `/private/var`, so a path the code canonicalizes would no longer equal the one a test built (the guard of [`safe_remove`] also
+/// `/private/var`, so a path the code canonicalizes would no longer equal the one a test built (the guard of [`safe_remove`](crate::safe_remove) also
 /// refuses a link on the way). Folders of the tests of this module come from here.
 #[cfg(test)]
 pub(crate) fn canonical_tempdir() -> tempfile::TempDir {

@@ -13,6 +13,7 @@
 //!   the caller creates the temporary file (an owner-only, unshared file for a secret on Windows).
 //! - [`cargo_layout`]: the profile folder above a test program or `OUT_DIR`, in cargo's old and 1.100 build-folder layouts.
 //! - [`winpath`]: Windows paths without the verbatim `\\?\` prefix, in one place (`plain`, `for_tools`, `real*`, `same`).
+//! - [`home_guard`]: the one "is this folder inside the home folder" check (symlinks resolved), shared by `heavy` and `paddock-dev`.
 //!
 //! Tests use temporary folders only and never read or write the user's real folders.
 
@@ -23,6 +24,7 @@ pub mod dev_override;
 mod dirs;
 mod error;
 mod folder;
+pub mod home_guard;
 pub mod private;
 mod versioned;
 pub mod winpath;

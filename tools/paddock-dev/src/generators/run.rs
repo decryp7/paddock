@@ -120,7 +120,7 @@ impl Real {
             .or_else(|| self.default_roots.iter().find(|r| r.is_dir()).cloned())
             .ok_or("there is no build-folder root: set PADDOCK_DEV_TARGET_DIR (generator builds never go inside the worktree or under ~, and not onto d8 unless configured)")?;
         if let Some(home) = self.env.get("HOME").filter(|h| !h.is_empty()).map(PathBuf::from)
-            && base.starts_with(&home)
+            && paddock_env::home_guard::inside_home(&base.to_string_lossy(), &home, &self.root)
         {
             return Err(format!(
                 "the build-folder root {} is under your home folder ({}), the internal disk; set PADDOCK_DEV_TARGET_DIR to a folder on a build disk",

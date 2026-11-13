@@ -447,6 +447,22 @@ mod real {
         assert!(calls(&f).is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_build_root_reached_through_a_link_into_the_home_is_refused_too() {
+        // The one home guard (paddock_env::home_guard, shared with heavy) resolves links; a plain prefix test did not.
+        let f = fixture(PASS_THROUGH);
+        let home = f.dir.path().join("home");
+        std::fs::create_dir_all(home.join("builds")).unwrap();
+        let link = f.dir.path().join("looks-external");
+        std::os::unix::fs::symlink(home.join("builds"), &link).unwrap();
+        let mut e = env(&f);
+        e.insert("HOME".into(), home.display().to_string());
+        e.insert("PADDOCK_DEV_TARGET_DIR".into(), link.display().to_string());
+        let why = Real::with(&f.repo, e, Vec::new()).target_dir("crates").unwrap_err();
+        assert!(why.contains("under your home folder"), "{why}");
+    }
+
     #[test]
     fn heavy_refusing_the_slot_is_not_the_checks_verdict() {
         let f = fixture("echo 'heavy 0.1 (macos) exit 0x4b: the lock could not be taken. Next: x' >&2; exit 75");
