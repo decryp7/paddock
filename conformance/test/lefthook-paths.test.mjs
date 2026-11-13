@@ -71,9 +71,9 @@ export function prePushCommands(text) {
   return block ? commands(block[1].replace(/^ {2}commands:\n/m, '')) : [];
 }
 
-test('the pre-push hook is the one command `./dev check --pre-push --refs-from-stdin`', () => {
+test('the pre-push hook is the one command `./dev check --pre-push --refs-from-stdin --remote {1}` (git passes the remote name)', () => {
   const found = prePushCommands(readFileSync(join(PADDOCK, 'lefthook.yml'), 'utf8'));
-  assert.deepEqual(found.map((c) => c.run), ['./dev check --pre-push --refs-from-stdin']);
+  assert.deepEqual(found.map((c) => c.run), ['./dev check --pre-push --refs-from-stdin --remote {1}']);
 });
 
 test('the pre-push reader sees a second command', () => {
