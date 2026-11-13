@@ -532,7 +532,7 @@ jobs:
     if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
     container:
-      image: dev.decryptology.net/decryp7/paddock-ci:v2
+      image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
       PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
       # Generator builds go outside the checkout and the home folder (tools/paddock-dev generators/run.rs).

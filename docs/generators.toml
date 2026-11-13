@@ -187,13 +187,13 @@ requires = ["ui/dist/paddock-ui/package.json", "ui/dist/paddock-e2e/package.json
 
 [[generator]]
 id = "conformance-line"
-what = "every conformance check CI runs on the tree, the arguments read from ci.yml's PADDOCK_CONFORMANCE_ARGS (the one line the conformance and train-gates jobs run); includes the C71 baseline (it may only shrink)"
-check = ["sh", "-c", "args=$(sed -n 's/^  PADDOCK_CONFORMANCE_ARGS: \"\\(.*\\)\"$/\\1/p' .gitea/workflows/ci.yml | head -1); [ -n \"$args\" ] || { echo 'no PADDOCK_CONFORMANCE_ARGS line found in .gitea/workflows/ci.yml' >&2; exit 6; }; eval \"node conformance/bin/paddock-conformance.mjs $args\""]
+what = "every conformance check CI runs on the tree, the list read from conformance/paddock.ci.json (`./dev ci run conformance paddock`, the one line the conformance and train-gates jobs run); includes the C71 baseline (it may only shrink)"
+check = ["./dev", "ci", "run", "conformance", "paddock"]
 regenerate = "none: fix the findings it prints; `node conformance/bin/paddock-timing-baseline.mjs --write` rewrites conformance/baselines/C71.json (shrink only)"
 paths = ["**"]
 outputs = ["conformance/baselines/*.json"]
 cost = "heavy"
-requires = [".gitea/workflows/ci.yml", "conformance/bin/paddock-conformance.mjs"]
+requires = ["conformance/paddock.ci.json", "conformance/bin/paddock-conformance.mjs"]
 
 # ---- message catalogues -------------------------------------------------------------------------------------------------
 
