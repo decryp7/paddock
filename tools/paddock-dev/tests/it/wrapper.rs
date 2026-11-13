@@ -929,12 +929,12 @@ fn a_cache_hit_counts_as_use_and_an_orphaned_legacy_build_folder_goes() {
 
 #[cfg(unix)]
 trait SpawnPiped {
-    fn output_child(&mut self) -> std::process::Child;
+    fn output_child(&mut self) -> paddock_testkit::TestChild;
 }
 
 #[cfg(unix)]
 impl SpawnPiped for TestCommand {
-    fn output_child(&mut self) -> std::process::Child {
+    fn output_child(&mut self) -> paddock_testkit::TestChild {
         use std::process::Stdio;
         self.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap()
     }

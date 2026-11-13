@@ -2,9 +2,9 @@
 #![allow(dead_code)]
 
 use paddock_proc::command;
-use paddock_testkit::TestCommand;
+use paddock_testkit::{TestChild, TestCommand};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 pub const BIN: &str = env!("CARGO_BIN_EXE_heavy");
@@ -13,7 +13,7 @@ pub const DEADLINE: Duration = Duration::from_secs(40);
 
 /// A child that is killed (and reaped) when dropped, so a failing test leaves no process behind.
 pub struct Guard {
-    pub child: Child,
+    pub child: TestChild,
     pub label: String,
 }
 
@@ -207,7 +207,7 @@ pub fn dead_pid() -> u32 {
 /// A long-running process (a live pid); killed when the guard drops.
 pub fn sleeper() -> Guard {
     Guard {
-        child: command("sleep").arg("60").spawn().expect("spawn sleep"),
+        child: TestCommand::new("sleep").arg("60").spawn().expect("spawn sleep"),
         label: "sleep 60".into(),
     }
 }

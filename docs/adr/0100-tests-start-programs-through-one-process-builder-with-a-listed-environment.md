@@ -50,6 +50,9 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   `~/.cargo` and `~/.rustup` named explicitly (a redirected `HOME` would otherwise hide the offline registry and the
   toolchains); on Windows `SystemRoot`, `ComSpec`, `PATHEXT` and a few more. These are `PASSED_THROUGH` and the only
   places a child reads the user's folders.
+- a private global git config (`GIT_CONFIG_GLOBAL` in the private home): `maintenance.auto=false`, `gc.auto=0` and a test identity,
+  so no test's git starts background maintenance (a detached `git maintenance` held `objects/maintenance.lock` and a bare clone made
+  meanwhile copied it: the kept-clone fixture hit that 104 times in 1200 runs under load);
 - fixed values: a git author and committer, `GIT_CONFIG_NOSYSTEM=1`, `NO_COLOR=1`.
 
 `allowed_names()` lists every name a fresh command carries. Everything else a test needs is a **named addition**
@@ -139,6 +142,10 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
   `LLVM_PROFILE_FILE`, the `CARGO_LLVM_COV*` variables, `CARGO_INCREMENTAL`), so a program built under coverage is the one the
   run measures. Used by Debrief's store-worker build and Pitcrew's fake runner; the Dyno tests only run `cargo tree` and
   `cargo metadata`, which compile nothing.
+- **D8 (decided, last review): `spawn()` returns a `TestChild`.** It derefs to the `Child`, holds the command's private folders until
+  it is waited on or dropped (a child that writes to its `HOME` after the builder dropped used to find it deleted), and kills and
+  reaps a child still running when it drops, through the handle it owns (ADR 0033: never a bare pid). `paddock_proc` is not used
+  because it depends on the testkit in its own tests.
 - **D4 (decided): git is not in C123.** `git` reads `HOME` and the git config, which `TestCommand` redirects when it is
   used; plain `Command::new("git")` fixtures (about 60) keep working. If a git-config incident appears, add it to the check.
 

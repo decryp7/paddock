@@ -52,7 +52,7 @@ pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_env::winpath::{real_or_given, same};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use private_temp::{PrivateTemp, private_tempdir};
-pub use process::TestCommand;
+pub use process::{TestChild, TestCommand};
 pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{
     CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,

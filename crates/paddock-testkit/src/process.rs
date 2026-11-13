@@ -12,7 +12,9 @@
 //!   replaces it whole;
 //! - the toolchain variables cargo needs (`RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN`) and, on Windows, the few the OS
 //!   needs (`SystemRoot`, ...): [`PASSED_THROUGH`], read from this process;
-//! - fixed values that make git deterministic: an author and committer identity, no system or global git config.
+//! - a private global git config (`GIT_CONFIG_GLOBAL`): `maintenance.auto=false`, `gc.auto=0` and a test identity, so no test's git starts
+//!   background maintenance;
+//! - fixed values that make git deterministic: an author and committer identity, no system git config.
 //!
 //! Everything else a test needs is a named addition (`.env("NAME", value)`), which is also what a reader of the test sees.
 //! [`ALLOWED_NAMES`] lists every name a fresh command carries; the tests of this module compare a real child's environment with
@@ -21,9 +23,10 @@
 //! The command derefs to [`std::process::Command`], so `args`, `current_dir`, `output`, `spawn` and the rest are the usual ones.
 
 use std::ffi::{OsStr, OsString};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::Arc;
 
 /// Variables copied from the test process when it has them: the toolchain cargo and rustup need to find themselves, and what
 /// Windows needs to start any program. Nothing ambient (no tokens, proxies, `CI`, `GITHUB_*`, `PADDOCK_*`, user variables).
@@ -104,7 +107,7 @@ pub struct TestCommand {
     cmd: Command,
     /// The environment a fresh command carries: what [`TestCommand::env_clear`] goes back to.
     base: Vec<(OsString, OsString)>,
-    private: PrivateDir,
+    private: Arc<PrivateDir>,
 }
 
 #[derive(Debug)]
@@ -167,6 +170,12 @@ impl TestCommand {
             // A failure surfaces as the child's own error about its home.
             let _ = std::fs::create_dir_all(d);
         }
+        // The private global git config: no background maintenance or gc (a detached `git maintenance` holds `objects/maintenance.lock`
+        // and a bare clone made meanwhile copies it: the kept-clone fixture hit that 104 times in 1200 under load) and a test identity.
+        let _ = std::fs::write(
+            home.join(".gitconfig"),
+            "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n",
+        );
         let vars: [(&str, PathBuf); 12] = [
             ("HOME", home.clone()),
             ("USERPROFILE", home.clone()),
@@ -206,7 +215,11 @@ impl TestCommand {
             .get_envs()
             .filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string())))
             .collect();
-        TestCommand { cmd, base, private }
+        TestCommand {
+            cmd,
+            base,
+            private: Arc::new(private),
+        }
     }
 
     /// The private folder of this command: `home/` and `tmp/` are in it.
@@ -338,14 +351,18 @@ impl TestCommand {
         self.cmd.status()
     }
 
-    /// Starts the child. The private folder goes when this command drops, so keep the command (or use
-    /// [`TestCommand::new_in`]) for as long as the child runs.
+    /// Starts the child. The returned [`TestChild`] keeps the private folders until it is waited on or dropped, whatever happens to
+    /// this command, and kills and reaps a child that is still running when it drops.
     ///
     /// # Errors
     ///
     /// When the program cannot be started.
-    pub fn spawn(&mut self) -> std::io::Result<Child> {
-        self.cmd.spawn()
+    pub fn spawn(&mut self) -> std::io::Result<TestChild> {
+        let child = self.cmd.spawn()?;
+        Ok(TestChild {
+            child: Some(child),
+            private: Arc::clone(&self.private),
+        })
     }
 
     /// For a child `cargo build` of the program a test looks for: [`cargo_target_dir`](TestCommand::cargo_target_dir) and the
@@ -377,9 +394,74 @@ impl TestCommand {
     }
 }
 
+/// A child started by [`TestCommand::spawn`]: it derefs to the [`Child`], holds the private folders of its command for as long as it
+/// lives, and kills and reaps itself when dropped while still running (through the handle it owns, never a bare pid, ADR 0033).
+#[derive(Debug)]
+pub struct TestChild {
+    child: Option<Child>,
+    private: Arc<PrivateDir>,
+}
+
+impl TestChild {
+    /// The private folder of the command that started this child.
+    #[must_use]
+    pub fn private_dir(&self) -> &Path {
+        self.private.path()
+    }
+
+    /// Waits for the child to end and collects its output; the private folders go when this guard drops at the end of the call.
+    ///
+    /// # Errors
+    ///
+    /// When waiting fails.
+    ///
+    /// # Panics
+    ///
+    /// Never: the child is present until this call takes it.
+    pub fn wait_with_output(mut self) -> std::io::Result<Output> {
+        #[allow(clippy::expect_used)]
+        let child = self
+            .child
+            .take()
+            .expect("the child is present until waited on");
+        child.wait_with_output()
+    }
+}
+
+impl Deref for TestChild {
+    type Target = Child;
+    #[allow(clippy::expect_used)]
+    fn deref(&self) -> &Child {
+        self.child
+            .as_ref()
+            .expect("the child is present until waited on")
+    }
+}
+
+impl DerefMut for TestChild {
+    #[allow(clippy::expect_used)]
+    fn deref_mut(&mut self) -> &mut Child {
+        self.child
+            .as_mut()
+            .expect("the child is present until waited on")
+    }
+}
+
+impl Drop for TestChild {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take()
+            && matches!(child.try_wait(), Ok(None))
+        {
+            // A handle this guard owns, not a pid read earlier: the child is ended and reaped before its folders are removed.
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 /// Keeps the private folder of a [`TestCommand`] that was taken apart with [`TestCommand::into_parts`].
 #[derive(Debug)]
-pub struct PrivateGuard(#[allow(dead_code)] PrivateDir);
+pub struct PrivateGuard(#[allow(dead_code)] Arc<PrivateDir>);
 
 impl Deref for TestCommand {
     type Target = Command;

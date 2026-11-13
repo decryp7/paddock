@@ -6,8 +6,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_proc::ProcessId;
-use paddock_testkit::TestCommand;
-use std::process::{Child, Command, Stdio};
+use paddock_testkit::{TestChild, TestCommand};
+use std::process::Stdio;
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
@@ -19,14 +19,14 @@ const READY_GUARD: Duration = Duration::from_secs(120);
 
 /// An agent this test started. It is ended and reaped when dropped, so a failed assertion never leaves one running; a test that
 /// stops it itself takes the child out with [`Agent::into_child`].
-struct Agent(Option<Child>);
+struct Agent(Option<TestChild>);
 
 impl Agent {
     fn id(&self) -> u32 {
         self.0.as_ref().expect("the agent is held").id()
     }
 
-    fn into_child(mut self) -> Child {
+    fn into_child(mut self) -> TestChild {
         self.0.take().expect("the agent is held")
     }
 
@@ -333,13 +333,9 @@ fn an_agent_on_a_data_folder_of_its_own_never_asks_this_computers_helper() {
 }
 
 /// A stand-in for an agent that never writes its discovery file: a shell that exits at once, or sleeps.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the test starts a plain shell as a stand-in child, to test the harness's wait"
-)]
 fn fake_agent(script: &str) -> Agent {
     Agent(Some(
-        Command::new("sh")
+        TestCommand::new("sh")
             .args(["-c", script])
             .stdin(Stdio::null())
             .stdout(Stdio::null())

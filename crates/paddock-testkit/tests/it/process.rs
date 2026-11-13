@@ -183,3 +183,49 @@ fn a_build_child_gets_the_runs_target_folder_and_build_variables_but_a_plain_one
         "{built:?}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_spawned_child_keeps_its_private_home_after_the_builder_is_dropped() {
+    use std::io::Write;
+    // The command is a temporary: it is gone before the child reads its line, which then writes to HOME.
+    let mut child = TestCommand::new("sh")
+        .args(["-c", "read x; echo ok > \"$HOME/out\" && echo \"$HOME\""])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"go\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "the child could not write to its home"
+    );
+}
+#[cfg(unix)]
+#[test]
+fn a_dropped_test_child_is_killed_and_its_private_folder_goes_with_it() {
+    let child = TestCommand::new("sh")
+        .args(["-c", "read x"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let private = child.private_dir().to_path_buf();
+    assert!(private.is_dir());
+    drop(child);
+    assert!(!private.exists(), "the private folder outlived the child");
+}
+
+#[test]
+fn a_builder_childs_git_has_no_background_maintenance_and_a_test_identity() {
+    let git = |args: &[&str]| {
+        let out = TestCommand::new("git").args(args).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(git(&["config", "--global", "maintenance.auto"]), "false");
+    assert_eq!(git(&["config", "--global", "gc.auto"]), "0");
+    assert_eq!(
+        git(&["config", "--global", "user.email"]),
+        "test@example.invalid"
+    );
+}
