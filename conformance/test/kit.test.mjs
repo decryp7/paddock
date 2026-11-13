@@ -334,3 +334,64 @@ test('a failed setup step (build-jobs, isolation acquire) marks the job aborted 
     c.done();
   }
 });
+
+test('on a CI host with rustup the pinned toolchain is ensured before the first step runs, and not without rustup or off CI', () => {
+  const c = checkout();
+  try {
+    // dev logs its arguments; the kit must call `--ensure-toolchain` first (run 8034: build-jobs ran before the pinned Rust was installed).
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    let r = c.run(['build-jobs'], { GITHUB_TOKEN: 't' });
+    const lines = r.log.trim().split('\n');
+    assert.match(lines[0], /^dev --ensure-toolchain /, r.log);
+    assert.match(r.log, /^dev ci build-jobs /m, r.log);
+    // A failed install is a warning, not the end: the step runs and fails with its own message if Rust is missing.
+    exe(join(c.root, 'dev'), 'echo "dev $*" >> "' + join(c.root, 'log') + '"; case "$1" in --ensure-toolchain) exit 2 ;; esac');
+    r = c.run(['which']);
+    assert.match(r.stderr, /::warning::kit\.sh: the pinned Rust toolchain could not be installed/, r.stderr);
+    // No rustup, or not a CI job: ./dev is not asked.
+    rmSync(join(c.root, 'bin', 'rustup'));
+    assert.doesNotMatch(c.run(['which']).log, /ensure-toolchain/);
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    assert.doesNotMatch(c.run(['which'], { GITHUB_ACTIONS: '' }).log, /ensure-toolchain/);
+  } finally {
+    c.done();
+  }
+});
+
+test('a rustup shim that cannot run is not rustc: the shell kit is chosen (run 8034 review)', () => {
+  const c = checkout();
+  try {
+    exe(join(c.root, 'bin', 'rustc'), 'echo "error: toolchain is not installed" >&2; exit 1');
+    const r = c.run(['which']);
+    assert.equal(r.stdout.trim(), 'shell');
+    assert.match(r.stderr, /rustc does not run in this checkout/);
+    exe(join(c.root, 'bin', 'rustc'), 'exit 0');
+    assert.equal(c.run(['which']).stdout.trim(), 'dev', 'a rustc that runs keeps the Rust kit');
+  } finally {
+    c.done();
+  }
+});
+
+test('after a failed toolchain install the job is marked, later steps neither retry nor use ./dev, and cleanup still runs in shell', () => {
+  const c = checkout();
+  try {
+    const env = join(c.root, 'github-env');
+    writeFileSync(env, '');
+    exe(join(c.root, 'bin', 'rustup'), 'exit 0');
+    exe(join(c.root, 'bin', 'rustc'), 'exit 1');
+    exe(join(c.root, 'dev'), `echo "dev $*" >> "${join(c.root, 'log')}"; case "$1" in --ensure-toolchain) exit 2 ;; esac`);
+    let r = c.run(['build-jobs'], { GITHUB_ENV: env, GITHUB_TOKEN: 't' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(env, 'utf8'), 'PADDOCK_TOOLCHAIN_FAILED=1\nPADDOCK_CI_KIT=shell\n');
+    assert.match(r.log, /^dev --ensure-toolchain/m);
+    assert.match(r.log, /^build-jobs\.sh /m, 'the step itself ran in shell');
+    // The next steps of the job see the variables the runner took from GITHUB_ENV.
+    const later = { PADDOCK_TOOLCHAIN_FAILED: '1', PADDOCK_CI_KIT: 'shell', GITHUB_ENV: env };
+    for (const args of [['build-jobs'], ['isolation', 'release'], ['host', 'sccache-stats'], ['host', 'host-cleanup', '--id', 'x']]) {
+      r = c.run(args, later);
+      assert.doesNotMatch(r.log, /ensure-toolchain|^dev/m, `${args}: no second install attempt, no ./dev: ${r.log}`);
+    }
+  } finally {
+    c.done();
+  }
+});
