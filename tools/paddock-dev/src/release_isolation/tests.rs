@@ -331,8 +331,9 @@ mod path_door {
     fn no_probe_resolves_a_path_through_a_door_that_strips_the_prefix() {
         // `winpath::real` returns the plain spelling, the folders of the ledger are verbatim: comparing the two with Path methods
         // failed every Windows verify. Probes resolve through `PathOps` (or `real_verbatim` for a candidate list), nothing else.
+        // pathfind.rs moved to the crate root (src/pathfind.rs) and is still release isolation's program lookup.
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/release_isolation");
-        for name in ["config.rs", "links.rs", "verify.rs", "identity.rs", "crates.rs", "pathfind.rs"] {
+        for name in ["config.rs", "links.rs", "verify.rs", "identity.rs", "crates.rs", "../pathfind.rs"] {
             let text = std::fs::read_to_string(dir.join(name)).unwrap();
             let code = text.split("#[cfg(test)]").next().unwrap();
             assert!(
