@@ -17,6 +17,7 @@ pub mod client;
 pub mod dispatch;
 pub mod flakes;
 pub mod logfind;
+pub mod members;
 pub mod preconditions;
 pub mod record;
 pub mod schedule_skip;
@@ -155,6 +156,11 @@ pub struct TriageArgs {
     /// Skip the flake history (faster: it reads the failed job logs of the window).
     #[arg(long)]
     no_history: bool,
+    /// Also blame the members of a train built by hand: the first-parent merges between this base (for example `origin/main`) and
+    /// the commit the run tested, each with the planner's answer for its own diff (ADR 0098). Read-only; run it in the
+    /// integrator's checkout, which holds the train.
+    #[arg(long, value_name = "BASE")]
+    members: Option<String>,
     /// The repository.
     #[arg(long, default_value = "decryp7/paddock")]
     repo: String,
@@ -453,8 +459,34 @@ pub fn triage(a: &TriageArgs) -> Result<Report, CliError> {
         CliError::failure(format!("run {} could not be triaged: {e}", a.run))
             .with_hint("Check the network, that GITEA_TOKEN can read the repository, and that the run has finished.")
     })?;
+    let (mut text, mut data, mut exit) = (report.text(), report.json(), report.exit());
+    if let Some(base) = &a.members {
+        // ADR 0098: blame the members of a hand-built train. Read-only; a member that cannot be read ends the blame (ER-33).
+        let answer = (|| -> Result<(String, serde_json::Value), String> {
+            let root = crate::gates::command::repo_root(None).map_err(|e| e.message)?;
+            let git = crate::merge_check::git::Git::new(&root);
+            let failures = crate::queue::real::failures_of(&report, a.run, &mut http, &a.server, &a.repo, &token);
+            let plan = |first: &str, merge: &str| crate::queue::real::run_planner(&root, first, merge);
+            let members = members::read(&git, base, &report.head, &plan, members::needs_files(&failures))?;
+            Ok(members::report(base, &report.head, &members, &failures))
+        })();
+        match answer {
+            Ok((t, d)) => {
+                text.push_str(&t);
+                data["members"] = d;
+            }
+            Err(why) => {
+                text.push_str(&format!(
+                    "::error::the members of {base}..{} could not be blamed: {why}. Next step: run this in the checkout that holds the train, with its base fetched; the failures above stand.\n",
+                    report.head.chars().take(9).collect::<String>()
+                ));
+                data["members"] = serde_json::json!({"error": why});
+                exit = Exit::Findings;
+            }
+        }
+    }
     // An answer with an UNKNOWN row or a gap is not a clean one: exit 5, so a script cannot read it as "nothing to worry about".
-    Ok(Report::new(report.json(), report.text()).with_exit(report.exit()))
+    Ok(Report::new(data, text).with_exit(exit))
 }
 
 /// `ci timings`.

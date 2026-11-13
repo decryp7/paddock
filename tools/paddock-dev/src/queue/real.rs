@@ -778,40 +778,46 @@ impl Ci for GiteaCi<'_> {
             };
             triage::collect(&mut c, &req, &mut |l| eprintln!("{l}"))?
         };
-        // The gate jobs (train gates, commit messages) fail on files: read their logs for the paths.
-        let is_gate = |job: &str| job.starts_with("train gates") || job.starts_with("commit messages");
-        let mut files: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        if report.rows.iter().any(|r| is_gate(&r.job)) {
-            let mut runs = crate::plan_since::GiteaRuns::new(self.http, &self.server, &self.repo, self.token.clone());
-            let jobs = runs.jobs(run).unwrap_or_default();
-            for r in report.rows.iter().filter(|r| is_gate(&r.job)) {
-                if let Some(j) = jobs.iter().find(|j| j.name == r.job)
-                    && let Ok(log) = runs.log(j.id)
-                {
-                    files.insert(
-                        r.job.clone(),
-                        files_named(&log.lines().map(crate::log_text::plain).collect::<Vec<_>>().join("\n")),
-                    );
-                }
+        Ok(failures_of(&report, run, self.http, &self.server, &self.repo, &self.token))
+    }
+}
+
+/// The failures of a triaged run as the queue and `ci triage --members` blame them: the projects each row belongs to and, for a
+/// gate job (train gates, commit messages), the files its log names.
+pub fn failures_of(report: &triage::Report, run: u64, http: &mut dyn Http, server: &str, repo: &str, token: &str) -> Vec<Failure> {
+    // The gate jobs (train gates, commit messages) fail on files: read their logs for the paths.
+    let is_gate = |job: &str| job.starts_with("train gates") || job.starts_with("commit messages");
+    let mut files: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    if report.rows.iter().any(|r| is_gate(&r.job)) {
+        let mut runs = crate::plan_since::GiteaRuns::new(http, server, repo, token.to_string());
+        let jobs = runs.jobs(run).unwrap_or_default();
+        for r in report.rows.iter().filter(|r| is_gate(&r.job)) {
+            if let Some(j) = jobs.iter().find(|j| j.name == r.job)
+                && let Ok(log) = runs.log(j.id)
+            {
+                files.insert(
+                    r.job.clone(),
+                    files_named(&log.lines().map(crate::log_text::plain).collect::<Vec<_>>().join("\n")),
+                );
             }
         }
-        Ok(report
-            .rows
-            .iter()
-            .map(|r| Failure {
-                what: format!(
-                    "{}: {}",
-                    r.job,
-                    match &r.test {
-                        Test::Named(n) => n.clone(),
-                        Test::WholeJob => "the job failed outside any test".into(),
-                        Test::Unread(w) => format!("failing tests not readable ({w})"),
-                    }
-                ),
-                projects: projects_of_row(&r.job, &r.test),
-                files: files.get(&r.job).cloned().unwrap_or_default(),
-                blame: blame_of(&r.status),
-            })
-            .collect())
     }
+    report
+        .rows
+        .iter()
+        .map(|r| Failure {
+            what: format!(
+                "{}: {}",
+                r.job,
+                match &r.test {
+                    Test::Named(n) => n.clone(),
+                    Test::WholeJob => "the job failed outside any test".into(),
+                    Test::Unread(w) => format!("failing tests not readable ({w})"),
+                }
+            ),
+            projects: projects_of_row(&r.job, &r.test),
+            files: files.get(&r.job).cloned().unwrap_or_default(),
+            blame: blame_of(&r.status),
+        })
+        .collect()
 }
