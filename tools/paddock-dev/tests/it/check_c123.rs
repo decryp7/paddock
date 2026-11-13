@@ -68,6 +68,10 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
             "crates/a/src/lib.rs",
             "fn run() {\n    Command::new(\"cargo\");\n}\n#[cfg(test)]\nmod tests {\n    fn t() {\n        Command::new(\"cargo\");\n    }\n}\n",
         ),
+        (
+            "crates/a/tests/it/bound.rs",
+            "const BIN: &str = env!(\"CARGO_BIN_EXE_heavy\");\nfn t() {\n    Command::new(env!(\"CARGO_BIN_EXE_other\")).output();\n    let mut c = command(BIN);\n    let p = std::env::var(\"PATH\").unwrap();\n    TestCommand::new(\"x\").env(\"PATH\", p);\n    let s = SpawnSpec::new(env!(\"CARGO_BIN_EXE_child\"), \"x\");\n}\n",
+        ),
         ("crates/a/src/plain.rs", "fn run() {\n    Command::new(\"cargo\");\n}\n"),
         (
             "crates/a/tests/it/waived.rs",

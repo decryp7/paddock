@@ -184,9 +184,11 @@ fn a_run_never_sees_the_machines_environment_or_takes_a_real_slot() {
     env.set("PADDOCK_ENV_CANARY", "1");
     let envlog = d.path().join("envlog");
     let path = fake_bin(d.path(), &format!("env >> {}; exit 0", envlog.display()));
-    let (code, out, err) = dev_heavy(&path, &["--only", "clippy"], None, false);
-    // Not vacuous: the fake cargo ran (its environment was logged) and the run ended as the fake gates say.
-    assert_eq!(code, 0, "{err}{out}");
+    let (code, out, err) = dev_heavy(&path, &["--only", "fmt,clippy"], None, false);
+    // Not vacuous: fmt ran (the fake cargo logged its environment) and clippy, which needs a slot tool, is NOT MEASURED because the
+    // machine's heavy.sh was not found (exit 6), instead of running through it.
+    assert_eq!(code, 6, "{err}{out}");
+    assert!(out.contains("NOT MEASURED  clippy crates"), "{out}");
     let seen = std::fs::read_to_string(&envlog).expect("the fake cargo never ran, so no environment was checked");
     assert!(
         seen.lines().any(|l| l.starts_with("PATH=")),
