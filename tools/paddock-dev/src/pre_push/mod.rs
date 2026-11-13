@@ -296,12 +296,18 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         }
         lookup_notes = trail;
     }
-    let (change, mut notes, extra) = discover(&root, args.base(), &args.files, &pushed)?;
+    let (base, why_base) = match (&args.base, pushed.first()) {
+        (None, Some(tip)) => choose_base(&root, args.remote.as_deref(), tip),
+        (Some(b), _) => (b.clone(), "named with --base".to_string()),
+        (None, None) => ("origin/main".to_string(), "the default base (no pushed commit)".to_string()),
+    };
+    let (change, mut notes, extra) = discover(&root, &base, &args.files, &pushed)?;
+    notes.push(format!("base {base}: {why_base}"));
     notes.extend(lookup_notes.into_iter().map(|l| format!("known-commit lookup: {l}")));
     if change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
             json!({"gates": [], "changed": 0}),
-            format!("pre-push: nothing changed since {}; nothing to check.", args.base()),
+            format!("pre-push: nothing changed since {base}; nothing to check ({why_base}; remote refs are as of the last fetch)."),
         ));
     }
     if !accept.is_empty() {
@@ -398,7 +404,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
     let head = format!(
         "pre-push: {} changed file(s) against {}; {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
         change.files.len(),
-        args.base(),
+        base,
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
         BUDGET.as_secs() / 60,
@@ -660,6 +666,38 @@ pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
         text,
     )
     .with_exit(exit)
+}
+
+/// The base a pushed commit is measured from when none is named: the remote-tracking branch of the push's remote that leaves the
+/// fewest of the commit's commits new (`git rev-list --count <branch>..<tip>`), as git's pre-push.sample and lefthook check only what
+/// the remote lacks. With no such branch (none fetched, or no remote named) it falls back to origin/main and says so. Returns the
+/// base ref and why it was chosen (ER-27).
+fn choose_base(root: &Path, remote: Option<&str>, tip: &str) -> (String, String) {
+    let scope = remote
+        .filter(|r| !r.is_empty() && !r.starts_with('-'))
+        .map_or("refs/remotes/".to_string(), |r| format!("refs/remotes/{r}/"));
+    let refs = git_text(root, &["for-each-ref", "--format=%(refname:short)", &scope]).unwrap_or_default();
+    let mut best: Option<(u32, String)> = None;
+    let mut seen = 0;
+    for r in refs.lines().map(str::trim).filter(|r| !r.is_empty() && !r.ends_with("/HEAD")) {
+        seen += 1;
+        let Some(n) = git_text(root, &["rev-list", "--count", &format!("{r}..{tip}")]).and_then(|t| t.trim().parse::<u32>().ok()) else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(m, _)| n < *m) {
+            best = Some((n, r.to_string()));
+        }
+    }
+    match best {
+        Some((n, r)) => (
+            r.clone(),
+            format!("the remote branch with the fewest new commits ({n}) among {seen} in {scope}, as of the last fetch"),
+        ),
+        None => (
+            "origin/main".into(),
+            format!("no remote-tracking branch under {scope} is readable (missing or not fetched); fell back to origin/main"),
+        ),
+    }
 }
 
 /// The change, notes for the header and the pushed commits beyond the first. Without pushed refs: files since the merge base

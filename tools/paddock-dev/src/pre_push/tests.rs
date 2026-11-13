@@ -1124,3 +1124,91 @@ fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pas
     assert!(next.contains("npm ci --ignore-scripts -w conformance"), "{next}");
     assert!(!ids(&planned).contains(&"conformance".to_string()), "it does not run");
 }
+
+mod base_choice {
+    use super::super::choose_base;
+    use crate::plan_repo::git_text;
+    use std::path::PathBuf;
+
+    /// main: m1; train (origin/train/t): m1-t1-t2. Returns the repo and a git closure's root.
+    fn repo() -> (tempfile::TempDir, PathBuf) {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path().join("r");
+        std::fs::create_dir(&r).unwrap();
+        for a in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.email", "t@t"],
+            &["config", "user.name", "t"],
+        ] {
+            git_text(&r, a).unwrap();
+        }
+        commit(&r, "m1");
+        git_text(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
+        git_text(&r, &["checkout", "-q", "-b", "train"]).unwrap();
+        commit(&r, "t1");
+        commit(&r, "t2");
+        git_text(&r, &["update-ref", "refs/remotes/origin/train/t", "HEAD"]).unwrap();
+        (d, r)
+    }
+    fn commit(r: &std::path::Path, f: &str) {
+        std::fs::write(r.join(f), f).unwrap();
+        git_text(r, &["add", f]).unwrap();
+        git_text(r, &["commit", "-q", "-m", f]).unwrap();
+    }
+    fn sha(r: &std::path::Path) -> String {
+        git_text(r, &["rev-parse", "HEAD"]).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn a_branch_made_from_a_train_branch_is_measured_from_that_train() {
+        let (_d, r) = repo();
+        commit(&r, "w1");
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r));
+        assert_eq!(base, "origin/train/t", "{why}");
+        assert!(why.contains("fewest new commits (1)"), "{why}");
+    }
+
+    #[test]
+    fn a_branch_made_from_main_is_measured_from_main() {
+        let (_d, r) = repo();
+        git_text(&r, &["checkout", "-q", "-b", "w", "origin/main"]).unwrap();
+        commit(&r, "w1");
+        let (base, _) = choose_base(&r, Some("origin"), &sha(&r));
+        assert_eq!(base, "origin/main");
+    }
+
+    #[test]
+    fn main_merged_into_a_train_based_branch_is_still_measured_from_the_train() {
+        let (_d, r) = repo();
+        // main moves on; the work branch is made from the train and merges the new main.
+        git_text(&r, &["checkout", "-q", "main"]).unwrap();
+        commit(&r, "m2");
+        git_text(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
+        git_text(&r, &["checkout", "-q", "-b", "w", "origin/train/t"]).unwrap();
+        commit(&r, "w1");
+        git_text(&r, &["merge", "-q", "--no-edit", "origin/main"]).unwrap();
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r));
+        assert_eq!(base, "origin/train/t", "{why}");
+    }
+
+    #[test]
+    fn a_missing_remote_ref_falls_back_to_origin_main_and_says_so() {
+        let (_d, r) = repo();
+        let (base, why) = choose_base(&r, Some("nowhere"), &sha(&r));
+        assert_eq!(base, "origin/main");
+        assert!(why.contains("fell back to origin/main"), "{why}");
+        // Another remote's branches are not looked at when the push names its own.
+        let (base, _) = choose_base(&r, Some("upstream"), &sha(&r));
+        assert_eq!(base, "origin/main");
+    }
+
+    #[test]
+    fn a_stale_remote_ref_only_widens_the_diff_it_never_hides_commits() {
+        let (_d, r) = repo();
+        // The remote train moved on (t2 is new there) but the local tracking ref is still at t1: t2 counts as new.
+        git_text(&r, &["update-ref", "refs/remotes/origin/train/t", "HEAD~1"]).unwrap();
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r));
+        assert_eq!(base, "origin/train/t", "{why}");
+        assert!(why.contains("(1)") && why.contains("as of the last fetch"), "{why}");
+    }
+}
