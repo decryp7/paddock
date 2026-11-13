@@ -557,30 +557,20 @@ mod tests {
         rig.stop();
     }
 
-    /// The helper's log (the `log` facade), routed into a capture for the ending harness; printed if the test fails.
-    fn captured() -> &'static paddock_ipc::testing::endings::log::LogCapture {
-        use paddock_ipc::testing::endings::log::LogCapture;
-        static CAPTURE: std::sync::OnceLock<LogCapture> = std::sync::OnceLock::new();
-        struct Sink(LogCapture);
-        impl log::Log for Sink {
-            fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-                true
-            }
-            fn log(&self, record: &log::Record<'_>) {
-                self.0.push(format!("{} {}", record.level(), record.args()));
-            }
-            fn flush(&self) {}
-        }
-        CAPTURE.get_or_init(|| {
-            let capture = LogCapture::new();
-            if log::set_boxed_logger(Box::new(Sink(capture.clone()))).is_ok() {
-                log::set_max_level(log::LevelFilter::Info);
-            }
-            capture
-        })
+    /// The helper's log (the `log` facade), routed into the shared rig's process capture.
+    fn captured() -> paddock_ipc::testing::endings::log::LogCapture {
+        paddock_ipc::testing::endings::log::process_capture().expect("the rig's log capture")
     }
 
+    /// One scenario, its log window closed by the shared rig (`paddock_ipc::testing::endings::ipc::logged`: the end lines it
+    /// expects, then a quiet spell) instead of a copy of that wait that read the log after the first end line.
     fn ending(
+        scenario: paddock_ipc::testing::endings::Scenario,
+    ) -> Result<(paddock_ipc::testing::endings::Observed, paddock_ipc::testing::endings::Expect), String> {
+        paddock_ipc::testing::endings::ipc::logged(|| drive(scenario))
+    }
+
+    fn drive(
         scenario: paddock_ipc::testing::endings::Scenario,
     ) -> Result<(paddock_ipc::testing::endings::Observed, paddock_ipc::testing::endings::Expect), &'static str> {
         use paddock_ipc::testing::endings::ipc::decode_frames;
@@ -624,7 +614,8 @@ mod tests {
                     .collect::<Result<_, _>>()
                     .map_err(|_| "connect")?;
                 let c = Stream::connect(&rig.name, Duration::from_secs(5)).map_err(|_| "connect")?;
-                let result = observe(c, Expect::reason(&["busy"]));
+                // Every held session and the refused one end once.
+                let result = observe(c, Expect::reason(&["busy"]).with_ends(MAX_SESSIONS + 1));
                 drop(held);
                 // The held sessions end after their clients closed, on their own threads; the daemon's stop does not wait for
                 // them. The scenario's window closes only when all of them logged their ends, or a late one is counted in the
@@ -651,6 +642,29 @@ mod tests {
         ending(paddock_ipc::testing::endings::Scenario::Busy).unwrap();
         let lines = log.since(from);
         assert_eq!(end_lines(&lines).len(), MAX_SESSIONS + 1, "{lines:#?}");
+    }
+
+    /// Regression (rule 55: this rig was a copy of `paddock_ipc::testing::endings::ipc::logged`, which closes a scenario's
+    /// window only when no further end line arrives for a quiet spell; the copy read the log right after the first end
+    /// line). An extra end line that lands 30 ms after the scenario's own must be in the scenario's window, where the judge
+    /// counts it, not in the next scenario's.
+    #[cfg(unix)]
+    #[test]
+    fn a_scenarios_window_holds_an_end_line_that_lands_just_after_its_own() {
+        use paddock_ipc::testing::endings::log::{end_lines, END_MARKER};
+        let log = captured();
+        let from = log.len();
+        let (observed, _) = std::thread::scope(|s| {
+            s.spawn(|| {
+                while end_lines(&log.since(from)).is_empty() {
+                    std::thread::yield_now();
+                }
+                std::thread::sleep(Duration::from_millis(30));
+                log.push(format!("INFO {END_MARKER} id=straggler code=closed"));
+            });
+            ending(paddock_ipc::testing::endings::Scenario::MalformedFirstFrame).unwrap()
+        });
+        assert_eq!(end_lines(&observed.log).len(), 2, "{:#?}", observed.log);
     }
 
     /// The ending test of the register's `dyno-helper` entry.
