@@ -236,7 +236,7 @@ pub fn run(argv: &[String], out: &mut dyn Write, err: &mut dyn Write, env: &dyn 
         .map(|x| x.trim().to_uppercase())
         .filter(|x| !x.is_empty())
         .collect();
-    let status = exit_status(&result.findings, &strict);
+    let status = exit_status(&result.findings, &strict, result.checks.len());
     if unwritten && status != outcome::CHECK_BROKEN {
         return outcome::IO_ERROR;
     }

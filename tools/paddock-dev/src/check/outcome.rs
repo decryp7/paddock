@@ -37,8 +37,9 @@ pub const NOT_MEASURED: i32 = 6;
 pub const CHECK_BROKEN: i32 = 7;
 
 /// 7 when a check is broken, else 1 when an error finding is left (or a warning of a check in `strict`), else 6 when a check did
-/// not look, else 0: warnings are report-only and never hide a missing measurement.
-pub fn exit_status(findings: &[Finding], strict: &BTreeSet<String>) -> i32 {
+/// not look **or no check ran at all** (`ran` is how many did: an empty selection or registry measured nothing, ADR 0089 amendment
+/// row 6), else 0: warnings are report-only and never hide a missing measurement.
+pub fn exit_status(findings: &[Finding], strict: &BTreeSet<String>, ran: usize) -> i32 {
     if findings.iter().any(|f| f.outcome == Some(Outcome::CheckBroken)) {
         return CHECK_BROKEN;
     }
@@ -48,7 +49,7 @@ pub fn exit_status(findings: &[Finding], strict: &BTreeSet<String>) -> i32 {
     {
         return FINDINGS;
     }
-    if findings.iter().any(|f| f.outcome == Some(Outcome::NotMeasured)) {
+    if ran == 0 || findings.iter().any(|f| f.outcome == Some(Outcome::NotMeasured)) {
         return NOT_MEASURED;
     }
     CLEAN
@@ -73,17 +74,36 @@ mod tests {
             .with_outcome(Outcome::NotMeasured);
         let warn = Finding::warn("C4", 1, "a", 1, "m", "f");
         let none = strict(&[]);
-        assert_eq!(exit_status(&[], &none), CLEAN);
-        assert_eq!(exit_status(std::slice::from_ref(&warn), &none), CLEAN, "a warning is report-only");
-        assert_eq!(exit_status(std::slice::from_ref(&unseen), &none), NOT_MEASURED);
-        assert_eq!(exit_status(&[unseen.clone(), err.clone()], &none), FINDINGS);
-        assert_eq!(exit_status(&[unseen, err, broken], &none), CHECK_BROKEN);
+        assert_eq!(exit_status(&[], &none, 1), CLEAN);
+        assert_eq!(
+            exit_status(std::slice::from_ref(&warn), &none, 1),
+            CLEAN,
+            "a warning is report-only"
+        );
+        assert_eq!(exit_status(std::slice::from_ref(&unseen), &none, 1), NOT_MEASURED);
+        assert_eq!(exit_status(&[unseen.clone(), err.clone()], &none, 1), FINDINGS);
+        assert_eq!(exit_status(&[unseen, err, broken], &none, 1), CHECK_BROKEN);
     }
 
     #[test]
     fn strict_makes_the_named_checks_warnings_fail() {
         let warn = Finding::warn("C36", 1, "a", 1, "m", "f");
-        assert_eq!(exit_status(std::slice::from_ref(&warn), &strict(&["C36"])), FINDINGS);
-        assert_eq!(exit_status(&[warn], &strict(&["C30"])), CLEAN);
+        assert_eq!(exit_status(std::slice::from_ref(&warn), &strict(&["C36"]), 1), FINDINGS);
+        assert_eq!(exit_status(&[warn], &strict(&["C30"]), 1), CLEAN);
+    }
+
+    /// Row 6 of the ADR 0089 amendment: a run in which no check ran exits 6, never 0 ("delete the check": the registry or the
+    /// selection is empty), and a check that ran and found nothing is still 0.
+    #[test]
+    fn a_run_in_which_no_check_ran_is_not_measured_never_clean() {
+        let none = strict(&[]);
+        assert_eq!(exit_status(&[], &none, 0), NOT_MEASURED);
+        let warn = Finding::warn("C4", 1, "a", 1, "m", "f");
+        assert_eq!(
+            exit_status(&[warn], &none, 0),
+            NOT_MEASURED,
+            "a warning never turns an empty run into a pass"
+        );
+        assert_eq!(exit_status(&[], &none, 1), CLEAN);
     }
 }
