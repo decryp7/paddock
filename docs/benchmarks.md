@@ -1220,3 +1220,11 @@ start load makes the peak comparison indicative only.
 - **Notes:** reproduces CI run 8027, job 37099 (spotter_app_lib: 307 `-L`, about 37,000 characters). The cause is sccache 0.19
   expanding cargo's `@argfile` (mozilla/sccache#2787; fixes #2789 and #3026 open). Raw output and the generator were kept outside
   the repository (the session's build folder on d7), not committed.
+
+### Pre-commit after Clippy moved to the push gate (2026-11-13, fix/precommit-heavy-slot)
+
+Clippy left the pre-commit hook (the user's decision): it runs rustfmt, ESLint on touched files, the Pitwall privacy check and commit-msg
+only, and Clippy runs in `./dev check --pre-push` through the heavy slot. One real `lefthook run pre-commit` with a Rust file staged in
+each of `apps/dyno` and `apps/pitcrew`, same machine, load about 15: both rustfmt commands took 0.06 and 0.07 s, 1 s wall in all. Before,
+the same change ran two Clippy builds in parallel: 363 s wall at a peak 1-minute load of 66.6 (section above, cold builds). One run;
+not measured: a change touching all five apps, which previously started five Clippy builds.

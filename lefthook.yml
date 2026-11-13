@@ -1,9 +1,8 @@
 # Git hooks for the whole monorepo (https://lefthook.dev; lefthook reads only this root file). Install once with
 # `npx lefthook install`. Each app's checks run in its own folder (`root:`) and only on its staged files; CI runs the
 # full gates (scripts/affected.mjs). The apps' own lefthook.yml files were merged here at their import (ADR 0014).
-# Cargo steps take their turn on the machine-wide heavy slot (ER-24), as the pre-push gate's heavy steps do: `./dev heavy` uses the
-# push gate's resolver (PADDOCK_HEAVY, heavy.sh or heavy on PATH, else the heavy built from tools/heavy) and fails with the next step
-# when there is none, never an unthrottled run. (The ./dev wrapper clears GIT_DIR itself: feat/test-env-builder.) Rustfmt and eslint stay parallel and light.
+# Pre-commit runs only the fast checks (rustfmt, ESLint on the touched files, the Pitwall privacy check, commit-msg). Clippy and every
+# other build run in the pre-push gate (`./dev check --pre-push`), through the machine-wide heavy slot (ER-24; user, 2026-11-13).
 pre-commit:
   parallel: true
   commands:
@@ -11,10 +10,6 @@ pre-commit:
       root: "apps/debrief/"
       glob: "*.rs"
       run: rustfmt --edition 2021 --check {staged_files}
-    debrief-clippy:
-      root: "apps/debrief/"
-      glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     debrief-eslint:
       root: "apps/debrief/app/"
       glob: "*.{ts,html}"
@@ -23,10 +18,6 @@ pre-commit:
       root: "apps/dyno/"
       glob: "*.rs"
       run: rustfmt --edition 2021 --check {staged_files}
-    dyno-clippy:
-      root: "apps/dyno/"
-      glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     dyno-eslint:
       root: "apps/dyno/app/"
       glob: "*.{ts,html}"
@@ -35,10 +26,6 @@ pre-commit:
       root: "apps/pitcrew/"
       glob: "*.rs"
       run: rustfmt --edition 2021 --check {staged_files}
-    pitcrew-clippy:
-      root: "apps/pitcrew/"
-      glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     pitcrew-eslint:
       root: "apps/pitcrew/app/"
       glob: "*.{ts,html}"
@@ -47,10 +34,6 @@ pre-commit:
       root: "apps/pitwall/"
       glob: "*.rs"
       run: rustfmt --edition 2021 --check {staged_files}
-    pitwall-clippy:
-      root: "apps/pitwall/"
-      glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     pitwall-eslint:
       root: "apps/pitwall/app/"
       glob: "*.{ts,html}"
@@ -59,10 +42,6 @@ pre-commit:
       root: "apps/spotter/"
       glob: "*.rs"
       run: rustfmt --edition 2021 --check {staged_files}
-    spotter-clippy:
-      root: "apps/spotter/"
-      glob: "*.rs"
-      run: ../../dev heavy -- cargo clippy --workspace --all-targets --quiet -- -D warnings
     spotter-eslint:
       root: "apps/spotter/app/"
       glob: "*.{ts,html}"
