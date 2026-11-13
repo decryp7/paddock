@@ -77,7 +77,8 @@ pub mod queue;
 pub mod release_isolation;
 pub mod safe_remove;
 pub mod slots;
-#[cfg(test)]
+// Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
+#[cfg(all(test, unix))]
 mod test_sleeper;
 pub mod wait;
 pub mod wait_lock;
