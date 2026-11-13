@@ -289,7 +289,10 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
 
 /// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_HEAVY` as given, else `heavy.sh` or `heavy`
 /// on PATH. Empty when there is none (the caller says so).
-pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
+///
+/// Last, `sibling` (see [`sibling_heavy`]) names a `heavy.sh` that is not on PATH, so a caller whose PATH lacks it (a git hook) still
+/// takes its turn.
+pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool, sibling: &dyn Fn() -> Option<String>) -> Vec<String> {
     if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
         if h.trim() == "off" {
             return Vec::new();
@@ -302,7 +305,29 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -
     if has("heavy") {
         return ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
     }
-    Vec::new()
+    sibling().into_iter().collect()
+}
+
+/// Where a `heavy.sh` may sit when PATH has none: `$ENGINEERING_RULES/scripts/heavy.sh`, else the `engineering-rules` checkout beside
+/// the main checkout of this repository (a worktree's `.git` file leads to it). The first candidate that is a file. None on Windows:
+/// `heavy.sh` is a shell script that CreateProcess cannot start.
+pub fn sibling_heavy(root: &Path, env: &HashMap<String, String>) -> Option<String> {
+    if cfg!(windows) {
+        return None;
+    }
+    let mut dirs: Vec<PathBuf> = env
+        .get("ENGINEERING_RULES")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .into_iter()
+        .collect();
+    if let Ok(repo) = crate::worktree::git::Repo::discover(root) {
+        dirs.extend(repo.primary.parent().map(|p| p.join("engineering-rules")));
+    }
+    dirs.into_iter()
+        .map(|d| d.join("scripts/heavy.sh"))
+        .find(|f| f.is_file())
+        .map(|f| f.to_string_lossy().into_owned())
 }
 
 /// The command that puts a heavy step through the machine-wide slot: [`heavy_prefix`], else the `heavy` built from the tree at
@@ -323,7 +348,7 @@ pub fn heavy_command_for(
             Err("PADDOCK_HEAVY=off is set without the test-only variable PADDOCK_TEST_HEAVY_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
         };
     }
-    let found = heavy_prefix(env, has_tool);
+    let found = heavy_prefix(env, has_tool, &|| sibling_heavy(root, env));
     if !found.is_empty() {
         return Ok(found);
     }
@@ -579,11 +604,37 @@ mod tests {
     #[test]
     fn heavy_is_found_when_the_variable_is_not_set() {
         let env = HashMap::new();
-        assert!(heavy_prefix(&env, &|_| false).is_empty());
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy.sh"), ["heavy.sh"]);
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy"), ["heavy", "run", "pre-push", "--"]);
+        let none = || None;
+        assert!(heavy_prefix(&env, &|_| false, &none).is_empty());
+        assert_eq!(heavy_prefix(&env, &|p| p == "heavy.sh", &none), ["heavy.sh"]);
+        assert_eq!(heavy_prefix(&env, &|p| p == "heavy", &none), ["heavy", "run", "pre-push", "--"]);
+        // not on PATH: the sibling checkout's script is used
+        assert_eq!(heavy_prefix(&env, &|_| false, &|| Some("/x/heavy.sh".into())), ["/x/heavy.sh"]);
         let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
-        assert_eq!(heavy_prefix(&set, &|_| true), ["my-heavy", "--x"]);
+        assert_eq!(heavy_prefix(&set, &|_| true, &none), ["my-heavy", "--x"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_sibling_checkout_of_the_main_checkout_is_found_from_a_worktree_path() {
+        let t = tempfile::tempdir().unwrap();
+        let main = t.path().join("repo");
+        std::fs::create_dir_all(t.path().join("engineering-rules/scripts")).unwrap();
+        std::fs::write(t.path().join("engineering-rules/scripts/heavy.sh"), "#!/bin/sh\n").unwrap();
+        std::fs::create_dir(&main).unwrap();
+        assert!(
+            paddock_proc::command("git")
+                .args(["init", "-q"])
+                .current_dir(&main)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let found = sibling_heavy(&main, &HashMap::new()).unwrap();
+        assert!(found.ends_with("engineering-rules/scripts/heavy.sh"), "{found}");
+        // no such checkout beside it: nothing
+        std::fs::remove_file(t.path().join("engineering-rules/scripts/heavy.sh")).unwrap();
+        assert_eq!(sibling_heavy(&main, &HashMap::new()), None);
     }
 
     #[test]
@@ -602,7 +653,7 @@ mod tests {
     #[test]
     fn heavy_off_runs_without_the_slot_and_is_the_only_way_to() {
         let off = HashMap::from([("PADDOCK_HEAVY".to_string(), "off".to_string())]);
-        assert!(heavy_prefix(&off, &|_| true).is_empty());
+        assert!(heavy_prefix(&off, &|_| true, &|| None).is_empty());
     }
 
     /// A stand-in for `heavy`: a directory is the lock (`mkdir`), a waiter prints who holds it as heavy does, the holder runs

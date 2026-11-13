@@ -193,7 +193,7 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
         }
         return 0;
     }
-    let heavy = if args.heavy { heavy_prefix(env) } else { Vec::new() };
+    let heavy = if args.heavy { heavy_prefix(&root, env) } else { Vec::new() };
     if args.heavy && heavy.is_empty() {
         return fail(
             out,
@@ -204,8 +204,10 @@ pub fn run_with(args: &RunArgs, env: &HashMap<String, String>, stop: &Arc<Atomic
     execute(args, &root, &lines, &child_env, &heavy, stop, out)
 }
 
-fn heavy_prefix(env: &HashMap<String, String>) -> Vec<String> {
-    crate::pre_push::exec::heavy_prefix(env, &|p| crate::pre_push::exec::on_path(env, p))
+fn heavy_prefix(root: &Path, env: &HashMap<String, String>) -> Vec<String> {
+    crate::pre_push::exec::heavy_prefix(env, &|p| crate::pre_push::exec::on_path(env, p), &|| {
+        crate::pre_push::exec::sibling_heavy(root, env)
+    })
 }
 
 fn execute(

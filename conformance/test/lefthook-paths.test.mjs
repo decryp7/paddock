@@ -33,7 +33,7 @@ export function problems(cmd, tracked, root = PADDOCK) {
   if (base && !(existsSync(join(root, base)) && statSync(join(root, base)).isDirectory())) found.push(`${cmd.name}: root ${base} is not a folder`);
   const nodeTest = /\bnode\b[^|&;]*--test\b/.test(cmd.run);
   for (const tok of cmd.run.split(/\s+/)) {
-    if (!tok || tok.startsWith('-') || tok.includes('{') || !/[/.]/.test(tok) || /^(?:https?:|\.\/dev$)/.test(tok)) continue;
+    if (!tok || tok.startsWith('-') || tok.includes('{') || tok.includes('}') || !/[/.]/.test(tok) || /^(?:https?:|\.\/dev$)/.test(tok)) continue;
     const rel = [base, tok].filter(Boolean).join('/');
     if (/[*?]/.test(tok)) {
       const re = globRe(rel);
@@ -79,4 +79,25 @@ test('the pre-push hook is the one command `./dev check --pre-push --refs-from-s
 test('the pre-push reader sees a second command', () => {
   const text = 'pre-push:\n  commands:\n    a:\n      run: ./dev check --pre-push\n    b:\n      run: node x.mjs\n';
   assert.equal(prePushCommands(text).length, 2);
+});
+
+// ER-24: a cargo build in a git hook takes its turn on the machine-wide heavy slot, like the pre-push gate's heavy steps
+// (`./dev heavy` calls `heavy_prefix` in tools/paddock-dev/src/pre_push/exec.rs, which also finds a heavy.sh off PATH).
+export const HEAVY = '../../dev heavy --';
+
+/** The pre-commit commands that run cargo and do not go through the heavy slot. */
+export function unslotted(cmds) {
+  return cmds.filter((c) => /\bcargo\b/.test(c.run) && !c.run.includes(`${HEAVY} cargo`)).map((c) => c.name);
+}
+
+const preCommit = (text) => commands(/^pre-commit:\n((?: .*\n|\n)*)/m.exec(text)?.[1] ?? '');
+
+test('every cargo command of the pre-commit hook runs through the heavy slot', () => {
+  const cmds = preCommit(readFileSync(join(PADDOCK, 'lefthook.yml'), 'utf8'));
+  assert.ok(cmds.filter((c) => /\bcargo\b/.test(c.run)).length >= 5, 'cargo commands found');
+  assert.deepEqual(unslotted(cmds), []);
+});
+
+test('the heavy-slot check sees a bare cargo command', () => {
+  assert.deepEqual(unslotted([{ name: 'a', run: 'cargo clippy' }, { name: 'b', run: `${HEAVY} cargo clippy` }, { name: 'c', run: 'rustfmt x' }]), ['a']);
 });

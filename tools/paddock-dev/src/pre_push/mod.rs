@@ -360,7 +360,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         overridden =
             "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
                 .into();
-    } else if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
+    } else if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p), &|| exec::sibling_heavy(&real.root, &env)).is_empty() {
         notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
