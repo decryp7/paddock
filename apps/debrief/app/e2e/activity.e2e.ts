@@ -1,5 +1,5 @@
 import { BrowserContext, ConsoleMessage, expect, Page, test } from '@playwright/test';
-import { ensureInspector, openApp } from './app';
+import { ensureInspector, gridRows, openApp } from './app';
 import { chooseMenu } from './menu-support';
 
 // The activity log in the browser build: entries go to the console logger (the mock "log sink"), as
@@ -69,7 +69,7 @@ test('a user journey is logged once per operation, in order, with triggers and w
   await expect.poll(() => entries.filter((e) => e.props['Operation'] === 'search.change').length).toBe(2);
 
   // Select an event.
-  const row = page.locator('debrief-events-grid [role=row].row').nth(2);
+  const row = gridRows(page).nth(2);
   const rowText = (await row.locator('.msg').innerText()).trim();
   await row.click();
   await expect.poll(() => find(entries, 0, { Operation: 'selection.change' })).toBeGreaterThanOrEqual(0);

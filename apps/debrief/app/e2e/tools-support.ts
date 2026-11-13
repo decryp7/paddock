@@ -1,5 +1,5 @@
 import { expect, Page } from '@playwright/test';
-import { APP_LOAD_TIMEOUT } from './app';
+import { APP_LOAD_TIMEOUT, gridRows } from './app';
 import { showView } from './menu-support';
 
 /**
@@ -13,7 +13,7 @@ export async function openAppWith(page: Page, search = ''): Promise<void> {
   await page.goto(`/${search}`);
   await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
   await expect(page.locator('debrief-status-bar')).toContainText('events');
-  await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+  await expect(gridRows(page).first()).toBeVisible();
   // The lifecycle extras are mounted into the title bar after start-up.
   await expect(page.locator('debrief-title-extras')).toBeAttached();
 }

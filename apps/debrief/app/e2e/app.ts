@@ -9,13 +9,20 @@ export const APP_LOAD_TIMEOUT = 15_000;
  */
 export const CAPTURE_TIMEOUT = 15_000;
 
+/**
+ * Loaded rows currently in the DOM (never more than a screenful plus overscan, whatever the total). A row whose page is
+ * still loading is a `.placeholder` with the same role: it has no event, so clicking it selects nothing (jobs.e2e.ts
+ * clicked one under load and the AI command stayed hidden).
+ */
+export const gridRows = (page: Page) => page.locator('debrief-events-grid [role=row].row:not(.placeholder)');
+
 /** Opens the app in the browser build (MockBackend) and waits for the demo workspace to load. */
 export async function openApp(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.getByRole('grid', { name: 'Events' })).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
   await expect(page.locator('debrief-status-bar')).toContainText('events');
   await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible();
-  await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+  await expect(gridRows(page).first()).toBeVisible();
 }
 
 /** Parses a count like "40,123" or "40.1k" shown in the UI into a number. */

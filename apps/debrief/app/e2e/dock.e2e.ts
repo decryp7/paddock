@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { ensureInspector, openApp, openView } from './app';
+import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu, menuItem, openMenu, showProfileEditor } from './menu-support';
 
@@ -39,7 +39,7 @@ test.describe('dock layout', () => {
     await expect(page.locator('debrief-inspector')).toHaveCount(0);
 
     // Selecting an event slides the inspector out over the right edge.
-    const rows = page.locator('debrief-events-grid [role=row].row');
+    const rows = gridRows(page);
     await rows.first().click();
     const flyout = page.locator('#debrief-ah-flyout');
     await expect(flyout.locator('debrief-inspector')).toBeVisible();

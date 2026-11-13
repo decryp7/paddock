@@ -1,12 +1,12 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 
 // Dragging an events-grid row onto the Notes panel opens the note editor on that event. Browsers cannot start a real
 // OS drag from automation, so the drag events are dispatched with a shared DataTransfer (what a drag carries).
 
-const rows = (page: Page) => page.locator('debrief-events-grid [role=row].row');
+const rows = (page: Page) => gridRows(page);
 
 async function openNotes(page: Page) {
   await runCommand(page, 'Show notes');

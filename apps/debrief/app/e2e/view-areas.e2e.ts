@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 
@@ -34,7 +34,7 @@ test.describe('view home areas', () => {
     await expect(grid).toBeVisible();
     await expect(timeline).toBeVisible();
     await expect(timeline.locator('.lane').first()).toBeVisible();
-    await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+    await expect(gridRows(page).first()).toBeVisible();
     // Exactly one group holds the analysis views.
     await expect(page.locator('.dv-groupview').filter({ has: tab(page, 'Anomalies') })).toHaveCount(1);
     await expect(page.locator('.dv-groupview').filter({ has: tab(page, 'Patterns') })).toHaveCount(1);

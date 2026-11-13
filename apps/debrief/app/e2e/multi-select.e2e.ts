@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';
 
@@ -9,7 +9,7 @@ test.describe('grid multi-select', () => {
   test('shift+click selects a range and "Infer pattern from lines…" uses every selected line', async ({ page }, testInfo) => {
     const grid = page.getByRole('grid', { name: 'Events' });
     await expect(grid).toHaveAttribute('aria-multiselectable', 'true');
-    const rows = page.locator('debrief-events-grid [role=row].row');
+    const rows = gridRows(page);
     const messages = await Promise.all([0, 1, 2].map((i) => rows.nth(i).locator('.msg').innerText()));
 
     await rows.nth(0).click();
@@ -28,7 +28,7 @@ test.describe('grid multi-select', () => {
   });
 
   test('the palette command "Infer pattern from selected lines" uses the grid multi-selection', async ({ page }) => {
-    const rows = page.locator('debrief-events-grid [role=row].row');
+    const rows = gridRows(page);
     const picked = [1, 2, 4];
     const messages = await Promise.all(picked.map((i) => rows.nth(i).locator('.msg').innerText()));
 
@@ -45,7 +45,7 @@ test.describe('grid multi-select', () => {
   });
 
   test('ctrl/cmd+click toggles rows and shift+arrow extends; a plain click selects one row again', async ({ page }) => {
-    const rows = page.locator('debrief-events-grid [role=row].row');
+    const rows = gridRows(page);
     const selected = page.locator('debrief-events-grid [role=row][aria-selected=true]');
 
     await rows.nth(0).click();

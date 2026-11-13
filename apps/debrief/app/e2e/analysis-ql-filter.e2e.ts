@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { gridTotal, initialTotal, openApp, parseCount } from './app';
+import { gridRows, gridTotal, initialTotal, openApp, parseCount } from './app';
 import { openQuery } from './analysis-support';
 
 test.describe('query language filters the workspace', () => {
@@ -20,7 +20,7 @@ test.describe('query language filters the workspace', () => {
       const n = parseCount(await gridTotal(page).innerText());
       return n > 0 && n < all;
     }).toBe(true);
-    const rows = page.locator('debrief-events-grid [role=row].row');
+    const rows = gridRows(page);
     await expect(rows.first()).toContainText(/ERR|FTL/);
     await expect(rows.filter({ hasText: /INF|WRN|DBG|VRB/ })).toHaveCount(0);
 

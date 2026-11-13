@@ -69,6 +69,26 @@ module.exports = defineConfig(
     },
   },
   {
+    // A grid row whose page is still loading is a `.placeholder` with the same role: a spec that clicks or waits on
+    // `[role=row].row` can get one, and clicking it selects nothing (jobs.e2e.ts, run 8056). Specs use `gridRows`
+    // (e2e/app.ts). Selected (`[aria-selected`) and highlighted (`.hl`) rows are always loaded, so those stay allowed.
+    // Report-only (warn) until its first green run (ER-41).
+    files: ['e2e/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'warn',
+        {
+          selector: 'Literal[value=/\\[role=row\\]\\.row(?!:not\\(\\.placeholder\\)|\\[aria-selected|\\.hl)/]',
+          message: 'This selector also matches loading placeholder rows: use gridRows(page) from e2e/app.ts.',
+        },
+        {
+          selector: 'TemplateElement[value.raw=/\\[role=row\\]\\.row(?!:not\\(\\.placeholder\\)|\\[aria-selected|\\.hl)/]',
+          message: 'This selector also matches loading placeholder rows: use gridRows(page) from e2e/app.ts.',
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.html'],
     extends: [angular.configs.templateRecommended, angular.configs.templateAccessibility],
     rules: {

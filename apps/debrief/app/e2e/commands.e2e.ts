@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { gridTotal, initialTotal, openApp } from './app';
+import { gridRows, gridTotal, initialTotal, openApp } from './app';
 import { runCommand } from './analysis-support';
 import { chooseMenu, menuItem, openMenuPath } from './menu-support';
 
@@ -61,12 +61,12 @@ test.describe('commands without another spec', () => {
 
   test('Edit ▸ Find and the "Search events" command focus the search box', async ({ page }) => {
     const search = page.getByTestId('query-field');
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     await expect(search).not.toBeFocused();
     await chooseMenu(page, 'Edit', 'Find');
     await expect(search).toBeFocused();
 
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     await expect(search).not.toBeFocused();
     await runCommand(page, 'Search events');
     await expect(search).toBeFocused();

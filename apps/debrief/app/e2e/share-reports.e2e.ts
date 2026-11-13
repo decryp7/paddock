@@ -1,6 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
-import { openView } from './app';
+import { gridRows, openView } from './app';
 import { openAppWith, runCommand } from './tools-support';
 
 /** What the mock share backend "wrote" (it records every report and image save). */
@@ -11,7 +11,7 @@ async function written(page: Page): Promise<{ path: string; kind: string; bytes:
 test.describe('incident report builder', () => {
   test('builds a report from a note and a chart and exports it as HTML', async ({ page }, testInfo) => {
     await openAppWith(page);
-    await page.locator('debrief-events-grid [role=row].row').nth(2).click();
+    await gridRows(page).nth(2).click();
     await runCommand(page, 'Add note to the selected event…');
     await page.getByTestId('note-text').fill('Start of the failure');
     await page.getByTestId('note-save').click();

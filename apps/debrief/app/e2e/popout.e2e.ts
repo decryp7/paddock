@@ -1,6 +1,6 @@
 import { BrowserContext, expect, Page, test } from '@playwright/test';
 import { openQuery } from './analysis-support';
-import { ensureInspector, openApp, openView } from './app';
+import { ensureInspector, gridRows, openApp, openView } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { runCommand } from './analysis-support';
 import { menuItem, openMenu } from './menu-support';
@@ -36,12 +36,12 @@ test.describe('pop-out windows', () => {
     const popup = await popOut(page, context, 'Inspector');
     expect(popup.url()).toContain('#/popout?view=inspector');
     await expect(popup.getByRole('button', { name: 'Dock back into the main window' })).toBeVisible();
-    const row = page.locator('debrief-events-grid [role=row].row').nth(3);
+    const row = gridRows(page).nth(3);
     const message = (await row.locator('.msg').innerText()).trim();
     await row.click();
     await expect(popup.locator('debrief-inspector')).toContainText(message.slice(0, 20));
     // And back: moving the selection in the host moves it in the pop-out.
-    const next = page.locator('debrief-events-grid [role=row].row').nth(6);
+    const next = gridRows(page).nth(6);
     const nextMessage = (await next.locator('.msg').innerText()).trim();
     await next.click();
     await expect(popup.locator('debrief-inspector')).toContainText(nextMessage.slice(0, 20));

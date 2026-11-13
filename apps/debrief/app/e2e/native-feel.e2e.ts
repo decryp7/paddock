@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 
 // The app should feel like a desktop app: no browser context menu on its chrome, no reload, page zoom or other
 // browser keys. The guard only prevents the browser's default, so Debrief's own menus and shortcuts keep working.
@@ -55,10 +55,10 @@ test.describe('native feel', () => {
         });
     const selected = () => page.evaluate(() => window.getSelection()?.toString().trim() ?? '');
     // Near the start of the message: selecting a row opens the inspector over the right of the grid.
-    const message = page.locator('debrief-events-grid [role=row].row .msg').first();
+    const message = gridRows(page).locator('.msg').first();
     await message.dblclick({ position: { x: 12, y: 6 } });
     await expect.poll(selected).not.toBe('');
-    expect(await userSelect('debrief-events-grid [role=row].row .msg')).toBe('text');
+    expect(await userSelect('debrief-events-grid [role=row].row:not(.placeholder) .msg')).toBe('text');
     // The toolbar and the status bar are chrome: double-clicking their text selects nothing.
     // (WebKit reports an inherited `none` as `auto`, so what counts is that nothing gets selected.)
     for (const chrome of ['debrief-status-bar', 'debrief-title-bar', 'debrief-events-grid .bar']) {
@@ -69,7 +69,7 @@ test.describe('native feel', () => {
   });
 
   test("right-clicking selected text opens Debrief's menu with Copy instead of the browser menu", async ({ page }) => {
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     const message = page.locator('debrief-inspector .message');
     await expect(message).not.toBeEmpty();
     expect(await message.evaluate((el) => getComputedStyle(el).userSelect || (getComputedStyle(el) as CSSStyleDeclaration & { webkitUserSelect?: string }).webkitUserSelect)).toBe('text');

@@ -1,12 +1,12 @@
 import { expect, Page, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openChat, runCommand, waitAnswered } from './ai-support';
-import { openAppWith } from './mock-url';
+import { gridRows, openAppWith } from './mock-url';
 
 /** The app with the AI mock at `search` (its own step time: `openAiApp` fixes a fast one). */
 async function openAiApp(page: Page, search: string): Promise<void> {
   await openAppWith(page, `?${search.includes('mockAiStepMs') ? '' : 'mockAiStepMs=5&'}${search}`);
-  await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+  await expect(gridRows(page).first()).toBeVisible();
 }
 
 // Jobs, notifications and research against the mock backends (src/app/jobs/mock-jobs.ts,
@@ -33,7 +33,10 @@ async function openNotifications(page: Page) {
 
 /** Explains the first event: no dialog, the request runs as a job and a toast says so. */
 async function explainInBackground(page: Page): Promise<void> {
-  await page.locator('debrief-events-grid [role=row].row').first().click();
+  const row = gridRows(page).first();
+  await row.click();
+  // The command needs a selected event: a click that landed while the page was reloading selected nothing.
+  await expect(row).toHaveAttribute('aria-selected', 'true');
   await runCommand(page, 'AI: Explain the selected event');
   const started = page.getByTestId('notification').filter({ hasText: /Explaining event #\d+ — running in Jobs/ });
   await expect(started).toBeVisible();

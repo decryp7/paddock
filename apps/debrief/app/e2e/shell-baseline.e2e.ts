@@ -3,7 +3,7 @@ import { dirname } from 'node:path';
 import { expect, Locator, Page, test } from '@playwright/test';
 import { DIALOG_TEST_INPUTS } from '../src/app/dialog-windows/dialog-test-inputs';
 import { runCommand } from './analysis-support';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { settleAnimations, settleDockLayout } from './axe';
 import { openAppWith } from './mock-url';
 
@@ -241,7 +241,7 @@ for (const scheme of SCHEMES) {
     test('a job running (the Jobs pane)', async ({ page }) => {
       await race(page, async () => {
         await openThemedApp(page, scheme, DESKTOP, '?mockAiStepMs=5&mockJobsHold=ai&mockJobsVisibleMs=0&mockJobsAttentionMs=600000');
-        await page.locator('debrief-events-grid [role=row].row').first().click();
+        await gridRows(page).first().click();
         await runCommand(page, 'AI: Explain the selected event');
         await runCommand(page, 'View: Jobs');
         const pane = page.locator('debrief-jobs-panel');

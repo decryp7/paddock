@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 
 // High contrast theme (WCAG AAA tokens) and "Follow system": the system's contrast preference picks it by default.
@@ -36,7 +36,7 @@ test.describe('high contrast', () => {
       await openApp(page);
       await expect(html(page)).toHaveAttribute('data-theme', 'contrast');
       expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text').trim())).toBe(scheme === 'dark' ? '#ffffff' : '#000000');
-      await page.locator('debrief-events-grid [role=row].row').first().click();
+      await gridRows(page).first().click();
       await expectNoSeriousViolations(page, testInfo, `high-contrast-${scheme}`);
       await page.screenshot({ path: testInfo.outputPath(`high-contrast-${scheme}.png`) });
     });

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp, gridTotal, parseCount } from './app';
+import { gridRows, gridTotal, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
 import { chooseMenu } from './menu-support';
@@ -8,7 +8,7 @@ test.describe('context view', () => {
   test.beforeEach(async ({ page }) => openApp(page));
 
   test('shows the original lines around the selected event, expands and copies', async ({ page }, testInfo) => {
-    await page.locator('debrief-events-grid [role=row].row').nth(15).click();
+    await gridRows(page).nth(15).click();
     const ctx = page.locator('debrief-context-section');
     await ctx.getByRole('button', { name: 'Context' }).click();
     const lines = ctx.getByTestId('context-lines');
@@ -28,19 +28,19 @@ test.describe('context view', () => {
   });
 
   test('follows the selection and recovers from a failed request', async ({ page }) => {
-    await page.locator('debrief-events-grid [role=row].row').nth(2).click();
+    await gridRows(page).nth(2).click();
     const ctx = page.locator('debrief-context-section');
     await ctx.getByRole('button', { name: 'Context' }).click();
     await expect(ctx.locator('.line.hit')).toHaveCount(1);
     const first = await ctx.locator('.line.hit').textContent();
-    await page.locator('debrief-events-grid [role=row].row').nth(6).click();
+    await gridRows(page).nth(6).click();
     await expect.poll(async () => ctx.locator('.line.hit').textContent()).not.toBe(first);
   });
 });
 
 test('a failed context request shows an inline error with Retry', async ({ page }) => {
   await openAppWith(page, '?mockFail=sourceContext:1&mockSnapshots=off');
-  await page.locator('debrief-events-grid [role=row].row').nth(3).click();
+  await gridRows(page).nth(3).click();
   const ctx = page.locator('debrief-context-section');
   await ctx.getByRole('button', { name: 'Context' }).click();
   await expect(ctx.getByRole('alert')).toContainText('Simulated sourceContext failure');
@@ -78,7 +78,7 @@ test.describe('live tail', () => {
     await expect(gridTotal(page)).toHaveText('0');
     await page.getByRole('button', { name: /Oldest first/ }).click();
     await page.getByRole('button', { name: 'Live tail', exact: true }).click();
-    const firstRow = page.locator('debrief-events-grid [role=row].row').first();
+    const firstRow = gridRows(page).first();
     await expect(firstRow).toContainText('Live event');
     const n1 = Number(/Live event (\d+)/.exec((await firstRow.textContent()) ?? '')![1]);
     await expect.poll(async () => Number(/Live event (\d+)/.exec((await firstRow.textContent()) ?? '')?.[1] ?? 0), { timeout: 10_000 }).toBeGreaterThan(n1);
@@ -90,7 +90,7 @@ test.describe('live tail', () => {
     await openAppWith(page, '?mockLiveMs=300');
     const live = page.locator('debrief-status-bar').getByRole('button', { name: 'Live tail', exact: true });
     await expect(live).toBeEnabled();
-    const row = page.locator('debrief-events-grid [role=row].row').nth(2);
+    const row = gridRows(page).nth(2);
     await row.click();
     await expect(page.locator('debrief-events-grid .row.sel')).toHaveCount(1);
     const selected = (await page.locator('debrief-events-grid .row.sel').textContent()) ?? '';

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu, menuItem } from './menu-support';
 
@@ -7,7 +7,7 @@ test.describe('source files and colours', () => {
   test.beforeEach(async ({ page }) => openApp(page));
 
   test('a row menu opens the event file at its line or shows it in its folder', async ({ page }, testInfo) => {
-    await page.locator('debrief-events-grid [role=row].row').first().click({ button: 'right' });
+    await gridRows(page).first().click({ button: 'right' });
     const menu = page.getByRole('menu', { name: 'Actions' });
     await expect(menuItem(menu, 'Open file')).toBeEnabled();
     await expect(menuItem(menu, /^Open at line \d+$/)).toBeEnabled();
@@ -34,7 +34,7 @@ test.describe('source files and colours', () => {
     const stripes = page.locator('debrief-events-grid [data-testid=source-stripe]');
     await expect(stripes.first()).toHaveAttribute('aria-label', /^File: /);
     await expect(page.locator('debrief-timeline-panel .lane-label debrief-source-swatch').first()).toBeVisible();
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     await expect(page.locator('debrief-inspector .src-line debrief-source-swatch')).toBeVisible();
     await expectNoSeriousViolations(page, testInfo, 'source-colours');
 
@@ -47,7 +47,7 @@ test.describe('source files and colours', () => {
     await expect(page.locator('debrief-timeline-panel .lane-label debrief-source-swatch')).toHaveCount(0);
     // The choice is a user preference: it survives a reload.
     await openApp(page);
-    await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+    await expect(gridRows(page).first()).toBeVisible();
     await expect(stripes).toHaveCount(0);
   });
 });

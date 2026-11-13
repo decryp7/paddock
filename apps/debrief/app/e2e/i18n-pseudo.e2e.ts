@@ -1,5 +1,5 @@
 import { expect, Locator, Page, test } from '@playwright/test';
-import { APP_LOAD_TIMEOUT } from './app';
+import { APP_LOAD_TIMEOUT, gridRows } from './app';
 
 // The generated pseudo-locale (Settings ▸ General ▸ Language ▸ Pseudo): accented, longer, bracketed (⟦…⟧) text.
 // Smoke test of runtime translation loading, and a guard against unmarked English in the shell chrome and menus.
@@ -19,7 +19,7 @@ async function openPseudo(page: Page): Promise<void> {
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en-XA');
   // The language is set before the app starts; the first rows come with the app's load, which takes as long as anywhere.
-  await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
+  await expect(gridRows(page).first()).toBeVisible({ timeout: APP_LOAD_TIMEOUT });
 }
 
 /**

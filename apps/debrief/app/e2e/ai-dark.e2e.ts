@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, narrativeDialog, openAiApp, openChat, runCommand, viewAnswer, waitAnswered } from './ai-support';
-import { openAppWith } from './mock-url';
+import { gridRows, openAppWith } from './mock-url';
 
 // Every AI view in the DARK theme (the other ai-* files check the light one): contrast of chips, badges,
 // citation links and proposal cards on the dark tokens.
@@ -39,7 +39,7 @@ test.describe('AI views in the dark theme', () => {
     await expectNoSeriousViolations(page, testInfo, 'dark-ai-narrative', '[role=dialog]');
     await narrative.getByRole('button', { name: 'Close' }).last().click();
 
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     await runCommand(page, 'AI: Propose markers…');
     const propose = page.getByRole('dialog', { name: 'Propose markers' });
     await propose.getByLabel('Which events should be marked?').fill('timeouts');
