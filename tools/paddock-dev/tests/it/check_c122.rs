@@ -1,4 +1,4 @@
-//! C121 (tests compare paths as paths, ADR 0099): the Rust host against the conformance host as the oracle, on a fixture tree and on
+//! C122 (tests compare paths as paths, ADR 0099): the Rust host against the conformance host as the oracle, on a fixture tree and on
 //! this working tree, and the tree's own state (no rule A or B site is left; the check starts with an empty baseline).
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use super::check::{LIVE_STALL, has_node, node, node_ticking, repo_root, skip};
@@ -33,7 +33,7 @@ fn options(root: &Path, app: &str) -> RunOptions {
     RunOptions {
         root: root.to_path_buf(),
         app: app.into(),
-        only: Some(vec!["C121".into()]),
+        only: Some(vec!["C122".into()]),
         files: None,
         today: "2026-11-13".into(),
         base_ref: Some("origin/main".into()),
@@ -48,7 +48,7 @@ const JS_RUN: &str = r#"
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
-const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C121'] });
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C122'] });
 process.stdout.write(JSON.stringify(r));
 "#;
 
@@ -105,14 +105,14 @@ fn live_tree_findings_equal_the_js_host_and_no_rule_a_or_b_site_is_left() {
     }
     let root = repo_root();
     let js_root = root.clone();
-    let js = paddock_testkit::guarded("the JS C121 over the live tree", LIVE_STALL, move |progress| {
+    let js = paddock_testkit::guarded("the JS C122 over the live tree", LIVE_STALL, move |progress| {
         let driver = format!(
             "import fs from 'node:fs';\nimport {{ syncBuiltinESMExports }} from 'node:module';\nconst read = fs.readFileSync;\nfs.readFileSync = (...a) => {{ process.stdout.write('.\\n'); return read(...a); }};\nsyncBuiltinESMExports();\n{JS_RUN}"
         );
         let env = [("RT5_ROOT", js_root.display().to_string()), ("RT5_APP", "paddock".into())];
         serde_json::from_str::<Value>(node_ticking(&driver, &env, &progress).trim()).unwrap()
     });
-    let r = paddock_testkit::guarded("the Rust C121 over the live tree", LIVE_STALL, {
+    let r = paddock_testkit::guarded("the Rust C122 over the live tree", LIVE_STALL, {
         let root = root.clone();
         move |progress| {
             let tree = Tree::open(&root).with_progress(move || progress.tick());

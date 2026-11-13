@@ -1,4 +1,4 @@
-// C121: tests compare paths as paths (rule 40, ADR 0099; the class: runs 7943, 8027, 8034, 8050 each failed only on the Windows
+// C122: tests compare paths as paths (rule 40, ADR 0099; the class: runs 7943, 8027, 8034, 8050 each failed only on the Windows
 // runner). In Rust test code (files under `tests/`, `tests.rs`, `*_tests.rs`, and the `#[cfg(test)] mod` of any other file) it reads,
 // with comments and string insides masked as C53 does:
 // - rule A: a `format!` that joins a `.display()` argument with a literal `/` or `\` next to the placeholder
@@ -8,7 +8,7 @@
 //   `.to_str().unwrap()`, `.to_string_lossy()`, none of a `file_name()`): compare Paths, or use `assert_same_path!`.
 // A site that is not a path comparison carries `// conformance: path-text — <why>` on the line or the line above.
 // ER-41: report-only until the first green run on the real tree; A and B are warnings now (flip SEVERITY and the mode to gate).
-// The Rust host has the same check (`tools/paddock-dev/src/check/c121.rs`); `tests/it/check_c121.rs` compares them.
+// The Rust host has the same check (`tools/paddock-dev/src/check/c122.rs`); `tests/it/check_c122.rs` compares them.
 import { warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 
@@ -91,7 +91,7 @@ const FIX = {
 };
 
 export default {
-  id: 'C121',
+  id: 'C122',
   scope: 'root',
   mode: 'report-only',
   title: 'Tests compare paths as paths',
@@ -106,7 +106,7 @@ export default {
         if (s.waived === 'reason') continue;
         const bare = s.waived === 'no-reason' ? ' (the waiver comment has no reason)' : '';
         const make = s.rule === 'C' ? warn : SEVERITY;
-        out.push(make('C121', 40, f, s.line, `${s.what}${bare} (rule ${s.rule}: the same place is spelled differently on Windows)`, `${FIX[s.rule]} A site that is not a path comparison carries \`// conformance: path-text — <why>\`.`));
+        out.push(make('C122', 40, f, s.line, `${s.what}${bare} (rule ${s.rule}: the same place is spelled differently on Windows)`, `${FIX[s.rule]} A site that is not a path comparison carries \`// conformance: path-text — <why>\`.`));
       }
     }
     return out;

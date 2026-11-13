@@ -1,4 +1,4 @@
-//! C121: tests compare paths as paths (ADR 0099, rule 40). The same place is spelled differently on Windows (`\` and `/`, `\\?\`,
+//! C122: tests compare paths as paths (ADR 0099, rule 40). The same place is spelled differently on Windows (`\` and `/`, `\\?\`,
 //! drive case, Git bash's `/c/x`), so test code that builds expected path text by hand fails there and only there. In Rust test
 //! code (files under `tests/`, `tests.rs`, `*_tests.rs`, and the `#[cfg(test)] mod` of any other file), with comments and string
 //! insides masked:
@@ -10,7 +10,7 @@
 //! A site that is not a path comparison carries `// conformance: path-text — <why>` on the line or the line above. Report-only
 //! (ER-41): A and B are warnings until the first green run on the real tree; flip [`SEVERITY_AB`] then.
 //!
-//! The port of `conformance/src/checks/C121-test-path-text.mjs`, finding for finding (`tests/it/check_c121.rs` compares them).
+//! The port of `conformance/src/checks/C122-test-path-text.mjs`, finding for finding (`tests/it/check_c122.rs` compares them).
 //! Positions are UTF-16 offsets, as in the JavaScript.
 
 use super::finding::{Finding, Severity};
@@ -208,11 +208,11 @@ fn fix(rule: Rule) -> &'static str {
 }
 
 /// The check.
-pub struct C121;
+pub struct C122;
 
-impl Check for C121 {
+impl Check for C122 {
     fn id(&self) -> &'static str {
-        "C121"
+        "C122"
     }
 
     fn rule(&self) -> u32 {
@@ -283,8 +283,8 @@ impl Check for C121 {
                     fix(s.rule)
                 );
                 findings.push(match severity {
-                    Severity::Warn => Finding::warn("C121", 40, f, s.line, message, fixed),
-                    Severity::Error => Finding::error("C121", 40, f, s.line, message, fixed),
+                    Severity::Warn => Finding::warn("C122", 40, f, s.line, message, fixed),
+                    Severity::Error => Finding::error("C122", 40, f, s.line, message, fixed),
                 });
             }
         }

@@ -13,7 +13,7 @@
 //! `tests/it/check.rs` diffs them on the tree and on `tests/fixtures/check`. The wiring is listed in the RT-5 hand-off, not done here.
 
 pub mod baseline;
-pub mod c121;
+pub mod c122;
 pub mod c39;
 pub mod c53;
 pub mod c53_liveness;
@@ -107,7 +107,7 @@ pub trait Check {
 
 /// The checks the host has, in the order of `conformance/src/checks/index.mjs`.
 pub fn registry() -> Vec<Box<dyn Check>> {
-    vec![Box::new(c39::C39), Box::new(c53::C53), Box::new(c121::C121)]
+    vec![Box::new(c39::C39), Box::new(c53::C53), Box::new(c122::C122)]
 }
 
 /// The inputs of a run.
