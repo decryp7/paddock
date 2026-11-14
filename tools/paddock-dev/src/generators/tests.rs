@@ -495,7 +495,10 @@ fn the_default_build_roots_are_the_disk_settings_roots() {
     // The platform's list separator (`:`, `;` on Windows), as `split_paths` reads it.
     let list = std::env::join_paths(["/nope/a", "/nope/b"]).unwrap().into_string().unwrap();
     let env = std::collections::HashMap::from([("PADDOCK_DISK_ROOTS".to_string(), list)]);
-    let roots = crate::disk::config::Settings::resolve(&Default::default(), &|k| env.get(k).cloned()).roots;
+    let roots = crate::disk::config::Settings::resolve_with(&Default::default(), &|k| env.get(k).cloned(), &|| {
+        Err("tests never derive the dev-targets folder from the real git config".to_string())
+    })
+    .roots;
     assert_eq!(roots, [std::path::PathBuf::from("/nope/a"), std::path::PathBuf::from("/nope/b")]);
     assert!(!include_str!("run.rs").contains("DEFAULT_ROOTS"), "run.rs names no machine path");
 }

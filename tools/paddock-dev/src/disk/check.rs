@@ -176,7 +176,9 @@ mod tests {
     const GIB: u64 = 1 << 30;
 
     fn settings() -> Settings {
-        Settings::resolve(&CommonArgs::default(), &|_| None)
+        Settings::resolve_with(&CommonArgs::default(), &|_| None, &|| {
+            Err("tests never derive the dev-targets folder from the real git config".to_string())
+        })
     }
 
     #[test]

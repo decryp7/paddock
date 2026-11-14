@@ -61,6 +61,8 @@ pub fn match_worktree<'a>(name: &str, wts: &'a [Wt]) -> Option<&'a Wt> {
 /// Runs `adopt`.
 pub fn run(a: &AdoptArgs, env: &dyn Fn(&str) -> Option<String>) -> Result<Report, CliError> {
     let s = Settings::resolve(&a.common, env);
+    // Like scan, report and clean: no roots to adopt into is a refusal with the next step, never a quiet empty run.
+    s.located_roots()?;
     let from = match &a.repo {
         Some(r) => r.clone(),
         None => std::env::current_dir().map_err(|e| CliError::failure(format!("Cannot read the current folder: {e}.")))?,
@@ -175,6 +177,23 @@ mod tests {
             branch: String::new(),
             head: String::new(),
         }
+    }
+
+    #[test]
+    fn without_derivable_roots_adopt_refuses_with_the_next_step() {
+        let a = AdoptArgs {
+            common: CommonArgs::default(),
+            repo: Some(PathBuf::from("/nonexistent-repo")),
+            dry_run: true,
+        };
+        // An invalid PADDOCK_DEV_TARGETS is refused before git config is read, so the developer's own config plays no part.
+        let env = |k: &str| (k == "PADDOCK_DEV_TARGETS").then(|| "relative/dt".to_string());
+        let e = run(&a, &env).unwrap_err();
+        let text = format!("{e:?}");
+        assert!(
+            text.contains("no folder to look in") && text.contains("PADDOCK_DISK_ROOTS"),
+            "{text}"
+        );
     }
 
     #[test]
