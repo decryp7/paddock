@@ -3,7 +3,7 @@
 The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` on Windows) from anywhere in the repository.
 
 - **Binary cache.** `./dev` names the binary by an input hash (`inputs.txt` plus the compiler cargo uses) and keeps it in
-  `$PADDOCK_DEV_HOME/bin/<hash>/` (default `~/.paddock-dev`). **Agents set `PADDOCK_DEV_HOME=/Volumes/d7sst7/dev-targets/paddock-dev-home`
+  `$PADDOCK_DEV_HOME/bin/<hash>/` (default `~/.paddock-dev`). **Agents set `PADDOCK_DEV_HOME=<dev-targets>/paddock-dev-home` ([where that is](../../docs/dev-setup.md#where-things-live))
   (never a folder in `~`); CI sets it under `PADDOCK_CI_HOME`. Tests always use a temporary `PADDOCK_DEV_HOME`.**
 - **Build folder.** A miss builds in a folder of its own, `<$PADDOCK_DEV_TARGET_DIR>/target-<hash>.XXXXXX`
   (default base `tools/paddock-dev/target/`, ignored by git), never shared by two builds and removed after the tool is
@@ -83,7 +83,7 @@ start, and cargo tracks the last use of its caches in SQLite (`cargo clean gc`, 
   worktree it belongs to). It is the source of truth and travels with the folder. `worktree add` writes it (and `worktree claim`
   touches it), the CI kit writes it for a slot's kept folders, and `./dev disk record <dir> --kind build --link <worktree>` writes or
   touches it for a build folder. In a worktree it is ignored through `<git-common-dir>/info/exclude`.
-- The usage index (default `/Volumes/d8sst7/dev-targets/.paddock-disk.sqlite`, `--index` or `PADDOCK_DISK_INDEX`; WAL,
+- The usage index (default `<dev-targets>/.paddock-disk.sqlite`, derived from `paddock.worktreeRoot` as the roots are, `--index` or `PADDOCK_DISK_INDEX`; WAL,
   15 s busy timeout) is a cache of the folders and a history of their sizes (90 days). A missing or corrupt index is set aside
   (`.corrupt-<time>`) and rebuilt from the records; nothing fails because of it.
 - `./dev disk scan` refreshes states and sizes (sizes younger than 6 hours are kept; `--force` measures all). Sizes are measured on

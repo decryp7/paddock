@@ -31,8 +31,13 @@ const WEEK: u64 = 7 * 86_400;
 
 /// Loads the folders and sizes the index has, rebuilding it first when it cannot be used. Returns the snapshot, the size
 /// history and the notes to print.
-pub fn load(s: &Settings, now: u64, note: &mut dyn FnMut(&str)) -> (Snapshot, BTreeMap<String, Vec<super::index::SizeRow>>) {
-    let (index, mut notes) = Index::open_or_recover(&s.index, now);
+pub fn load(
+    s: &Settings,
+    index: &std::path::Path,
+    now: u64,
+    note: &mut dyn FnMut(&str),
+) -> (Snapshot, BTreeMap<String, Vec<super::index::SizeRow>>) {
+    let (index, mut notes) = Index::open_or_recover(index, now);
     let mut index = index;
     let stored = index.as_ref().and_then(|i| i.folders().ok()).unwrap_or_default();
     let (mut snap, history) = if stored.is_empty() {
@@ -136,8 +141,10 @@ fn totals_text(t: &BTreeMap<State, Totals>) -> String {
 /// Runs the report.
 pub fn run(a: &ReportArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn FnMut(&str)) -> Result<Report, CliError> {
     let s = Settings::resolve(&a.common, env);
+    s.located_roots()?;
+    let index = s.index_file()?.to_path_buf();
     let now = now_secs();
-    let (snap, history) = load(&s, now, note);
+    let (snap, history) = load(&s, &index, now, note);
     let t = totals(&snap);
     let grew = growth(&history, now, WEEK, 10);
     let reclaimable: u64 = [State::Merged, State::StalePushed]
@@ -153,7 +160,7 @@ pub fn run(a: &ReportArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn 
         "Disk report: {} tracked folder(s) under {} root(s); index {}; sizes measured {}\n",
         snap.folders.len(),
         s.roots.len(),
-        s.index.display(),
+        index.display(),
         scanned.map_or("never (run ./dev disk scan)".to_string(), |m| format!("{} ago", ago(now, m)))
     ));
     for n in &snap.notes {
@@ -246,7 +253,7 @@ pub fn run(a: &ReportArgs, env: &dyn Fn(&str) -> Option<String>, note: &mut dyn 
     }
     Ok(Report::new(
         json!({
-            "index": s.index.display().to_string(),
+            "index": index.display().to_string(),
             "disks": disks,
             "totals": t.iter().map(|(k, v)| (k.word().to_string(), json!({"count": v.count, "bytes": v.bytes, "unmeasured": v.unmeasured}))).collect::<serde_json::Map<_, _>>(),
             "reclaimable_bytes": reclaimable,

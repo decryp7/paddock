@@ -59,6 +59,8 @@ pub fn run_with(
     before_remove: &mut dyn FnMut(&Path),
 ) -> Result<Report, CliError> {
     let s = Settings::resolve(&a.common, env);
+    s.located_roots()?;
+    let index_path = s.index_file()?.to_path_buf();
     if a.apply && context(&s, crate::worktree::note::now_secs()).process_folders.is_none() {
         return Err(
             CliError::refused("The processes' current folders cannot be read here, so whether a folder is in use is not known.").with_hint(
@@ -66,7 +68,9 @@ pub fn run_with(
             ),
         );
     }
-    let mut cached = Index::open_read_only(&s.index).and_then(|i| i.latest_sizes()).unwrap_or_default();
+    let mut cached = Index::open_read_only(&index_path)
+        .and_then(|i| i.latest_sizes())
+        .unwrap_or_default();
     let mut text = String::new();
     let (mut removed, mut kept) = (Vec::new(), Vec::new());
     let mut total = 0u64;
@@ -145,7 +149,7 @@ pub fn run_with(
         gib(total)
     ));
     if a.apply {
-        let (index, _) = Index::open_or_recover(&s.index, crate::worktree::note::now_secs());
+        let (index, _) = Index::open_or_recover(&index_path, crate::worktree::note::now_secs());
         if let Some(mut i) = index {
             let _ = scan(&s, Sizes::Skip, Some(&mut i), &mut |_| {});
         }

@@ -69,6 +69,7 @@ pub mod log_text;
 pub mod merge_check;
 pub mod nextest_log;
 pub mod pathfind;
+pub mod places;
 pub mod plan;
 pub mod plan_ci;
 pub mod plan_cmd;

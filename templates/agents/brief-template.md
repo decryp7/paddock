@@ -14,10 +14,10 @@ Owned files: <paths. Nothing else.>
 
 ## Where to work
 
-Worktree: <a folder under /Volumes/d8sst7/dev-targets/wt/, or "none: read-only, use git show">
+Worktree: <a folder under the dev-targets folder's wt/ (docs/dev-setup.md, "Where things live"), or "none: read-only, use git show">
 Branch: <name, or "none">
 Base: <origin/branch at a pinned head, for example origin/train/2026-11-11-5 at 607bb7928>
-Scratch: <the agent's own subfolder, never a root: a subfolder of /Volumes/d8sst7/dev-targets/ or /Volumes/d7sst7/dev-targets/ or of the session scratchpad, for example /Volumes/d8sst7/dev-targets/scratch/<agent id>>
+Scratch: <the agent's own subfolder, never a root: a subfolder of the dev-targets folder or of the session scratchpad, for example dev-targets/scratch/agent-id>
 Worktree order: `./dev worktree add <name> --base <base> -b <branch> --owner <role>:<task>` (it locks), then `./dev worktree claim <path>`, work, push, and at the end `./dev worktree drop <path>`. Use drop, never release, and never chain a drop after a commit that can fail.
 Main checkout: no git writes there, ever. Check `git rev-parse --show-toplevel` before each git command, and write `cd <dir> && git ...`, never `cd <dir>; git ...`.
 
@@ -32,7 +32,7 @@ Decisions: <what the user or an accepted ADR already decided, and what was ruled
 
 Check ids: <a brief that adds a conformance check says: take the id with `./dev check new-id --reserve <branch>` and commit the reservation file; otherwise write "none">
 Gates: <the exact commands, in order: fmt, clippy on the host and through xwin, the touched tests, `./dev gates check`, commit-lint, and the conformance line if conformance is touched>
-Heavy steps: through /Volumes/d8sst7/dev.decryptology.net/engineering-rules/scripts/heavy.sh (the slot), with CARGO_BUILD_JOBS=2, NEXTEST_TEST_THREADS=4 and a private CARGO_TARGET_DIR under /Volumes/d8sst7/dev-targets/build/, only while the 5-minute load is under 15.
+Heavy steps: through engineering-rules' scripts/heavy.sh (next to the main checkout; the slot), with CARGO_BUILD_JOBS=2, NEXTEST_TEST_THREADS=4 and a private CARGO_TARGET_DIR under <dev-targets>/build/, only while the 5-minute load is under 15.
 
 ## Rules every brief repeats
 
@@ -42,7 +42,7 @@ Heavy steps: through /Volumes/d8sst7/dev.decryptology.net/engineering-rules/scri
 - Never filter `git commit` or `git push` output (no grep, head or tail): a hook rejection hidden by a filter went unseen 3 times on 2026-11-13.
 - Base shared-tooling branches on the newest train head, not main, and name the in-flight mechanisms (branches that touch the same tool) in the brief.
 - Check IDs come from `./dev check new-id`, never picked by hand.
-- Scratch files only under /Volumes/d8sst7/dev-targets/. Never /tmp, /var/folders or the internal disk.
+- Scratch files only under <dev-targets>/ (the parent of `git config paddock.worktreeRoot`; `./dev brief check` derives it, and docs/dev-setup.md says where it is). Never /tmp, /var/folders or the internal disk.
 - Never `git stash`. Push your branch once; do not dispatch CI unless this brief says so.
 
 ## Report

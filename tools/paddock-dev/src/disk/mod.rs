@@ -100,8 +100,10 @@ pub fn command(c: DiskCommand) -> Result<Report, CliError> {
 
 fn scan_command(a: &ScanArgs) -> Result<Report, CliError> {
     let s = config::Settings::resolve(&a.common, &env);
+    s.located_roots()?;
+    let index_path = s.index_file()?.to_path_buf();
     let now = crate::worktree::note::now_secs();
-    let (index, mut notes) = index::Index::open_or_recover(&s.index, now);
+    let (index, mut notes) = index::Index::open_or_recover(&index_path, now);
     let mut index = index;
     let mode = if a.no_sizes {
         scan::Sizes::Skip
@@ -117,14 +119,14 @@ fn scan_command(a: &ScanArgs) -> Result<Report, CliError> {
         "Scanned {} folder(s) into {}.\n{}",
         snap.folders.len(),
         if index.is_some() {
-            s.index.display().to_string()
+            index_path.display().to_string()
         } else {
             "no index (it could not be used)".to_string()
         },
         notes.iter().map(|n| format!("note: {n}\n")).collect::<String>()
     );
     Ok(Report::new(
-        serde_json::json!({"folders": snap.folders.len(), "index": s.index.display().to_string(), "indexed": index.is_some(),
+        serde_json::json!({"folders": snap.folders.len(), "index": index_path.display().to_string(), "indexed": index.is_some(),
             "states": t.iter().map(|(k, v)| (k.word().to_string(), serde_json::json!(v.count))).collect::<serde_json::Map<_, _>>(),
             "notes": notes}),
         text,

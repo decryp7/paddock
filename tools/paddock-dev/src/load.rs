@@ -43,7 +43,8 @@ pub struct LoadArgs {
     /// Stop starting agents at or above this 5-minute load; a 1-minute load above it holds (default: 20 on 14 cores, scaled).
     #[arg(long)]
     hold_above: Option<f64>,
-    /// The roots whose free space is checked, repeatable (default: /Volumes/d7sst7 and /Volumes/d8sst7).
+    /// The folders whose disk's free space is checked, repeatable (default: the dev-targets folder, PADDOCK_DEV_TARGETS or the
+    /// parent of `git config paddock.worktreeRoot`; refused when it cannot be derived).
     #[arg(long = "disk")]
     disks: Vec<String>,
     /// Stop below this much free space on a root, GiB.
@@ -411,15 +412,23 @@ pub fn settings_of(a: &LoadArgs, cores: usize) -> Result<Settings, CliError> {
     Ok(s)
 }
 
+/// The folders whose free space is checked: the `--disk` flags, else the derived dev-targets folder (never a disk named here, C125).
+pub fn disks_of(a: &LoadArgs, dev_targets: &dyn Fn() -> Result<std::path::PathBuf, CliError>) -> Result<Vec<String>, CliError> {
+    if !a.disks.is_empty() {
+        return Ok(a.disks.clone());
+    }
+    let dt = dev_targets().map_err(|e| e.with_hint("Pass --disk <folder>, or derive it: `git config paddock.worktreeRoot <dev-targets>/wt` once, or PADDOCK_DEV_TARGETS (docs/dev-setup.md)."))?;
+    Ok(vec![dt.to_string_lossy().into_owned()])
+}
+
 /// `load`, against the real machine.
 pub fn command(a: &LoadArgs) -> Result<Report, CliError> {
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let s = settings_of(a, cores)?;
-    let roots: Vec<String> = if a.disks.is_empty() {
-        vec!["/Volumes/d7sst7".into(), "/Volumes/d8sst7".into()]
-    } else {
-        a.disks.clone()
-    };
+    let roots = disks_of(a, &|| {
+        let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("cannot read the current folder: {e}.")))?;
+        crate::places::dev_targets(&cwd, &|k| std::env::var(k).ok())
+    })?;
     let ci = if a.no_ci {
         CiQueue::Skipped
     } else {
@@ -658,8 +667,7 @@ mod tests {
 
     #[test]
     fn df_output_parses_to_bytes() {
-        let t =
-            "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk9s1 3906813744 3369256228 537083648 87% /Volumes/d8sst7\n";
+        let t = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk9s1 3906813744 3369256228 537083648 87% /srv/disk-b\n";
         assert_eq!(parse_df(t), Some(537_083_648 * 1024));
         assert_eq!(parse_df("Filesystem\n"), None);
         assert_eq!(parse_df(""), None);

@@ -76,13 +76,19 @@ pub fn free_bytes(path: &Path, df: &str) -> Result<u64, String> {
 }
 
 fn largest(s: &Settings) -> Vec<String> {
-    if !s.index.exists() {
+    let Some(index) = s.index.as_deref() else {
+        return vec![format!(
+            "no size index: {} (docs/dev-setup.md)",
+            s.unlocated.as_deref().unwrap_or("none was given")
+        )];
+    };
+    if !index.exists() {
         return vec![format!(
             "no size index at {} yet: run ./dev disk scan to see the largest folders",
-            s.index.display()
+            index.display()
         )];
     }
-    let rows = Index::open_read_only(&s.index).and_then(|i| i.latest_sizes());
+    let rows = Index::open_read_only(index).and_then(|i| i.latest_sizes());
     match rows {
         Ok(sizes) if !sizes.is_empty() => {
             let mut v: Vec<_> = sizes.into_values().collect();
@@ -186,7 +192,7 @@ mod tests {
     #[test]
     fn df_output_in_posix_format_is_read_even_when_the_names_have_spaces() {
         let text =
-            "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk9s1 3906000000 3200000000 538000000 86% /Volumes/d8sst7\n";
+            "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk9s1 3906000000 3200000000 538000000 86% /srv/disk-b\n";
         assert_eq!(parse_df(text).unwrap(), 538_000_000 * 1024);
         let spaced = "Filesystem 1024-blocks Used Available Capacity Mounted on\nmy disk 100 50 25 50% /Volumes/gog games\n";
         assert_eq!(parse_df(spaced).unwrap(), 25 * 1024);
