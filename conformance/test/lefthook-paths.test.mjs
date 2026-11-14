@@ -33,7 +33,7 @@ export function problems(cmd, tracked, root = PADDOCK) {
   if (base && !(existsSync(join(root, base)) && statSync(join(root, base)).isDirectory())) found.push(`${cmd.name}: root ${base} is not a folder`);
   const nodeTest = /\bnode\b[^|&;]*--test\b/.test(cmd.run);
   for (const tok of cmd.run.split(/\s+/)) {
-    if (!tok || tok.startsWith('-') || tok.includes('{') || !/[/.]/.test(tok) || /^(?:https?:|\.\/dev$)/.test(tok)) continue;
+    if (!tok || tok.startsWith('-') || tok.includes('{') || tok.includes('}') || !/[/.]/.test(tok) || /^(?:https?:|\.\/dev$)/.test(tok)) continue;
     const rel = [base, tok].filter(Boolean).join('/');
     if (/[*?]/.test(tok)) {
       const re = globRe(rel);
@@ -51,7 +51,7 @@ const tracked = () => spawnSync('git', ['ls-files'], { cwd: PADDOCK, encoding: '
 
 test('every path and glob a lefthook command names exists, and node --test is given files, not folders', () => {
   const cmds = commands(readFileSync(join(PADDOCK, 'lefthook.yml'), 'utf8'));
-  assert.ok(cmds.length >= 15, `commands found (${cmds.length})`);
+  assert.ok(cmds.length >= 10, `commands found (${cmds.length})`);
   const files = tracked();
   assert.deepEqual(cmds.flatMap((c) => problems(c, files)), []);
 });
@@ -79,4 +79,31 @@ test('the pre-push hook is the one command `./dev check --pre-push --refs-from-s
 test('the pre-push reader sees a second command', () => {
   const text = 'pre-push:\n  commands:\n    a:\n      run: ./dev check --pre-push\n    b:\n      run: node x.mjs\n';
   assert.equal(prePushCommands(text).length, 2);
+});
+
+// ER-24: the pre-commit hook runs only fast checks. Clippy and every other build run in the pre-push gate, through the machine-wide
+// heavy slot (user, 2026-11-13: five parallel Clippy builds in a commit spiked the shared machine).
+
+/** The pre-commit commands that run cargo (a build of any kind). */
+export function cargoCommands(cmds) {
+  return cmds.filter((c) => /\bcargo\b/.test(c.run)).map((c) => c.name);
+}
+
+const preCommit = (text) => commands(/^pre-commit:\n((?: .*\n|\n)*)/m.exec(text)?.[1] ?? '');
+
+test('the pre-commit hook runs no cargo command: Clippy and builds belong to the pre-push gate', () => {
+  const cmds = preCommit(readFileSync(join(PADDOCK, 'lefthook.yml'), 'utf8'));
+  assert.ok(cmds.length >= 10, `pre-commit commands found (${cmds.length})`);
+  assert.deepEqual(cargoCommands(cmds), []);
+});
+
+test('the cargo check sees a Clippy command', () => {
+  assert.deepEqual(cargoCommands([{ name: 'a', run: 'cargo clippy' }, { name: 'b', run: 'rustfmt x' }]), ['a']);
+});
+
+test('every app whose Clippy left the pre-commit hook is a cargo workspace of its own, so the pre-push plan lints it', () => {
+  for (const app of ['debrief', 'dyno', 'pitcrew', 'pitwall', 'spotter']) {
+    const ci = JSON.parse(readFileSync(join(PADDOCK, 'apps', app, 'paddock.ci.json'), 'utf8'));
+    assert.equal(typeof ci.cargo, 'string', `${app}: paddock.ci.json has no cargo workspace`);
+  }
 });
