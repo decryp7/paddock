@@ -214,6 +214,14 @@ review_by = 2026-12-14
 approved = "coordinator"
 
 [[report_only]]
+id = "step:tools/hooks"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then remove continue-on-error from ci.yml's `Hooks tests (report-only)` step (the tools job, `./dev ci run tools hooks`) and this entry; C100 fails when review_by passes or when the step already blocks. It runs every .claude/hooks/*.test.sh (python3, jq and git are in paddock-ci:v3, checked 2026-11-15) with PADDOCK_DEV set to the built tool, so the rule-55 parity test of places.rs against lib/paddockpaths.py runs in CI. First green run id: none yet"
+owner = "fix/hooks-ci-and-config-guard"
+since = 2026-11-14
+review_by = 2026-12-14
+approved = "coordinator"
+
+[[report_only]]
 id = "C14"
 reason = "the hermetic-wrapper check only reports warnings (static part); the root conformance line runs it"
 owner = "Rule 40 follow-up"

@@ -492,9 +492,8 @@ jobs:
         run: ./dev ci run tools affected
 
       # The agent hooks' tests (.claude/hooks/*.test.sh, with the rule-55 parity test of places.rs against lib/paddockpaths.py).
-      # Report-only (ER-41): it blocks after its first green run on the real tree: remove `continue-on-error` below then and
-      # record the run id here. First green run: none yet. (docs/gates.toml registers checks, and this is a test step, so it has no
-      # entry there.) A change under .claude/hooks/, places.rs or docs/known-copies.toml marks this job.
+      # Report-only (ER-41): registered as `step:tools/hooks` in docs/gates.toml (review_by, first green run id); `./dev gates check`
+      # fails when the date passes or when this step blocks. A change under .claude/hooks/, places.rs or docs/known-copies.toml marks this job.
       - env:
           PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         name: Hooks tests (report-only)
