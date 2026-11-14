@@ -17,7 +17,7 @@ use super::finding::{Finding, Severity};
 use super::jsre::{has_reason, rx, units};
 use super::mask::mask_units;
 use super::record::Precondition;
-use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
+use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -223,12 +223,13 @@ impl Check for C122 {
         "Tests compare paths as paths"
     }
 
-    fn scope(&self) -> CheckScope {
-        CheckScope::Root
+    fn scope(&self) -> super::CheckScope {
+        // As the JavaScript host declares it (`scope: 'root'`): run once over the whole tree, not again per app.
+        super::CheckScope::Root
     }
 
-    fn mode(&self) -> Mode {
-        Mode::ReportOnly
+    fn mode(&self) -> super::Mode {
+        super::Mode::ReportOnly
     }
 
     fn control(&self) -> Control {

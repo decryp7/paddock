@@ -1,0 +1,15 @@
+// conformance: file-layout-guess — no test module here, so this waives nothing
+fn gone() {
+    // conformance: layout-guess — the guess this was for was removed
+    let p = base.join("cache");
+}
+
+fn moved() {
+    // conformance: layout-guess — two lines above its guess, so it waives nothing
+
+    let q = base.join("deps");
+}
+
+fn used() {
+    let r = base.join("deps"); // conformance: layout-guess — on its own line
+}

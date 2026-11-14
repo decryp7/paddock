@@ -12,13 +12,16 @@
 //!
 //! Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (`11c365fc4`,
 //! `0308201b4`) have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows
-//! may read them: its path (a folder, ending in `/`, or a file) goes in `conformance/c121-allow.json` with a reason.
+//! may read them: each such site goes in `conformance/c121-allow.json` with its path, a `site` (a piece of the flagged line), a reason
+//! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale or ambiguous entry and
+//! never allows a whole file or folder.
 //!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
 //!
 //! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and the `c121` tests of `tests/it/check.rs`
 //! compares them finding for finding.
 
+use super::allow_list::{self, AllowList, Entry};
 use super::finding::Finding;
 use super::jsre::rx;
 use super::record::Precondition;
@@ -58,8 +61,9 @@ pub fn kind_of(path: &str) -> Option<Kind> {
     }
 }
 
-/// `(line, what)` of every line of `text` that reads a workflow's text with a text tool or, in a test, a regular expression.
-pub fn flagged(kind: Kind, text: &str) -> Vec<(usize, String)> {
+/// `(line, what, the line's text)` of every line of `text` that reads a workflow's text with a text tool or, in a test, a regular
+/// expression.
+pub fn flagged(kind: Kind, text: &str) -> Vec<(usize, String, String)> {
     let mut out = Vec::new();
     for (i, line) in text.split('\n').enumerate() {
         let t = line.trim();
@@ -67,52 +71,20 @@ pub fn flagged(kind: Kind, text: &str) -> Vec<(usize, String)> {
             continue;
         }
         if let Some(m) = TOOL.find(line) {
-            out.push((i + 1, format!("`{}`", m.as_str())));
+            out.push((i + 1, format!("`{}`", m.as_str()), line.to_string()));
         } else if kind == Kind::Test && REGEX_USE.is_match(line) {
-            out.push((i + 1, "a regular expression".to_string()));
+            out.push((i + 1, "a regular expression".to_string(), line.to_string()));
         }
     }
     out
 }
 
-/// One entry of the allow list.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Allowed {
-    /// A file, or a folder (ending in `/`).
-    pub path: String,
-    /// Why it may read workflows.
-    pub reason: String,
+/// Reads the allow list: its entries, or why it cannot be read (the shared parser, [`super::allow_list`]).
+pub fn parse_allow(text: &str) -> Result<Vec<Entry>, String> {
+    allow_list::parse(text, ALLOW)
 }
 
-/// Reads the allow list; an unreadable one, or an entry without a reason, is why the check cannot look.
-pub fn parse_allow(text: &str) -> Result<Vec<Allowed>, String> {
-    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("{ALLOW} is not JSON: {e}"))?;
-    let list = v["allow"].as_array().ok_or_else(|| format!("{ALLOW} has no `allow` array"))?;
-    let mut out = Vec::new();
-    for e in list {
-        let (path, reason) = (e["path"].as_str().unwrap_or(""), e["reason"].as_str().unwrap_or("").trim());
-        if path.is_empty() || reason.chars().count() < 8 {
-            return Err(format!("{ALLOW}: every entry needs a path and a reason of at least 8 characters"));
-        }
-        out.push(Allowed {
-            path: path.to_string(),
-            reason: reason.to_string(),
-        });
-    }
-    Ok(out)
-}
-
-fn allowed(allow: &[Allowed], path: &str) -> bool {
-    allow.iter().any(|a| {
-        if a.path.ends_with('/') {
-            path.starts_with(&a.path)
-        } else {
-            path == a.path
-        }
-    })
-}
-
-const FIX: &str = "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list its path with a reason in conformance/c121-allow.json.";
+const FIX: &str = "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json.";
 
 /// The check.
 pub struct C121;
@@ -143,7 +115,7 @@ impl Check for C121 {
             files: vec![
                 (
                     ALLOW,
-                    "{\"allow\":[{\"path\":\"conformance/test/\",\"reason\":\"tests of checks of workflows\"}]}",
+                    "{\"allow\":[{\"path\":\"conformance/test/c.test.mjs\",\"site\":\"text.match(/x/)\",\"reason\":\"tests of checks of workflows\"}]}",
                 ),
                 (
                     "docs/x.toml",
@@ -183,20 +155,23 @@ impl Check for C121 {
             Ok(a) => (a, None),
             Err(e) => (Vec::new(), Some(e)),
         };
+        let mut allow = AllowList::new(ALLOW, allow);
         let mut findings = Vec::new();
         let mut probes = 0;
         let mut completed = true;
+        let mut scanned = std::collections::HashSet::new();
         for f in ctx.files().iter() {
             let Some(kind) = kind_of(f) else { continue };
-            if allowed(&allow, f) {
-                continue;
-            }
             let Some(text) = ctx.read(f) else {
                 completed = false;
                 continue;
             };
             probes += 1;
-            for (line, what) in flagged(kind, &text) {
+            scanned.insert(f.to_string());
+            for (line, what, at) in flagged(kind, &text) {
+                if allow.allows(f, &at) {
+                    continue;
+                }
                 findings.push(Finding::warn(
                     "C121",
                     79,
@@ -207,6 +182,7 @@ impl Check for C121 {
                 ));
             }
         }
+        findings.extend(allow.warnings("C121", 79, |p| scanned.contains(p) || ctx.read(p).is_none()));
         CheckOutput {
             findings,
             probes,

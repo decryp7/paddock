@@ -57,6 +57,28 @@ impl CommentView {
     pub fn file(&self, tag: &str) -> InlineWaiver {
         recognise(&self.whole, tag)
     }
+
+    /// The 1-based line whose comment gives the waiver of `tag` with a reason for a site on `line`: that line, else the one above.
+    pub fn waiver_line(&self, line: usize, tag: &str) -> Option<usize> {
+        [line, line.wrapping_sub(1)].into_iter().find(|&n| {
+            n >= 1
+                && self
+                    .lines
+                    .get(n - 1)
+                    .is_some_and(|l| matches!(recognise(l, tag), InlineWaiver::Reason(_)))
+        })
+    }
+
+    /// The 1-based lines whose comment is a waiver of `tag` with a reason: what an unused-waiver report reads.
+    pub fn reasoned_lines(&self, tag: &str) -> Vec<usize> {
+        self.lines
+            .iter()
+            .enumerate()
+            // `recognise` builds its patterns per call: only a line that names the marker is worth asking.
+            .filter(|(_, l)| l.contains("conformance:") && matches!(recognise(l, tag), InlineWaiver::Reason(_)))
+            .map(|(i, _)| i + 1)
+            .collect()
+    }
 }
 
 /// The waiver comment for `tag` in `near` (the site's line and the line above, as the check defines them).

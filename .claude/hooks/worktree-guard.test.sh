@@ -2,8 +2,13 @@
 # Tests for worktree-guard.sh. Run: bash .claude/hooks/worktree-guard.test.sh
 here=$(cd "$(dirname "$0")" && pwd)
 H="$here/worktree-guard.sh"
-MAIN=/Volumes/d8sst7/dev.decryptology.net/paddock
-WT=/Volumes/d8sst7/dev-targets/wt/some-agent
+# Paths are built at run time: a main checkout the guard must derive from git, never a machine path.
+TMP=$(cd "$(mktemp -d)" && pwd -P); trap 'rm -rf "$TMP"' EXIT
+MAIN=$TMP/elsewhere/paddock-main
+git init -q "$MAIN" || exit 1
+WT=$TMP/dev-targets/wt/some-agent
+export CLAUDE_PROJECT_DIR=$MAIN
+unset WORKTREE_GUARD_MAIN
 fail=0
 # who: agent|coord
 run() { # who cwd command
@@ -17,7 +22,7 @@ expect() { # name want who cwd command
 }
 # --- unguarded cd (everyone)
 expect "2026-11-12 shape: cd missing; git switch -c" deny agent "$WT" "cd /missing/worktree; git switch -c foo"
-expect "2026-11-10 shape: cd train-wt; git merge" deny agent "$WT" "cd /Volumes/d8sst7/dev-targets/wt/train-wt; git merge fix/x"
+expect "2026-11-10 shape: cd train-wt; git merge" deny agent "$WT" "cd $TMP/dev-targets/wt/train-wt; git merge fix/x"
 expect "newline after cd is unguarded" deny coord "$MAIN" $'cd /x\ngit status'
 expect "subshell ( cd X; ... ) is unguarded" deny agent "$WT" "( cd /x; git status )"
 expect "cd X || echo; more is unguarded" deny agent "$WT" "cd /x || echo no; git status"
@@ -42,7 +47,7 @@ expect "agent fetch && reset in main" deny agent "$MAIN" "git fetch origin && gi
 expect "agent cherry-pick in main" deny agent "$MAIN" "git cherry-pick abc"
 expect "agent git fetch in main is allowed" allow agent "$MAIN" "git fetch origin"
 expect "agent git status/log/diff in main" allow agent "$MAIN" "git status && git log -3 && git diff HEAD~1"
-expect "agent git worktree add in main" allow agent "$MAIN" "git worktree add /Volumes/d8sst7/dev-targets/wt/x -b b origin/main"
+expect "agent git worktree add in main" allow agent "$MAIN" "git worktree add $TMP/dev-targets/wt/x -b b origin/main"
 expect "agent git worktree list/lock in main" allow agent "$MAIN" "git worktree list && git worktree lock /x"
 expect "agent git branch --list in main" allow agent "$MAIN" "git branch --list"
 expect "agent git tag -l in main" allow agent "$MAIN" "git tag -l 'dyno-*'"
@@ -87,7 +92,7 @@ t deny  agent $MAIN "agent: git -C quoted main commit" "git -C \"$MAIN\" commit 
 t deny  agent $MAIN "agent: env VAR=1 git push" "env GIT_SSH=x git push origin y"
 t deny  agent $MAIN "agent: VAR=1 git merge (main cwd)" "GIT_TRACE=1 git merge x"
 t deny  agent $MAIN "agent: git -c k=v merge" "git -c core.x=1 merge x"
-t deny  agent $MAIN "agent: lowercase /volumes path" "git -C /volumes/d8sst7/dev.decryptology.net/paddock merge x"
+t deny  agent $MAIN "agent: lowercase /volumes path" "git -C $(printf %s "$MAIN" | tr A-Z a-z) merge x"
 t allow agent $MAIN "agent: git branch new (create)" "git branch newb origin/main"
 t deny  agent $MAIN "agent: git update-ref (FN)" "git update-ref refs/heads/main HEAD~1"
 t deny  agent $MAIN "agent: git branch with force flag" "git branch --force main HEAD~1"
@@ -162,4 +167,14 @@ expect "agent export LEFTHOOK_EXCLUDE then push on a later line" deny agent "$WT
 expect "agent LEFTHOOK=0 then export LEFTHOOK then commit" deny agent "$WT" "LEFTHOOK=0; export LEFTHOOK; git commit -m x"
 expect "agent export LEFTHOOK=1 then commit" allow agent "$WT" "export LEFTHOOK=1; git commit -m x"
 expect "coordinator export LEFTHOOK=0 then commit" allow coord "$WT" "export LEFTHOOK=0; git commit -m x"
+# ---- the main checkout is derived, not a default path (disks moved on 2026-11-14 and the old default went stale)
+expect "agent git commit in a main checkout at a non-default path is refused" deny agent "$MAIN" "git commit -m x"
+expect "agent git commit from a subfolder of that main checkout is refused" deny agent "$MAIN/sub" "git commit -m x"
+mkdir -p "$TMP/other" && git init -q "$TMP/other/repo"
+expect "another repo is not the main checkout" allow agent "$TMP/other/repo" "git commit -m x"
+mkdir -p "$TMP/nogit"
+out=$(jq -nc --arg d "$TMP/nogit" '{tool_name:"Bash",cwd:$d,agent_id:"a1",tool_input:{command:"git commit -m x"}}' | CLAUDE_PROJECT_DIR="$TMP/nogit" "$H" 2>/dev/null)
+case "$out" in *'"deny"'*"Next step"*) echo "ok: underivable main refuses with a next step" ;; *) echo "FAIL: underivable main must refuse"; fail=1 ;; esac
+out=$(jq -nc --arg d "$TMP/nogit" '{tool_name:"Bash",cwd:$d,agent_id:"a1",tool_input:{command:"git commit -m x"}}' | CLAUDE_PROJECT_DIR="$TMP/nogit" WORKTREE_GUARD_MAIN="$TMP/nogit" "$H" 2>/dev/null)
+case "$out" in *'"deny"'*"main checkout"*) echo "ok: WORKTREE_GUARD_MAIN override" ;; *) echo "FAIL: override"; fail=1 ;; esac
 exit $fail

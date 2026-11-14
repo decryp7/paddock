@@ -3,7 +3,7 @@
 //! `heavy` built from tools/heavy). When none can be found it is an error with the next step: never an unthrottled run.
 
 use crate::pre_push::exec::{BUDGET, heavy_command_for, on_path};
-use crate::pre_push::heavy_tool::Held;
+use crate::tool_cache::Held;
 use clap::Args;
 use paddock_cli::{CliError, Report};
 use serde_json::json;
