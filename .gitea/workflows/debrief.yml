@@ -543,6 +543,12 @@ jobs:
         if: needs.plan.outputs.frontend_include == ''
         run: npm run lint
 
+      # The report-only ESLint rules (ER-41; eslint.config.js, DEBRIEF_LINT_REPORT=1): warnings in the log, until each rule's first
+      # green run makes it an error in `npm run lint`. C100 counts this line as the gate of `lint:report`.
+      - name: Lint (report-only rules)
+        if: needs.plan.outputs.frontend_include == ''
+        run: npm run lint:report
+
       # Needs the installed TypeScript (a type-checked call-graph walk), so it runs here and not with the other script tests.
       - name: Dialog command lint tests
         if: needs.plan.outputs.frontend_include == ''
