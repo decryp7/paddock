@@ -65,19 +65,14 @@ fn path_dependency_folders(meta: &Value) -> BTreeSet<String> {
             }
         }
     }
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap()
-        .to_string_lossy()
-        .replace('\\', "/");
+    let repo = paddock_testkit::path::text(Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2).unwrap());
     meta["packages"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|p| p["source"].is_null() && seen.contains(p["id"].as_str().unwrap()))
         .map(|p| {
-            let manifest = p["manifest_path"].as_str().unwrap().replace('\\', "/");
+            let manifest = paddock_testkit::path::text(Path::new(p["manifest_path"].as_str().unwrap()));
             let dir = manifest.trim_end_matches("/Cargo.toml");
             dir.strip_prefix(&format!("{repo}/")).unwrap().to_string()
         })

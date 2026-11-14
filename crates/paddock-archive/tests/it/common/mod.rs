@@ -116,11 +116,7 @@ pub fn tree(root: &Path) -> Vec<String> {
     fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) {
         for e in std::fs::read_dir(dir).unwrap() {
             let p = e.unwrap().path();
-            let rel = p
-                .strip_prefix(base)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/");
+            let rel = paddock_testkit::path::text(p.strip_prefix(base).unwrap());
             if p.is_dir() && !p.is_symlink() {
                 walk(base, &p, out);
             } else {

@@ -266,6 +266,24 @@ pub fn strip_prefix(path: &Path, prefix: &Path, os: Os) -> Option<String> {
     Some(rest.join("/"))
 }
 
+/// A Git bash path (`/c/dir`, `/c`; what its `pwd`, `$HOME` and `$RUNNER_TOOL_CACHE` print) as the drive path Windows reads
+/// (`C:/dir`, `C:/`); anything else as it is. Only on Windows: elsewhere `/c/dir` is a folder of that name. Pure, so every OS
+/// tests it. Rust's `Path::exists` cannot resolve the Git bash form, which is why a test or tool that gets such text from a
+/// shell reads it through here first.
+pub fn from_git_bash(p: &str, os: Os) -> String {
+    let b = p.as_bytes();
+    if os == Os::Windows
+        && (b.len() == 2 || b.len() >= 3 && b[2] == b'/')
+        && b[0] == b'/'
+        && b[1].is_ascii_alphabetic()
+    {
+        // `/c` is the drive's root `C:/`, never the drive-relative `C:`.
+        let rest = if b.len() == 2 { "/" } else { &p[2..] };
+        return format!("{}:{rest}", (b[1] as char).to_ascii_uppercase());
+    }
+    p.to_string()
+}
+
 /// The path as text for comparing and as a map key: on Windows the prefix dropped lexically and `/` separators (`C:/a/b`,
 /// `//server/share/a`), off Windows the text as it is. Never refuses and never opens anything; not for a program
 /// ([`for_tools`]).

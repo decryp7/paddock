@@ -437,7 +437,7 @@ fn a_commit_that_is_not_a_merge_is_a_usage_error() {
 #[test]
 fn a_clone_without_the_parents_is_not_measured_never_a_pass() {
     let r = clean_merge();
-    let url = format!("file://{}", r.path().display());
+    let url = format!("file://{}", paddock_testkit::path::text(r.path()));
     for depth in ["1", "2"] {
         let dest = tempfile::tempdir().unwrap();
         let clone = dest.path().join("c");

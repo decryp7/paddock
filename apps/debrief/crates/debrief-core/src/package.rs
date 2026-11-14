@@ -543,7 +543,7 @@ mod tests {
         std::fs::write(dir.join("index/meta.json"), b"{}").unwrap();
         std::fs::write(dir.join("snapshots/s1.json"), b"{}").unwrap();
         let files = p.shared_files().unwrap();
-        let names: Vec<String> = files.iter().map(|f| f.to_string_lossy().replace('\\', "/")).collect();
+        let names: Vec<String> = files.iter().map(paddock_testkit::path::text).collect();
         assert_eq!(
             names,
             vec!["data.duckdb", "project.toml", "segments/0001.parquet", "snapshots/s1.json"]

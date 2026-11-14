@@ -445,7 +445,9 @@ reason = "r"
         );
         assert!(policy("/", PathKind::File, PathAccess::Write).is_err());
         // `..` does not get out.
-        let dotdot = format!("{}/../secret/s.txt", docs.display());
+        let dotdot = paddock_testkit::path::under(&docs, "../secret/s.txt")
+            .display()
+            .to_string();
         assert!(policy(&dotdot, PathKind::File, PathAccess::Read).is_err());
         // A link inside a grant that leads out of it is followed, so it leads out.
         #[cfg(unix)]

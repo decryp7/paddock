@@ -676,12 +676,7 @@ fn copy_checked_out_files(src: &Path, dst: &Path) {
     git(dst, &["config", "gc.auto", "0"]);
     // `canonicalize` on Windows returns a verbatim path: `\\?\C:\...` for a drive, `\\?\UNC\server\share\...` for a share. Git
     // reads `C:/...` and `//server/share/...`.
-    let objects = objects.to_str().unwrap();
-    let objects = match objects.strip_prefix(r"\\?\UNC\") {
-        Some(share) => format!(r"\\{share}"),
-        None => objects.strip_prefix(r"\\?\").unwrap_or(objects).to_string(),
-    }
-    .replace('\\', "/");
+    let objects = paddock_testkit::path::text(&objects);
     std::fs::write(dst.join(".git/objects/info/alternates"), format!("{objects}\n")).unwrap();
     git_with_input(dst, &["update-index", "-z", "--index-info"], entries);
     // A fresh index has no file on disk to keep: every entry is written, and `-u` records what was written.

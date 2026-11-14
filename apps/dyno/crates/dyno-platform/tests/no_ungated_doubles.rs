@@ -543,7 +543,7 @@ fn no_shipped_crate_declares_an_ungated_test_double() {
     );
     for want in ["dyno-platform/src/lib.rs", "dyno-core/src/wol/mod.rs"] {
         assert!(
-            gated.iter().any(|f| f.replace('\\', "/").ends_with(want)),
+            gated.iter().any(|f| std::path::Path::new(f).ends_with(want)),
             "check broken: the scan never met the gated `mod fake` in {want}; met {gated:?}"
         );
     }

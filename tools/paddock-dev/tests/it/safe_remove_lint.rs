@@ -88,7 +88,7 @@ fn only_safe_remove_and_the_listed_callers_delete_folders_under_tools() {
     let mut unlisted = Vec::new();
     let mut used = std::collections::BTreeSet::new();
     for f in files {
-        let rel = f.strip_prefix(&repo).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = paddock_testkit::path::text(f.strip_prefix(&repo).unwrap());
         let text = std::fs::read_to_string(&f).unwrap();
         if !PATTERNS.iter().any(|p| text.contains(p)) {
             continue;

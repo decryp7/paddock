@@ -423,7 +423,7 @@ mod tests {
         let (temp, _, sockets) = job(d.path());
         let dead = format!("{sockets}/pd-killedjb");
         std::fs::create_dir(&dead).unwrap();
-        std::fs::write(format!("{dead}/.owner"), format!("{}/long-gone\n", d.path().display())).unwrap();
+        std::fs::write(format!("{dead}/.owner"), format!("{}\n", d.path().join("long-gone").display())).unwrap();
         let live = format!("{sockets}/pd-livejob1");
         std::fs::create_dir(&live).unwrap();
         std::fs::write(format!("{live}/.owner"), format!("{temp}\n")).unwrap();

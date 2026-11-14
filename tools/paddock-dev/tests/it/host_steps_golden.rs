@@ -61,7 +61,7 @@ fn scratch() -> (tempfile::TempDir, PathBuf) {
 }
 
 fn forward(p: &Path) -> String {
-    p.display().to_string().replace('\\', "/")
+    paddock_testkit::path::text(p)
 }
 
 #[test]

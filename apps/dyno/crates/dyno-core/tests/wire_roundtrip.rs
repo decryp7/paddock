@@ -1070,7 +1070,13 @@ fn postcard_unfriendly_serde_attributes_only_appear_where_listed() {
     let banned = ["tag = ", "untagged", "flatten", "skip_serializing_if", "content = "];
     let mut problems = vec![];
     for f in files {
-        let rel = f.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = f
+            .strip_prefix(&src)
+            .unwrap()
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
         let text = std::fs::read_to_string(&f).unwrap();
         let found = text
             .lines()

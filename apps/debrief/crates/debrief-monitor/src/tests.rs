@@ -671,7 +671,7 @@ fn sysinfo_source_by_name_children_and_missing_pid() {
     let second = s.sample(&t, true);
     assert!(second.iter().find(|p| p.pid == me).unwrap().cpu_core_percent.is_some());
     // Path target.
-    let t = cfg(json!({"targets": [{"path": exe.to_string_lossy().replace('\\', "/")}]}))
+    let t = cfg(json!({"targets": [{"path": paddock_testkit::path::text(&exe)}]}))
         .unwrap()
         .targets;
     assert!(s.sample(&t, false).iter().any(|p| p.pid == me));

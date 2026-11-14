@@ -180,7 +180,7 @@ mod tests {
         assert_eq!(code, 0, "{out}");
         let kept = d.path().join("home/.paddock-ci");
         let written = std::fs::read_to_string(d.path().join("github-env")).unwrap();
-        let kept_text = crate::ci_host::fwd(&kept);
+        let kept_text = paddock_testkit::path::text(&kept);
         assert_eq!(written, format!("npm_config_cache={kept_text}/npm-s1\n"));
         let ng = format!("{kept_text}/angular/e2e_1-s1");
         assert!(Path::new(&ng).is_dir(), "the kept Angular folder exists");

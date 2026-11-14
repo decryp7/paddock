@@ -547,7 +547,7 @@ mod tests {
         let env = |k: &str| (k == "CARGO_HOME").then(|| home.display().to_string());
         let names: Vec<String> = config_files(&root, &env)
             .iter()
-            .map(|p| p.strip_prefix(d.path()).unwrap().display().to_string().replace('\\', "/"))
+            .map(|p| paddock_testkit::path::text(p.strip_prefix(d.path()).unwrap()))
             .collect();
         assert_eq!(
             names,

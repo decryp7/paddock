@@ -906,8 +906,9 @@ mod tests {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}/scan.json'; else cat '{0}/drive.json'; fi\nexit 4\n",
-                dir.display()
+                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}'; else cat '{1}'; fi\nexit 4\n",
+                dir.join("scan.json").display(),
+                dir.join("drive.json").display()
             ),
         )
         .unwrap();
@@ -953,8 +954,10 @@ mod tests {
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}/scan.json'; exit 0; fi\ncase \"$*\" in *usb-*) cat '{0}/usb.json'; exit 2;; *) cat '{0}/drive.json'; exit 4;; esac\n",
-                dir.display()
+                "#!/bin/sh\nif [ \"$1\" = \"--scan\" ]; then cat '{0}'; exit 0; fi\ncase \"$*\" in *usb-*) cat '{1}'; exit 2;; *) cat '{2}'; exit 4;; esac\n",
+                dir.join("scan.json").display(),
+                dir.join("usb.json").display(),
+                dir.join("drive.json").display()
             ),
         )
         .unwrap();
