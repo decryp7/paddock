@@ -33,8 +33,60 @@ const RUST_RUN = /\.(?:output|status|wait_with_output)\s*\(\s*\)/;
 /** A Rust file that builds commands: `.status()`, `.output()` and `.spawn()` mean a program only there (not an HTTP status, an actor). */
 const RUST_COMMANDS = /\bCommand::new\b|\bcommand\s*\(|\bquiet_command\b|\bTestCommand\b|\bCommand\b/;
 const NODE_RUN = /\b(?:spawnSync|execFileSync|execSync)\s*\(/;
-const RUST_GUARD = /\bReaper\b|\bSupervised\b|\bwait_exit\b|\bwait_ready_or_exit\b|\.kill\s*\(|\bkill_tree\b|\.wait\s*\(|\bwait_with_output\b|\bend_holders\b/;
-const NODE_GUARD = /\bReaper\b|\breapUnder\b|\bendHolders\b/;
+/** What makes a `.status()` a program's: a Command chain in the same statement (an HTTP response's `.status()` is not one). */
+const COMMAND_CHAIN = /\bCommand::new\b|\bcommand\s*\(|\bquiet_command\b|\bTestCommand\b|\.args?\s*\(|\.current_dir\s*\(|\.envs?\s*\(|\.std(?:in|out|err)\s*\(/;
+const COMMAND_MADE = /\bCommand::new\b|\bcommand\s*\(|\bquiet_command\b|\bTestCommand\b/;
+/** A Node call that guards the file's detached children (a word alone is not one). */
+const NODE_GUARD = /\bnew\s+Reaper\s*\(|\breapUnder\s*\(|\bendHolders\s*\(|\bfileReaper\s*\(/;
+const ASSERTION = /\b(?:assert\w*|panic|unreachable|todo|unimplemented)!\s*\(/;
+
+const escape = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The start of the statement that holds `at`: just past the last `;`, `{` or `}` before it. */
+function statementStart(masked, at) {
+  return Math.max(masked.lastIndexOf(';', at - 1), masked.lastIndexOf('{', at - 1), masked.lastIndexOf('}', at - 1)) + 1;
+}
+
+/** Whether the `.status()` at `at` belongs to a Command: its statement is a Command chain, or its receiver was made from one. */
+function commandStatus(masked, at) {
+  const stmt = masked.slice(statementStart(masked, at), at);
+  if (COMMAND_CHAIN.test(stmt)) return true;
+  const recv = /(\w+)\s*$/.exec(stmt)?.[1];
+  if (!recv) return false;
+  return new RegExp(`\\blet\\s+(?:mut\\s+)?${escape(recv)}\\b[^;]*?=[^;]*?(?:${COMMAND_MADE.source})`).test(masked);
+}
+
+/**
+ * Rule C for one Rust function body (`inner`, starting at `base`): each `.spawn()` of a Command must be waited for, ended or handed on
+ * by name (`name.wait(`, `.kill(`, `.try_wait(`, `.wait_with_output(`, or a call that takes it: `wait_exit(name`, `adopt(&name`, ...),
+ * with no assertion between the spawn and that guard (a failing assertion would leave it running). Returns [index, what] pairs.
+ */
+function unguardedSpawns(inner, base) {
+  const out = [];
+  for (const m of inner.matchAll(/\.spawn\s*\(\s*\)/g)) {
+    // A nested fn is judged on its own.
+    if (/\bfn\s+\w+/.test(inner.slice(0, m.index))) break;
+    const start = statementStart(inner, m.index);
+    const end = inner.indexOf(';', m.index);
+    const rest = inner.slice(m.index, end < 0 ? inner.length : end);
+    if (/\.(?:wait|wait_with_output|kill|try_wait|is_err)\s*\(/.test(rest)) continue; // waited for in the same statement, or meant to fail
+    const head = inner.slice(start, m.index);
+    const name = /\blet\s+(?:mut\s+)?(\w+)/.exec(head)?.[1];
+    // Handed straight to a guard: a wrapper (`Reaped(c.spawn()…)`) or a struct field (`child: c.spawn()…`) owns it.
+    if (/\b[A-Z]\w*\s*\(\s*[^()]*$/.test(head) || (!name && /\b\w+\s*:\s*[^:]*$/.test(head))) continue;
+    if (!name) {
+      out.push([base + m.index, 'starts a process and neither waits for it, ends it nor hands it to a Reaper']);
+      continue;
+    }
+    const after = inner.slice(end < 0 ? inner.length : end);
+    const n = escape(name);
+    // Waited for, ended, or moved on by name: passed to a call, matched, or bound again.
+    const guard = new RegExp(`\\b${n}\\s*\\.\\s*(?:wait|wait_with_output|kill|try_wait)\\s*\\(|[(,]\\s*(?:&\\s*(?:mut\\s+)?)?${n}\\s*[,)]|\\b(?:match|=)\\s*(?:&\\s*(?:mut\\s+)?)?${n}\\b`).exec(after);
+    if (!guard) out.push([base + m.index, `starts a process (\`${name}\`) and neither waits for it, ends it nor hands it to a Reaper`]);
+    else if (ASSERTION.test(after.slice(0, guard.index))) out.push([base + m.index, `starts a process (\`${name}\`) and asserts before its wait: a failing assertion leaves it running`]);
+  }
+  return out;
+}
 
 /** The index just past the brace that closes the `{` at `open` in `masked`, or -1. */
 function closeBrace(masked, open) {
@@ -91,19 +143,30 @@ export function stepSites(text, file) {
     if (!out.some((o) => o.line === line && o.rule === rule)) out.push({ index, line, rule, what });
   };
   const commands = rust && RUST_COMMANDS.test(masked);
+  // Node: a sleep from node:timers/promises (imported under any name), or one named sleep/delay, awaited in a loop.
+  const timerNames = rust ? [] : [...text.matchAll(/import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?timers\/promises['"]/g)]
+    .flatMap((i) => i[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop()).filter(Boolean));
+  const sleeps = rust ? null : new RegExp(`\\bawait\\s+(?:${['sleep', 'delay', ...timerNames].map(escape).join('|')})\\s*\\(`);
   const loops = rust ? /\b(?:for|while|loop)\b/g : /\b(?:for|while)\s*\(/g;
   for (const m of masked.matchAll(loops)) {
     if (m.index < from) continue;
+    // `impl Trait for Type {` and `for<'a>` are not loops.
+    if (rust && m[0] === 'for' && (/\bimpl\b/.test(masked.slice(statementStart(masked, m.index), m.index)) || /^for\s*</.test(masked.slice(m.index)))) continue;
     const body = bodyAfter(masked, m.index, !rust);
     if (!body) continue;
     const inner = masked.slice(body[0], body[1]);
-    const run = rust && !commands ? null : (rust ? RUST_RUN : NODE_RUN).exec(inner);
+    let run = null;
+    if (rust && commands) {
+      for (const r of inner.matchAll(new RegExp(RUST_RUN.source, 'g'))) {
+        if (!r[0].includes('status') || commandStatus(masked, body[0] + r.index)) { run = r; break; }
+      }
+    } else if (!rust) run = NODE_RUN.exec(inner);
     if (run) push(body[0] + run.index, 'A', 'runs a program to completion on every turn of a loop, so the test\'s one time bound covers the sum of the turns', m.index);
     if (!rust) {
       const header = masked.slice(m.index, body[0]);
       for (const t of [header, inner]) {
-        const poll = /\bsetTimeout\s*\([^)]*,\s*\d[\d_]*\s*\)/.exec(t);
-        if (poll) push((t === header ? m.index : body[0]) + poll.index, 'B', 'polls at a fixed pace (a `setTimeout` with a fixed number inside a loop)');
+        const poll = /\bsetTimeout\s*\([^)]*,\s*[^)\s][^)]*\)/.exec(t) ?? (sleeps ? sleeps.exec(t) : null);
+        if (poll) push((t === header ? m.index : body[0]) + poll.index, 'B', 'polls at a fixed pace (a timer with a fixed pause inside a loop)');
       }
     }
   }
@@ -115,12 +178,7 @@ export function stepSites(text, file) {
       if (m.index < from || !commands) continue;
       const body = bodyAfter(masked, m.index);
       if (!body) continue;
-      const inner = masked.slice(body[0], body[1]);
-      const spawn = /\.spawn\s*\(\s*\)/.exec(inner);
-      // A nested fn is judged on its own; the outer one only on the text outside it.
-      if (spawn && !RUST_GUARD.test(inner) && !/\bfn\s+\w+/.test(inner.slice(0, spawn.index))) {
-        push(body[0] + spawn.index, 'C', 'starts a process and neither waits for it, ends it nor hands it to a Reaper in the same function');
-      }
+      for (const [at, what] of unguardedSpawns(masked.slice(body[0], body[1]), body[0])) push(at, 'C', what);
     }
   } else if (!NODE_GUARD.test(masked)) {
     for (const m of masked.matchAll(/\bdetached\s*:\s*true\b/g)) push(m.index, 'C', 'starts a detached process (its own process group) that nothing in this file reaps');
