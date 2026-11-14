@@ -2006,3 +2006,16 @@ kept the child), or, when you must act on a pid, check immediately before the ki
 that its start time is later than your own command's start; if either is unknown or differs, do not kill: report it to its
 owner or the coordinator. Never `pkill -f` or `kill` by a name pattern (`lefthook`, `cargo`, `node`) because every agent runs
 the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
+
+## Member gates passed, the train's own tests did not: run the full tool suites before a train push (ER-8, ER-36, 2026-11-14)
+Every member of train 11 passed its member gate (fmt, Clippy on three targets, conformance, lockfiles), and the integrator ran the
+tests of the modules its two merge ports touched (229 of them). A full paddock-dev nextest on the merged tree, first in a Linux
+container and then on the host, still found three failures that only the combination made: the 0089 merge added C122 to the
+check lists of both hosts but not to the registry test (`check_engine`) or the hand-kept ci-run golden, the Rust C122 lacked the
+`root` scope its JavaScript host declares (the registry test compares them), and a test in `pre_push/heavy_tool.rs` (from
+fix/gen-check-build-first) used `remove_dir_all`, which `safe_remove_lint` refuses under tools/. The ci.yml run had not started
+yet, so no runner time went on it. A member gate runs no tests by design (ADR 0098); the train's one test run was meant to be CI.
+**What changed:** before a train is pushed, the integrator runs the full nextest of `tools/paddock-dev` and of `crates` on the
+merged tree (through the heavy slot), fixes what fails in one combination commit, and pushes once; touched-module tests are not
+enough for a merge that changes shared lists (check registries, goldens, lint allow lists). **Class: train-time combination
+failures (ADR 0098; train 8's eight fixes, above).**

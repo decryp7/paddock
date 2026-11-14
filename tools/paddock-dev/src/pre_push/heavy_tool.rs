@@ -250,8 +250,12 @@ mod tests {
             !held.path().starts_with(home.path().join("bin")),
             "outside the folder `./dev` prunes"
         );
-        // Another agent's `./dev` prunes the cache folder (or a failed `--version` probe removes the binary) mid-run.
-        std::fs::remove_dir_all(home.path().join("bin")).unwrap();
+        // Another agent's `./dev` prunes the cache folder (or a failed `--version` probe removes the binary) mid-run. The test takes
+        // the cache's path away by removing the binary and moving its folder aside: the same loss for the run, with no folder
+        // deletion outside `safe_remove` (tests/it/safe_remove_lint.rs reads this file's text too).
+        std::fs::remove_file(&cached).unwrap();
+        std::fs::rename(home.path().join("bin"), home.path().join("pruned")).unwrap();
+        assert!(!cached.exists(), "the shared cache's name is gone");
         assert!(held.path().is_file(), "the held binary is still there for the later steps");
         #[cfg(unix)]
         {
