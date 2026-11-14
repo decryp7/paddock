@@ -47,7 +47,9 @@ case_ "a relative variable" - - wt REFUSED
 case_ "a variable with leading whitespace" - - " /srv/b/dt/wt" REFUSED
 # `places --pinned` (the Windows VM guards) reads the repository's own config with an empty environment: nothing moves it.
 r="$TMP/pinned"; git init -q "$r" && git -C "$r" config paddock.worktreeRoot /srv/p/dt/wt
+# DEV's build notes and git's stderr are not part of the answer: a program that writes to stderr first must give the same result.
+noisy="$TMP/noisy-dev"; printf '#!/bin/bash\necho "note: building paddock-dev" >&2\nexec "%s" "$@"\n' "$DEV" > "$noisy"; chmod +x "$noisy"
 got=$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=paddock.worktreeRoot GIT_CONFIG_VALUE_0=/srv/e/dt/wt PADDOCK_DEV_TARGETS=/srv/y \
-  PADDOCK_WORKTREE_ROOT=/srv/z/dt/wt PADDOCK_VM_DATA=/srv/x "$DEV" places --pinned --get vm-data --repo "$r" 2>&1)
+  PADDOCK_WORKTREE_ROOT=/srv/z/dt/wt PADDOCK_VM_DATA=/srv/x "$noisy" places --pinned --get vm-data --repo "$r" 2>/dev/null)
 [ "$got" = /srv/p/vm-data ] && echo "ok: --pinned ignores the environment" || { echo "FAIL: --pinned gave '$got', want /srv/p/vm-data"; fail=1; }
 exit $fail
