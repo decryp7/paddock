@@ -115,6 +115,11 @@ static SELF_HOLD: OnceLock<Option<Held>> = OnceLock::new();
 /// Holds this program's own binary for the whole run when it runs from the tool cache (`<home>/bin*/`), so a prune or a
 /// republish by another run cannot remove the path its children start (see [`self_exe`]). Once per process; best effort: without
 /// a hold [`self_exe`] is the program's own path. Returns the hold's path; `main` calls [`release_self`] before it exits.
+///
+/// Unix only. On Windows a hard link of a running program cannot be removed while it runs, so every run would leave its hold for
+/// the week-long sweep; and Windows cannot remove the running program's own cache entry either, so the prune or a republish
+/// fails on it and the entry stays for the run anyway.
+#[cfg(unix)]
 pub fn hold_self(env: &HashMap<String, String>) -> Option<&'static Path> {
     SELF_HOLD
         .get_or_init(|| {
@@ -131,6 +136,7 @@ pub fn hold_self(env: &HashMap<String, String>) -> Option<&'static Path> {
 }
 
 /// Ends this process's own hold ([`hold_self`]): `std::process::exit` runs no destructors.
+#[cfg(unix)]
 pub fn release_self() {
     if let Some(Some(h)) = SELF_HOLD.get() {
         let _ = std::fs::remove_file(h.path());
@@ -258,6 +264,7 @@ mod tests {
         assert!(why.contains("cannot hold heavy") && why.contains("Next:"), "{why}");
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_program_outside_the_cache_holds_nothing_and_names_its_own_path() {
         // The test binary runs from cargo's target folder, never from a cache: no hold, `self_exe` is the program itself.

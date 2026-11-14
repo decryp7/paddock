@@ -2,11 +2,13 @@
 # PreToolUse(Bash), agents only (agent_id in the input; the coordinator is not refused): the kill guard (rule 53), blocking.
 # An agent ends only processes it can show are its own; a pid read from `ps`, `pgrep` or an earlier output is a hint, never an
 # owner (on 2026-11-14 an integrator killed another agent's `lefthook run pre-commit` by pid; docs/lessons.md).
-#  Refused: `pkill`, `killall` (by name: every agent runs the same programs); `kill` fed by xargs, `$( )`, backticks or a
+#  Refused: `pkill`, `killall`, `killall5` (by name: every agent runs the same programs), `fuser -k`, a program named at run
+#  time (`$(..)`, backticks, an unresolved variable) given pid-like arguments; `kill` fed by xargs, `$( )`, backticks or a
 #  variable set from them; `kill` of a variable the hook cannot see; `kill 0`, `kill -1` and process groups (`kill -- -PID`);
 #  `kill PID` (any signal) unless the hook proves the pid: alive, a descendant of this Claude session's process (CLAUDE_PID,
 #  else the nearest `claude` ancestor), and its working folder inside the agent's own worktree, which is the linked worktree
 #  (a folder whose `.git` is a file) holding the command's effective folder (the last `cd` target, else the input's cwd).
+#  Seen through: ANSI-C quoting (`$'\x6bill'`), `alias k=kill`, `script ... kill`, bash -c, eval (lib/shellscan.py).
 #  Allowed: `kill %job`, `kill $!` (or a variable set from `$!`) in the command that started it, `kill -0` (a probe),
 #  `kill -l`, the TaskStop tool (not Bash), and `./dev` tools, which kill through paddock_proc.
 # THIS IS A MISTAKE GUARD, NOT A SECURITY BOUNDARY. Known gaps: pids built at run time or read from files by scripts, kills
