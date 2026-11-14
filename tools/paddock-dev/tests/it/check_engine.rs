@@ -366,7 +366,7 @@ fn a_new_check_gets_inline_waivers_from_the_engine_without_any_waiver_code() {
 fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
     let reg = check::registry();
     let ids: Vec<&str> = reg.iter().map(|c| c.id()).collect();
-    assert_eq!(ids, ["C39", "C53", "C119", "C120"]);
+    assert_eq!(ids, ["C39", "C53", "C119", "C120", "C121", "C124"]);
     assert_eq!(check::sources().iter().map(|(id, _)| *id).collect::<Vec<_>>(), ids);
     let rust = check::conformance::list_checks(&reg);
     let js = paddock_proc::command("node")

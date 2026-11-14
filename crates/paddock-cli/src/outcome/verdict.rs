@@ -1,6 +1,6 @@
 //! Folding a run's outcomes into one exit code (ADR 0089 section 2).
 
-use super::{Optional, Outcome, Run, Scope};
+use super::{Date, Optional, Outcome, Run, RunKind, Scope};
 use crate::{Exit, Table};
 use serde_json::{Value, json};
 
@@ -9,8 +9,18 @@ use serde_json::{Value, json};
 struct Item {
     id: String,
     outcome: Outcome,
-    /// The id of the live `[[optional]]` entry that covers this not-measured item.
-    excused_by: Option<String>,
+    /// What excuses this not-measured item, if anything.
+    excused_by: Option<Excuse>,
+}
+
+/// What excuses a not-measured item: reviewed data, or a person's override. A person's override is an excuse, never a
+/// state of its own (ADR 0089 amendment 2026-11-13, pre-push's former `Accepted`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Excuse {
+    /// A live `[[optional]]` entry, by id.
+    Register(String),
+    /// A person's override, by who gave it.
+    Override(String),
 }
 
 impl Item {
@@ -43,12 +53,30 @@ impl Verdict {
         optional: &Optional,
         run: &Run,
     ) -> Verdict {
+        Verdict::of_overridden(
+            outcomes.into_iter().map(|(id, o)| (id, o, None)),
+            optional,
+            run,
+        )
+    }
+
+    /// Like [`Verdict::of`], with a person's override per item (the name of who gave it): it excuses a not-measured item
+    /// like an `[[optional]]` entry does, is named in the JSON (`override`), and excuses nothing else.
+    pub fn of_overridden<S: Into<String>>(
+        outcomes: impl IntoIterator<Item = (S, Outcome, Option<String>)>,
+        optional: &Optional,
+        run: &Run,
+    ) -> Verdict {
         let items = outcomes
             .into_iter()
-            .map(|(id, outcome)| {
+            .map(|(id, outcome, who)| {
                 let id = id.into();
                 let excused_by = match outcome {
-                    Outcome::NotMeasured(_) => optional.covering(&id, run).map(|e| e.id.clone()),
+                    Outcome::NotMeasured(_) => who.map(Excuse::Override).or_else(|| {
+                        optional
+                            .covering(&id, run)
+                            .map(|e| Excuse::Register(e.id.clone()))
+                    }),
                     _ => None,
                 };
                 Item {
@@ -73,6 +101,32 @@ impl Verdict {
             scope: run.scope,
             problems,
         }
+    }
+
+    /// Folds `outcomes` for a tool with no `[[optional]]` register: an ordinary whole-tree run, so nothing is excused, a
+    /// not-applicable item counts as not measured, and no outcome at all is [`Exit::NotMeasured`].
+    pub fn strict<S: Into<String>>(outcomes: impl IntoIterator<Item = (S, Outcome)>) -> Verdict {
+        let today =
+            Date::parse("2000-01-01").unwrap_or_else(|_| unreachable!("a fixed valid date"));
+        Verdict::of(
+            outcomes,
+            &Optional::none(),
+            &Run::new(RunKind::Ordinary, Scope::Root, "any", today),
+        )
+    }
+
+    /// Like [`Verdict::strict`] for a run scoped to a change (the push gate: a gate the change does not reach is not applicable, not
+    /// missing), with a person's override per item (see [`Verdict::of_overridden`]).
+    pub fn scoped<S: Into<String>>(
+        outcomes: impl IntoIterator<Item = (S, Outcome, Option<String>)>,
+    ) -> Verdict {
+        let today =
+            Date::parse("2000-01-01").unwrap_or_else(|_| unreachable!("a fixed valid date"));
+        Verdict::of_overridden(
+            outcomes,
+            &Optional::none(),
+            &Run::new(RunKind::Ordinary, Scope::Scoped, "any", today),
+        )
     }
 
     /// The exit code, by the precedence in the module doc.
@@ -107,8 +161,10 @@ impl Verdict {
             .map(|i| {
                 let mut v = i.outcome.json();
                 v["id"] = json!(i.id);
-                if let Some(e) = &i.excused_by {
-                    v["optional"] = json!(e);
+                match &i.excused_by {
+                    Some(Excuse::Register(e)) => v["optional"] = json!(e),
+                    Some(Excuse::Override(who)) => v["override"] = json!(who),
+                    None => {}
                 }
                 if i.counts_as_not_measured(self.scope) && matches!(i.outcome, Outcome::NotApplicable(_)) {
                     v["note"] = json!("not applicable only in a scoped run; this was a whole-tree run, so it counts as not measured");
@@ -119,7 +175,10 @@ impl Verdict {
         let mut used: Vec<&str> = self
             .items
             .iter()
-            .filter_map(|i| i.excused_by.as_deref())
+            .filter_map(|i| match &i.excused_by {
+                Some(Excuse::Register(e)) => Some(e.as_str()),
+                _ => None,
+            })
             .collect();
         used.sort_unstable();
         used.dedup();
@@ -146,7 +205,11 @@ impl Verdict {
                     json!(i.id),
                     json!(i.outcome.name()),
                     json!(i.outcome.detail()),
-                    json!(i.excused_by.clone().unwrap_or_default()),
+                    json!(match &i.excused_by {
+                        Some(Excuse::Register(e)) => e.clone(),
+                        Some(Excuse::Override(who)) => format!("override by {who}"),
+                        None => String::new(),
+                    }),
                 ]
             })
             .collect();
@@ -163,7 +226,8 @@ impl Verdict {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::outcome::{Date, Finding, Reason, RunKind};
+    use crate::outcome::test_support::{clean, measured};
+    use crate::outcome::{Finding, Reason};
     use crate::{TableFormat, write_table};
 
     const FILE: &str = "[[optional]]\nid = \"test:cov\"\nwhere = { leg = [\"l\"] }\nreason = \"r\"\nexpires = \"2027-01-31\"\nmeasured_on = [\"m\"]\n";
@@ -190,16 +254,13 @@ mod tests {
     /// Every kind an outcome can take, with both severities, a mixed list, and a not-measured item the entry names.
     fn kinds() -> Vec<Labelled> {
         vec![
-            ("clean", Outcome::Clean),
+            ("clean", clean()),
             ("na", Outcome::NotApplicable(reason())),
-            ("fail", Outcome::from_findings(vec![Finding::failing("f")])),
-            (
-                "report",
-                Outcome::from_findings(vec![Finding::report_only("r")]),
-            ),
+            ("fail", measured(vec![Finding::failing("f")])),
+            ("report", measured(vec![Finding::report_only("r")])),
             (
                 "mixed",
-                Outcome::from_findings(vec![Finding::report_only("r"), Finding::failing("f")]),
+                measured(vec![Finding::report_only("r"), Finding::failing("f")]),
             ),
             ("unc", Outcome::NotMeasured(reason())),
             ("test:cov", Outcome::NotMeasured(reason())),
@@ -253,7 +314,8 @@ mod tests {
             match o {
                 Outcome::CheckBroken(_) => 4,
                 Outcome::Findings(f)
-                    if f.as_slice()
+                    if f.findings()
+                        .as_slice()
                         .iter()
                         .any(|x| x.severity == crate::outcome::Severity::Failing) =>
                 {
@@ -335,8 +397,8 @@ mod tests {
 
     #[test]
     fn positive_controls() {
-        let report_only = || Outcome::from_findings(vec![Finding::report_only("r")]);
-        let failing = || Outcome::from_findings(vec![Finding::failing("f")]);
+        let report_only = || measured(vec![Finding::report_only("r")]);
+        let failing = || measured(vec![Finding::failing("f")]);
         // D5: report-only findings plus not measured is 6 (never 0), plus check broken is 7.
         assert_eq!(
             of(
@@ -378,7 +440,7 @@ mod tests {
             Exit::CheckBroken
         );
         // The probe sees the clean cases: only these exit 0.
-        assert_eq!(of(vec![("a", Outcome::Clean)], &root()).exit(), Exit::Ok);
+        assert_eq!(of(vec![("a", clean())], &root()).exit(), Exit::Ok);
         assert_eq!(of(vec![("a", report_only())], &root()).exit(), Exit::Ok);
         let scoped = Run::new(RunKind::Ordinary, Scope::Scoped, "linux", d("2026-11-10"));
         assert_eq!(
@@ -400,7 +462,7 @@ mod tests {
         let v = of(
             vec![
                 ("test:cov", Outcome::NotMeasured(Reason::new("no ffmpeg"))),
-                ("x", Outcome::Clean),
+                ("x", clean()),
             ],
             &root(),
         );
@@ -441,7 +503,7 @@ mod tests {
 
     #[test]
     fn the_json_gives_every_finding_its_message_and_failing_flag() {
-        let mixed = Outcome::from_findings(vec![
+        let mixed = measured(vec![
             Finding::report_only("only reported"),
             Finding::failing("really failing"),
         ]);
@@ -463,7 +525,7 @@ mod tests {
         let v = of(
             vec![
                 ("test:cov", Outcome::NotMeasured(Reason::new("no ffmpeg"))),
-                ("t", Outcome::from_findings(vec![Finding::failing("f")])),
+                ("t", measured(vec![Finding::failing("f")])),
             ],
             &root(),
         );
@@ -484,13 +546,9 @@ mod tests {
     #[test]
     fn every_status_name_reaches_the_json_and_the_table() {
         let all = [
-            ("a", Outcome::Clean, "clean"),
+            ("a", clean(), "clean"),
             ("b", Outcome::NotApplicable(reason()), "not-applicable"),
-            (
-                "c",
-                Outcome::from_findings(vec![Finding::failing("f")]),
-                "findings",
-            ),
+            ("c", measured(vec![Finding::failing("f")]), "findings"),
             ("d", Outcome::NotMeasured(reason()), "not-measured"),
             ("e", Outcome::CheckBroken(reason()), "check-broken"),
         ];
@@ -532,5 +590,18 @@ mod tests {
             0
         );
         assert_eq!(on("2027-02-01").exit(), Exit::Findings);
+    }
+
+    #[test]
+    fn strict_folds_without_a_register() {
+        let one = |o: Outcome| Verdict::strict(vec![("x", o)]).exit();
+        assert_eq!(one(clean()), Exit::Ok);
+        assert_eq!(one(measured(vec![Finding::failing("f")])), Exit::Findings);
+        assert_eq!(one(Outcome::NotMeasured(reason())), Exit::NotMeasured);
+        assert_eq!(one(Outcome::NotApplicable(reason())), Exit::NotMeasured);
+        assert_eq!(
+            Verdict::strict(Vec::<(&str, Outcome)>::new()).exit(),
+            Exit::NotMeasured
+        );
     }
 }

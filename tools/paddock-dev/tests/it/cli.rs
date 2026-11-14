@@ -237,3 +237,39 @@ fn plan_refuses_json_mentions_commit_flags_in_its_usage_and_annotates_errors_in_
         "{err}"
     );
 }
+
+/// ADR 0098 WP-4: everything `--trial` can refuse is refused before the scratch clone is made and before `trial/<branch>` is
+/// pushed (the scratch folder stays empty, so no git ran at all).
+#[test]
+fn a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed() {
+    let scratch = tempfile::tempdir().unwrap();
+    let run = |extra: &[&str]| {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        cmd.args(["ci", "dispatch", "ci.yml", "--trial", "feat/x"])
+            .args(extra)
+            .env("GITEA_TOKEN", "not-a-real-token")
+            .env("PADDOCK_TRIAL_DIR", scratch.path());
+        let out = cmd.output().unwrap();
+        (out.status.code().unwrap(), String::from_utf8_lossy(&out.stderr).into_owned())
+    };
+    for (extra, word) in [
+        (&["--max", "soon"][..], "duration"),
+        (&["--max", "30m", "--input", "novalue"], "key=value"),
+        (&["--max", "0s"], "out of range"),
+    ] {
+        let (code, err) = run(extra);
+        assert_eq!(code, 2, "{extra:?}: {err}");
+        assert!(err.contains(word), "{extra:?}: {err}");
+    }
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.args(["ci", "dispatch", "ci.yml", "--trial", "bad branch;x", "--max", "30m"])
+        .env("GITEA_TOKEN", "not-a-real-token")
+        .env("PADDOCK_TRIAL_DIR", scratch.path());
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        std::fs::read_dir(scratch.path()).unwrap().count(),
+        0,
+        "a clone was made before the arguments were checked"
+    );
+}

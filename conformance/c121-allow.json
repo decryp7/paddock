@@ -1,0 +1,6 @@
+{
+  "allow": [
+    { "path": "conformance/test/", "reason": "tests of the conformance checks of workflows: the workflow text is their subject, not data read for another purpose" },
+    { "path": "tools/paddock-dev/tests/it/check.rs", "reason": "the parity fixtures of C121 itself: invented lines that C121 must flag, written as test data" }
+  ]
+}

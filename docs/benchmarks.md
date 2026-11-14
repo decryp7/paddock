@@ -1228,3 +1228,18 @@ only, and Clippy runs in `./dev check --pre-push` through the heavy slot. One re
 each of `apps/dyno` and `apps/pitcrew`, same machine, load about 15: both rustfmt commands took 0.06 and 0.07 s, 1 s wall in all. Before,
 the same change ran two Clippy builds in parallel: 363 s wall at a peak 1-minute load of 66.6 (section above, cold builds). One run;
 not measured: a change touching all five apps, which previously started five Clippy builds.
+
+## Trial merges and the train-gates job (2026-11-13, ADR 0098)
+
+Mac mini (14 cores), 1-minute load 9 to 12, warm git objects. One run each; quoted by ADR 0098.
+
+| What | Time |
+| --- | ---: |
+| `git merge-tree --write-tree <merge>^1 <merge>^2` for train 8's merges `047a6d05f`, `10b6b88f0` (in memory, no checkout) | 0.01 s each |
+| the same for `ad6bc2e9b` (`feat/generator-registry`) | 0.03 s |
+| the conformance line (`node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS`, origin/main `f7bbe2b86`) | 20.8 s |
+| CI: the `train gates` job of run 8053 (ci.yml dispatch on `train/2026-11-13-8` at `3a342cb42`, Linux runner, green), from the jobs API `started_at` to `completed_at` | 288 s |
+| CI: run 8053 as a whole, `started_at` to `completed_at` | 13 min 20 s |
+
+The per-gate times of `./dev check --pre-push` on a shared-crate change (about 100 s of wall time with warm build folders) are in
+"`./dev check --pre-push` run times" above.
