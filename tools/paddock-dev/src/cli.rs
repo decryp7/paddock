@@ -1,6 +1,6 @@
 use crate::{
     brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
-    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, plan, plan_cmd, pr, pre_push, queue,
+    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue,
     release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
@@ -36,8 +36,11 @@ enum Command {
     Wait(wait::WaitArgs),
     /// Run a command through the machine-wide heavy slot (ER-24), found the way `check --pre-push` finds it; git hooks use it.
     Heavy(heavy_cmd::HeavyArgs),
-    /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of d7 and d8 and the CI queue (ER-24).
+    /// One line for the coordinator: start, hold or stop for new agents, from the load, the free disk of the dev-targets folder and the CI queue (ER-24).
     Load(load::LoadArgs),
+    /// The machine's dev folders, derived from `git config paddock.worktreeRoot` (docs/dev-setup.md): dev-targets, dev-disk,
+    /// vm-data, lock-root and main-checkout; `--get <name>` prints one, `--pinned` ignores every environment variable.
+    Places(places::PlacesArgs),
     /// Briefs to agents: check one for the required fields and the known-bad patterns (templates/agents/brief-template.md).
     Brief {
         #[command(subcommand)]
@@ -652,6 +655,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
         Command::Load(a) => load::command(&a),
+        Command::Places(a) => places::command(&a),
         Command::Brief { command } => brief_check::command(command),
         Command::Locks {
             command: LocksCommand::Check(a),

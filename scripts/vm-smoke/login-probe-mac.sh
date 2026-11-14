@@ -4,8 +4,8 @@
 # Usage: login-probe-mac.sh <new Dyno .dmg> <1.0.0 .dmg>   (fresh clones of the macOS test VM, removed at the end; --no-audio; guest only)
 set -u
 NEW=${1:?new dmg}; OLD=${2:?1.0.0 dmg}; HERE=$(cd "$(dirname "$0")" && pwd)
-. "$HERE/../dev-places.sh"
-TART_HOME=${TART_HOME:-$(paddock_vm_data)/tart-from-home} || exit 2
+# The images live in <dev disk>/vm-data/tart-from-home (`./dev places`, docs/dev-setup.md); TART_HOME overrides it.
+TART_HOME=${TART_HOME:-$("$HERE/../../dev" places --get vm-data --repo "$HERE/../..")/tart-from-home} || exit 2
 export TART_HOME
 BASE=${PADDOCK_MAC_BASE:-vmgui-base-tahoe-4aaa751f}
 STAGE=$(mktemp -d /private/tmp/claude-501/login-mac-stage.XXXXXX); cp "$NEW" $STAGE/new.dmg; cp "$OLD" $STAGE/old.dmg

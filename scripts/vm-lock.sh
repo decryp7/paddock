@@ -23,7 +23,7 @@
 # lock still held, then releases the lock (so a cleanup of the VM is never unlocked).
 #
 # Exit codes: 75 busy (EX_TEMPFAIL), 3 the lock could not be used (root missing, paddock-dev failed).
-# Environment: PADDOCK_VM_LOCK_ROOT (default <dev disk>/ci/locks/test-machines, derived by scripts/dev-places.sh; the lock refuses
+# Environment: PADDOCK_VM_LOCK_ROOT (default <dev disk>/ci/locks/test-machines, from `./dev places --get lock-root`; the lock refuses
 #   with exit 3 when neither is there), PADDOCK_VM_LOCK_WAIT (0),
 #   PADDOCK_VM_LOCK_POLL (seconds between tries, 5), PADDOCK_DEV (the paddock-dev program; default the repository's ./dev),
 #   PADDOCK_VM_LOCK_SLOW_SECS (a paddock-dev call this slow is logged, 10).
@@ -63,13 +63,13 @@ _vm_lock_same_start() {
   ta="${a##*\[t}"; tb="${b##*\[t}"
   if [ "$ta" != "$a" ] && [ "$tb" != "$b" ]; then [ "$ta" = "$tb" ]; else [ "${a%% \[t*}" = "${b%% \[t*}" ]; fi
 }
-. "$_vm_lock_here/dev-places.sh"
-# The one fixed lock root: PADDOCK_VM_LOCK_ROOT, else <dev disk>/ci/locks/test-machines; empty (and a non-zero status) when it cannot be derived.
+# The one fixed lock root: PADDOCK_VM_LOCK_ROOT, else <dev disk>/ci/locks/test-machines (`./dev places`, docs/dev-setup.md); empty and
+# a non-zero status, with paddock-dev's reason on stderr, when it cannot be derived.
 _vm_lock_default_root() {
-  local disk
+  local root
   if [ -n "${PADDOCK_VM_LOCK_ROOT:-}" ]; then printf '%s' "$PADDOCK_VM_LOCK_ROOT"; return 0; fi
-  disk="$(paddock_dev_disk)" || return 3
-  printf '%s' "$disk/ci/locks/test-machines"
+  root="$(_vm_lock_dev places --get lock-root --repo "$_vm_lock_here/..")" || return 3
+  printf '%s' "$root"
 }
 
 # The owner folder of the current holder, if the slot is held; retried a few times (status can race a holder starting or ending).

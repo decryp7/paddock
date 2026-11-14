@@ -293,6 +293,6 @@ test('the default lock root is derived from the dev-targets folder, never a name
   assert.equal(named.stdout, join(scratch, 'named'));
   const gone = bash(`. '${LIB}'; vm_lock_acquire probe`, { ...env, PADDOCK_DEV_TARGETS: 'not-absolute' });
   assert.equal(gone.status, 3, gone.stderr);
-  assert.match(gone.stderr, /::error::dev-places: PADDOCK_DEV_TARGETS 'not-absolute' is not an absolute path/);
+  assert.match(gone.stderr, /not-absolute \(PADDOCK_DEV_TARGETS\) is not an absolute folder/);
   assert.match(gone.stderr, /::error::vm-lock: the lock root cannot be derived/);
 });

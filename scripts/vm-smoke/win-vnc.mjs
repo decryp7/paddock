@@ -5,10 +5,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { vmData } from '../dev-places.mjs';
+import { devPlace } from './win-vm-target.mjs';
 
 // The VNC tools' venv in <dev disk>/vm-data/tart-from-home (docs/dev-setup.md), derived when first needed.
-const venv = () => join(vmData(), 'tart-from-home', '.paddock-vm-gui');
+const venv = () => join(devPlace('vm-data'), 'tart-from-home', '.paddock-vm-gui');
 export const vncdo = () => {
   const VENV = venv();
   const dir = readdirSync(VENV).find((d) => d.startsWith('vnc-venv-'));

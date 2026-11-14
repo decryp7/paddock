@@ -33,6 +33,7 @@
 //! - `disk check|report|scan|clean|adopt|record`: free-space check, usage tracking (owner records and a SQLite index) and clean-up
 //!   of merged and stale-pushed folders ([`disk`]).
 //! - `load`: start, hold or stop for new agents, from the load, the free disk and the CI queue ([`load`], ER-24).
+//! - `places`: the machine's dev folders, derived from `paddock.worktreeRoot` for the scripts, `--pinned` for the VM guards ([`places`]).
 //! - `brief check`: the fields and known-bad patterns of a brief to an agent ([`brief_check`], templates/agents/brief-template.md).
 //! - `ci triage <run>`: NEW, ALREADY FAILING ON MAIN or FLAKY for each failed test of a run ([`ci_runs::triage`]).
 //! - `worktree add|claim|reassign|release|drop|list|clean` and `check primary`: agent worktrees locked with an owner note and

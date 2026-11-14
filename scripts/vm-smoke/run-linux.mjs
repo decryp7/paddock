@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { vmData } from '../dev-places.mjs';
+import { devPlace } from './win-vm-target.mjs';
 import { buildStep, expectedCommit } from './verdict.mjs';
 import { requiredSteps } from './manifest.mjs';
 import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
@@ -38,7 +38,7 @@ const BASE = process.env.PADDOCK_LINUX_BASE ?? 'linux-gnome-base';
 // The Linux images live in <dev disk>/vm-data/tart-from-home (docs/dev-setup.md), derived; TART_HOME overrides it.
 let tartHomeOnce = '';
 /** TART_HOME, else the derived folder; throws (fail closed, with the next step) when neither is there. */
-const tartHome = () => (tartHomeOnce ||= process.env.TART_HOME ?? `${vmData()}/tart-from-home`);
+const tartHome = () => (tartHomeOnce ||= process.env.TART_HOME ?? `${devPlace('vm-data')}/tart-from-home`);
 const SESSION = 'export XDG_RUNTIME_DIR=/run/user/1000 DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus';
 const log = (m) => console.error(`vm-smoke(linux): ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

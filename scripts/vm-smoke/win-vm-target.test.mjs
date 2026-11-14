@@ -5,12 +5,11 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { WIN_VM_DIR, WIN_VMX, WIN_VM_UNKNOWN, checkWinVmTarget, winVmDirIn, winVmxIn } from './win-vm-target.mjs';
-import { vmDataPinned } from '../dev-places.mjs';
+import { WIN_VM_DIR, WIN_VMX, WIN_VM_UNKNOWN, checkWinVmTarget, devPlace, winVmDirIn, winVmxIn } from './win-vm-target.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fakeRealpath = (map) => (p) => { if (p in map) return map[p]; const e = new Error(`ENOENT ${p}`); e.code = 'ENOENT'; throw e; };
-const DIR = winVmDirIn(vmDataPinned('/srv/disk-b/dev-targets/wt'));
+const DIR = winVmDirIn('/srv/disk-b/vm-data');
 const VMX = winVmxIn(DIR);
 
 test('the target is the one test VM under the derived vm-data folder, and its .vmx is derived from the folder', () => {
@@ -25,17 +24,15 @@ test('the target is the one test VM under the derived vm-data folder, and its .v
   }
 });
 
-test('an environment variable cannot move the target', () => {
-  const before = { ...process.env };
-  try {
-    Object.assign(process.env, { PADDOCK_VM_DATA: '/srv/elsewhere', PADDOCK_DEV_TARGETS: '/srv/elsewhere/dt', GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'paddock.worktreeRoot', GIT_CONFIG_VALUE_0: '/srv/elsewhere/dt/wt' });
-    let pinned = '';
-    try { pinned = vmDataPinned(); } catch { /* not derivable here (CI): nothing can move it either */ }
-    assert.ok(!pinned.includes('elsewhere'), pinned);
-  } finally {
-    for (const k of Object.keys(process.env)) if (!(k in before)) delete process.env[k];
-    Object.assign(process.env, before);
-  }
+test('the folder comes from the repository\'s own ./dev places --pinned, and its refusal is passed on', () => {
+  const calls = [];
+  const run = (prog, args) => { calls.push([prog, args]); return '/srv/disk-b/vm-data\n'; };
+  assert.equal(devPlace('vm-data', { pinned: true, run }), '/srv/disk-b/vm-data');
+  assert.match(calls[0][0], /\/dev$/);
+  assert.deepEqual(calls[0][1].filter((a) => !a.startsWith('/')), ['places', '--get', 'vm-data', '--repo', '--pinned']);
+  const refuse = () => { const e = new Error('exit 2'); e.stderr = 'error: The dev-targets folder cannot be derived: no worktree root is set.\n'; throw e; };
+  assert.throws(() => devPlace('vm-data', { pinned: true, run: refuse }), /--pinned` failed: error: The dev-targets folder cannot be derived/);
+  assert.throws(() => devPlace('vm-data', { run: () => '' }), /printed nothing/);
 });
 
 test('the real folder and .vmx pass', () => {

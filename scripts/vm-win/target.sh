@@ -2,16 +2,22 @@
 # 2026-11-08). The user's own VMs (Fusion keeps them in the same app) must be impossible to target, whatever the environment.
 #
 # Allowed: the folder <dev disk>/vm-data/paddock-win11-test (after resolving links; derived from the repository's own git config
-# with an empty environment, scripts/dev-places.sh, so no variable can move it; docs/dev-setup.md), or, for the scripts' own tests only,
+# with an empty environment, `./dev places --pinned`, so no variable can move it; docs/dev-setup.md), or, for the scripts' own tests only,
 # "fake mode", which nothing in the environment can switch on by itself: the folder resolves under the per-user temp root
 # (`getconf DARWIN_USER_TEMP_DIR`, /tmp where there is none; never $TMPDIR), carries the marker file `.paddock-fake-vm`
 # the test created, is not under $HOME, its .vmx has one hard link, and FUSION_APP's vmrun resolves outside the installed Fusion, is a script and never names the app.
 # Anything else is refused before vmrun, ssh, scp or any file is touched. FAKE_VM=1 is set only in fake mode.
 WIN_VM_NAME=paddock-win11-test
-. "$(dirname "${BASH_SOURCE[0]}")/../dev-places.sh"
+# The repository's own ./dev, never PADDOCK_DEV: the program that names the target must not come from the environment either.
+_win_vm_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # Empty when it cannot be derived: then only fake mode passes, and the real VM is refused with the reason (fail closed).
 WIN_VM_DIR_UNKNOWN=""
-WIN_VM_DIR="$(paddock_vm_data_pinned 2>/dev/null)/$WIN_VM_NAME" || { WIN_VM_DIR=""; WIN_VM_DIR_UNKNOWN="$(paddock_vm_data_pinned 2>&1 >/dev/null)"; }
+if _win_vm_data="$("$_win_vm_repo/dev" places --pinned --get vm-data --repo "$_win_vm_repo" 2>/dev/null)" && [ -n "$_win_vm_data" ]; then
+  WIN_VM_DIR="$_win_vm_data/$WIN_VM_NAME"
+else
+  WIN_VM_DIR=""
+  WIN_VM_DIR_UNKNOWN="$("$_win_vm_repo/dev" places --pinned --get vm-data --repo "$_win_vm_repo" 2>&1 >/dev/null | tail -1)"
+fi
 
 # A path with links resolved; a missing last part is resolved through its parent (prepare.sh creates the folder).
 resolve_path() {

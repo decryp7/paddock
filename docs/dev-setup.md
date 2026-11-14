@@ -44,8 +44,9 @@ and links here.
 | `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
 | the main checkout | `paddock`, with `engineering-rules` next to it | the folder that holds the git common directory |
 
-The derivation is `tools/paddock-dev/src/places.rs`, with copies in `scripts/dev-places.sh`, `scripts/dev-places.mjs` and
-`.claude/hooks/lib/paddockpaths.py` (docs/known-copies.toml, `dev-places`).
+The derivation is `tools/paddock-dev/src/places.rs`; scripts ask `./dev places` (`--get <name>` for one folder, `--pinned` to
+ignore every environment variable). The hooks, which run before any binary is built, have the one copy,
+`.claude/hooks/lib/paddockpaths.py` (docs/known-copies.toml, `dev-places`; a parity test runs both on one table).
 
 The Mac mini's layout since 2026-11-14 (one SSD for all dev data; media and backups are on another disk, which no tool reads):
 

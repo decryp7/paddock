@@ -1,12 +1,34 @@
 // The one Windows VM the harness may ever drive (ADR 0040 §1; review P1-1, 2026-11-08). There is no override: the user's own
 // Fusion VMs must be impossible to target. vm-win.sh enforces the same folder on its side (scripts/vm-win/target.sh). The folder is
-// derived from the repository's git config alone (C125: no disk is named here).
+// derived from the repository's git config alone, through `./dev places --pinned` (C125: no disk is named here).
 //
 //   node scripts/vm-smoke/win-vm-target.mjs --vmx    prints the checked .vmx path, or exits 2 with an ::error:: line
+import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isMain } from '../../conformance/src/util/is-main.mjs';
-import { vmDataPinned } from '../dev-places.mjs';
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * One folder from `./dev places` (dev-targets, dev-disk, vm-data, lock-root, main-checkout; docs/dev-setup.md), run through the
+ * repository's own ./dev, never a program the environment names. `pinned` ignores every environment variable (paddock-dev reads
+ * git config with an empty environment). Throws with paddock-dev's reason when the folder cannot be derived (fail closed).
+ * @param {string} name
+ * @param {{pinned?: boolean, run?: typeof execFileSync}} [o] `run` injected for tests
+ */
+export function devPlace(name, { pinned = false, run = execFileSync } = {}) {
+  const args = ['places', '--get', name, '--repo', REPO, ...(pinned ? ['--pinned'] : [])];
+  try {
+    const out = String(run(join(REPO, 'dev'), args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 })).trim();
+    if (!out) throw new Error('it printed nothing');
+    return out;
+  } catch (e) {
+    const why = String(e.stderr || e.message || e).trim().split('\n').pop();
+    throw new Error(`\`./dev places --get ${name}${pinned ? ' --pinned' : ''}\` failed: ${why}`);
+  }
+}
 
 export const WIN_VM_NAME = 'paddock-win11-test';
 /** The test VM's folder under a vm-data folder: <vm-data>/paddock-win11-test. */
@@ -14,10 +36,10 @@ export const winVmDirIn = (vmData) => join(vmData, WIN_VM_NAME);
 /** The test VM's .vmx under its folder. */
 export const winVmxIn = (dir) => join(dir, 'vm', `${WIN_VM_NAME}.vmwarevm`, `${WIN_VM_NAME}.vmx`);
 
-// From the repository's own git config with an empty environment (scripts/dev-places.mjs): no variable can move it.
+// From the repository's own git config with an empty environment (`./dev places --pinned`): no variable can move it.
 const [derived, why] = (() => {
   try {
-    return [winVmDirIn(vmDataPinned()), ''];
+    return [winVmDirIn(devPlace('vm-data', { pinned: true })), ''];
   } catch (e) {
     return ['', e.message];
   }

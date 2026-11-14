@@ -7,9 +7,9 @@
 # Results go outside the repository: WP0_OUT, default $TMPDIR/dyno-wp0-out.
 set -euo pipefail
 # The pinned VM's folder, <dev disk>/vm-data/paddock-win11-test, from the repository's own git config with an empty environment
-# (scripts/dev-places.sh; docs/dev-setup.md): no variable moves it, and no folder at all refuses the run.
-. "$(cd "$(dirname "$0")/../../../.." && pwd)/scripts/dev-places.sh"
-PINNED="$(paddock_vm_data_pinned)/paddock-win11-test" || exit 2
+# (`./dev places --pinned`, the repository's own ./dev; docs/dev-setup.md): no variable moves it, and no folder refuses the run.
+REPO="$(cd "$(dirname "$0")/../../../.." && pwd)"
+PINNED="$("$REPO/dev" places --pinned --get vm-data --repo "$REPO")/paddock-win11-test" || exit 2
 VMX="$PINNED/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx"
 VMRUN="/Applications/VMware Fusion.app/Contents/Library/vmrun"
 SNAP=gui-session-tools
