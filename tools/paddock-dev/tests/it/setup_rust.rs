@@ -384,18 +384,42 @@ fn without_sccache_the_job_builds_without_the_cache() {
     assert!(rs.out.contains("::warning::sccache is not available on this runner"), "{}", rs.out);
 }
 
+/// The runner OS of this host, as the job sees it, and whether the action pins an sccache release for it. The pairing is the real
+/// one: `RUNNER_OS` is macOS only on a Mac, where `uname -m` says `arm64` (the shell's key) and Rust says `aarch64`. Faking macOS on a
+/// Linux aarch64 host made a pairing no runner has (the shell keys on `macOS-aarch64`, which it does not list), and the two sides
+/// differed there only (found in the native arm64 Linux container, 2026-11-14).
+fn host_runner() -> (&'static str, bool) {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", arch) => ("macOS", arch == "aarch64"),
+        ("linux", arch) => ("Linux", matches!(arch, "x86_64" | "aarch64")),
+        (_, arch) => ("Windows", arch == "x86_64"),
+    }
+}
+
+#[test]
+fn the_host_runner_pairs_the_os_with_its_own_architecture() {
+    let (os, pinned) = host_runner();
+    assert_eq!(os == "macOS", cfg!(target_os = "macos"));
+    assert_eq!(os == "Linux", cfg!(target_os = "linux"));
+    if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        assert!(pinned, "Linux arm64 has a pinned release (aarch64-unknown-linux-musl)");
+    }
+}
+
 #[test]
 fn a_pinned_copy_in_the_tool_cache_is_put_on_path_and_used() {
     let r = Runner::new(None);
     let pinned = r.root.join("tools/sccache/0.19.0");
     std::fs::create_dir_all(&pinned).unwrap();
     write_shim(&pinned.join("sccache"), &r.calls, "true");
-    let sh = r.shell(&LOCAL, &[], true);
-    let rs = r.rust(&LOCAL, &[]);
+    let (os, has_pin) = host_runner();
+    let host = [("RUNNER_OS", os)];
+    let sh = r.shell(&LOCAL, &host, true);
+    let rs = r.rust(&LOCAL, &host);
     assert_eq!((sh.code, &sh.env, &sh.path), (rs.code, &rs.env, &rs.path), "{}\n{}", sh.out, rs.out);
     assert!(rs.env.contains("RUSTC_WRAPPER=sccache\n"), "{}", rs.env);
-    if std::env::consts::ARCH != "aarch64" {
-        // No macOS release for this host's architecture: both warn before the tool cache, and use the pinned copy all the same.
+    if !has_pin {
+        // No release for this host's architecture: both warn before the tool cache, and use the pinned copy all the same.
         assert_eq!((rs.path.as_str(), rs.calls.as_str()), ("", sh.calls.as_str()));
         return;
     }
