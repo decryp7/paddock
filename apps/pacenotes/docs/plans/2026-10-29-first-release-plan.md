@@ -22,7 +22,7 @@
   plans [workbench.md](../../../../docs/plans/workbench.md) §4.4, [debrief-1-2.md](../../../../docs/plans/debrief-1-2.md),
   [shared-next.md](../../../../docs/plans/shared-next.md) X55; [crates/README.md](../../../../crates/README.md),
   [ui/README.md](../../../../ui/README.md); the read-only backend note
-  `/Volumes/d7sst7/dev-targets/review/2026-10-28-pacenotes-sighter-backend-plan.md` (outside the repo; its content is
+  `<dev-targets>/review/2026-10-28-pacenotes-sighter-backend-plan.md` (outside the repo; its content is
   summarised in appendix A; its packages are cited here as BN1-BN8, not PN, because `docs/audits/pacenotes.md` uses PN1-PN10
   for its findings).
 - Companion plan: [the shared workbench move](../../../../docs/plans/2026-10-29-shared-workbench-move.md). Pacenotes' UI
@@ -547,7 +547,7 @@ the planning figure at four agents is in the same range once waits on Debrief 1.
 
 ## Appendix A. The backend note of 2026-10-28, folded in
 
-`/Volumes/d7sst7/dev-targets/review/2026-10-28-pacenotes-sighter-backend-plan.md` (outside the repo) planned the backend
+`<dev-targets>/review/2026-10-28-pacenotes-sighter-backend-plan.md` (outside the repo) planned the backend
 work that was safe to start before Debrief 1.2. Its Pacenotes content, as it maps to this plan:
 
 | Backend note | Here |

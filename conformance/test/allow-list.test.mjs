@@ -49,3 +49,17 @@ test('allow list: an entry for a file the run did not look at is neither stale n
   l.allows('a/b.rs', 'needle');
   assert.equal(messages(l, () => false).length, 1);
 });
+
+test('allow list: admit counts up to the count and calls the rest beyond, never ambiguous', () => {
+  const l = list(entry({ count: 2 }));
+  const exact = (site) => site === 'needle';
+  assert.deepEqual([l.admit('a/b.rs', exact), l.admit('a/b.rs', exact), l.admit('a/b.rs', exact)], ['allowed', 'allowed', 'beyond']);
+  assert.equal(l.admit('a/c.rs', exact), 'unlisted');
+  assert.equal(l.admit('a/b.rs', () => false), 'unlisted');
+  assert.deepEqual(messages(l), [], "a site beyond the count is the caller's finding, not an ambiguous entry");
+});
+
+test('allow list: a whole float count is its integer, as the Rust host reads it', () => {
+  assert.equal(parseAllowList('{"allow": [{"path": "a", "site": "b", "reason": "a reason long enough", "count": 1.0}]}', 'f').at(0).count, 1);
+  assert.throws(() => parseAllowList('{"allow": [{"path": "a", "site": "b", "reason": "a reason long enough", "count": 1.5}]}', 'f'), /count/);
+});

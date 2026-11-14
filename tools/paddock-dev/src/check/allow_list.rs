@@ -38,8 +38,14 @@ pub fn parse(text: &str, file: &str) -> Result<Vec<Entry>, String> {
         }
         let count = match e.get("count") {
             None => 1,
+            // `1.0` is the number 1 to JavaScript's JSON.parse, which the other host uses: a whole float counts as its integer.
             Some(c) => c
                 .as_u64()
+                .or_else(|| {
+                    c.as_f64()
+                        .filter(|f| f.fract() == 0.0 && (1.0..9_007_199_254_740_992.0).contains(f))
+                        .map(whole)
+                })
                 .filter(|n| *n >= 1)
                 .and_then(|n| usize::try_from(n).ok())
                 .ok_or_else(|| format!("{file}: `count` ({path}: {site}) is a whole number of at least 1"))?,
@@ -52,6 +58,27 @@ pub fn parse(text: &str, file: &str) -> Result<Vec<Entry>, String> {
         });
     }
     Ok(out)
+}
+
+/// A whole, positive float below 2^53 as its integer (the caller checked both).
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "whole, positive and below 2^53"
+)]
+fn whole(f: f64) -> u64 {
+    f as u64
+}
+
+/// What [`AllowList::admit`] says about one site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Admit {
+    /// An entry with room left names it; the site counts on it.
+    Allowed,
+    /// Entries name it, but every one is at its count: the caller reports it at its own file and line.
+    Beyond,
+    /// No entry names it.
+    Unlisted,
 }
 
 /// The allow list of one run: [`AllowList::allows`] answers per flagged site and counts, [`AllowList::warnings`] names the stale and
@@ -83,6 +110,25 @@ impl AllowList {
             }
         }
         named
+    }
+
+    /// Like [`AllowList::allows`], for a check that decides the match itself and reports a site beyond the count at the site:
+    /// `matches(site)` says whether an entry's `site` names it. The site counts on the first matching entry with room left; when
+    /// every matching entry is at its count it is [`Admit::Beyond`], and [`AllowList::warnings`] never calls such an entry ambiguous.
+    pub fn admit(&mut self, path: &str, matches: impl Fn(&str) -> bool) -> Admit {
+        let named: Vec<usize> = (0..self.entries.len())
+            .filter(|&i| self.entries[i].path == path && matches(&self.entries[i].site))
+            .collect();
+        if named.is_empty() {
+            return Admit::Unlisted;
+        }
+        match named.into_iter().find(|&i| self.hits[i] < self.entries[i].count) {
+            Some(i) => {
+                self.hits[i] += 1;
+                Admit::Allowed
+            }
+            None => Admit::Beyond,
+        }
     }
 
     /// The warnings of check `id` (rule `rule`) for the entries that matched another number of sites than their count. `looked(path)`
@@ -161,7 +207,10 @@ mod tests {
                     .contains("path, a site")
             );
         }
-        for count in ["0", "-1", "1.5", "\"2\""] {
+        // A whole float is its integer, as JSON.parse reads it in the other host.
+        assert_eq!(list(&entry(", \"count\": 1.0")).entries[0].count, 1);
+        assert_eq!(list(&entry(", \"count\": 3.0")).entries[0].count, 3);
+        for count in ["0", "-1", "1.5", "0.0", "\"2\""] {
             assert!(
                 parse(&format!("{{\"allow\": [{}]}}", entry(&format!(", \"count\": {count}"))), FILE)
                     .unwrap_err()
@@ -200,6 +249,21 @@ mod tests {
         assert_eq!(
             messages(&short, true),
             ["stale allow entry (a/b.rs: needle) matches only 1 of its 3 sites"]
+        );
+    }
+
+    #[test]
+    fn admit_counts_up_to_the_count_and_calls_the_rest_beyond_never_ambiguous() {
+        let mut l = list(&entry(", \"count\": 2"));
+        let exact = |site: &str| site == "needle";
+        assert_eq!(l.admit("a/b.rs", exact), Admit::Allowed);
+        assert_eq!(l.admit("a/b.rs", exact), Admit::Allowed);
+        assert_eq!(l.admit("a/b.rs", exact), Admit::Beyond);
+        assert_eq!(l.admit("a/c.rs", exact), Admit::Unlisted);
+        assert_eq!(l.admit("a/b.rs", |_| false), Admit::Unlisted);
+        assert!(
+            messages(&l, true).is_empty(),
+            "a site beyond the count is the caller's finding, not an ambiguous entry"
         );
     }
 

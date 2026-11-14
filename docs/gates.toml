@@ -207,7 +207,7 @@ approved = "user"
 
 [[report_only]]
 id = "C125"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C125-machine-paths.mjs and c125.rs, then flip the warnings to errors and the mode to gate. First count 2026-11-14: 105 warnings in 40 files, every one a path on the d7sst7 or d8sst7 disk (stale disk names: guards, VM scripts, dev-tool defaults, briefs, dev docs); invented test volumes are listed per site in conformance/c125-allow.json, history documents are skipped by path there"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C125-machine-paths.mjs and c125.rs, then flip the warnings to errors and the mode to gate. First count 2026-11-14: 105 warnings in 40 files (92 in 34 after the review of 2026-11-15), every one a path on the d7sst7 or d8sst7 disk (stale disk names: guards, VM scripts, dev-tool defaults, briefs, dev docs); invented test volumes are listed per site in conformance/c125-allow.json, history documents are skipped by path there"
 owner = "ER-21 class: stale machine paths after a disk move (fix/guard-paths-derived)"
 since = 2026-11-14
 review_by = 2026-12-14

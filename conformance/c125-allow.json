@@ -5,10 +5,6 @@
       "reason": "Lessons record what happened, with the paths of the day; rewriting them would falsify the record"
     },
     {
-      "path": "docs/history.md",
-      "reason": "The family history records past events with the paths of the day"
-    },
-    {
       "path": "docs/benchmarks.md",
       "reason": "Benchmark results record the machine and folders they were measured on (rule 48)"
     },
@@ -25,10 +21,6 @@
       "reason": "Dated research notes record where their raw data was at the time"
     },
     {
-      "path": "docs/plans/",
-      "reason": "Dated plans cite the files outside the repository as they were when written"
-    },
-    {
       "path": "docs/wiki/",
       "reason": "The wiki is retired (ER-30, 2026-11-12): frozen pages, read by no tool"
     },
@@ -41,16 +33,8 @@
       "reason": "Dated app research notes and their raw results record where the data was at the time"
     },
     {
-      "path": "apps/*/docs/plans/",
-      "reason": "Dated app plans cite the files outside the repository as they were when written"
-    },
-    {
       "path": "apps/*/docs/performance.md",
       "reason": "Benchmark results record the machine and folders they were measured on (rule 48)"
-    },
-    {
-      "path": "**/CHANGELOG.md",
-      "reason": "Changelogs record what each release changed, as written then"
     }
   ],
   "allow": [
@@ -309,8 +293,7 @@
     {
       "path": "apps/dyno/crates/dyno-core/src/disk/volume.rs",
       "site": "/Volumes/M",
-      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
-      "count": 2
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
     },
     {
       "path": "apps/dyno/crates/dyno-core/src/disk/volume.rs",
@@ -547,6 +530,36 @@
       "path": "ui/projects/paddock-ui/shell/diagnostics/src/backend.ts",
       "site": "/Volumes/Backup",
       "reason": "Shell diagnostics mock: an invented backup disk for the failed-export state"
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/cancel.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 3
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/import.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 39
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/loop.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 18
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/probe.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 16
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/query.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 6
     }
   ]
 }

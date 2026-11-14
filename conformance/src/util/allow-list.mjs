@@ -3,7 +3,7 @@
 // appears more than once in the file, how many sites it covers (`count`, default 1). A whole file or folder is never allowed.
 // After a run, an entry that matched fewer sites than its count is stale (remove it, or lower its count) and one that matched more is
 // ambiguous (lengthen its `site`): both are warnings, so the list only ever names the sites that still exist.
-// Used by C121 and C124. Rust host: tools/paddock-dev/src/check/allow_list.rs (same entries, same warnings).
+// Used by C121, C124 and C125. Rust host: tools/paddock-dev/src/check/allow_list.rs (same entries, same warnings).
 import { warn } from '../finding.mjs';
 
 /** The entries of the allow list `file` (its JSON `text`): [{ path, site, reason, count }], or throws why it cannot be read. */
@@ -46,6 +46,21 @@ export class AllowList {
       }
     });
     return named;
+  }
+
+  /**
+   * Like `allows`, for a check that decides the match itself and reports a site beyond the count at the site: `matches(site)` says
+   * whether an entry's `site` names it. 'allowed' counts the site on the first matching entry with room left; 'beyond' means
+   * entries name it but every one is at its count (the caller reports it at its own file and line, so `warnings` never calls such
+   * an entry ambiguous); 'unlisted' means no entry names it.
+   */
+  admit(path, matches) {
+    const named = this.entries.flatMap((a, i) => (a.path === path && matches(a.site) ? [i] : []));
+    if (named.length === 0) return 'unlisted';
+    const free = named.find((i) => this.hits[i] < this.entries[i].count);
+    if (free === undefined) return 'beyond';
+    this.hits[free]++;
+    return 'allowed';
   }
 
   /**
