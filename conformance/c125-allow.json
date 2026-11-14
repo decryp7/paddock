@@ -39,6 +39,11 @@
   ],
   "allow": [
     {
+      "path": ".claude/hooks/lib/shell-forms.tsv",
+      "site": "/Volumes/x",
+      "reason": "the guards' shell-forms corpus: an invented mount point as the argument of `fuser -km`, test data, not a machine's disk"
+    },
+    {
       "path": "apps/debrief/app/src/app/video/mock/mock-video-backend.ts",
       "site": "/Volumes/OldDisk",
       "reason": "Debrief's video mock: an invented disk that is gone, for the missing-recording state",
