@@ -119,7 +119,8 @@ mod tests {
         let named = |k: &str| (k == DEV_TARGETS_ENV).then(|| "/srv/disk-b/dt".to_string());
         assert_eq!(dev_targets(d.path(), &named).unwrap(), PathBuf::from("/srv/disk-b/dt"));
         let main = main_checkout(d.path()).unwrap();
-        assert_eq!(main.canonicalize().unwrap(), d.path().canonicalize().unwrap());
+        let real = |p: &Path| paddock_env::winpath::real(p).unwrap();
+        assert_eq!(real(&main), real(d.path()));
     }
 
     #[test]

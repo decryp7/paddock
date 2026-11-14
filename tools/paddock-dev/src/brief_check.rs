@@ -908,8 +908,8 @@ mod tests {
         git.text(&["config", "paddock.worktreeRoot", "/srv/disk-c/dev-targets/wt"]).unwrap();
         let p = Places::derive(d.path(), &none).unwrap();
         assert_eq!(p.dev_targets, "/srv/disk-c/dev-targets/");
-        let main = std::path::PathBuf::from(&p.main_checkout).canonicalize().unwrap();
-        assert_eq!(main, d.path().canonicalize().unwrap());
+        let real = |p: &std::path::Path| paddock_env::winpath::real(p).unwrap();
+        assert_eq!(real(std::path::Path::new(&p.main_checkout)), real(d.path()));
         // After a disk move the same brief text follows the new folder: the old one is refused, the new one passes.
         let brief = filled().replace("/srv/disk-b/", "/srv/disk-c/");
         assert!(check(&brief, &places()).iter().any(|f| f.code == "bad-scratch"));
