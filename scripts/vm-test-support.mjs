@@ -72,15 +72,13 @@ export async function endHolders(scratch) {
 }
 
 /**
- * The last guard of a test file (its `after`): every process still running whose command line names the file's scratch folder (a
- * fake ssh, a vm-win.sh a test did not end) is ended by identity and reported (ADR 0103, the kit's Reaper with the folder as marker).
- * Returns what it had to end. Run it only after the holders' own end ([endHolders]), so a holder is never killed before it could
+ * A test file's reaper and its scratch folder (ADR 0103): the reaper is made first, with its token in this process's environment
+ * (`inherit`, so every child the file starts carries it), and the scratch folder is one it made under `parent`, so an orphan or a
+ * child of this process that names it (a fake ssh, a vm-win.sh a test did not end, a holder whose script was killed) is the file's.
+ * Its `reap()` belongs in the file's `after`, after the holders' own end ([endHolders]), so a holder is never killed before it could
  * end by itself.
  */
-export async function reapUnder(scratch, what) {
-  const ended = [];
-  for (const marker of new Set([scratch, (() => { try { return realpathSync(scratch); } catch { return scratch; } })()])) {
-    ended.push(...await new Reaper(what, { marker }).reap());
-  }
-  return ended;
+export function fileReaper(what, parent) {
+  const reaper = new Reaper(what, { inherit: true });
+  return { reaper, scratch: reaper.scratchIn(parent) };
 }

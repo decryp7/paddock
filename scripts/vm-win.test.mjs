@@ -10,7 +10,7 @@ import { after, afterEach, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
 import { waitProgressing } from './test-kit.mjs';
-import { endHolders, reapUnder, macOnly, warmDev } from './vm-test-support.mjs';
+import { endHolders, fileReaper, macOnly, warmDev } from './vm-test-support.mjs';
 
 /** Waits until `cond` holds (the kit's backing-off poll, ADR 0103), for at most `ms` without it holding: a bound that only stops a hung child. */
 const until = (what, cond, ms) => waitProgressing(what, cond, { noProgressMs: ms }).then(() => true, () => cond());
@@ -19,7 +19,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), 'utf8');
 // Fakes live under the per-user temp root the scripts trust (getconf DARWIN_USER_TEMP_DIR on macOS, /tmp elsewhere), never $TMPDIR.
 const tempRoot = (() => { const r = spawnSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }); return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : '/tmp'; })();
-const scratch = mkdtempSync(join(tempRoot, 'vm-win-test-'));
+// ADR 0103: the file's reaper first, then its scratch folder (one the reaper made), so what the file leaves running is provably its own.
+const { reaper, scratch } = fileReaper('vm-win.test.mjs', mkdtempSync(join(tempRoot, 'vm-win-test-')));
 const fakeVm = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, '.paddock-fake-vm'), 'test\n'); return dir; };
 
 // The interim VM lock (scripts/vm-lock.sh) is always taken under a scratch root, never the host's real one.
@@ -36,9 +37,9 @@ const guardHolders = async () => {
 afterEach(guardHolders);
 after(async () => {
   await guardHolders();
-  // ADR 0103: anything else this file started under its scratch folder (a fake ssh, a script a test did not end) ends here, and fails it.
-  const left = await reapUnder(scratch, 'vm-win.test.mjs');
-  rmSync(scratch, { recursive: true, force: true });
+  // ADR 0103: anything else this file started (a fake ssh, a script a test did not end) ends here, and fails it.
+  const left = await reaper.reap();
+  rmSync(dirname(scratch), { recursive: true, force: true });
   assert.deepEqual(left, [], 'a process started under the scratch folder outlived its test');
 });
 const run = (script, args, env = {}) =>

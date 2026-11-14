@@ -8,11 +8,12 @@ import { dirname, join } from 'node:path';
 import { after, afterEach, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { waitProgressing } from './test-kit.mjs';
-import { endHolders, reapUnder, warmDev } from './vm-test-support.mjs';
+import { endHolders, fileReaper, warmDev } from './vm-test-support.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const LIB = join(here, 'vm-lock.sh');
-const scratch = mkdtempSync(join(process.env.PADDOCK_TEST_SCRATCH ?? tmpdir(), 'vm-lock-test-'));
+// ADR 0103: the file's reaper first, then its scratch folder (one the reaper made), so what the file leaves running is provably its own.
+const { reaper, scratch } = fileReaper('vm-lock.test.mjs', mkdtempSync(join(process.env.PADDOCK_TEST_SCRATCH ?? tmpdir(), 'vm-lock-test-')));
 /** The paddock-dev program the lock runs (PADDOCK_DEV): the cached binary, or ./dev when its inputs have uncommitted changes. */
 let DEV = join(here, '..', 'dev');
 before(() => { DEV = warmDev(); });
@@ -25,9 +26,9 @@ const guardHolders = async () => {
 afterEach(guardHolders);
 after(async () => {
   await guardHolders();
-  // ADR 0103: anything else this file started under its scratch folder (a fake ssh, a script a test did not end) ends here, and fails it.
-  const left = await reapUnder(scratch, 'vm-lock.test.mjs');
-  rmSync(scratch, { recursive: true, force: true });
+  // ADR 0103: anything else this file started (a fake ssh, a script a test did not end) ends here, and fails it.
+  const left = await reaper.reap();
+  rmSync(dirname(scratch), { recursive: true, force: true });
   assert.deepEqual(left, [], 'a process started under the scratch folder outlived its test');
 });
 
