@@ -191,5 +191,11 @@ expect "agent git config --get paddock.worktreeRoot" allow agent "$WT" "git conf
 expect "agent git config get paddock.worktreeRoot" allow agent "$WT" "git config get paddock.worktreeRoot"
 expect "agent git config --get-regexp ^paddock" allow agent "$WT" "git config --get-regexp ^paddock"
 expect "agent git config user.name in its worktree" allow agent "$WT" "git config user.email a@example.invalid"
+expect "agent git config --file <f> paddock.worktreeRoot <v>" deny agent "$WT" "git config --file .git/config paddock.worktreeRoot /x"
+expect "agent git config -f <f> paddock.worktreeRoot <v>" deny agent "$WT" "git config -f .git/config paddock.worktreeRoot /x"
+expect "agent git config --file=<f> paddock.worktreeRoot <v>" deny agent "$WT" "git config --file=.git/config paddock.worktreeRoot /x"
+expect "agent git config --type bool paddock.x true" deny agent "$WT" "git config --type bool paddock.x true"
+expect "agent git config --blob <b> paddock.x (a read)" allow agent "$WT" "git config --blob HEAD:cfg paddock.x"
+expect "agent git config -f <f> paddock.worktreeRoot (a read)" allow agent "$WT" "git config -f .git/config paddock.worktreeRoot"
 expect "coordinator git config paddock.worktreeRoot <v>" allow coord "$MAIN" "git config paddock.worktreeRoot /srv/x/wt"
 exit $fail
