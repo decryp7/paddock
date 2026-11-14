@@ -51,13 +51,14 @@ def is_write(sub, args):
     return False
 
 
-CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--show-origin", "--show-scope",
-                     "--name-only", "--null", "-z", "--default", "--includes", "--no-includes"}
+# An allow-list: a subagent's `git config` that names `paddock` passes only as a lookup (these flags, the get/list subcommands, or one
+# bare key). Every other option (-z, --includes, --show-scope, --fixed-value ...) only modifies a read or a write, so it decides nothing.
+CONFIG_LOOKUP_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"}
 CONFIG_WRITE_FLAGS = {"--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e"}
 CONFIG_SCOPE = {"--local", "--global", "--system", "--worktree", "--file", "-f", "--blob"}
 
 
-CONFIG_VALUE_OPTIONS = ("--file", "-f", "--blob", "--type", "-t", "--default", "--comment", "--fixed-value")
+CONFIG_VALUE_OPTIONS = ("--file", "-f", "--blob", "--type", "-t", "--default", "--comment")
 
 
 def _config_positionals(args):
@@ -92,7 +93,7 @@ def paddock_config_write(args):
         return True
     if any(a in CONFIG_WRITE_FLAGS for a in args):
         return True
-    if any(a in CONFIG_READ_FLAGS for a in args):
+    if any(a in CONFIG_LOOKUP_FLAGS for a in args):
         return False
     # `git config <key> <value>` writes; `git config <key>` reads. The type options (--type, --bool, ...) only canonicalise.
     return len(keys) >= 2
