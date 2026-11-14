@@ -2047,3 +2047,13 @@ env overrides, and refuse with a `Blocked: ... Next step: ...` message when they
 (`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
 config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
 **Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
+
+## A zombie answers kill(pid, 0): CI's job container never collects orphans (2026-11-15, CI run 8110)
+The VM lock test "a holder killed by its test leaves no `slot hold` process" passed on the Mac and failed in ci.yml's ui job:
+the detached holder had exited, but in the job container PID 1 is `sleep 21600` (the runner's entrypoint), which never collects
+an orphan, so the holder stayed a zombie under PID 1 and `kill(pid, 0)` still answered for it; the guard polled its whole 15 s
+bound. Reproduced in `node:24-bookworm` with entrypoint `sleep`: stat Z, ppid 1, kill0 alive. **Rule for tests:** a process
+check that means "has it ended" treats a zombie as ended (`running()` in scripts/vm-test-support.mjs: exists and `ps` stat is
+not `Z`); a bare `kill(pid, 0)` is only "the pid exists". Tests that start detached processes run once in a container whose PID 1
+is a plain `sleep` before a train push, as CI's is. **Class: a Linux CI container differs from the dev host (ER-9; run 7485's
+root user and software rasteriser, above).**
