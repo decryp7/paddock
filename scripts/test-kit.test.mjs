@@ -85,3 +85,12 @@ test('a pid handed on is never ended: identity is the pid and its start time (ru
   reaper.adoptIdentity({ pid: process.pid, started: `${me.started} (not this one)` });
   assert.deepEqual(reaper.stillRunning(), [], 'a pid whose start time differs is another process');
 });
+
+test('a marker too short to be unique to the test is refused, so a reap never reaches unrelated processes', () => {
+  // The short markers here match no process, so the test is safe while it is red too (a reap by `/tmp` would end other shells).
+  assert.throws(() => new Reaper('a short marker', { marker: 'zq%x' }), /marker .* at least 12 characters/);
+  assert.throws(() => new Reaper('an empty marker', { marker: '' }), /marker .* at least 12 characters/);
+  const ok = new Reaper('a scratch folder', { marker: 'paddock-kit-scratch-AbC123-zq%x' });
+  ok.stopped = true;
+  clearTimeout(ok.timer);
+});

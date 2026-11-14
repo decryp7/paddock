@@ -2017,3 +2017,13 @@ several steps is `wait_progressing` (Rust) or `waitProgressing` (scripts/test-ki
 starts goes through a `Reaper` (Rust `paddock_testkit_start`, Node `scripts/test-kit.mjs`), which ends detached grandchildren too;
 a limit is tested with a small limit; a CPU-bound test gets a measured size class, not a raised default. C125 (provisional, ADR
 0103's C1xx) lists the shapes, report-only. **Class: tests time out on the loaded Mac (ADR 0102 is the machine side).**
+
+## A red test of the Reaper ended other processes on the machine (2026-11-15, ADR 0103)
+Writing the failing-first test for "a short marker is refused", the designer called `Reaper::marked("/tmp")` before the guard
+existed. The red run did what the guard was for: its drop ended every process whose command line contained `/tmp`, by identity,
+three runs in a row; that included the agent's own shell and very likely other agents' running shell commands (their wrappers
+name `/tmp/claude-…` files). **Rule:** a failing-first test must be safe in its failing state: when the missing behaviour is a
+guard against a destructive action, the red test feeds an input that the action cannot harm (here a short marker that matches no
+process), never the real dangerous one. A tool that ends processes by a pattern refuses a pattern that is not unique to its
+owner (both kits: at least 12 characters, the test's scratch folder). **Class: acting on processes by a name or pattern
+(rule 53; the lefthook kill of 2026-11-14 above).**

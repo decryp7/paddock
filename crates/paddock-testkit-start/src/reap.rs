@@ -24,6 +24,8 @@ use std::time::{Duration, Instant};
 /// first) and backs off to 0.5 s, about 4 % of a core per live reaper; what it misses after that the marker finds.
 pub const SAMPLE_FIRST: Duration = Duration::from_millis(10);
 pub const SAMPLE_EVERY: Duration = Duration::from_millis(500);
+/// The shortest marker [`Reaper::marked`] takes: a test's scratch folder is far longer, a shared prefix (`/tmp`) is shorter.
+pub const MARKER_MIN: usize = 12;
 /// How long [`Reaper::reap`] waits for what it ended to be gone: a bound that only stops a process the OS does not end.
 pub const GONE_WITHIN: Duration = Duration::from_secs(15);
 
@@ -60,8 +62,16 @@ impl Reaper {
 
     /// A reaper that also ends every process whose command line names `marker` (use the test's own scratch folder: unique to
     /// the test, and named by everything the test starts there).
+    ///
+    /// Panics on a marker shorter than [`MARKER_MIN`] characters: a short text (`/tmp`) is in the command lines of unrelated
+    /// processes, and the reap would end them.
     pub fn marked(what: &str, marker: &std::path::Path) -> Reaper {
-        Reaper::make(what, Some(marker.to_string_lossy().into_owned()))
+        let marker = marker.to_string_lossy().into_owned();
+        assert!(
+            marker.chars().count() >= MARKER_MIN,
+            "reaper ({what}): the marker {marker:?} must be at least {MARKER_MIN} characters and unique to the test (its scratch folder)"
+        );
+        Reaper::make(what, Some(marker))
     }
 
     fn make(what: &str, marker: Option<String>) -> Reaper {
@@ -322,6 +332,14 @@ mod tests {
             parent.has_ended() && g.has_ended(),
             "the parent or the grandchild outlived a test that panicked"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "at least 12 characters")]
+    fn a_marker_too_short_to_be_unique_to_the_test_is_refused() {
+        // A short marker names unrelated processes (`/tmp` is in the command line of half the machine's shells): a reap by it would
+        // end processes that are not the test's. The marker here matches nothing, so the test is safe while it is red too.
+        let _ = Reaper::marked("a short marker", std::path::Path::new("zq%x"));
     }
 
     #[test]

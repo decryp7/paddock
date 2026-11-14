@@ -117,15 +117,20 @@ progress instead of total time (Bazel and nextest bound total time only), a way 
   a test's scratch folder is unique and named by everything started there): `kill_tree` then `end`, each by identity, then waits
   until they are gone (the kit's backoff, `GONE_WITHIN` 15 s, a bound that only stops a process the OS does not end) and panics on a
   survivor. What it had to end is printed and returned, so a test asserts that it left nothing.
-- This is the one place tests end processes (rule 55); it calls `paddock_proc` and never `kill(2)` itself.
+- A marker must be at least `MARKER_MIN` (12) characters: a short text such as `/tmp` is in the command lines of unrelated
+  processes (other agents' shells), and a reap by it ends them. This guard came from an incident while building it (below).
+- This is the one place Rust tests end processes (rule 55); it calls `paddock_proc` and never `kill(2)` itself. The Node `Reaper`
+  is a second implementation by language (Node tests cannot call Rust), with the same rules and tests; it is named here rather
+  than in `docs/known-copies.toml`, whose copies have a delete-by tag and count only non-test source.
 
 **Node, `scripts/test-kit.mjs`** (for `scripts/*.test.mjs` and `conformance/test`; the Node side cannot call `paddock_proc`, so
 it reads `ps` and checks the same identity, pid plus `lstart`):
 
 - `nextPause(previous)`: 1 ms doubling to 100 ms (the replaced polls' own pace as the worst case); `waitProgressing(what, done, { noProgressMs, progress })`: the same rule as
   the Rust wait.
-- `Reaper` (`spawn`, `adoptPid`, `adoptIdentity`, `observe`, `stillRunning`, `reap`): the same rules; it kills a process group only
-  when the process still leads it and is still the same process.
+- `Reaper` (`spawn`, `adoptPid`, `adoptIdentity`, `observe`, `stillRunning`, `reap`): the same rules and the same marker minimum;
+  it kills a process group only when the process still leads it and is still the same process. One `ps` of the table blocks the
+  event loop about 29 ms (863 processes), so its sampler backs off from 10 ms to 0.5 s (about 6 % of the loop).
 - `scripts/vm-test-support.mjs` keeps its holder-specific `endHolders` (a holder is ended by removing its owner folder, as the lock
   means it to end), now waiting with `waitProgressing`, and adds `reapUnder(scratch)` for each file's `after`.
 
@@ -231,6 +236,15 @@ total to 2.0-2.5, which D3 asks about.
   (c) when C125 turns into a gate. Recommended: (c), items 1-3 first.
 - **D4. C125 to gate:** after its first green run on main and the open list migrated or waived (the `[[report_only]]` entry's
   review date, 2026-12-14).
+
+## Incident while building it
+
+On 2026-11-15 about 00:20-00:25 (+08), the red run of the marker-minimum test called `Reaper::marked("/tmp")` before the guard
+existed (three runs). Its drop ended every process on the machine whose command line contained `/tmp`, by identity: the agent's
+own shell (the run's output stopped at "Starting 1 test") and, very likely, other agents' running shell commands, whose wrappers
+name `/tmp/claude-…` files. The CI runners, OrbStack and the agent sessions were still running afterwards. The test now uses a
+short marker that matches no process, so it is harmless while red too, and the guard refuses short markers in both kits. Lesson
+recorded (docs/lessons.md): a failing-first test must be safe in its failing state.
 
 ## Consequences
 

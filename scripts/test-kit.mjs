@@ -14,6 +14,12 @@ import { spawn, spawnSync } from 'node:child_process';
 /** The first and the longest pause of a poll, in ms. */
 export const FIRST_MS = 1;
 export const LAST_MS = 100;
+/** The first and the longest pause of a Reaper's sampler: one `ps` of the whole table blocks the event loop about 29 ms (863
+ * processes, load 16), so it backs off to 0.5 s (about 6 % of the loop); what it misses after that the marker finds. */
+export const SAMPLE_FIRST_MS = 10;
+export const SAMPLE_LAST_MS = 500;
+/** The shortest marker a Reaper takes: a test's scratch folder is far longer, a shared prefix (`/tmp`) is shorter. */
+export const MARKER_MIN = 12;
 /** How long reap() waits for what it ended to be gone: a bound that only stops a process the OS does not end. */
 export const GONE_WITHIN_MS = 15_000;
 /** The default no-progress bound: a hang guard under node --test's and CI's own bounds. */
@@ -66,6 +72,9 @@ const same = (a, b) => a.pid === b.pid && a.started === b.started;
 export class Reaper {
   /** @param {string} what a name for its messages; @param {{ marker?: string }} options */
   constructor(what, { marker } = {}) {
+    if (marker !== undefined && [...String(marker)].length < MARKER_MIN) {
+      throw new Error(`reaper (${what}): the marker ${JSON.stringify(marker)} must be at least ${MARKER_MIN} characters and unique to the test (its scratch folder): a short text is in unrelated processes' command lines`);
+    }
     this.what = what;
     this.marker = marker;
     this.roots = [];
@@ -79,8 +88,8 @@ export class Reaper {
   tick() {
     if (this.stopped) return;
     this.observe();
-    this.pace = nextPause(this.pace);
-    this.timer = setTimeout(() => this.tick(), Math.max(this.pace, 20));
+    this.pace = this.pace <= 0 ? SAMPLE_FIRST_MS : Math.min(this.pace * 2, SAMPLE_LAST_MS);
+    this.timer = setTimeout(() => this.tick(), this.pace);
     this.timer.unref();
   }
 
