@@ -369,10 +369,18 @@ class _State:
         self.aliases = {}
 
 
-def expand(word, vars_):
+_DEFAULT = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):?-([^}$`]*)\}")
+
+
+def expand(word, vars_, home=None):
+    """Resolves `$NAME` and `${NAME}` from the variables the scan has seen, and `${NAME:-default}` from them, else from the
+    hook's own environment (the agent's shell has the same one), the default only when NAME is unset or empty there too; `$HOME`
+    is the home folder unless the command set it. Anything else stays as written."""
     if "$" not in word:
         return word
-    return _VAR.sub(lambda m: vars_.get(m.group(1) or m.group(2), m.group(0)), word)
+    known = vars_ if home is None or "HOME" in vars_ else dict(vars_, HOME=home)
+    word = _DEFAULT.sub(lambda m: known.get(m.group(1)) or os.environ.get(m.group(1)) or m.group(2), word)
+    return _VAR.sub(lambda m: known.get(m.group(1) or m.group(2), m.group(0)), word)
 
 
 def resolve(cur, target, home):
@@ -461,7 +469,7 @@ def _finish(st, words, redirs, term, depth, heredoc_refs=()):
     cmd = Cmd()
     cmd.subs = subs
     lead = 0
-    w = [expand(x, st.vars) for x in words]
+    w = [expand(x, st.vars, st.home) for x in words]
     while w and w[0] in _LEAD:
         if w[0] in ("if", "while", "until", "elif"):
             cmd.cond = True
@@ -470,7 +478,7 @@ def _finish(st, words, redirs, term, depth, heredoc_refs=()):
         w = w[1:]
         lead += 1
     cmd.words = w
-    cmd.redirs = [(op, expand(t, st.vars)) for op, t in redirs]
+    cmd.redirs = [(op, expand(t, st.vars, st.home)) for op, t in redirs]
     cmd.term = term
     cmd.depth = depth
     cmd.cwd = st.cwd

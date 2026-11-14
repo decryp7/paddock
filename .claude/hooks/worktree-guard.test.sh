@@ -177,4 +177,7 @@ out=$(jq -nc --arg d "$TMP/nogit" '{tool_name:"Bash",cwd:$d,agent_id:"a1",tool_i
 case "$out" in *'"deny"'*"Next step"*) echo "ok: underivable main refuses with a next step" ;; *) echo "FAIL: underivable main must refuse"; fail=1 ;; esac
 out=$(jq -nc --arg d "$TMP/nogit" '{tool_name:"Bash",cwd:$d,agent_id:"a1",tool_input:{command:"git commit -m x"}}' | CLAUDE_PROJECT_DIR="$TMP/nogit" WORKTREE_GUARD_MAIN="$TMP/nogit" "$H" 2>/dev/null)
 case "$out" in *'"deny"'*"main checkout"*) echo "ok: WORKTREE_GUARD_MAIN override" ;; *) echo "FAIL: override"; fail=1 ;; esac
+
+# The shared shell-forms corpus: every scanner bypass and false refusal found so far, judged by every guard.
+bash "$here/lib/shell-forms.sh" worktree-guard "$H" || fail=1
 exit $fail
