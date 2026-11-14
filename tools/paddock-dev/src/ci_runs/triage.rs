@@ -477,6 +477,9 @@ pub fn flaky_from(r: &flakes::Report) -> Flaky {
         .collect()
 }
 
+/// A failed job read from its log: the job, its failing tests (or why the log could not be read) and those of them a retry passed.
+type FailedJob<'a> = (&'a TimedJob, Result<BTreeSet<String>, String>, BTreeSet<String>);
+
 /// Triages a run: reads the run, its failed jobs, the baseline and the history.
 pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) -> Result<Report, String> {
     let run = client
@@ -492,7 +495,7 @@ pub fn collect(client: &mut Client, req: &Request, log: &mut dyn FnMut(&str)) ->
         .timed_jobs(run.id)?
         .ok_or_else(|| format!("the server has no job list for run {}", run.id))?;
     let mut skipped_jobs = 0;
-    let mut failed: Vec<(&TimedJob, Result<BTreeSet<String>, String>, BTreeSet<String>)> = Vec::new();
+    let mut failed: Vec<FailedJob<'_>> = Vec::new();
     for j in jobs.iter().filter(|j| j.failed()) {
         if j.is_caller() || j.never_ran() {
             skipped_jobs += 1;
