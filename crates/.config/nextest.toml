@@ -61,7 +61,8 @@ success-output = "final"
 # waiver: ADR 0103's size class "cpu-heavy" (Bazel's "medium"): paddock-service's crash-model explorations are pure CPU and finish
 # no unit a test could watch. Measured: 5-7 s each on a quiet Mac, at most 8.5 s with 6 CPU burners at load 30 (2026-11-14,
 # docs/benchmarks.md, "2026-11-14, crash model under load"), 59 s on the loaded CI Mac, where four of eight were stopped at 60 s
-# (run 8066, job 37869): a 9x slowdown from other jobs' load. Two at a time (a test group) cut the slowest from 8.5 s to 6.8 s
+# (run 8066, job 37869): a 9x slowdown from other jobs' load. n = 1: one CI run shows it, and that job's log does not record the
+# runner's load (not measured); the local runs reached load 32 at most (6 burners, the agents' cap), not the ~100 of a busy CI Mac. Two at a time (a test group) cut the slowest from 8.5 s to 6.8 s
 # but tripled the wall time (8 s to 22 s), and under other jobs' load the CPU share, not their own number, sets the cost; so the
 # class gives them 120 s, the default profile's own bound, instead.
 [[profile.ci.overrides]]
