@@ -17,8 +17,10 @@
 //   leaked from vm-lock.test.mjs, run 8099). Start it through `paddock_testkit_start::Reaper` or the Node kit's `Reaper`.
 // A site that is fine carries `// conformance: test-steps — <why>` on the line or the line above (for rule A also on the loop's line
 // or the line above it).
-// ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml; then flip SEVERITY and the
-// mode to gate. The kits themselves (crates/paddock-testkit*, scripts/test-kit.mjs) and the conformance fixtures are skipped.
+// Known gaps (not found): a program run in an iterator chain (`cases.iter().map(|c| Command::new(c).output())`), and a Node
+// `spawn` without `detached` that is left running (rule C reads only detached children).
+// ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml; then B and C may flip to
+// gate (SEVERITY); rule A never does (ADR 0103, D4). The kits themselves (crates/paddock-testkit*, scripts/test-kit.mjs) and the conformance fixtures are skipped.
 import { warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 import { maskTs } from './C71-test-timing.mjs';

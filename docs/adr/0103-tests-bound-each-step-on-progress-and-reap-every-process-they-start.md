@@ -1,7 +1,7 @@
 # 0103. Tests bound each step on progress and reap every process they start
 
 - Status: Proposed 2026-11-14, revised 2026-11-15 after the first independent review (verdict NOT YET; its P1s and P2s are
-  answered below). The user approved building the test-side redesign (about 1-2 agent-days) for the class "tests time out on the
+  answered below) and again after the second (one P1: the reaper's children escaped nextest's group kill; fixed below). The user approved building the test-side redesign (about 1-2 agent-days) for the class "tests time out on the
   loaded Mac" on the night of 2026-11-14 (relayed in the designer's brief). The coordinator decided D1-D4 within that approval on
   2026-11-15 (recorded under "Decisions"). Second review round next. Built on `feat/test-timing-redesign` (train 12).
 - Date: 2026-11-14 (revised 2026-11-15)
@@ -124,20 +124,30 @@ What the common practice adds up to, and how this ADR compares, honestly:
 **Rust, `paddock_testkit_start::Reaper`** (`crates/paddock-testkit-start/src/reap.rs`), on `paddock_proc::own`
 (`crates/paddock-proc/src/own.rs`, new): it acts only on processes it can prove the test created.
 
-- `Reaper::new(what)` gets a random token and, on Linux, makes the test process a child subreaper (orphans of its tree stay its
-  children). `spawn(&mut Command)` starts the child with `PADDOCK_REAPER_ID=<token>` in its environment, leading a process group
-  of its own (Unix, `process_group(0)`) and in a kill-on-close job (Windows, `own::KillOnClose`). `scratch_in(parent)` makes a
+- **A test helper never makes a new group or session while the test leads one** (after Bazel: "Tests may create subprocesses,
+  but not process groups or sessions"). nextest starts every test in a process group of its own and, on a timeout, SIGTERMs and
+  SIGKILLs that group; no drop runs then, so a child in a group of its own would survive (the run-8099 cascade). `Reaper::new(what)`
+  gets a random token and, on Linux, makes the test process a child subreaper (orphans of its tree stay its children).
+  `spawn(&mut Command)` starts the child with `PADDOCK_REAPER_ID=<token>` in its environment and in a kill-on-close job (Windows,
+  `own::KillOnClose`); it stays in the test's group when the test leads one (`own::leads_own_group`: `getpgid(0) == getpid()`,
+  true under nextest), and leads a group of its own only when the test does not (a plain `cargo test`, which kills no group). A
+  test with a fake runner (`a_runner_that_ends_the_tests_group_also_ends_the_reapers_children`: this test binary started as the
+  test in a group of its own, its group SIGKILLed) checks it; red with an always-new group, the child survived. `scratch_in(parent)` makes a
   folder named with the token. `observe()`, `candidates()` (what it would end, and why) and `reap()`; `Drop` reaps too, so a test
   that panics partway ends its children.
 - The candidates (the pure rule `choose`, unit-tested on rows): the reaper's own children; the descendants a sampler saw below
   them (10 ms backing off to 0.5 s; a look at the table is 18 ms with 890 processes at load 60, about 4 % of a core per live
   reaper), and the groups any of them leads; then, only for a process of this user started after the reaper (start times from
-  `ProcessId`, with one second of slack for Linux's whole-second boot time): one in a group the reaper made or saw made, one that
+  `ProcessId`, with one second of slack for Linux's whole-second boot time): one in a group the reaper made or saw made (a group
+  is kept by its leader's identity and counts while that leader is still the process seen, or while no process holds the leader's
+  pid: a group keeps its id while it has members), one that
   carries the token (readable on Linux only), or one whose command line names a folder the reaper made while it is an orphan or a
   child of the test process. Zombies and the test process itself never. A command-line match alone proves nothing.
-- A child is ended with its tree (`kill_tree`: its own group, which the reaper made); every other candidate alone, by identity
+- A child is ended with its tree (`kill_tree`: by identity, and its group only when it leads one the reaper made); every other candidate alone, by identity
   (`paddock_proc::end`), never a group or a pattern. On Linux an ended orphan re-parented to the test is collected
-  (`own::reap_zombie`), never a child whose `Child` the test still holds. The reaper then waits until they are gone (`GONE_WITHIN`
+  (`own::reap_zombie`), and only one seen below a child (so it was re-parented): never a process the test started itself, whose
+  exit status a `Child` may still be waiting for. `own::look` reads the identities first and the facts after (as
+  `processes_mentioning` does, ADR 0033) and drops a row whose identity no longer holds once its group was read. The reaper then waits until they are gone (`GONE_WITHIN`
   15 s, a bound that only stops a process the OS does not end) and panics on a survivor.
 - This is the one place Rust tests end other processes (rule 55); it calls `paddock_proc` and never `kill(2)` itself. It follows
   the rule of the kill guard on train 11 (0cda11713): act only on a process proven to be one's own.
@@ -149,7 +159,10 @@ only non-test source with a delete-by tag):
   to `performance.now()`, and progress levels compare by value (`sameLevel`: numbers, strings and NaN by value, objects by JSON).
 - `processTable()` fails closed: it throws when `ps` fails or lists nothing, and on Windows (the kit's tests skip there with the
   reason); zombies are left out (`stat` Z). A reap whose gone-wait cannot read the table fails.
-- `Reaper(what, { inherit })`: children by `spawn` (detached: a session and group of their own, with the token); `scratchIn`;
+- `Reaper(what, { inherit })`: children by `spawn`, with the token and never detached: they stay in the test's process group
+  (under `node --test` a test file's process leads no group, measured, so a new group would only move them away from a group
+  kill of whatever runs the tests); a fake-runner test kills a test's group and checks the reaper's child is gone (red with
+  `detached: true`, it survived); groups are kept by their leader's identity as in Rust; `scratchIn`;
   `choose` is the same rule as Rust's; each candidate is ended alone with `SIGKILL` after its start time is checked again, never
   `kill(-pgid)`. With `inherit: true` the token goes into this process's environment, so every child a test file starts carries it.
 - `scripts/vm-test-support.mjs`: `endHolders` (unchanged rule: a holder ends when its owner folder goes) and `fileReaper(what,
@@ -181,7 +194,9 @@ report-only (ER-41) until the first green CI run with it on main, recorded besid
   before that; Node `detached: true` in a file that calls no `new Reaper(`, `fileReaper(`, `reapUnder(` or `endHolders(`.
 - A site that is fine carries `// conformance: test-steps — <why>` (on the site's line, the loop's line, or the line above either).
 
-It is **report-only** (ER-41: warnings, `mode: 'report-only'`, a `[[report_only]]` entry in `docs/gates.toml`). On this branch's
+Known gaps, named in the check's header: a program run in an iterator chain (`cases.iter().map(|c| Command::new(c).output())`),
+and a Node `spawn` without `detached` that is left running. It is **report-only** (ER-41: warnings, `mode: 'report-only'`, a
+`[[report_only]]` entry in `docs/gates.toml`). On this branch's
 tree it lists **60 sites in 41 files** (24 A, 36 C, 0 B). The review's probe cases (`impl` blocks, an HTTP `.status()`, a spawn
 asserted on before its wait, a leaked second child, a timers/promises sleep, a pause held in a name, a file that names "Reaper"
 without making one) are tests in `conformance/test/c126-test-steps.test.mjs`.
