@@ -229,3 +229,51 @@ fn a_builder_childs_git_has_no_background_maintenance_and_a_test_identity() {
         "test@example.invalid"
     );
 }
+
+/// git finds the private config through `HOME`, never through `GIT_CONFIG_GLOBAL` (fix/linux-container-gate, 88c06e902): with that
+/// variable set, a test that gives its child another home with its own `.gitconfig` (the kept-clone fixture turns maintenance off that
+/// way) had that file ignored.
+#[test]
+fn a_childs_git_reads_the_gitconfig_of_the_home_it_is_given() {
+    let other = tempfile::tempdir().unwrap();
+    std::fs::write(
+        other.path().join(".gitconfig"),
+        "[maintenance]\n\tauto = 7\n",
+    )
+    .unwrap();
+    let out = TestCommand::new("git")
+        .args(["config", "--global", "maintenance.auto"])
+        .env("HOME", other.path())
+        .env("USERPROFILE", other.path())
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "7",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !TestCommand::new("git")
+            .environment()
+            .iter()
+            .any(|(k, _)| k == "GIT_CONFIG_GLOBAL"),
+        "GIT_CONFIG_GLOBAL is set, so git ignores the home's .gitconfig"
+    );
+}
+
+/// `GIT_CONFIG_NOSYSTEM` hides the system config, where the CI image and the local Linux container name `safe.directory`; the
+/// private config names it, so a child's git still works in a checkout another user owns (a mounted worktree in the container).
+#[test]
+fn a_childs_git_trusts_any_folder_since_the_system_config_is_not_read() {
+    let out = TestCommand::new("git")
+        .args(["config", "--global", "--get-all", "safe.directory"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "*",
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

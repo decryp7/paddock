@@ -12,8 +12,9 @@
 //!   replaces it whole;
 //! - the toolchain variables cargo needs (`RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN`) and, on Windows, the few the OS
 //!   needs (`SystemRoot`, ...): [`PASSED_THROUGH`], read from this process;
-//! - a private global git config (`GIT_CONFIG_GLOBAL`): `maintenance.auto=false`, `gc.auto=0` and a test identity, so no test's git starts
-//!   background maintenance;
+//! - a private global git config, `.gitconfig` in the private home, which git finds through `HOME` (no `GIT_CONFIG_GLOBAL`, so a test
+//!   that names another home gets that home's `.gitconfig`, as on a machine): `maintenance.auto=false`, `gc.auto=0`, a test identity
+//!   and `safe.directory=*` (the system config, where CI's image names it, is not read), so no test's git starts background maintenance;
 //! - fixed values that make git deterministic: an author and committer identity, no system git config.
 //!
 //! Everything else a test needs is a named addition (`.env("NAME", value)`), which is also what a reader of the test sees.
@@ -82,7 +83,6 @@ const REDIRECTED: &[&str] = &[
     "TMPDIR",
     "TEMP",
     "TMP",
-    "GIT_CONFIG_GLOBAL",
 ];
 
 /// Every variable name a fresh [`TestCommand`] can carry: the redirected folders, `PATH`, the fixed values and
@@ -170,13 +170,15 @@ impl TestCommand {
             // A failure surfaces as the child's own error about its home.
             let _ = std::fs::create_dir_all(d);
         }
-        // The private global git config: no background maintenance or gc (a detached `git maintenance` holds `objects/maintenance.lock`
-        // and a bare clone made meanwhile copies it: the kept-clone fixture hit that 104 times in 1200 under load) and a test identity.
+        // The private global git config, read through HOME: no background maintenance or gc (a detached `git maintenance` holds
+        // `objects/maintenance.lock` and a bare clone made meanwhile copies it: the kept-clone fixture hit that 104 times in 1200 under
+        // load), a test identity, and every folder trusted, since GIT_CONFIG_NOSYSTEM hides the system config where the CI image and the
+        // local Linux container name `safe.directory` (a worktree mounted there belongs to another user).
         let _ = std::fs::write(
             home.join(".gitconfig"),
-            "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n",
+            "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n[safe]\n\tdirectory = *\n",
         );
-        let vars: [(&str, PathBuf); 12] = [
+        let vars: [(&str, PathBuf); 11] = [
             ("HOME", home.clone()),
             ("USERPROFILE", home.clone()),
             ("APPDATA", home.join("AppData/Roaming")),
@@ -188,7 +190,6 @@ impl TestCommand {
             ("TMPDIR", tmp.clone()),
             ("TEMP", tmp.clone()),
             ("TMP", tmp),
-            ("GIT_CONFIG_GLOBAL", home.join(".gitconfig")),
         ];
         for (k, v) in vars {
             cmd.env(k, v);

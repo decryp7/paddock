@@ -39,7 +39,7 @@ wrapped `Command` (review of f39597fbb, P1-1: `Command::env_clear` through the d
 Its own `env_clear` goes **back to the listed set**. It starts from an **empty environment** plus a listed set:
 
 - `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`,
-  `TMPDIR`, `TEMP`, `TMP` and `GIT_CONFIG_GLOBAL` point into a **private folder** made for the command and removed when it
+  `TMPDIR`, `TEMP` and `TMP` point into a **private folder** made for the command and removed when it
   drops (`TestCommand::new_in` takes a folder the test owns). A slot tool that keeps its slots under `$HOME/.cache` then
   keeps them in the private folder, never in `~/.cache/heavy-slots`.
 - `PATH` is **curated**: the folder of the cargo that runs the test (`CARGO`, so also `rustc`), the folders of `node` and
@@ -50,8 +50,10 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   `~/.cargo` and `~/.rustup` named explicitly (a redirected `HOME` would otherwise hide the offline registry and the
   toolchains); on Windows `SystemRoot`, `ComSpec`, `PATHEXT` and a few more. These are `PASSED_THROUGH` and the only
   places a child reads the user's folders.
-- a private global git config (`GIT_CONFIG_GLOBAL` in the private home): `maintenance.auto=false`, `gc.auto=0` and a test identity,
-  so no test's git starts background maintenance (a detached `git maintenance` held `objects/maintenance.lock` and a bare clone made
+- a private global git config, `.gitconfig` in the private home, found through `HOME` (no `GIT_CONFIG_GLOBAL`: with it set, a test
+  that names another home lost that home's `.gitconfig`, the P1 of fix/linux-container-gate 88c06e902): `maintenance.auto=false`,
+  `gc.auto=0`, a test identity and `safe.directory=*` (`GIT_CONFIG_NOSYSTEM` hides the system config, where the CI image and the
+  local Linux container trust a checkout another user owns), so no test's git starts background maintenance (a detached `git maintenance` held `objects/maintenance.lock` and a bare clone made
   meanwhile copied it: the kept-clone fixture hit that 104 times in 1200 runs under load);
 - fixed values: a git author and committer, `GIT_CONFIG_NOSYSTEM=1`, `NO_COLOR=1`.
 
