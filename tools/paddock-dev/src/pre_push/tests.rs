@@ -157,7 +157,8 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
         ranges: vec![],
     };
     let planned = plan_gates(&docs, &c, &facts());
-    assert!(ids(&planned).is_empty(), "{:?}", ids(&planned));
+    // Conformance and its tests run on every push, whatever the plan says (ER-41); everything else a docs change does not reach.
+    assert_eq!(ids(&planned), ["conformance", "conformance-tests"], "{:?}", ids(&planned));
     let skipped: Vec<&String> = planned
         .iter()
         .filter_map(|p| if let Planned::Skip { reason, .. } = p { Some(reason) } else { None })
@@ -171,6 +172,35 @@ fn what_the_change_does_not_reach_is_skipped_with_a_reason() {
         !got.contains(&"clippy-windows apps/debrief".to_string()),
         "debrief has no windowsClippy: {got:?}"
     );
+}
+
+/// ER-41 (user, 2026-11-14): a branch's touched-file tests passed and the full conformance run failed (lib-usage.test.mjs on
+/// fix/spotter-release-plan-verdict; train 8's registry entry that sliced ci.yml with sed). The push gate runs the conformance row
+/// and the conformance tests on every push, even one the plan says does not reach them.
+#[test]
+fn conformance_and_its_tests_run_on_every_push_whatever_changed() {
+    let unrelated = json!({"conformance": false, "apps": [], "packages": {}});
+    for files in [&["docs/x.md"][..], &["apps/dyno/app/src/a.ts"], &["Mystery"], &[]] {
+        let planned = plan_gates(&unrelated, &change(files), &facts());
+        let by = |id: &str| run_gates(&planned).into_iter().find(|g| g.id == id).cloned();
+        let row = by("conformance").unwrap_or_else(|| panic!("conformance is not run for {files:?}: {planned:?}"));
+        assert_eq!(
+            (row.program.as_str(), row.args.join(" ")),
+            ("/x/dev", "ci run conformance paddock".to_string())
+        );
+        let tests = by("conformance-tests").unwrap_or_else(|| panic!("the conformance tests are not run for {files:?}: {planned:?}"));
+        assert_eq!(
+            (tests.program.as_str(), tests.args.join(" "), tests.cwd.as_str()),
+            ("/x/dev", "ci run conformance tests".to_string(), ""),
+            "CI's own step (`./dev ci run conformance tests`, the `tests` list of conformance/paddock.ci.json)"
+        );
+        assert_eq!(tests.rank, 0, "a cheap gate: it starts before any Clippy");
+        assert_eq!(
+            tests.env,
+            [("PADDOCK_TEST_CONCURRENCY".to_string(), "4".to_string())],
+            "a share of the machine beside the Clippy rows (ER-24), not one test process per core"
+        );
+    }
 }
 
 #[test]
@@ -1280,6 +1310,14 @@ fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pas
     assert!(reason.starts_with("environment not ready"), "{reason}");
     assert!(next.contains("npm ci --ignore-scripts -w conformance"), "{next}");
     assert!(!ids(&planned).contains(&"conformance".to_string()), "it does not run");
+    // The conformance tests need the same install: not measured too, never a failure.
+    assert!(
+        planned
+            .iter()
+            .any(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "conformance-tests")),
+        "{planned:?}"
+    );
+    assert!(!ids(&planned).contains(&"conformance-tests".to_string()), "it does not run");
 }
 
 mod base_choice {
