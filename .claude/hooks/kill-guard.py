@@ -45,6 +45,39 @@ def kill_args(argv):
     return sig, ops, lists
 
 
+LISTERS = {"pgrep", "ps", "pidof", "lsof", "fuser", "jobs"}
+
+
+def kill_shaped(c, cmds):
+    """Whether a command whose program is named at run time takes what only a kill takes: every argument a pid, a job, a signal
+    or a value of a substitution, with at least one pid, job or substitution; or pids from a listing through xargs; or a
+    substitution that names kill. A program with any other argument (`build`, `server.mjs`, a file) is not a kill."""
+    if any(os.path.basename(x) in BY_NAME | {"kill"} for f in c.subs for x in f.argv):
+        return True
+    if c.xargs:
+        k = c.idx - 1
+        while k >= 0 and cmds[k].term == "|":
+            if cmds[k].argv and os.path.basename(cmds[k].argv[0]) in LISTERS:
+                return True
+            k -= 1
+    args, operand, after_dashes, prev_sig = c.argv[1:], False, False, False
+    if not args:
+        return False
+    for x in args:
+        tainted = x in c.tainted or "$(..)" in x or "`..`" in x
+        if prev_sig:
+            prev_sig = False
+        elif x == "--" and not after_dashes:
+            after_dashes = True
+        elif x in ("-s", "-n", "--signal") and not after_dashes:
+            prev_sig = True
+        elif tainted or PID.match(x.lstrip("-")) and (after_dashes or not x.startswith("-")) or x.startswith("%"):
+            operand = True
+        elif not (KILLISH.match(x) and not after_dashes):
+            return False
+    return operand
+
+
 def own_worktree(d):
     """The linked worktree (a folder whose `.git` is a file) that holds folder d, or None (main checkout, no repo, unknown)."""
     if not d:
@@ -174,10 +207,9 @@ def check(c, cmds, prover):
     a = c.argv
     if not a:
         return None
-    if shellscan.dynamic_argv0(c) and (any(KILLISH.match(x) for x in a[1:]) or any(
-            os.path.basename(x) in BY_NAME | {"kill"} for f in c.subs for x in f.argv[:1] + f.argv[1:])):
-        return refuse("`%s` is a program named at run time with pid-like arguments, so the hook cannot see whether it is a kill"
-                      % a[0])
+    if shellscan.dynamic_argv0(c) and kill_shaped(c, cmds):
+        return refuse("`%s` is a program named at run time with the arguments of a kill (pids, signals, a pid listing), so "
+                      "the hook cannot see whether it is one" % a[0])
     n = os.path.basename(a[0])
     if n == "fuser" and any(x == "--kill" or (x.startswith("-") and not x.startswith("--") and "k" in x[1:]) for x in a[1:]):
         return refuse("`fuser -k` ends every process that uses a file, whoever owns it")

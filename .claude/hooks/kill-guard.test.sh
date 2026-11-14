@@ -67,6 +67,19 @@ expect "killall5" deny agent "$own" 'killall5 -9'
 expect "program from a substitution with a pid" deny agent "$own" '$(echo kill) 34522'
 expect "program from backticks with a signal" deny agent "$own" '`which kill` -9 34522'
 expect "program from an unknown variable with a pid" deny agent "$own" '${K} 34522'
+expect "a run-time program fed pids by a substitution" deny agent "$own" '"$KILLER" $(pgrep -f lefthook)'
+expect "a run-time program fed pids by backticks" deny agent "$own" '$KILLER `pgrep x`'
+expect "pgrep through xargs into a run-time program" deny agent "$own" 'pgrep x | xargs "$KILLER"'
+expect "a program built by printf, fed by pgrep" deny agent "$own" "\"\$(printf 'k%sll' i)\" \$(pgrep x)"
+expect "a run-time program with a signal and a pid" deny agent "$own" '"$K" -9 34522'
+expect "a run-time program with -- and a group" deny agent "$own" '"$K" -- -34522'
+# run-time programs that are not kills
+expect "\$HOME cargo with a thread count" allow agent "$own" '"$HOME/.cargo/bin/cargo" test -- --test-threads 1'
+expect "\$CARGO with a job count" allow agent "$own" '"$CARGO" build -j 2'
+expect "\$NODE with a port" allow agent "$own" '"$NODE" server.mjs --port 8080'
+expect "\${PYTHON:-python3} with a count" allow agent "$own" '"${PYTHON:-python3}" bench.py 100'
+expect "\$EDITOR with a file and a line" allow agent "$own" '$EDITOR file 3'
+expect "find through xargs into a run-time program" allow agent "$own" 'find . -name "*.rs" | xargs "$EDITOR"'
 # regression rows: forms that already worked
 expect "env wrapper" deny agent "$own" "env FOO=1 kill $theirs"
 expect "timeout wrapper" deny agent "$own" "timeout 5 kill $theirs"
