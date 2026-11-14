@@ -9,8 +9,11 @@
 // - a call of `Evidence::ci_run(` or `Evidence::adopt(` outside the modules that own them (`ci_runs/verdict.rs`, `pre_push/known.rs`
 //   until WP-T4 moves the CI reader's evidence to `ci_runs::verdict`).
 // In JavaScript, outside `conformance/src/outcome.mjs`: an object literal `status: 'clean'` (a pass made by hand).
-// Pre-existing sites are listed by path in `conformance/c124-allow.json` with a reason: a shrink-only seed, expected to empty out as
-// each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
+// - `measure(.., || Ok(Vec::new()))` (also `vec![]`, `Vec::default()`): a measurement that always finds nothing reads as a pass;
+//   return the not-measured outcome when the check cannot look, or build the findings from what it saw.
+// Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line, so an edit
+// that moves the line keeps the entry) and a reason. A whole file or folder is never allowed. A shrink-only seed, expected to empty
+// out as each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { unwaivable, warn } from '../finding.mjs';
 
 export const ALLOW = 'conformance/c124-allow.json';
@@ -25,9 +28,11 @@ const CALL = /\b(?:Evidence|Proof)::(?:ci_run|adopt)\s*\(/;
 const CALL_OWNERS = new Set(['tools/paddock-dev/src/ci_runs/verdict.rs', 'tools/paddock-dev/src/pre_push/known.rs']);
 const JS_FILE = /^(?:conformance\/(?:src|bin)|scripts|tools)\/.*\.mjs$/;
 const JS_PASS = /\bstatus\s*:\s*['"]clean['"]/;
+// `measure(` .. `|| Ok(Vec::new())`: the closure of a measurement that is always empty (up to the first `;`, so one call at a time).
+const EMPTY_MEASURE = /\bmeasure\s*\([^;]*?\|\|\s*(?:\{\s*)?Ok\(\s*(?:Vec::new\(\)|vec!\s*\[\s*\]|Vec::default\(\))\s*\)/g;
 const FIX = 'Build the result with `paddock_cli::measure` (or `Evidence::adopt`) and print it with `Outcome::json()`; read another gate\'s result with `Outcome::from_wire`, never its exit code (ADR 0089 amendment 2026-11-13).';
 
-/** [{ line, what }] of every site in the Rust text `text` of `path`. */
+/** [{ line, what, text }] of every site in the Rust text `text` of `path`. */
 export function flaggedRust(path, text) {
   if (OWNER.test(path) || TEST_PATH.test(path)) return [];
   const out = [];
@@ -42,25 +47,31 @@ export function flaggedRust(path, text) {
     if (depth >= 0) {
       if (depth === 1) {
         const v = VARIANT.exec(line);
-        if (v) out.push({ line: i + 1, what: `an enum variant \`${v[1]}\` (a second result type)` });
+        if (v) out.push({ line: i + 1, text: line, what: `an enum variant \`${v[1]}\` (a second result type)` });
       }
       for (const c of line) depth += c === '{' ? 1 : c === '}' ? -1 : 0;
       if (depth <= 0) depth = -1;
     }
-    if (JSON_KEY.test(line) && /json!|serde_json/.test(text)) out.push({ line: i + 1, what: 'a JSON result object with a status, verdict or outcome key' });
-    if (BOOL_FN.test(line)) out.push({ line: i + 1, what: 'a `fails`/`passed` bool on a result type' });
-    if (CALL.test(line) && !CALL_OWNERS.has(path)) out.push({ line: i + 1, what: 'a call of `Evidence::ci_run`/`adopt` outside its owner' });
+    if (JSON_KEY.test(line) && /json!|serde_json/.test(text)) out.push({ line: i + 1, text: line, what: 'a JSON result object with a status, verdict or outcome key' });
+    if (BOOL_FN.test(line)) out.push({ line: i + 1, text: line, what: 'a `fails`/`passed` bool on a result type' });
+    if (CALL.test(line) && !CALL_OWNERS.has(path)) out.push({ line: i + 1, text: line, what: 'a call of `Evidence::ci_run`/`adopt` outside its owner' });
   });
+  const code = body.join('\n');
+  for (const m of code.matchAll(EMPTY_MEASURE)) {
+    const at = m.index + m[0].lastIndexOf('Ok');
+    const line = code.slice(0, at).split('\n').length;
+    out.push({ line, text: body[line - 1], what: 'a `measure` whose closure always returns `Ok(Vec::new())` (an empty measurement reads as a pass)' });
+  }
   return out;
 }
 
-/** [{ line, what }] of every hand-made pass in the JavaScript text of `path`. */
+/** [{ line, what, text }] of every hand-made pass in the JavaScript text of `path`. */
 export function flaggedJs(path, text) {
   if (path === 'conformance/src/outcome.mjs' || path === 'conformance/src/checks/C124-gate-outcomes.mjs' || TEST_PATH.test(path) || /\.test\.mjs$/.test(path)) return [];
   const out = [];
   text.split('\n').forEach((line, i) => {
     if (line.trim().startsWith('//')) return;
-    if (JS_PASS.test(line)) out.push({ line: i + 1, what: "an object literal `status: 'clean'` (a pass made by hand)" });
+    if (JS_PASS.test(line)) out.push({ line: i + 1, text: line, what: "an object literal `status: 'clean'` (a pass made by hand)" });
   });
   return out;
 }
@@ -76,13 +87,15 @@ export function parseAllow(text) {
   if (!Array.isArray(v?.allow)) throw new Error(`${ALLOW} has no \`allow\` array`);
   return v.allow.map((e) => {
     const path = typeof e?.path === 'string' ? e.path : '';
+    const site = typeof e?.site === 'string' ? e.site.trim() : '';
     const reason = typeof e?.reason === 'string' ? e.reason.trim() : '';
-    if (!path || [...reason].length < 8) throw new Error(`${ALLOW}: every entry needs a path and a reason of at least 8 characters`);
-    return { path, reason };
+    if (!path || !site || [...reason].length < 8) throw new Error(`${ALLOW}: every entry needs a path, a site (a piece of the flagged line) and a reason of at least 8 characters`);
+    return { path, site, reason };
   });
 }
 
-const isAllowed = (allow, path) => allow.some((a) => (a.path.endsWith('/') ? path.startsWith(a.path) : path === a.path));
+/** True when an entry names this site: the file and a piece of the flagged line. */
+export const isAllowed = (allow, path, text) => allow.some((a) => a.path === path && String(text ?? '').includes(a.site));
 
 export default {
   id: 'C124',
@@ -97,15 +110,16 @@ export default {
       if (raw === null || raw === undefined) throw new Error(`${ALLOW} cannot be read`);
       allow = parseAllow(raw);
     } catch (e) {
-      return [unwaivable(warn('C124', 21, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c124-allow.json: {"allow": [{"path": "...", "reason": "..."}]}.'), 'check-broken')];
+      return [unwaivable(warn('C124', 21, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c124-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "..."}]}.'), 'check-broken')];
     }
     const out = [];
     for (const f of ctx.files()) {
       const rust = RUST.test(f);
-      if ((!rust && !JS_FILE.test(f)) || isAllowed(allow, f)) continue;
+      if (!rust && !JS_FILE.test(f)) continue;
       const text = ctx.read(f);
       if (text === null || text === undefined) continue;
-      for (const { line, what } of rust ? flaggedRust(f, text) : flaggedJs(f, text)) {
+      for (const { line, what, text: at } of rust ? flaggedRust(f, text) : flaggedJs(f, text)) {
+        if (isAllowed(allow, f, at)) continue;
         out.push(warn('C124', 21, f, line, `builds a gate result by hand: ${what}`, FIX));
       }
     }
