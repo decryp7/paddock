@@ -28,7 +28,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node test/require-full-tree.mjs && node --test test/*.test.mjs"
+    "test": "node test/require-full-tree.mjs && node test/run-tests.mjs --test test/*.test.mjs"
   },
   "dependencies": {
     "yaml": "^2.9.1"

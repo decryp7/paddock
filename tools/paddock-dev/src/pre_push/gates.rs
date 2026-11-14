@@ -455,12 +455,23 @@ fn conformance(facts: &Facts) -> Planned {
 /// the whole tree (lib-usage.test.mjs failed on fix/spotter-release-plan-verdict, 2026-11-14, while its touched-file tests passed).
 /// Run through the executor, as CI's conformance job does (`./dev ci run conformance tests`, the `tests` list of
 /// conformance/paddock.ci.json).
+///
+/// Blocking since its first green run on the real tree (ER-41): `./dev check --pre-push --refs-from-stdin --remote origin` on
+/// ci/conformance-every-change, 2026-11-14 (6002697d3: 71.1 s; the hook's run on the push of c84694951: 70.6 s), recorded in
+/// docs/benchmarks.md, "Conformance tests in the push gate". A local gate has no CI run id; the benchmark section is its record.
+///
+/// [`CONFORMANCE_TEST_CONCURRENCY`] caps the test processes (conformance/test/run-tests.mjs reads it; CI leaves it unset).
+/// The conformance tests' share of the machine in the push gate (ER-24): uncapped, `node --test` starts one process per core
+/// (about 13 on the 14-core Mac mini) beside the Clippy rows; the gate runs at most three rows at a time.
+const CONFORMANCE_TEST_CONCURRENCY: &str = "4";
+
 fn conformance_tests(facts: &Facts) -> Planned {
     let id = "conformance-tests";
     conformance_not_ready(id, facts).unwrap_or_else(|| {
         Planned::Run(Gate {
             program: facts.dev_exe.clone(),
             args: strs(&["ci", "run", "conformance", "tests"]),
+            env: vec![("PADDOCK_TEST_CONCURRENCY".into(), CONFORMANCE_TEST_CONCURRENCY.into())],
             ..gate(
                 id.into(),
                 "",

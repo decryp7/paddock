@@ -1317,3 +1317,11 @@ The conformance row already ran on every push (the plan marks conformance on eve
   time, so that is added wall time (the measured push gate took 4 min 3 s in all, 94 s of it queued for the heavy slot); on a
   quieter machine (three rows at a time) it overlaps the Clippy rows. It fits the 15 minute budget.
 - **Not measured:** a run at a load under 10 (three rows at a time), and the conformance tests on Linux or Windows.
+
+### With the cap of 4 test processes (2026-11-15, same branch, after review)
+
+The gate now sets `PADDOCK_TEST_CONCURRENCY=4` (ER-24; `node --test` otherwise starts one process per core, about 13 here).
+One run of `PADDOCK_TEST_CONCURRENCY=4 ./dev ci run conformance tests` (1004 tests) at a 1-minute load of 27 rising to 37: 75.1 s,
+against 70.0 s uncapped a few minutes earlier at a load of about 24 to 29. So the cap costs at most a few seconds at this load
+and leaves about 9 cores to the Clippy rows beside it. Not measured: the capped run on a quiet machine, where the gap could be
+larger.

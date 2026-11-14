@@ -195,6 +195,11 @@ fn conformance_and_its_tests_run_on_every_push_whatever_changed() {
             "CI's own step (`./dev ci run conformance tests`, the `tests` list of conformance/paddock.ci.json)"
         );
         assert_eq!(tests.rank, 0, "a cheap gate: it starts before any Clippy");
+        assert_eq!(
+            tests.env,
+            [("PADDOCK_TEST_CONCURRENCY".to_string(), "4".to_string())],
+            "a share of the machine beside the Clippy rows (ER-24), not one test process per core"
+        );
     }
 }
 
