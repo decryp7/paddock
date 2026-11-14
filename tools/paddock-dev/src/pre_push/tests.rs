@@ -1346,7 +1346,7 @@ mod base_choice {
     }
 
     /// `git ls-remote` as the remote would answer it: a fixed text or unreachable.
-    pub struct Remote(Option<String>);
+    pub struct Remote(pub Option<String>);
     impl Lookups for Remote {
         fn ls_remote(&self, _: &str) -> Option<String> {
             self.0.clone()
@@ -1439,19 +1439,32 @@ mod base_choice {
         let train = sha(&r, "origin/train/t");
         commit(&r, "w1");
         let tip = sha(&r, "HEAD");
+        let main = sha(&r, "origin/main");
+        // Not checked live, a train ref main does not hold may be gone from the remote: only main (or the upstream) counts.
         let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
-        assert_eq!(base, train, "{why}");
+        assert_eq!(base, main, "{why}");
         assert!(
             why.contains("could not be read, so the remote-tracking refs are not checked live")
-                && why.contains("origin/train/t (remote-tracking ref, not checked live)"),
+                && why.contains("origin/main (remote-tracking ref, not checked live; main or the upstream holds it)")
+                && why.contains("skipped 1 remote-tracking ref(s)"),
             "{why}"
         );
         let (base, why) = choose_base(&r, None, &tip, &live(&r));
-        assert_eq!(
-            (base.as_str(), why.contains("no remote was named")),
-            (train.as_str(), true),
-            "{why}"
-        );
+        assert_eq!((base.as_str(), why.contains("no remote was named")), (main.as_str(), true), "{why}");
+        // The train as the branch's upstream: it counts.
+        git_text(&r, &["config", "remote.origin.url", "/nowhere"]).unwrap();
+        git_text(&r, &["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]).unwrap();
+        git_text(&r, &["config", "branch.train.remote", "origin"]).unwrap();
+        git_text(&r, &["config", "branch.train.merge", "refs/heads/train/t"]).unwrap();
+        let p = Pushed {
+            local_ref: "refs/heads/train".into(),
+            sha: tip.clone(),
+            remote_ref: "refs/heads/w".into(),
+            remote_sha: "0".repeat(40),
+        };
+        let (base, why) = super::super::choose_base(&r, &p, Some("origin"), "origin/main", &Remote(None));
+        assert_eq!(base, train, "{why}");
+        git_text(&r, &["config", "--unset", "branch.train.merge"]).unwrap();
         // A remote-tracking ref the live list no longer has (deleted or force-pushed) is stale: skipped, said so; then origin/main.
         let (base, why) = choose_base(
             &r,
@@ -1460,7 +1473,10 @@ mod base_choice {
             &Remote(Some(format!("{}\trefs/heads/x\n", "1".repeat(40)))),
         );
         assert_eq!(base, sha(&r, "origin/main"), "{why}");
-        assert!(why.contains("skipped 2 remote-tracking ref(s) the remote no longer has"), "{why}");
+        assert!(
+            why.contains("skipped 2 remote-tracking ref(s) the remote may no longer have"),
+            "{why}"
+        );
         // The remote moved a branch on to a commit this clone has: its older remote-tracking ref still counts.
         let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(Some(format!("{tip}\trefs/heads/train/t\n"))));
         assert_eq!(base, train, "{why}");
@@ -1471,6 +1487,26 @@ mod base_choice {
         let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
         assert_eq!(base, "origin/main", "{why}");
         assert!(why.contains("measuring from origin/main"), "{why}");
+    }
+
+    /// A branch deleted on the remote keeps its remote-tracking ref until a prune. With the remote unreadable it must not be the
+    /// base: its commits may be gone, and measuring from it would leave them unchecked.
+    #[test]
+    fn a_stale_ref_of_a_branch_deleted_on_the_remote_is_no_base_when_the_remote_cannot_be_read() {
+        let (_d, r) = repo();
+        commit(&r, "gone1");
+        let gone = sha(&r, "HEAD");
+        git_text(&r, &["update-ref", "refs/remotes/origin/feat/gone", &gone]).unwrap();
+        commit(&r, "w1");
+        let tip = sha(&r, "HEAD");
+        let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
+        assert_ne!(base, gone, "{why}");
+        assert_eq!(base, sha(&r, "origin/main"), "{why}");
+        assert!(why.contains("feat/gone"), "the skipped ref is named: {why}");
+        // Live, the listing without it says the same.
+        let listing = format!("{}\trefs/heads/main\n", sha(&r, "origin/main"));
+        let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(Some(listing)));
+        assert_eq!(base, sha(&r, "origin/main"), "{why}");
     }
 
     #[test]
@@ -1814,6 +1850,9 @@ struct Queued {
     in_flight: std::sync::atomic::AtomicUsize,
     most: std::sync::atomic::AtomicUsize,
     limits: Mutex<Vec<(String, Limits)>>,
+    /// The steps in flight, and for each step the ones that were in flight when it entered.
+    running: Mutex<Vec<String>>,
+    beside: Mutex<Vec<(String, Vec<String>)>>,
     /// Steps that have entered `run`, and a signal for each entry.
     entered: Mutex<usize>,
     entry: std::sync::Condvar,
@@ -1828,6 +1867,8 @@ impl Queued {
             in_flight: Default::default(),
             most: Default::default(),
             limits: Mutex::new(Vec::new()),
+            running: Mutex::new(Vec::new()),
+            beside: Mutex::new(Vec::new()),
             entered: Mutex::new(0),
             entry: std::sync::Condvar::new(),
         }
@@ -1850,6 +1891,11 @@ impl Exec for Queued {
     fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
         use std::sync::atomic::Ordering::SeqCst;
         self.limits.lock().unwrap().push((g.id.clone(), limits));
+        {
+            let mut running = self.running.lock().unwrap();
+            self.beside.lock().unwrap().push((g.id.clone(), running.clone()));
+            running.push(g.id.clone());
+        }
         let now = self.in_flight.fetch_add(1, SeqCst) + 1;
         self.most.fetch_max(now, SeqCst);
         // Wait for a second step to enter while this one is in flight: it does at once unless the push holds it back. The
@@ -1864,6 +1910,7 @@ impl Exec for Queued {
             .unwrap();
         drop(_held);
         self.moved.fetch_add(u64::try_from(self.queued.as_micros()).unwrap(), SeqCst);
+        self.running.lock().unwrap().retain(|id| *id != g.id);
         self.in_flight.fetch_sub(1, SeqCst);
         Ok(Done {
             success: true,
@@ -2079,8 +2126,16 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
         },
     );
     assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
-    let order: Vec<String> = fake.limits.lock().unwrap().iter().map(|(id, _)| id.clone()).collect();
-    assert_eq!(order, ["clippy a", "fmt x", "clippy b"].map(String::from).to_vec());
+    let beside = fake.beside.lock().unwrap().clone();
+    // The first heavy step and the light row overlapped (whichever entered first); held behind the second heavy row, the
+    // light row would start only after the first heavy step ended.
+    let with = |a: &str, b: &str| beside.iter().any(|(id, w)| id == a && w.iter().any(|x| x == b));
+    assert!(with("fmt x", "clippy a") || with("clippy a", "fmt x"), "{beside:?}");
+    let heavy_beside: Vec<_> = beside.iter().filter(|(id, _)| id.starts_with("clippy")).collect();
+    assert!(
+        heavy_beside.iter().all(|(_, with)| !with.iter().any(|w| w.starts_with("clippy"))),
+        "never two heavy steps at once: {beside:?}"
+    );
 }
 
 /// A small deterministic generator for the property test (no new dependency).
@@ -2102,7 +2157,7 @@ impl Lcg {
 #[test]
 fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
     let mut rng = Lcg(0x5eed_2026_1115);
-    let mut with_unpushed_train = 0;
+    let (mut with_unpushed_train, mut with_merge, mut with_force) = (0, 0, 0);
     for case in 0..24 {
         let r = Repo::new();
         let add = |path: &str| {
@@ -2135,39 +2190,64 @@ fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
             r.git(&["rm", "-q", "apps/pitwall/src/undone.rs"]);
             r.git(&["commit", "-q", "-m", "undo"]);
         }
+        // An unpushed local side branch merged in with --no-ff: its commits are sent too.
+        if rng.below(2) == 1 {
+            with_merge += 1;
+            r.git(&["checkout", "-q", "-b", "side"]);
+            for i in 0..=rng.below(2) {
+                add(&format!("apps/pitwall/src/side{i}.rs"));
+            }
+            r.git(&["checkout", "-q", "fix"]);
+            add("tools/x/before-merge.rs");
+            r.git(&["merge", "-q", "--no-ff", "--no-edit", "side"]);
+        }
+        // A force push: the remote has an old `fix` that the pushed commit does not contain.
+        let mut push = new_ref("fix", "");
+        if rng.below(3) == 0 {
+            with_force += 1;
+            r.git(&["checkout", "-q", "-b", "old-fix", &c0]);
+            let old = add("tools/x/old.rs");
+            r.remote("fix", &old);
+            r.git(&["checkout", "-q", "fix"]);
+            push.remote_sha = old;
+        }
         let tip = r.git(&["rev-parse", "HEAD"]).trim().to_string();
-        let (base, why) = r.choose(&new_ref("fix", &tip));
-        let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&tip)).unwrap();
+        push.sha = tip.clone();
         let lacks = r.git(&["rev-list", &tip, "--not", "--remotes=origin"]);
-        for c in lacks.lines() {
-            for f in r
-                .git(&["show", "--no-merges", "--name-only", "--format=", c])
-                .lines()
-                .filter(|l| !l.is_empty())
-            {
+        // Live, and with `git ls-remote` unreadable.
+        for (how, look) in [("live", r.live()), ("unreadable", base_choice::Remote(None))] {
+            let (base, why) = super::choose_base(&r.root, &push, Some("origin"), "origin/main", &look);
+            let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&tip)).unwrap();
+            for c in lacks.lines() {
+                for f in r
+                    .git(&["show", "--no-merges", "--name-only", "--format=", c])
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                {
+                    assert!(
+                        change.files.iter().any(|x| x == f),
+                        "case {case} ({how}): {f} of {c} is not planned; base {base} ({why})"
+                    );
+                }
+            }
+            if train.iter().any(|t| lacks.lines().any(|l| l == t)) {
+                with_unpushed_train += 1;
+                // The branch's own diff (from the train's local tip) does not reach apps/dyno; the push's check must.
+                let (own, _, _) = super::discover(&r.root, &train_tip, &[], std::slice::from_ref(&tip)).unwrap();
                 assert!(
-                    change.files.iter().any(|x| x == f),
-                    "case {case}: {f} of {c} is not planned; base {base} ({why})"
+                    !ids(&plan_gates(&plan(), &own, &facts())).contains(&"clippy apps/dyno".to_string()),
+                    "case {case}"
+                );
+                let got = ids(&plan_gates(&plan(), &change, &facts()));
+                assert!(
+                    got.contains(&"clippy apps/dyno".to_string()),
+                    "case {case} ({how}): {got:?}; base {base} ({why})"
                 );
             }
         }
-        if train.iter().any(|t| lacks.lines().any(|l| l == t)) {
-            with_unpushed_train += 1;
-            // The branch's own diff (from the train's local tip) does not reach apps/dyno; the push's check must.
-            let (own, _, _) = super::discover(&r.root, &train_tip, &[], std::slice::from_ref(&tip)).unwrap();
-            assert!(
-                !ids(&plan_gates(&plan(), &own, &facts())).contains(&"clippy apps/dyno".to_string()),
-                "case {case}"
-            );
-            let got = ids(&plan_gates(&plan(), &change, &facts()));
-            assert!(
-                got.contains(&"clippy apps/dyno".to_string()),
-                "case {case}: {got:?}; base {base} ({why})"
-            );
-        }
     }
     assert!(
-        with_unpushed_train >= 4,
-        "the cases must include unpushed train commits: {with_unpushed_train}"
+        with_unpushed_train >= 8 && with_merge >= 4 && with_force >= 4,
+        "the cases must cover each shape: unpushed train {with_unpushed_train}, merge {with_merge}, force push {with_force}"
     );
 }

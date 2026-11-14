@@ -743,7 +743,8 @@ struct Candidate {
 /// pushed commit contains it: a force push does not) and the remote-tracking refs of `remote` the pushed commit contains (`git
 /// for-each-ref --merged`), each only when the live listing still has that branch at that commit or a later one (a ref the remote
 /// deleted or force-pushed since the last fetch is stale and its commits may be gone from the remote); when the remote cannot be
-/// read, the remote-tracking refs as they are, said so. Of the candidates only the ones no other candidate contains can be nearest
+/// read, only the remote-tracking refs that the remote-tracking main or the upstream holds (a deleted branch's ref is not), said
+/// so. Of the candidates only the ones no other candidate contains can be nearest
 /// (`git merge-base --independent`, one process however many branches the remote has); of those the fewest new commits wins, on a
 /// tie the lower rank. A candidate at the pushed commit itself is skipped unless `empty_ok` (a person's run).
 fn nearest_base(
@@ -812,6 +813,20 @@ fn nearest_base(
             ));
         }
     }
+    // What a ref that cannot be checked live must be held by: the remote-tracking main and the upstream.
+    let anchors: Vec<String> = ["main".to_string()]
+        .into_iter()
+        .chain(upstream.clone())
+        .filter_map(|b| {
+            git(&[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/remotes/{tracking_of}/{b}^{{commit}}"),
+            ])
+        })
+        .map(|t| t.trim().to_string())
+        .collect();
     let merged = format!("--merged={}", p.sha);
     let prefix = format!("refs/remotes/{tracking_of}/");
     for line in git(&["for-each-ref", &merged, "--format=%(objectname) %(refname:strip=3)", &prefix])
@@ -823,7 +838,12 @@ fn nearest_base(
             continue;
         }
         let verified = match (&listing, live.get(name)) {
-            (None, _) => Some("remote-tracking ref, not checked live"),
+            // Not checked live: only a commit main or the upstream holds is surely still on the remote (a deleted branch's ref
+            // is not), so only those count.
+            (None, _) if anchors.iter().any(|a| git(&["merge-base", "--is-ancestor", sha, a]).is_some()) => {
+                Some("remote-tracking ref, not checked live; main or the upstream holds it")
+            }
+            (None, _) => None,
             (Some(_), Some(now)) if now == sha => Some("remote-tracking ref, the remote has it there (live)"),
             (Some(_), Some(now))
                 if git(&["cat-file", "-e", &format!("{now}^{{commit}}")]).is_some()
@@ -844,7 +864,7 @@ fn nearest_base(
     if !stale.is_empty() {
         stale.sort();
         notes.push(format!(
-            "skipped {} remote-tracking ref(s) the remote no longer has at that commit or later (deleted or force-pushed since the last fetch): {}",
+            "skipped {} remote-tracking ref(s) the remote may no longer have at that commit or later (deleted or force-pushed since the last fetch, or not checkable live and held by neither main nor the upstream): {}",
             stale.len(),
             stale.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
         ));

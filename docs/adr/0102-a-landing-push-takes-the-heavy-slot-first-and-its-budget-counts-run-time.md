@@ -90,7 +90,8 @@ work. The run of train 10 that counted queue time against the budget (837 s for 
    is the nearest commit of the remote that the pushed commit contains: the remote ref's old commit (git's pre-push line), or a
    remote-tracking ref of the push's remote the pushed commit contains, counted only when the live `git ls-remote` listing still
    has that branch at that commit or a later one (a branch deleted or force-pushed since the last fetch is stale; when the remote
-   cannot be read the refs are used as they are, said so). Of the candidates only those no other candidate contains can be
+   cannot be read, only refs the remote-tracking main or the upstream holds count, since a deleted branch's ref survives until
+   a prune; said so). Of the candidates only those no other candidate contains can be
    nearest (`git merge-base --independent`, one process however many branches the remote has), so no caps are needed; the
    fewest new commits wins, the old commit then the tracking upstream on a tie; origin/main when none is usable. A candidate at
    the pushed commit itself is skipped (nothing measured is no evidence). A person's run measures HEAD the same way. The base is
