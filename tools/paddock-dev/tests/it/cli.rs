@@ -242,7 +242,7 @@ fn plan_refuses_json_mentions_commit_flags_in_its_usage_and_annotates_errors_in_
 fn a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed() {
     let scratch = tempfile::tempdir().unwrap();
     let run = |extra: &[&str]| {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut cmd = paddock_testkit::TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         cmd.args(["ci", "dispatch", "ci.yml", "--trial", "feat/x"])
             .args(extra)
             .env("GITEA_TOKEN", "not-a-real-token")
@@ -259,7 +259,7 @@ fn a_trial_with_bad_arguments_is_refused_before_anything_is_cloned_or_pushed() {
         assert_eq!(code, 2, "{extra:?}: {err}");
         assert!(err.contains(word), "{extra:?}: {err}");
     }
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    let mut cmd = paddock_testkit::TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.args(["ci", "dispatch", "ci.yml", "--trial", "bad branch;x", "--max", "30m"])
         .env("GITEA_TOKEN", "not-a-real-token")
         .env("PADDOCK_TRIAL_DIR", scratch.path());

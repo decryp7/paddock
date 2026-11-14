@@ -628,20 +628,16 @@ fn rustup_installing_broken(f: &Fixture, what: &str) -> (PathBuf, PathBuf) {
     (shims, log)
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
-)]
 #[cfg(unix)]
 fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::Output {
     // Run from outside any repository: the setup-rust action calls this mode before anything else is set up.
     let outside = tempfile::tempdir().unwrap();
-    Command::new("sh")
+    TestCommand::new("sh")
         .arg(f.root().join("dev"))
         .arg("--install-toolchain")
         .args(args)
         .current_dir(outside.path())
-        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
+        .path_first(shims)
         .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTUP_TOOLCHAIN")
         .output()
@@ -676,20 +672,16 @@ fn a_broken_toolchain_is_an_error_naming_the_manual_repair_and_is_never_uninstal
 }
 
 /// ./dev's own install (a machine whose rustc does not run) checks the toolchain the same way and never uninstalls it either.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
-)]
 #[cfg(unix)]
 #[test]
 fn ensure_toolchain_refuses_a_broken_install_without_uninstalling_it() {
     let f = Fixture::new();
     let (shims, log) = rustup_installing_broken(&f, "clippy");
-    let out = Command::new("sh")
+    let out = TestCommand::new("sh")
         .arg(f.root().join("dev"))
         .arg("--ensure-toolchain")
         .current_dir(f.root())
-        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
+        .path_first(&shims)
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
         .env_remove("RUSTC")
@@ -1602,10 +1594,6 @@ fn a_cached_tool_that_fails_its_probe_is_replaced_never_removed_first() {
     );
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "a test starts the program under test and waits for it; nothing here ends a process by pid"
-)]
 #[cfg(unix)]
 #[test]
 fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_is_pruned_meanwhile() {
@@ -1617,7 +1605,7 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
     std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &cached).unwrap();
     let signal = scratch.path().join("signal.log");
     std::fs::write(&signal, "").unwrap();
-    let mut run = Command::new(&cached)
+    let mut run = TestCommand::new(&cached)
         .args(["wait", "--file"])
         .arg(&signal)
         .args(["--line", "^go$", "--include-past", "--max", "60s", "--interval", "100ms"])

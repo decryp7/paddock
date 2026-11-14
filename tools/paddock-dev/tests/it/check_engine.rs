@@ -24,11 +24,11 @@ struct Ran {
 fn run_host(js: bool, args: &[&str], scratch: &Path) -> Ran {
     let (out, summary) = (scratch.join("out.json"), scratch.join("summary.md"));
     let mut c = if js {
-        let mut c = paddock_proc::command("node");
+        let mut c = paddock_testkit::TestCommand::new("node");
         c.arg("conformance/bin/paddock-conformance.mjs");
         c
     } else {
-        let mut c = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut c = paddock_testkit::TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         c.arg("conformance");
         c
     };
@@ -144,7 +144,7 @@ fn a_report_file_that_cannot_be_written_is_an_io_error_with_the_cause_and_the_ne
     let d = tree(&[("crates/a/src/x.rs", "fn a() {}\n")]);
     let missing = d.path().join("no-such-folder").join("out.json");
     for flag in ["--out", "--summary"] {
-        let o = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+        let o = paddock_testkit::TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["conformance", "--app", "t", "--root"])
             .arg(d.path())
             .args(["--only", "C39", flag])
@@ -369,7 +369,7 @@ fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
     assert_eq!(ids, ["C39", "C53", "C119", "C120", "C121", "C122", "C123", "C124"]);
     assert_eq!(check::sources().iter().map(|(id, _)| *id).collect::<Vec<_>>(), ids);
     let rust = check::conformance::list_checks(&reg);
-    let js = paddock_proc::command("node")
+    let js = paddock_testkit::TestCommand::new("node")
         .args(["conformance/bin/paddock-conformance.mjs", "list", "--json"])
         .current_dir(repo())
         .output()

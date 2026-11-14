@@ -1283,7 +1283,7 @@ exit 0
         let bin = tempfile::tempdir().unwrap();
         fake_cargo(bin.path());
         let out = r
-            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .dev_cmd()
             .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
             .args(["merge", "check", "--json", "--root"])
             .arg(r.path())
@@ -1341,7 +1341,7 @@ exit 0
         fn run(&self, args: &[&str], gates_exit: &str) -> (i32, String) {
             let out = self
                 .repo
-                .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+                .dev_cmd()
                 .env("PADDOCK_MERGE_CHECK_GATES", self.gates.path().join("gates"))
                 .env("GATES_LOG", self.log())
                 .env("GATES_EXIT", gates_exit)
