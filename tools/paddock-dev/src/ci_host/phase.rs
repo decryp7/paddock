@@ -31,7 +31,8 @@ pub fn bounded<T: Send + 'static>(
 }
 
 /// [`bounded`] for a phase that can end itself at its limit (a program it runs is bounded by the same limit): when `hung` is set at
-/// the end of a failed phase, the phase did not fail, it hung, and the caller reports that, so no `failed` line is logged.
+/// the end of the phase, failed or not, the phase did not fail or finish, it hung, and the caller reports that, so no `failed` or
+/// `done` line is logged.
 pub fn bounded_hung<T: Send + 'static>(
     step: &mut Step<'_>,
     label: &str,
@@ -47,6 +48,9 @@ pub fn bounded_hung<T: Send + 'static>(
     });
     let secs = |s: Instant| s.elapsed().as_secs();
     match rx.recv_timeout(limit) {
+        // A program of the phase ended at its limit and the phase went on (the port of a shell function that ignores one step's
+        // status): the phase still ran for its limit, and the shell's `bounded` ends the whole phase there, so it hung.
+        Ok(Ok(_)) if hung.is_some_and(|h| h.load(Ordering::SeqCst)) => Err(Phase::Timeout),
         Ok(Ok(v)) => {
             step.say(format!("{}: {label}: done in {} s", step.name, secs(start)));
             Ok(v)
