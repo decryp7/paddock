@@ -1,1 +1,4 @@
-export DUCKDB_LIB_DIR=/Volumes/d8sst7/dev.decryptology.net/debrief/target/libduckdb/2.0.0/duckdb-shared-libs-osx-arm64 DUCKDB_INCLUDE_DIR=/Volumes/d8sst7/dev.decryptology.net/debrief/target/libduckdb/2.0.0/duckdb-shared-libs-osx-arm64 CARGO_TARGET_DIR=$HOME/.debrief-target-opsB CARGO_BUILD_JOBS=2
+# A second build environment for Debrief ("ops B"): its own target folder, and the pinned libduckdb from the fetch script, which
+# derives its folder from CARGO_TARGET_DIR (no disk is named here, C125). Source it from apps/debrief.
+export CARGO_TARGET_DIR=$HOME/.debrief-target-opsB CARGO_BUILD_JOBS=2
+eval "$(sh crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$CARGO_TARGET_DIR/libduckdb")"

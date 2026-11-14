@@ -1353,3 +1353,33 @@ status = "built"
 # =====================================================================================================================
 # Build folders kept off the home folder
 # =====================================================================================================================
+
+# =====================================================================================================================
+# Development folders derived, never named (C125)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "dev-places"
+title = "The dev-targets folder (and the dev disk, VM and lock folders below it) derived from git config paddock.worktreeRoot, failing closed"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/places.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = [".claude/hooks/lib/paddockpaths.py"]
+  symbols = ["text:worktreeRoot"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The guard hooks' copy (dev_targets_dirs, main_checkout): Python, because the hooks run before any binary is built; it moves onto `./dev hook pre-tool-use` (ADR 0083) with the other guards."
+
+  [[mechanism.copy]]
+  paths = ["scripts/dev-places.sh"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The VM scripts' copy (vm-lock, vm-win, vm-smoke probes, wp0-run): bash, sourced; scripts/vm-smoke/dev-places.test.mjs runs it against the JS copy's rule. Goes when the VM scripts move into paddock-dev (docs/plans/ci-in-rust.md)."
+
+  [[mechanism.copy]]
+  paths = ["scripts/dev-places.mjs"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The vm-smoke harness's copy (win-vm-target, run-linux, win-vnc): Node; goes with the shell copy."

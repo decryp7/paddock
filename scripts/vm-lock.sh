@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Interim exclusive lock for the Windows test VM (/Volumes/d8sst7/vm-data/paddock-win11-test). SOURCE it, then call
+# Interim exclusive lock for the Windows test VM (<dev disk>/vm-data/paddock-win11-test, docs/dev-setup.md). SOURCE it, then call
 # `vm_lock_acquire <label>` before anything that starts, stops, reverts, snapshots or loads the guest (vmrun, SSH jobs).
 #
 #   . "$(dirname "$0")/vm-lock.sh"; vm_lock_acquire vm-win-start
@@ -23,7 +23,8 @@
 # lock still held, then releases the lock (so a cleanup of the VM is never unlocked).
 #
 # Exit codes: 75 busy (EX_TEMPFAIL), 3 the lock could not be used (root missing, paddock-dev failed).
-# Environment: PADDOCK_VM_LOCK_ROOT (default /Volumes/d7sst7/ci/locks/test-machines), PADDOCK_VM_LOCK_WAIT (0),
+# Environment: PADDOCK_VM_LOCK_ROOT (default <dev disk>/ci/locks/test-machines, derived by scripts/dev-places.sh; the lock refuses
+#   with exit 3 when neither is there), PADDOCK_VM_LOCK_WAIT (0),
 #   PADDOCK_VM_LOCK_POLL (seconds between tries, 5), PADDOCK_DEV (the paddock-dev program; default the repository's ./dev),
 #   PADDOCK_VM_LOCK_SLOW_SECS (a paddock-dev call this slow is logged, 10).
 
@@ -62,7 +63,14 @@ _vm_lock_same_start() {
   ta="${a##*\[t}"; tb="${b##*\[t}"
   if [ "$ta" != "$a" ] && [ "$tb" != "$b" ]; then [ "$ta" = "$tb" ]; else [ "${a%% \[t*}" = "${b%% \[t*}" ]; fi
 }
-_vm_lock_default_root() { printf '%s' "${PADDOCK_VM_LOCK_ROOT:-/Volumes/d7sst7/ci/locks/test-machines}"; }
+. "$_vm_lock_here/dev-places.sh"
+# The one fixed lock root: PADDOCK_VM_LOCK_ROOT, else <dev disk>/ci/locks/test-machines; empty (and a non-zero status) when it cannot be derived.
+_vm_lock_default_root() {
+  local disk
+  if [ -n "${PADDOCK_VM_LOCK_ROOT:-}" ]; then printf '%s' "$PADDOCK_VM_LOCK_ROOT"; return 0; fi
+  disk="$(paddock_dev_disk)" || return 3
+  printf '%s' "$disk/ci/locks/test-machines"
+}
 
 # The owner folder of the current holder, if the slot is held; retried a few times (status can race a holder starting or ending).
 _vm_lock_holder() {
@@ -87,7 +95,7 @@ vm_lock_inherited() {
   IFS=$'\t' read -r pid start owner <<< "$PADDOCK_VM_LOCK_HELD"
   [ -n "$pid" ] && [ -n "$start" ] && [ -n "$owner" ] || return 1
   now="$(_vm_lock_start "$pid")"; _vm_lock_same_start "$now" "$start" || return 1
-  root="$(_vm_lock_default_root)"
+  root="$(_vm_lock_default_root)" || return 1
   cur="$(_vm_lock_holder "$root")" || return 1
   [ "$cur" = "$owner" ] || return 1
   # The pid must be the one that took the lock: the owner folder's who file names it (an unrelated live pid such as $PPID is not).
@@ -128,9 +136,9 @@ _vm_lock_install_traps() {
 vm_lock_acquire() {
   local label="${1:?vm_lock_acquire needs a label}" unknown=0 wait poll waited=0 said src owner other who pid start rest olabel now errf t0
   vm_lock_inherited && return 0
-  _vm_lock_root="$(_vm_lock_default_root)"
+  _vm_lock_root="$(_vm_lock_default_root)" || { echo "::error::vm-lock: the lock root cannot be derived (the line above says why); set PADDOCK_VM_LOCK_ROOT or paddock.worktreeRoot (docs/dev-setup.md)" >&2; exit 3; }
   wait="${PADDOCK_VM_LOCK_WAIT:-0}"; poll="${PADDOCK_VM_LOCK_POLL:-5}"
-  mkdir -p "$_vm_lock_root" || { echo "::error::vm-lock: cannot create $_vm_lock_root; check that /Volumes/d7sst7 is mounted" >&2; exit 3; }
+  mkdir -p "$_vm_lock_root" || { echo "::error::vm-lock: cannot create $_vm_lock_root; check that the dev disk holding it is mounted (docs/dev-setup.md)" >&2; exit 3; }
   owner="$(mktemp -d "${TMPDIR:-/tmp}/paddock-vm-lock-$label-XXXXXX")"
   owner="$(cd "$owner" && pwd -P)" # `slot status` reports the canonical path
   printf '%s\t%s\t%s\n' "$$" "$(_vm_lock_start $$)" "$label" > "$owner/who"

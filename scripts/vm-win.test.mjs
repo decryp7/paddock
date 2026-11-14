@@ -201,7 +201,7 @@ describe('only paddock-win11-test can be the target', () => {
     for (const args of commands) {
       const r = run('vm-win.sh', args, { PADDOCK_WIN_VM_DIR: other, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' });
       assert.notEqual(r.status, 0, `${args[0]} was not refused`);
-      assert.match(r.stderr, /only drives \/Volumes\/d8sst7\/vm-data\/paddock-win11-test/, `${args[0]}: ${r.stderr}`);
+      assert.match(r.stderr, /only drives (\/\S+\/vm-data\/paddock-win11-test|the test VM, whose folder cannot be derived)/, `${args[0]}: ${r.stderr}`);
     }
     assert.equal(calls(f.log), '');
     assert.equal(existsSync(other), false);
@@ -317,7 +317,7 @@ describe('only paddock-win11-test can be the target', () => {
     const other = '/Volumes/no-such-volume-paddock-test/vms/someone-elses-vm'; // not creatable, so a regression cannot leave a folder behind
     const r = run('vm-win/prepare.sh', ['--vm-only'], { PADDOCK_WIN_VM_DIR: other, FUSION_APP: f.fusion, PATH: f.path, PADDOCK_VM_MAX_LOAD: '100000' });
     assert.notEqual(r.status, 0);
-    assert.match(r.stderr, /only drives \/Volumes\/d8sst7\/vm-data\/paddock-win11-test/);
+    assert.match(r.stderr, /only drives (\/\S+\/vm-data\/paddock-win11-test|the test VM, whose folder cannot be derived)/);
     assert.equal(existsSync(other), false);
     assert.equal(calls(f.log), '');
   });

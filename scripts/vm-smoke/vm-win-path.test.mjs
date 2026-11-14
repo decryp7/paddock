@@ -18,7 +18,7 @@ test('PADDOCK_VM_WIN is for tests only: a fake driver under $TMPDIR; anything el
   try {
     assert.equal(vmWinPath({ PADDOCK_VM_WIN: fake }), realpathSync(fake));
     assert.equal(vmWinPath({ PADDOCK_VM_WIN: '' }), VM_WIN_IN_REPO);
-    assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh' }), /PADDOCK_VM_WIN is for tests only/);
+    assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: '/srv/disk-a/dev-targets/scratch/dyno-vm-t/vm-win.sh' }), /PADDOCK_VM_WIN is for tests only/);
     assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: '/usr/bin/true' }), /PADDOCK_VM_WIN is for tests only/);
     assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: join(dir, 'missing.sh') }), /PADDOCK_VM_WIN is for tests only/);
     // a caller-set TMPDIR does not move the trusted root
