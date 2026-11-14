@@ -8,7 +8,7 @@
 #   bash paddock/tools/linux-container.sh --id dyno [--root <repo>] [--packages dyno-platform] -- [command...]
 #   bash paddock/tools/linux-container.sh --id paddock --image <ref> [--platform linux/amd64] -- command...   # a ready image, run as it is
 #   bash paddock/tools/linux-container.sh --id paddock --ci-image [--platform linux/amd64] -- command...   # the CI image, native by default
-#   bash paddock/tools/linux-container.sh --id dyno --clean              # stop labelled containers, delete the two volumes
+#   bash paddock/tools/linux-container.sh --id dyno --clean              # stop labelled containers, delete its volumes and local CI images
 #
 # With no command: `cargo test -p <packages> && cargo clippy -p <packages> --all-targets -- -D warnings`.
 #
@@ -16,9 +16,13 @@
 # linux/amd64 is the registry's paddock-ci:v<VERSION>; linux/arm64 (the default on an Apple Silicon Mac) is built here from
 # ci-image/Dockerfile on ci-image/garage-arm64.Dockerfile, tagged by a hash of those files, labelled, and never pushed. amd64 on an
 # arm64 host runs under emulation, where a failed exec is not reported to the parent; the script then prints a warning.
+# The arm64 image has no Chrome for Testing and no draw.io (neither is published for Linux arm64): it runs the Rust gates and
+# Node scripts, not the e2e suites against Chrome for Testing or the SVG drift check, which stay CI's (amd64). A new arm64 build
+# removes this id's older local images (paddock-ci-local, paddock-garage-local; about 11 GB a pair); --clean removes them all.
 # A linked worktree's git folders (its own and the common one) are mounted read-only at their own paths, so git works inside; the
 # pre-push state folder (<common git dir>/paddock-pre-push) is a tmpfs there, so `dev check --pre-push` can write its logs without
-# touching the host's. CARGO_TARGET_DIR (/target, a volume) and /tmp are the other writable places.
+# touching the host's. CARGO_TARGET_DIR (/target, a volume) and /tmp are the other writable places. git's safe.directory comes
+# from a global config file the container writes to /tmp at start (GIT_CONFIG_GLOBAL), because the repository's owner is the host user.
 # Environment: DOCKER (default docker), PADDOCK_LINUX_BASE_IMAGE (rust:1-bookworm), PADDOCK_LINUX_CPUS (4), PADDOCK_LINUX_JOBS (2),
 # PADDOCK_LINUX_HOST_ARCH (default `uname -m`; tests pretend with it), PADDOCK_LINUX_CI_REGISTRY (dev.decryptology.net/decryp7/paddock-ci),
 # PADDOCK_LINUX_RUN_LABEL (an extra label, `key=value`, on the container: `dev check --pre-push` finds and stops its own container by it), PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
@@ -45,6 +49,17 @@ docker="${DOCKER:-docker}"
 command -v "$docker" >/dev/null 2>&1 || { echo "linux-container: $docker (OrbStack or Docker) is needed" >&2; exit 1; }
 
 label="paddock.tools=$id"
+
+# Removes this id's local CI images (the arm64 builds of --ci-image) except the ones named; only images with this id's label.
+remove_local_images() {
+  local ref keep
+  while IFS= read -r ref; do
+    case "$ref" in paddock-ci-local:* | paddock-garage-local:*) ;; *) continue ;; esac
+    for keep in "$@"; do [ "$ref" != "$keep" ] || continue 2; done
+    "$docker" image rm "$ref" >/dev/null 2>&1 && echo "linux-container: removed the old local image $ref" >&2
+  done < <("$docker" image ls --filter "label=$label" --format '{{.Repository}}:{{.Tag}}')
+  return 0
+}
 base_image="${PADDOCK_LINUX_BASE_IMAGE:-rust:1-bookworm}"
 image="$id-linux-dev:1"
 cpus="${PADDOCK_LINUX_CPUS:-4}"
@@ -58,6 +73,7 @@ if [ "$clean" = 1 ]; then
   # shellcheck disable=SC2086
   [ -z "$leftovers" ] || "$docker" rm -f $leftovers >/dev/null
   "$docker" volume rm -f "$registry_volume" "$target_volume" "$target_volume-arm64" >/dev/null
+  remove_local_images
   echo "removed the volumes $registry_volume, $target_volume and $target_volume-arm64"
   exit 0
 fi
@@ -101,6 +117,7 @@ if [ "$ci_image" = 1 ]; then
       "$docker" build --platform linux/arm64 --label "$label" --build-arg "GARAGE_IMAGE=$garage" -f "$root/ci-image/Dockerfile" -t "$image" "$root/ci-image" >&2 \
         || { echo "::error::linux-container: building $image failed (exit $?). Next step: read the build output above; verify.sh names what is missing" >&2; exit 1; }
       echo "linux-container: built $image in $((SECONDS - started)) s in all" >&2
+      remove_local_images "$image" "$garage"
     fi
   else
     image="${PADDOCK_LINUX_CI_REGISTRY:-dev.decryptology.net/decryp7/paddock-ci}:v$version"
@@ -151,8 +168,11 @@ fi
 if [ -n "$state" ]; then
   # The mount point must exist in the read-only folder; it is the pre-push tool's own state folder, made empty if missing.
   mkdir -p "$state" 2>/dev/null && git_args+=(--mount "type=tmpfs,target=$state_in")
-  # The repository belongs to the host user; git refuses another owner's repository unless it is marked safe.
-  git_args+=(-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*')
+  # The repository belongs to the host user; git refuses another owner's repository unless it is marked safe. A global config file
+  # in the container's /tmp says so, written before the command starts (nothing is added to the command's own config variables).
+  git_args+=(-e GIT_CONFIG_GLOBAL=/tmp/paddock-linux-gitconfig)
+  # shellcheck disable=SC2016 # expanded by the container's sh, not here
+  set -- sh -c 'printf "[safe]\n\tdirectory = *\n" > "$GIT_CONFIG_GLOBAL" && exec "$@"' linux-container "$@"
 fi
 
 exec "$docker" run --rm --label "$label" ${PADDOCK_LINUX_RUN_LABEL:+--label "$PADDOCK_LINUX_RUN_LABEL"} --cpus "$cpus" --memory "$memory" \

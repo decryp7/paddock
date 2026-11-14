@@ -2019,7 +2019,8 @@ differs on OrbStack's btrfs, where an empty folder has no blocks and a few bytes
 1 KB cap (CI's ext4 gives every folder a 4 KB block, which hides it; open, owned by paddock-dev). The emulation class had been seen twice before:
 f08362a29 (Spotter's notifier, 2026-10-30) and feat/heavy-priority-lane (2026-11-13). What changed: `tools/linux-container.sh`
 mounts a worktree's git folders read-only at their own paths with a tmpfs pre-push state folder, and `--ci-image` runs the CI
-image natively (linux/arm64 on the Mac, built locally from `ci-image/` on `ci-image/garage-arm64.Dockerfile`, the same pins) and
-warns whenever amd64 is emulated. CI's Linux jobs stay on their native amd64 runners. **Rule for agents:** run the local Linux
+image natively (linux/arm64 on the Mac, built locally from `ci-image/Dockerfile` on `ci-image/garage-arm64.Dockerfile`: garage's
+base tag and tool versions as recorded in `ci-image/garage-release.txt` and checked by verify.sh, paddock-ci's own pins on top;
+apt packages float, and there is no Chrome for Testing or draw.io) and warns whenever amd64 is emulated. CI's Linux jobs stay on their native amd64 runners. **Rule for agents:** run the local Linux
 gate with `--ci-image` and no `--platform`; a missing-program or timing failure seen only under emulation is not a finding.
 **Class: environment-only failures of the local Linux gate (amd64 emulation on Apple Silicon).**

@@ -5,9 +5,9 @@ import { test } from 'node:test';
 import { calls, run, scratch, shim, write } from './helpers.mjs';
 
 /** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set; `build` reads its Dockerfile from stdin like the real one (an unread pipe would end the script's printf with SIGPIPE). */
-function docker({ ps = '' } = {}) {
+function docker({ ps = '', images = [] } = {}) {
   const bin = scratch('paddock-bin-');
-  shim(bin, 'docker', `case "$1 $2" in "image inspect") [ -n "$HAVE_IMAGE" ];; "ps -aq") echo "${ps}";; "build "*) cat >/dev/null;; esac`);
+  shim(bin, 'docker', `case "$1 $2" in "image inspect") [ -n "$HAVE_IMAGE" ];; "ps -aq") echo "${ps}";; "image ls") printf '%s\\n' ${images.join(' ')};; "build "*) cat >/dev/null;; esac`);
   return bin;
 }
 const go = (bin, args, env = {}) => run('linux-container.sh', args, { bin, cwd: scratch(), env: { DOCKER: join(bin, 'docker'), ...env } });
@@ -48,7 +48,12 @@ test('--clean removes only containers with this app\'s label and only its volume
   const r = go(bin, ['--id', 'dyno', '--clean']);
   assert.equal(r.status, 0, r.out);
   const log = calls(bin);
-  assert.deepEqual(log, ['docker ps -aq --filter label=paddock.tools=dyno', 'docker rm -f abc123 def456', 'docker volume rm -f dyno-cargo-registry dyno-linux-target dyno-linux-target-arm64']);
+  assert.deepEqual(log, [
+    'docker ps -aq --filter label=paddock.tools=dyno',
+    'docker rm -f abc123 def456',
+    'docker volume rm -f dyno-cargo-registry dyno-linux-target dyno-linux-target-arm64',
+    'docker image ls --filter label=paddock.tools=dyno --format {{.Repository}}:{{.Tag}}',
+  ]);
   const none = docker();
   go(none, ['--id', 'dyno', '--clean']);
   assert.ok(!calls(none).some((l) => l.startsWith('docker rm')), 'no container, no rm');
@@ -156,7 +161,9 @@ test('a linked worktree gets its common git folder read-only at its own path, a 
   assert.ok(runLine.includes(`type=bind,source=${common},target=${common},readonly`), runLine);
   assert.ok(!runLine.includes(`target=${common}/worktrees/wt,`), 'a git folder inside the common one is not mounted twice');
   assert.ok(runLine.includes(`type=tmpfs,target=${common}/paddock-pre-push`), runLine);
-  assert.match(runLine, /-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe\.directory -e GIT_CONFIG_VALUE_0=\*/);
+  assert.ok(runLine.includes(' -e GIT_CONFIG_GLOBAL=/tmp/paddock-linux-gitconfig '), runLine);
+  assert.doesNotMatch(runLine, /GIT_CONFIG_COUNT/);
+  assert.ok(runLine.endsWith(' img sh -c printf "[safe]\\n\\tdirectory = *\\n" > "$GIT_CONFIG_GLOBAL" && exec "$@" linux-container git status'), runLine);
   assert.ok(existsSync(join(common, 'paddock-pre-push')), 'the mount point exists');
 
   const elsewhere = realpathSync(write(scratch(), { 'commondir': `${common}\n`, 'HEAD': 'x\n' }));
@@ -175,4 +182,28 @@ test('a checkout with a .git folder needs no extra git mount; its pre-push state
   const runLine = calls(bin).at(-1);
   assert.ok(!runLine.includes('type=bind,source=' + repo + '/.git'), runLine);
   assert.ok(runLine.includes('type=tmpfs,target=/work/.git/paddock-pre-push'), runLine);
+});
+
+test('a new arm64 build removes this id\'s older local CI images and keeps the new pair; --clean removes them all, never another image', () => {
+  const images = ['paddock-ci-local:v3-arm64-aaaaaaaaaaaa', 'paddock-garage-local:arm64-aaaaaaaaaaaa', 'paddock-linux-dev:1', 'someone-else:latest'];
+  const bin = docker({ images });
+  const repo = ciRepo();
+  const r = go(bin, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+  assert.equal(r.status, 0, r.out);
+  const log = calls(bin);
+  assert.ok(log.includes('docker image ls --filter label=paddock.tools=paddock --format {{.Repository}}:{{.Tag}}'), log.join('\n'));
+  const removed = log.filter((l) => l.startsWith('docker image rm'));
+  assert.deepEqual(removed, ['docker image rm paddock-ci-local:v3-arm64-aaaaaaaaaaaa', 'docker image rm paddock-garage-local:arm64-aaaaaaaaaaaa']);
+  assert.match(r.out, /removed the old local image paddock-ci-local:v3-arm64-aaaaaaaaaaaa/);
+  const fresh = log.find((l) => l.startsWith('docker build') && l.includes('ci-image/Dockerfile')).match(/-t (\S+)/)[1];
+  const kept = docker({ images: [fresh] });
+  go(kept, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+  assert.ok(!calls(kept).some((l) => l.startsWith('docker image rm')), 'the image just built stays');
+
+  const all = docker({ images });
+  assert.equal(go(all, ['--id', 'paddock', '--clean']).status, 0);
+  assert.deepEqual(calls(all).filter((l) => l.startsWith('docker image rm')), removed);
+  const nobuild = docker({ images });
+  go(nobuild, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64', HAVE_IMAGE: '1' });
+  assert.ok(!calls(nobuild).some((l) => l.startsWith('docker image')  && !l.startsWith('docker image inspect')), 'no build, no clean-up');
 });
