@@ -1036,30 +1036,52 @@ fn run_kept(fx: &Fx, step: &Step, rust: bool) -> Seen {
     seen
 }
 
+/// The shell on fixture `a` and the Rust command on fixture `b` at the same time: two folders and two processes that share nothing, so a
+/// parity check waits for the slower of the two, not for both one after the other (a kept-clone test runs up to 24 jobs; one after
+/// the other they reached nextest's 60 s bound on the loaded CI Mac, runs 8054 and 8099).
+fn run_kept_pair(a: &Fx, b: &Fx, shell: &Step, rust: &Step) -> (Seen, Seen) {
+    std::thread::scope(|s| {
+        let sh = s.spawn(|| run_kept(a, shell, false));
+        let r = run_kept(b, rust, true);
+        (sh.join().expect("the shell's run panicked"), r)
+    })
+}
+
+/// Two kept fixtures, made at the same time (each is a handful of git commands; see [`run_kept_pair`]).
+fn kept_fixtures() -> (Fx, Fx) {
+    std::thread::scope(|s| {
+        let a = s.spawn(|| {
+            let fx = fixture();
+            kept_fixture(&fx);
+            fx
+        });
+        let b = fixture();
+        kept_fixture(&b);
+        (a.join().expect("a kept fixture failed"), b)
+    })
+}
+
 /// Both implementations on a fresh kept fixture each: a first job, then `between` (what a later job finds), then a second job.
 /// Every job's result must agree; returns the Rust command's second result.
 fn kept_twice(first: &Step, between: &dyn Fn(&Fx), second: &Step) -> Seen {
-    let (a, b) = (fixture(), fixture());
-    kept_fixture(&a);
-    kept_fixture(&b);
-    let (s1, r1) = (run_kept(&a, first, false), run_kept(&b, first, true));
+    let (a, b) = kept_fixtures();
+    let (s1, r1) = run_kept_pair(&a, &b, first, first);
     assert_eq!(s1, r1, "the first job: the shell (left) and the Rust command (right) differ");
     for fx in [&a, &b] {
         between(fx);
         fresh_job(fx);
     }
-    let (s2, r2) = (run_kept(&a, second, false), run_kept(&b, second, true));
+    let (s2, r2) = run_kept_pair(&a, &b, second, second);
     assert_eq!(s2, r2, "the second job: the shell (left) and the Rust command (right) differ");
     r2
 }
 
 fn kept_once(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
-    let (a, b) = (fixture(), fixture());
+    let (a, b) = kept_fixtures();
     for fx in [&a, &b] {
-        kept_fixture(fx);
         setup(fx);
     }
-    let (s, r) = (run_kept(&a, step, false), run_kept(&b, step, true));
+    let (s, r) = run_kept_pair(&a, &b, step, step);
     assert_eq!(s, r, "the shell (left) and the Rust command (right) differ");
     r
 }
@@ -1124,8 +1146,12 @@ fn kept_clone_reuses_the_clone_and_leaves_a_clean_tree_whatever_the_last_job_lef
     );
 }
 
+// The kept clone is made again, never reused, when it is foreign, unmarked, too big, broken or locked, and on a tag run. One test per
+// case: together they ran 24 jobs one after the other, 26 s on a quiet Mac and past nextest's 60 s bound on the loaded CI Mac (runs 8054,
+// 8099).
+
 #[test]
-fn kept_clone_makes_the_clone_again_when_it_is_foreign_stale_locked_unmarked_or_too_big() {
+fn kept_clone_makes_the_clone_again_when_it_is_foreign() {
     let step = kept_step("macOS", "lean", vec![]);
     // A config key this step did not write (it changes what git does): one warning naming it, a new clone.
     let seen = kept_twice(
@@ -1143,25 +1169,43 @@ fn kept_clone_makes_the_clone_again_when_it_is_foreign_stale_locked_unmarked_or_
         seen.stdout
     );
     assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
+}
+
+#[test]
+fn kept_clone_makes_the_clone_again_when_it_is_unmarked() {
     // The marker is missing (an older layout's checkout): never reused.
+    let step = kept_step("macOS", "lean", vec![]);
     let seen = kept_twice(
         &step,
         &|fx| std::fs::remove_file(fx.p("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/paddock-kept-clone")).unwrap(),
         &step,
     );
     assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
-    // Too big.
+}
+
+#[test]
+fn kept_clone_makes_the_clone_again_when_it_is_too_big() {
+    let step = kept_step("macOS", "lean", vec![]);
     let big = kept_step("macOS", "lean", vec![("PADDOCK_KEPT_CLONE_MAX_MIB", "0".into())]);
     let seen = kept_twice(&step, &|_| {}, &big);
     assert!(seen.stdout.contains("larger than 0 MiB; starting again"), "{}", seen.stdout);
-    // A broken HEAD.
+}
+
+#[test]
+fn kept_clone_makes_the_clone_again_when_its_head_is_broken() {
+    let step = kept_step("macOS", "lean", vec![]);
     let seen = kept_twice(
         &step,
         &|fx| fx.write("home/.paddock-ci/src/decryp7_paddock-crate-s1/.git/HEAD", "garbage\n"),
         &step,
     );
     assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
+}
+
+#[test]
+fn kept_clone_makes_the_clone_again_when_it_is_stale_locked() {
     // A stale lock: the first bring-up fails on it, a new clone succeeds, and the failing command is named.
+    let step = kept_step("macOS", "lean", vec![]);
     let seen = kept_twice(
         &step,
         &|fx| {
@@ -1176,20 +1220,21 @@ fn kept_clone_makes_the_clone_again_when_it_is_foreign_stale_locked_unmarked_or_
         seen.stdout
     );
     assert!(seen.stdout.contains("(created, profile lean"), "{}", seen.stdout);
+}
+
+#[test]
+fn kept_clone_makes_the_clone_again_on_a_tag_run() {
     // The tag run never reuses a clone shared with branch jobs: the shell has FRESH=true, the Rust command --fresh.
-    let (a, b) = (fixture(), fixture());
-    for fx in [&a, &b] {
-        kept_fixture(fx);
-    }
+    let (a, b) = kept_fixtures();
     let first = kept_step("macOS", "lean", vec![]);
-    let _ = (run_kept(&a, &first, false), run_kept(&b, &first, true));
+    let _ = run_kept_pair(&a, &b, &first, &first);
     fresh_job(&a);
     fresh_job(&b);
     let mut shell_fresh = kept_step("macOS", "lean", vec![]);
     shell_fresh.shell_env.push(("FRESH", "true".into()));
     let mut rust_fresh = kept_step("macOS", "lean", vec![]);
     rust_fresh.rust.push("--fresh");
-    let (s, r) = (run_kept(&a, &shell_fresh, false), run_kept(&b, &rust_fresh, true));
+    let (s, r) = run_kept_pair(&a, &b, &shell_fresh, &rust_fresh);
     assert_eq!(s, r, "FRESH: the shell (left) and the Rust command (right) differ");
     assert!(
         r.stdout.contains("(created, profile lean") && !r.stdout.contains("kept-clone: clean"),
@@ -1294,42 +1339,76 @@ const KEPT_PHASES: [(&str, &str, &str); 7] = [
     ("PADDOCK_KEPT_CLONE_TIMEOUT_LINK", "", "link "),
 ];
 
-#[test]
-fn kept_clone_each_phase_is_bounded_by_its_own_limit() {
-    // One phase at a time hangs (a git that sleeps on that phase's command) and only that phase has a short limit (1 s): it ends in a
-    // warning naming it, the job never fails, and no other phase can meet a limit (they keep the default, 900 s).
+/// One phase hangs (a git that sleeps on that phase's command) and only that phase has a short limit (1 s): it ends in a warning naming
+/// it, the job never fails, and no other phase can meet a limit (they keep the default, 900 s). One test per phase: the five together
+/// ran 20 jobs with two hung phases each one after the other, 33 s on a quiet Mac and past nextest's 60 s bound on the loaded CI Mac
+/// (run 8099).
+fn kept_phase_is_bounded_by_its_own_limit(id: &str) {
+    let (id, word, label) = KEPT_PHASES.iter().find(|(i, ..)| *i == id).expect("a phase of KEPT_PHASES");
+    assert!(!word.is_empty(), "{id} runs no git, so no git can hang in it");
     let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
-    for (id, word, label) in KEPT_PHASES.iter().filter(|(_, w, _)| !w.is_empty()) {
-        let shim = format!(
-            "case \" $* \" in *\"{word}\"*) exec /bin/sleep 30;; esac\nexec '{}' \"$@\"",
-            real.trim()
-        );
-        let step = kept_step("macOS", "lean", vec![(*id, "1".into())]);
-        // The clean phase runs only on a reused clone: a first job makes it, then the second job's clean hangs.
-        let seen = if *id == "PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN" {
-            kept_twice(&kept_step("macOS", "lean", vec![]), &|fx: &Fx| fx.script("bin/git", &shim), &step)
-        } else {
-            kept_once(&|fx: &Fx| fx.script("bin/git", &shim), &step)
-        };
-        assert_eq!(seen.code, 0, "{id}: {seen:?}");
-        let warned = format!("::warning::kept-clone: '{label}");
-        assert!(
-            seen.stdout
-                .lines()
-                .any(|l| l.starts_with(&warned) && l.contains("' did not finish within 1 s")),
-            "{id}: the phase '{label}' ends at its own limit: {}",
-            seen.stdout
-        );
-        // A hung clean is followed by a new clone, which has no clean phase: the job ends on that clone. Every other phase hangs again
-        // on the new clone, and the job builds from the work folder.
-        let end = if *id == "PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN" {
-            "(created, profile lean"
-        } else {
-            "building from the work folder"
-        };
-        assert!(seen.stdout.contains(end), "{id}: {}", seen.stdout);
-        assert!(!seen.stdout.contains("::error::"), "{id}: {}", seen.stdout);
-    }
+    let shim = format!(
+        "case \" $* \" in *\"{word}\"*) exec /bin/sleep 30;; esac\nexec '{}' \"$@\"",
+        real.trim()
+    );
+    let step = kept_step("macOS", "lean", vec![(*id, "1".into())]);
+    // The clean phase runs only on a reused clone: a first job makes it, then the second job's clean hangs.
+    let seen = if *id == "PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN" {
+        kept_twice(&kept_step("macOS", "lean", vec![]), &|fx: &Fx| fx.script("bin/git", &shim), &step)
+    } else {
+        kept_once(&|fx: &Fx| fx.script("bin/git", &shim), &step)
+    };
+    assert_eq!(seen.code, 0, "{id}: {seen:?}");
+    let warned = format!("::warning::kept-clone: '{label}");
+    assert!(
+        seen.stdout
+            .lines()
+            .any(|l| l.starts_with(&warned) && l.contains("' did not finish within 1 s")),
+        "{id}: the phase '{label}' ends at its own limit: {}",
+        seen.stdout
+    );
+    // A hung clean is followed by a new clone, which has no clean phase: the job ends on that clone. Every other phase hangs again
+    // on the new clone, and the job builds from the work folder.
+    let end = if *id == "PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN" {
+        "(created, profile lean"
+    } else {
+        "building from the work folder"
+    };
+    assert!(seen.stdout.contains(end), "{id}: {}", seen.stdout);
+    assert!(!seen.stdout.contains("::error::"), "{id}: {}", seen.stdout);
+}
+
+#[test]
+fn kept_clone_the_create_phase_is_bounded_by_its_own_limit() {
+    kept_phase_is_bounded_by_its_own_limit("PADDOCK_KEPT_CLONE_TIMEOUT_CREATE");
+}
+
+#[test]
+fn kept_clone_the_clean_phase_is_bounded_by_its_own_limit() {
+    kept_phase_is_bounded_by_its_own_limit("PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN");
+}
+
+#[test]
+fn kept_clone_the_fetch_phase_is_bounded_by_its_own_limit() {
+    kept_phase_is_bounded_by_its_own_limit("PADDOCK_KEPT_CLONE_TIMEOUT_FETCH");
+}
+
+#[test]
+fn kept_clone_the_checkout_phase_is_bounded_by_its_own_limit() {
+    kept_phase_is_bounded_by_its_own_limit("PADDOCK_KEPT_CLONE_TIMEOUT_CHECKOUT");
+}
+
+#[test]
+fn kept_clone_the_verify_phase_is_bounded_by_its_own_limit() {
+    kept_phase_is_bounded_by_its_own_limit("PADDOCK_KEPT_CLONE_TIMEOUT_VERIFY");
+}
+
+#[test]
+fn kept_clone_every_phase_that_runs_git_has_its_own_limit_test() {
+    // The tests above are one per phase that runs git; a phase added to KEPT_PHASES with a git word needs its own, or it is not tested.
+    let tested = ["CREATE", "CLEAN", "FETCH", "CHECKOUT", "VERIFY"].map(|p| format!("PADDOCK_KEPT_CLONE_TIMEOUT_{p}"));
+    let with_git: Vec<&str> = KEPT_PHASES.iter().filter(|(_, w, _)| !w.is_empty()).map(|(id, ..)| *id).collect();
+    assert_eq!(with_git, tested.iter().map(String::as_str).collect::<Vec<_>>());
 }
 
 #[test]

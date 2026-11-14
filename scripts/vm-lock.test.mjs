@@ -5,16 +5,24 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { after, before, test } from 'node:test';
+import { after, afterEach, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { warmDev } from './vm-test-support.mjs';
+import { endHolders, warmDev } from './vm-test-support.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const LIB = join(here, 'vm-lock.sh');
-const DEV = join(here, '..', 'dev');
 const scratch = mkdtempSync(join(process.env.PADDOCK_TEST_SCRATCH ?? tmpdir(), 'vm-lock-test-'));
-after(() => rmSync(scratch, { recursive: true, force: true }));
-before(warmDev);
+/** The paddock-dev program the lock runs (PADDOCK_DEV): the cached binary, or ./dev when its inputs have uncommitted changes. */
+let DEV = join(here, '..', 'dev');
+before(() => { DEV = warmDev(); });
+/** ER-14: no `slot hold` outlives the test that started it. A killed holder script leaves its detached holder running until the
+ * owner folder goes; this ends it then, and fails the test if one had to be killed. */
+const guardHolders = async () => {
+  const killed = await endHolders(scratch);
+  assert.deepEqual(killed, [], 'a slot holder ignored the removal of its owner folder and had to be killed');
+};
+afterEach(guardHolders);
+after(async () => { await guardHolders(); rmSync(scratch, { recursive: true, force: true }); });
 
 /** A holder's body: it waits until its process group is killed, never for a fixed time (a slow machine must not outlast it, ER-12). */
 const FOREVER = 'while :; do sleep 0.2; done';
@@ -31,7 +39,13 @@ const fresh = () => {
 /** A stub "VM script": takes the lock as `label`, logs, runs `body` (bash), and logs the end. */
 const stub = (label, log, body = 'true') =>
   `. '${LIB}'; vm_lock_acquire ${label}; echo "${label} start" >> '${log}'; ${body}; echo "${label} end" >> '${log}'`;
-const bash = (script, env) => spawnSync('bash', ['-c', script], { env, encoding: 'utf8', timeout: 60_000 });
+/** Runs a script to its end; when the 60 s bound ends it, the stderr says so (a null status alone explains nothing, ER-27). */
+const bash = (script, env) => {
+  const t0 = Date.now();
+  const r = spawnSync('bash', ['-c', script], { env, encoding: 'utf8', timeout: 60_000 });
+  if (r.status === null) r.stderr = `${r.stderr ?? ''}\n[test] bash was ended by ${r.signal} after ${Date.now() - t0} ms (bound 60 s); its stderr up to then is above`;
+  return r;
+};
 const lines = (f) => (existsSync(f) ? readFileSync(f, 'utf8').trim().split('\n') : []);
 /** Polls `cond` every 100 ms until it holds; the bound only stops a hung child, so the verdict never depends on the time taken. */
 const until = async (cond) => {
@@ -126,9 +140,10 @@ const waitFor = async (f, line) => { assert.ok(await until(() => lines(f).includ
 /** A holder in its own process group (killed with the group, so no orphaned sleep or detached holder outlives the test). */
 const hold = async (t, label, body = FOREVER) => {
   const child = spawn('bash', ['-c', stub(label, t.log, `echo ready-${label} >> '${t.log}'; ${body}`)], { env: t.env, stdio: 'ignore', detached: true });
-  await waitFor(t.log, `ready-${label}`);
   const exited = new Promise((r) => child.on('exit', r));
-  return { child, stop: async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; } };
+  const stop = async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; await guardHolders(); };
+  try { await waitFor(t.log, `ready-${label}`); } catch (e) { await stop(); throw e; } // a holder that never got ready must not outlive the test either
+  return { child, stop };
 };
 /** The start the lock records for a pid (vm-lock.sh's own function: `ps lstart`, plus the kernel start tick on Linux). */
 const lstart = (pid) => spawnSync('bash', ['-c', `. '${LIB}'; _vm_lock_start ${Number(pid)}`], { encoding: 'utf8' }).stdout.trim();
@@ -248,4 +263,23 @@ test('no holder in the lock tests lives for a fixed time: a holder waits for its
     const longSleeps = readFileSync(join(here, file), 'utf8').split('\n').filter((l) => /sleep (\d{2,}|[3-9])\b/.test(l) && !l.includes('longSleeps'));
     assert.deepEqual(longSleeps, [], `${file}: a holder that sleeps a fixed time frees the lock when the test runs longer`);
   }
+});
+
+test('ER-14: a holder killed by its test leaves no `slot hold` process once the test\'s guard returns', async () => {
+  const t = fresh();
+  const h = await hold(t, 'guarded');
+  const holder = Number(readFileSync(join(t.root, 'slots', 's1.owner'), 'utf8').match(/^pid=(\d+)$/m)?.[1]);
+  assert.ok(holder > 0, 'the slot names its holder process');
+  await h.stop();
+  let alive = true;
+  try { process.kill(holder, 0); } catch { alive = false; }
+  assert.equal(alive, false, `the detached \`slot hold\` (pid ${holder}) outlived the test's guard`);
+});
+
+test('ER-27: a slow paddock-dev call is logged with its step, duration and exit code', () => {
+  const t = fresh();
+  const r = bash(stub('logged', t.log), { ...t.env, PADDOCK_VM_LOCK_SLOW_SECS: '0' }); // 0: every call counts as slow, so no test waits for a slow one
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /vm-lock: paddock-dev ci slot acquire took \d+s \(exit 0\); the host may be overloaded/);
+  assert.match(r.stderr, /vm-lock: paddock-dev ci slot release took \d+s \(exit 0\)/);
 });

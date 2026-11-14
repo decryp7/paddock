@@ -1243,3 +1243,30 @@ Mac mini (14 cores), 1-minute load 9 to 12, warm git objects. One run each; quot
 
 The per-gate times of `./dev check --pre-push` on a shared-crate change (about 100 s of wall time with warm build folders) are in
 "`./dev check --pre-push` run times" above.
+
+### 2026-11-14, VM lock and kept-clone tests under load (fix/vm-tooling-and-kept-clone-tests)
+
+- **Commit:** base 8c9c01dde (train 11) → this branch
+- **Machine:** the shared Mac mini (14 cores, macOS 27.2), with the CI runners and other agents running
+- **Load:** extra load: 6 `yes` burners (scratch `load.sh 6`); measured 1-minute load during the runs 35.5–120.5 (kept-clone, the first
+  runs still in the decay of an earlier 42-burner run) and 22–29 (VM tests); no runs at the coordinator's request beyond 6 burners
+- **Build:** debug test binary (`cargo nextest run --profile ci`, `NEXTEST_TEST_THREADS=4`, `CARGO_BUILD_JOBS=2`); node 24 for the VM tests
+- **Command:** `cargo nextest run --profile ci --test it -E 'test(/host_steps::kept/)'` (20 times);
+  `node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs` (3 times, the 5-minute share of the load budget)
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | `./dev ci slot status` through the wrapper, idle / load 36 / load 200 (CPU) | 0.17 / 0.4 / 0.4 (max 1.0) s | binary: 0.01 s | none | the VM tests now run the binary |
+  | kept-clone "foreign, stale, locked, unmarked, too big" (one test before, six after), quiet | 25.6 s | 2.1–2.7 s each | nextest 60 s | pass |
+  | kept-clone "each phase bounded" (one test before, five after), quiet | 33.1 s | 2.8–4.5 s each | nextest 60 s | pass |
+  | the same two, load 95 (42 burners, base only) | 41.1 / 35.3 s | not run at that load | nextest 60 s | base fails on CI (runs 8054, 8099) |
+  | slowest kept-clone test, 20 runs, 6 burners | — | max 5.2 s (clean phase), 0 failures | nextest 60 s | pass |
+  | VM lock + VM win tests, whole run, quiet | 133 s | 99 s | none | — |
+  | the same, 6 burners, 3 runs | — | 138–142 s, 71/71 pass, 0 `slot hold` left after each run | none | pass |
+  | `slot hold` processes left after a run, quiet | 1 (seen by `ps` after node exited) | 0 | 0 (ER-14) | pass |
+
+- **Notes:** the kept-clone speed-up is parity runs of the shell and Rust implementations at the same time (two fixtures, nothing
+  shared), one test per case, and bounded.sh's first second of naps at 0.05 s instead of 0.2 s (a kept clone's six phases each waited
+  at least one nap). No limit was raised. The CI stall of single `./dev` calls past 60 s in run 8099 was not reproduced here (CPU load to
+  200 and a 4 × 6 GB write load gave at most 1.0 s per wrapper call): not measured. Raw output in the agent's scratch folder, not kept.
