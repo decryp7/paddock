@@ -73,7 +73,7 @@ function gateWorkflows(root) {
 const ACTION = 'actions/plan/action.yml';
 const actionText = () => readFileSync(join(PADDOCK, '.gitea', ACTION), 'utf8');
 /** Release workflows whose plan job is the shared plan action (it prints the verdict line; the workflow passes `full`). */
-const ACTION_WORKFLOWS = ['spotter-release.yml'];
+const ACTION_WORKFLOWS = ['dyno-release.yml', 'pitcrew-release.yml', 'pitwall-release.yml', 'spotter-release.yml'];
 
 const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');
 

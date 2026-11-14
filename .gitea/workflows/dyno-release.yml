@@ -58,6 +58,8 @@ jobs:
           nightly-marker: "false"
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           release: "true"
+          # Full when the gates job runs (a tag, or a dispatch with gates on): the scope of the plan action's verdict line.
+          full: ${{ startsWith(github.ref, 'refs/tags/dyno-v') || github.event.inputs.gates == 'true' }}
 
       # ADR 0072 D8: a tag whose pattern a ratchet entry of docs/ipc-endpoint-ratchet.toml blocks is refused (connection endings
       # not yet made right), before the gates run. Fails this job, so `gates` and `release` do not start.

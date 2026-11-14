@@ -56,6 +56,8 @@ jobs:
           nightly-marker: "false"
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           release: "true"
+          # Full when the gates job runs (a tag, or a dispatch with gates on): the scope of the plan action's verdict line.
+          full: ${{ startsWith(github.ref, 'refs/tags/pitwall-v') || github.event.inputs.gates == 'true' }}
       # ADR 0052 §1.1, C85: report-only (amended 2026-11-12, user): a test that features.toml owes (`owed_until`) and that is due, expired or
       # past the next release line is a warning of C85 itself (exit 0; it shows in the log and the job summary) and never blocks the tag.
       # Nothing here swallows an exit code: a register or source C85 cannot read (not measured, exit 6), a broken reader (exit 7) and a
