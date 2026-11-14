@@ -49,7 +49,7 @@ pub trait Gates {
 fn program() -> Result<std::path::PathBuf, String> {
     match std::env::var_os("PADDOCK_MERGE_CHECK_GATES") {
         Some(p) => Ok(p.into()),
-        None => std::env::current_exe().map_err(|e| format!("this program cannot be found: {e}")),
+        None => crate::tool_cache::self_exe().map_err(|e| format!("this program cannot be found: {e}")),
     }
 }
 

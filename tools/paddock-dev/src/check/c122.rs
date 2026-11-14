@@ -223,6 +223,15 @@ impl Check for C122 {
         "Tests compare paths as paths"
     }
 
+    fn scope(&self) -> super::CheckScope {
+        // As the JavaScript host declares it (`scope: 'root'`): run once over the whole tree, not again per app.
+        super::CheckScope::Root
+    }
+
+    fn mode(&self) -> super::Mode {
+        super::Mode::ReportOnly
+    }
+
     fn control(&self) -> Control {
         Control {
             files: vec![
