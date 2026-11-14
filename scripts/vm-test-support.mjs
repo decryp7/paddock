@@ -29,6 +29,9 @@ export function warmDev() {
 }
 
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+/** Is `pid` running: it exists and is not a zombie. A zombie has ended (its parent has not collected it); in CI's job container
+ * PID 1 never collects, so an orphaned holder stays a zombie that `kill(pid, 0)` still answers for (CI run 8110). */
+export const running = (pid) => alive(pid) && !spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim().startsWith('Z');
 const commandOf = (pid) => spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
 
 /**
@@ -61,8 +64,8 @@ export async function endHolders(scratch) {
     const owner = h.command.match(/--owner (\S+)/)?.[1];
     if (owner && inside(owner, scratch)) rmSync(owner, { recursive: true, force: true });
   }
-  for (let i = 0; i < 300 && holders.some((h) => alive(h.pid)); i++) await new Promise((r) => setTimeout(r, 50)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a holder that ignores its owner folder
-  const killed = holders.filter((h) => alive(h.pid) && commandOf(h.pid) === h.command);
+  for (let i = 0; i < 300 && holders.some((h) => running(h.pid)); i++) await new Promise((r) => setTimeout(r, 50)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a holder that ignores its owner folder
+  const killed = holders.filter((h) => running(h.pid) && commandOf(h.pid) === h.command);
   for (const h of killed) { try { process.kill(h.pid, 'SIGKILL'); } catch { /* gone */ } }
   return killed;
 }

@@ -99,8 +99,10 @@ mod tests {
         // The prefix is the caller's to repair (`winpath::real_for_tools`); the call neither drops nor respells it.
         let c = junction_call(&home::mixed(Path::new(r"\\?\C:\ci\src")), &home::mixed(Path::new(r"\\.\C:\work")));
         let shown = c.display();
+        // The logged line quotes an argument with a character outside the plain set (`ci_tool::quote`): `?` is one, so the
+        // verbatim path shows in quotes while the argument itself is passed as given (CI run 8110, paddock-dev windows-latest).
         #[cfg(windows)]
-        assert_eq!(shown, r"cmd /c mklink /J \\.\C:\work \\?\C:\ci\src");
+        assert_eq!(shown, r"cmd /c mklink /J \\.\C:\work '\\?\C:\ci\src'");
         #[cfg(not(windows))]
         assert!(shown.contains(r"\\.\C:\work") && shown.contains(r"\\?\C:\ci\src"), "{shown}");
     }
