@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Reaper, waitProgressing } from './test-kit.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -50,10 +51,10 @@ const inside = (path, scratch) => {
 
 /**
  * The guard for a lock test's holders (ER-14: no process outlives its test). Ends every `slot hold` under `scratch` the way the
- * lock means it to end, by removing its owner folder, then waits for the process to exit: a poll of that condition every 50 ms,
- * whose bound (15 s) only stops a holder that ignores its folder. A holder still running then is killed (after checking that its
- * pid is still that holder: rule 53) and reported, so a leak fails the test that made it instead of a later job's cleanup.
- * Returns the holders it had to kill (empty when all ended by themselves).
+ * lock means it to end, by removing its owner folder, then waits for the processes to exit on progress (ADR 0103: the kit's poll,
+ * which backs off from 1 ms, and a 15 s bound on no holder ending, which only stops a holder that ignores its folder). A holder
+ * still running then is killed (after checking that its pid is still that holder: rule 53) and reported, so a leak fails the test
+ * that made it instead of a later job's cleanup. Returns the holders it had to kill (empty when all ended by themselves).
  */
 export async function endHolders(scratch) {
   const holders = holdersUnder(scratch);
@@ -61,8 +62,25 @@ export async function endHolders(scratch) {
     const owner = h.command.match(/--owner (\S+)/)?.[1];
     if (owner && inside(owner, scratch)) rmSync(owner, { recursive: true, force: true });
   }
-  for (let i = 0; i < 300 && holders.some((h) => alive(h.pid)); i++) await new Promise((r) => setTimeout(r, 50)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a holder that ignores its owner folder
+  const running = () => holders.filter((h) => alive(h.pid)).length;
+  try {
+    await waitProgressing(`${holders.length} slot holder(s) to see their owner folder gone`, () => running() === 0, { noProgressMs: 15_000, progress: running });
+  } catch { /* the survivors are killed and reported below */ }
   const killed = holders.filter((h) => alive(h.pid) && commandOf(h.pid) === h.command);
   for (const h of killed) { try { process.kill(h.pid, 'SIGKILL'); } catch { /* gone */ } }
   return killed;
+}
+
+/**
+ * The last guard of a test file (its `after`): every process still running whose command line names the file's scratch folder (a
+ * fake ssh, a vm-win.sh a test did not end) is ended by identity and reported (ADR 0103, the kit's Reaper with the folder as marker).
+ * Returns what it had to end. Run it only after the holders' own end ([endHolders]), so a holder is never killed before it could
+ * end by itself.
+ */
+export async function reapUnder(scratch, what) {
+  const ended = [];
+  for (const marker of new Set([scratch, (() => { try { return realpathSync(scratch); } catch { return scratch; } })()])) {
+    ended.push(...await new Reaper(what, { marker }).reap());
+  }
+  return ended;
 }

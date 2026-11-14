@@ -9,7 +9,11 @@ import { dirname, join } from 'node:path';
 import { after, afterEach, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
-import { endHolders, macOnly, warmDev } from './vm-test-support.mjs';
+import { waitProgressing } from './test-kit.mjs';
+import { endHolders, reapUnder, macOnly, warmDev } from './vm-test-support.mjs';
+
+/** Waits until `cond` holds (the kit's backing-off poll, ADR 0103), for at most `ms` without it holding: a bound that only stops a hung child. */
+const until = (what, cond, ms) => waitProgressing(what, cond, { noProgressMs: ms }).then(() => true, () => cond());
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), 'utf8');
@@ -30,7 +34,13 @@ const guardHolders = async () => {
   assert.deepEqual(killed, [], 'a slot holder ignored the removal of its owner folder and had to be killed');
 };
 afterEach(guardHolders);
-after(async () => { await guardHolders(); rmSync(scratch, { recursive: true, force: true }); });
+after(async () => {
+  await guardHolders();
+  // ADR 0103: anything else this file started under its scratch folder (a fake ssh, a script a test did not end) ends here, and fails it.
+  const left = await reapUnder(scratch, 'vm-win.test.mjs');
+  rmSync(scratch, { recursive: true, force: true });
+  assert.deepEqual(left, [], 'a process started under the scratch folder outlived its test');
+});
 const run = (script, args, env = {}) =>
   spawnSync('bash', [join(here, script), ...args], { encoding: 'utf8', env: { ...process.env, ...lockEnv, ...env } });
 
@@ -483,7 +493,7 @@ exit 0`);
     const exited = new Promise((r) => child.on('exit', (code, sig) => r({ code, sig })));
     let code;
     try {
-      for (let i = 0; i < 300 && t.hung().length === 0; i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 30 s bound that only stops a hung child
+      await until('the step to hang', () => t.hung().length > 0, 30_000);
       assert.ok(t.hung().length > 0, `the step is waiting; vm-win.sh said so far: ${err}`);
     } finally {
       // Whatever the poll found, the script ends here: a vm-win.sh left running holds the VM lock, and every later lock test then
@@ -519,7 +529,7 @@ exit 0`);
     const holder = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire other-holder; touch '${marker}'; while :; do sleep 0.2; done`], { env: { ...process.env, ...lockEnv }, stdio: 'ignore', detached: true });
     const exited = new Promise((r) => holder.on('exit', r));
     try {
-      for (let i = 0; i < 150 && !existsSync(marker); i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a hung child
+      await until('the other holder to take the lock', () => existsSync(marker), 15_000);
       assert.ok(existsSync(marker));
       const r = run('vm-win.sh', ['admin-setup'], t.env);
       assert.equal(r.status, 75, r.stderr);
@@ -688,7 +698,7 @@ describe('the VM lock', () => {
     const child = spawn('bash', ['-c', `. '${join(here, 'vm-lock.sh')}'; vm_lock_acquire ${label}; touch '${marker}'; ${body}`], { env: { ...process.env, ...lockEnv }, stdio: 'ignore', detached: true });
     const exited = new Promise((r) => child.on('exit', r));
     // A poll of a condition: the bound only stops a hung child, the verdict never depends on the time taken.
-    for (let i = 0; i < 150 && !existsSync(marker); i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a hung child
+    await until(`${label} to take the lock`, () => existsSync(marker), 15_000);
     const stop = async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; await guardHolders(); };
     if (!existsSync(marker)) { await stop(); assert.fail(`${label} did not take the lock`); } // a holder that never got the lock must not outlive the test either
     return { stop };
@@ -748,6 +758,7 @@ describe('the VM lock', () => {
   test('run-win.mjs and defender-rate.mjs take the lock for the whole run: a second one fails at the start (75), before any vm-win call', async () => {
     const holder = await holding('chain-release');
     try {
+      // conformance: test-steps — two programs that each fail at their start (exit 75) before any work; one bound covers both easily
       for (const [file, args] of [['vm-smoke/run-win.mjs', ['--app', 'dyno', '--installer', '/nonexistent/setup.exe']], ['vm-smoke/defender-rate.mjs', ['--installer', '/nonexistent/setup.exe']]]) {
         const r = spawnSync('node', [join(here, file), ...args], { encoding: 'utf8', env: { ...process.env, ...lockEnv }, timeout: 60_000 });
         assert.equal(r.status, 75, `${file}: ${r.stdout}${r.stderr}`);
