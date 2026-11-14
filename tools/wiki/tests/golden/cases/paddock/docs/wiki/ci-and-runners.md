@@ -5,7 +5,7 @@ sources: [.gitea/workflows/ci.yml, rule 50, rule 41, ADR 0025, handoff/merge-ste
 ---
 How a change reaches CI today, which machines run it, why the single Mac is the queue, and which failures are known flakes.
 Origin/main at `233c1339b` (2026-10-31). The CI economy is rule 50 and the load rule is rule 41; this page links them and
-does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/Volumes/d7sst7/dev-targets/handoff/`.
+does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/srv/disk-a/dev-targets/handoff/`.
 
 ## Current state
 - ci.yml starts with a plan job that runs `scripts/affected.mjs` and runs only the projects a change reaches; the base of the
@@ -43,9 +43,9 @@ does not restate them. Steward-log citations are `merge-steward.md:<line>` in `/
 ## Machine load and the heavy-step lock (agents on the Mac)
 - Agents gate heavy steps on a 1-minute load below 30; the load rule is [Throughput, rule 41](../rules.md#throughput-user-2026-10-24). Source: src: `merge-steward.md:533` (gate stated in the entry).
 - Heavy steps (cargo, npm, ng, playwright, llvm-cov, xwin) take turns through the lock tool `plock`, one at a time:
-  `plock run [--high] [--no-gate] <agent-name> -- <command>` takes the lock, waits for the load gate, runs, releases; `plock status` shows the holder. Source: src: `/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock` (header; a scratch tool outside the repository).
+  `plock run [--high] [--no-gate] <agent-name> -- <command>` takes the lock, waits for the load gate, runs, releases; `plock status` shows the holder. Source: src: `/srv/disk-a/dev-targets/scratch/pitcrew-lock/plock` (header; a scratch tool outside the repository).
 - The lock is a directory that appears atomically with its owner record (pid, start time, name) inside; it is broken only by the tool, only
-  when the recorded pid is gone or its start time differs, and each break is logged. Do not remove it by hand. Source: src: `/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock` (header and `break_if_stale`).
+  when the recorded pid is gone or its start time differs, and each break is logged. Do not remove it by hand. Source: src: `/srv/disk-a/dev-targets/scratch/pitcrew-lock/plock` (header and `break_if_stale`).
 - Why the tool exists: an agent removed a stale lock by hand while its owner record was empty (`merge-steward.md:646`); the tool was announced in `merge-steward.md:649`. Source: src: `merge-steward.md:646, 649`.
 
 ## Known flakes (as the steward judged them in the log; re-check before waiving)

@@ -1353,3 +1353,21 @@ status = "built"
 # =====================================================================================================================
 # Build folders kept off the home folder
 # =====================================================================================================================
+
+# =====================================================================================================================
+# Development folders derived, never named (C125)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "dev-places"
+title = "The dev-targets folder (and the dev disk, VM and lock folders below it) derived from git config paddock.worktreeRoot, failing closed"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/places.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = [".claude/hooks/lib/paddockpaths.py"]
+  symbols = ["text:worktreeRoot", "text:PADDOCK_DEV_TARGETS", "text:dev_targets_of"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The guard hooks' copy (dev_targets_of, dev_targets, main_checkout): Python, because the hooks run before any binary is built; scripts call `./dev places` instead. .claude/hooks/paddockpaths-parity.test.sh runs both on one table (named, root-level, relative, `..`, blank and whitespace values). Goes when the guards move onto `./dev hook pre-tool-use` (ADR 0083)."

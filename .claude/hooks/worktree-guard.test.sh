@@ -177,6 +177,21 @@ out=$(jq -nc --arg d "$TMP/nogit" '{tool_name:"Bash",cwd:$d,agent_id:"a1",tool_i
 case "$out" in *'"deny"'*"Next step"*) echo "ok: underivable main refuses with a next step" ;; *) echo "FAIL: underivable main must refuse"; fail=1 ;; esac
 out=$(jq -nc --arg d "$TMP/nogit" '{tool_name:"Bash",cwd:$d,agent_id:"a1",tool_input:{command:"git commit -m x"}}' | CLAUDE_PROJECT_DIR="$TMP/nogit" WORKTREE_GUARD_MAIN="$TMP/nogit" "$H" 2>/dev/null)
 case "$out" in *'"deny"'*"main checkout"*) echo "ok: WORKTREE_GUARD_MAIN override" ;; *) echo "FAIL: override"; fail=1 ;; esac
+# --- paddock.* git config is shared by every worktree (the common config): a subagent never writes it (it retargets the VM, lock
+#     and disk folders for everyone, docs/dev-setup.md "Where things live"); reads are fine, and the coordinator may write it.
+expect "agent git config paddock.worktreeRoot <v>" deny agent "$WT" "git config paddock.worktreeRoot /srv/x/wt"
+expect "agent git -C wt config --local paddock.worktreeRoot <v>" deny agent "$WT" "git -C $WT config --local paddock.worktreeRoot /srv/x/wt"
+expect "agent git config --global paddock.x <v>" deny agent "$WT" "git config --global paddock.x y"
+expect "agent git config --unset paddock.worktreeRoot" deny agent "$WT" "git config --unset paddock.worktreeRoot"
+expect "agent git config set paddock.worktreeRoot <v>" deny agent "$WT" "git config set paddock.worktreeRoot /srv/x/wt"
+expect "agent git config --replace-all Paddock.WorktreeRoot <v>" deny agent "$WT" "git config --replace-all Paddock.WorktreeRoot /srv/x/wt"
+expect "agent git config --remove-section paddock" deny agent "$WT" "git config --remove-section paddock"
+expect "agent git config paddock.worktreeRoot (a read)" allow agent "$WT" "git config paddock.worktreeRoot"
+expect "agent git config --get paddock.worktreeRoot" allow agent "$WT" "git config --get paddock.worktreeRoot"
+expect "agent git config get paddock.worktreeRoot" allow agent "$WT" "git config get paddock.worktreeRoot"
+expect "agent git config --get-regexp ^paddock" allow agent "$WT" "git config --get-regexp ^paddock"
+expect "agent git config user.name in its worktree" allow agent "$WT" "git config user.email a@example.invalid"
+expect "coordinator git config paddock.worktreeRoot <v>" allow coord "$MAIN" "git config paddock.worktreeRoot /srv/x/wt"
 
 # The shared shell-forms corpus: every scanner bypass and false refusal found so far, judged by every guard.
 bash "$here/lib/shell-forms.sh" worktree-guard "$H" || fail=1

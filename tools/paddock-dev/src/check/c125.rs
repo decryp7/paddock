@@ -3,14 +3,15 @@
 //! stops working (the tart link, the app plists, and the worktree and docker guards, which defaulted to a disk that no longer existed;
 //! fix/guard-paths-derived, a5907d18c, 2026-11-14).
 //!
-//! Flagged: every `/Volumes/<name>` literal (the name starts with a letter or digit; a letter, digit, `_`, `.` or `~` right before
-//! it makes it part of another path) in every text file of the tree, one finding per literal. Not read as findings: Markdown
-//! documents that record history (the `history` path patterns of `conformance/c125-allow.json`, each with a reason; only `.md`
-//! files, and an entry that skipped no literal is a warning; dated plans are read), the checkout's own `.git` file and owner note, and
-//! the check's own files. Allowed: the per-site entries of the same file's `allow` array, read by the shared [`super::allow_list`];
-//! a site names a path by whole components, and a literal beyond its entries' count is reported at its own line. A file that
-//! cannot be read is not measured (an error at that file); an allow file that cannot be read makes the check broken (one finding,
-//! nothing else). **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
+//! Flagged: every `/Volumes/<name>` literal, also with its slashes escaped (`\/Volumes\/<name>`, a regular expression) and reported
+//! unescaped (the name starts with a letter or digit; a letter, digit, `_`, `.` or `~` right before it makes it part of another
+//! path) in every text file of the tree, one finding per literal. Not read as findings: Markdown documents that record history (the
+//! `history` path patterns of `conformance/c125-allow.json`, each with a reason; only `.md` files, and an entry that skipped no
+//! literal is a warning; dated plans are read), the checkout's own `.git` file and owner note, and the check's own files. Allowed:
+//! the per-site entries of the same file's `allow` array, read by the shared [`super::allow_list`]; a site names a path by whole
+//! components, and a literal beyond its entries' count is reported at its own line. A file that cannot be read is not measured (an
+//! error at that file); an allow file that cannot be read makes the check broken (one finding, nothing else). **Report-only
+//! (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
 //! The JavaScript check `conformance/src/checks/C125-machine-paths.mjs` is the original; `tests/it/check_c125.rs` compares the two
 //! finding for finding.
@@ -42,7 +43,8 @@ static BINARY: LazyLock<Regex> = LazyLock::new(|| {
         r"(?i)\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst|7z|whl|wasm|dmg|pkg|msi|exe|dll|so|dylib|a|lib|rlib|o|obj|pdb|ttf|otf|woff2?|mp3|mp4|mov|wav|webm|parquet|duckdb|sqlite|db|evtx|dmp|bin|onnx|safetensors)$",
     )
 });
-static LITERAL: LazyLock<Regex> = LazyLock::new(|| rx(r"/Volumes/[A-Za-z0-9][A-Za-z0-9_.+@-]*(?:/[A-Za-z0-9_.+@-]*)*"));
+/// A `/` may be escaped (`\/`, a regular expression literal); the finding names the path unescaped.
+static LITERAL: LazyLock<Regex> = LazyLock::new(|| rx(r"\\?/Volumes\\?/[A-Za-z0-9][A-Za-z0-9_.+@-]*(?:\\?/[A-Za-z0-9_.+@-]*)*"));
 const BROKEN_FIX: &str = "Restore conformance/c125-allow.json: {\"history\": [{\"path\": \"...\", \"reason\": \"...\"}], \"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.";
 const UNREAD_FIX: &str = "Make the file readable (permissions) and run the check again.";
 const FIX: &str = "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason.";
@@ -50,7 +52,7 @@ const FIX: &str = "Derive the folder (git, `paddock.worktreeRoot`, an environmen
 /// Every machine disk path in `text`: `(line, literal)`.
 pub fn machine_paths(text: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
-    if !text.contains("/Volumes/") {
+    if !text.contains("Volumes") {
         return out;
     }
     let (mut line, mut from) = (1, 0);
@@ -64,7 +66,7 @@ pub fn machine_paths(text: &str) -> Vec<(usize, String)> {
         }
         line += text[from..m.start()].matches('\n').count();
         from = m.start();
-        out.push((line, m.as_str().to_string()));
+        out.push((line, m.as_str().replace("\\/", "/")));
     }
     out
 }
@@ -297,6 +299,16 @@ mod tests {
             [(1, "/Volumes/d8sst7/vm".to_string())]
         );
         assert!(machine_paths("/Volumes/<disk>/x /Volumes/... /System/Volumes/Data ~/Volumes/x\n").is_empty());
+    }
+
+    #[test]
+    fn an_escaped_literal_is_a_machine_path_reported_unescaped() {
+        assert_eq!(
+            machine_paths("assert.match(e, /only drives \\/Volumes\\/d8sst7\\/vm-data\\/x/);\n"),
+            [(1, "/Volumes/d8sst7/vm-data/x/".to_string())]
+        );
+        assert_eq!(machine_paths(r#"re = r"\/Volumes\/Data""#), [(1, "/Volumes/Data".to_string())]);
+        assert!(machine_paths(r"firmlink \/System\/Volumes\/Data and \/Volumes\/<disk>").is_empty());
     }
 
     #[test]

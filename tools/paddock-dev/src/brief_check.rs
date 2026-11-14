@@ -31,13 +31,38 @@ pub struct CheckArgs {
     stdin: bool,
 }
 
-/// The scratch and worktree prefix an agent's files must be under.
-pub const SCRATCH_ROOT: &str = "/Volumes/d8sst7/dev-targets/";
 /// The longest commit subject the commit-msg hook accepts.
 pub const MAX_SUBJECT: usize = 100;
 
-/// The allowed scratch locations: a subfolder of one of these is the agent's own.
-pub const SCRATCH_ROOTS: [&str; 2] = ["/Volumes/d8sst7/dev-targets/", "/Volumes/d7sst7/dev-targets/"];
+/// Where a brief's agent may work, derived from the repository ([`crate::places`]), never a disk named in the code (C125): the
+/// dev-targets folder (worktrees and scratch go below it) and the main checkout (no git writes there).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Places {
+    /// The dev-targets folder, with a trailing `/`.
+    pub dev_targets: String,
+    /// The main checkout, without a trailing `/`.
+    pub main_checkout: String,
+}
+
+impl Places {
+    /// The places of these two folders.
+    pub fn new(dev_targets: &std::path::Path, main_checkout: &std::path::Path) -> Places {
+        let dev_targets = dev_targets.to_string_lossy().replace('\\', "/");
+        let main = main_checkout.to_string_lossy().replace('\\', "/");
+        Places {
+            dev_targets: format!("{}/", dev_targets.trim_end_matches('/')),
+            main_checkout: main.trim_end_matches('/').to_string(),
+        }
+    }
+
+    /// The places of the repository at `from`; refused (fail closed, with the next step) when either cannot be derived.
+    pub fn derive(from: &std::path::Path, env: &dyn Fn(&str) -> Option<String>) -> Result<Places, CliError> {
+        Ok(Places::new(
+            &crate::places::dev_targets(from, env)?,
+            &crate::places::main_checkout(from)?,
+        ))
+    }
+}
 
 fn first_word(v: &str) -> &str {
     v.split_whitespace()
@@ -48,12 +73,13 @@ fn first_word(v: &str) -> &str {
 
 /// Whether `path` is a strict subfolder (one level or more) of an allowed scratch location. A root itself, a trailing-slash root
 /// and any path with `..` are refused: the agent's own subfolder is the only place it may write and clean.
-pub fn scratch_ok(path: &str) -> Result<(), String> {
+pub fn scratch_ok(path: &str, places: &Places) -> Result<(), String> {
     let trimmed = path.trim_end_matches('/');
     if path.split('/').any(|c| c == "..") {
         return Err(format!("the scratch folder `{path}` has `..`: name the agent's own subfolder"));
     }
-    for root in SCRATCH_ROOTS {
+    {
+        let root = places.dev_targets.as_str();
         if trimmed == root.trim_end_matches('/') {
             return Err(format!(
                 "the scratch folder `{path}` is the root {root}, not a subfolder: name your own subfolder, for example {root}scratch/<agent id>"
@@ -75,7 +101,7 @@ pub fn scratch_ok(path: &str) -> Result<(), String> {
     }
     Err(format!(
         "the scratch folder `{path}` is not a subfolder of an allowed location ({} or the session scratchpad): never /tmp, /var/folders or the internal disk",
-        SCRATCH_ROOTS.join(", ")
+        places.dev_targets
     ))
 }
 
@@ -269,7 +295,7 @@ fn placeholder() -> Regex {
 }
 
 /// Checks a brief's text.
-pub fn check(text: &str) -> Vec<Finding> {
+pub fn check(text: &str, places: &Places) -> Vec<Finding> {
     let mut found = Vec::new();
     let fs = fields(text);
     let ph = placeholder();
@@ -313,17 +339,17 @@ pub fn check(text: &str) -> Vec<Finding> {
     if let Some(f) = get("worktree")
         && !ph.is_match(&f.value)
         && !f.value.to_lowercase().starts_with("none")
-        && !f.value.starts_with(SCRATCH_ROOT)
+        && !f.value.starts_with(places.dev_targets.as_str())
     {
         found.push(Finding {
             line: f.line,
             code: "bad-scratch",
-            message: format!("the worktree `{}` is not under {SCRATCH_ROOT}", f.value),
+            message: format!("the worktree `{}` is not under {}", f.value, places.dev_targets),
         });
     }
     if let Some(f) = get("scratch")
         && !ph.is_match(&f.value)
-        && let Err(why) = scratch_ok(first_word(&f.value))
+        && let Err(why) = scratch_ok(first_word(&f.value), places)
     {
         found.push(Finding {
             line: f.line,
@@ -374,7 +400,7 @@ pub fn check(text: &str) -> Vec<Finding> {
             });
         }
     }
-    found.extend(patterns(text));
+    found.extend(patterns(text, places));
     found.sort_by_key(|f| f.line);
     found
 }
@@ -387,14 +413,15 @@ fn capitalise(s: &str) -> String {
 }
 
 /// The known-bad patterns, line by line.
-fn patterns(text: &str) -> Vec<Finding> {
+fn patterns(text: &str, places: &Places) -> Vec<Finding> {
     let mut found = Vec::new();
     let scratch = re(r"(/private)?/var/folders|(^|[\s`'\x22=(])(/private)?/tmp(/|\b)|\$TMPDIR|\$\{TMPDIR\}|mktemp");
     let unguarded_cd = re(r"\bcd\s+[^;&|`\n]+;");
     let attribution = re(r"(?i)co-authored-by|generated with|claude-session");
-    let main_git = re(
-        r"git\s+-C\s+/Volumes/d8sst7/dev\.decryptology\.net/paddock/?\s+(commit|merge|checkout|switch|reset|push|rebase|add|pull|fetch|worktree|branch|tag|cherry-pick|am|apply|stash|clean|restore)\b",
-    );
+    let main_git = re(&format!(
+        r"git\s+-C\s+{}/?\s+(commit|merge|checkout|switch|reset|push|rebase|add|pull|fetch|worktree|branch|tag|cherry-pick|am|apply|stash|clean|restore)\b",
+        regex::escape(&places.main_checkout)
+    ));
     let subject = re(r#"git\s+commit\b[^\n]*?\s-m\s+["']([^"'\n]*)["']"#);
     let mut release_line = None;
     let mut drop_line = None;
@@ -404,7 +431,10 @@ fn patterns(text: &str) -> Vec<Finding> {
             found.push(Finding {
                 line: n,
                 code: "bad-scratch",
-                message: format!("scratch under /tmp, /var/folders or $TMPDIR: use a folder under {SCRATCH_ROOT}"),
+                message: format!(
+                    "scratch under /tmp, /var/folders or $TMPDIR: use a folder under {}",
+                    places.dev_targets
+                ),
             });
         }
         if hit(&unguarded_cd, l) {
@@ -521,14 +551,16 @@ fn is_lite(fs: &[Field]) -> bool {
 
 /// The command: reads the file, prints the findings, ends with `Exit::Findings` when there are any.
 pub fn command(c: BriefCommand) -> Result<Report, CliError> {
-    command_with(c, &mut std::io::stdin())
+    let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("cannot read the current folder: {e}.")))?;
+    let places = Places::derive(&cwd, &|k| std::env::var(k).ok())?;
+    command_with(c, &mut std::io::stdin(), &places)
 }
 
 /// The longest brief read: a brief is a page or two.
 const MAX_BRIEF_BYTES: u64 = 1 << 20;
 
-/// [`command`] with standard input passed in.
-pub fn command_with(c: BriefCommand, stdin: &mut dyn std::io::Read) -> Result<Report, CliError> {
+/// [`command`] with standard input and the places passed in.
+pub fn command_with(c: BriefCommand, stdin: &mut dyn std::io::Read, places: &Places) -> Result<Report, CliError> {
     use std::io::Read;
     let BriefCommand::Check(a) = c;
     let (name, text) = if a.stdin || a.file.as_os_str() == "-" {
@@ -544,7 +576,7 @@ pub fn command_with(c: BriefCommand, stdin: &mut dyn std::io::Read) -> Result<Re
         })?;
         (a.file.display().to_string(), text)
     };
-    Ok(report(&name, &check(&text)))
+    Ok(report(&name, &check(&text, places)))
 }
 
 /// The report of a check.
@@ -576,6 +608,14 @@ mod tests {
 
     const TEMPLATE: &str = include_str!("../../../templates/agents/brief-template.md");
 
+    /// The places the tests derive: invented folders, no machine's disk.
+    fn places() -> Places {
+        Places::new(
+            std::path::Path::new("/srv/disk-b/dev-targets"),
+            std::path::Path::new("/srv/disk-b/src/paddock"),
+        )
+    }
+
     /// The template with every field filled in plausibly.
     fn filled() -> String {
         let ph = placeholder();
@@ -586,9 +626,9 @@ mod tests {
             } else if l.starts_with("Agent id:") {
                 "Agent id: implementer:dev-load. Run `export PADDOCK_AGENT_ID=implementer:dev-load` first.".to_string()
             } else if l.starts_with("Worktree:") {
-                "Worktree: /Volumes/d8sst7/dev-targets/wt/feat-x".to_string()
+                "Worktree: /srv/disk-b/dev-targets/wt/feat-x".to_string()
             } else if l.starts_with("Scratch:") {
-                "Scratch: /Volumes/d8sst7/dev-targets/scratch/implementer-dev-load".to_string()
+                "Scratch: /srv/disk-b/dev-targets/scratch/implementer-dev-load".to_string()
             } else if l.starts_with("> Source:") {
                 "> Source: docs/adr/0001-x.md:12 at abc1234".to_string()
             } else if l.starts_with("Worktree order:") || l.starts_with("Main checkout:") {
@@ -602,12 +642,12 @@ mod tests {
     }
 
     fn codes(text: &str) -> Vec<&'static str> {
-        check(text).iter().map(|f| f.code).collect()
+        check(text, &places()).iter().map(|f| f.code).collect()
     }
 
     #[test]
     fn the_unfilled_template_fails_on_every_placeholder_field() {
-        let f = check(TEMPLATE);
+        let f = check(TEMPLATE, &places());
         for label in ["role", "agent id", "worktree", "branch", "base", "scratch", "gates"] {
             assert!(
                 f.iter()
@@ -619,7 +659,7 @@ mod tests {
 
     #[test]
     fn the_filled_template_passes() {
-        let f = check(&filled());
+        let f = check(&filled(), &places());
         assert!(f.is_empty(), "{f:?}");
         let r = report("b.md", &f);
         assert_eq!(r.exit, Exit::Ok);
@@ -628,7 +668,7 @@ mod tests {
     #[test]
     fn a_missing_field_is_named() {
         let text = filled().replace("Gates:", "Checks of the work:");
-        let f = check(&text);
+        let f = check(&text, &places());
         assert!(
             f.iter().any(|f| f.code == "missing-field" && f.message.contains("`gates`")),
             "{f:?}"
@@ -650,52 +690,60 @@ mod tests {
         assert!(codes(&only).contains(&"release-without-drop"));
         // Drop alone, and a rule that says never release, are fine.
         let text = format!("{}\nUse drop, never `./dev worktree release`.\n", filled());
-        assert_eq!(check(&text), Vec::new());
+        assert_eq!(check(&text, &places()), Vec::new());
     }
 
     #[test]
     fn scratch_outside_the_agent_disk_is_refused() {
         for bad in ["/tmp/x", "/var/folders/ab/T/x", "$TMPDIR/x", "/private/tmp/x"] {
-            let text = filled().replace("/Volumes/d8sst7/dev-targets/scratch/implementer-dev-load", bad);
+            let text = filled().replace("/srv/disk-b/dev-targets/scratch/implementer-dev-load", bad);
             assert!(codes(&text).contains(&"bad-scratch"), "{bad}");
         }
         let text = format!("{}\nWrite the log to /tmp/out.log.\n", filled());
         assert!(codes(&text).contains(&"bad-scratch"));
         // The rule itself names /tmp and is not a finding.
-        assert!(check(&filled()).is_empty());
+        assert!(check(&filled(), &places()).is_empty());
     }
 
     #[test]
     fn scratch_must_be_the_agents_own_subfolder_never_a_root() {
-        let with = |v: &str| filled().replace("/Volumes/d8sst7/dev-targets/scratch/implementer-dev-load", v);
+        let with = |v: &str| filled().replace("/srv/disk-b/dev-targets/scratch/implementer-dev-load", v);
         let bad_scratch = |v: &str| {
-            check(&with(v))
+            check(&with(v), &places())
                 .iter()
                 .any(|f| f.code == "bad-scratch" && f.message.contains("subfolder"))
         };
         // The roots themselves are refused.
         for root in [
-            "/Volumes/d8sst7/dev-targets",
-            "/Volumes/d8sst7/dev-targets/",
-            "/Volumes/d7sst7/dev-targets/",
+            "/srv/disk-b/dev-targets",
+            "/srv/disk-b/dev-targets/",
             "/private/tmp/claude-501/-Volumes-x/ab12/scratchpad",
             "/private/tmp/claude-501/-Volumes-x/ab12/scratchpad/",
         ] {
             assert!(bad_scratch(root), "{root}");
         }
         // A parent-dir escape is refused too.
-        assert!(bad_scratch("/Volumes/d8sst7/dev-targets/scratch/../.."));
+        assert!(bad_scratch("/srv/disk-b/dev-targets/scratch/../.."));
         // Subfolders of an allowed location pass.
         for ok in [
-            "/Volumes/d8sst7/dev-targets/scratch/a",
-            "/Volumes/d7sst7/dev-targets/scratch/a",
+            "/srv/disk-b/dev-targets/scratch/a",
             "/private/tmp/claude-501/-Volumes-x/ab12/scratchpad/agent-a",
         ] {
-            let f = check(&with(ok));
+            let f = check(&with(ok), &places());
             assert!(f.is_empty(), "{ok}: {f:?}");
         }
+        // Another disk's dev-targets folder (the one before a disk move) is not the derived one.
+        assert!(
+            check(&with("/srv/disk-a/dev-targets/scratch/a"), &places())
+                .iter()
+                .any(|f| f.code == "bad-scratch")
+        );
         // Another place under /private/tmp is not the session scratchpad.
-        assert!(check(&with("/private/tmp/other")).iter().any(|f| f.code == "bad-scratch"));
+        assert!(
+            check(&with("/private/tmp/other"), &places())
+                .iter()
+                .any(|f| f.code == "bad-scratch")
+        );
     }
 
     #[test]
@@ -706,7 +754,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            check(&text)
+            check(&text, &places())
                 .iter()
                 .any(|f| f.code == "missing-field" && f.message.contains("`scratch`"))
         );
@@ -734,7 +782,7 @@ mod tests {
     fn long_subjects_unguarded_cd_attribution_and_main_checkout_git_are_refused() {
         let long = "x".repeat(101);
         let text = format!(
-            "{}\ngit commit -m \"{long}\"\ncd /Volumes/d8sst7/dev-targets/wt/a; git status\nCo-Authored-By: someone\ngit -C /Volumes/d8sst7/dev.decryptology.net/paddock merge feat/x\ngit stash\n",
+            "{}\ngit commit -m \"{long}\"\ncd /srv/disk-b/dev-targets/wt/a; git status\nCo-Authored-By: someone\ngit -C /srv/disk-b/src/paddock merge feat/x\ngit stash\n",
             filled()
         );
         let c = codes(&text);
@@ -742,11 +790,11 @@ mod tests {
             assert!(c.contains(&want), "{want}: {c:?}");
         }
         let ok = format!(
-            "{}\ngit commit -m \"{}\"\ncd /Volumes/d8sst7/dev-targets/wt/a && git status\n",
+            "{}\ngit commit -m \"{}\"\ncd /srv/disk-b/dev-targets/wt/a && git status\n",
             filled(),
             "x".repeat(100)
         );
-        assert!(check(&ok).is_empty(), "{:?}", check(&ok));
+        assert!(check(&ok, &places()).is_empty(), "{:?}", check(&ok, &places()));
     }
 
     #[test]
@@ -792,7 +840,7 @@ mod tests {
         assert!(flagged("Don't forget to run git stash first."));
         assert!(flagged("Not only commit, also use `git stash`."));
         assert!(flagged(
-            "If the build does not pass, run cd /Volumes/d8sst7/dev-targets/wt/a; cargo build"
+            "If the build does not pass, run cd /srv/disk-b/dev-targets/wt/a; cargo build"
         ));
         assert!(flagged("Never mind the order: git commit --no-verify."));
         // Rules that forbid.
@@ -813,43 +861,75 @@ mod tests {
             .replace("worktree TMP", "worktree drop");
         let c = codes(&swapped);
         assert!(c.contains(&"drop-before-claim"), "{c:?}");
-        assert!(check(&filled()).is_empty());
+        assert!(check(&filled(), &places()).is_empty());
     }
 
     #[test]
     fn a_scout_lookup_needs_only_the_short_field_list() {
-        let brief = "Role: scout\nAgent id: scout:ci-watch\nWorktree: none: read-only, use git show\nScratch: /Volumes/d8sst7/dev-targets/scratch/scout-ci-watch\n\
+        let brief = "Role: scout\nAgent id: scout:ci-watch\nWorktree: none: read-only, use git show\nScratch: /srv/disk-b/dev-targets/scratch/scout-ci-watch\n\
             Report: the run's state, filtered. End with a `Recurring:` line; tip SHA of what you read. No attribution anywhere. No git writes in the main checkout.\n";
-        assert_eq!(check(brief), Vec::new(), "{:?}", check(brief));
+        assert_eq!(check(brief, &places()), Vec::new(), "{:?}", check(brief, &places()));
         // A scout still needs a scratch folder and the report.
         let c = codes(&brief.replace("Scratch:", "Notes:"));
         assert!(c.contains(&"missing-field"));
         // A builder with the same text does not pass.
         assert!(
-            !check(&brief.replace("Role: scout", "Role: implementer").replace(
-                "Worktree: none: read-only, use git show",
-                "Worktree: /Volumes/d8sst7/dev-targets/wt/x"
-            ))
+            !check(
+                &brief
+                    .replace("Role: scout", "Role: implementer")
+                    .replace("Worktree: none: read-only, use git show", "Worktree: /srv/disk-b/dev-targets/wt/x"),
+                &places()
+            )
             .is_empty()
         );
     }
 
     #[test]
     fn a_scratch_root_gets_the_root_message() {
-        let e = scratch_ok("/Volumes/d8sst7/dev-targets").unwrap_err();
+        let e = scratch_ok("/srv/disk-b/dev-targets", &places()).unwrap_err();
         assert!(e.contains("is the root") && e.contains("not a subfolder"), "{e}");
-        assert!(scratch_ok("/Volumes/d8sst7/dev-targets/").unwrap_err().contains("is the root"));
-        assert!(scratch_ok("/Volumes/d8sst7/dev-targets/scratch/a").is_ok());
-        assert!(scratch_ok("/Volumes/d8sst7/dev-targets-other/x").is_err());
+        assert!(
+            scratch_ok("/srv/disk-b/dev-targets/", &places())
+                .unwrap_err()
+                .contains("is the root")
+        );
+        assert!(scratch_ok("/srv/disk-b/dev-targets/scratch/a", &places()).is_ok());
+        assert!(scratch_ok("/srv/disk-b/dev-targets-other/x", &places()).is_err());
+    }
+
+    #[test]
+    fn the_scratch_root_and_the_main_checkout_are_derived_from_the_repository_not_named() {
+        let d = tempfile::tempdir().unwrap();
+        let git = crate::worktree::git::Git::at(d.path());
+        git.text(&["init", "-q"]).unwrap();
+        let none = |_: &str| None;
+        // Fail closed: no worktree root, no places.
+        assert!(Places::derive(d.path(), &none).is_err());
+        git.text(&["config", "paddock.worktreeRoot", "/srv/disk-c/dev-targets/wt"]).unwrap();
+        let p = Places::derive(d.path(), &none).unwrap();
+        assert_eq!(p.dev_targets, "/srv/disk-c/dev-targets/");
+        let real = |p: &std::path::Path| paddock_env::winpath::real(p).unwrap();
+        assert_eq!(real(std::path::Path::new(&p.main_checkout)), real(d.path()));
+        // After a disk move the same brief text follows the new folder: the old one is refused, the new one passes.
+        let brief = filled().replace("/srv/disk-b/", "/srv/disk-c/");
+        assert!(check(&brief, &places()).iter().any(|f| f.code == "bad-scratch"));
+        let moved = Places::new(
+            std::path::Path::new("/srv/disk-c/dev-targets"),
+            std::path::Path::new("/srv/disk-c/src/paddock"),
+        );
+        assert_eq!(check(&brief, &moved), Vec::new());
+        // A git write in the derived main checkout is caught wherever that is.
+        let write = format!("{brief}\ngit -C /srv/disk-c/src/paddock commit -m x\n");
+        assert!(check(&write, &moved).iter().any(|f| f.code == "main-checkout-write"));
     }
 
     #[test]
     fn a_brief_can_be_piped_in_with_a_dash_or_stdin() {
         let args = |file: &str, stdin: bool| BriefCommand::Check(CheckArgs { file: file.into(), stdin });
         let text = filled();
-        let r = command_with(args("-", false), &mut text.as_bytes()).unwrap();
+        let r = command_with(args("-", false), &mut text.as_bytes(), &places()).unwrap();
         assert_eq!((r.exit, r.data["file"].as_str()), (Exit::Ok, Some("<stdin>")));
-        let r = command_with(args("ignored.md", true), &mut "Role: scout\n".as_bytes()).unwrap();
+        let r = command_with(args("ignored.md", true), &mut "Role: scout\n".as_bytes(), &places()).unwrap();
         assert_eq!(r.exit, Exit::Findings);
     }
 

@@ -11,7 +11,7 @@
 set -u
 ROOT=$(git rev-parse --show-toplevel)
 export PADDOCK_AGENT_ID=${PADDOCK_AGENT_ID:-implementer:dyno-vm}
-L=${DYNO_VM_DIR:-/Volumes/d8sst7/dev-targets/dyno-vm}
+L=${DYNO_VM_DIR:-$("$ROOT/dev" places --get dev-targets --repo "$ROOT")/dyno-vm} || exit 2
 V="bash $ROOT/scripts/vm-win.sh"
 A=$L/t-crates/aarch64-pc-windows-msvc/debug
 M=$L/t-mut/aarch64-pc-windows-msvc/debug

@@ -1452,7 +1452,7 @@ Diagrams
 - Graphviz LICENSE (EPL-2.0): https://gitlab.com/graphviz/graphviz/-/raw/main/LICENSE
 - PlantUML (LGPL-3.0): https://github.com/plantuml/plantuml ; Mermaid and dagre MIT: GitHub licence API
 - Rust layout crates: https://crates.io/crates/rust-sugiyama , https://crates.io/crates/layout-rs , https://docs.rs/crate/bra0-layout/0.2.2 , https://docs.rs/crate/dagre/0.1.1
-- Paddock diagram kit: /Volumes/d8sst7/dev.decryptology.net/paddock/diagrams (STYLE.md, paddock.xml, templates, tools)
+- Paddock diagram kit: the repository's `diagrams/` folder (STYLE.md, paddock.xml, templates, tools)
 
 Understand and docs
 - DeepWiki and clones: https://medium.com/@jasonyang.algo/unlocking-codebases-with-ai-introducing-deepwiki-open-a61de3402cc4 , https://codersera.com/blog/deepwiki-complete-developer-guide-2026/
@@ -1480,4 +1480,4 @@ Names
 - GitHub repository-name search, crates.io and npm registry lookups for pacenotes, roadbook, gridwalk, recce, scrutineer, stewards, parcferme, codriver, homologate (2026-10-23); https://github.com/DataRecce/recce ; https://github.com/alpha-omega-security/scrutineer ; https://github.com/Ashon/pacenote
 
 Carried over from rev 1
-- MCP spec 2026-07-28: https://modelcontextprotocol.io/specification/latest/changelog ; rmcp: https://github.com/modelcontextprotocol/rust-sdk ; SCIP: https://github.com/sourcegraph/scip ; stack-graphs (archived): https://github.com/github/stack-graphs ; Cursor indexing: https://cursor.com/blog/secure-codebase-indexing ; Greptile: https://www.greptile.com/docs/how-greptile-works/graph-based-codebase-context ; Sourcegraph changes: https://sourcegraph.com/blog/changes-to-cody-free-pro-and-enterprise-starter-plans ; Pitwall docs: /Volumes/d8sst7/dev.decryptology.net/pitwall/docs/
+- MCP spec 2026-07-28: https://modelcontextprotocol.io/specification/latest/changelog ; rmcp: https://github.com/modelcontextprotocol/rust-sdk ; SCIP: https://github.com/sourcegraph/scip ; stack-graphs (archived): https://github.com/github/stack-graphs ; Cursor indexing: https://cursor.com/blog/secure-codebase-indexing ; Greptile: https://www.greptile.com/docs/how-greptile-works/graph-based-codebase-context ; Sourcegraph changes: https://sourcegraph.com/blog/changes-to-cody-free-pro-and-enterprise-starter-plans ; Pitwall docs: `apps/pitwall/docs/`

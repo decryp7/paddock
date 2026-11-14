@@ -7,6 +7,9 @@
 #     cherry-pick, tag, branch -D/-d/-m/-M, worktree remove/prune/move). The effective folder is `git -C`, else the
 #     last `cd` target, else the hook input's cwd. Read-only git, fetch and `worktree add|list|lock` stay allowed.
 #     A subagent is told from the coordinator by `agent_id` in the hook input; the coordinator is not refused here.
+#  3. A subagent's `git config` write of a `paddock.*` key (set, unset, add, replace, section edits; any scope) is refused, wherever
+#     it runs: the common config every worktree shares names the machine's dev, VM, lock and disk folders (docs/dev-setup.md).
+#     Reads (`--get`, `get`, a key alone) stay allowed.
 # Never fails closed: a parse problem allows the command and warns on stderr.
 # The main checkout is derived from git (CLAUDE_PROJECT_DIR, else this folder); WORKTREE_GUARD_MAIN overrides it. If it cannot be
 # derived, a subagent's git write is refused.

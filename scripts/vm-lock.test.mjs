@@ -288,3 +288,16 @@ test('ER-27: a slow paddock-dev call is logged with its step, duration and exit 
   assert.match(r.stderr, /vm-lock: paddock-dev ci slot acquire took \d+s \(exit 0\); the host may be overloaded/);
   assert.match(r.stderr, /vm-lock: paddock-dev ci slot release took \d+s \(exit 0\)/);
 });
+
+test('the default lock root is derived from the dev-targets folder, never a named disk, and refuses when it cannot be', () => {
+  const env = { ...process.env, PADDOCK_VM_LOCK_ROOT: '', PADDOCK_DEV_TARGETS: join(scratch, 'disk', 'dev-targets') };
+  const got = bash(`. '${LIB}'; _vm_lock_default_root`, env);
+  assert.equal(got.status, 0, got.stderr);
+  assert.equal(got.stdout, join(scratch, 'disk', 'ci', 'locks', 'test-machines'));
+  const named = bash(`. '${LIB}'; _vm_lock_default_root`, { ...env, PADDOCK_VM_LOCK_ROOT: join(scratch, 'named') });
+  assert.equal(named.stdout, join(scratch, 'named'));
+  const gone = bash(`. '${LIB}'; vm_lock_acquire probe`, { ...env, PADDOCK_DEV_TARGETS: 'not-absolute' });
+  assert.equal(gone.status, 3, gone.stderr);
+  assert.match(gone.stderr, /not-absolute \(PADDOCK_DEV_TARGETS\) is not an absolute folder/);
+  assert.match(gone.stderr, /::error::vm-lock: the lock root cannot be derived/);
+});

@@ -11,6 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { devPlace } from './win-vm-target.mjs';
 import { buildStep, expectedCommit } from './verdict.mjs';
 import { requiredSteps } from './manifest.mjs';
 import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
@@ -34,7 +35,10 @@ import { recordScratch } from './disk-record.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
 const BASE = process.env.PADDOCK_LINUX_BASE ?? 'linux-gnome-base';
-const TART_HOME = process.env.TART_HOME ?? '/Volumes/d8sst7/vm-data/tart-from-home';
+// The Linux images live in <dev disk>/vm-data/tart-from-home (docs/dev-setup.md), derived; TART_HOME overrides it.
+let tartHomeOnce = '';
+/** TART_HOME, else the derived folder; throws (fail closed, with the next step) when neither is there. */
+const tartHome = () => (tartHomeOnce ||= process.env.TART_HOME ?? `${devPlace('vm-data')}/tart-from-home`);
 const SESSION = 'export XDG_RUNTIME_DIR=/run/user/1000 DISPLAY=:0 XAUTHORITY=/run/user/1000/gdm/Xauthority DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus';
 const log = (m) => console.error(`vm-smoke(linux): ${m}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -52,7 +56,7 @@ export function parseArgs(argv) {
   return o;
 }
 
-const sh = (cmd, args, ms, input) => { const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: ms, input, env: { ...process.env, TART_HOME } }); return { code: r.status ?? 124, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }; };
+const sh = (cmd, args, ms, input) => { const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: ms, input, env: { ...process.env, TART_HOME: tartHome() } }); return { code: r.status ?? 124, stdout: r.stdout ?? '', stderr: r.stderr ?? '' }; };
 const result = makeResult;
 
 async function main(argv) {
@@ -87,7 +91,7 @@ async function main(argv) {
     log(`cloning ${BASE} as ${vm}`);
     cloned = true;
     if (sh('tart', ['clone', BASE, vm], 600_000).code !== 0) throw new Error('tart clone failed');
-    run = spawn('tart', ['run', '--no-audio', '--no-graphics', '--vnc-experimental', '--rosetta=rosetta', vm], { env: { ...process.env, TART_HOME }, stdio: 'ignore' });
+    run = spawn('tart', ['run', '--no-audio', '--no-graphics', '--vnc-experimental', '--rosetta=rosetta', vm], { env: { ...process.env, TART_HOME: tartHome() }, stdio: 'ignore' });
     for (let i = 0; i < 75 && g('true', 20_000).code !== 0; i++) await sleep(4000);
     // the desktop session: gnome-shell running as admin, Rosetta registered
     for (let i = 0; i < 60 && !/gnome-shell/.test(g('pgrep -x gnome-shell || true').stdout); i++) await sleep(3000);
@@ -99,10 +103,10 @@ async function main(argv) {
     log(`desktop up; rosetta ${rosetta || 'NOT registered'}`);
 
     // The repo's AT-SPI driver goes into the guest for every run (the base image holds an older copy: a change to guest/atspi.py needs no base rebuild).
-    sh('bash', ['-c', `cat ${JSON.stringify(join(HERE, 'guest', 'atspi.py'))} | TART_HOME=${TART_HOME} tart exec -i ${vm} sudo tee /var/cache/vmsmoke/atspi.py >/dev/null`], 60_000);
+    sh('bash', ['-c', `cat ${JSON.stringify(join(HERE, 'guest', 'atspi.py'))} | TART_HOME=${tartHome()} tart exec -i ${vm} sudo tee /var/cache/vmsmoke/atspi.py >/dev/null`], 60_000);
     // 1. Install the CI's amd64 .deb (Rosetta runs it; the amd64 libraries were installed in the base).
     let checks = [];
-    sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
+    sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${tartHome()} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
     const inst = g('sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /tmp/Dyno.deb 2>&1 | tail -3; dpkg-query -W -f="\\${Version}\\n" dyno', 600_000);
     const ver = inst.stdout.trim().split('\n').at(-1);
     checks.push({ ok: /^\d+\.\d+\.\d+/.test(ver), detail: `dpkg reports dyno ${ver}` });
@@ -429,9 +433,9 @@ async function main(argv) {
     if (want(26)) {
       if (!o.oldInstaller) push(swapNotDriven('no older build was given (--old-installer <older .deb>: the 1.0.0 .deb or an older RC), so there is nothing to install over'));
       else {
-        sh('bash', ['-c', `cat ${JSON.stringify(resolve(o.oldInstaller))} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/DynoOld.deb'`], 600_000);
+        sh('bash', ['-c', `cat ${JSON.stringify(resolve(o.oldInstaller))} | TART_HOME=${tartHome()} tart exec -i ${vm} bash -c 'cat > /tmp/DynoOld.deb'`], 600_000);
         // /tmp is cleared by the restart check's reboot: the new .deb goes into the guest again.
-        sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
+        sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${tartHome()} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
         const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-swap${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
         g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; pkill -x dyno-app; pkill -x dyno-agent; true', 300_000);
         push(await upgradeSwapStep(linuxSwapPrimitives({ exec: async (c, o) => ses(c, o?.timeoutMs ?? 120_000), sleep, now: () => Date.now(), oldDeb: '/tmp/DynoOld.deb', newDeb: '/tmp/Dyno.deb', startApp })).catch((e) => swapNotDriven(String(e.message ?? e))));

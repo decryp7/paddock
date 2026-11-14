@@ -206,7 +206,9 @@ mod tests {
             jobs: Some(2),
             ..CommonArgs::default()
         };
-        Settings::resolve(&args, &|_| None)
+        Settings::resolve_with(&args, &|_| None, &|| {
+            Err("tests never derive the dev-targets folder from the real git config".to_string())
+        })
     }
 
     fn tree() -> tempfile::TempDir {

@@ -79,21 +79,45 @@ fn identity(key: &str, value: &str, runners: &mut BTreeMap<String, usize>) -> Op
     })
 }
 
-/// The lines of a job log that the nextest reader needs (`Job:` key, `Starting`, a test's end, `Summary`, errors), as they were.
-pub fn trim_log(log: &str) -> String {
+/// The lines of a job log that the nextest reader needs (`Job:` key, `Starting`, a test's end, `Summary`, errors), scrubbed as the
+/// API answers are: the server and owner names ([`rename`]), runner and disk names, and the user folder of a home path.
+pub fn trim_log(log: &str, real_host: &str, real_owner: &str) -> String {
     let keep = regex::Regex::new(
         r"^\s*(Job: |Starting \d+ tests?|(FAIL|TIMEOUT|TMT|SIG\w*|FLAKY|FLKY\S*|TRY \d+ (FAIL|TIMEOUT|PASS|SIG\w*))\b|Summary \[|.*tests? (were |was )?not run|Cancelling due to|##\[error\]|::error::)",
     );
     let Ok(keep) = keep else { return String::new() };
-    // Runner work folders name the runner and the disk: `/Volumes/<disk>/gitea-runners/<runner>/work/...`.
-    let paths = regex::Regex::new(r"/Volumes/[^/\s]+/gitea-runners/[^/\s]+");
+    // (pattern, replacement), in order. Runner work folders name the runner and the disk: `/Volumes/<disk>/gitea-runners/<runner>`;
+    // any other folder on a named disk (the CI home `/Volumes/<disk>/ci/home/...`) names the disk too. Home folders name the user:
+    // `/Users/<name>` (macOS), `/home/<name>` (Linux), `C:\Users\<name>` and `C:/Users/<name>` (Windows, also JSON-escaped). A
+    // name ends at a separator, white space or a quote.
+    const NAME: &str = r#"[^/\\\s'`"]+"#;
+    let rules: Vec<(regex::Regex, &str)> = [
+        (
+            format!("/Volumes/{NAME}/gitea-runners/{NAME}"),
+            "/Volumes/disk/gitea-runners/runner-1",
+        ),
+        (format!("/Volumes/{NAME}"), "/Volumes/disk"),
+        (format!("/Users/{NAME}"), "/Users/user"),
+        (format!("/home/{NAME}"), "/home/user"),
+        (
+            format!(r"(?i)([A-Z]:)(\\{{1,2}}|/)Users(\\{{1,2}}|/){NAME}"),
+            "${1}${2}Users${3}user",
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(p, r)| regex::Regex::new(&p).ok().map(|re| (re, r)))
+    .collect();
+    if rules.len() != 5 {
+        return String::new();
+    }
     let mut out = String::new();
     for l in log.lines() {
         if keep.is_match(&plain(l)) {
-            match &paths {
-                Ok(p) => out.push_str(&p.replace_all(l, "/Volumes/disk/gitea-runners/runner-1")),
-                Err(_) => out.push_str(l),
+            let mut l = rename(l, real_host, real_owner);
+            for (re, with) in &rules {
+                l = re.replace_all(&l, *with).into_owned();
             }
+            out.push_str(&l);
             out.push('\n');
         }
     }
@@ -132,7 +156,7 @@ pub fn record(
             .unwrap_or_default();
         for job in failed {
             match http.get_text(&format!("{api}/jobs/{job}/logs"), token) {
-                Ok(t) => files.push((format!("log-{job}.txt"), trim_log(&t))),
+                Ok(t) => files.push((format!("log-{job}.txt"), trim_log(&t, host, owner))),
                 Err(e) => log(&format!("::warning::job {job}: its log was not recorded ({e})")),
             }
         }
@@ -239,12 +263,13 @@ mod tests {
             &format!("{api}/runs/7/jobs?limit=50&page=1"),
             json!({"total_count": 1, "jobs": [{"id": 9, "name": "j", "conclusion": "failure", "runner_name": "box-1", "steps": []}]}),
         );
-        f.log(9, "2026-01-01T00:00:00.0Z Job: rust-test\nnoise from box-1 and Jane Doe\n##[error]failed in /Volumes/d7sst7/gitea-runners/box-1/work/abc\n2026-01-01T00:00:01.0Z      Summary [ 1.0s] 2 tests run: 1 passed, 1 failed\n");
+        let vol = "/Volumes";
+        f.log(9, &format!("2026-01-01T00:00:00.0Z Job: rust-test\nnoise from box-1 and Jane Doe\n##[error]failed in {vol}/realdisk7/gitea-runners/box-1/work/abc\n::error::move the checkout to {vol}/realdisk7/ci/home/src/job-s3\n2026-01-01T00:00:01.0Z      Summary [ 1.0s] 2 tests run: 1 passed, 1 failed\n"));
         let files = record(&mut f, "https://real.example.net", "jdoe/paddock", "t", &[7], &mut |_| {}).unwrap();
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["log-9.txt", "jobs-7.json", "run-7.json", "runs-1.json"]);
         for (n, text) in &files {
-            for real in ["jdoe", "Jane", "real.example.net", "box-1", "d7sst7", "noreply"] {
+            for real in ["jdoe", "Jane", "real.example.net", "box-1", "realdisk7", "noreply"] {
                 assert!(!text.contains(real), "{n} holds {real}");
             }
         }
@@ -254,5 +279,32 @@ mod tests {
             "{log}"
         );
         assert!(files[3].1.contains("\"total_count\": 1"));
+    }
+
+    #[test]
+    fn an_identity_inside_a_kept_error_line_is_scrubbed() {
+        let mut f = Fake::default();
+        let api = "https://real.example.net/api/v1/repos/jdoe/paddock/actions";
+        f.json(&format!("{api}/runs/8"), sample());
+        f.json(
+            &format!("{api}/runs/8/jobs?limit=50&page=1"),
+            json!({"total_count": 1, "jobs": [{"id": 10, "conclusion": "failure"}]}),
+        );
+        let vol = "/Volumes";
+        f.log(
+            10,
+            &format!(
+                "::error::push to https://real.example.net/jdoe/paddock failed for jdoe in /Users/janedoe/src and /home/jdoe2/x and \
+                 C:\\Users\\JaneD\\AppData and C:/Users/JaneD/y and \"{vol}/realdisk8\"/z\n"
+            ),
+        );
+        let files = record(&mut f, "https://real.example.net", "jdoe/paddock", "t", &[8], &mut |_| {}).unwrap();
+        let log = &files[0].1;
+        for real in ["real.example.net", "jdoe", "janedoe", "JaneD", "realdisk8"] {
+            assert!(!log.contains(real), "the kept line holds {real}: {log}");
+        }
+        assert!(log.contains("::error::") && log.contains("gitea.invalid/example/paddock"), "{log}");
+        assert!(log.contains("/Users/user/src") && log.contains("/home/user/x"), "{log}");
+        assert!(log.contains("\"/Volumes/disk\"/z"), "the quote ends the disk name: {log}");
     }
 }

@@ -115,7 +115,7 @@
       "path": "apps/dyno/app/src/app/core/mock/disk-map.spec.ts",
       "site": "/Volumes/Photos",
       "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
-      "count": 7
+      "count": 8
     },
     {
       "path": "apps/dyno/app/src/app/core/mock/disk-map.ts",
@@ -503,7 +503,14 @@
     {
       "path": "tools/paddock-dev/src/ci_runs/record.rs",
       "site": "/Volumes/disk",
-      "reason": "The scrubbed placeholder that recorded CI paths are rewritten to (ER-14)"
+      "reason": "The scrubbed placeholder that recorded CI paths are rewritten to (ER-14)",
+      "count": 3
+    },
+    {
+      "path": "docs/dev-setup.md",
+      "site": "/Volumes/vault-dev",
+      "reason": "The one place that names this machine's dev disk layout (\"Where things live\"); everything else derives it or links there",
+      "count": 4
     },
     {
       "path": "tools/paddock-dev/src/disk/check.rs",
@@ -513,12 +520,14 @@
     {
       "path": "tools/paddock-dev/tests/ci-triage/log-36215.txt",
       "site": "/Volumes/disk",
-      "reason": "Recorded CI log, scrubbed to the placeholder disk (ER-14)"
+      "reason": "Recorded CI log, scrubbed to the placeholder disk (ER-14)",
+      "count": 2
     },
     {
       "path": "tools/paddock-dev/tests/ci-triage/log-36219.txt",
       "site": "/Volumes/disk",
-      "reason": "Recorded CI log, scrubbed to the placeholder disk (ER-14)"
+      "reason": "Recorded CI log, scrubbed to the placeholder disk (ER-14)",
+      "count": 2
     },
     {
       "path": "tools/paddock-dev/tests/it/host_steps.rs",

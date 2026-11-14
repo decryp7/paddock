@@ -27,13 +27,45 @@ scripts/setup-dev.sh --install  # macOS: installs the missing tools, then report
 | Playwright browsers | e2e: Chromium in branches, Chromium + WebKit on the combined branch and in CI | `npx playwright install chromium webkit` in `app/` | `npx playwright install --with-deps chromium webkit` | `npx playwright install chromium` |
 | Chrome for Testing (pinned) | tests that drive a real browser; never the installed Google Chrome (rule 7) | each app's `install-test-browser` script sets `CHROMIUM_TEST_PATH` | same | same |
 
+## Where things live
+
+Code, scripts and docs never name a disk (C125, rule 40): a disk gets renamed or replaced, and a hard-coded path then goes
+stale without a sound (on 2026-11-14 the dev data moved disks, and the guards, the VM scripts and the dev tool's defaults all
+pointed at disks that were gone). Tools derive every folder from one setting per machine, `git config paddock.worktreeRoot`
+in the main checkout (repo-local, so every worktree sees it), and fail with an `::error::` and this next step when it is not
+set. This section is the one place that names this machine's layout; everything else writes `<dev-targets>` or `<dev disk>`
+and links here.
+
+| Name | What is there | How the tools find it |
+| --- | --- | --- |
+| `<dev-targets>` | worktrees (`wt/`), build folders, agent scratch (`scratch/<agent id>`), `sccache`, `paddock-dev-home`, the disk index `.paddock-disk.sqlite` | `PADDOCK_DEV_TARGETS`, else the parent of `paddock.worktreeRoot`, else of `PADDOCK_WORKTREE_ROOT` |
+| `<dev disk>` | the folder that holds `<dev-targets>` | the parent of `<dev-targets>` |
+| `<dev disk>/vm-data` | the test VMs: the Windows test VM `paddock-win11-test`, the Tart images `tart-from-home` | `PADDOCK_VM_DATA`, else derived; the Windows VM's guard reads git config only, with an empty environment |
+| `<dev disk>/ci/locks/test-machines` | the lock of the test machines (`scripts/vm-lock.sh`) | `PADDOCK_VM_LOCK_ROOT`, else derived |
+| the main checkout | `paddock`, with `engineering-rules` next to it | the folder that holds the git common directory |
+
+The derivation is `tools/paddock-dev/src/places.rs`; scripts ask `./dev places` (`--get <name>` for one folder, `--pinned` to
+ignore every environment variable). The hooks, which run before any binary is built, have the one copy,
+`.claude/hooks/lib/paddockpaths.py` (docs/known-copies.toml, `dev-places`; a parity test runs both on one table).
+
+The Mac mini's layout since 2026-11-14 (one SSD for all dev data; media and backups are on another disk, which no tool reads):
+
+| Name | Folder |
+| --- | --- |
+| `<dev disk>` | `/Volumes/vault-dev` |
+| `<dev-targets>` | `/Volumes/vault-dev/dev-targets` (`paddock.worktreeRoot` = `/Volumes/vault-dev/dev-targets/wt`) |
+| the main checkout | `/Volumes/vault-dev/dev.decryptology.net/paddock` |
+
+After a disk move: move the folders, run `git config paddock.worktreeRoot <new dev-targets>/wt` in the main checkout,
+update the shell profile's `SCCACHE_DIR` and `PADDOCK_DEV_HOME`, and change the table above. Nothing else names the disk.
+
 ## Environment
 
 Put these in the shell profile (`~/.zshenv` on macOS):
 
 ```sh
 export RUSTC_WRAPPER=sccache        # shared compile cache; `sccache --show-stats` shows the hit rate
-export SCCACHE_DIR=/Volumes/d8sst7/dev-targets/sccache   # on the big volume (Mac mini), not the system disk
+export SCCACHE_DIR=<dev-targets>/sccache   # on the dev disk ("Where things live" below), not the system disk
 export SCCACHE_CACHE_SIZE=60G       # the default 10G is too small for several apps
 export CARGO_BUILD_JOBS=2           # per job; several run at once (Mac mini: about five heavy jobs at most)
 ```
@@ -41,7 +73,7 @@ export CARGO_BUILD_JOBS=2           # per job; several run at once (Mac mini: ab
 Change `RUSTC_WRAPPER` only between builds: it is part of Cargo's fingerprint, so changing it rebuilds the target folder.
 
 **sccache.** One server per user serves every checkout and worktree; the cache lives on the big volume
-(`SCCACHE_DIR`, Mac mini: `/Volumes/d8sst7/dev-targets/sccache`, next to the per-worktree target folders). It caches
+(`SCCACHE_DIR`: `<dev-targets>/sccache`, next to the per-worktree target folders; see "Where things live"). It caches
 the dependencies (registry crates, build scripts' C code), which is most of a cold build of a new worktree. It cannot
 cache the workspace's own crates in a debug build (incremental) or any link, so an edit-and-test cycle gains nothing
 from it. When `sccache --show-stats` stays at 0 requests while builds run, the server is broken: `sccache --stop-server`
@@ -151,7 +183,7 @@ author or by `./dev brief` (not on main yet): that call belongs there. The Rust 
 - Linux-only failures: run the CI image locally, for example
   `docker run --rm -v "$PWD:/src" -w /src <ci-image> cargo nextest run --workspace` (only containers you created).
 - Before starting another agent, ask `./dev load` (the coordinator's speed check, ER-24). It prints one line that starts with
-  `start`, `hold` or `stop`, and why. The 1- and 5-minute load, the free space of `/Volumes/d7sst7` and `/Volumes/d8sst7`, and the
+  `start`, `hold` or `stop`, and why. The 1- and 5-minute load, the free space of the disk holding `<dev-targets>` (derived, see "Where things live"), and the
   CI queue (queued plus running runs among the newest 200, read-only through `GITEA_TOKEN`) decide it: `start` while the 5-minute load is under 12
   (on 14 cores, scaled to the core count), nothing is low on space and fewer than 4 runs are queued or running; `hold` between
   12 and 20, on a 1-minute spike over 20, with a long CI queue, or when something could not be measured (never `start` on a

@@ -5,8 +5,12 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const VENV = '/Volumes/d8sst7/vm-data/tart-from-home/.paddock-vm-gui';
+import { devPlace } from './win-vm-target.mjs';
+
+// The VNC tools' venv in <dev disk>/vm-data/tart-from-home (docs/dev-setup.md), derived when first needed.
+const venv = () => join(devPlace('vm-data'), 'tart-from-home', '.paddock-vm-gui');
 export const vncdo = () => {
+  const VENV = venv();
   const dir = readdirSync(VENV).find((d) => d.startsWith('vnc-venv-'));
   const bin = dir && join(VENV, dir, 'bin', 'vncdo');
   if (!bin || !existsSync(bin)) throw new Error(`vncdotool is not installed under ${VENV}`);
