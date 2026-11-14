@@ -2,11 +2,11 @@
 """Agents stop only their own containers by name (ER-14). See docker-guard.sh for what it covers and its known gaps."""
 import json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-import shellscan
+import shellscan, paddockpaths
 
 NAME = "docker-guard"
 MSG = "Agents stop only their own containers by name (ER-14); never mass-stop or touch Docker/OrbStack itself."
-OK_DIRS = [d for d in os.environ.get("DOCKER_GUARD_OK_DIRS", "/Volumes/d8sst7/dev-targets:/Volumes/d7sst7/dev-targets:/private/tmp/claude-").split(":") if d]
+OK_DIRS = paddockpaths.dev_targets_dirs()  # None when it cannot be derived: compose down is then refused
 MASS = {"stop", "kill", "rm", "restart", "rmi", "volume rm", "network rm", "image rm"}
 LISTERS = {"ps", "ls", "container ls", "container list", "volume ls", "network ls", "images", "image ls", "container ps"}
 VALUE_FLAGS = {"-t", "--time", "-s", "--signal", "-n"}
@@ -79,7 +79,7 @@ def feeders_narrowed(c, cmds):
 
 
 def under_ok(d):
-    return d is None or any(d == o or d.startswith(o.rstrip("/") + "/") or (o.endswith("-") and d.startswith(o)) for o in OK_DIRS)
+    return d is None or OK_DIRS is not None and any(d == o or d.startswith(o.rstrip("/") + "/") or (o.endswith("-") and d.startswith(o)) for o in OK_DIRS)
 
 
 def check_docker(c, cmds):
@@ -139,6 +139,9 @@ def compose_down(c):
             f = shellscan.resolve(c.cwd, rest[k + 1], None)
             d = os.path.dirname(f) if f else None
         k += 1
+    if d is not None and OK_DIRS is None:
+        return refuse("`docker compose down` cannot be checked: the worktree root (`git config paddock.worktreeRoot`) is not set. "
+                      "Next step: set it, or set DOCKER_GUARD_OK_DIRS")
     if not under_ok(d):
         return refuse("`docker compose down` outside your own worktree or scratch folder (%s)" % d)
     if project is not None and (d is None or not project or not project.startswith(os.path.basename(d.rstrip("/")))):

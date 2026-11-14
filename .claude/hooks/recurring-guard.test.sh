@@ -2,7 +2,7 @@
 # Tests for recurring-guard.sh with invented transcripts of the real shape. Run: bash .claude/hooks/recurring-guard.test.sh
 here=$(cd "$(dirname "$0")" && pwd)
 H="$here/recurring-guard.sh"
-T=${TMPDIR:-/Volumes/d8sst7/dev-targets/scratch-guard}/recurring-guard-test.$$
+T=${TMPDIR:-/private/tmp/scratch-guard}/recurring-guard-test.$$
 mkdir -p "$T"; trap 'rm -rf "$T"' EXIT
 fail=0
 human='{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"do the batch"}}'
@@ -51,7 +51,7 @@ ms=$(( (e - s) / 1000000 )); echo "info: ${ms} ms on $(wc -c <"$big") bytes"
 [ "$ms" -lt 500 ] || { echo "FAIL: too slow (${ms} ms)"; fail=1; }
 
 # ---- the reviewer's cases (2026-11-12): every line must match
-R=${TMPDIR:-/Volumes/d8sst7/dev-targets/scratch-guard}/recurring-guard-rv.$$
+R=${TMPDIR:-/private/tmp/scratch-guard}/recurring-guard-rv.$$
 mkdir -p "$R"; trap 'rm -rf "$T" "$R"' EXIT
 rep() { jq -nc --arg c "<agent-message from=\"a1\">
 [Subagent hand-back] The text below is the final report.

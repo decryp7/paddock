@@ -2005,6 +2005,48 @@ had outlived its agent, and Dyno's launcher dropped the handle of its first chil
 kept the child), or, when you must act on a pid, check immediately before the kill that its cwd is inside your own worktree and
 that its start time is later than your own command's start; if either is unknown or differs, do not kill: report it to its
 owner or the coordinator. Never `pkill -f` or `kill` by a name pattern (`lefthook`, `cargo`, `node`) because every agent runs
+the same tools. **Class: acting on a reusable OS name without identity (rule 53).** Enforced since 2026-11-14 by the blocking
+hook `.claude/hooks/kill-guard.sh` (with its `.test.sh`): an agent's `pkill`, `killall`, `xargs kill` and `kill <pid>` are refused
+unless the pid is a `%job`, `$!` from the same command, or a live descendant of this Claude session whose working folder is in
+the agent's own worktree.
+
+## A cached tool vanished under a long run, and a hard link's age is the file's age (2026-11-14)
+CI run 7773's job-isolation release found its pinned paddock-dev gone, and on train 10 six generators of one `gen check` found
+heavy gone: `./dev`'s prune of `~/.paddock-dev/bin` counted `heavy-*` folders as its own hashes and never knew a run still needed
+an entry, and both `./dev` and heavy's resolver removed a cached binary whose `--version` probe failed (a slow probe on a loaded
+machine is enough). The first fix held heavy only, and its sweep judged a hold's age by the file's modification time, which a
+hard link shares with the cached binary: a fresh hold of a heavy built a week ago was removed by the next run's sweep (a failing
+test showed it). Fix: one mechanism for every cached tool (`tools/paddock-dev/src/tool_cache.rs`): a run holds its own hard link
+under `held/` (paddock-dev holds itself whenever it runs from the cache, and starts its children from that hold), a hold's age
+comes from its name, a hit touches its entry, and `./dev`'s prune keeps five entries per tool and never removes one used within
+a day or with a file linked more than once; a binary that fails its probe is replaced by an atomic rename, never removed first.
+**Class: a shared cached tool binary is removed while a long run needs it (ER-21).**
+
+## Member gates passed, the train's own tests did not: run the full tool suites before a train push (ER-8, ER-36, 2026-11-14)
+Every member of train 11 passed its member gate (fmt, Clippy on three targets, conformance, lockfiles), and the integrator ran the
+tests of the modules its two merge ports touched (229 of them). A full paddock-dev nextest on the merged tree, first in a Linux
+container and then on the host, still found three failures that only the combination made: the 0089 merge added C122 to the
+check lists of both hosts but not to the registry test (`check_engine`) or the hand-kept ci-run golden, the Rust C122 lacked the
+`root` scope its JavaScript host declares (the registry test compares them), and a test in `pre_push/heavy_tool.rs` (from
+fix/gen-check-build-first) used `remove_dir_all`, which `safe_remove_lint` refuses under tools/ (resolved by merging feat/kill-guard-and-tool-hold, whose `tool_cache.rs` took that
+test over without it). The ci.yml run had not started
+yet, so no runner time went on it. A member gate runs no tests by design (ADR 0098); the train's one test run was meant to be CI.
+**What changed:** before a train is pushed, the integrator runs the full nextest of `tools/paddock-dev` and of `crates` on the
+merged tree (through the heavy slot), fixes what fails in one combination commit, and pushes once; touched-module tests are not
+enough for a merge that changes shared lists (check registries, goldens, lint allow lists). **Class: train-time combination
+failures (ADR 0098; train 8's eight fixes, above).**
+
+## The guards kept a disk path that no longer existed (2026-11-14)
+After all dev data moved to `/Volumes/vault-dev`, `worktree-guard.py` still defaulted its main checkout to the old `d8sst7` path
+and `docker-guard.py` its allowed folders to the old `d8sst7`/`d7sst7` dev-targets, and no env override was set. The worktree
+guard stopped recognising the real main checkout, so the ER-2 protection (no subagent git write in main) was silently off; their
+tests hard-coded the same paths, so they stayed green. Fix: the guards derive the main checkout from git (the common dir of
+`$CLAUDE_PROJECT_DIR`, else of the hook's own folder) and the allowed folders from `git config paddock.worktreeRoot`, keep their
+env overrides, and refuse with a `Blocked: ... Next step: ...` message when they cannot derive
+(`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
+config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
+**Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
+
 the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
 
 ## Tests summed their steps under one bound and failed on the loaded Mac (2026-11-14, ADR 0103)

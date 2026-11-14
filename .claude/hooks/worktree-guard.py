@@ -2,11 +2,11 @@
 """The ER-2 guard (RT-7), blocking, on lib/shellscan.py. See worktree-guard.sh for the rules."""
 import json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
-import shellscan
+import shellscan, paddockpaths
 
 
 NAME = "worktree-guard"
-MAIN = os.environ.get("WORKTREE_GUARD_MAIN", "/Volumes/d8sst7/dev.decryptology.net/paddock")
+MAIN = paddockpaths.main_checkout()  # None when it cannot be derived: git writes by agents are then refused
 
 WRITES = {"checkout", "switch", "commit", "merge", "rebase", "reset", "push", "cherry-pick", "revert", "am", "pull",
           "restore", "clean", "stash", "update-ref"}
@@ -20,6 +20,8 @@ def norm(p):
 
 
 def in_main(d):
+    if MAIN is None:
+        return True
     d, m = norm(d), norm(MAIN)
     return d == m or d.startswith(m + os.sep)
 
@@ -115,6 +117,10 @@ def decide(data):
             return ("Blocked: `git %s` runs after a `cd X && ...` chain ended by `;` or a newline (unguarded cd): if "
                     "the cd failed, it runs in the wrong folder. Next step: keep it in the chain (`cd X && ... && git %s`)"
                     ", or use `git -C <worktree> %s`." % (sub, sub, sub))
+        if is_agent and MAIN is None:
+            return ("Blocked: `git %s` by a subagent, and the main checkout could not be derived from git (CLAUDE_PROJECT_DIR "
+                    "is not in a git checkout), so the ER-2 check cannot run. Next step: run from the repository, or set "
+                    "WORKTREE_GUARD_MAIN to the main checkout's path." % sub)
         if is_agent and eff and in_main(eff):
             return ("Blocked: `git %s` in the main checkout (%s) by a subagent. The main checkout stays on `main` for "
                     "the coordinator's fast-forwards (ER-2). Next step: do it in your own worktree (`./dev worktree add` "
