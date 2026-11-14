@@ -7,6 +7,7 @@ mod check;
 mod check_c119;
 mod check_c120;
 mod check_c122;
+mod check_c125;
 mod check_engine;
 mod check_ids;
 mod check_lex;

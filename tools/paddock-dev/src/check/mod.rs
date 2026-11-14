@@ -54,6 +54,7 @@ register_checks! {
     c121::C121,
     c122::C122,
     c124::C124,
+    c125::C125,
 }
 
 use config::Config;

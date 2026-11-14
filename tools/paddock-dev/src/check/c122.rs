@@ -17,7 +17,7 @@ use super::finding::{Finding, Severity};
 use super::jsre::{has_reason, rx, units};
 use super::mask::mask_units;
 use super::record::Precondition;
-use super::{Check, CheckOutput, Control, Ctx};
+use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -221,6 +221,14 @@ impl Check for C122 {
 
     fn title(&self) -> &'static str {
         "Tests compare paths as paths"
+    }
+
+    fn scope(&self) -> CheckScope {
+        CheckScope::Root
+    }
+
+    fn mode(&self) -> Mode {
+        Mode::ReportOnly
     }
 
     fn control(&self) -> Control {
