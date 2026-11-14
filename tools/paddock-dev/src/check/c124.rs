@@ -4,7 +4,9 @@
 //! Flagged, one site at a time, in the gate and check tools' Rust (`tools/paddock-dev/src/`, `crates/paddock-bench/src/`) outside
 //! test code (a `tests/` folder, `tests.rs`, `*_test.rs`, and everything after a file's first `#[cfg(test)]`):
 //!
-//! - a local enum with a `NotMeasured`, `Clean`, `Pass`, `Current` or `Green` variant: a second result type;
+//! - the `NotMeasured`, `Clean`, `Pass`, `Current` or `Green` variants of a local enum that is a result type, one with a `NotMeasured`
+//!   variant or two or more result words (`Clean`, `Pass`, `Passed`, `Current`, `Green`, `Red`, `Stale`, `Fail`, `Failed`,
+//!   `Findings`): a second result type; one such word among others names a phase or a command (`PhaseId::Clean`);
 //! - a JSON object literal with a `"status"`, `"verdict"` or `"outcome"` key: a result a consumer would read without evidence;
 //! - `fn fails(&self) -> bool` or `fn passed(&self) -> bool`: the bool conversion the shared type forbids;
 //! - a call of `Evidence::ci_run(` or `Evidence::adopt(` outside the modules that own them;
@@ -14,12 +16,14 @@
 //! In JavaScript, outside `conformance/src/outcome.mjs`: an object literal `status: 'clean'` (a pass made by hand).
 //!
 //! Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line) and a
-//! reason (shrink only). An entry that matches no site is stale and one that matches several is ambiguous: both are warnings. **Report-only (warnings)
+//! reason (shrink only), read and counted by the shared [`super::allow_list`] (also C121's): an entry that matches no site is stale
+//! and one that matches more than its `count` is ambiguous, both warnings. **Report-only (warnings)
 //! until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
 //! The JavaScript check `conformance/src/checks/C124-gate-outcomes.mjs` is the original; the `c124` tests of `tests/it/check.rs`
 //! compare the two finding for finding.
 
+use super::allow_list::{self, AllowList, Entry};
 use super::finding::Finding;
 use super::jsre::rx;
 use super::record::Precondition;
@@ -34,6 +38,10 @@ static RUST: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:tools/paddock-dev/src|c
 static OWNER: LazyLock<Regex> = LazyLock::new(|| rx(r"^crates/paddock-cli/"));
 static TEST_PATH: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:tests?|__tests__)/|(?:^|/)tests\.rs$|_test\.rs$"));
 static VARIANT: LazyLock<Regex> = LazyLock::new(|| rx(r"^\s*(NotMeasured|Clean|Pass|Current|Green)\b"));
+/// The words of a result: an enum is a second result type when it has a `NotMeasured` variant or two or more of these (`Earlier {
+/// Clean, Failed }`), never for one word among others (`PhaseId { Resolve, Clean, Fetch }`: a phase, not a result).
+static RESULT_WORD: LazyLock<Regex> =
+    LazyLock::new(|| rx(r"^\s*(NotMeasured|Clean|Pass|Passed|Current|Green|Red|Stale|Fail|Failed|Findings)\b"));
 static ENUM: LazyLock<Regex> = LazyLock::new(|| rx(r"^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+\w+"));
 static JSON_KEY: LazyLock<Regex> = LazyLock::new(|| rx(r#""(?:status|verdict|outcome)"\s*:"#));
 static BOOL_FN: LazyLock<Regex> = LazyLock::new(|| rx(r"\bfn\s+(?:fails|passed)\s*\(\s*&self\s*\)\s*->\s*bool\b"));
@@ -48,7 +56,10 @@ static JS_FILE: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:conformance/(?:src|b
 static JS_PASS: LazyLock<Regex> = LazyLock::new(|| rx(r#"\bstatus\s*:\s*['"]clean['"]"#));
 static JS_TEST: LazyLock<Regex> = LazyLock::new(|| rx(r"\.test\.mjs$"));
 
-const CALL_OWNERS: [&str; 2] = ["tools/paddock-dev/src/ci_runs/verdict.rs", "tools/paddock-dev/src/pre_push/known.rs"];
+const CALL_OWNERS: [&str; 2] = [
+    "tools/paddock-dev/src/ci_runs/verdict.rs",
+    "tools/paddock-dev/src/pre_push/known.rs",
+];
 const FIX: &str = "Build the result with `paddock_cli::measure` (or `Evidence::adopt`) and print it with `Outcome::json()`; read another gate's result with `Outcome::from_wire`, never its exit code (ADR 0089 amendment 2026-11-13).";
 
 /// One flagged site: its line, the text the allow list's `site` is looked for in, and what is wrong with it.
@@ -65,6 +76,9 @@ pub fn flagged_rust(path: &str, text: &str) -> Vec<Site> {
     let json_used = JSON_USE.is_match(text);
     let mut depth: i64 = -1; // brace depth inside an enum, -1 outside
     let mut header = String::new(); // the enum's own line, so the `NotMeasured,` of two enums are two sites
+    // The enum's flaggable variants, kept until it closes and shows whether it is a result type, and its result words.
+    let mut candidates: Vec<Site> = Vec::new();
+    let mut words = std::collections::BTreeSet::new();
     for (i, line) in lines[..end].iter().enumerate() {
         if line.trim().starts_with("//") {
             continue;
@@ -72,16 +86,21 @@ pub fn flagged_rust(path: &str, text: &str) -> Vec<Site> {
         if depth < 0 && ENUM.is_match(line) && line.contains('{') {
             depth = 0;
             header = line.trim().to_string();
+            candidates.clear();
+            words.clear();
         }
         if depth >= 0 {
-            if depth == 1
-                && let Some(c) = VARIANT.captures(line)
-            {
-                out.push((
-                    i + 1,
-                    format!("{header} {}", line.trim()),
-                    format!("an enum variant `{}` (a second result type)", &c[1]),
-                ));
+            if depth == 1 {
+                if let Some(c) = VARIANT.captures(line) {
+                    candidates.push((
+                        i + 1,
+                        format!("{header} {}", line.trim()),
+                        format!("an enum variant `{}` (a second result type)", &c[1]),
+                    ));
+                }
+                if let Some(w) = RESULT_WORD.captures(line) {
+                    words.insert(w[1].to_string());
+                }
             }
             for ch in line.chars() {
                 depth += match ch {
@@ -92,6 +111,9 @@ pub fn flagged_rust(path: &str, text: &str) -> Vec<Site> {
             }
             if depth <= 0 {
                 depth = -1;
+                if words.contains("NotMeasured") || words.len() >= 2 {
+                    out.append(&mut candidates);
+                }
             }
         }
         if json_used && JSON_KEY.is_match(line) {
@@ -141,6 +163,8 @@ pub fn flagged_rust(path: &str, text: &str) -> Vec<Site> {
             "a `measure` whose closure always returns an empty list (an empty measurement reads as a pass)".to_string(),
         ));
     }
+    // An enum's variants are known only when it closes: back in line order (stable, as the JavaScript sorts).
+    out.sort_by_key(|s| s.0);
     out
 }
 
@@ -156,48 +180,19 @@ pub fn flagged_js(path: &str, text: &str) -> Vec<Site> {
     text.split('\n')
         .enumerate()
         .filter(|(_, l)| !l.trim().starts_with("//") && JS_PASS.is_match(l))
-        .map(|(i, l)| (i + 1, l.to_string(), "an object literal `status: 'clean'` (a pass made by hand)".to_string()))
+        .map(|(i, l)| {
+            (
+                i + 1,
+                l.to_string(),
+                "an object literal `status: 'clean'` (a pass made by hand)".to_string(),
+            )
+        })
         .collect()
 }
 
-/// One allow-list entry: the file, a piece of the flagged line, and (read, never used) why.
-pub struct Entry {
-    path: String,
-    site: String,
-}
-
-/// Reads the allow list: its entries, or why it cannot be read.
+/// Reads the allow list: its entries, or why it cannot be read (the shared parser, [`super::allow_list`]).
 pub fn parse_allow(text: &str) -> Result<Vec<Entry>, String> {
-    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("{ALLOW} is not JSON: {e}"))?;
-    let list = v["allow"].as_array().ok_or_else(|| format!("{ALLOW} has no `allow` array"))?;
-    let mut out = Vec::new();
-    for e in list {
-        let (path, site, reason) = (
-            e["path"].as_str().unwrap_or(""),
-            e["site"].as_str().unwrap_or("").trim(),
-            e["reason"].as_str().unwrap_or("").trim(),
-        );
-        if path.is_empty() || site.is_empty() || reason.chars().count() < 8 {
-            return Err(format!(
-                "{ALLOW}: every entry needs a path, a site (a piece of the flagged line) and a reason of at least 8 characters"
-            ));
-        }
-        out.push(Entry {
-            path: path.to_string(),
-            site: site.to_string(),
-        });
-    }
-    Ok(out)
-}
-
-/// The indexes of the entries that name this site: the file and a piece of the flagged line.
-fn matching(allow: &[Entry], path: &str, text: &str) -> Vec<usize> {
-    allow
-        .iter()
-        .enumerate()
-        .filter(|(_, a)| a.path == path && text.contains(a.site.as_str()))
-        .map(|(i, _)| i)
-        .collect()
+    allow_list::parse(text, ALLOW)
 }
 
 /// The check.
@@ -248,10 +243,10 @@ impl Check for C124 {
             Ok(a) => (a, None),
             Err(e) => (Vec::new(), Some(e)),
         };
+        let mut allow = AllowList::new(ALLOW, allow);
         let mut findings = Vec::new();
         let mut probes = 0;
         let mut completed = true;
-        let mut hits = vec![0usize; allow.len()];
         let mut scanned = std::collections::HashSet::new();
         for f in ctx.files().iter() {
             let rust = RUST.is_match(f);
@@ -266,37 +261,20 @@ impl Check for C124 {
             scanned.insert(f.to_string());
             let sites = if rust { flagged_rust(f, &text) } else { flagged_js(f, &text) };
             for (line, at, what) in sites {
-                let named = matching(&allow, f, &at);
-                for n in &named {
-                    hits[*n] += 1;
-                }
-                if !named.is_empty() {
+                if allow.allows(f, &at) {
                     continue;
                 }
-                findings.push(Finding::warn("C124", 21, f, line, format!("builds a gate result by hand: {what}"), FIX));
-            }
-        }
-        for (n, a) in allow.iter().enumerate() {
-            if hits[n] == 0 && (scanned.contains(&a.path) || ctx.read(&a.path).is_none()) {
                 findings.push(Finding::warn(
                     "C124",
                     21,
-                    ALLOW,
-                    1,
-                    format!("stale allow entry ({}: {}) matches no site", a.path, a.site),
-                    "Remove it from conformance/c124-allow.json.",
-                ));
-            } else if hits[n] > 1 {
-                findings.push(Finding::warn(
-                    "C124",
-                    21,
-                    ALLOW,
-                    1,
-                    format!("ambiguous allow entry ({}: {}) matches {} sites", a.path, a.site, hits[n]),
-                    "Lengthen its `site` so it names one line.",
+                    f,
+                    line,
+                    format!("builds a gate result by hand: {what}"),
+                    FIX,
                 ));
             }
         }
+        findings.extend(allow.warnings("C124", 21, |p| scanned.contains(p) || ctx.read(p).is_none()));
         CheckOutput {
             findings,
             probes,

@@ -12,6 +12,7 @@
 //! Shadow running: until the JavaScript host drops C39 and C53 (RT-5 retirement), both run in the conformance job and
 //! `tests/it/check.rs` diffs them on the tree and on `tests/fixtures/check`. The wiring is listed in the RT-5 hand-off, not done here.
 
+pub mod allow_list;
 pub mod baseline;
 pub mod c53_liveness;
 pub mod config;

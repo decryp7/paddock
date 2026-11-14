@@ -51,18 +51,13 @@
       "reason": "Seed 2026-11-13 (shrink only): ci verdict Verdict{Green,Red,NotMeasured} and its Evidence::ci_run owner (WP-T4)"
     },
     {
-      "path": "tools/paddock-dev/src/disk/mod.rs",
-      "site": "pub enum DiskCommand { Clean(clean::CleanArgs),",
-      "reason": "Seed 2026-11-13 (shrink only): a disk cleanliness state, not a gate result"
-    },
-    {
       "path": "tools/paddock-dev/src/generators/mod.rs",
       "site": "json!({\"id\": r.id, \"verdict\": verdict, \"detail\": detail, \"check\": r.line, \"regenerate\": r.regenerate,",
       "reason": "Seed 2026-11-13 (shrink only): the gen check JSON keeps its verdict word beside the outcome (WP-T7 done)"
     },
     {
       "path": "tools/paddock-dev/src/generators/mod.rs",
-      "site": "\"cost\": r.cost.name(), \"seconds\": r.took.as_secs_f64(), \"outcome\": r.outcome.json()})",
+      "site": "\"cost\": r.cost.name(), \"seconds\": r.took.as_secs_f64(), \"outcome\": r.outcome.json(),",
       "reason": "Seed 2026-11-13 (shrink only): the gen check JSON keeps its verdict word beside the outcome (WP-T7 done)"
     },
     {
@@ -159,11 +154,6 @@
       "path": "tools/paddock-dev/src/release_isolation/verify.rs",
       "site": "pub fn passed(&self) -> bool {",
       "reason": "Seed 2026-11-13 (shrink only): release isolation (ADR 0089 section 8), its own Leak/Probe types"
-    },
-    {
-      "path": "tools/paddock-dev/src/worktree/mod.rs",
-      "site": "pub enum WorktreeCommand { Clean(CleanArgs),",
-      "reason": "Seed 2026-11-13 (shrink only): a worktree state (clean or dirty), not a gate result"
     },
     {
       "path": "tools/paddock-dev/src/worktree/primary.rs",

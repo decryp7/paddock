@@ -12,6 +12,9 @@
 // (`# conformance: ...` in shell) on the line or the line above; the test code of a file, `// conformance: file-layout-guess — <why>` anywhere in it: it covers the lines inside `#[cfg(test)] mod` blocks, or every line of a file under `tests/`; production code in the same file is still reported.
 // Test code is recognised by the plain `#[cfg(test)] mod name { ... }` only: `#[cfg(all(test, ...))]` and an out-of-line `mod tests;` (its own file, not under `tests/`) are not, so their sites stay reported (fail-safe).
 // A waived site is not a finding: the host counts it as waived (`inlineWaiver`), so suppressions stay visible (ER-33). Rust host: tools/paddock-dev/src/check/c120.rs (same findings, line for line).
+// A waiver that waives nothing is a warning of its own, at the comment's line (ESLint's `--report-unused-disable-directives`): a
+// `layout-guess` comment with a reason that no guess on its line or the next uses, and a second `file-layout-guess` comment or one
+// that waives no site. A waiver outlives the code it was for otherwise, and would silently waive a new guess written under it.
 import { applyInlineWaiver, commentView } from '../util/inline-waiver.mjs';
 import { warn } from '../finding.mjs';
 import { maskRust } from './C39-freed-port.mjs';
@@ -95,6 +98,20 @@ export function layoutGuesses(text, shell = false, file = '') {
   return out;
 }
 
+/** The 1-based lines of the waiver comments in one source that waive no guess: unused site waivers and unused file waivers. */
+export function unusedWaivers(text, shell = false, file = '') {
+  if (!text.includes('layout-guess')) return [];
+  const view = commentView(text, shell ? 'shell' : 'rust');
+  const used = new Set();
+  const [fileMarker = 0] = view.reasonedLines('file-layout-guess');
+  for (const g of layoutGuesses(text, shell, file)) {
+    const site = view.waiverLine(g.line, 'layout-guess');
+    if (site) used.add(site);
+    else if (g.waived.state === 'reason' && fileMarker) used.add(fileMarker);
+  }
+  return [...view.reasonedLines('layout-guess'), ...view.reasonedLines('file-layout-guess')].filter((n) => !used.has(n)).sort((a, b) => a - b);
+}
+
 export default {
   id: 'C120',
   scope: 'both',
@@ -108,10 +125,13 @@ export default {
       const shell = f.endsWith('.sh');
       if ((!shell && !f.endsWith('.rs')) || !SCOPE.test(f) || VENDORED.test(f) || IMPLEMENTATION.has(f)) continue;
       const text = ctx.read(f);
-      if (!text || !/current_exe|OUT_DIR|deps/.test(text)) continue;
+      if (!text || !/current_exe|OUT_DIR|deps|layout-guess/.test(text)) continue;
       for (const g of layoutGuesses(text, shell, f)) {
         const site = warn('C120', 40, f, g.line, `${g.what}: right in one cargo layout, a wrong folder in the other`, fix);
         out.push(applyInlineWaiver(g.waived, site, () => warn('C120', 40, f, g.line, 'the layout-guess waiver gives no reason', 'Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`.')));
+      }
+      for (const line of unusedWaivers(text, shell, f)) {
+        out.push(warn('C120', 40, f, line, 'this layout-guess waiver waives no site: the guess it was for is gone or moved', 'Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it.'));
       }
     }
     return out;
