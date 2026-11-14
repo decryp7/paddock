@@ -1,12 +1,14 @@
 // `./dev ci verdict` (tools/paddock-dev/src/ci_runs/verdict.rs) is the one reader of the Actions runs for "is there a full green run
 // of workflow W on commit S?". Two checks keep it that way: every workflow the tag gate can ask about prints the full-mode marker
-// in its plan job, and no other script or tool reads the runs API to make a pass/fail verdict.
+// (in its own plan job, or through the shared plan action, whose callers pass the scope as `full:`), and no other script or tool
+// reads the runs API to make a pass/fail verdict.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
+import { conjuncts, expr, job as workflowJob, loadWorkflow, stepsUsing } from './lib/workflow.mjs';
 
 // ---- the marker ---------------------------------------------------------------------------------------------------------------
 // `./dev ci verdict` trusts the line `plan verdict: complete=true` (plan_since::COMPLETE_LINE), which the plan job prints AFTER its
@@ -25,27 +27,30 @@ export function jobText(text, id) {
 const VERDICT_ECHO = 'echo "plan verdict: complete=$complete"';
 
 /** The plan job's code lines (comments dropped). */
-const planCode = (text) =>
-  (jobText(text, 'plan') ?? '')
+const codeLines = (body) =>
+  body
     .split('\n')
     .filter((l) => !l.trim().startsWith('#'))
-    .map((l) => l.trim());
+    .map((l) => l.trim())
+    .filter(Boolean);
+const planCode = (text) => codeLines(jobText(text, 'plan') ?? '');
 
 /** Why a workflow's plan job does not print the verdict marker after its decision, or null when it does. */
-export function markerProblem(text) {
-  if (jobText(text, 'plan') == null) return 'it has no `plan` job';
-  const code = planCode(text);
+export function markerProblem(text, code = planCode(text), { sinceRun = true } = {}) {
+  if (code.length === 0) return 'it has no `plan` job';
   const at = code.indexOf(VERDICT_ECHO);
+  const mentions = code.filter((l) => /^(?:echo|printf)\b.*plan verdict:/.test(l));
+  if (mentions.length > 1 || (mentions.length === 1 && at < 0)) return `its plan job prints \`plan verdict:\` other than as the single \`${VERDICT_ECHO}\` after its decision: ${mentions.join(' | ')}`;
   if (at < 0) return `its plan job does not \`${VERDICT_ECHO}\` (plan_since::COMPLETE_LINE)`;
   const decided = code.findLastIndex((l) => /^(?:\.\/dev plan\b|run=\$\(|echo "run=|node scripts\/affected\.mjs|grep -q|if \[ "\$EVENT")/.test(l) || /^echo "(?:run|crate_legs|paddock_dev_legs)=/.test(l) || /\|\| echo "(?:crate_legs|paddock_dev_legs)=/.test(l));
   if (decided > at) return 'its plan job prints the verdict line before it has finished deciding';
-  if (!code.some((l) => /^if \[.*-z "\$PLAN_SINCE_RUN".*PLAN_MODE_FULL" = true.*complete=true/.test(l))) return 'its complete=true condition does not need an empty PLAN_SINCE_RUN and PLAN_MODE_FULL = true';
+  const cond = sinceRun ? /^if \[.*-z "\$PLAN_SINCE_RUN".*PLAN_MODE_FULL" = true.*complete=true/ : /^if \[ "\$run" = true \] && \[ "\$PLAN_MODE_FULL" = true \]; then complete=true; fi$/;
+  if (!code.some((l) => cond.test(l))) return 'its complete=true condition does not need ' + (sinceRun ? 'an empty PLAN_SINCE_RUN and ' : '') + 'PLAN_MODE_FULL = true';
   return null;
 }
 
 /** The three lines that decide `complete` (from `complete=false` to the echo) of a plan job. */
-export function verdictSnippet(text) {
-  const code = planCode(text);
+export function verdictSnippet(text, code = planCode(text)) {
   const at = code.indexOf(VERDICT_ECHO);
   const from = code.lastIndexOf('complete=false', at);
   return from < 0 || at < 0 ? null : code.slice(from, at + 1).join('\n');
@@ -70,6 +75,11 @@ function gateWorkflows(root) {
   return [...out].sort();
 }
 
+const ACTION = 'actions/plan/action.yml';
+const actionText = () => readFileSync(join(PADDOCK, '.gitea', ACTION), 'utf8');
+/** Release workflows whose plan job is the shared plan action (it prints the verdict line; the workflow passes `full`). */
+const ACTION_WORKFLOWS = ['dyno-release.yml', 'pitcrew-release.yml', 'pitwall-release.yml', 'spotter-release.yml'];
+
 const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');
 
 test('every gate workflow prints the verdict marker after its plan decided (the tag gate reads it through ./dev ci verdict)', () => {
@@ -79,6 +89,31 @@ test('every gate workflow prints the verdict marker after its plan decided (the 
     const p = markerProblem(text(w));
     assert.equal(p, null, `${w}: ${p}. Without the marker a dispatch run is never full, so the tag workflow refuses the app's tag as "not full".`);
   }
+});
+
+test('the shared plan action prints the verdict marker after deciding, and its release callers pass the scope', () => {
+  const code = codeLines(actionText());
+  assert.equal(markerProblem(null, code, { sinceRun: false }), null);
+  assert.ok(code.includes('PLAN_MODE_FULL: ${{ inputs.full }}'), 'the action takes PLAN_MODE_FULL from its `full` input');
+  assert.ok(!code.some((l) => l.includes('PLAN_SINCE_RUN')), 'the action has no since-run input (the workflows that rerun do not use it)');
+  for (const w of ACTION_WORKFLOWS) {
+    const plan = jobText(text(w), 'plan') ?? '';
+    assert.match(plan, /uses: \.\/\.gitea\/actions\/plan/, `${w}: its plan job uses the plan action`);
+    assert.match(plan, /^\s+full: \S/m, `${w}: its plan job passes \`full:\` to the plan action (the scope of the run)`);
+    assert.doesNotMatch(plan, /plan verdict/, `${w}: no hand-written copy of the verdict line`);
+    // The scope is exactly the condition under which the workflow's gates job runs (its `if:` less the plan's `run` term).
+    const wf = loadWorkflow(w);
+    const full = expr(stepsUsing(workflowJob(wf, 'plan'), './.gitea/actions/plan')[0]?.with?.full);
+    const [runTerm, scope, ...rest] = conjuncts(workflowJob(wf, 'gates').if);
+    assert.equal(runTerm, "needs.plan.outputs.run == 'true'", `${w}: the gates job runs only when the plan says so`);
+    assert.ok(full && scope && rest.length === 0, `${w}: could not read the full: expression or the gates job's if: (${full} / ${scope})`);
+    assert.equal(full, scope.replace(/^\((.*)\)$/, '$1'), `${w}: full: must equal the gates job's condition`);
+  }
+  const snippet = verdictSnippet(null, code);
+  const say = (env) => runSnippet(snippet, { run: 'true', PLAN_MODE_FULL: 'true', ...env });
+  assert.equal(say({}), 'plan verdict: complete=true');
+  assert.equal(say({ run: 'false' }), 'plan verdict: complete=false');
+  assert.equal(say({ PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false');
 });
 
 test('the verdict is complete=true only for a plan that ran, a full mode and no since_run (the snippets, run in bash)', () => {
@@ -116,6 +151,7 @@ test('the marker check sees a missing, early or unguarded marker (positive contr
   assert.match(markerProblem(ok.replace('echo "plan verdict', '# echo "plan verdict')), /does not/);
   assert.match(markerProblem(ok.replace('-z "$PLAN_SINCE_RUN" ] && [ ', '')), /does not need an empty PLAN_SINCE_RUN/);
   assert.match(markerProblem(ok.replace('          echo "plan verdict: complete=$complete"\n', '').replace('run=$(./dev plan', 'echo "plan verdict: complete=$complete"\n          run=$(./dev plan')), /before it has finished/);
+  assert.match(markerProblem(ok.replace('          complete=false\n', '          echo "plan verdict: complete=true"\n          complete=false\n')), /other than as the single/);
   assert.match(markerProblem('jobs:\n  other:\n    x: 1\n'), /no `plan` job/);
   // The scope line alone is not the marker.
   assert.match(markerProblem(ok.replace('plan verdict: complete=', 'plan mode: full=')), /does not/);
