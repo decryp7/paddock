@@ -11,9 +11,13 @@ import { isMain } from '../../conformance/src/util/is-main.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
+/** The environment ./dev runs under: only PATH and HOME (the tool's cache and rustup), so no variable can pick a planted binary. */
+const devEnv = () => ({ PATH: [join(process.env.HOME ?? '', '.cargo', 'bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin', '/opt/homebrew/bin', '/usr/local/bin'].join(':'), HOME: process.env.HOME ?? '' });
+
 /**
  * One folder from `./dev places` (dev-targets, dev-disk, vm-data, lock-root, main-checkout; docs/dev-setup.md), run through the
- * repository's own ./dev, never a program the environment names. `pinned` ignores every environment variable (paddock-dev reads
+ * repository's own ./dev, never a program the environment names, under an empty environment (PATH and HOME only; the first run
+ * after its inputs change builds paddock-dev, about 35 s measured on 2026-11-15). `pinned` ignores every environment variable (paddock-dev reads
  * git config with an empty environment). Throws with paddock-dev's reason when the folder cannot be derived (fail closed).
  * @param {string} name
  * @param {{pinned?: boolean, run?: typeof execFileSync}} [o] `run` injected for tests
@@ -21,7 +25,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export function devPlace(name, { pinned = false, run = execFileSync } = {}) {
   const args = ['places', '--get', name, '--repo', REPO, ...(pinned ? ['--pinned'] : [])];
   try {
-    const out = String(run(join(REPO, 'dev'), args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 })).trim();
+    const out = String(run(join(REPO, 'dev'), args, { encoding: 'utf8', env: devEnv(), stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 })).trim();
     if (!out) throw new Error('it printed nothing');
     return out;
   } catch (e) {

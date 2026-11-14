@@ -3,6 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WIN_VM_DIR, WIN_VMX, WIN_VM_UNKNOWN, checkWinVmTarget, devPlace, winVmDirIn, winVmxIn } from './win-vm-target.mjs';
@@ -26,10 +29,12 @@ test('the target is the one test VM under the derived vm-data folder, and its .v
 
 test('the folder comes from the repository\'s own ./dev places --pinned, and its refusal is passed on', () => {
   const calls = [];
-  const run = (prog, args) => { calls.push([prog, args]); return '/srv/disk-b/vm-data\n'; };
+  const run = (prog, args, opts) => { calls.push([prog, args, opts]); return '/srv/disk-b/vm-data\n'; };
   assert.equal(devPlace('vm-data', { pinned: true, run }), '/srv/disk-b/vm-data');
   assert.match(calls[0][0], /\/dev$/);
   assert.deepEqual(calls[0][1].filter((a) => !a.startsWith('/')), ['places', '--get', 'vm-data', '--repo', '--pinned']);
+  // No variable of the caller reaches ./dev: only PATH and HOME (the cache), so PADDOCK_DEV_HOME and the like cannot pick a binary.
+  assert.deepEqual(Object.keys(calls[0][2].env).sort(), ['HOME', 'PATH']);
   const refuse = () => { const e = new Error('exit 2'); e.stderr = 'error: The dev-targets folder cannot be derived: no worktree root is set.\n'; throw e; };
   assert.throws(() => devPlace('vm-data', { pinned: true, run: refuse }), /--pinned` failed: error: The dev-targets folder cannot be derived/);
   assert.throws(() => devPlace('vm-data', { run: () => '' }), /printed nothing/);
@@ -67,4 +72,18 @@ test('run-win.mjs checks the target before it writes the .vmx or starts anything
   assert.ok(main > 0);
   const body = s.slice(main);
   assert.ok(body.indexOf('checkWinVmTarget()') >= 0 && body.indexOf('checkWinVmTarget()') < body.indexOf('vm(['), 'checkWinVmTarget() must come before the first vm([...]) call in main');
+});
+
+test('target.sh runs ./dev with an empty environment: PADDOCK_DEV_HOME and PADDOCK_DEV cannot pick the program', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'win-target-'));
+  try {
+    mkdirSync(join(dir, 'scripts', 'vm-win'), { recursive: true });
+    copyFileSync(join(here, '..', 'vm-win', 'target.sh'), join(dir, 'scripts', 'vm-win', 'target.sh'));
+    // A stand-in ./dev that reports what it inherited.
+    writeFileSync(join(dir, 'dev'), '#!/bin/sh\necho "/srv/x/${PADDOCK_DEV_HOME:-none}-${PADDOCK_DEV:-none}-${PADDOCK_DEV_TARGETS:-none}"\n', { mode: 0o755 });
+    const out = execFileSync('bash', ['-c', 'source "$1"; printf %s "$WIN_VM_DIR"', 'x', join(dir, 'scripts', 'vm-win', 'target.sh')], {
+      encoding: 'utf8', env: { ...process.env, PADDOCK_DEV_HOME: '/planted', PADDOCK_DEV: '/planted/dev', PADDOCK_DEV_TARGETS: '/planted' },
+    });
+    assert.equal(out, '/srv/x/none-none-none/paddock-win11-test');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
