@@ -585,7 +585,7 @@ mod tests {
         assert!(!cut);
         let names: Vec<_> = files
             .iter()
-            .map(|f| f.path.strip_prefix(&dir).unwrap().to_string_lossy().replace('\\', "/"))
+            .map(|f| paddock_testkit::path::text(f.path.strip_prefix(&dir).unwrap()))
             .collect();
         assert_eq!(names, ["a.log", "sub/b.log"]);
         assert!(files.iter().all(|f| f.size == 1 && f.modified_ms > 0));

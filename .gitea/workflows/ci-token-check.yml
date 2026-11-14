@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       run:
-        description: "A finished ci.yml run (its number)"
+        description: "A finished ci.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number)"
         required: true
       job:
         description: "One job id of that run"

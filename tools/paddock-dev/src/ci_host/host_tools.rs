@@ -9,10 +9,10 @@
 //! Two jobs installing one version at once each rename a whole copy into place (a part file of their own), so no reader sees half
 //! a program.
 
-use super::safe_remove;
 use super::{Step, is_executable, on_path};
 use crate::ci_isolation::home;
 use crate::ci_tool::{NETWORK_ENV, ToolCall};
+use crate::safe_remove;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Write;

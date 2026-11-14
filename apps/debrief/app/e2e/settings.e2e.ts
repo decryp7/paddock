@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 
 // The Settings screen runs against the browser build's mock settings backend
@@ -42,14 +42,14 @@ test('settings dialog changes the theme, colour scheme, date format and density,
   await dialog.getByRole('button', { name: 'compact' }).click();
   await expect(page.locator('debrief-events-grid')).toHaveCSS('--row-h', '22px');
   await expect(page.locator('html')).toHaveAttribute('data-density', 'compact');
-  await expect(page.locator('debrief-events-grid .row .time').first()).toHaveText(/^\d{4}-\d{2}-\d{2} /);
+  await expect(gridRows(page).locator('.time').first()).toHaveText(/^\d{4}-\d{2}-\d{2} /);
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
   // Safari does not focus clicked buttons, so there is nothing to restore focus to there.
   if (browserName === 'chromium') await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused();
 
   await page.reload();
-  await expect(page.locator('debrief-events-grid .row .time').first()).toHaveText(/^\d{4}-\d{2}-\d{2} /);
+  await expect(gridRows(page).locator('.time').first()).toHaveText(/^\d{4}-\d{2}-\d{2} /);
   await expect(page.locator('html')).toHaveAttribute('data-scheme', 'light');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'console');
   expect(csp).toEqual([]);

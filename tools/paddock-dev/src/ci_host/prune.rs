@@ -16,10 +16,11 @@
 //!   `<repo>/target/*` except debug, release, rust-analyzer, doc, tmp and flycheck*) with their sizes; with `--remove` deletes those
 //!   not kept (a `--keep 6c` keeps `~/.<app>-target-6c*` and `target/agent-6c*`). Ends with the free space of the repository's drive.
 //!
-//! Deletions go through [`safe_remove`](super::safe_remove): only under the folder being capped, never through a link.
+//! Deletions go through [`safe_remove`](crate::safe_remove): only under the folder being capped, never through a link.
 
+// conformance: file-layout-guess — the prune code never names `deps`; its tests use it only as filler data for a build folder to prune
 use super::Step;
-use super::safe_remove::{self, RemoveError};
+use crate::safe_remove::{self, RemoveError};
 use clap::Args as ClapArgs;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -561,7 +562,9 @@ mod tests {
         std::os::unix::fs::symlink(&real, c.home.join(".paddock-ci/target-link")).unwrap();
         big(&c.home, ".paddock-ci/notes/debug/incremental", 3000);
         big(&c.home, "Documents/debug/incremental", 3000);
-        let dotted = format!("{}/.paddock-ci/target-real-s1/../target-real-s1/../../Documents", c.home.display());
+        let dotted = paddock_testkit::path::under(&c.home, ".paddock-ci/target-real-s1/../target-real-s1/../../Documents")
+            .display()
+            .to_string();
         let cases: Vec<(&str, String, PathBuf)> = vec![
             ("unset", String::new(), real.join("debug/incremental/blob")),
             (

@@ -24,7 +24,7 @@ fn manifest() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn repo_root() -> PathBuf {
+pub(crate) fn repo_root() -> PathBuf {
     crate::full_tree(manifest().ancestors().nth(2).unwrap())
 }
 
@@ -32,7 +32,7 @@ fn fixtures() -> PathBuf {
     manifest().join("tests/fixtures/check")
 }
 
-fn skip(reason: &str) {
+pub(crate) fn skip(reason: &str) {
     let ci = ["CI", "GITHUB_ACTIONS"].iter().any(|k| std::env::var(k).is_ok_and(|v| v == "true"));
     if ci && cfg!(target_os = "linux") {
         panic!("the live comparison cannot run in CI: {reason}");
@@ -48,7 +48,7 @@ fn skip(reason: &str) {
     clippy::disallowed_methods,
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
-fn has_node() -> bool {
+pub(crate) fn has_node() -> bool {
     TestCommand::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
@@ -68,7 +68,8 @@ fn materialize() -> tempfile::TempDir {
 fn options(root: &Path) -> RunOptions {
     RunOptions {
         root: root.to_path_buf(),
-        app: "fixture".into(),
+        config: paddock_dev::check::config::Config::bare("fixture"),
+        scope: None,
         only: Some(vec!["C39".into(), "C53".into()]),
         files: None,
         today: "2026-11-10".into(),
@@ -98,8 +99,10 @@ fn fixture_findings_equal_the_recorded_js_findings_exactly() {
         serde_json::to_string_pretty(&want).unwrap()
     );
     assert!(
-        r.errors() > 40 && r.waived.len() == 3,
-        "the fixture must exercise many findings and the waivers"
+        r.errors() > 40
+            && r.waived.iter().filter(|w| w.expires != "inline").count() == 3
+            && r.waived.iter().filter(|w| w.expires == "inline").count() == 10,
+        "the fixture must exercise many findings, the dated waivers and the inline ones (listed under waived, ER-33)"
     );
 }
 
@@ -142,7 +145,7 @@ fn fixture_masks_equal_the_recorded_js_masks() {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 /// Runs a node program (an ES module given on the command line) in the repository and returns its standard output.
-fn node(driver: &str, env: &[(&str, String)]) -> String {
+pub(crate) fn node(driver: &str, env: &[(&str, String)]) -> String {
     let mut c = TestCommand::new("node");
     c.args(["--input-type=module", "-e", driver]).current_dir(repo_root());
     // The parity runs measure growth against `origin/main` of their own repository, whatever the caller's environment says.
@@ -159,7 +162,7 @@ fn node(driver: &str, env: &[(&str, String)]) -> String {
 /// (ADR 0071). A slow disk or a loaded host stretches the run, never this: 42-49 s quiet against over 240 s under I/O load, and
 /// every one of those seconds finished files. nextest's slow-timeout (`.config/nextest.toml`) is only the backstop.
 // conformance: hang-guard
-const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
+pub(crate) const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
 
 #[allow(
     clippy::disallowed_methods,
@@ -168,7 +171,7 @@ const LIVE_STALL: std::time::Duration = std::time::Duration::from_secs(120);
 /// [`node`] for a driver that prints a `.` line per unit of work: every such line is a tick of `progress`, and everything else it
 /// prints is the answer, returned. The child's end (its exit status) ends the wait; a hang ends it through the progress guard
 /// around the call.
-fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
+pub(crate) fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
     use std::io::{BufRead, Read};
     let mut c = TestCommand::new("node");
     c.args(["--input-type=module", "-e", driver])
@@ -257,7 +260,8 @@ fn live_tree_findings_equal_the_js_host() {
         let root = root.clone();
         move |progress| {
             let opts = RunOptions {
-                app: "paddock".into(),
+                config: paddock_dev::check::config::Config::bare("paddock"),
+                scope: None,
                 today: paddock_dev::check::today_utc(),
                 base_ref: None,
                 ..options(&root)
@@ -914,7 +918,7 @@ fn live_token_soup_findings_equal_the_js_host() {
         ))
         .unwrap();
         let mut o = options(d.path());
-        o.app = "soup".into();
+        o.config = paddock_dev::check::config::Config::bare("soup");
         let r = run_checks(&o, &legacy_registry()).unwrap();
         assert_eq!(shared_part(&r.json())["findings"], js["findings"], "seed {seed}");
         assert!(
@@ -1139,5 +1143,255 @@ fn an_invalid_baseline_fails_closed_with_one_error_on_both_hosts() {
             .unwrap();
             assert_eq!(shared_part(&r.json()), shared_part(&js), "{bad}");
         }
+    }
+}
+
+// ---- C121 (ADR 0098 WP-2): the Rust host's check against its JavaScript port ----------------------------------------------------
+
+/// A tree with every shape C121 reads: flagged and clean registries and tests, an allowed folder, a fixture folder, comments.
+fn c121_tree() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    let files: &[(&str, &str)] = &[
+        (
+            "conformance/c121-allow.json",
+            "{\"allow\":[{\"path\":\"conformance/test/\",\"reason\":\"tests of checks of workflows\"},{\"path\":\"scripts/ok.test.mjs\",\"reason\":\"reads a workflow as its subject\"}]}",
+        ),
+        (
+            "docs/a.toml",
+            "[[g]]\ncheck = [\"sh\", \"-c\", \"sed -n p .gitea/workflows/ci.yml\"]\n",
+        ),
+        (
+            "docs/b.toml",
+            "# grep .gitea/workflows/ci.yml in a comment\ncheck = [\"./dev\", \"ci\", \"conformance-args\"]\n",
+        ),
+        (
+            "docs/c.toml",
+            "check = [\"sh\", \"-c\", \"rg -n x workflows/ci.yml | awk 1\"]\nwhat = \"the sedate .gitea/workflows/ci.yml\"\n",
+        ),
+        (
+            "tools/t/tests/it/a.rs",
+            "fn a() {\n    let _ = Regex::new(\"x\"); // .gitea/workflows/ci.yml\n}\n",
+        ),
+        (
+            "tools/t/tests/it/b.rs",
+            "fn b() {\n    let _ = read(\".gitea/workflows/ci.yml\");\n}\n",
+        ),
+        (
+            "tools/t/src/tests.rs",
+            "fn c() { Command::new(\"grep\").arg(\".gitea/workflows/x.yml\"); }\n",
+        ),
+        (
+            "conformance/test/x.test.mjs",
+            "const t = a.match(/x/); // .gitea/workflows/ci.yml\n",
+        ),
+        ("scripts/ok.test.mjs", "sed .gitea/workflows/ci.yml\n"),
+        (
+            "scripts/bad.test.mjs",
+            "const r = new RegExp(\"x\").test(readFileSync('.gitea/workflows/ci.yml'));\nconst m = t.matchAll(/x/g); // workflows/ci.yml\n",
+        ),
+        (
+            "tools/t/tests/fixtures/f.rs",
+            "Command::new(\"grep\"); // .gitea/workflows/ci.yml\n",
+        ),
+        ("a/b_test.rs", "perl -ne print .gitea/workflows/ci.yml\r\nx\r\n"),
+    ];
+    for (p, t) in files {
+        let to = d.path().join(p);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(to, t).unwrap();
+    }
+    d
+}
+
+const JS_RUN_C121: &str = r#"
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C121'], options: {} });
+process.stdout.write(JSON.stringify(r));
+"#;
+
+fn c121_options(root: &Path, app: &str) -> RunOptions {
+    RunOptions {
+        only: Some(vec!["C121".into()]),
+        config: paddock_dev::check::config::Config::bare(app),
+        ..options(root)
+    }
+}
+
+#[test]
+fn c121_flags_the_shapes_it_names_and_only_as_warnings() {
+    let tree = c121_tree();
+    let r = run_checks(&c121_options(tree.path(), "fixture"), &registry()).unwrap();
+    let got: Vec<(String, usize)> = r.findings.iter().map(|f| (f.file.clone(), f.line)).collect();
+    assert_eq!(
+        got,
+        [
+            ("a/b_test.rs".to_string(), 1),
+            ("docs/a.toml".to_string(), 2),
+            ("docs/c.toml".to_string(), 1),
+            ("scripts/bad.test.mjs".to_string(), 1),
+            ("scripts/bad.test.mjs".to_string(), 2),
+            ("tools/t/src/tests.rs".to_string(), 1),
+            ("tools/t/tests/it/a.rs".to_string(), 2),
+        ]
+    );
+    assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
+    assert_eq!(r.warnings(), 7);
+}
+
+#[test]
+fn c121_without_its_allow_list_cannot_look() {
+    let tree = c121_tree();
+    std::fs::remove_file(tree.path().join("conformance/c121-allow.json")).unwrap();
+    let r = run_checks(&c121_options(tree.path(), "fixture"), &registry()).unwrap();
+    assert!(
+        r.errors() > 0,
+        "a check that could not read its allow list is an error no waiver covers"
+    );
+}
+
+#[test]
+fn live_c121_findings_equal_the_js_port_on_a_fixture_tree_and_on_this_tree() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let tree = c121_tree();
+    for (root, app) in [(tree.path().to_path_buf(), "fixture"), (repo_root(), "paddock")] {
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN_C121,
+            &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
+        ))
+        .unwrap();
+        let r = run_checks(&c121_options(&root, app), &registry()).unwrap();
+        let (got, want) = (shared_part(&r.json()), shared_part(&js));
+        assert_eq!(got["findings"], want["findings"], "C121 on {app}");
+        assert_eq!(got, want, "C121 on {app}");
+    }
+}
+
+// ---- C124 (ADR 0089 amendment WP-T6): the Rust host's check against its JavaScript original ------------------------------------
+
+/// A tree with every shape C124 reads: a result enum, JSON result keys, a bool on a result, a call outside its owner, an allowed
+/// file, test code, comments and a hand-made JavaScript pass.
+fn c124_tree() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    let files: &[(&str, &str)] = &[
+        (
+            "conformance/c124-allow.json",
+            "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"site\":\"NotMeasured\",\"reason\":\"the seed, shrink only\"},{\"path\":\"tools/paddock-dev/src/gone.rs\",\"site\":\"x\",\"reason\":\"a stale entry\"},{\"path\":\"tools/paddock-dev/src/two.rs\",\"site\":\"Clean,\",\"reason\":\"an ambiguous entry\"}]}",
+        ),
+        ("tools/paddock-dev/src/two.rs", "enum A {\n    Clean,\n}\nenum B {\n    Clean,\n}\n"),
+        (
+            "tools/paddock-dev/src/a.rs",
+            "pub enum V {\n    Green { run: u64 },\n    NotMeasured(String),\n}\n",
+        ),
+        (
+            "tools/paddock-dev/src/b.rs",
+            "let v = json!({\"status\": \"clean\"});\nlet w = json!({\"verdict\": k, \"id\": 1});\n",
+        ),
+        (
+            "tools/paddock-dev/src/c.rs",
+            "impl R {\n    pub fn fails(&self) -> bool { true }\n}\nlet e = Evidence::ci_run(a, b);\n",
+        ),
+        ("tools/paddock-dev/src/ci_runs/verdict.rs", "let e = Evidence::adopt(x, &repo);\n"),
+        (
+            "tools/paddock-dev/src/ok.rs",
+            "pub enum V {\n    NotMeasured,\n}\nfn f() { let o = measure(a, b, c, d, || Ok(Vec::new())); }\n",
+        ),
+        (
+            "tools/paddock-dev/src/d.rs",
+            "// json!({\"status\": \"clean\"})\nfn x() {}\n#[cfg(test)]\nmod tests {\n    fn t() { json!({\"status\": 1}); }\n}\n",
+        ),
+        ("tools/paddock-dev/tests/it/e.rs", "let v = json!({\"status\": \"clean\"});\n"),
+        ("crates/paddock-cli/src/outcome/mod.rs", "enum X {\n    NotMeasured,\n}\n"),
+        ("conformance/src/runner.mjs", "return { status: 'clean', findings: [] };\n"),
+        ("conformance/src/outcome.mjs", "const o = { status: 'clean' };\n"),
+        ("scripts/x.test.mjs", "const r = { status: 'clean' };\n"),
+    ];
+    for (p, t) in files {
+        let to = d.path().join(p);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(to, t).unwrap();
+    }
+    d
+}
+
+const JS_RUN_C124: &str = r#"
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C124'], options: {} });
+process.stdout.write(JSON.stringify(r));
+"#;
+
+fn c124_options(root: &Path, app: &str) -> RunOptions {
+    RunOptions {
+        only: Some(vec!["C124".into()]),
+        config: paddock_dev::check::config::Config::bare(app),
+        ..options(root)
+    }
+}
+
+#[test]
+fn c124_flags_the_shapes_it_names_and_only_as_warnings() {
+    let tree = c124_tree();
+    let r = run_checks(&c124_options(tree.path(), "fixture"), &registry()).unwrap();
+    let got: Vec<(String, usize)> = r.findings.iter().map(|f| (f.file.clone(), f.line)).collect();
+    assert_eq!(
+        got,
+        [
+            ("conformance/src/runner.mjs".to_string(), 1),
+            ("tools/paddock-dev/src/a.rs".to_string(), 2),
+            ("tools/paddock-dev/src/a.rs".to_string(), 3),
+            ("tools/paddock-dev/src/b.rs".to_string(), 1),
+            ("tools/paddock-dev/src/b.rs".to_string(), 2),
+            ("tools/paddock-dev/src/c.rs".to_string(), 2),
+            ("tools/paddock-dev/src/c.rs".to_string(), 4),
+            // a listed file does not hide a different, unlisted site in it
+            ("tools/paddock-dev/src/ok.rs".to_string(), 4),
+            // an entry that matches nothing is stale, one that matches two sites is ambiguous
+            ("conformance/c124-allow.json".to_string(), 1),
+            ("conformance/c124-allow.json".to_string(), 1),
+        ]
+    );
+    let said = |needle: &str| r.findings.iter().any(|f| f.message.contains(needle));
+    assert!(said("always returns an empty list"), "the empty measurement is named");
+    assert!(said("stale allow entry (tools/paddock-dev/src/gone.rs"), "the stale entry is named");
+    assert!(
+        said("ambiguous allow entry (tools/paddock-dev/src/two.rs: Clean,) matches 2 sites"),
+        "the ambiguous entry is named"
+    );
+    assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
+}
+
+/// "Delete the check": with its allow list gone the check cannot look, and that is an error no waiver covers, never a pass.
+#[test]
+fn c124_without_its_allow_list_cannot_look() {
+    let tree = c124_tree();
+    std::fs::remove_file(tree.path().join("conformance/c124-allow.json")).unwrap();
+    let r = run_checks(&c124_options(tree.path(), "fixture"), &registry()).unwrap();
+    assert!(
+        r.errors() > 0,
+        "a check that could not read its allow list is an error no waiver covers"
+    );
+}
+
+#[test]
+fn live_c124_findings_equal_the_js_original_on_a_fixture_tree_and_on_this_tree() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let tree = c124_tree();
+    for (root, app) in [(tree.path().to_path_buf(), "fixture"), (repo_root(), "paddock")] {
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN_C124,
+            &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
+        ))
+        .unwrap();
+        let r = run_checks(&c124_options(&root, app), &registry()).unwrap();
+        let (got, want) = (shared_part(&r.json()), shared_part(&js));
+        assert_eq!(got["findings"], want["findings"], "C124 on {app}");
+        assert_eq!(got, want, "C124 on {app}");
     }
 }

@@ -21,10 +21,10 @@
 
 use super::links::{Links, OsLinks};
 use super::phase::{Phase, bounded};
-use super::safe_remove::{self, RemoveError};
 use super::{Step, folder_name, isolation_full, tail_flat};
 use crate::ci_isolation::home;
 use crate::ci_tool::ToolCall;
+use crate::safe_remove::{self, RemoveError};
 use clap::Args as ClapArgs;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -526,7 +526,7 @@ mod tests {
     fn kept(sc: &Scene) -> String {
         format!(
             "{}/.paddock-ci/src/decryp7_paddock-crate-s1",
-            crate::ci_host::fwd(&sc.dir.path().join("home"))
+            paddock_testkit::path::text(sc.dir.path().join("home"))
         )
     }
 

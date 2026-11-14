@@ -45,6 +45,7 @@ exclude bundle apps/*/docs/design each app's design sheets
 
 mention conformance/src/ C24 and its context read the screenshot folders in the conformance job (Linux, full checkout)
 mention docs/generators.toml the icons entry names docs/images paths its check reads (the icons generator's own outputs; its check needs a full checkout and runs locally, not on a lean clone)
+mention tools/paddock-dev/src/check/config.rs the conformance run's default `screenshotDirs`, the same default as conformance/src/context.mjs (a string in the Rust host, read from no folder; the host runs in the conformance job on Linux)
 mention paddock.conformance.json names the screenshot folder C24 checks (conformance job, Linux)
 mention scripts/affected.test.mjs test strings for the plan job (Linux)
 mention icons/tools/ the icons job (Linux) and the icon install scripts, run by hand

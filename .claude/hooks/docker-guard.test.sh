@@ -2,8 +2,14 @@
 # Tests for docker-guard.sh. Run: bash .claude/hooks/docker-guard.test.sh
 here=$(cd "$(dirname "$0")" && pwd)
 H="$here/docker-guard.sh"
-MAIN=/Volumes/d8sst7/dev.decryptology.net/paddock
-WT=/Volumes/d8sst7/dev-targets/wt/some-agent
+# Paths are built at run time; the guard derives its allowed folders from `git config paddock.worktreeRoot`.
+TMP=$(cd "$(mktemp -d)" && pwd -P); trap 'rm -rf "$TMP"' EXIT
+MAIN=$TMP/elsewhere/paddock-main
+git init -q "$MAIN" || exit 1
+git -C "$MAIN" config paddock.worktreeRoot "$TMP/dev-targets/wt"
+WT=$TMP/dev-targets/wt/some-agent
+export CLAUDE_PROJECT_DIR=$MAIN
+unset DOCKER_GUARD_OK_DIRS
 fail=0
 expect() { # name want who cwd command
   if [ "$3" = agent ]; then x='{"agent_id":"a1"}'; else x='{}'; fi
@@ -38,7 +44,7 @@ expect "docker image prune (dangling only) is allowed" allow agent "$WT" 'docker
 expect "docker compose down in the main checkout" deny agent "$MAIN" 'docker compose down'
 expect "docker-compose down in the main checkout" deny agent "$MAIN" 'docker-compose down -v'
 expect "docker compose down in own worktree" allow agent "$WT" 'docker compose down'
-expect "docker compose -f file in a scratch folder" allow agent "$MAIN" 'docker compose -f /Volumes/d8sst7/dev-targets/scratch/x/compose.yml down'
+expect "docker compose -f file in a scratch folder" allow agent "$MAIN" "docker compose -f $TMP/dev-targets/scratch/x/compose.yml down"
 expect "docker compose up in main is not down" allow agent "$MAIN" 'docker compose up -d'
 # --- Docker and OrbStack themselves
 expect "orb stop" deny agent "$WT" 'orb stop'
@@ -104,6 +110,26 @@ expect "docker rm --help" allow agent "$WT" 'docker rm --help'
 # --- the coordinator is not refused
 expect "coordinator docker stop \$(docker ps -q)" allow coord "$MAIN" 'docker stop $(docker ps -q)'
 expect "coordinator orb stop" allow coord "$MAIN" 'orb stop'
+# --- no worktree root to derive from: compose down fails closed
+mkdir -p "$TMP/bare" && git init -q "$TMP/bare/r"
+out=$(jq -nc --arg d "$TMP/bare/r" '{tool_name:"Bash",cwd:$d,agent_id:"a",tool_input:{command:"docker compose down"}}' | CLAUDE_PROJECT_DIR="$TMP/bare/r" "$H" 2>/dev/null)
+case "$out" in *'"deny"'*"Next step"*) echo "ok: underivable folders refuse with a next step" ;; *) echo "FAIL: underivable folders must refuse"; fail=1 ;; esac
+# A worktree root with no usable parent (root-level, relative, `..`, blank) derives nothing: compose down fails closed anywhere.
+for bad in /wt wt ../dt/wt '  ' /srv/../wt; do
+  git -C "$TMP/bare/r" config paddock.worktreeRoot "$bad"
+  out=$(jq -nc --arg d "$TMP/bare/r" '{tool_name:"Bash",cwd:$d,agent_id:"a",tool_input:{command:"docker compose down"}}' | CLAUDE_PROJECT_DIR="$TMP/bare/r" "$H" 2>/dev/null)
+  case "$out" in *'"deny"'*) echo "ok: worktree root '$bad' refuses" ;; *) echo "FAIL: worktree root '$bad' must refuse, not allow everywhere"; fail=1 ;; esac
+done
+# The precedence of docs/dev-setup.md: DOCKER_GUARD_OK_DIRS, then PADDOCK_DEV_TARGETS, then git config, then PADDOCK_WORKTREE_ROOT.
+git -C "$TMP/bare/r" config --unset paddock.worktreeRoot
+dc() { jq -nc --arg d "$1" '{tool_name:"Bash",cwd:$d,agent_id:"a",tool_input:{command:"docker compose down"}}' | CLAUDE_PROJECT_DIR="$TMP/bare/r" "$H" 2>/dev/null; }
+case "$(PADDOCK_DEV_TARGETS=$TMP/named dc "$TMP/named/wt/x")" in *'"deny"'*) echo "FAIL: PADDOCK_DEV_TARGETS must be honoured"; fail=1 ;; *) echo "ok: PADDOCK_DEV_TARGETS is honoured" ;; esac
+case "$(PADDOCK_WORKTREE_ROOT=$TMP/byroot/wt dc "$TMP/byroot/wt/x")" in *'"deny"'*) echo "FAIL: PADDOCK_WORKTREE_ROOT must be the last fallback"; fail=1 ;; *) echo "ok: PADDOCK_WORKTREE_ROOT is the last fallback" ;; esac
+git -C "$TMP/bare/r" config paddock.worktreeRoot "$TMP/cfg/wt"
+case "$(PADDOCK_DEV_TARGETS=$TMP/named dc "$TMP/cfg/x")" in *'"deny"'*) echo "ok: PADDOCK_DEV_TARGETS beats git config" ;; *) echo "FAIL: PADDOCK_DEV_TARGETS must beat git config"; fail=1 ;; esac
+case "$(PADDOCK_WORKTREE_ROOT=$TMP/byroot/wt dc "$TMP/byroot/x")" in *'"deny"'*) echo "ok: git config beats PADDOCK_WORKTREE_ROOT" ;; *) echo "FAIL: git config must beat PADDOCK_WORKTREE_ROOT"; fail=1 ;; esac
+case "$(PADDOCK_DEV_TARGETS=relative dc "$TMP/cfg/x")" in *'"deny"'*) echo "ok: a relative PADDOCK_DEV_TARGETS refuses" ;; *) echo "FAIL: a relative PADDOCK_DEV_TARGETS must refuse"; fail=1 ;; esac
+git -C "$TMP/bare/r" config --unset paddock.worktreeRoot
 # --- fail open, message
 out=$(echo 'not json' | "$H" 2>/dev/null); [ -z "$out" ] && echo "ok: bad input allows" || { echo "FAIL: bad input"; fail=1; }
 out=$(jq -nc '{tool_name:"Bash",cwd:"/x",agent_id:"a",tool_input:{command:"docker stop"}}' | "$H")

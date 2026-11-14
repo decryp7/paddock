@@ -21,14 +21,17 @@
 //! `PADDOCK_ACCEPT_NOT_MEASURED=<full row ids>` (or `--accept-not-measured`) lets those not-measured rows pass the push; it is
 //! announced at the top of every run it is set in, shown in the table and logged next to the gate logs.
 
+pub mod budget;
 pub mod exec;
 pub mod gates;
 pub mod heavy_tool;
+pub mod known;
+pub mod outcome;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{BUDGET, RealExec, RunOpts, Verdict, parse_load, run_all_with, workers};
+use exec::{BUDGET, Kind, QUEUE_MAX, RealExec, Row, RunOpts, parse_load, run_all_timed, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -46,10 +49,15 @@ pub struct PrePushArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     pub root: Option<PathBuf>,
-    /// The base every push is measured from. Default: for an existing remote ref its old commit; for a new one the nearest remote
-    /// branch the pushed commit descends from (its tracking upstream, then a `train/*` branch, then main); origin/main when none.
+    /// The base every push is measured from. Default: for an existing remote ref its old commit; for a new one (or one the remote
+    /// already has at the pushed commit) the remote branch tip, read live with `git ls-remote` on the push's remote, that leaves the
+    /// fewest new commits among its tracking upstream, the `train/*` branches and main; origin/main when none is usable. Naming it
+    /// also turns off the known-commit shortcut.
     #[arg(long)]
     pub base: Option<String>,
+    /// The remote being pushed to (git's first pre-push argument; the hook passes it): the only remote evidence and bases are read from.
+    #[arg(long)]
+    pub remote: Option<String>,
     /// Only the gates whose row starts with one of these words (for example `fmt,clippy`); the hook always runs them all.
     #[arg(long, value_delimiter = ',')]
     pub only: Vec<String>,
@@ -236,6 +244,31 @@ impl Drop for Detached {
     }
 }
 
+impl PrePushArgs {
+    /// The base: the one named, or origin/main.
+    pub fn base(&self) -> &str {
+        self.base.as_deref().unwrap_or("origin/main")
+    }
+}
+
+/// The lookups that leave the machine: git's `ls-remote` and the shared CI verdict reader.
+struct RealLookups {
+    root: PathBuf,
+}
+
+impl known::Lookups for RealLookups {
+    fn ls_remote(&self, remote: &str) -> Option<String> {
+        git_text(&self.root, &["ls-remote", "--", remote])
+    }
+    fn ci_green(&self, sha: &str) -> Result<u64, String> {
+        match crate::ci_runs::ci_verdict(known::CI_WORKFLOW, sha) {
+            crate::ci_runs::verdict::Verdict::Green { run } => Ok(run),
+            crate::ci_runs::verdict::Verdict::Red { reason, .. } => Err(format!("red or partial: {reason}")),
+            crate::ci_runs::verdict::Verdict::NotMeasured(why) => Err(format!("not measured: {why}")),
+        }
+    }
+}
+
 /// The command.
 pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
     let root = match &args.root {
@@ -247,27 +280,41 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
                 .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))?
         }
     };
+    let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
+    command_in(args, &root, &stdin, &RealLookups { root: root.clone() })
+}
+
+/// [`command`] with the repository, git's pre-push lines and the outside lookups given.
+fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lookups) -> Result<Report, CliError> {
+    let root = root.to_path_buf();
     let env: HashMap<String, String> = std::env::vars().collect();
     let accept = accepted_ids(&args.accept_not_measured, &env);
     let stop = Arc::new(AtomicBool::new(false));
     stop_on_signals(&stop);
     let state = state_dir(&root);
-    let pushes = if args.refs_from_stdin {
-        parse_push(&read_stdin()?)
-    } else {
-        Vec::new()
-    };
+    let pushes = if args.refs_from_stdin { parse_push(stdin) } else { Vec::new() };
     let pushed: Vec<String> = pushes.iter().map(|p| p.sha.clone()).collect();
+    let mut lookup_notes = Vec::new();
+    if known::applicable(args, &pushed) {
+        let (found, trail) = known::find(&root, &state, args.remote.as_deref(), &pushed, look);
+        log_known(&state, &pushed, args.remote.as_deref(), &trail);
+        if let Some(ev) = found {
+            return Ok(known::report(&pushed, args.remote.as_deref(), &ev));
+        }
+        lookup_notes = trail;
+    }
     let (base, base_why) = match (&args.base, pushes.first()) {
         (Some(b), _) => (b.clone(), format!("--base {b} was given")),
-        (None, Some(first)) => choose_base(&root, first, DEFAULT_BASE),
+        (None, Some(first)) => choose_base(&root, first, args.remote.as_deref(), DEFAULT_BASE, look),
         (None, None) => (DEFAULT_BASE.to_string(), "no push to look at (a person's run)".to_string()),
     };
     let (change, mut notes, extra) = discover(&root, &base, &args.files, &pushed)?;
     notes.insert(0, format!("base: {base} ({base_why})"));
-    if change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
+    notes.extend(lookup_notes.into_iter().map(|l| format!("known-commit lookup: {l}")));
+    // An empty diff passes on its own only for a person's run with no pushed commit; a push is always measured (or known).
+    if pushed.is_empty() && change.files.is_empty() && change.ranges.is_empty() && extra.is_empty() {
         return Ok(Report::new(
-            json!({"gates": [], "changed": 0, "base": base}),
+            json!({"gates": [], "changed": 0, "base": base, "outcome": outcome::nothing_to_check(&base).json()}),
             format!("pre-push: base {base} ({base_why}); nothing changed since; nothing to check."),
         ));
     }
@@ -323,6 +370,8 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         stop: Arc::clone(&stop),
         built_heavy: Default::default(),
         budget_end: std::time::Instant::now() + BUDGET,
+        priority: pushes.iter().any(|p| budget::is_landing_ref(&p.remote_ref)),
+        queue_max: queue_max(&env),
     };
     let history = GitHistory::new(&work, GIT_TIMEOUT);
     let req = Request {
@@ -338,6 +387,12 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
             .with_hint("Run `./dev plan --files <a,b>` to see the same error.")
     })?;
     let mut facts = read_facts(&work, &plan, &env);
+    // A dry run lists and runs nothing, so it needs no install; a real run in a throw-away tree on Windows has no node_modules.
+    facts.conformance_env = if args.dry_run {
+        None
+    } else {
+        node_env_problem(cfg!(windows) && work != root, &|p| std::fs::read_to_string(work.join(p)).ok())
+    };
     facts.linux = args.linux;
     facts.kept_targets = kept_targets;
     let mut planned = gates::plan_gates(&plan, &change, &facts);
@@ -345,7 +400,7 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         planned.retain(|p| {
             let id = match p {
                 gates::Planned::Run(g) => &g.id,
-                gates::Planned::Skip { id, .. } | gates::Planned::Broken { id, .. } => id,
+                gates::Planned::Skip { id, .. } | gates::Planned::NotMeasured { id, .. } | gates::Planned::Broken { id, .. } => id,
             };
             args.only.iter().any(|w| id.split(' ').next() == Some(w.as_str()))
         });
@@ -360,49 +415,91 @@ pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
         overridden =
             "OVERRIDE SET: PADDOCK_HEAVY=off is not allowed outside the tests; every compile (clippy, xwin, Linux) is not measured\n"
                 .into();
-    } else if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p), &|| exec::sibling_heavy(&real.root, &env)).is_empty() {
+    } else if exec::heavy_prefix(&env, &|p| exec::Exec::has_tool(&real, p)).is_empty() {
         notes.push("no heavy.sh or heavy on PATH: the compiles (clippy, xwin, Linux) run through the heavy built from tools/heavy (cached under ~/.paddock-dev/bin); if that build fails they are not measured (ER-24)".into());
     }
     let head = format!(
-        "{overridden}pre-push: base {} ({}); {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min; logs in {}\n{}",
+        "{overridden}pre-push: base {} ({}); {} changed file(s); {} gate(s) at a time (1-minute load {}); budget {} min of run time (time queued for the heavy slot is reported apart, limit {} min, {}); logs in {}\n{}",
         base,
         base_why,
         change.files.len(),
         n,
         load.map_or("unknown".to_string(), |l| format!("{l:.1}")),
         BUDGET.as_secs() / 60,
+        real.queue_max.as_secs() / 60,
+        if real.priority {
+            "priority lane: this push lands on a train, main or a release tag"
+        } else {
+            "normal lane"
+        },
         real.logs.display(),
         notes.iter().map(|n| format!("pre-push: {n}")).collect::<Vec<_>>().join("\n")
     );
-    let mut rows = run_all_with(
+    // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
+    let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
+    let subject = outcome::subject_of(&root, checked.as_deref());
+    let (mut rows, timings) = run_all_timed(
         &planned,
         &real,
         &RunOpts {
             workers: n,
             budget: BUDGET,
             stop: &stop,
+            subject: &subject,
         },
     );
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
-    let mut report = render(head.trim_end(), &rows);
+    let mut report = render_timed(head.trim_end(), &rows, &timings);
     if stop.load(Ordering::SeqCst) {
         report = report.with_exit(Exit::Interrupted);
+    }
+    // A complete passing run is the evidence a later push of the same commit may rest on (known::find).
+    // The run's own outcome, with the commit and tree it is about: what a consumer reads (Outcome::from_wire), never the exit code.
+    let (shared, run_outcome) = outcome::fold(&rows, &subject);
+    debug_assert!(
+        report.exit == Exit::Interrupted || report.exit == shared.exit(),
+        "the table's exit and the shared verdict's exit disagree"
+    );
+    report.data["outcome"] = run_outcome.json();
+    report.data["outcomes"] = shared.json();
+    if let Some(sha) =
+        checked.filter(|_| known::recordable(args, accept.len(), extra.len(), report.exit) && outcome::leaves_record(&run_outcome))
+    {
+        let passed: Vec<String> = rows
+            .iter()
+            .filter(|(_, v)| v.kind() == Kind::Passed)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        if let Err(e) = known::write_record(&root, &state, &sha, args.base(), &passed, now, &run_outcome) {
+            eprintln!("::warning::pre-push: the pass record of {sha} was not written: {e}. A later push of it is checked again.");
+        }
     }
     Ok(report)
 }
 
+/// The longest a heavy step waits for a slot: `PADDOCK_QUEUE_MAX` (seconds, at least 1) or [`QUEUE_MAX`].
+fn queue_max(env: &HashMap<String, String>) -> Duration {
+    env.get("PADDOCK_QUEUE_MAX")
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s >= 1)
+        .map_or(QUEUE_MAX, Duration::from_secs)
+}
+
 /// One not-measured row per pushed commit beyond the first: a run checks a single commit, so the others are never passed.
-fn extra_ref_rows(extra: &[String]) -> Vec<(String, Verdict)> {
+fn extra_ref_rows(extra: &[String]) -> Vec<(String, Row)> {
     extra
         .iter()
         .map(|sha| {
             (
                 format!("pushed commit {}", &sha[..sha.len().min(12)]),
-                Verdict::NotMeasured {
-                    reason: "a run checks one pushed commit and this push has more than one ref".into(),
-                    next: "push the refs one at a time (`git push origin <ref>`), so each is checked".into(),
-                },
+                Row::not_measured(
+                    "a run checks one pushed commit and this push has more than one ref",
+                    "push the refs one at a time (`git push origin <ref>`), so each is checked",
+                ),
             )
         })
         .collect()
@@ -510,104 +607,133 @@ pub fn parse_push(input: &str) -> Vec<Pushed> {
 }
 
 /// Where a push is measured from, and why (printed at the top of the run). An existing remote ref: its old commit, so exactly what the
-/// push adds. A new one: the remote branch the pushed commit descends from that is nearest to it, preferring the branch's tracking
-/// upstream, then a `train/*` branch, then main on a tie (a fix branch cut from a train is measured against the train, not main). When
-/// no remote branch is an ancestor, `fallback` (origin/main).
-pub fn choose_base(root: &Path, p: &Pushed, fallback: &str) -> (String, String) {
-    let git = |args: &[&str]| git_text(root, args);
+/// push adds. Otherwise (a new ref, or the old commit is not here or is the pushed commit itself): the branch tip of the push's remote,
+/// read live with `git ls-remote`, that leaves the fewest of the pushed commit's commits new, as git's pre-push.sample does
+/// ([`nearest_remote_branch`]). `fallback` (origin/main) when the remote cannot be read or no tip is usable. An empty diff is never
+/// a pass on its own: when every pushed commit is already on the remote the answer is `fallback` and the whole change is measured.
+pub fn choose_base(root: &Path, p: &Pushed, remote: Option<&str>, fallback: &str, look: &dyn known::Lookups) -> (String, String) {
     let short = |s: &str| s[..s.len().min(12)].to_string();
+    let mut prefix = String::new();
+    let mut old = None;
     if p.remote_sha.chars().any(|c| c != '0') {
-        if git(&["cat-file", "-e", &format!("{}^{{commit}}", p.remote_sha)]).is_some() {
-            return (
-                p.remote_sha.clone(),
-                format!("{} exists on the remote: its old commit {}", p.remote_ref, short(&p.remote_sha)),
+        if p.remote_sha == p.sha {
+            prefix = format!("{} is already at the pushed commit on the remote; ", p.remote_ref);
+        } else if git_text(root, &["cat-file", "-e", &format!("{}^{{commit}}", p.remote_sha)]).is_some() {
+            old = Some(p.remote_sha.clone());
+        } else {
+            prefix = format!(
+                "{} is on the remote at {}, which is not here (fetch it); ",
+                p.remote_ref,
+                short(&p.remote_sha)
             );
         }
-        let why = format!(
-            "{} is on the remote at {}, which is not here (fetch it)",
-            p.remote_ref,
-            short(&p.remote_sha)
-        );
-        let (b, w) = nearest_remote_branch(root, p, fallback);
-        return (b, format!("{why}; {w}"));
     }
-    nearest_remote_branch(root, p, fallback)
+    let (b, w) = nearest_remote_branch(root, p, remote, fallback, look, old.as_deref());
+    (b, format!("{prefix}{w}"))
 }
 
 /// The most `train/*` branches whose distance is counted (the newest by name): bounds the search on a remote with hundreds of branches.
 const MAX_TRAINS: usize = 40;
 
-fn nearest_remote_branch(root: &Path, p: &Pushed, fallback: &str) -> (String, String) {
+/// The candidates are the remote ref's own old commit (when the ref exists and the commit is here), the push's tracking upstream, the
+/// `train/*` branches and main (a sibling feature branch is no base, and counting every branch of a large remote spawned about 1,100
+/// git processes before), the tips read live with `git ls-remote <remote>`; a tip this clone has no object for is skipped. The fewest
+/// new commits wins (so a branch that merged its train in is measured from the train, not from its own old tip, which would count the
+/// whole train as new); on a tie the old commit, then the tracking upstream, then a train, then main. If the remote cannot be read the
+/// old commit is the base when there is one.
+fn nearest_remote_branch(
+    root: &Path,
+    p: &Pushed,
+    remote: Option<&str>,
+    fallback: &str,
+    look: &dyn known::Lookups,
+    old: Option<&str>,
+) -> (String, String) {
     let started = std::time::Instant::now();
     let git = |args: &[&str]| git_text(root, args);
+    let old_why = |sha: &str, why: &str| {
+        (
+            sha.to_string(),
+            format!(
+                "{} exists on the remote: its old commit {}; {why}",
+                p.remote_ref,
+                &sha[..sha.len().min(12)]
+            ),
+        )
+    };
+    let fall = |why: String| match old {
+        Some(sha) => old_why(sha, &why),
+        None => (fallback.to_string(), format!("{why}; measuring from {fallback}")),
+    };
     let branch = p.remote_ref.strip_prefix("refs/heads/").unwrap_or(&p.remote_ref);
+    let Some(remote) = remote.filter(|r| !r.is_empty() && !r.starts_with('-')) else {
+        return fall("no remote was named for this push, so no live branch list".into());
+    };
+    let Some(listing) = look.ls_remote(remote) else {
+        return fall(format!("git ls-remote {remote} could not be read"));
+    };
     let upstream = p
         .local_ref
         .strip_prefix("refs/heads/")
         .and_then(|b| git(&["rev-parse", "--symbolic-full-name", &format!("{b}@{{upstream}}")]))
-        .map(|t| t.trim().to_string())
-        .filter(|t| t.starts_with("refs/remotes/"));
-    // One process lists every remote branch the pushed commit descends from; the distance is counted only for the few that can be a
-    // base: its tracking upstream, the `train/*` branches and main (a repository with hundreds of branches made this search spawn
-    // about 1,100 git processes before).
-    let merged = git(&["for-each-ref", "--merged", &p.sha, "--format=%(refname)", "refs/remotes"]).unwrap_or_default();
-    let ancestors: Vec<&str> = merged
+        .and_then(|t| t.trim().strip_prefix(&format!("refs/remotes/{remote}/")).map(str::to_string));
+    let mut heads: Vec<(&str, &str)> = listing
         .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.ends_with("/HEAD"))
+        .filter_map(|l| l.split_once('\t'))
+        .filter_map(|(sha, n)| n.trim().strip_prefix("refs/heads/").map(|n| (n, sha)))
+        .filter(|(n, _)| *n != branch)
         .collect();
-    let on_remote = |full: &str| {
-        let name = full.strip_prefix("refs/remotes/").unwrap_or(full);
-        name.split_once('/').map_or(name, |(_, rest)| rest).to_string()
-    };
-    let mut pool: Vec<&str> = ancestors.iter().copied().filter(|f| on_remote(f) != branch).collect();
-    pool.sort_by(|a, b| b.cmp(a));
-    let (mut trains, mut others): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
-    for f in pool {
-        let name = on_remote(f);
-        if upstream.as_deref() == Some(f) || name == "main" {
-            others.push(f);
-        } else if name.starts_with("train/") && trains.len() < MAX_TRAINS {
-            trains.push(f);
-        }
+    heads.sort_by(|a, b| b.0.cmp(a.0));
+    let mut trains = 0;
+    let count = |sha: &str| git(&["rev-list", "--count", &format!("{sha}..{}", p.sha)]).and_then(|t| t.trim().parse::<u32>().ok());
+    let mut cands: Vec<(u32, u8, String, String)> = Vec::new();
+    if let Some(sha) = old
+        && let Some(d) = count(sha)
+    {
+        cands.push((d, 0, p.remote_ref.clone(), sha.to_string()));
     }
-    // (distance, priority, name): the nearest wins; on a tie the tracking upstream, then a train, then main.
-    let mut cands: Vec<(u32, u8, String)> = Vec::new();
-    for full in trains.into_iter().chain(others) {
-        let name = on_remote(full);
-        let dist = git(&["rev-list", "--count", &format!("{full}..{}", p.sha)])
-            .and_then(|t| t.trim().parse().ok())
-            .unwrap_or(u32::MAX);
-        let prio = if upstream.as_deref() == Some(full) {
-            0
-        } else if name.starts_with("train/") {
+    for (name, sha) in heads {
+        let prio = if upstream.as_deref() == Some(name) {
             1
-        } else {
+        } else if name == "main" {
+            3
+        } else if name.starts_with("train/") && trains < MAX_TRAINS {
+            trains += 1;
             2
+        } else {
+            continue;
         };
-        cands.push((dist, prio, full.strip_prefix("refs/remotes/").unwrap_or(full).to_string()));
+        if git(&["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_none() {
+            continue;
+        }
+        if let Some(d) = count(sha) {
+            cands.push((d, prio, name.to_string(), sha.to_string()));
+        }
     }
     cands.sort();
     let took = format!(
-        "searched {} ancestor branch(es), counted {} in {} ms",
-        ancestors.len(),
+        "counted {} candidate tip(s) of {remote} in {} ms",
         cands.len(),
         started.elapsed().as_millis()
     );
     match cands.first() {
-        Some((dist, prio, name)) => (
-            name.clone(),
-            format!(
-                "new remote ref {branch}: the nearest of its upstream, the train branches and main that it descends from, {dist} commit(s) ahead{}; {took}",
-                if *prio == 0 { " (its tracking upstream)" } else { "" }
-            ),
-        ),
-        None => (
+        Some((0, _, name, _)) => (
             fallback.to_string(),
             format!(
-                "new remote ref {branch}: no tracking upstream, train branch or main is an ancestor of the pushed commit, so {fallback}; {took}"
+                "every pushed commit is already on {remote}'s {name} but no evidence for it was found ({took}); measuring from {fallback}"
             ),
         ),
+        Some((dist, 0, _, sha)) => old_why(sha, &format!("it leaves the fewest new commits, {dist} ({took})")),
+        Some((dist, prio, name, sha)) => (
+            sha.clone(),
+            format!(
+                "{remote}'s {name} (read live with git ls-remote) leaves the fewest new commits, {dist}{}; {took}",
+                if *prio == 1 { " (its tracking upstream)" } else { "" }
+            ),
+        ),
+        None => fall(format!(
+            "no tracking upstream, train branch or main of {remote} has a tip this clone has ({took})"
+        )),
     }
 }
 
@@ -627,9 +753,12 @@ pub fn parse_refs(input: &str) -> Vec<String> {
 }
 
 /// Turns the not-measured rows a person named (by full row id) into accepted ones and logs each use: when, who, which row and why.
-pub fn accept_not_measured(rows: &mut [(String, Verdict)], accept: &[String], state: &Path) {
+pub fn accept_not_measured(rows: &mut [(String, Row)], accept: &[String], state: &Path) {
     for (id, v) in rows.iter_mut() {
-        let Verdict::NotMeasured { reason, .. } = v else { continue };
+        if v.kind() != Kind::NotMeasured {
+            continue;
+        }
+        let reason = v.reason();
         if !accept.iter().any(|a| a == id) {
             continue;
         }
@@ -648,7 +777,7 @@ pub fn accept_not_measured(rows: &mut [(String, Verdict)], accept: &[String], st
         {
             let _ = std::io::Write::write_all(&mut f, line.as_bytes());
         }
-        *v = Verdict::Accepted { reason: reason.clone() };
+        v.excused_by = Some(std::env::var("USER").unwrap_or_else(|_| "a person".into()));
     }
 }
 
@@ -665,6 +794,10 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
                 text.push_str(&format!("skip  {id:<34} {reason}\n"));
                 data.push(json!({"id": id, "action": "skip", "reason": reason}));
             }
+            gates::Planned::NotMeasured { id, reason, .. } => {
+                text.push_str(&format!("NOT MEASURED {id:<31} {reason}\n"));
+                data.push(json!({"id": id, "action": "not-measured", "reason": reason}));
+            }
             gates::Planned::Broken { id, cause, .. } => {
                 text.push_str(&format!("BROKEN {id:<33} {cause}\n"));
                 data.push(json!({"id": id, "action": "broken", "reason": cause}));
@@ -676,54 +809,73 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
 
 /// The table, one line per row, then what CI runs that this gate does not, and the exit code (see the module doc). A failure's line
 /// carries its cause and next step.
-pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
+pub fn render(head: &str, rows: &[(String, Row)]) -> Report {
+    render_timed(head, rows, &std::collections::BTreeMap::new())
+}
+
+/// [`render`] with the queue and run time of the rows that went through `heavy`: a pass or a failure shows both, apart (ER-27).
+pub fn render_timed(head: &str, rows: &[(String, Row)], timings: &std::collections::BTreeMap<String, budget::Timing>) -> Report {
+    let both = |id: &str, secs: f64| match timings.get(id) {
+        Some(t) => format!("{:.1} s run, {:.1} s queued", t.ran, t.queued),
+        None => format!("{secs:.1} s"),
+    };
     let mut text = format!("{head}\n");
     let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
     let mut data = Vec::new();
     let (mut unmeasured_ids, mut failed_ids): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for (id, v) in rows {
-        let (line, kind) = match v {
-            Verdict::Passed { secs } => {
+        let reason = v.reason();
+        let (line, kind) = match v.kind() {
+            Kind::Passed => {
                 ok += 1;
-                (format!("ok            {id:<34} {secs:.1} s"), "passed")
+                (format!("ok            {id:<34} {}", both(id, v.secs)), "passed")
             }
-            Verdict::Skipped { reason } => {
+            Kind::Skipped => {
                 skip += 1;
                 (format!("skip          {id:<34} {reason}"), "skipped")
             }
-            Verdict::NotMeasured { reason, next } => {
+            Kind::NotMeasured => {
                 unmeasured += 1;
                 unmeasured_ids.push(id);
-                (format!("NOT MEASURED  {id:<34} {reason}. Next: {next}"), "not measured")
+                (format!("NOT MEASURED  {id:<34} {reason}. Next: {}", v.next), "not measured")
             }
-            Verdict::Accepted { reason } => {
+            Kind::Accepted => {
                 accepted += 1;
                 (
                     format!("ACCEPTED      {id:<34} not measured ({reason}); named by its full id in PADDOCK_ACCEPT_NOT_MEASURED, logged"),
                     "accepted",
                 )
             }
-            Verdict::Failed { cause, tail, next, secs } => {
+            Kind::Failed => {
                 fail += 1;
                 failed_ids.push(id);
-                let shown = if tail.is_empty() {
+                let shown = if v.tail.is_empty() {
                     String::new()
                 } else {
-                    format!("\n    {}", tail.replace('\n', "\n    "))
+                    format!("\n    {}", v.tail.replace('\n', "\n    "))
                 };
                 (
-                    format!("FAIL          {id:<34} {secs:.1} s\n  ::error::{id}: {cause} Next step: {next}{shown}"),
+                    format!(
+                        "FAIL          {id:<34} {}\n  ::error::{id}: {reason} Next step: {}{shown}",
+                        both(id, v.secs),
+                        v.next
+                    ),
                     "failed",
                 )
             }
-            Verdict::Broken { cause, next } => {
+            Kind::Broken => {
                 broken += 1;
-                (format!("CHECK BROKEN  {id:<34} {cause}. Next: {next}"), "broken")
+                (format!("CHECK BROKEN  {id:<34} {reason}. Next: {}", v.next), "broken")
             }
         };
         text.push_str(&line);
         text.push('\n');
-        data.push(json!({"id": id, "verdict": kind}));
+        let mut row = json!({"id": id, "verdict": kind});
+        if let Some(t) = timings.get(id) {
+            row["run_secs"] = json!(t.ran);
+            row["queued_secs"] = json!(t.queued);
+        }
+        data.push(row);
     }
     text.push_str("CI also runs, and this gate does not:\n");
     for (what, why) in gates::NOT_RUN {
@@ -798,6 +950,9 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
     if let Some((tip, rest)) = pushed.split_first() {
         extra.extend(rest.iter().cloned());
         let mb = merge_base(tip)?;
+        notes.push(format!(
+            "measured from {base} (merge base {mb}): no remote branch holds every pushed commit"
+        ));
         let diff = git_text(root, &["diff", "--name-only", &mb, tip])
             .ok_or_else(|| CliError::failure(format!("git diff {mb} {tip} failed.")).with_hint("Run it by hand to see why."))?;
         changed.extend(lines(Some(diff)));
@@ -867,14 +1022,72 @@ fn read_facts(root: &Path, plan: &Value, env: &HashMap<String, String>) -> Facts
     tests.sort();
     Facts {
         conformance: Some(ci),
+        conformance_env: None,
         windows_clippy: windows,
         image: Some(image),
         linux: false,
         kept_targets: None,
         pitwall_tests: tests,
-        dev_exe: std::env::current_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),
+        dev_exe: crate::tool_cache::self_exe().map_or_else(|_| "./dev".into(), |p| p.to_string_lossy().to_string()),
         target_dir: env.get("CARGO_TARGET_DIR").cloned(),
     }
+}
+
+/// Why conformance's npm install is not usable (the environment is not ready), or None when it is. The throw-away worktree links
+/// this checkout's `node_modules` in (Unix only); a stale install fails inside conformance as "yaml cannot be loaded", which reads as
+/// a finding, so each dependency's version in `node_modules/.package-lock.json` is compared with `package-lock.json` first.
+fn node_env_problem(windows_throwaway: bool, read: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    if windows_throwaway {
+        return Some("the throw-away worktree has no node_modules (it is linked in on Unix only, not on Windows)".into());
+    }
+    let json = |p: &str| read(p).and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let Some(installed) = json("node_modules/.package-lock.json") else {
+        return Some("node_modules/.package-lock.json cannot be read (nothing is installed here)".into());
+    };
+    let (Some(lock), Some(manifest)) = (json("package-lock.json"), json("conformance/package.json")) else {
+        return Some("package-lock.json or conformance/package.json cannot be read".into());
+    };
+    let names = ["dependencies", "devDependencies"]
+        .iter()
+        .filter_map(|k| manifest[k].as_object())
+        .flat_map(|o| o.keys().cloned())
+        .collect::<Vec<_>>();
+    for name in names {
+        for place in [format!("node_modules/{name}"), format!("conformance/node_modules/{name}")] {
+            let Some(want) = lock["packages"][&place]["version"].as_str() else {
+                continue;
+            };
+            let have = installed["packages"][&place]["version"].as_str();
+            if have != Some(want) {
+                return Some(format!(
+                    "{place} is {} in node_modules but {want} in package-lock.json",
+                    have.map_or("missing".to_string(), str::to_string)
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// One line per decision about a known commit, in the state folder: the shas, the remote, how fresh the ref lookup was and which
+/// evidence decided (ER-27). A failed write is not an error of the push.
+fn log_known(state: &Path, pushed: &[String], remote: Option<&str>, trail: &[String]) {
+    use std::io::Write;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let line = format!(
+        "{now} shas={} remote={} | {}\n",
+        pushed.join(","),
+        remote.unwrap_or("-"),
+        trail.join(" | ")
+    );
+    let _ = std::fs::create_dir_all(state);
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(state.join("known-commits.log"))
+        .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
 fn uptime_load(exec: &RealExec) -> Option<f64> {

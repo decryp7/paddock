@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { gridTotal, initialTotal, openApp, parseCount } from './app';
+import { gridRows, gridTotal, initialTotal, openApp, parseCount } from './app';
 
 test.describe('filters', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -49,7 +49,7 @@ test.describe('filters', () => {
       return n > 0 && n < parseCount(all);
     }).toBe(true);
     await expect(page.locator('debrief-status-bar')).toContainText('matching');
-    await expect(page.locator('debrief-events-grid [role=row].row').first()).toContainText(/time/i);
+    await expect(gridRows(page).first()).toContainText(/time/i);
 
     await search.fill('');
     await expect(total).toHaveText(all);
@@ -67,7 +67,7 @@ test.describe('filters', () => {
     await expect(note).toBeVisible();
     await expect(note).toHaveAttribute('title', /more partial match(es)? added/);
     await expect.poll(async () => parseCount(await gridTotal(page).innerText())).toBeGreaterThan(0);
-    await expect(page.locator('debrief-events-grid [role=row].row').first().getByTestId('partial-match')).toBeVisible();
+    await expect(gridRows(page).first().getByTestId('partial-match')).toBeVisible();
     // A cleared search clears the note.
     await search.fill('');
     await expect(note).toBeHidden();

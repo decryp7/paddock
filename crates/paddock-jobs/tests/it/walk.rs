@@ -24,11 +24,10 @@ fn names(r: &WalkResult, root: &Path) -> Vec<String> {
     r.entries
         .iter()
         .map(|e| {
-            e.path
-                .strip_prefix(root)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/")
+            paddock_env::winpath::lexical_text(
+                e.path.strip_prefix(root).unwrap(),
+                paddock_env::Os::current(),
+            )
         })
         .collect()
 }

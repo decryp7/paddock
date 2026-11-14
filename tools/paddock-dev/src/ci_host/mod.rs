@@ -35,7 +35,6 @@ pub mod links;
 pub mod node_caches;
 pub mod phase;
 pub mod prune;
-pub mod safe_remove;
 pub mod sccache_stats;
 pub mod stable_workspace;
 
@@ -234,7 +233,7 @@ pub fn is_executable(p: &Path) -> bool {
 }
 
 /// A scratch folder whose path is already canonical: on macOS the default temp folder is under `/var`, which is a link to
-/// `/private/var`, so a path the code canonicalizes would no longer equal the one a test built (the guard of [`safe_remove`] also
+/// `/private/var`, so a path the code canonicalizes would no longer equal the one a test built (the guard of [`safe_remove`](crate::safe_remove) also
 /// refuses a link on the way). Folders of the tests of this module come from here.
 #[cfg(test)]
 pub(crate) fn canonical_tempdir() -> tempfile::TempDir {
@@ -246,13 +245,6 @@ pub(crate) fn canonical_tempdir() -> tempfile::TempDir {
         .expect("a canonical parent");
     drop(probe);
     tempfile::Builder::new().tempdir_in(parent).expect("a temp folder")
-}
-
-/// A path as the kept-folder tools print it: `/` separators on every OS and no `\\?\` prefix (`C:/a/b`). Expected values of the
-/// tests of this module are built with it, never with `format!("{}/..", path.display())`, which mixes `\` and `/` on Windows.
-#[cfg(test)]
-pub(crate) fn fwd(path: &Path) -> String {
-    paddock_env::winpath::lexical_text(path, paddock_env::Os::current())
 }
 
 #[cfg(test)]

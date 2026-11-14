@@ -158,6 +158,14 @@ review_by = 2026-12-27
 approved = "coordinator"
 
 [[report_only]]
+id = "C122"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY in C122-test-path-text.mjs (and c122.rs) and the mode to gate. Rules A and B start with no sites on the tree (all 63 migrated onto paddock_testkit::path in the same change, ADR 0099 WP-3b); rule C only ever warns"
+owner = "ADR 0099"
+since = 2026-11-13
+review_by = 2026-12-13
+approved = "user"
+
+[[report_only]]
 id = "C118"
 reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C118-floating-tools.mjs and the mode to gate. 16 floating-tool warnings today (7 cargo install without a pinned version, 5 dtolnay/rust-toolchain at a channel ref, 2 taiki-e/install-action refs without a digest, 1 install-action tool without @x.y.z, 1 npx --yes of a package that is not in the lockfile); an npx of a binary of a top-level package-lock.json package is not a finding"
 owner = "ER-26 (2026-11-13)"
@@ -172,6 +180,30 @@ owner = "CI-in-Rust WP-3 review (2026-11-13)"
 since = 2026-11-13
 review_by = 2026-12-13
 approved = "coordinator"
+
+[[report_only]]
+id = "C120"
+reason = "ER-41: report-only until its first green run on main, then change warn to error in C120-layout-guess.mjs (and its Rust port, tools/paddock-dev/src/check/c120.rs) and the mode to gate. 0 warnings today: the 24 sites found (prune test data, cargo-output samples, old-layout tests) are waived with a reason and counted as waived"
+owner = "build-folder layout (ER-21, paddock_env::cargo_layout)"
+since = 2026-11-13
+review_by = 2026-12-13
+approved = "coordinator"
+
+[[report_only]]
+id = "C121"
+reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0098 (WP-2), then flip the findings to errors in C121-declared-data.mjs and c121.rs. first count 2026-11-13: 10 findings, all the parity fixtures of C121 in tools/paddock-dev/tests/it/check.rs, now allowed with a reason (0 left); it flags a registry entry or test that runs grep, sed, awk or a regular expression over a workflow file"
+owner = "ADR 0098 WP-2"
+since = 2026-11-13
+review_by = 2027-01-07
+approved = "user"
+
+[[report_only]]
+id = "C124"
+reason = "ER-41: report-only until its first green run on the real tree is recorded in ADR 0089 (amendment 2026-11-13, WP-T6), then flip the warnings to errors in C124-gate-outcomes.mjs and the mode to gate. First count 2026-11-13: 18 files, every one listed with a reason in conformance/c124-allow.json (a shrink-only seed that empties as each gate migrates); it flags a gate result built by hand outside paddock_cli::Outcome"
+owner = "ADR 0089 amendment WP-T6"
+since = 2026-11-13
+review_by = 2027-01-07
+approved = "user"
 
 [[report_only]]
 id = "C123"

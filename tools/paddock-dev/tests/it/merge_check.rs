@@ -442,14 +442,13 @@ fn a_commit_that_is_not_a_merge_is_a_usage_error() {
 #[test]
 fn a_clone_without_the_parents_is_not_measured_never_a_pass() {
     let r = clean_merge();
-    let url = format!("file://{}", r.path().display());
+    let url = format!("file://{}", paddock_testkit::path::text(r.path()));
     for depth in ["1", "2"] {
         let dest = tempfile::tempdir().unwrap();
         let clone = dest.path().join("c");
         r.git(&["clone", "-q", "--no-local", "--depth", depth, &url, clone.to_str().unwrap()]);
         let (code, out) = r.check_at(&clone, &["HEAD"]);
-        // TODO(ADR 0089 WP-1): exit 6 once paddock_cli::Exit has it; until then a failure, exit 1.
-        assert_eq!(code, 1, "depth {depth}: {out}");
+        assert_eq!(code, 6, "depth {depth}: {out}");
         assert!(out.contains("NOT MEASURED") && out.contains("::error::"), "depth {depth}: {out}");
         assert!(!out.contains("nothing a parent added"), "depth {depth}: {out}");
     }
@@ -475,7 +474,7 @@ fn a_rust_file_that_does_not_parse_is_not_measured() {
     r.git(&["add", "--all"]);
     r.git(&["commit", "-q", "-m", "Merge feature"]);
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(
         out.contains("NOT MEASURED") && out.contains("crates/x/src/lib.rs does not parse"),
         "{out}"
@@ -486,7 +485,7 @@ fn a_rust_file_that_does_not_parse_is_not_measured() {
 fn an_unknown_revision_is_not_measured() {
     let r = clean_merge();
     let (code, out) = r.check(&["no-such-revision"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(out.contains("NOT MEASURED"), "{out}");
 }
 
@@ -653,7 +652,7 @@ fn a_deleted_file_whose_path_git_quotes_is_not_measured() {
     r.commit("fix: other");
     r.git(&["merge", "-q", "--no-ff", "-m", "Merge feature", "feature"]);
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(out.contains("NOT MEASURED"), "{out}");
 }
 
@@ -728,7 +727,7 @@ fn a_shallow_clone_is_not_measured_even_when_every_object_is_there() {
     let root = r.git(&["rev-list", "--max-parents=0", "HEAD"]);
     fs::write(r.path().join(".git").join("shallow"), format!("{root}\n")).unwrap();
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(out.contains("NOT MEASURED") && out.contains("shallow"), "{out}");
 }
 
@@ -1006,7 +1005,7 @@ fn an_octopus_merge_is_not_measured() {
     r.git(&["merge", "-q", "-m", "Merge one and two", "one", "two"]);
     assert_eq!(r.git(&["rev-list", "--parents", "-n", "1", "HEAD"]).split(' ').count(), 4);
     let (code, out) = r.check(&["HEAD"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 6, "{out}");
     assert!(
         out.contains("NOT MEASURED") && out.contains("octopus merges are not supported"),
         "{out}"
@@ -1271,8 +1270,225 @@ exit 0
             .output()
             .unwrap();
         let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-        assert_ne!(out.status.code(), Some(0), "{text}");
+        // Alone it is the merge check's not-measured, exit 6 (ADR 0089 amendment A2), not a finding (5) and never 0.
+        assert_eq!(out.status.code(), Some(6), "{text}");
         assert!(text.contains("NOT MEASURED"), "{text}");
         assert_eq!(text.lines().filter(|l| l.contains("::error::")).count(), 1, "{text}");
+    }
+
+    /// A pass says what it is a pass of: the merge commit and its tree, in the JSON (ADR 0089 amendment section 2).
+    #[test]
+    fn a_clean_merge_names_the_commit_and_tree_it_is_clean_for() {
+        let r = train(true, true);
+        let bin = tempfile::tempdir().unwrap();
+        fake_cargo(bin.path());
+        let out = r
+            .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+            .env("PADDOCK_MERGE_CHECK_CARGO", bin.path().join("cargo"))
+            .args(["merge", "check", "--json", "--root"])
+            .arg(r.path())
+            .arg("HEAD")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0));
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let ev = &v["result"]["evidence"];
+        let head = r.git(&["rev-parse", "HEAD"]);
+        let tree = r.git(&["rev-parse", "HEAD^{tree}"]);
+        assert_eq!(v["result"]["status"], "clean", "{v}");
+        assert_eq!(
+            (ev["subject"]["sha"].as_str(), ev["subject"]["tree"].as_str()),
+            (Some(head.trim()), Some(tree.trim())),
+            "{v}"
+        );
+    }
+}
+
+// ADR 0098 WP-1: the member gate (`merge check --gates`). A stand-in for `dev check --pre-push` plays the fast gates: it fails
+// (exit 5) when the checkout it is run in holds both a.txt and b.txt, the shape of a pair of members that only fail together
+// (train 8: a lint list of one branch meeting new code of another).
+#[cfg(unix)]
+mod member_gate {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const FAKE_GATES: &str = r#"#!/bin/sh
+# argv: check --pre-push --base <base> --root <root>; run in <root>. Logs its argv and the checkout's HEAD.
+echo "$* HEAD=$(git rev-parse HEAD)" >> "$GATES_LOG"
+# What the real push gate prints with --json: an outcome whose evidence names this checkout's commit and tree (ADR 0089 WP-T5).
+sha=$(git rev-parse HEAD); tree=$(git rev-parse 'HEAD^{tree}')
+ev="{\"check\":\"pre-push\",\"subject\":{\"kind\":\"commit\",\"sha\":\"$sha\",\"tree\":\"$tree\"},\"tool\":\"fake\",\"at\":1}"
+if [ -f a.txt ] && [ -f b.txt ]; then
+  echo "clippy FAILED: a.txt and b.txt together"
+  printf '{"outcome":{"status":"findings","findings":[{"message":"clippy","failing":true}],"evidence":%s}}\n' "$ev"
+  exit "${GATES_EXIT:-5}"
+fi
+echo "fmt ok; clippy ok"
+printf '{"outcome":{"status":"clean","evidence":%s}}\n' "$ev"
+exit 0
+"#;
+
+    struct Train {
+        repo: Repo,
+        gates: tempfile::TempDir,
+    }
+
+    impl Train {
+        fn log(&self) -> PathBuf {
+            self.gates.path().join("log")
+        }
+
+        fn run(&self, args: &[&str], gates_exit: &str) -> (i32, String) {
+            let out = self
+                .repo
+                .cmd(env!("CARGO_BIN_EXE_paddock-dev"))
+                .env("PADDOCK_MERGE_CHECK_GATES", self.gates.path().join("gates"))
+                .env("GATES_LOG", self.log())
+                .env("GATES_EXIT", gates_exit)
+                .env("PADDOCK_MERGE_CHECK_CARGO", "/nonexistent/cargo")
+                .args(["merge", "check", "--root"])
+                .arg(self.repo.path())
+                .args(args)
+                .output()
+                .unwrap();
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+            (out.status.code().unwrap(), text)
+        }
+    }
+
+    /// A train with member `a` merged; `b` is merged too when `both`. HEAD is the last merge.
+    fn train(both: bool) -> Train {
+        let repo = Repo::new();
+        repo.write("base.txt", "base\n");
+        repo.commit("base");
+        for (member, on) in [("a", true), ("b", both)] {
+            if !on {
+                continue;
+            }
+            repo.git(&["checkout", "-q", "-b", member, "main"]);
+            repo.write(&format!("{member}.txt"), &format!("{member}\n"));
+            repo.commit(&format!("feat: {member}"));
+            repo.git(&["checkout", "-q", "main"]);
+            repo.git(&["merge", "-q", "--no-ff", "-m", &format!("Merge {member}"), member]);
+        }
+        let gates = tempfile::tempdir().unwrap();
+        let p = gates.path().join("gates");
+        fs::write(&p, FAKE_GATES).unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        Train { repo, gates }
+    }
+
+    #[test]
+    fn a_member_that_passes_the_gates_on_the_combined_tree_is_reported_passed() {
+        let t = train(false);
+        let (code, out) = t.run(&["--gates", "HEAD"], "5");
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("member gate: passed"), "{out}");
+        assert!(!out.contains("FAILED"), "{out}");
+    }
+
+    /// Row 7 of the ADR 0089 amendment, through the real binary: a stand-in gate that exits 0 and prints no outcome, or an outcome
+    /// whose evidence is for another commit, is not a pass; enforced it would be exit 6. (Report-only here, so the exit is 0 and
+    /// the step says NOT MEASURED, never "passed".)
+    #[test]
+    fn a_gate_that_exits_0_without_an_outcome_for_this_merge_is_not_a_pass() {
+        let t = train(false);
+        let script = |body: &str| {
+            let p = t.gates.path().join("gates");
+            fs::write(&p, format!("#!/bin/sh\n{body}\nexit 0\n")).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let stale = r#"printf '{"outcome":{"status":"clean","evidence":{"check":"pre-push","subject":{"kind":"commit","sha":"0000000000000000000000000000000000000001","tree":"0000000000000000000000000000000000000002"},"tool":"x","at":1}}}\n'"#;
+        for body in ["echo fine", "echo '{\"outcome\":{\"status\":\"clean\"}}'", stale] {
+            script(body);
+            let (code, out) = t.run(&["--gates", "--json", "HEAD"], "0");
+            assert_eq!(code, 0, "report-only keeps the exit: {out}");
+            assert!(out.contains("NOT MEASURED") || out.contains("not measured"), "{body}: {out}");
+            assert!(!out.contains("member gate: passed"), "{body}: {out}");
+        }
+    }
+
+    #[test]
+    fn two_members_that_only_fail_together_are_named_at_the_merge_that_joins_them_and_stay_report_only() {
+        let t = train(true);
+        let (code, out) = t.run(&["--gates", "HEAD"], "5");
+        // Report-only until the first green run (ER-41, ADR 0098 D3 (a)): the rows and the warning are printed, the exit is not.
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("clippy FAILED: a.txt and b.txt together"), "{out}");
+        assert!(out.contains("::warning::member gate FAILED"), "{out}");
+        assert!(out.contains("REPORT-ONLY"), "{out}");
+        assert!(out.contains("take the member out") && out.contains("send it back"), "{out}");
+    }
+
+    #[test]
+    fn the_gates_run_on_the_merge_with_the_train_before_it_as_the_base() {
+        let t = train(true);
+        let first_parent = t.repo.git(&["rev-parse", "HEAD^1"]);
+        let head = t.repo.git(&["rev-parse", "HEAD"]);
+        t.run(&["--gates", "HEAD"], "5");
+        let log = fs::read_to_string(t.log()).unwrap();
+        assert!(
+            log.contains(&format!("check --pre-push --base {first_parent} --root")) && log.contains(&format!("HEAD={head}")),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn without_gates_nothing_is_run() {
+        let t = train(true);
+        let (code, out) = t.run(&["HEAD"], "5");
+        assert_eq!(code, 0, "{out}");
+        assert!(!t.log().exists(), "the gates ran without --gates");
+        assert!(!out.contains("member gate"), "{out}");
+    }
+
+    #[test]
+    fn a_checkout_that_is_not_the_merge_is_not_measured_and_runs_no_gate() {
+        let t = train(true);
+        t.repo.git(&["checkout", "-q", "a"]);
+        let merge = t.repo.git(&["rev-parse", "main"]);
+        let (code, out) = t.run(&["--gates", &merge], "5");
+        assert_eq!(code, 0, "report-only: {out}");
+        assert!(
+            out.contains("member gate NOT MEASURED") && out.contains("not the merge result"),
+            "{out}"
+        );
+        assert!(!t.log().exists(), "a gate ran on a checkout that is not the merge");
+    }
+
+    #[test]
+    fn a_gate_that_could_not_look_is_never_reported_as_a_pass() {
+        let t = train(true);
+        let (code, out) = t.run(&["--gates", "HEAD"], "6");
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("member gate NOT MEASURED"), "{out}");
+        assert!(!out.contains("member gate: passed"), "{out}");
+    }
+
+    #[test]
+    fn json_carries_the_gate_result_under_its_own_key() {
+        let t = train(true);
+        let (code, out) = t.run(&["--gates", "HEAD", "--json"], "5");
+        assert_eq!(code, 0, "{out}");
+        let v: serde_json::Value = serde_json::from_str(out.lines().find(|l| l.starts_with('{')).unwrap()).unwrap();
+        assert_eq!(v["gates"]["outcome"], "failed", "{out}");
+        assert_eq!(v["gates"]["enforced"], false, "{out}");
+    }
+
+    #[test]
+    fn a_branch_checked_before_merging_has_no_checkout_to_gate() {
+        let t = train(false);
+        t.repo.git(&["checkout", "-q", "-b", "c", "main"]);
+        t.repo.write("c.txt", "c\n");
+        t.repo.commit("feat: c");
+        let (code, out) = t.run(&["--branch", "c", "--target", "main"], "5");
+        assert_eq!(code, 0, "{out}");
+        let (code, out) = t.run(&["--branch", "c", "--target", "main", "--gates"], "5");
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.contains("member gate not run") && out.contains("before it is merged"),
+            "said out loud, not silent: {out}"
+        );
+        assert!(!t.log().exists(), "a gate ran without a merge checkout");
     }
 }

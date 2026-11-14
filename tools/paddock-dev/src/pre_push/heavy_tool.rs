@@ -5,10 +5,14 @@
 //! removed afterwards through `safe_remove` with the result printed. Inputs with uncommitted changes (a fix to heavy still in the
 //! working tree) are published as `heavy-dirty`, replaced by each such build. Any failure is a message with the
 //! cause and the next step; the caller turns it into "not measured" (ER-33).
+//! The cache, its hold and its prune are the tool cache's one mechanism ([`crate::tool_cache`]): a run starts its own hold, never
+//! the shared path.
 
 use crate::ci_tool::{ToolCall, tail};
 use crate::disk::record::{self, Kind, Record};
 use crate::input_hash::{self, Real};
+pub use crate::tool_cache::Held;
+use crate::tool_cache::{exe, home, touch};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -27,19 +31,6 @@ const PASS: &[&str] = &[
     "CC",
     "CXX",
 ];
-
-/// The cache folder: `PADDOCK_DEV_HOME`, else `~/.paddock-dev` (what `./dev` uses).
-fn home(env: &HashMap<String, String>) -> Result<PathBuf, String> {
-    match (env.get("PADDOCK_DEV_HOME"), env.get("HOME")) {
-        (Some(h), _) if !h.is_empty() => Ok(PathBuf::from(h)),
-        (_, Some(h)) if !h.is_empty() => Ok(Path::new(h).join(".paddock-dev")),
-        _ => Err("neither PADDOCK_DEV_HOME nor HOME is set, so there is no cache folder for the heavy tool".into()),
-    }
-}
-
-fn exe(name: &str) -> String {
-    if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
-}
 
 /// Whether `bin` runs and answers `--version` (an empty or cut-short file is not a tool).
 fn runs(bin: &Path, env: &HashMap<String, String>) -> bool {
@@ -66,11 +57,16 @@ pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Res
             home.join("bin").join(format!("heavy-{}", h.hash)).join(exe("heavy")),
         )
     };
+    // A cached binary that fails its probe is not removed: a probe that timed out on a loaded machine is no proof the file is
+    // broken, and another agent may be running it. The build below replaces it by an atomic rename, which leaves every running
+    // copy and every hold intact.
     if !h.dirty && cached.is_file() {
+        // Use first, then the probe: the probe may take its whole 30 s on a loaded machine, and an entry marked as used only after it
+        // could be pruned meanwhile. `./dev`'s prune of `bin/` spares a folder used within a day (best effort; a miss costs a rebuild).
+        touch(cached.parent().unwrap_or(&home));
         if runs(&cached, env) {
             return Ok(cached);
         }
-        let _ = std::fs::remove_file(&cached);
     }
     if left.is_zero() {
         return Err(format!(
@@ -147,4 +143,49 @@ fn publish(built: &Path, bin: &Path) -> Result<(), String> {
     std::fs::copy(built, &tmp)
         .and_then(|_| std::fs::rename(&tmp, bin))
         .map_err(|e| format!("cannot publish heavy into {}: {e}", dir.display()))
+}
+
+/// Holds the cached `heavy` at `bin` for this run: the tool cache's one hold ([`crate::tool_cache::hold`]).
+pub fn hold(bin: &Path, env: &HashMap<String, String>) -> Result<Held, String> {
+    crate::tool_cache::hold("heavy", bin, env)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cache_hit_is_marked_as_used_before_its_probe_so_a_slow_or_failed_probe_cannot_let_the_prune_take_it() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let home = tempfile::tempdir().unwrap();
+        let mut env: HashMap<String, String> = std::env::vars().collect();
+        env.insert("PADDOCK_DEV_HOME".into(), home.path().display().to_string());
+        let lookup = |k: &str| env.get(k).cloned();
+        let vars: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let h = input_hash::compute_for(&Real, &lookup, &vars, &root, "tools/heavy").unwrap();
+        if h.dirty {
+            // An uncommitted tools/heavy has no cache entry to touch (it builds `heavy-dirty`): nothing to check on this tree.
+            eprintln!("tools/heavy has uncommitted changes; the cache-hit path is not reachable here");
+            return;
+        }
+        let entry = home.path().join("bin").join(format!("heavy-{}", h.hash));
+        std::fs::create_dir_all(&entry).unwrap();
+        let bin = entry.join(exe("heavy"));
+        // A probe that fails: `--version` prints nothing.
+        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let two_days = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
+        std::fs::File::open(&entry).unwrap().set_modified(two_days).unwrap();
+        // No budget left: ensure stops after the probe and builds nothing.
+        assert!(ensure(&root, &env, Duration::ZERO).is_err());
+        let age = std::fs::metadata(&entry).unwrap().modified().unwrap().elapsed().unwrap();
+        assert!(
+            age < Duration::from_secs(3600),
+            "the entry was marked as used before the probe (age {age:?})"
+        );
+        assert!(bin.is_file(), "and the binary that failed its probe is not removed");
+    }
 }

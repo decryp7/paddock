@@ -1,6 +1,10 @@
 //! Finding a program the way the job would: on the job's own `PATH`, with Windows' spelling of the variable (`Path`) and its program
 //! extensions, never through the parent's `PATH`. The platform is a parameter so that every OS tests both behaviours.
 
+/// This file's own text, for source audits of its users (rule 79: read through the owner's export).
+#[cfg(test)]
+pub(crate) const SOURCE: &str = include_str!("pathfind.rs");
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

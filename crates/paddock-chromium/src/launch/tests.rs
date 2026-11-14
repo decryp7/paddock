@@ -1177,6 +1177,36 @@ fn missing_executable_or_profile_folder_is_a_launch_error() {
 
 // ---- pages ----
 
+/// Regression (CI run 8060, Spotter's copy of this wait): a look at the page that the browser answered later than the fixed
+/// 10 s command deadline ended the wait with `Timeout("a command")`, inside a longer page budget. The page's own time now
+/// bounds every look: with the fake holding `Runtime.evaluate`, a 300 ms wait ends at once with a timeout naming the look.
+#[test]
+fn a_look_the_browser_does_not_answer_ends_with_the_pages_time_and_says_so() {
+    let f = Fixture::new(Mode::Obey, 1);
+    let b = f.launch();
+    let p = b.start_page().unwrap();
+    f.fake.act(UserAction::HoldEvaluate).unwrap();
+    let ended = std::thread::scope(|s| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let p = &p;
+        s.spawn(move || {
+            let _ = tx.send(p.wait_ready(None, &Rule::default(), Duration::from_millis(300)));
+        });
+        // The old fixed deadline is 10 s; the page's time is 0.3 s.
+        let r = rx.recv_timeout(Duration::from_secs(5)); // conformance: expiry-under-test — the caller's 0.3 s must end the look long before the old fixed 10 s
+        f.fake.act(UserAction::ReleaseAnswers).unwrap();
+        if r.is_err() {
+            let _ = rx.recv_timeout(CLOSE_GUARD);
+        }
+        r
+    });
+    assert!(
+        matches!(&ended, Ok(Err(Error::Timeout(m))) if *m == crate::page::READINESS_UNANSWERED),
+        "{:?}",
+        ended.map(|r| r.map(|_| ()))
+    );
+}
+
 #[test]
 fn a_page_is_read_snapshot_by_snapshot() {
     let f = Fixture::new(Mode::Obey, 1);

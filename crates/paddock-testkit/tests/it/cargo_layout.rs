@@ -24,6 +24,7 @@ fn the_running_test_program_is_inside_the_profile_folder_it_reports() {
 fn a_program_outside_cargo_s_build_folders_is_refused_with_what_was_expected() {
     let e = profile_dir_for(Path::new("/usr/local/bin/t")).unwrap_err();
     assert!(
+        // conformance: layout-guess — the expected message names the old layout it explains
         e.contains("/usr/local/bin/t") && e.contains("<profile>/deps") && e.contains("<hash>/out"),
         "{e}"
     );

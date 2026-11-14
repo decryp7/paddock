@@ -39,7 +39,7 @@ fn text<'a>(r: &'a Record, field: &str) -> &'a str {
 
 fn of<'a>(ws: &'a Workspace, suffix: &str) -> Vec<&'a Record> {
     let s = ws.summary();
-    let src = s.sources.iter().find(|x| x.path.replace('\\', "/").ends_with(suffix)).unwrap();
+    let src = s.sources.iter().find(|x| std::path::Path::new(&x.path).ends_with(suffix)).unwrap();
     assert_eq!((src.importer.as_str(), src.skipped), ("otlp", 0), "{suffix}");
     let (from, to) = (src.from.unwrap(), src.to.unwrap());
     assert!(START <= from && to <= END, "{suffix}: {from}..{to}");

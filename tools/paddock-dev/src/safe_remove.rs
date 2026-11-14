@@ -10,9 +10,15 @@
 //!   files), has no stash, has a remote, and has no commit that is on no remote; a linked worktree is also not locked and not
 //!   claimed by an agent.
 //!
+//! [`remove_under`] (in `safe_remove/guard.rs`) is the lighter entry the CI host steps use for paths that are not recorded folders
+//! (a file, a link, a cache folder): strictly under an explicit root that is not a home folder, a drive root or a top-level
+//! folder, and no link on the way. [`remove`] applies the same root rule to its allowed roots.
+//!
 //! A fact that cannot be established is a refusal, never a pass: an unreadable process list (every process list on Windows),
 //! a git error, a repository without any remote, a walk that hit its limit. `tests/it/safe_remove_lint.rs` fails when other
 //! code in `tools/` deletes folders without going through here (apart from the listed callers that adopt it later).
+
+mod guard;
 
 use crate::disk::record;
 use crate::worktree::git::{Git, Repo, key, worktrees};
@@ -21,6 +27,9 @@ use crate::worktree::procs;
 use paddock_env::winpath;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+// The root-and-link guard of the CI host steps (`remove_under`): any path under an explicit root, no owner record needed.
+pub use guard::{RemoveError, Rules, check_root, check_root_for, children, remove_under, strictly_under};
 
 /// The longest the walk for nested repositories runs for one folder.
 pub const WALK_LIMIT: Duration = Duration::from_secs(300);
@@ -54,7 +63,7 @@ pub fn check_with(path: &Path, roots: &[PathBuf], processes: ProcessFolders) -> 
 
 /// [`check_with`] with the walk's limits given.
 pub fn check_limited(path: &Path, roots: &[PathBuf], processes: ProcessFolders, limit: Duration, entries: u64) -> Result<Proof, Refusal> {
-    let real = under_root(path, roots)?;
+    let real = under_root(path, roots, home_dir().as_deref())?;
     match record::read(path) {
         Ok(Some(_)) => {}
         Ok(None) => return Err("it has no owner record".into()),
@@ -72,8 +81,15 @@ pub fn check_limited(path: &Path, roots: &[PathBuf], processes: ProcessFolders, 
     Ok(Proof { linked_worktree, repos })
 }
 
+/// The home folder as the environment names it, when it does.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
 /// The real path of `path`, when it is a real folder strictly below a root and no part of it is a symlink.
-fn under_root(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, Refusal> {
+fn under_root(path: &Path, roots: &[PathBuf], home: Option<&Path>) -> Result<PathBuf, Refusal> {
     let meta = path.symlink_metadata().map_err(|e| format!("it cannot be read ({e})"))?;
     if meta.file_type().is_symlink() {
         return Err("it is a symlink".into());
@@ -90,10 +106,16 @@ fn under_root(path: &Path, roots: &[PathBuf]) -> Result<PathBuf, Refusal> {
     if real.parent() != Some(parent_real.as_path()) || real.file_name() != path.file_name() {
         return Err("its path goes through a symlink".into());
     }
+    // The home folder in the same spelling as the roots (a link in it must not hide it).
+    let home_real = home.and_then(|h| winpath::real_verbatim(h).ok());
+    let home = home_real.as_deref().or(home);
     let allowed = roots
         .iter()
         .filter_map(|r| winpath::real_verbatim(r).ok())
-        .any(|r| real.starts_with(&r) && real != r);
+        // The same root and containment rules as `remove_under`: a root that is a drive root, a top-level folder or the home folder
+        // (or above it) allows nothing, and names and drive letters compare without case where the file system does.
+        .filter(|r| check_root(r, home).is_ok())
+        .any(|r| strictly_under(&r, &real, Rules::host()) == Ok(true));
     if !allowed {
         return Err("it is not strictly below an allowed root".into());
     }
@@ -304,6 +326,38 @@ mod tests {
         record::write(&root, &Record::new(Kind::Build, "x")).unwrap();
         assert!(check_with(&root, &roots(&d), Ok(vec![])).unwrap_err().contains("allowed root"));
         assert!(outside.is_dir() && root.is_dir());
+    }
+
+    #[test]
+    fn a_root_that_is_a_drive_root_or_the_home_folder_or_above_it_allows_nothing() {
+        let (d, root) = setup();
+        let inside = recorded(&root, "build");
+        let r = |roots: &[PathBuf], home: Option<&Path>| under_root(&inside, roots, home);
+        assert!(r(std::slice::from_ref(&root), None).is_ok(), "a proper root allows its children");
+        assert!(r(&[PathBuf::from("/")], None).unwrap_err().contains("allowed root"), "a drive root");
+        assert!(
+            r(std::slice::from_ref(&d.path().to_path_buf()), Some(&root))
+                .unwrap_err()
+                .contains("allowed root"),
+            "above the home folder"
+        );
+        assert!(
+            r(std::slice::from_ref(&root), Some(&root)).unwrap_err().contains("allowed root"),
+            "the home folder itself"
+        );
+        assert!(
+            r(std::slice::from_ref(&root), Some(Path::new("/elsewhere/home"))).is_ok(),
+            "a home folder elsewhere"
+        );
+    }
+
+    #[test]
+    fn names_and_drives_compare_as_the_file_system_does_in_the_root_check() {
+        // Containment is `strictly_under` under the host's rules: the folding itself is tested in guard.rs for both OS spellings.
+        let (_d, root) = setup();
+        let inside = recorded(&root, "build");
+        assert_eq!(strictly_under(&root, &inside, Rules::host()), Ok(true));
+        assert_eq!(strictly_under(&root, &root, Rules::host()), Ok(false));
     }
 
     #[cfg(unix)]

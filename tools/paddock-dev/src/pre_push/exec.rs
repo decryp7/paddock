@@ -1,16 +1,24 @@
 //! Running the gates: each one decided by an [`Exec`] (real processes, or a fake in the tests), several at a time, cheapest first,
 //! inside a total time budget, and stopped when the person stops the push.
 
+use super::budget::{BudgetClock, Timing, parse_heavy_timing, with_heavy_flags};
 use super::gates::{Gate, Need, Planned};
 use crate::ci_tool::{Output, ToolCall, tail};
-use std::collections::{HashMap, VecDeque};
+use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The push gate's total budget (ADR 0038 amendment A2.5): what has not run by then is "not measured".
+/// The push gate's total budget (ADR 0038 amendment A2.5): what has not run by then is "not measured". It counts RUN time: time a
+/// step queued for the heavy slot behind other agents' steps is credited back ([`BudgetClock`], ADR 0102).
 pub const BUDGET: Duration = Duration::from_secs(15 * 60);
+
+/// The longest a heavy step waits for a slot before it is "not measured" (`PADDOCK_QUEUE_MAX` seconds overrides). Twice the run
+/// budget: a step that waited longer than a whole gate is a busy machine's finding, not a result (ADR 0102; the queue times the
+/// push gate now records are the measurement to revisit it with).
+pub const QUEUE_MAX: Duration = Duration::from_secs(2 * 15 * 60);
 
 /// How one run ended.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,12 +31,19 @@ pub struct Done {
     pub tail: String,
     /// The file that holds the whole output, when there is one.
     pub log: Option<String>,
+    /// Queue and run seconds as `heavy` measured them; none for a gate that did not go through it.
+    pub timing: Option<Timing>,
 }
 
 impl Done {
     /// It did not end by itself: the budget or the gate's own limit stopped it, or the person did. Nothing is proven either way.
     pub fn cut_short(&self) -> bool {
         self.how.starts_with("timed out") || self.how == "cancelled" || self.how.starts_with("stopped at the output cap")
+    }
+
+    /// `heavy` gave up waiting for a slot: the command never ran.
+    pub fn no_slot(&self) -> bool {
+        self.how.starts_with("queue limit")
     }
 }
 
@@ -47,49 +62,113 @@ pub trait Exec: Sync {
     }
 }
 
-/// The outcome of one table row.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Verdict {
+/// One table row: a shared [`Outcome`] (ADR 0089 amendment, WP-T3) plus what the table prints around it. A pass or a failure is
+/// built only through [`measure`] (with the commit and tree as evidence); there is no status a caller can set by hand.
+#[derive(Debug, Clone)]
+pub struct Row {
+    /// How the gate ended: `Clean` (ran and passed), `Findings` (ran and failed), `NotApplicable` (the change does not reach it),
+    /// `NotMeasured` (it could not look: nothing is proven, ER-33) or `CheckBroken` (the check itself cannot be trusted).
+    pub outcome: Outcome,
+    /// Seconds the gate ran (0 when it did not).
+    pub secs: f64,
+    /// The tail of its output, for a failure.
+    pub tail: String,
+    /// What to do and how to re-run (failure, not measured, broken).
+    pub next: String,
+    /// A not-measured row a person named in the override: who. Logged; the push may go, but the row is still not proven.
+    pub excused_by: Option<String>,
+}
+
+/// The kind of a row, for the table and its JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
     /// It ran and passed.
-    Passed {
-        /// Seconds.
-        secs: f64,
-    },
+    Passed,
     /// It ran and failed.
-    Failed {
-        /// What failed, in one line.
-        cause: String,
-        /// The tail of its output.
-        tail: String,
-        /// What to do and how to re-run.
-        next: String,
-        /// Seconds.
-        secs: f64,
-    },
+    Failed,
     /// The change does not reach it.
-    Skipped {
-        /// Why.
-        reason: String,
-    },
-    /// It could not look: nothing is proven (ER-33). Blocks the push (exit 6) unless named in an override.
-    NotMeasured {
-        /// Why.
-        reason: String,
-        /// What to do.
-        next: String,
-    },
-    /// Not measured, and a person named this gate in the override: logged, and the push may go.
-    Accepted {
-        /// Why it was not measured.
-        reason: String,
-    },
+    Skipped,
+    /// It could not look.
+    NotMeasured,
+    /// Not measured, and a person named this gate in the override.
+    Accepted,
     /// The check itself cannot be trusted.
-    Broken {
-        /// What is wrong.
-        cause: String,
-        /// What to do.
-        next: String,
-    },
+    Broken,
+}
+
+fn check_id(id: &str) -> CheckId {
+    CheckId::new(format!("pre-push:{id}"))
+}
+
+impl Row {
+    fn plain(outcome: Outcome, secs: f64, tail: String, next: String) -> Row {
+        Row {
+            outcome,
+            secs,
+            tail,
+            next,
+            excused_by: None,
+        }
+    }
+
+    /// The gate `id` ran to its end (not cut short): the measurement reads how it ended. A clean exit finds nothing; any other ends in
+    /// one failing finding with `cause` in one line. `tail` and `next` are the caller's to set on a failure.
+    pub fn from_run(id: &str, subject: &Subject, done: &Done, cause: impl Into<String>, secs: f64) -> Row {
+        let cause = cause.into();
+        let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || {
+            if done.success {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![Finding::failing(cause)])
+            }
+        });
+        Row::plain(o, secs, String::new(), String::new())
+    }
+
+    /// The gate `id` ran and failed: `cause` in one line, the `tail` of its output, `next` what to do.
+    pub fn failed(id: &str, subject: &Subject, cause: String, tail: String, next: String, secs: f64) -> Row {
+        let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || {
+            Ok(vec![Finding::failing(cause)])
+        });
+        Row::plain(o, secs, tail, next)
+    }
+
+    /// The change does not reach it.
+    pub fn skipped(reason: impl Into<String>) -> Row {
+        Row::plain(Outcome::NotApplicable(Reason::new(reason)), 0.0, String::new(), String::new())
+    }
+
+    /// It could not look: nothing is proven.
+    pub fn not_measured(reason: impl Into<String>, next: impl Into<String>) -> Row {
+        Row::plain(Outcome::NotMeasured(Reason::new(reason)), 0.0, String::new(), next.into())
+    }
+
+    /// The check itself cannot be trusted.
+    pub fn broken(cause: impl Into<String>, next: impl Into<String>) -> Row {
+        Row::plain(Outcome::CheckBroken(Reason::new(cause)), 0.0, String::new(), next.into())
+    }
+
+    /// The row's kind.
+    pub fn kind(&self) -> Kind {
+        match (&self.outcome, &self.excused_by) {
+            (Outcome::NotMeasured(_), Some(_)) => Kind::Accepted,
+            (Outcome::Clean(_) | Outcome::KnownCommit(_), _) => Kind::Passed,
+            (Outcome::Findings(_), _) => Kind::Failed,
+            (Outcome::NotApplicable(_), _) => Kind::Skipped,
+            (Outcome::NotMeasured(_), None) => Kind::NotMeasured,
+            (Outcome::CheckBroken(_), _) => Kind::Broken,
+        }
+    }
+
+    /// Why (not measured, skipped, broken), or the failure's cause.
+    pub fn reason(&self) -> String {
+        self.outcome.detail()
+    }
+}
+
+/// The tool, with its version.
+pub fn tool() -> ToolVersion {
+    ToolVersion::new(concat!("paddock-dev pre-push ", env!("CARGO_PKG_VERSION")))
 }
 
 fn first_word(id: &str) -> &str {
@@ -97,55 +176,69 @@ fn first_word(id: &str) -> &str {
 }
 
 /// The verdict of one gate: its needs first, then the run.
-pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration) -> Verdict {
+pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject) -> Row {
+    decide_with(gate, exec, left, subject, &mut |_| {})
+}
+
+/// [`decide`], telling `seen` how the run ended (its queue and run time) before the row is made.
+pub fn decide_with(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject, seen: &mut dyn FnMut(&Done)) -> Row {
     match &gate.need {
         Need::Tool(t) if !exec.has_tool(t) => {
-            return Verdict::NotMeasured {
-                reason: format!("{t} is not installed"),
-                next: format!(
+            return Row::not_measured(
+                format!("{t} is not installed"),
+                format!(
                     "install it (`cargo install {t} --locked`), then re-run `./dev check --pre-push`; an agent reports this instead (ER-33)"
                 ),
-            };
+            );
         }
         Need::Docker if !exec.docker_up() => {
-            return Verdict::NotMeasured {
-                reason: "Docker (OrbStack) is not running".into(),
-                next: "start it yourself and re-run; an agent reports this to the coordinator and never starts or restarts it (ER-14)"
-                    .into(),
-            };
+            return Row::not_measured(
+                "Docker (OrbStack) is not running",
+                "start it yourself and re-run; an agent reports this to the coordinator and never starts or restarts it (ER-14)",
+            );
         }
         _ => {}
     }
     if gate.heavy
         && let Some(why) = exec.heavy_unavailable()
     {
-        return Verdict::NotMeasured {
-            reason: format!("no heavy slot tool, so a compile would run beside every other push's: {why}"),
-            next: "fix the build error above and re-run `./dev check --pre-push`; an agent reports this (ER-24, ER-33)".into(),
-        };
+        return Row::not_measured(
+            format!("no heavy slot tool, so a compile would run beside every other push's: {why}"),
+            "fix the build error above and re-run `./dev check --pre-push`; an agent reports this (ER-24, ER-33)",
+        );
     }
     let started = Instant::now();
-    match exec.run(gate, left) {
-        Err(e) => Verdict::NotMeasured {
-            reason: e,
-            next: "install the program, then re-run `./dev check --pre-push`".into(),
-        },
-        Ok(done) if done.success => Verdict::Passed {
-            secs: started.elapsed().as_secs_f64(),
-        },
-        Ok(done) if done.cut_short() => Verdict::NotMeasured {
-            reason: format!(
+    let result = exec.run(gate, left);
+    if let Ok(done) = &result {
+        seen(done);
+    }
+    // The run time of a step that went through heavy; the wall time (queue included) only when there is no timing.
+    let secs = |d: &Done| d.timing.map_or_else(|| started.elapsed().as_secs_f64(), |t| t.ran);
+    match result {
+        Err(e) => Row::not_measured(e, "install the program, then re-run `./dev check --pre-push`"),
+        // No slot means the command never ran: not measured, never a pass or a failure (ADR 0102 on ADR 0089's rows).
+        Ok(done) if done.no_slot() => Row::not_measured(
+            format!(
+                "{} never got a heavy slot ({}, queued {:.1} s): the machine was busy with other steps, so nothing was measured",
+                gate.rerun(),
+                done.how,
+                done.timing.map_or(0.0, |t| t.queued)
+            ),
+            "look at `heavy status` and re-run `./dev check --pre-push` when it is free; a longer wait is PADDOCK_QUEUE_MAX (seconds), and an agent reports this (ER-24, ER-33)",
+        ),
+        Ok(done) if done.cut_short() => Row::not_measured(
+            format!(
                 "{} ({}) before it finished{}",
                 gate.rerun(),
                 done.how,
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
-            next: format!(
+            format!(
                 "re-run it alone: {} (the whole gate has a budget of {} min)",
                 gate.rerun(),
                 BUDGET.as_secs() / 60
             ),
-        },
+        ),
         Ok(done) => {
             let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
                 (true, "exit 125") => {
@@ -158,12 +251,12 @@ pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration) -> Verdict {
                 _ => gate.next.clone(),
             };
             let full = done.log.as_ref().map_or(String::new(), |l| format!(" Full output: {l}."));
-            Verdict::Failed {
-                cause: format!("{} ({})", gate.rerun(), done.how),
-                tail: done.tail.trim_end().to_string(),
-                next: format!("{hint}. Re-run alone: {}.{full}", gate.rerun()),
-                secs: started.elapsed().as_secs_f64(),
+            let mut row = Row::from_run(&gate.id, subject, &done, format!("{} ({})", gate.rerun(), done.how), secs(&done));
+            if !done.success {
+                row.tail = done.tail.trim_end().to_string();
+                row.next = format!("{hint}. Re-run alone: {}.{full}", gate.rerun());
             }
+            row
         }
     }
 }
@@ -176,11 +269,13 @@ pub struct RunOpts<'a> {
     pub budget: Duration,
     /// Set by SIGINT or SIGTERM: nothing more starts.
     pub stop: &'a AtomicBool,
+    /// What the run is about (the commit and its tree): the evidence of every pass.
+    pub subject: &'a Subject,
 }
 
 /// Every planned row decided, `workers` at a time, lowest rank first; the result keeps the planned order. The default budget, never
 /// stopped.
-pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(String, Verdict)> {
+pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize, subject: &Subject) -> Vec<(String, Row)> {
     run_all_with(
         planned,
         exec,
@@ -188,6 +283,7 @@ pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(Str
             workers,
             budget: BUDGET,
             stop: &AtomicBool::new(false),
+            subject,
         },
     )
 }
@@ -195,21 +291,28 @@ pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(Str
 fn row_id(p: &Planned) -> &str {
     match p {
         Planned::Run(g) => &g.id,
-        Planned::Skip { id, .. } | Planned::Broken { id, .. } => id,
+        Planned::Skip { id, .. } | Planned::NotMeasured { id, .. } | Planned::Broken { id, .. } => id,
     }
 }
 
 /// [`run_all`] with its bounds. A gate that panics, one that never ran and one the budget or a signal cut off are "not measured",
 /// never a pass.
-pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec<(String, Verdict)> {
+pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec<(String, Row)> {
+    run_all_timed(planned, exec, opts).0
+}
+
+/// [`run_all_with`], and the queue and run time of every row that went through `heavy`. The budget is run time: what a step spent
+/// queued behind other agents' steps is credited back ([`BudgetClock`]).
+pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (Vec<(String, Row)>, BTreeMap<String, Timing>) {
     let mut order: Vec<usize> = (0..planned.len()).collect();
     order.sort_by_key(|&i| match &planned[i] {
         Planned::Run(g) => g.rank,
         _ => 0,
     });
-    let deadline = Instant::now() + opts.budget;
+    let clock = BudgetClock::new(Instant::now(), opts.budget);
+    let timings = Mutex::new(BTreeMap::<String, Timing>::new());
     let queue = Mutex::new(order.into_iter().collect::<VecDeque<_>>());
-    let results: Vec<Mutex<Option<Verdict>>> = planned.iter().map(|_| Mutex::new(None)).collect();
+    let results: Vec<Mutex<Option<Row>>> = planned.iter().map(|_| Mutex::new(None)).collect();
     std::thread::scope(|s| {
         for _ in 0..opts.workers.max(1) {
             s.spawn(|| {
@@ -218,34 +321,44 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
                     let Some(i) = next else { break };
                     let v = match &planned[i] {
                         Planned::Run(g) => {
-                            let left = deadline.saturating_duration_since(Instant::now());
+                            let left = clock.left(Instant::now());
                             if opts.stop.load(Ordering::SeqCst) {
-                                Verdict::NotMeasured {
-                                    reason: "the push was interrupted before it started".into(),
-                                    next: format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                                }
+                                Row::not_measured(
+                                    "the push was interrupted before it started",
+                                    format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
+                                )
                             } else if left.is_zero() {
-                                Verdict::NotMeasured {
-                                    reason: format!(
+                                Row::not_measured(
+                                    format!(
                                         "the {} min budget of the push gate was spent before it started",
                                         opts.budget.as_secs() / 60
                                     ),
-                                    next: format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                                }
+                                    format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
+                                )
                             } else {
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decide(g, exec, left))).unwrap_or_else(|_| {
-                                    Verdict::NotMeasured {
-                                        reason: "the gate's runner crashed".into(),
-                                        next: "report this with the command that ran; re-run it alone".into(),
+                                let started = Instant::now();
+                                let mut seen = |d: &Done| {
+                                    if let Some(t) = d.timing {
+                                        clock.record(started, Instant::now(), Duration::from_secs_f64(t.queued.max(0.0)));
+                                        if let Ok(mut m) = timings.lock() {
+                                            m.insert(g.id.clone(), t);
+                                        }
                                     }
+                                };
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    decide_with(g, exec, left, opts.subject, &mut seen)
+                                }))
+                                .unwrap_or_else(|_| {
+                                    Row::not_measured(
+                                        "the gate's runner crashed",
+                                        "report this with the command that ran; re-run it alone",
+                                    )
                                 })
                             }
                         }
-                        Planned::Skip { reason, .. } => Verdict::Skipped { reason: reason.clone() },
-                        Planned::Broken { cause, next, .. } => Verdict::Broken {
-                            cause: cause.clone(),
-                            next: next.clone(),
-                        },
+                        Planned::Skip { reason, .. } => Row::skipped(reason.clone()),
+                        Planned::NotMeasured { reason, next, .. } => Row::not_measured(reason.clone(), next.clone()),
+                        Planned::Broken { cause, next, .. } => Row::broken(cause.clone(), next.clone()),
                     };
                     if let Ok(mut slot) = results[i].lock() {
                         *slot = Some(v);
@@ -254,17 +367,20 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
             });
         }
     });
-    planned
+    let rows = planned
         .iter()
         .zip(results)
         .map(|(p, r)| {
-            let v = r.into_inner().ok().flatten().unwrap_or_else(|| Verdict::NotMeasured {
-                reason: "the gate never ran".into(),
-                next: "re-run `./dev check --pre-push`; if it happens again, report it".into(),
+            let v = r.into_inner().ok().flatten().unwrap_or_else(|| {
+                Row::not_measured(
+                    "the gate never ran",
+                    "re-run `./dev check --pre-push`; if it happens again, report it",
+                )
             });
             (row_id(p).to_string(), v)
         })
-        .collect()
+        .collect();
+    (rows, timings.into_inner().unwrap_or_default())
 }
 
 /// How many gates run at once: one while the machine is loaded (ER-24: 20 or more on the 1-minute average), else three; `heavy`
@@ -289,10 +405,7 @@ pub fn parse_load(uptime: &str) -> Option<f64> {
 
 /// The command that puts a heavy step through the machine-wide slot (ER-24): `PADDOCK_HEAVY` as given, else `heavy.sh` or `heavy`
 /// on PATH. Empty when there is none (the caller says so).
-///
-/// Last, `sibling` (see [`sibling_heavy`]) names a `heavy.sh` that is not on PATH, so a caller whose PATH lacks it (a git hook) still
-/// takes its turn.
-pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool, sibling: &dyn Fn() -> Option<String>) -> Vec<String> {
+pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -> Vec<String> {
     if let Some(h) = env.get("PADDOCK_HEAVY").filter(|h| !h.trim().is_empty()) {
         if h.trim() == "off" {
             return Vec::new();
@@ -305,40 +418,18 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool, s
     if has("heavy") {
         return ["heavy", "run", "pre-push", "--"].map(String::from).to_vec();
     }
-    sibling().into_iter().collect()
-}
-
-/// Where a `heavy.sh` may sit when PATH has none: `$ENGINEERING_RULES/scripts/heavy.sh` when that variable is set (and nowhere else),
-/// else the `engineering-rules` checkout beside the main checkout of this repository (a worktree's `.git` file leads to it). None on Windows:
-/// `heavy.sh` is a shell script that CreateProcess cannot start.
-pub fn sibling_heavy(root: &Path, env: &HashMap<String, String>) -> Option<String> {
-    if cfg!(windows) {
-        return None;
-    }
-    let named = env.get("ENGINEERING_RULES").filter(|d| !d.is_empty());
-    let dirs: Vec<PathBuf> = match named {
-        // A named folder is the only place: one without heavy.sh means none, not "try the checkout beside this repository".
-        Some(d) => vec![PathBuf::from(d)],
-        None => crate::worktree::git::Repo::discover(root)
-            .ok()
-            .and_then(|repo| repo.primary.parent().map(|p| p.join("engineering-rules")))
-            .into_iter()
-            .collect(),
-    };
-    dirs.into_iter()
-        .map(|d| d.join("scripts/heavy.sh"))
-        .find(|f| f.is_file())
-        .map(|f| f.to_string_lossy().into_owned())
+    Vec::new()
 }
 
 /// The command that puts a heavy step through the machine-wide slot: [`heavy_prefix`], else the `heavy` built from the tree at
-/// `root` (once, kept in `built`; `left` bounds that build). The one resolver of the push gate and of `./dev gen check`, so
-/// both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_HEAVY=off`.
+/// `root` (once, kept in `built`; `left` bounds that build), held under a name of this run's own for as long as `built` lives
+/// ([`crate::tool_cache::Held`]), so another agent pruning or replacing the shared cache cannot fail a later step. The one
+/// resolver of the push gate and of `./dev gen check`, so both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_HEAVY=off`.
 pub fn heavy_command_for(
     root: &Path,
     env: &HashMap<String, String>,
     has_tool: &dyn Fn(&str) -> bool,
-    built: &std::sync::OnceLock<Result<PathBuf, String>>,
+    built: &std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
     left: Duration,
 ) -> Result<Vec<String>, String> {
     if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
@@ -349,12 +440,17 @@ pub fn heavy_command_for(
             Err("PADDOCK_HEAVY=off is set without the test-only variable PADDOCK_TEST_HEAVY_OFF, so this is an override of the machine-wide slot (OVERRIDE SET); unset it".into())
         };
     }
-    let found = heavy_prefix(env, has_tool, &|| sibling_heavy(root, env));
+    let found = heavy_prefix(env, has_tool);
     if !found.is_empty() {
         return Ok(found);
     }
-    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left)) {
-        Ok(bin) => Ok(vec![bin.display().to_string(), "run".into(), "pre-push".into(), "--".into()]),
+    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left).and_then(|bin| super::heavy_tool::hold(&bin, env))) {
+        Ok(held) => Ok(vec![
+            held.path().display().to_string(),
+            "run".into(),
+            "pre-push".into(),
+            "--".into(),
+        ]),
         Err(e) => Err(e.clone()),
     }
 }
@@ -387,9 +483,13 @@ pub struct RealExec {
     /// Set by SIGINT or SIGTERM: the running gates' process trees are ended.
     pub stop: Arc<AtomicBool>,
     /// The `heavy` built from tools/heavy when none is on PATH, built once per run (or the reason it could not be).
-    pub built_heavy: std::sync::OnceLock<Result<PathBuf, String>>,
+    pub built_heavy: std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
     /// When the push gate's budget ends: the build of heavy is cut off there.
     pub budget_end: Instant,
+    /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).
+    pub priority: bool,
+    /// The longest a heavy step waits for a slot (`PADDOCK_QUEUE_MAX`, default [`QUEUE_MAX`]).
+    pub queue_max: Duration,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -433,11 +533,16 @@ impl RealExec {
     }
 
     fn call(&self, gate: &Gate, left: Duration, log: &Path, label: Option<&str>) -> ToolCall {
+        let own = Duration::from_secs(if gate.heavy { 3000 } else { 900 });
+        // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-max`);
+        // the outer timeout is only a backstop for both plus a minute.
+        let run_max = own.min(left);
         let heavy = if gate.heavy {
-            self.heavy_command().unwrap_or_default()
+            with_heavy_flags(&self.heavy_command().unwrap_or_default(), self.priority, self.queue_max, run_max)
         } else {
             Vec::new()
         };
+        let limited = heavy.iter().any(|a| a == "--run-max");
         let (program, args): (String, Vec<String>) = match heavy.split_first() {
             Some((first, rest)) => (
                 first.clone(),
@@ -449,12 +554,16 @@ impl RealExec {
             ),
             None => (gate.program.clone(), gate.args.clone()),
         };
-        let own = Duration::from_secs(if gate.heavy { 3000 } else { 900 });
+        let timeout = if limited {
+            run_max + self.queue_max + Duration::from_secs(60)
+        } else {
+            own.min(left)
+        };
         let mut call = ToolCall::new(program)
             .args(args)
             .pass(PASS.iter().copied())
             .cwd(self.root.join(&gate.cwd))
-            .timeout(own.min(left))
+            .timeout(timeout)
             .cancel_on(Arc::clone(&self.stop));
         if gate.heavy && !self.env.contains_key("CARGO_BUILD_JOBS") {
             call = call.env("CARGO_BUILD_JOBS", "2");
@@ -519,11 +628,24 @@ impl Exec for RealExec {
         let log = self.logs.join(format!("{}.log", slug(&gate.id)));
         let label = (gate.need == Need::Docker).then(run_token);
         let mut ran = self.call(gate, left, &log, label.as_deref()).run(&self.env, &mut std::io::sink())?;
-        // Cut short while queued for the heavy slot: say so, the gate itself never ran (ER-33: not measured, with that reason).
-        if gate.heavy && !ran.success && ran.how.starts_with("timed out") {
+        let mut timing = None;
+        if gate.heavy {
             let text = std::fs::read_to_string(&log).unwrap_or_default();
-            if let Some(w) = slot_wait(&text) {
-                ran.how = format!("{}: {w}", ran.how);
+            timing = parse_heavy_timing(&text);
+            // heavy's own limits: 79 no slot in time (the command never ran), 80 the command was ended at its run limit.
+            let how = ran.how.clone();
+            match how.as_str() {
+                "exit 79" if timing.is_some() => ran.how = "queue limit: no slot taken in time".into(),
+                "exit 80" if timing.is_some() => {
+                    ran.how = format!("timed out after {} s of running", timing.map_or(0.0, |t| t.ran).round())
+                }
+                // Cut short while queued for the heavy slot: say so, the gate itself never ran (ER-33).
+                h if h.starts_with("timed out") && !ran.success => {
+                    if let Some(w) = slot_wait(&text) {
+                        ran.how = format!("{}: {w}", ran.how);
+                    }
+                }
+                _ => {}
             }
         }
         if let Some(l) = &label
@@ -537,6 +659,7 @@ impl Exec for RealExec {
             how: ran.how,
             tail: tail(&ran.stderr, 12),
             log: Some(log.display().to_string()),
+            timing,
         })
     }
 }
@@ -583,6 +706,16 @@ fn docker_answers(env: &HashMap<String, String>) -> bool {
         .is_ok_and(|r| r.success)
 }
 
+/// A commit and tree for tests that need a [`Subject`].
+#[cfg(test)]
+pub(crate) fn test_subject() -> Subject {
+    use paddock_cli::outcome::{Sha, TreeId};
+    Subject::Commit {
+        sha: Sha::new("a1"),
+        tree: TreeId::new("t1"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -605,59 +738,11 @@ mod tests {
     #[test]
     fn heavy_is_found_when_the_variable_is_not_set() {
         let env = HashMap::new();
-        let none = || None;
-        assert!(heavy_prefix(&env, &|_| false, &none).is_empty());
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy.sh", &none), ["heavy.sh"]);
-        assert_eq!(heavy_prefix(&env, &|p| p == "heavy", &none), ["heavy", "run", "pre-push", "--"]);
-        // not on PATH: the sibling checkout's script is used
-        assert_eq!(heavy_prefix(&env, &|_| false, &|| Some("/x/heavy.sh".into())), ["/x/heavy.sh"]);
+        assert!(heavy_prefix(&env, &|_| false).is_empty());
+        assert_eq!(heavy_prefix(&env, &|p| p == "heavy.sh"), ["heavy.sh"]);
+        assert_eq!(heavy_prefix(&env, &|p| p == "heavy"), ["heavy", "run", "pre-push", "--"]);
         let set = HashMap::from([("PADDOCK_HEAVY".to_string(), "my-heavy --x".to_string())]);
-        assert_eq!(heavy_prefix(&set, &|_| true, &none), ["my-heavy", "--x"]);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn the_sibling_checkout_of_the_main_checkout_is_found_from_a_worktree_path() {
-        let t = tempfile::tempdir().unwrap();
-        let main = t.path().join("repo");
-        std::fs::create_dir_all(t.path().join("engineering-rules/scripts")).unwrap();
-        std::fs::write(t.path().join("engineering-rules/scripts/heavy.sh"), "#!/bin/sh\n").unwrap();
-        std::fs::create_dir(&main).unwrap();
-        assert!(
-            paddock_proc::command("git")
-                .args(["init", "-q"])
-                .current_dir(&main)
-                .status()
-                .unwrap()
-                .success()
-        );
-        let found = sibling_heavy(&main, &HashMap::new()).unwrap();
-        assert!(found.ends_with("engineering-rules/scripts/heavy.sh"), "{found}");
-        // no such checkout beside it: nothing
-        std::fs::remove_file(t.path().join("engineering-rules/scripts/heavy.sh")).unwrap();
-        assert_eq!(sibling_heavy(&main, &HashMap::new()), None);
-    }
-
-    /// A named `ENGINEERING_RULES` is the only place looked in: a folder without `heavy.sh` means "none", never "try the checkout
-    /// beside this repository" (ADR 0100: a test names an empty folder so the machine's own checkout is not found).
-    #[cfg(unix)]
-    #[test]
-    fn a_named_engineering_rules_folder_is_the_only_place_looked_in() {
-        let t = tempfile::tempdir().unwrap();
-        let main = t.path().join("repo");
-        std::fs::create_dir_all(t.path().join("engineering-rules/scripts")).unwrap();
-        std::fs::write(t.path().join("engineering-rules/scripts/heavy.sh"), "#!/bin/sh\n").unwrap();
-        std::fs::create_dir(&main).unwrap();
-        assert!(
-            paddock_proc::command("git")
-                .args(["init", "-q"])
-                .current_dir(&main)
-                .status()
-                .unwrap()
-                .success()
-        );
-        let named = HashMap::from([("ENGINEERING_RULES".to_string(), t.path().join("empty").display().to_string())]);
-        assert_eq!(sibling_heavy(&main, &named), None, "the checkout beside the repository was used");
+        assert_eq!(heavy_prefix(&set, &|_| true), ["my-heavy", "--x"]);
     }
 
     #[test]
@@ -676,7 +761,7 @@ mod tests {
     #[test]
     fn heavy_off_runs_without_the_slot_and_is_the_only_way_to() {
         let off = HashMap::from([("PADDOCK_HEAVY".to_string(), "off".to_string())]);
-        assert!(heavy_prefix(&off, &|_| true, &|| None).is_empty());
+        assert!(heavy_prefix(&off, &|_| true).is_empty());
     }
 
     /// A stand-in for `heavy`: a directory is the lock (`mkdir`), a waiter prints who holds it as heavy does, the holder runs
@@ -712,6 +797,8 @@ exit $rc
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
+                priority: false,
+                queue_max: QUEUE_MAX,
             }
         }
 
@@ -739,7 +826,7 @@ exit $rc
             std::thread::scope(|s| {
                 for n in ["a", "b"] {
                     let (ex, g) = (&ex, gate(&format!("clippy {n}"), &cmd(n)));
-                    s.spawn(move || assert!(matches!(decide(&g, ex, Duration::from_secs(60)), Verdict::Passed { .. })));
+                    s.spawn(move || assert!(decide(&g, ex, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed));
                 }
             });
             let lines: Vec<String> = std::fs::read_to_string(&trace).unwrap().lines().map(String::from).collect();
@@ -761,12 +848,13 @@ exit $rc
             std::fs::write(lock.join("owner"), "Bob").unwrap();
             let ex = real(d.path(), &lock);
             let g = gate("clippy a", "echo never runs");
-            match decide(&g, &ex, Duration::from_secs(2)) {
-                Verdict::NotMeasured { reason, .. } => {
-                    assert!(reason.contains("waiting for the heavy slot, held by Bob"), "{reason}");
-                }
-                v => panic!("a slot that was never taken is not a pass or a failure: {v:?}"),
-            }
+            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
+            assert_eq!(
+                r.kind(),
+                Kind::NotMeasured,
+                "a slot that was never taken is not a pass or a failure: {r:?}"
+            );
+            assert!(r.reason().contains("waiting for the heavy slot, held by Bob"), "{}", r.reason());
         }
 
         /// A repository with the heavy tool's inputs committed, and a `cargo` that "builds" a fake heavy (a script that records
@@ -791,7 +879,7 @@ exit $rc
             std::fs::create_dir_all(&bin).unwrap();
             let body = if cargo_ok {
                 format!(
-                    "mkdir -p \"$CARGO_TARGET_DIR/release\"\ncat > \"$CARGO_TARGET_DIR/release/heavy\" <<'EOS'\n#!/bin/sh\n[ \"$1\" = --version ] && {{ echo heavy-fake; exit 0; }}\necho \"$@\" >> {m}\nshift 3\nexec \"$@\"\nEOS\nchmod +x \"$CARGO_TARGET_DIR/release/heavy\"\n",
+                    "mkdir -p \"$CARGO_TARGET_DIR/release\"\ncat > \"$CARGO_TARGET_DIR/release/heavy\" <<'EOS'\n#!/bin/sh\n[ \"$1\" = --version ] && {{ echo heavy-fake; exit 0; }}\necho \"$@\" >> {m}\nwhile [ \"$1\" != -- ]; do shift; done\nshift\nexec \"$@\"\nEOS\nchmod +x \"$CARGO_TARGET_DIR/release/heavy\"\n",
                     m = d.join("heavy-calls").display()
                 )
             } else {
@@ -813,7 +901,20 @@ exit $rc
                 stop: Arc::new(AtomicBool::new(false)),
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
+                priority: false,
+                queue_max: QUEUE_MAX,
             }
+        }
+
+        #[test]
+        fn a_landing_pushs_heavy_step_takes_the_priority_lane() {
+            let d = tempfile::tempdir().unwrap();
+            let mut ex = repo_with_fake_cargo(d.path(), true);
+            ex.priority = true;
+            let g = gate("clippy a", "echo ran >> out.txt");
+            assert!(decide(&g, &ex, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
+            let calls = std::fs::read_to_string(d.path().join("heavy-calls")).unwrap();
+            assert!(calls.contains("run --high --queue-max 1800 --run-max "), "{calls}");
         }
 
         #[test]
@@ -821,9 +922,13 @@ exit $rc
             let d = tempfile::tempdir().unwrap();
             let ex = repo_with_fake_cargo(d.path(), true);
             let g = gate("clippy a", "echo ran >> out.txt");
-            assert!(matches!(decide(&g, &ex, Duration::from_secs(60)), Verdict::Passed { .. }));
+            assert!(decide(&g, &ex, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
             let calls = std::fs::read_to_string(d.path().join("heavy-calls")).unwrap();
-            assert!(calls.contains("run pre-push --"), "{calls}");
+            assert!(
+                calls.contains("run --queue-max 1800 --run-max ") && calls.contains(" pre-push --"),
+                "{calls}"
+            );
+            assert!(!calls.contains("--high"), "a normal push does not take the priority lane: {calls}");
             assert!(d.path().join("out.txt").is_file(), "the gate's command ran under the built heavy");
             let cached: Vec<_> = std::fs::read_dir(d.path().join("home/bin")).unwrap().flatten().collect();
             assert!(
@@ -841,28 +946,28 @@ exit $rc
             let ex2 = RealExec {
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
+                priority: false,
+                queue_max: QUEUE_MAX,
                 env: ex.env.clone(),
                 root: ex.root.clone(),
                 logs: ex.logs.clone(),
                 stop: ex.stop.clone(),
             };
-            assert!(matches!(decide(&g, &ex2, Duration::from_secs(60)), Verdict::Passed { .. }));
+            assert!(decide(&g, &ex2, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
         }
 
         #[test]
         fn a_heavy_that_will_not_build_is_not_measured_and_names_the_error() {
             let d = tempfile::tempdir().unwrap();
             let ex = repo_with_fake_cargo(d.path(), false);
-            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(60)) {
-                Verdict::NotMeasured { reason, next } => {
-                    assert!(
-                        reason.contains("unresolved import") && reason.contains("no heavy slot tool"),
-                        "{reason}"
-                    );
-                    assert!(next.contains("re-run"), "{next}");
-                }
-                v => panic!("{v:?}"),
-            }
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(60), &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            let reason = r.reason();
+            assert!(
+                reason.contains("unresolved import") && reason.contains("no heavy slot tool"),
+                "{reason}"
+            );
+            assert!(r.next.contains("re-run"), "{}", r.next);
         }
 
         #[test]
@@ -870,10 +975,9 @@ exit $rc
             let d = tempfile::tempdir().unwrap();
             let mut ex = real(d.path(), &d.path().join("l"));
             ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
-            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
-                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("OVERRIDE SET"), "{reason}"),
-                v => panic!("{v:?}"),
-            }
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5), &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(r.reason().contains("OVERRIDE SET"), "{}", r.reason());
         }
 
         #[test]
@@ -881,10 +985,9 @@ exit $rc
             let d = tempfile::tempdir().unwrap();
             let mut ex = repo_with_fake_cargo(d.path(), true);
             ex.budget_end = Instant::now();
-            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
-                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("budget was spent"), "{reason}"),
-                v => panic!("{v:?}"),
-            }
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5), &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(r.reason().contains("budget was spent"), "{}", r.reason());
         }
 
         #[test]
@@ -894,10 +997,10 @@ exit $rc
             ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
             ex.env.insert(TEST_HEAVY_OFF.into(), "1".into());
             ex.env.insert("PATH".into(), "/usr/bin:/bin".into());
-            assert!(matches!(
-                decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)),
-                Verdict::Passed { .. }
-            ));
+            assert_eq!(
+                decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5), &test_subject()).kind(),
+                Kind::Passed
+            );
         }
     }
 

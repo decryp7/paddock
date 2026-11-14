@@ -65,8 +65,9 @@ fn fixture(tfm: &str, x86: bool) -> Option<PathBuf> {
             .args(["build", "-c", "Release", "-f", tfm, "-o"])
             .arg(&out)
             .arg(format!(
-                "-p:BaseIntermediateOutputPath={}/",
-                out_dir().join(format!("obj-{key}")).display()
+                "-p:BaseIntermediateOutputPath={}{}",
+                out_dir().join(format!("obj-{key}")).display(),
+                std::path::MAIN_SEPARATOR
             ));
         if x86 {
             cmd.arg("-p:PlatformTarget=x86");

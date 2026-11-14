@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 
 // The start-up contract (ADR 0058). A window shows a splash until Angular renders, paints its frame (activity bar,
 // status bar) without waiting for any IPC, reports `window_ready` after that first paint, and says calmly when
@@ -122,7 +122,7 @@ test.describe('start-up contract', () => {
     const levels = page.getByRole('toolbar', { name: 'Levels' });
     await levels.getByRole('button', { name: /^ERR/ }).click();
     await expect(levels.getByRole('button', { name: /^ERR/ })).toHaveAttribute('aria-pressed', 'true');
-    const rows = page.locator('debrief-events-grid [role=row].row');
+    const rows = gridRows(page);
     const word = ((await rows.first().locator('.msg').innerText()).trim().split(/\s+/)[0] ?? '').replace(/[^\w]/g, '');
     expect(word.length).toBeGreaterThan(2);
     await page.getByTestId('query-field').fill(word);

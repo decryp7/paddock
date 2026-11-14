@@ -111,10 +111,16 @@ fn blocking_render(
             Err(Error::Timeout(_)) => return Err(RenderError::Failed("the page did not finish loading in time".into())),
             Err(e) => return Err(failed(e)),
         }
-        match page
-            .wait_ready(selector.as_deref(), &Rule::default(), left("waiting")?)
-            .map_err(failed)?
-        {
+        let waited = match page.wait_ready(selector.as_deref(), &Rule::default(), left("waiting")?) {
+            // The browser answered no look at the page before its time ran out (a starved host, or a hung tab).
+            Err(Error::Timeout(what)) => {
+                return Err(RenderError::Failed(format!(
+                    "the page did not finish in time (the browser did not answer {what} before the page's time ran out)"
+                )))
+            }
+            r => r.map_err(failed)?,
+        };
+        match waited {
             Outcome::Ready => {}
             Outcome::Challenge(c) => return Err(RenderError::NeedsYou(c.reason().into())),
             Outcome::TimedOut(Readiness::WaitingForElement) => {

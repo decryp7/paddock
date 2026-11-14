@@ -16,7 +16,7 @@
 use super::finding::Finding;
 use super::jsre::rx;
 use super::record::Precondition;
-use super::{Check, CheckOutput, Control, Ctx};
+use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -171,6 +171,14 @@ impl Check for C123 {
 
     fn title(&self) -> &'static str {
         "a Rust test starts ./dev, cargo or node only through paddock_testkit::TestCommand"
+    }
+
+    fn scope(&self) -> CheckScope {
+        CheckScope::Root
+    }
+
+    fn mode(&self) -> Mode {
+        Mode::ReportOnly
     }
 
     fn control(&self) -> Control {

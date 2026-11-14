@@ -44,11 +44,6 @@ fn dev_heavy(path: &str, args: &[&str], heavy: Option<&str>, test_off: bool) -> 
             "PADDOCK_DEV_HOME",
             path.split(':').next().unwrap_or("/nonexistent").to_string() + "/home",
         )
-        // A named engineering-rules folder with no heavy.sh is the only place `dev` looks: the machine's own checkout is not found.
-        .env(
-            "ENGINEERING_RULES",
-            path.split(':').next().unwrap_or("/nonexistent").to_string() + "/no-engineering-rules",
-        )
         .output()
         .unwrap();
     (

@@ -39,7 +39,7 @@ fn fake_path(s: &Scratch, user_temp: Option<&Path>) -> OsString {
     tool(
         "getconf",
         match user_temp {
-            Some(u) => format!("echo '{}/'\n", u.display()),
+            Some(u) => format!("echo '{}{}'\n", u.display(), std::path::MAIN_SEPARATOR),
             None => "exit 1\n".into(),
         },
     );

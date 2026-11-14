@@ -1,13 +1,15 @@
-//! `dev heavy -- <command...>`: run a command through the machine-wide heavy slot (ER-24), found by the one function
-//! `check --pre-push` uses ([`crate::pre_push::exec::heavy_prefix`]), so a git hook does not depend on `heavy.sh` being on PATH.
-//! When no slot tool is found it prints one warning line and runs the command plain; it never stays silently unwrapped.
+//! `dev heavy -- <command...>`: run a command through the machine-wide heavy slot (ER-24), found by the one resolver the push gate and
+//! `./dev gen check` use ([`crate::pre_push::exec::heavy_command_for`]: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the
+//! `heavy` built from tools/heavy). When none can be found it is an error with the next step: never an unthrottled run.
 
-use crate::pre_push::exec::{heavy_prefix, sibling_heavy};
+use crate::pre_push::exec::{BUDGET, heavy_command_for, on_path};
+use crate::tool_cache::Held;
 use clap::Args;
 use paddock_cli::{CliError, Report};
 use serde_json::json;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 /// Arguments of `dev heavy`.
 #[derive(Args, Debug)]
@@ -17,30 +19,38 @@ pub struct HeavyArgs {
     pub command: Vec<String>,
 }
 
-/// The full command line to run, and the warning to print when no slot tool was found.
-pub fn plan(command: &[String], env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool, root: &Path) -> (Vec<String>, Option<String>) {
-    let prefix = heavy_prefix(env, has, &|| sibling_heavy(root, env));
-    let warn = prefix.is_empty().then(|| {
-        "dev heavy: no heavy slot tool found (set PADDOCK_HEAVY or ENGINEERING_RULES, or put heavy.sh on PATH): running without the machine-wide slot".to_string()
-    });
-    (prefix.into_iter().chain(command.iter().cloned()).collect(), warn)
+/// The full command line to run, or why there is no slot to run it through.
+pub fn plan(
+    command: &[String],
+    env: &HashMap<String, String>,
+    has: &dyn Fn(&str) -> bool,
+    root: &Path,
+    built: &OnceLock<Result<Held, String>>,
+) -> Result<Vec<String>, String> {
+    let prefix = heavy_command_for(root, env, has, built, BUDGET).map_err(|why| {
+        format!("dev heavy: no machine-wide heavy slot, so `{}` was not started: {why}. Next: put `heavy` or `heavy.sh` on PATH, set PADDOCK_HEAVY, or fix the build of tools/heavy", command[0])
+    })?;
+    Ok(prefix.into_iter().chain(command.iter().cloned()).collect())
 }
 
 /// `heavy`, against the real machine.
 pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
     let env: HashMap<String, String> = std::env::vars().collect();
-    let path = env.get("PATH").cloned().unwrap_or_default();
-    let has = |p: &str| std::env::split_paths(&path).any(|d| d.join(p).is_file());
-    let root = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
-    let (line, warn) = plan(&a.command, &env, &has, &root);
-    if let Some(w) = warn {
-        eprintln!("{w}");
-    }
+    let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("current folder: {e}")))?;
+    // The tree being committed in (a hook runs in an app's folder): heavy is built from this tree's tools/heavy.
+    let root = crate::worktree::git::Git::at(&cwd)
+        .text(&["rev-parse", "--show-toplevel"])
+        .map(|t| PathBuf::from(t.trim()))
+        .map_err(|e| CliError::failure(format!("dev heavy: {e}")))?;
+    let built = OnceLock::new();
+    let line = plan(&a.command, &env, &|p| on_path(&env, p), &root, &built).map_err(CliError::failure)?;
     let (program, args) = line.split_first().ok_or_else(|| CliError::failure("dev heavy: no command"))?;
     let status = paddock_proc::command(program)
         .args(args)
         .status()
         .map_err(|e| CliError::failure(format!("dev heavy: cannot start {program}: {e}")))?;
+    // The hold ends with the command (and before `exit`, which runs no destructors).
+    drop(built);
     if status.success() {
         return Ok(Report::new(json!({ "ok": true }), ""));
     }
@@ -73,26 +83,32 @@ mod tests {
     }
 
     #[test]
-    fn when_no_slot_tool_is_found_the_command_is_unchanged_with_a_warning_and_paddock_heavy_wins() {
-        let env = HashMap::from([("ENGINEERING_RULES".to_string(), "/nonexistent".to_string())]);
-        // no PATH tool, no sibling file: one warning, the command unchanged
-        let (line, warn) = plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"));
-        assert_eq!(line, cmd());
-        assert!(warn.unwrap().contains("no heavy slot tool found"));
-        // PADDOCK_HEAVY wins
-        let env = HashMap::from([("PADDOCK_HEAVY".to_string(), "/x/heavy.sh".to_string())]);
-        let (line, warn) = plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"));
-        assert_eq!(line, ["/x/heavy.sh", "cargo", "clippy"]);
-        assert!(warn.is_none());
+    fn no_slot_tool_is_an_error_naming_the_command_and_the_next_step_never_a_plain_run() {
+        let built = OnceLock::new();
+        built.set(Err("the build of heavy failed".into())).unwrap();
+        let err = plan(&cmd(), &HashMap::new(), &|_| false, Path::new("/nonexistent"), &built).unwrap_err();
+        assert!(
+            err.contains("`cargo` was not started") && err.contains("the build of heavy failed") && err.contains("Next:"),
+            "{err}"
+        );
     }
 
-    #[cfg(unix)]
     #[test]
-    fn engineering_rules_variable_finds_the_script_off_path() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/heavy");
-        let env = HashMap::from([("ENGINEERING_RULES".to_string(), dir.to_string())]);
-        let (line, warn) = plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"));
-        assert_eq!(line, [format!("{dir}/scripts/heavy.sh"), "cargo".into(), "clippy".into()]);
-        assert!(warn.is_none());
+    fn paddock_heavy_and_a_tool_on_path_are_put_in_front_of_the_command() {
+        let built = OnceLock::new();
+        let env = HashMap::from([("PADDOCK_HEAVY".to_string(), "/x/heavy.sh".to_string())]);
+        assert_eq!(
+            plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"), &built).unwrap(),
+            ["/x/heavy.sh", "cargo", "clippy"]
+        );
+        let line = plan(&cmd(), &HashMap::new(), &|p| p == "heavy.sh", Path::new("/nonexistent"), &built).unwrap();
+        assert_eq!(line, ["heavy.sh", "cargo", "clippy"]);
+    }
+
+    #[test]
+    fn the_override_off_without_the_test_variable_is_an_error() {
+        let built = OnceLock::new();
+        let env = HashMap::from([("PADDOCK_HEAVY".to_string(), "off".to_string())]);
+        assert!(plan(&cmd(), &env, &|_| false, Path::new("/nonexistent"), &built).is_err());
     }
 }

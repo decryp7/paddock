@@ -200,11 +200,7 @@ pub fn assert_blocks_consistent_with(store: &DuckStore, dir: &std::path::Path, u
         0,
         "two blocks overlap"
     );
-    let glob = dir
-        .join(debrief_store_duck::segments::SEGMENTS_DIR)
-        .join("*.parquet")
-        .to_string_lossy()
-        .replace('\\', "/");
+    let glob = paddock_testkit::path::text(dir.join(debrief_store_duck::segments::SEGMENTS_DIR).join("*.parquet"));
     if count("SELECT 1 FROM segments") > 0 {
         assert_eq!(
             count(&format!(

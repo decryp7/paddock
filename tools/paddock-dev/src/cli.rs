@@ -1,7 +1,7 @@
 use crate::{
-    brief_check, check, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates, generators,
-    heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, plan, plan_cmd, pr, pre_push, queue, release_isolation, slots,
-    wait, worktree,
+    brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
+    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, plan, plan_cmd, pr, pre_push, queue,
+    release_isolation, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -52,6 +52,15 @@ enum Command {
     Locks {
         #[command(subcommand)]
         command: LocksCommand,
+    },
+    /// The conformance checks on the Rust host, with the command line, output and exit codes of `paddock-conformance`
+    /// (`--app`, `--root`, `--only`, `--strict`, `--json`, `--out`, `--summary`, `list`, `commands`). It runs the checks ported so far;
+    /// `node conformance/bin/paddock-conformance.mjs` keeps the rest.
+    #[command(disable_help_flag = true)]
+    Conformance {
+        /// The arguments of `paddock-conformance`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
     },
     /// Repository checks of the family.
     Check {
@@ -151,6 +160,16 @@ enum CheckCommand {
     /// is "not measured" (exit 6), never a pass; a failure is one line with its next step (exit 5). The pre-push hook runs it.
     #[command(name = "pre-push", long_flag = "pre-push")]
     PrePush(pre_push::PrePushArgs),
+    /// The next free conformance check id, read from the working tree, every local branch, every branch of origin as the
+    /// remote has it now (git ls-remote) and conformance/reserved/ (ER-21: two branches took the same id four times). `--reserve <branch>` creates the reservation file.
+    NewId {
+        /// Create conformance/reserved/C<n>-<branch-slug> (commit it: the commit is the reservation).
+        #[arg(long)]
+        reserve: Option<String>,
+        /// The repository root (default: the folder containing .git, found from the current folder).
+        #[arg(long)]
+        root: Option<PathBuf>,
+    },
     /// C102 (ADR 0072): every listen site is in docs/ipc-endpoints.toml with an ending test or a reason, and the ratchet of
     /// connection endings is well formed. With `--tag`, also refuses a release tag that a ratchet entry blocks.
     IpcEndpoints {
@@ -217,12 +236,23 @@ struct MergeCheckArgs {
     /// checkout must be the merge result, else they are NOT MEASURED).
     #[arg(long)]
     no_generators: bool,
+    /// Also run the member gate on the merge commit: `check --pre-push --base <merge>^1`, the fast gates on the combined tree
+    /// (ADR 0098). The checkout must be the merge result. Report-only until its first green run on a real train is recorded.
+    #[arg(long)]
+    gates: bool,
 }
 
 #[derive(Subcommand)]
 enum SelfCommand {
     /// Print the input hash this binary's sources, dependencies and compiler give, and the hash it was built from.
     Hash,
+}
+
+#[derive(Args)]
+struct ConformanceArgsArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -262,6 +292,10 @@ enum CiCommand {
     /// flaky tests found exit 5 only with --fail-on-flakes;
     /// cancelled runs are counted and listed but never change the exit code.
     Flakes(ci_runs::FlakesArgs),
+    /// The arguments of CI's conformance line (`--app paddock ... --only ...`, after `node conformance/bin/paddock-conformance.mjs`... as
+    /// one line), read from .gitea/workflows/ci.yml by the one reader the push gate uses (ADR 0098 WP-2). Exit 6 when the
+    /// workflow has no single such line.
+    ConformanceArgs(ConformanceArgsArgs),
     /// For each failed test of a finished run: NEW, ALREADY FAILING ON MAIN (the last main run of the same workflow) or FLAKY (its
     /// `ci flakes` history). UNKNOWN when nothing proves either way. Read-only: it never quarantines or marks anything green (ER-12).
     Triage(ci_runs::TriageArgs),
@@ -280,6 +314,8 @@ enum CiCommand {
     /// Dispatch a workflow once no other run is on its single-machine runner (macOS, Windows): waits like `wait --ci-run`, at
     /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once.
     Dispatch(ci_runs::DispatchArgs),
+    /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).
+    TrialPrune(ci_runs::TrialPruneArgs),
 }
 
 #[derive(Subcommand)]
@@ -453,6 +489,10 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
             .with_hint("Its output is the planner's own: JSON for a plan, true or false, a range.");
         return finish(Format::Json, Err(e), out, err).code();
     }
+    if let Command::Conformance { args } = &cli.command {
+        // The conformance host's contract: its own text or JSON on standard output, `::error::` lines, exit 0, 1, 2, 6 or 7.
+        return check::conformance::run(args, out, err, &|k| std::env::var(k).ok());
+    }
     if let Command::Ci {
         command: CiCommand::Isolation(a),
     } = &cli.command
@@ -516,6 +556,7 @@ pub fn run(args: &[String], out: &mut dyn Write, err: &mut dyn Write) -> i32 {
                     branch: a.branch,
                     target: a.target,
                     generators: !a.no_generators,
+                    gates: a.gates,
                 },
                 out,
                 err,
@@ -563,6 +604,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Run(_),
         } => Err(CliError::failure("`ci run` was dispatched through the report path.")),
+        Command::Conformance { .. } => Err(CliError::failure("`conformance` was dispatched through the report path.")),
         Command::Ci {
             command: CiCommand::Host(_),
         } => Err(CliError::failure("a `ci` host step was dispatched through the report path.")),
@@ -575,6 +617,20 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::RecordFixture(a),
         } => ci_runs::record::command(&a),
+        Command::Ci {
+            command: CiCommand::ConformanceArgs(a),
+        } => gates::command::repo_root(a.root.as_deref()).and_then(|root| {
+            // The one reader is the contract, `conformance/paddock.ci.json` (ADR 0038 section 1), which replaced the line in ci.yml.
+            let args = crate::ci_run::contract::conformance_args_at(&root).map_err(|why| {
+                paddock_cli::CliError::new(
+                    paddock_cli::Exit::NotMeasured,
+                    format!(
+                        "::error::conformance args NOT MEASURED: {why}. Next step: fix the `conformance` field of conformance/paddock.ci.json, then run it again."
+                    ),
+                )
+            })?;
+            Ok(paddock_cli::Report::new(serde_json::json!({ "args": args }), args.join(" ")))
+        }),
         Command::Ci {
             command: CiCommand::Triage(a),
         } => ci_runs::triage(&a),
@@ -590,6 +646,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
+        Command::Ci {
+            command: CiCommand::TrialPrune(a),
+        } => ci_runs::trial_prune(&a),
         Command::Wait(a) => wait::command(&a),
         Command::Heavy(a) => heavy_cmd::command(&a),
         Command::Load(a) => load::command(&a),
@@ -640,6 +699,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::PrePush(a),
         } => pre_push::command(&a),
         Command::Check {
+            command: CheckCommand::NewId { reserve, root },
+        } => check_ids::command(root, reserve),
+        Command::Check {
             command: CheckCommand::IpcEndpoints { tag, root },
         } => ipc_endpoints::command(root, tag),
         Command::Check {
@@ -657,6 +719,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             branch: a.branch,
             target: a.target,
             generators: !a.no_generators,
+            gates: a.gates,
         }),
         Command::Gen {
             command: GenCommand::Check(a),

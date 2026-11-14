@@ -48,8 +48,8 @@ const ALLOWED: &[(&str, &str)] = &[
         "the guard rule matches the `worktree remove` words of a command; it deletes nothing",
     ),
     (
-        "tools/paddock-dev/src/ci_host/safe_remove.rs",
-        "FOLLOW-UP: the CI host steps' guarded remove (feat/ci-in-rust-wp4) and safe_remove become one mechanism",
+        "tools/paddock-dev/src/safe_remove/guard.rs",
+        "the shared check itself: the root-and-link guard (`remove_under`) of the CI host steps",
     ),
     ("tools/heavy/src/lock.rs", "heavy.sh's lock folders, not work folders"),
     (
@@ -88,7 +88,7 @@ fn only_safe_remove_and_the_listed_callers_delete_folders_under_tools() {
     let mut unlisted = Vec::new();
     let mut used = std::collections::BTreeSet::new();
     for f in files {
-        let rel = f.strip_prefix(&repo).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = paddock_testkit::path::text(f.strip_prefix(&repo).unwrap());
         let text = std::fs::read_to_string(&f).unwrap();
         if !PATTERNS.iter().any(|p| text.contains(p)) {
             continue;

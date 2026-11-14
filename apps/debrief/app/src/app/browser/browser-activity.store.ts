@@ -2,6 +2,7 @@ import { inject } from '@angular/core';
 import { patchState, signalStore, withHooks, withMethods, withState } from '@ngrx/signals';
 import { BrowserBackend } from './browser-backend';
 import { AiDriver, BrowserActivityKind, BrowserEvent } from './browser.types';
+import { Logger } from '../core/logger';
 
 interface BrowserActivityState {
   /** Who drives the AI's browser window now (a chat's agent mode, or research); null: nobody. */
@@ -25,9 +26,12 @@ const idle: Omit<BrowserActivityState, 'driver' | 'driverHeard'> = { text: null,
 export const BrowserActivityStore = signalStore(
   { providedIn: 'root' },
   withState<BrowserActivityState>({ driver: null, driverHeard: false, ...idle }),
-  withMethods((store, backend = inject(BrowserBackend)) => ({
+  withMethods((store, backend = inject(BrowserBackend), logger = inject(Logger)) => ({
     onEvent(e: BrowserEvent): void {
-      if (e.type === 'driving') patchState(store, { driver: e.by, driverHeard: true, ...(e.by ? {} : idle) });
+      if (e.type === 'driving') {
+        logger.debug('browser', 'AI browser driver changed', { From: store.driver()?.kind ?? 'none', To: e.by?.kind ?? 'none' });
+        patchState(store, { driver: e.by, driverHeard: true, ...(e.by ? {} : idle) });
+      }
       else if (e.type === 'status') patchState(store, { text: e.text });
       else if (e.type === 'activity') patchState(store, { activity: e.activity, host: e.host });
     },
@@ -35,7 +39,10 @@ export const BrowserActivityStore = signalStore(
     /** Who drives now (a failure leaves the chip hidden; the events still arrive). */
     async load(): Promise<void> {
       const d = await backend.driving().catch(() => undefined);
-      if (d !== undefined && !store.driverHeard()) patchState(store, { driver: d });
+      if (d !== undefined && !store.driverHeard()) {
+        logger.debug('browser', 'AI browser driver loaded', { To: d?.kind ?? 'none' });
+        patchState(store, { driver: d });
+      }
     },
   })),
   withHooks((store, backend = inject(BrowserBackend)) => {

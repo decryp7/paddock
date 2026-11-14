@@ -666,3 +666,36 @@ fn strip_prefix_reads_unc_and_verbatim_unc_paths() {
         None
     );
 }
+
+#[test]
+fn from_git_bash_reads_a_one_letter_first_part_as_a_drive_on_windows_only() {
+    assert_eq!(
+        from_git_bash("/c/x", Os::Linux),
+        "/c/x",
+        "off Windows `/c/x` is a folder of that name"
+    );
+    assert_eq!(from_git_bash("/c/x", Os::MacOs), "/c/x");
+    assert_eq!(from_git_bash("/c/x", W), "C:/x");
+    assert_eq!(from_git_bash("/C/Users/x/", W), "C:/Users/x/");
+    assert_eq!(
+        from_git_bash("/cc/x", W),
+        "/cc/x",
+        "only a one-letter first part is a drive"
+    );
+    assert_eq!(from_git_bash("/usr", W), "/usr");
+    assert_eq!(
+        from_git_bash("/c", W),
+        "C:/",
+        "a drive's root, not the drive-relative C:"
+    );
+    assert_eq!(from_git_bash("/c/", W), "C:/");
+    assert_eq!(from_git_bash("/c", Os::Linux), "/c");
+    assert_eq!(from_git_bash("C:/x", W), "C:/x");
+    assert_eq!(from_git_bash(r"C:\x", W), r"C:\x");
+    assert_eq!(from_git_bash("", W), "");
+    assert_eq!(
+        from_git_bash("/1/x", W),
+        "/1/x",
+        "a digit is not a drive letter"
+    );
+}

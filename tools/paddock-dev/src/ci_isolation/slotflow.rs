@@ -251,6 +251,55 @@ fn env_lines(file: &str, lines: &[String]) -> R<()> {
     Ok(())
 }
 
+/// The `heavy` that announces this job to the agents' queue (ADR 0102): `PADDOCK_HEAVY_BIN`, else the one cached for this tree
+/// (`~/.paddock-dev/bin/heavy-<hash>`, built by any agent's pre-push). It never builds one: that would slow every job's first step.
+fn heavy_bin(ctx: &Ctx) -> Option<PathBuf> {
+    if let Some(b) = ctx.get("PADDOCK_HEAVY_BIN").filter(|b| !b.is_empty()) {
+        return Some(PathBuf::from(b));
+    }
+    let root = ctx
+        .get("GITHUB_WORKSPACE")
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())?;
+    crate::pre_push::heavy_tool::ensure(&root, &ctx.env_snapshot(), Duration::ZERO).ok()
+}
+
+/// Announces (or withdraws) this job on the agents' heavy queue: `heavy mark ci-<slot> --pid <the slot's holder>`. While the holder
+/// lives, agents' normal heavy steps wait for it (they are never killed; ADR 0102); the marker goes with the holder, with `release`,
+/// and after `HEAVY_CI_MAX` (the bound of a hung or crashed job). Best effort: a missing or failing `heavy` is said, and the job goes on.
+fn heavy_mark(ctx: &Ctx, io: &mut Sinks<'_>, home: &str, slot: &str, remove: bool) {
+    let Some(pid) = owner_field(home, slot, "pid").filter(|p| p.parse::<u32>().is_ok()) else {
+        io.say(format!(
+            "::warning::job-isolation: {slot} has no holder pid, so agents' heavy steps are not told to yield to this job"
+        ));
+        return;
+    };
+    let Some(bin) = heavy_bin(ctx) else {
+        if !remove {
+            io.say("::warning::job-isolation: no `heavy` for this tree is built yet (any agent's `./dev check --pre-push` builds it, or set PADDOCK_HEAVY_BIN), so agents' heavy steps do not yield to this job (ADR 0102)");
+        }
+        return;
+    };
+    let name = format!("ci-{slot}");
+    let mut args = vec!["mark"];
+    if remove {
+        args.push("--remove");
+    }
+    args.extend([name.as_str(), "--pid", pid.as_str()]);
+    match paddock_proc::command(&bin).args(&args).stdin(Stdio::null()).output() {
+        Ok(o) if o.status.success() => {
+            io.say(format!("job-isolation: {} {name} (holder pid {pid}) on the agents' heavy queue", if remove { "withdrew" } else { "announced" }));
+        }
+        Ok(o) => io.say(format!(
+            "::warning::job-isolation: `heavy {}` failed ({}): {}. Agents' heavy steps may not yield to this job; next step: run it by hand",
+            args.join(" "),
+            o.status,
+            String::from_utf8_lossy(&o.stderr).trim()
+        )),
+        Err(e) => io.say(format!("::warning::job-isolation: {} could not be started: {e}", bin.display())),
+    }
+}
+
 /// `acquire`: the job's slot (first step of a host job); appends `PADDOCK_CI_SLOT`, `PADDOCK_CI_SLOT_TOKEN`, `PADDOCK_JOB_TEMP`, `TMPDIR`
 /// to `$GITHUB_ENV`; sweeps idle slots; checks the free-disk floor. A Linux container takes no slot.
 pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
@@ -324,6 +373,7 @@ pub fn acquire(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
     }
     // The env lines a slot gives the job's later steps, then the job's temp and socket folders (job-tmpdir, one implementation).
     env_lines(&out, &[format!("PADDOCK_CI_SLOT={slot}"), format!("PADDOCK_CI_SLOT_TOKEN={token}")])?;
+    heavy_mark(ctx, io, &home, &slot, false);
     if let Err(e) = tmpdir::sweep(ctx, io) {
         if !e.text.is_empty() {
             io.say(&e.text);
@@ -482,6 +532,7 @@ pub fn release(ctx: &Ctx, io: &mut Sinks<'_>) -> R<()> {
         }
         Ok(true) => {}
     }
+    heavy_mark(ctx, io, &home, &s, true);
     // Only this job's own holder: release honours only its token.
     let released = dev_tool(
         ctx,

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { chooseMenu, openMenuPath } from './menu-support';
 import { openAppWith, openView } from './tools-support';
@@ -51,7 +51,7 @@ test.describe('inspector (K1), anomalies (K2)', () => {
   test('More actions holds Mask and Extract with a reason, and a property value can be copied', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => undefined);
     await openApp(page);
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     await expect(page.getByRole('button', { name: 'Mask…' })).toHaveCount(0);
     await page.getByRole('button', { name: 'More actions…' }).click();
     const mask = page.getByRole('menuitem', { name: 'Mask in message…' });

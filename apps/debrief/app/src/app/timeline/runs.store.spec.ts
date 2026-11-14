@@ -48,6 +48,23 @@ describe('RunsStore', () => {
     expect(runs.limit()).toBe(1000);
   });
 
+  it('clearing the workspace while runs load ends the loading state (ADR 0071)', async () => {
+    const { runs, ws } = await setup();
+    const backend = TestBed.inject(RunsBackend);
+    let release!: (r: RunsReply) => void;
+    vi.spyOn(backend, 'queryRuns').mockImplementationOnce(() => new Promise<RunsReply>((res) => (release = res)));
+    runs.kind.set('run');
+    await settleUntil(undefined, () => expect(release).toBeTypeOf('function'));
+    expect(runs.loading()).toBe(true);
+    await ws.clearWorkspace();
+    await settle(undefined, 6);
+    expect(runs.loading()).toBe(false);
+    expect(runs.rows()).toHaveLength(0);
+    release({ runs: [], summaries: [], total: 0 } as unknown as RunsReply);
+    await settle(undefined, 4);
+    expect(runs.loading()).toBe(false);
+  });
+
   it('shows failures with retry and ignores superseded answers', async () => {
     const { runs } = await setup();
     const backend = TestBed.inject(RunsBackend);

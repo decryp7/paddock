@@ -8,6 +8,7 @@ import { MockBrowserBackend, MockWeb, resetMockWeb } from './mock-browser-backen
 
 let web: MockWeb;
 let backend: MockBrowserBackend;
+let logger: MemoryLogger;
 
 async function render() {
   const f = TestBed.createComponent(AiBrowsingChip);
@@ -23,11 +24,12 @@ describe('AiBrowsingChip', () => {
   beforeEach(() => {
     web = resetMockWeb();
     backend = new MockBrowserBackend(web);
+    logger = new MemoryLogger();
     TestBed.configureTestingModule({
       providers: [
         { provide: BrowserBackend, useValue: backend },
         { provide: ChatBrowserBackend, useValue: backend },
-        { provide: Logger, useClass: MemoryLogger },
+        { provide: Logger, useValue: logger },
       ],
     });
   });
@@ -102,6 +104,15 @@ describe('AiBrowsingChip', () => {
     expect(stop).toHaveBeenCalledWith('c-1');
     expect(web.status('c-1').agent).toBe(false);
     expect(q(f, 'ai-browsing')).toBeNull();
+    // The log explains a chip that stayed: what Stop ended, and who drove afterwards (run 8056, browser.e2e.ts:103).
+    const lines = logger.entries.filter((e) => e.category === 'browser');
+    expect(lines.map((e) => [e.message, e.props])).toEqual([
+      ['AI browser driver loaded', { To: 'none' }],
+      ['AI browser driver changed', { From: 'none', To: 'agent' }],
+      ['Stop pressed on the AI browsing chip', { Driver: 'agent' }],
+      ['AI browser driver changed', { From: 'agent', To: 'none' }],
+      ['AI browsing stopped', { Driver: 'agent', DriverAfter: 'none' }],
+    ]);
   });
 
   it('shows a failed stop and lets Stop try again', async () => {

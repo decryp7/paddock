@@ -13,6 +13,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const CALL: Duration = Duration::from_secs(10);
+/// The least a look is waited for in [`Page::wait_ready`], so that a wait whose time is spent (or zero) still makes its one
+/// look; the look never gets more than the page's remaining time beyond this.
+const LOOK_GRACE: Duration = Duration::from_secs(1);
+/// What [`Page::wait_ready`]'s timeout names when no look at the page was answered before the page's time ran out.
+pub const READINESS_UNANSWERED: &str = "the page's readiness check";
 const POLL: Duration = Duration::from_millis(100);
 /// The largest document [`Page::capture`] returns.
 pub const MAX_HTML: usize = 16 << 20;
@@ -257,10 +262,15 @@ impl Page {
     }
 
     pub(crate) fn call(&self, method: &str, params: Value) -> Result<Value> {
+        self.call_within(method, params, CALL)
+    }
+
+    /// A command to the page's session whose answer is waited for at most `wait`.
+    fn call_within(&self, method: &str, params: Value, wait: Duration) -> Result<Value> {
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        self.closed_wins(self.conn.call(Some(&self.session), method, params, CALL))
+        self.closed_wins(self.conn.call(Some(&self.session), method, params, wait))
     }
 
     fn closed_wins<T>(&self, r: Result<T>) -> Result<T> {
@@ -374,10 +384,21 @@ impl Page {
 
     /// Evaluates a JavaScript expression in the page and returns its value.
     pub fn evaluate(&self, expression: &str) -> Result<Value> {
-        let r = self.call(
-            "Runtime.evaluate",
-            json!({"expression": expression, "returnByValue": true, "awaitPromise": true, "timeout": 8000}),
-        )?;
+        self.evaluate_within(expression, CALL)
+    }
+
+    /// [`Page::evaluate`], its answer waited for at most `wait`. A timeout names the script, not "a command".
+    fn evaluate_within(&self, expression: &str, wait: Duration) -> Result<Value> {
+        let r = self
+            .call_within(
+                "Runtime.evaluate",
+                json!({"expression": expression, "returnByValue": true, "awaitPromise": true, "timeout": 8000}),
+                wait,
+            )
+            .map_err(|e| match e {
+                Error::Timeout(_) => Error::Timeout("a script in the page (Runtime.evaluate)"),
+                e => e,
+            })?;
         if let Some(d) = r.get("exceptionDetails") {
             let m = d
                 .pointer("/exception/description")
@@ -424,6 +445,11 @@ impl Page {
 
     /// One observation of the page. `selector` is the element a caller waits for.
     pub fn snapshot(&self, selector: Option<&str>) -> Result<Snapshot> {
+        self.snapshot_within(selector, CALL)
+    }
+
+    /// [`Page::snapshot`], its answer waited for at most `wait`.
+    fn snapshot_within(&self, selector: Option<&str>, wait: Duration) -> Result<Snapshot> {
         let sel = match selector {
             // JSON string literals are valid JavaScript string literals.
             Some(s) => format!(
@@ -437,7 +463,7 @@ impl Page {
 pw: !!document.querySelector('input[type=password]'), url: location.href, title: document.title, \
 text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
         );
-        let v = self.evaluate(&expr)?;
+        let v = self.evaluate_within(&expr, wait)?;
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         Ok(Snapshot {
             url: s("url"),
@@ -461,6 +487,11 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
 
     /// Polls until the page is ready, shows a challenge (once loaded), or `timeout` passes; at least one poll is made.
     /// Needs [`Page::track_dom_changes`] before the navigation, or the DOM never counts as quiet.
+    ///
+    /// `timeout` is the only bound of the looks too: a look the browser answers late (a starved host) is waited for while
+    /// the page has time left, never cut at a fixed per-command deadline (CI run 8060). When the time runs out during a
+    /// look, the outcome is the last answered look's verdict, or [`Error::Timeout`] naming [`READINESS_UNANSWERED`] when
+    /// no look was answered at all.
     pub fn wait_ready(
         &self,
         selector: Option<&str>,
@@ -468,8 +499,15 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
         timeout: Duration,
     ) -> Result<Outcome> {
         let end = Deadline::after(self.clock.clone(), timeout);
+        let mut previous: Option<Readiness> = None;
         loop {
-            let snap = self.snapshot(selector)?;
+            // At least one look is made, so a spent time still waits [`LOOK_GRACE`] for its answer.
+            let left = end.remaining().map_or(CALL, |r| r.max(LOOK_GRACE));
+            let snap = match (self.snapshot_within(selector, left), previous) {
+                (Err(Error::Timeout(_)), Some(last)) => return Ok(Outcome::TimedOut(last)),
+                (Err(Error::Timeout(_)), None) => return Err(Error::Timeout(READINESS_UNANSWERED)),
+                (r, _) => r?,
+            };
             let last = ready::readiness(
                 &Observation {
                     load_finished: snap.load_finished,
@@ -487,6 +525,7 @@ text: document.body ? document.body.innerText.slice(0, {TEXT_EXCERPT}) : ''}})"
             if last == Readiness::Ready {
                 return Ok(Outcome::Ready);
             }
+            previous = Some(last);
             if end.passed() {
                 return Ok(Outcome::TimedOut(last));
             }

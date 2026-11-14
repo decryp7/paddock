@@ -111,6 +111,22 @@ impl Tree {
         rc
     }
 
+    /// Whether the path exists (a file or a folder).
+    pub fn exists(&self, rel: &str) -> bool {
+        match &self.memory {
+            Some(m) => m.contains_key(rel) || self.is_dir(rel),
+            None => self.root.join(rel).exists(),
+        }
+    }
+
+    /// Whether the path is a folder.
+    pub fn is_dir(&self, rel: &str) -> bool {
+        match &self.memory {
+            Some(m) => m.keys().any(|k| k.starts_with(&format!("{rel}/"))),
+            None => self.root.join(rel).is_dir(),
+        }
+    }
+
     /// The file's text (invalid UTF-8 becomes U+FFFD, as Node does), or `None` when it cannot be read.
     pub fn read(&self, rel: &str) -> Option<Rc<String>> {
         if let Some(hit) = self.cache.borrow().get(rel) {

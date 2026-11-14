@@ -1,0 +1,4 @@
+// conformance: file-layout-guess
+fn one() {
+    let a = root.join("target/debug/deps/x");
+}

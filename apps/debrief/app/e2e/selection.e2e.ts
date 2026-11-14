@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { initialTotal, openApp } from './app';
+import { gridRows, initialTotal, openApp } from './app';
 
 test.describe('selection and inspector', () => {
   test.beforeEach(async ({ page }) => openApp(page));
@@ -17,7 +17,7 @@ test.describe('selection and inspector', () => {
   test('inspector + adds a filter pill and removing it restores the total', async ({ page }) => {
     const total = page.locator('debrief-events-grid .bar .total');
     const all = await initialTotal(page);
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
 
     const inspector = page.locator('debrief-inspector');
     const prop = inspector.locator('.prop').filter({ has: page.locator('.k', { hasText: /^MachineName$/ }) });
@@ -34,7 +34,7 @@ test.describe('selection and inspector', () => {
   });
 
   test('arrow keys move the grid selection', async ({ page }) => {
-    const rows = page.locator('debrief-events-grid [role=row].row');
+    const rows = gridRows(page);
     await rows.first().click();
     const sel = page.locator('debrief-events-grid .row.sel');
     const id = page.locator('debrief-inspector .head .faint').first();

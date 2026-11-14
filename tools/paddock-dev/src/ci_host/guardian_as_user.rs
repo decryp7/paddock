@@ -346,6 +346,7 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
     const BUILD: &str = "   Compiling paddock-proc v0.1.0\n  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-0123abcd)\n  Executable tests/it/main.rs (target/debug/deps/it-ff)\n  Executable unittests src/lib.rs (target/debug/deps/paddock_chromium-9f8e7d)\n";
 
     /// A scripted machine: who runs it, what the programs say, what was started.
@@ -466,14 +467,18 @@ mod tests {
     fn the_test_binaries_are_the_last_unit_test_executables_of_each_crate() {
         assert_eq!(
             exe_of(BUILD, "paddock_proc"),
+            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
             Some("target/debug/deps/paddock_proc-0123abcd".into())
         );
         assert_eq!(
             exe_of(BUILD, "paddock_chromium"),
+            // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
             Some("target/debug/deps/paddock_chromium-9f8e7d".into())
         );
         assert_eq!(exe_of(BUILD, "paddock_missing"), None);
+        // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
         let twice = format!("{BUILD}  Executable unittests src/lib.rs (target/debug/deps/paddock_proc-beef)\n");
+        // conformance: layout-guess — a sample of cargo's own output, or the test binary it names; not a computed layout
         assert_eq!(exe_of(&twice, "paddock_proc"), Some("target/debug/deps/paddock_proc-beef".into()));
     }
 

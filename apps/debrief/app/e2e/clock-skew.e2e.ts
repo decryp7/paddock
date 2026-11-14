@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith, runCommand } from './tools-support';
+import { gridRows } from './app';
 
 /** The sidebar row of a source, by the end of its path (the row's tooltip starts with the path; rows show only the name under a folder heading). */
 function sourceRow(page: Page, path: string) {
@@ -10,7 +11,7 @@ function sourceRow(page: Page, path: string) {
 /** Searches the messages and selects the first matching event. */
 async function selectFirst(page: Page, text: string): Promise<void> {
   await page.getByTestId('query-field').fill(text);
-  const first = page.locator('debrief-events-grid [role=row].row').first();
+  const first = gridRows(page).first();
   await expect(first).toContainText(text);
   await first.click();
   await expect(page.locator('debrief-inspector .message')).toContainText(text);
@@ -85,7 +86,7 @@ test.describe('clock-skew correction', () => {
 
   test('palette commands work on the selected event', async ({ page }) => {
     await openAppWith(page, '');
-    await page.locator('debrief-events-grid [role=row].row').nth(3).click();
+    await gridRows(page).nth(3).click();
     await runCommand(page, 'Use selected event as clock reference');
     await expect(page.getByTestId('is-reference')).toBeVisible();
     await runCommand(page, "Adjust clock of the selected event's source");

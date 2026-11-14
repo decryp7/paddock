@@ -16,8 +16,7 @@ export async function openAppWith(page: Page, search: string, options: { grid?: 
 /** The events grid's scroll container. */
 export const viewport = (page: Page) => page.locator('debrief-events-grid .viewport');
 
-/** Rows currently in the DOM (never more than a screenful plus overscan, whatever the total). */
-export const gridRows = (page: Page) => page.locator('debrief-events-grid .row:not(.placeholder)');
+export { gridRows } from './app';
 
 /** Parses the id out of "Synthetic event 123". */
 export function eventId(text: string | null): number {

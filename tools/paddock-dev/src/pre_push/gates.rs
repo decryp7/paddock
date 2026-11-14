@@ -69,6 +69,16 @@ pub enum Planned {
         /// Why.
         reason: String,
     },
+    /// The environment is not ready (a missing or stale install): the check did not look, which is not a finding in the change and
+    /// not a broken check (ADR 0089 amendment A2): exit 6, never a pass.
+    NotMeasured {
+        /// The row.
+        id: String,
+        /// What is not ready.
+        reason: String,
+        /// What to do.
+        next: String,
+    },
     /// The check itself is broken (its input cannot be read): the push does not pass (ER-33).
     Broken {
         /// The row.
@@ -85,6 +95,8 @@ pub enum Planned {
 pub struct Facts {
     /// The conformance command's arguments after `node`, read from conformance/paddock.ci.json, or why that failed.
     pub conformance: Option<Result<Vec<String>, String>>,
+    /// Why conformance's npm dependencies are not installed (the environment is not ready), or None when they are.
+    pub conformance_env: Option<String>,
     /// Workspace folders whose CI lints Windows too (`apps/<app>`, from `windowsClippy`); `crates` always does.
     pub windows_clippy: BTreeSet<String>,
     /// The CI image reference (from `ci-image/VERSION`), or why it cannot be read.
@@ -414,6 +426,13 @@ fn conformance(plan: &Value, facts: &Facts) -> Planned {
         return Planned::Skip {
             id,
             reason: "the plan does not reach the conformance job".into(),
+        };
+    }
+    if let Some(cause) = &facts.conformance_env {
+        return Planned::NotMeasured {
+            id,
+            reason: format!("environment not ready: {cause}"),
+            next: "run `npm ci --ignore-scripts -w conformance` in the main checkout, then re-run `./dev check --pre-push`; this is not a finding in your change".into(),
         };
     }
     match &facts.conformance {

@@ -25,9 +25,11 @@ mod tests {
         let t = paddock_testkit::private_tempdir().unwrap();
         std::fs::write(t.path().join("b"), b"x").unwrap();
         assert!(check("relative/path").is_err());
-        assert!(check(&format!("{}/a/../b", t.path().display())).is_err());
-        assert!(check(&format!("{}/missing", t.path().display())).is_err());
-        assert!(check(&format!("{}/b", t.path().display())).unwrap_err().contains("file"));
+        assert!(check(paddock_testkit::path::under(t.path(), "a/../b").to_str().unwrap()).is_err());
+        assert!(check(paddock_testkit::path::under(t.path(), "missing").to_str().unwrap()).is_err());
+        assert!(check(paddock_testkit::path::under(t.path(), "b").to_str().unwrap())
+            .unwrap_err()
+            .contains("file"));
         assert!(check(&t.path().display().to_string()).is_ok());
     }
 }

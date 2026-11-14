@@ -24,7 +24,8 @@
 #
 # Exit codes: 75 busy (EX_TEMPFAIL), 3 the lock could not be used (root missing, paddock-dev failed).
 # Environment: PADDOCK_VM_LOCK_ROOT (default /Volumes/d7sst7/ci/locks/test-machines), PADDOCK_VM_LOCK_WAIT (0),
-#   PADDOCK_VM_LOCK_POLL (seconds between tries, 5), PADDOCK_DEV (the paddock-dev program; default the repository's ./dev).
+#   PADDOCK_VM_LOCK_POLL (seconds between tries, 5), PADDOCK_DEV (the paddock-dev program; default the repository's ./dev),
+#   PADDOCK_VM_LOCK_SLOW_SECS (a paddock-dev call this slow is logged, 10).
 
 _vm_lock_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # State of the lock this shell holds (needed by the EXIT trap).
@@ -32,6 +33,14 @@ _vm_lock_slot=""; _vm_lock_token=""; _vm_lock_owner=""; _vm_lock_root=""; _vm_lo
 VM_LOCK_BUSY=75
 
 _vm_lock_dev() { if [ -n "${PADDOCK_DEV:-}" ]; then "$PADDOCK_DEV" "$@"; else (cd "$_vm_lock_here/.." && bash ./dev "$@"); fi; }
+# _vm_lock_slow <start SECONDS> <step> <exit code>: a paddock-dev call that took PADDOCK_VM_LOCK_SLOW_SECS (10) or more says so on
+# stderr (ER-27): on an overloaded host every lock step is slow, and a run that hits its own bound must show where the time went
+# (run 8099: lock tests ended at 60 s with nothing on stderr). 10 s is twice the 5 s a busy acquire takes by design (the holder's
+# acquire grace), so a normal refusal says nothing. Called by each caller, whose own redirection of paddock-dev's stderr must not
+# swallow it.
+_vm_lock_slow() {
+  [ $((SECONDS - $1)) -lt "${PADDOCK_VM_LOCK_SLOW_SECS:-10}" ] || echo "vm-lock: paddock-dev ci slot $2 took $((SECONDS - $1))s (exit $3); the host may be overloaded" >&2
+}
 # The start of a process: `ps lstart` (shown to people), plus on Linux the kernel start tick from /proc/<pid>/stat as " [t<ticks>]". Linux
 # derives lstart from the wall clock, which can move by a second between two calls for one process; the tick never changes, so a live holder
 # is never taken for a dead one (rule 53 identity is pid plus start; compare with _vm_lock_same_start, never with `=`).
@@ -57,9 +66,11 @@ _vm_lock_default_root() { printf '%s' "${PADDOCK_VM_LOCK_ROOT:-/Volumes/d7sst7/c
 
 # The owner folder of the current holder, if the slot is held; retried a few times (status can race a holder starting or ending).
 _vm_lock_holder() {
-  local json
+  local json t0 rc
   for _ in 1 2 3; do
-    json="$(_vm_lock_dev ci slot status --max 1 --root "$1" --json 2>/dev/null)" || json=""
+    t0=$SECONDS; rc=0
+    json="$(_vm_lock_dev ci slot status --max 1 --root "$1" --json 2>/dev/null)" || { rc=$?; json=""; }
+    _vm_lock_slow "$t0" status "$rc"
     case "$json" in
       *'"busy":false'*) return 1 ;;
       *'"busy":true'*) printf '%s\n' "$json" | sed -n 's/.*"owner":"\([^"]*\)".*/\1/p'; return 0 ;;
@@ -87,7 +98,9 @@ vm_lock_inherited() {
 
 vm_lock_release() {
   [ -z "$_vm_lock_slot" ] && return 0
-  _vm_lock_dev ci slot release --slot "$_vm_lock_slot" --token "$_vm_lock_token" --root "$_vm_lock_root" >/dev/null 2>&1 || true
+  local t0=$SECONDS rc=0
+  _vm_lock_dev ci slot release --slot "$_vm_lock_slot" --token "$_vm_lock_token" --root "$_vm_lock_root" >/dev/null 2>&1 || rc=$?
+  _vm_lock_slow "$t0" release "$rc"
   [ -z "$_vm_lock_owner" ] || rm -rf "$_vm_lock_owner"
   echo "vm-lock: $_vm_lock_label released the test machines lock after $((SECONDS - _vm_lock_since))s" >&2
   _vm_lock_slot=""; _vm_lock_owner=""
@@ -113,7 +126,7 @@ _vm_lock_install_traps() {
 }
 
 vm_lock_acquire() {
-  local label="${1:?vm_lock_acquire needs a label}" unknown=0 wait poll waited=0 said src owner other who pid start rest olabel now errf
+  local label="${1:?vm_lock_acquire needs a label}" unknown=0 wait poll waited=0 said src owner other who pid start rest olabel now errf t0
   vm_lock_inherited && return 0
   _vm_lock_root="$(_vm_lock_default_root)"
   wait="${PADDOCK_VM_LOCK_WAIT:-0}"; poll="${PADDOCK_VM_LOCK_POLL:-5}"
@@ -123,7 +136,8 @@ vm_lock_acquire() {
   printf '%s\t%s\t%s\n' "$$" "$(_vm_lock_start $$)" "$label" > "$owner/who"
   errf="$owner.err"
   while :; do
-    src=0; said="$(_vm_lock_dev ci slot acquire --max 1 --owner "$owner" --root "$_vm_lock_root" --max-hold-secs 0 2>"$errf")" || src=$?
+    src=0; t0=$SECONDS; said="$(_vm_lock_dev ci slot acquire --max 1 --owner "$owner" --root "$_vm_lock_root" --max-hold-secs 0 2>"$errf")" || src=$?
+    _vm_lock_slow "$t0" acquire "$src"
     if [ "$src" = 0 ]; then
       rm -f "$errf"
       read -r _vm_lock_slot _vm_lock_token <<< "$said"; _vm_lock_owner="$owner"; _vm_lock_label="$label"; _vm_lock_since=$SECONDS

@@ -144,8 +144,10 @@ export async function main(argv, { log = console.log, err = console.error, env =
         rulesMd: o['rules-md'] && resolve(o['rules-md']),
       },
     });
-    writeOutputs(result, { out: o.out, summary: o.summary, env });
-    log(o.json ? JSON.stringify(result, null, 2) : formatText(result));
+    // The evidence of each outcome (with its time) decides the exit status below and is not part of the report both hosts print.
+    const { outcomes: _outcomes, ...report } = result;
+    writeOutputs(report, { out: o.out, summary: o.summary, env });
+    log(o.json ? JSON.stringify(report, null, 2) : formatText(report));
     // `--strict C36`: the warnings of these checks fail the run too (a check that is a warning for apps may block in one repo).
     const strict = new Set((o.strict ?? '').split(',').map((x) => x.trim().toUpperCase()).filter(Boolean));
     // 7 a check is broken, 1 findings, 6 a check did not look (outcome.mjs); `--strict` makes the named checks' warnings fail too.

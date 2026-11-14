@@ -67,6 +67,8 @@ pub enum UserAction {
     HoldPageList,
     /// As [`UserAction::HoldPageList`], for `Target.attachToTarget`.
     HoldAttach,
+    /// As [`UserAction::HoldPageList`], for `Runtime.evaluate` (a browser too starved to run the page's script).
+    HoldEvaluate,
     /// Held answers are sent, and nothing is held from now on.
     ReleaseAnswers,
     /// While an answer is held, the process ends but its DevTools connection stays open (a process it started holds the
@@ -88,6 +90,7 @@ impl UserAction {
             UserAction::AbortLoads => "abort-loads",
             UserAction::HoldPageList => "hold-page-list",
             UserAction::HoldAttach => "hold-attach",
+            UserAction::HoldEvaluate => "hold-evaluate",
             UserAction::ReleaseAnswers => "release-answers",
             UserAction::EndKeepingConnection => "end-keeping-connection",
         }
@@ -306,6 +309,7 @@ static NETWORK_SERVICE: std::sync::atomic::AtomicU32 = std::sync::atomic::Atomic
 static LOADS_ABORTED: AtomicBool = AtomicBool::new(false);
 static PAGE_LIST_HELD: AtomicBool = AtomicBool::new(false);
 static ATTACH_HELD: AtomicBool = AtomicBool::new(false);
+static EVALUATE_HELD: AtomicBool = AtomicBool::new(false);
 static ANSWERS_RELEASED: AtomicBool = AtomicBool::new(false);
 static END_KEEPING_CONNECTION: AtomicBool = AtomicBool::new(false);
 /// The number of the last page opened over DevTools (its target id is `T<n>`).
@@ -369,6 +373,7 @@ fn apply_control() {
             "abort-loads" => LOADS_ABORTED.store(true, Ordering::SeqCst),
             "hold-page-list" => PAGE_LIST_HELD.store(true, Ordering::SeqCst),
             "hold-attach" => ATTACH_HELD.store(true, Ordering::SeqCst),
+            "hold-evaluate" => EVALUATE_HELD.store(true, Ordering::SeqCst),
             "release-answers" => ANSWERS_RELEASED.store(true, Ordering::SeqCst),
             "end-keeping-connection" => END_KEEPING_CONNECTION.store(true, Ordering::SeqCst),
             "quit" => std::process::exit(0),
@@ -598,7 +603,8 @@ fn hold_if_asked(ws: &tungstenite::WebSocket<std::net::TcpStream>, method: &str)
     let held = |m: &str| {
         !ANSWERS_RELEASED.load(Ordering::SeqCst)
             && ((m == "Target.getTargets" && PAGE_LIST_HELD.load(Ordering::SeqCst))
-                || (m == "Target.attachToTarget" && ATTACH_HELD.load(Ordering::SeqCst)))
+                || (m == "Target.attachToTarget" && ATTACH_HELD.load(Ordering::SeqCst))
+                || (m == "Runtime.evaluate" && EVALUATE_HELD.load(Ordering::SeqCst)))
     };
     if held(method) {
         record_call(&format!("held {method}"));

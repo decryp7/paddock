@@ -1165,6 +1165,23 @@ to workspaces with their own changes is what makes a shared-crate push fit the 1
 load of 25 or more (the load was 11 at the start; with one gate at a time the three Clippy runs would add up to about 5 minutes
 at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).
 
+## Pre-commit Clippy through the heavy slot, measured with `HEAVY_SLOTS=1` (2026-11-13, fix/precommit-heavy-slot)
+
+The pre-commit hook started one `cargo clippy --workspace --all-targets` per app with staged Rust files, all at once; they now go through
+`./dev heavy -- cargo clippy ...`, which finds the slot tool with the push gate's resolver (`heavy_command_for`: `PADDOCK_HEAVY`, `heavy.sh` or `heavy` on PATH, else the `heavy` built from tools/heavy) and refuses to run when there is none (ER-24). The numbers below were measured with `heavy.sh` called directly, before `./dev heavy` existed; the slot logic is the same script. Method: two apps (Dyno, Pitcrew) cold, started in parallel as
+lefthook does, `CARGO_BUILD_JOBS=2` each, own target folder on d7, the 1-minute load sampled every 5 s. Plain commands, then the same
+commands through `heavy.sh` with `HEAVY_SLOTS=1` (the default is 5 slots machine-wide, so with the default setting two builds still run
+together unless other jobs hold slots). One run each on the shared Mac mini while other agents ran, so the load at the start differed.
+
+| Run | Start load (1, 5, 15 min) | Wall | Peak 1-min load |
+| --- | --- | ---: | ---: |
+| plain, parallel | 30.5, 29.0, 20.6 | 363 s | 66.6 |
+| through `heavy.sh`, `HEAVY_SLOTS=1` | 9.0, 13.4, 16.3 | 532 s | 30.8 |
+
+Result: taking turns costs wall time (about 1.5 times here, the two builds no longer overlap) and the peak stayed under half. Not measured:
+a quiet machine, the default 5 slots, and a real `lefthook run pre-commit` (lefthook is not installed in this worktree); the difference in
+start load makes the peak comparison indicative only.
+
 ## Orphan guardian step, Linux crates job (2026-11-13, feat/ci-in-rust-wp5)
 
 - **Command:** `./dev ci timings --json --limit 15 --no-logs` (Gitea API, no token printed), the `ci.yml (push)` section, job `crates (fmt, workspace hack, unused deps, coverage, deny)`, which runs `./dev ci guardian-as-user` (the shell script before)
@@ -1204,19 +1221,76 @@ at these speeds, not measured), and the opt-in Linux Clippy (`--linux`).
   expanding cargo's `@argfile` (mozilla/sccache#2787; fixes #2789 and #3026 open). Raw output and the generator were kept outside
   the repository (the session's build folder on d7), not committed.
 
-## Pre-commit Clippy through the heavy slot, measured with `HEAVY_SLOTS=1` (2026-11-13, fix/precommit-heavy-slot)
+### Pre-commit after Clippy moved to the push gate (2026-11-13, fix/precommit-heavy-slot)
 
-The pre-commit hook started one `cargo clippy --workspace --all-targets` per app with staged Rust files, all at once; they now go through
-`./dev heavy -- cargo clippy ...`, which finds the slot tool with the pre-push gate's `heavy_prefix` (`PADDOCK_HEAVY`, PATH, then `$ENGINEERING_RULES` or the engineering-rules checkout beside the main checkout) and warns once when it finds none (ER-24). The numbers below were measured with `heavy.sh` called directly, before `./dev heavy` existed; the slot logic is the same script. Method: two apps (Dyno, Pitcrew) cold, started in parallel as
-lefthook does, `CARGO_BUILD_JOBS=2` each, own target folder on d7, the 1-minute load sampled every 5 s. Plain commands, then the same
-commands through `heavy.sh` with `HEAVY_SLOTS=1` (the default is 5 slots machine-wide, so with the default setting two builds still run
-together unless other jobs hold slots). One run each on the shared Mac mini while other agents ran, so the load at the start differed.
+Clippy left the pre-commit hook (the user's decision): it runs rustfmt, ESLint on touched files, the Pitwall privacy check and commit-msg
+only, and Clippy runs in `./dev check --pre-push` through the heavy slot. One real `lefthook run pre-commit` with a Rust file staged in
+each of `apps/dyno` and `apps/pitcrew`, same machine, load about 15: both rustfmt commands took 0.06 and 0.07 s, 1 s wall in all. Before,
+the same change ran two Clippy builds in parallel: 363 s wall at a peak 1-minute load of 66.6 (section above, cold builds). One run;
+not measured: a change touching all five apps, which previously started five Clippy builds.
 
-| Run | Start load (1, 5, 15 min) | Wall | Peak 1-min load |
-| --- | --- | ---: | ---: |
-| plain, parallel | 30.5, 29.0, 20.6 | 363 s | 66.6 |
-| through `heavy.sh`, `HEAVY_SLOTS=1` | 9.0, 13.4, 16.3 | 532 s | 30.8 |
+## Trial merges and the train-gates job (2026-11-13, ADR 0098)
 
-Result: taking turns costs wall time (about 1.5 times here, the two builds no longer overlap) and the peak stayed under half. Not measured:
-a quiet machine, the default 5 slots, and a real `lefthook run pre-commit` (lefthook is not installed in this worktree); the difference in
-start load makes the peak comparison indicative only.
+Mac mini (14 cores), 1-minute load 9 to 12, warm git objects. One run each; quoted by ADR 0098.
+
+| What | Time |
+| --- | ---: |
+| `git merge-tree --write-tree <merge>^1 <merge>^2` for train 8's merges `047a6d05f`, `10b6b88f0` (in memory, no checkout) | 0.01 s each |
+| the same for `ad6bc2e9b` (`feat/generator-registry`) | 0.03 s |
+| the conformance line (`node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS`, origin/main `f7bbe2b86`) | 20.8 s |
+| CI: the `train gates` job of run 8053 (ci.yml dispatch on `train/2026-11-13-8` at `3a342cb42`, Linux runner, green), from the jobs API `started_at` to `completed_at` | 288 s |
+| CI: run 8053 as a whole, `started_at` to `completed_at` | 13 min 20 s |
+
+The per-gate times of `./dev check --pre-push` on a shared-crate change (about 100 s of wall time with warm build folders) are in
+"`./dev check --pre-push` run times" above.
+
+### 2026-11-14, VM lock and kept-clone tests under load (fix/vm-tooling-and-kept-clone-tests)
+
+- **Commit:** base 8c9c01dde (train 11) → this branch
+- **Machine:** the shared Mac mini (14 cores, macOS 27.2), with the CI runners and other agents running
+- **Load:** extra load: 6 `yes` burners (scratch `load.sh 6`); measured 1-minute load during the runs 35.5–120.5 (kept-clone, the first
+  runs still in the decay of an earlier 42-burner run) and 22–29 (VM tests); no runs at the coordinator's request beyond 6 burners
+- **Build:** debug test binary (`cargo nextest run --profile ci`, `NEXTEST_TEST_THREADS=4`, `CARGO_BUILD_JOBS=2`); node 24 for the VM tests
+- **Command:** `cargo nextest run --profile ci --test it -E 'test(/host_steps::kept/)'` (20 times);
+  `node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs` (3 times, the 5-minute share of the load budget)
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | `./dev ci slot status` through the wrapper, idle / load 36 / load 200 (CPU) | 0.17 / 0.4 / 0.4 (max 1.0) s | binary: 0.01 s | none | the VM tests now run the binary |
+  | kept-clone "foreign, stale, locked, unmarked, too big" (one test before, six after), quiet | 25.6 s | 2.1–2.7 s each | nextest 60 s | pass |
+  | kept-clone "each phase bounded" (one test before, five after), quiet | 33.1 s | 2.8–4.5 s each | nextest 60 s | pass |
+  | the same two, load 95 (42 burners, base only) | 41.1 / 35.3 s | not run at that load | nextest 60 s | base fails on CI (runs 8054, 8099) |
+  | slowest kept-clone test, 20 runs, 6 burners | — | max 5.2 s (clean phase), 0 failures | nextest 60 s | pass |
+  | VM lock + VM win tests, whole run, quiet | 133 s | 99 s | none | — |
+  | the same, 6 burners, 3 runs | — | 138–142 s, 71/71 pass, 0 `slot hold` left after each run | none | pass |
+  | `slot hold` processes left after a run, quiet | 1 (seen by `ps` after node exited) | 0 | 0 (ER-14) | pass |
+
+- **Notes:** the kept-clone speed-up is parity runs of the shell and Rust implementations at the same time (two fixtures, nothing
+  shared), one test per case, and bounded.sh's first second of naps at 0.05 s instead of 0.2 s (a kept clone's six phases each waited
+  at least one nap). No limit was raised. The CI stall of single `./dev` calls past 60 s in run 8099 was not reproduced here (CPU load to
+  200 and a 4 × 6 GB write load gave at most 1.0 s per wrapper call): not measured. Raw output in the agent's scratch folder, not kept.
+
+## gen check: cold build of a generator's test binary (2026-11-14, fix/gen-check-build-first)
+
+Question: how long does the build phase of the slowest `./dev gen check` entry take cold, so its own bound (`build_limit()` in
+`tools/paddock-dev/src/generators/run.rs`) rests on a measurement (ER-12)? Before this branch the build ran inside the check's
+1800 s hang guard; on train 10 and on the vault run2 (2026-11-14) `ts-debrief-wire` hit that guard cold and passed once the
+folder was warm, so cold build plus run was more than 1800 s there.
+
+- **Machine:** Mac mini (arm64), freshly rebooted (up 19 minutes), 1-minute load 29 at the start (5-minute 73), 42 at the end,
+  peaks near 190 from other agents during the run
+- **Command:** `./dev heavy -- cargo test --no-run -p debrief-app --lib` in `apps/debrief` (the entry's `build`), commit
+  0a78cae1f, `CARGO_BUILD_JOBS=2`, empty `CARGO_TARGET_DIR`, no `RUSTC_WRAPPER` (no sccache), libduckdb from `cargo xtask libduckdb`
+- **Runs:** 1 (a cold build is one event per folder)
+- **Numbers:**
+
+  | What | Time |
+  |---|---|
+  | cargo inside the heavy slot (607 crates compiled) | 866 s (cargo: 14 m 25 s); slot wait 0 s |
+  | wall, including building this branch's `./dev` and `heavy` | 1021 s (user 1290 s, sys 47 s) |
+
+- **Memory measure:** not measured
+- **Bound chosen:** 3600 s for the build phase, about 4x the measured 866 s: the train 10 run under heavier load needed more than
+  1800 s for build plus run, and the bound is a hang guard, not a budget. The check's own guard stays 1800 s and now covers only
+  the run. Not measured: a cold build at load 150 or more, and the other entries' builds (all smaller workspaces or crates).

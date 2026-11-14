@@ -28,8 +28,8 @@
 //! through an argument that names the job's folder. `PADDOCK_PS` replaces the table by a program's output (tests: those processes are never ended).
 
 use super::Step;
-use super::safe_remove;
 use crate::ci_tool::ToolCall;
+use crate::safe_remove;
 use clap::Args as ClapArgs;
 use paddock_proc::{ProcessId, StartTime};
 use regex::Regex;

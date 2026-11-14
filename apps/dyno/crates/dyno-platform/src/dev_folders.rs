@@ -101,7 +101,7 @@ mod tests {
         }
         let found = scan(dir.path(), ScanLimits::default());
         assert_eq!(found.len(), 1, "{found:?}");
-        assert!(found[0].path.replace('\\', "/").ends_with("/real/proj"));
+        assert!(std::path::Path::new(&found[0].path).ends_with("real/proj"));
         assert!(skipped("OneDrive - Fabrikam") && !skipped("my-onedrive-notes"));
         assert!(skipped("OneDrive") && skipped("ONEDRIVE") && !skipped("onedrive-cli") && !skipped("OneDriveSync"));
     }
@@ -125,10 +125,16 @@ mod tests {
         mk("notes", "readme.txt");
         let mut found: Vec<String> = scan(root, ScanLimits::default())
             .into_iter()
-            .map(|f| f.path.strip_prefix(&*root.to_string_lossy()).unwrap_or(&f.path).replace('\\', "/"))
+            .map(|f| {
+                paddock_testkit::path::text(
+                    std::path::Path::new(&f.path)
+                        .strip_prefix(root)
+                        .unwrap_or(std::path::Path::new(&f.path)),
+                )
+            })
             .collect();
         found.sort();
-        assert_eq!(found, ["/dev/rusty", "/dev/web", "/src/app"]);
+        assert_eq!(found, ["dev/rusty", "dev/web", "src/app"]);
         let one = scan(
             root,
             ScanLimits {

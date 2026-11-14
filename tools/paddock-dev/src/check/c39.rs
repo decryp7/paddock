@@ -15,7 +15,8 @@
 //! The port of `conformance/src/checks/C39-freed-port.mjs`, finding for finding (the oracle test compares them).
 
 use super::finding::Finding;
-use super::jsre::{has_reason, line_at, rx};
+use super::inline_waiver::{CommentView, InlineWaiver, Kind as CommentKind};
+use super::jsre::{line_at, rx};
 use super::mask::mask_rust;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -33,17 +34,6 @@ pub enum Kind {
     Drop,
 }
 
-/// Whether a site carries the waiver comment.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Waived {
-    /// No comment.
-    No,
-    /// The comment without a reason.
-    NoReason,
-    /// The comment with a reason.
-    Reason,
-}
-
 /// One freed port in a Rust source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FreedPort {
@@ -52,12 +42,9 @@ pub struct FreedPort {
     /// Its shape.
     pub kind: Kind,
     /// The waiver comment.
-    pub waived: Waived,
+    pub waived: InlineWaiver,
 }
 
-/// The marker up to its dashes; a reason must follow ([`has_reason`]).
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*freed-port\s*([—–-]+)"));
-static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*freed-port"));
 static ALIAS: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:TcpListener|TcpSocket)\s+as\s+(\w+)"));
 static TAIL: LazyLock<Regex> =
     LazyLock::new(|| rx(r"^\s*(?:\?|\.\s*await\b|\.\s*unwrap\s*\(\s*\)|\.\s*(?:expect|unwrap_or_else|map_err|context|with_context)\s*\()"));
@@ -133,22 +120,11 @@ fn word_re(name: &str, rest: &str) -> Regex {
 /// The freed ports in a Rust source.
 pub fn freed_ports(text: &str) -> Vec<FreedPort> {
     let clean = mask_rust(text);
-    let raw: Vec<&str> = text.split('\n').collect();
+    let view = CommentView::of(text, CommentKind::Rust);
     let mut out = Vec::new();
     let mut push = |i: usize, kind: Kind| {
         let line = line_at(&clean, i);
-        let here = format!(
-            "{}\n{}",
-            raw.get(line - 1).copied().unwrap_or(""),
-            if line >= 2 { raw.get(line - 2).copied().unwrap_or("") } else { "" }
-        );
-        let waived = if has_reason(&here, &WAIVER) {
-            Waived::Reason
-        } else if BARE_WAIVER.is_match(&here) {
-            Waived::NoReason
-        } else {
-            Waived::No
-        };
+        let waived = view.waiver(line, "freed-port");
         out.push(FreedPort { line, kind, waived });
     };
     for m in bind_pattern(&clean).find_iter(&clean) {
@@ -269,25 +245,24 @@ impl Check for C39 {
                     Kind::Block => "returns the port of a listener the block drops",
                     Kind::Drop => "drops a listener whose port it read",
                 };
-                match p.waived {
-                    Waived::Reason => {}
-                    Waived::NoReason => findings.push(Finding::error(
+                let site = Finding::error(
+                    "C39",
+                    40,
+                    f,
+                    p.line,
+                    format!("{what}: another process may be given the port before the test uses it"),
+                    fix,
+                );
+                findings.push(p.waived.apply(site, || {
+                    Finding::error(
                         "C39",
                         40,
                         f,
                         p.line,
                         "the freed-port waiver gives no reason",
                         "Write `// conformance: freed-port — <why the port may be freed>`.",
-                    )),
-                    Waived::No => findings.push(Finding::error(
-                        "C39",
-                        40,
-                        f,
-                        p.line,
-                        format!("{what}: another process may be given the port before the test uses it"),
-                        fix,
-                    )),
-                }
+                    )
+                }));
             }
         }
         CheckOutput {

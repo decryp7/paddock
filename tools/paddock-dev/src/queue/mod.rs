@@ -6,6 +6,7 @@
 //! - [`tick`]: the pure state machine over them;
 //! - [`real`]: the adapters over Gitea, git, `ci dispatch`, `ci verdict` and `ci triage`.
 
+pub mod blame;
 pub mod ports;
 pub mod real;
 pub mod tick;

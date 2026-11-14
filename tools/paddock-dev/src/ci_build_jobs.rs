@@ -221,7 +221,7 @@ impl Step<'_> {
         self.say(&format!("{name}={value} ({why})"));
         match var(self.env, "GITHUB_ENV") {
             Some(file) => {
-                let file = home::from_git_bash(file, self.windows);
+                let file = paddock_env::winpath::from_git_bash(file, home::os_of(self.windows));
                 std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)

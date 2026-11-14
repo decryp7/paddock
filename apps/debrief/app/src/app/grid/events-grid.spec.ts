@@ -1,6 +1,6 @@
 import { splitInstance } from './events-grid';
 import { TestBed } from '@angular/core/testing';
-import { all, buttonByText, el, provideTinyBackend, settle, text, tinyBackend } from '../../testing/helpers';
+import { all, buttonByText, el, provideTinyBackend, settle, testLogger, text, tinyBackend } from '../../testing/helpers';
 import { Page, PageRequest, RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
@@ -379,6 +379,143 @@ describe('EventsGrid', () => {
     await settle(fixture);
     expect(store.anchorMissed()).toBe(true);
     expect(text(fixture)).toContain('hidden by the current filters');
+  });
+
+  it('keeps a jump the query changed under: it asks again against the new query and selects the record', async () => {
+    // A recovery reload restores the query, then the selection (a jump); the search box's debounce and smart search then
+    // change the query while that jump's answer is on its way (startup-contract.e2e.ts, run 8056).
+    const backend = tinyBackend();
+    const { fixture, store } = await render(backend);
+    const real = backend.queryPage.bind(backend);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let holdNext = true;
+    vi.spyOn(backend, 'queryPage').mockImplementation(async (req) => {
+      if (req.anchor != null && holdNext) {
+        holdNext = false;
+        await held;
+      }
+      return real(req);
+    });
+    store.jumpTo(6);
+    await settle(fixture);
+    store.patchQuery({ textMode: 'words' });
+    await settle(fixture);
+    release();
+    await settle(fixture);
+    expect(store.selected()?.id).toBe(6);
+    expect(store.anchorMissed()).toBe(false);
+    expect(all(fixture, '.row.sel')).toHaveLength(1);
+    // The log shows the jump was asked again (ER-27), with no user content.
+    expect(testLogger().entries.filter((e) => e.category === 'ui.grid').map((e) => e.message)).toEqual(['Query changed during a jump; asking again', 'Jump resolved']);
+  });
+
+  it('a newer jump wins over an older one still on its way', async () => {
+    const backend = tinyBackend();
+    const { fixture, store } = await render(backend);
+    const real = backend.queryPage.bind(backend);
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    vi.spyOn(backend, 'queryPage').mockImplementation(async (req) => {
+      if (req.anchor === 6) await held;
+      return real(req);
+    });
+    store.jumpTo(6);
+    await settle(fixture);
+    store.jumpTo(3);
+    await settle(fixture);
+    expect(store.selected()?.id).toBe(3);
+    release();
+    await settle(fixture);
+    expect(store.selected()?.id).toBe(3);
+  });
+
+  /** Holds the answers to jump (anchor) requests until `release`; other requests answer at once. */
+  function holdJumps(backend: MockBackend, onAnswer?: () => void) {
+    const real = backend.queryPage.bind(backend);
+    const jumps: PageRequest[] = [];
+    let release!: (fail?: unknown) => void;
+    let held = new Promise<unknown>((r) => (release = r));
+    let holding = true;
+    vi.spyOn(backend, 'queryPage').mockImplementation(async (req) => {
+      if (req.anchor == null) return real(req);
+      jumps.push(req);
+      if (holding) {
+        holding = false;
+        const fail = await held;
+        if (fail) throw fail;
+      }
+      const answer = await real(req);
+      onAnswer?.();
+      return answer;
+    });
+    return {
+      jumps,
+      release: (fail?: unknown) => release(fail),
+      holdNext: () => {
+        holding = true;
+        held = new Promise<unknown>((r) => (release = r));
+      },
+    };
+  }
+
+  it('a jump whose query changes on every answer still ends: at most 3 asks, then an error and a log line', async () => {
+    const backend = tinyBackend();
+    const { fixture, store } = await render(backend);
+    let flip = false;
+    const { jumps, release } = holdJumps(backend, () => {
+      flip = !flip;
+      store.patchQuery({ textMode: flip ? 'words' : undefined });
+    });
+    store.jumpTo(6);
+    release();
+    await settle(fixture, 12);
+    expect(jumps).toHaveLength(3);
+    expect(store.selected()).toBeNull();
+    expect(el(fixture, '.err-card').textContent).toContain('the filters kept changing');
+    expect(testLogger().entries.some((e) => e.category === 'ui.grid' && e.level === 'warn')).toBe(true);
+  });
+
+  it('a jump still on its way when the grid is destroyed neither asks again nor selects', async () => {
+    const backend = tinyBackend();
+    const { fixture, store } = await render(backend);
+    const hold = holdJumps(backend);
+    store.jumpTo(6);
+    await settle(fixture);
+    store.patchQuery({ textMode: 'words' });
+    fixture.destroy();
+    hold.release();
+    await settle(undefined, 6);
+    expect(hold.jumps).toHaveLength(1);
+    expect(store.selected()).toBeNull();
+  });
+
+  it('a jump whose answer failed after the query changed asks again instead of ending silently', async () => {
+    const backend = tinyBackend();
+    const { fixture, store } = await render(backend);
+    const hold = holdJumps(backend);
+    store.jumpTo(6);
+    await settle(fixture);
+    store.patchQuery({ textMode: 'words' });
+    await settle(fixture);
+    hold.release(new Error('the old query was cancelled'));
+    await settle(fixture, 6);
+    expect(store.selected()?.id).toBe(6);
+    expect(all(fixture, '.err-card')).toHaveLength(0);
+  });
+
+  it("the user's click wins over a jump answer that arrives later", async () => {
+    const backend = tinyBackend();
+    const { fixture, store } = await render(backend);
+    const hold = holdJumps(backend);
+    store.jumpTo(6);
+    await settle(fixture);
+    at(rows(fixture), 2).click();
+    await settle(fixture);
+    expect(store.selected()?.id).toBe(2);
+    hold.release();
+    await settle(fixture, 6);
+    expect(store.selected()?.id).toBe(2);
   });
 
   it('adds and removes property columns', async () => {

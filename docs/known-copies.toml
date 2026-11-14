@@ -197,13 +197,13 @@ adr = "0030"
   paths = ["apps/spotter/crates/spotter-render/src/**"]
   owner = "spotter"
   delete_by = "spotter-v1.1.0"
-  note = "Has --disable-field-trial-config, not the NetworkServiceSandbox switch the canonical has. The fixed 20 s START_LIMIT start is fixed with StartWatch on spotter/run-state 3a83731eb and lands with the Spotter 1.0 batch (waived in fix/chromium-start-judge). Consolidation ADR right after the Spotter tag. answer.rs ported from 8d8424805 (the judged wait for the commands that open a page)."
+  note = "Has --disable-field-trial-config, not the NetworkServiceSandbox switch the canonical has. The fixed 20 s START_LIMIT start is fixed with StartWatch on spotter/run-state 3a83731eb and lands with the Spotter 1.0 batch (waived in fix/chromium-start-judge). Consolidation ADR right after the Spotter tag. answer.rs ported from 8d8424805 (the judged wait for the commands that open a page). wait_ready bounds each look by the page's remaining time (fix/spotter-dyno-ci-flakes, CI run 8060), as the canonical now does."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/crates/chromium-driver/src/**"]
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
-  note = "The start is judged by paddock-proc's StartWatch like the canonical's (fix/chromium-start-judge, the real_browser flake of CI 7213/7250), and so are its first answers (answer.rs, ported from 8d8424805 and 2dd883b47 on fix/debrief-train5-waits after CI 7963). It also has Answers::Judged, the test form that judges every answer and page load until the kit's hang guard (ADR 0071), which the canonical lacks; still no NetworkServiceSandbox switch. Adopt the canonical instead of patching further."
+  note = "The start is judged by paddock-proc's StartWatch like the canonical's (fix/chromium-start-judge, the real_browser flake of CI 7213/7250), and so are its first answers (answer.rs, ported from 8d8424805 and 2dd883b47 on fix/debrief-train5-waits after CI 7963). It also has Answers::Judged, the test form that judges every answer and page load until the kit's hang guard (ADR 0071), which the canonical lacks; still no NetworkServiceSandbox switch. It has no wait_ready (its callers poll in the app's renderer.rs, which keeps the fixed 10 s per look: its 10 minute challenge wait must still fail on a hung tab), so the same fix is Page::evaluate_within, load_finished_within and challenge_within, for a caller whose own time is shorter (CI run 8060). Adopt the canonical instead of patching further."
 
 [[mechanism]]
 id = "instance-lock"
@@ -1272,7 +1272,7 @@ adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
   symbols = ["item:mixed"]
   owner = "paddock"
   delete_by = "v0.4.0"
-  note = "Spells a canonical path with forward slashes and no prefix; moves to winpath::lexical_text or for_tools (WP-P5)."
+  note = "Spells a canonical path with forward slashes and no prefix; moves to winpath::lexical_text or for_tools (WP-P5). Kept as it was in ADR 0099's build: lexical_text also drops the verbatim prefix and respells device paths, which would change the junction call and the slot tool's arguments."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src-tauri/src/paths.rs"]
@@ -1324,19 +1324,6 @@ adr = "docs/adr/amendments/0021-windows-verbatim-paths-2026-11-11.md"
   note = "Drops the prefix, unifies separators and ignores case for a comparison; adopts winpath::same."
 
 [[mechanism]]
-id = "guarded-remove"
-title = "Removing a tool-made folder only after proving it is safe to remove (owner record, allowed root, no symlink, no live process, clean git)"
-canonical = "tools/paddock-dev"
-paths = ["tools/paddock-dev/src/safe_remove.rs"]
-status = "built"
-
-  [[mechanism.copy]]
-  paths = ["tools/paddock-dev/src/ci_host/safe_remove.rs"]
-  owner = "paddock-dev"
-  delete_by = "v0.5.0"
-  note = "The CI host steps' own guarded remove (feat/ci-in-rust-wp4: no link followed, a link on the way refuses) beside feat/dev-disk's safe_remove; listed in tests/it/safe_remove_lint.rs as a follow-up. Unifying them is a train-8 item."
-
-[[mechanism]]
 id = "spawn-detached"
 title = "Starting a child that must not carry its starter's handles (own process group, no console, no inherited handle but its stdio; a pipe the runner waits on ends the child with the step)"
 canonical = "paddock-proc"
@@ -1366,18 +1353,3 @@ status = "built"
 # =====================================================================================================================
 # Build folders kept off the home folder
 # =====================================================================================================================
-
-[[mechanism]]
-id = "home-root-guard"
-title = "Refusing a build folder under the home folder, the internal disk (ER-14, ER-24)"
-canonical = "heavy"
-paths = ["tools/heavy/src/guard.rs"]
-symbols = ["item:violation", "item:abs_path"]
-status = "built"
-
-  [[mechanism.copy]]
-  paths = ["tools/paddock-dev/src/generators/run.rs"]
-  symbols = ["item:target_dir"]
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "The generator checks' build root (PADDOCK_DEV_TARGET_DIR or the first configured disk root) is refused when it starts with $HOME; heavy's guard also resolves relative and quoted cargo target dirs. Both move onto one guard when paddock-dev and heavy share it."

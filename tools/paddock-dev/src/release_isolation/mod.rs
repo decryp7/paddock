@@ -23,6 +23,23 @@ pub use crate::pathfind;
 pub mod setup;
 pub mod verify;
 
+/// The sources of this folder's modules and of the program lookup it uses, exported by their owner for the source audit of its path
+/// probes (rule 79: a test reads another area's text through what the owner exports, not through a path into its folder; the lookup
+/// moved to `src/pathfind.rs` once and the audit then read the old path). A module added above is added here, or the audit does
+/// not see it.
+#[cfg(test)]
+pub(crate) const PROBE_SOURCES: [(&str, &str); 9] = [
+    ("config.rs", include_str!("config.rs")),
+    ("crates.rs", include_str!("crates.rs")),
+    ("fixture.rs", include_str!("fixture.rs")),
+    ("identity.rs", include_str!("identity.rs")),
+    ("ledger.rs", include_str!("ledger.rs")),
+    ("links.rs", include_str!("links.rs")),
+    ("setup.rs", include_str!("setup.rs")),
+    ("verify.rs", include_str!("verify.rs")),
+    ("pathfind.rs", crate::pathfind::SOURCE),
+];
+
 #[cfg(test)]
 mod tests;
 

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations, settleAnimations, settleDockLayout } from './axe';
 
 /**
@@ -30,7 +30,7 @@ for (const theme of THEMES) {
     test.describe(`${theme} ${scheme}`, () => {
       test('the main window has no serious accessibility violations', async ({ page }, testInfo) => {
         await openThemed(page, theme, scheme);
-        await page.locator('debrief-events-grid [role=row].row').first().click();
+        await gridRows(page).first().click();
         await expectNoSeriousViolations(page, testInfo, `theme-${theme}-${scheme}`);
       });
 
@@ -93,7 +93,7 @@ test('Precision draws bracket runs and barcode lanes; the interface font follows
   // The operating system's font by default (native feel, ADR 0028), log text in the theme's mono face.
   const font = () => page.locator('debrief-status-bar').evaluate((el) => getComputedStyle(el).fontFamily);
   expect(await font()).toContain('Segoe UI');
-  const time = page.locator('debrief-events-grid [role=row].row .time').first();
+  const time = gridRows(page).locator('.time').first();
   expect(await time.evaluate((el) => getComputedStyle(el).fontFamily)).toContain('IBM Plex Mono');
   // Keeping the theme's font (Settings ▸ Appearance ▸ Interface font) brings IBM Plex Sans to the interface.
   const themed = await page.context().newPage();

@@ -1,6 +1,6 @@
 import { expect, Page, test } from '@playwright/test';
 import { runCommand } from './ai-support';
-import { ensureInspector, openApp } from './app';
+import { ensureInspector, gridRows, openApp } from './app';
 
 // Usability review 2026-10-23 (U1, U2): the events grid is the main artefact, so the default layout, a document opened
 // beside the timeline and a pinned Inspector all leave it many rows, and the timeline plot keeps its width.
@@ -9,7 +9,7 @@ import { ensureInspector, openApp } from './app';
 async function visibleGridRows(page: Page): Promise<number> {
   return page.evaluate(() => {
     const grid = document.querySelector('debrief-events-grid')!.getBoundingClientRect();
-    return [...document.querySelectorAll('debrief-events-grid [role=row].row')].filter((e) => {
+    return [...document.querySelectorAll('debrief-events-grid [role=row].row:not(.placeholder)')].filter((e) => {
       const b = e.getBoundingClientRect();
       return b.height > 0 && b.top >= grid.top && b.bottom <= grid.bottom + 1;
     }).length;
@@ -50,7 +50,7 @@ for (const size of SIZES) {
 test('the Inspector flyout does not cover the selected row', async ({ page }) => {
   await page.addInitScript(() => localStorage.clear());
   await openApp(page);
-  await page.locator('debrief-events-grid [role=row].row').nth(3).click();
+  await gridRows(page).nth(3).click();
   const flyout = page.locator('#debrief-ah-flyout');
   await expect(flyout).toBeVisible();
   await expect

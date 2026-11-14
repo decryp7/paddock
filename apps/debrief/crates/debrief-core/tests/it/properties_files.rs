@@ -113,6 +113,7 @@ fn parser_like() -> impl Strategy<Value = String> {
         Just("1".to_string()),
         Just("\"1.0.0\"".to_string()),
         "-?[0-9]{1,6}".prop_map(|s| s),
+        // conformance: path-text — a generated TOML string value, not a path: a backslash would start an escape
         "\"[ -~]{0,30}\"".prop_map(|s| s.replace('\\', "/")),
         Just("[]".to_string()),
         Just("[\"(?P<ts>\\\\S+) (?P<message>.*)\"]".to_string()),

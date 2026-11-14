@@ -1,6 +1,7 @@
 //! One finding, in the shape of `conformance/src/finding.mjs` and the waiver engine's own findings, so the report JSON of the
 //! two hosts can be merged and diffed.
 
+use super::outcome::Outcome;
 use serde_json::{Map, Value, json};
 
 /// How a finding counts: an error fails the run, a warning does not.
@@ -41,8 +42,12 @@ pub struct Finding {
     pub fix: String,
     /// An error no waiver can cover: the check could not look ("check broken", "not measured"), ER-33.
     pub unwaivable: bool,
+    /// Why it is unwaivable: the check is broken or did not look (the exit status of the run, ADR 0089). `None` for an ordinary finding.
+    pub outcome: Option<Outcome>,
     /// The JSON key order of the JavaScript object this mirrors: waiver findings put `file` and `line` before `rule`.
     where_first: bool,
+    /// The reason of a comment at the finding's site that waives it: the host counts it as waived (with `expires` "inline"), not as a finding.
+    pub inline_waiver: Option<String>,
 }
 
 impl Finding {
@@ -57,7 +62,9 @@ impl Finding {
             message: message.into(),
             fix: fix.into(),
             unwaivable: false,
+            outcome: None,
             where_first: false,
+            inline_waiver: None,
         }
     }
 
@@ -85,9 +92,21 @@ impl Finding {
         }
     }
 
+    /// Marks the finding as waived by a comment at its site, with the comment's reason.
+    pub fn inline_waived(mut self, reason: impl Into<String>) -> Finding {
+        self.inline_waiver = Some(reason.into());
+        self
+    }
+
     /// Marks the finding as one no waiver covers.
     pub fn unwaivable(mut self) -> Finding {
         self.unwaivable = true;
+        self
+    }
+
+    /// Names why the finding is unwaivable (`outcome`), as `unwaivable(f, outcome)` does in the JavaScript host.
+    pub fn with_outcome(mut self, outcome: Outcome) -> Finding {
+        self.outcome = Some(outcome);
         self
     }
 
@@ -109,6 +128,9 @@ impl Finding {
         m.insert("fix".into(), json!(self.fix));
         if self.unwaivable {
             m.insert("unwaivable".into(), json!(true));
+        }
+        if let Some(o) = self.outcome {
+            m.insert("outcome".into(), json!(o.name()));
         }
         Value::Object(m)
     }

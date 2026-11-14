@@ -40,6 +40,7 @@ pub mod golden;
 pub mod hostile;
 pub mod limits;
 pub mod net;
+pub mod path;
 pub mod private_temp;
 pub mod process;
 pub mod runner;

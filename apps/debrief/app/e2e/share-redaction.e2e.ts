@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { openAppWith } from './tools-support';
 import { expectNoSeriousViolations } from './axe';
+import { gridRows } from './app';
 
 async function runCommand(page: Page, title: string): Promise<void> {
   await page.keyboard.press('ControlOrMeta+k');
@@ -14,7 +15,7 @@ async function runCommand(page: Page, title: string): Promise<void> {
 test('the redacted view masks the grid until it is turned off', async ({ page }, testInfo) => {
   await openAppWith(page, '');
   await page.getByTestId('query-field').fill('listening');
-  const row = page.locator('debrief-events-grid [role=row].row').first();
+  const row = gridRows(page).first();
   await expect(row).toContainText('0.0.0.0');
 
   await runCommand(page, 'Toggle redacted view');

@@ -1,5 +1,6 @@
 import { createContext, loadConfig } from './context.mjs';
 import { error, unwaivable } from './finding.mjs';
+import { measure, Unmeasured } from './outcome.mjs';
 import { checks } from './checks/index.mjs';
 import { inScope } from './util/scope.mjs';
 import { pathMatches } from './util/fs.mjs';
@@ -8,7 +9,7 @@ import { applyWaivers, parseWaivers } from './util/waivers.mjs';
 /**
  * Runs the selected checks over `root`. A check that throws (whatever it throws), returns no list, or returns an invalid finding is an unwaivable error finding: a run that did not finish never passes and
  * no waiver (not even `path = "*"`) covers it (ER-33, ADR 0089 D8). Waivers are applied last.
- * Returns { app, checks: [ids run], findings, waived, errors, warnings }.
+ * Returns { app, checks: [ids run], outcomes (one per check, made by `measure`), findings, waived, errors, warnings }.
  */
 export async function runChecks({ root, app, only = null, options = {}, registry = checks }) {
   const config = loadConfig(root, app);
@@ -18,25 +19,39 @@ export async function runChecks({ root, app, only = null, options = {}, registry
   if (unknown.length) throw new Error(`unknown check: ${unknown.join(', ')}`);
 
   let findings = [];
+  const inlineWaived = [];
   const looked = new Set(); // checks whose result is a real result (a waiver for the others is not "stale", it is unmeasured)
   const validFinding = (f) => f !== null && typeof f === 'object' && ['error', 'warn'].includes(f.severity) && typeof f.message === 'string';
+  const outcomes = [];
+  const subject = options.subject ?? { kind: 'files', head: 'working-tree', digest: 'not-computed' };
   for (const check of selected) {
-    try {
+    const outcome = await measure(check.id, subject, 'paddock-conformance', async () => {
       const found = await check.run(ctx);
       if (!Array.isArray(found)) {
-        findings.push(unwaivable(error(check.id, check.rule, '', 1, `the check did not complete: it returned ${found === undefined ? 'nothing' : typeof found} instead of a list of findings`, 'Fix the check; a run that is incomplete never passes.'), 'not-measured'));
-        continue;
+        throw new Unmeasured('not-measured', `the check did not complete: it returned ${found === undefined ? 'nothing' : typeof found} instead of a list of findings`, 'Fix the check; a run that is incomplete never passes.');
       }
       const bad = found.findIndex((f) => !validFinding(f));
       if (bad >= 0) {
         const shown = JSON.stringify(found[bad]) ?? String(found[bad]);
-        findings.push(unwaivable(error(check.id, check.rule, '', 1, `check broken: it returned an invalid finding (item ${bad}: ${shown.slice(0, 120)}); a finding is an object with severity "error" or "warn" and a message`, 'Fix the check so every finding is made with error() or warn().')));
-        continue;
+        throw new Unmeasured('broken', `check broken: it returned an invalid finding (item ${bad}: ${shown.slice(0, 120)}); a finding is an object with severity "error" or "warn" and a message`, 'Fix the check so every finding is made with error() or warn().');
       }
-      findings.push(...found);
+      return found;
+    });
+    outcomes.push(outcome);
+    if (outcome.status === 'not-measured') {
+      findings.push(unwaivable(error(check.id, check.rule, '', 1, outcome.reason, outcome.next), 'not-measured'));
+    } else if (outcome.status === 'check-broken') {
+      findings.push(unwaivable(error(check.id, check.rule, '', 1, outcome.reason, outcome.next)));
+    } else {
+      // A finding the check marked `inlineWaiver: <reason>` (and that is not `unwaivable`: no comment covers a check that could not look) is waived at its site (a comment): it counts as waived, never as a finding,
+      // and stays in the report (ER-33). `expires` is 'inline': there is no date.
+      for (const f of outcome.findings) {
+        if (typeof f.inlineWaiver === 'string' && !f.unwaivable) {
+          const { inlineWaiver, ...rest } = f;
+          inlineWaived.push({ ...rest, waiver: { reason: inlineWaiver, expires: 'inline' } });
+        } else findings.push(f);
+      }
       looked.add(check.id);
-    } catch (e) {
-      findings.push(unwaivable(error(check.id, check.rule, '', 1, `the check crashed: ${String(e?.message ?? e)}`, 'Fix the check or the input it could not read; a check that cannot run never passes.')));
     }
   }
 
@@ -47,8 +62,9 @@ export async function runChecks({ root, app, only = null, options = {}, registry
   return {
     app: config.app,
     checks: selected.map((c) => c.id),
+    outcomes,
     findings,
-    waived: applied.waived,
+    waived: [...applied.waived, ...inlineWaived],
     errors: findings.filter((f) => f.severity === 'error').length,
     warnings: findings.filter((f) => f.severity === 'warn').length,
   };

@@ -1,8 +1,9 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
-use super::exec::{Done, Exec, RunOpts, Verdict, decide, run_all, run_all_with};
+use super::budget::Timing;
+use super::exec::{Done, Exec, Kind, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
 use super::gates::{Change, Facts, Gate, Need, Planned, plan_gates};
-use super::{accept_not_measured, parse_refs, render};
+use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -29,6 +30,7 @@ fn facts() -> Facts {
         conformance: Some(Ok(["conformance/bin/paddock-conformance.mjs", "--app", "paddock", "--only", "C06"]
             .map(String::from)
             .to_vec())),
+        conformance_env: None,
         windows_clippy: BTreeSet::from(["apps/dyno".to_string(), "apps/pitwall".to_string()]),
         image: Some(Ok("registry/paddock-ci:v7".into())),
         linux: true,
@@ -193,6 +195,10 @@ struct Fake {
     unstartable: Vec<String>,
     panics: Vec<String>,
     cut_short: Vec<String>,
+    /// What every gate that ran reports as its queue and run time (as `heavy`'s timing line would).
+    timing: Option<Timing>,
+    /// Gates that never got a slot: `how` is heavy's queue-limit text.
+    no_slot: Vec<String>,
     ran: Mutex<Vec<String>>,
 }
 
@@ -215,6 +221,16 @@ impl Exec for Fake {
                 how: "timed out after 900 s".into(),
                 tail: String::new(),
                 log: Some("/logs/x.log".into()),
+                timing: None,
+            });
+        }
+        if self.no_slot.contains(&g.id) {
+            return Ok(Done {
+                success: false,
+                how: "queue limit: no slot within 30 s".into(),
+                tail: String::new(),
+                log: Some("/logs/q.log".into()),
+                timing: Some(Timing { queued: 31.0, ran: 0.0 }),
             });
         }
         let fail = self.fail.iter().any(|f| f == &g.id);
@@ -223,11 +239,25 @@ impl Exec for Fake {
             how: if fail { "exit 1".into() } else { "exit 0".into() },
             tail: if fail { "error: boom".into() } else { String::new() },
             log: None,
+            timing: self.timing,
         })
     }
 }
 
-fn verdicts(rows: &[(String, Verdict)]) -> std::collections::BTreeMap<String, Verdict> {
+fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(String, Row)> {
+    super::exec::run_all(planned, exec, workers, &test_subject())
+}
+
+/// A row's reason and next step when it is a plain not-measured row.
+fn nm(row: &Row) -> Option<(String, String)> {
+    (row.kind() == Kind::NotMeasured).then(|| (row.reason(), row.next.clone()))
+}
+
+fn passed(row: &Row) -> bool {
+    row.kind() == Kind::Passed
+}
+
+fn verdicts(rows: &[(String, Row)]) -> std::collections::BTreeMap<String, Row> {
     rows.iter().cloned().collect()
 }
 
@@ -240,9 +270,7 @@ fn no_docker_means_not_measured_and_never_a_pass() {
     };
     let rows = run_all(&planned, &fake, 3);
     let v = verdicts(&rows);
-    assert!(
-        matches!(&v["clippy-linux crates"], Verdict::NotMeasured { reason, next } if reason.contains("Docker") && next.contains("never starts"))
-    );
+    assert!(matches!(nm(&v["clippy-linux crates"]), Some((reason, next)) if reason.contains("Docker") && next.contains("never starts")));
     assert!(
         !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
         "the container was never started"
@@ -267,9 +295,7 @@ fn a_missing_xwin_is_not_measured_with_the_install_line() {
         },
         2,
     );
-    assert!(
-        matches!(&verdicts(&rows)["clippy-windows crates"], Verdict::NotMeasured { next, .. } if next.contains("cargo install cargo-xwin"))
-    );
+    assert!(matches!(nm(&verdicts(&rows)["clippy-windows crates"]), Some((_, next)) if next.contains("cargo install cargo-xwin")));
 }
 
 #[test]
@@ -344,12 +370,16 @@ fn a_docker_failure_names_its_cause() {
                 how: "exit 137".into(),
                 tail: String::new(),
                 log: None,
+                timing: None,
             })
         }
     }
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
     let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy-linux crates").unwrap();
-    assert!(matches!(decide(g, &Oom, Duration::from_secs(60)), Verdict::Failed { next, .. } if next.contains("PADDOCK_LINUX_MEMORY")));
+    assert!({
+        let r = decide(g, &Oom, Duration::from_secs(60), &test_subject());
+        r.kind() == Kind::Failed && r.next.contains("PADDOCK_LINUX_MEMORY")
+    });
 }
 
 #[test]
@@ -396,7 +426,7 @@ fn a_gate_that_cannot_start_is_not_measured_never_passed() {
         },
         2,
     );
-    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("not installed")));
+    assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("not installed")));
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
 }
 
@@ -408,11 +438,8 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
     };
     let rows = run_all(&crates_gates(), &fake, 2);
     let v = verdicts(&rows);
-    assert!(matches!(&v["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("crashed")));
-    assert!(
-        matches!(&v["lockfile apps/dyno"], Verdict::Passed { .. }),
-        "the other gates still ran"
-    );
+    assert!(matches!(nm(&v["fmt crates"]), Some((reason, _)) if reason.contains("crashed")));
+    assert!(passed(&v["lockfile apps/dyno"]), "the other gates still ran");
     // With a budget of nothing nothing starts: every gate that would run is not measured, none passes.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -422,13 +449,14 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
             workers: 2,
             budget: Duration::ZERO,
             stop: &AtomicBool::new(false),
+            subject: &test_subject(),
         },
     );
     assert!(fake.ran.lock().unwrap().is_empty());
     for (id, v) in &rows {
-        assert!(!matches!(v, Verdict::Passed { .. } | Verdict::Failed { .. }), "{id}: {v:?}");
+        assert!(!matches!(v.kind(), Kind::Passed | Kind::Failed), "{id}: {v:?}");
     }
-    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("budget")));
+    assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("budget")));
     // A signal stops the rest the same way.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -438,10 +466,11 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
             workers: 1,
             budget: Duration::from_secs(60),
             stop: &AtomicBool::new(true),
+            subject: &test_subject(),
         },
     );
     assert!(fake.ran.lock().unwrap().is_empty());
-    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("interrupted")));
+    assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("interrupted")));
 }
 
 #[test]
@@ -454,7 +483,7 @@ fn a_timeout_is_not_measured_and_does_not_tell_you_to_fix_lints() {
         },
         2,
     );
-    let Verdict::NotMeasured { reason, next } = &verdicts(&rows)["clippy crates"] else {
+    let Some((reason, next)) = nm(&verdicts(&rows)["clippy crates"]) else {
         panic!("{rows:?}")
     };
     assert!(
@@ -467,28 +496,48 @@ fn a_timeout_is_not_measured_and_does_not_tell_you_to_fix_lints() {
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
 }
 
+/// A gate that ran and exited 0, as a row.
+fn ran_ok(id: &str, secs: f64) -> Row {
+    let done = Done {
+        success: true,
+        how: "exit 0".into(),
+        tail: String::new(),
+        log: None,
+        timing: None,
+    };
+    Row::from_run(id, &test_subject(), &done, "", secs)
+}
+
+/// ADR 0089: the row reads how the run ended; a failed run is a finding, never a pass (delete `done.success` and this goes red).
+#[test]
+fn a_row_from_a_run_reads_its_exit() {
+    let run = |success: bool| Done {
+        success,
+        how: if success { "exit 0" } else { "exit 1" }.into(),
+        tail: String::new(),
+        log: None,
+        timing: None,
+    };
+    assert_eq!(
+        Row::from_run("g", &test_subject(), &run(true), "g (exit 1)", 1.0).kind(),
+        Kind::Passed
+    );
+    let failed = Row::from_run("g", &test_subject(), &run(false), "g (exit 1)", 1.0);
+    assert_eq!(failed.kind(), Kind::Failed);
+    assert!(failed.reason().contains("g (exit 1)"));
+}
+
 #[test]
 fn the_worst_finding_decides_the_exit_code_7_then_5_then_6() {
-    let nm = Verdict::NotMeasured {
-        reason: "r".into(),
-        next: "n".into(),
-    };
-    let failed = Verdict::Failed {
-        cause: "c".into(),
-        tail: String::new(),
-        next: "n".into(),
-        secs: 1.0,
-    };
-    let broken = Verdict::Broken {
-        cause: "c".into(),
-        next: "n".into(),
-    };
-    let row = |id: &str, v: &Verdict| (id.to_string(), v.clone());
+    let nm = Row::not_measured("r", "n");
+    let failed = Row::failed("g", &test_subject(), "c".into(), String::new(), "n".into(), 1.0);
+    let broken = Row::broken("c", "n");
+    let row = |id: &str, v: &Row| (id.to_string(), v.clone());
     let all = [row("a", &nm), row("b", &failed), row("c", &broken)];
     assert_eq!(render("h", &all).exit, Exit::CheckBroken);
     assert_eq!(render("h", &all[..2]).exit, Exit::Findings);
     assert_eq!(render("h", &all[..1]).exit, Exit::NotMeasured);
-    assert_eq!(render("h", &[row("x", &Verdict::Passed { secs: 0.1 })]).exit, Exit::Ok);
+    assert_eq!(render("h", &[row("x", &ran_ok("x", 0.1))]).exit, Exit::Ok);
 }
 
 #[test]
@@ -516,7 +565,7 @@ fn pitwalls_deny_needs_cargo_deny_and_an_empty_script_list_is_a_broken_check() {
         },
         2,
     );
-    assert!(matches!(&verdicts(&rows)["pitwall-deny"], Verdict::NotMeasured { reason, .. } if reason.contains("cargo-deny")));
+    assert!(matches!(nm(&verdicts(&rows)["pitwall-deny"]), Some((reason, _)) if reason.contains("cargo-deny")));
     let mut f = facts();
     f.pitwall_tests.clear();
     let planned = plan_gates(&plan(), &change(&["apps/pitwall/a.rs"]), &f);
@@ -792,13 +841,12 @@ fn a_leftover_locked_worktree_of_an_ended_run_is_swept_and_a_live_ones_is_kept()
 
 #[test]
 fn extra_pushed_refs_are_not_measured_rows_and_never_passes() {
-    use super::exec::Verdict;
     let rows = super::extra_ref_rows(&["aaaaaaaaaaaaaaaa".to_string(), "bbb".to_string()]);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].0, "pushed commit aaaaaaaaaaaa");
     assert!(
         rows.iter()
-            .all(|(_, v)| matches!(v, Verdict::NotMeasured { next, .. } if next.contains("one at a time")))
+            .all(|(_, v)| matches!(nm(v), Some((_, next)) if next.contains("one at a time")))
     );
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
 }
@@ -861,6 +909,537 @@ fn a_symlink_into_home_a_relative_path_and_a_tilde_are_refused() {
     assert!(!home.join("work/also-never").exists());
 }
 
+mod known_commit {
+    use super::super::known::{self, Evidence, Lookups};
+    use super::super::{PrePushArgs, command_in, node_env_problem};
+    use crate::plan_repo::git_text;
+    use paddock_cli::Exit;
+    use std::path::{Path, PathBuf};
+
+    struct Fake {
+        ls: Option<String>,
+        ci: Result<u64, String>,
+        asked: std::cell::RefCell<Vec<String>>,
+    }
+    impl Lookups for Fake {
+        fn ls_remote(&self, remote: &str) -> Option<String> {
+            self.asked.borrow_mut().push(format!("ls-remote {remote}"));
+            self.ls.clone()
+        }
+        fn ci_green(&self, sha: &str) -> Result<u64, String> {
+            self.asked.borrow_mut().push(format!("ci {sha}"));
+            self.ci.clone()
+        }
+    }
+    fn fake(ls: Option<&str>, ci: Result<u64, &str>) -> Fake {
+        Fake {
+            ls: ls.map(String::from),
+            ci: ci.map_err(String::from),
+            asked: Default::default(),
+        }
+    }
+
+    fn args() -> PrePushArgs {
+        PrePushArgs {
+            root: None,
+            base: None,
+            remote: Some("origin".into()),
+            only: vec![],
+            dry_run: false,
+            files: vec![],
+            refs_from_stdin: true,
+            linux: false,
+            accept_not_measured: vec![],
+        }
+    }
+
+    /// A repository with two commits; main is at the first, origin/train at the second (the 2026-11-13 shape).
+    fn repo() -> (tempfile::TempDir, PathBuf, String, String) {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path().join("r");
+        std::fs::create_dir(&r).unwrap();
+        let git = |a: &[&str]| git_text(&r, a).unwrap_or_else(|| panic!("git {a:?}"));
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        std::fs::write(r.join("a.txt"), "1\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&["commit", "-q", "-m", "one"]);
+        let one = git(&["rev-parse", "HEAD"]).trim().to_string();
+        git(&["update-ref", "refs/remotes/origin/main", &one]);
+        std::fs::write(r.join("a.txt"), "2\n").unwrap();
+        git(&["commit", "-q", "-am", "two"]);
+        let two = git(&["rev-parse", "HEAD"]).trim().to_string();
+        git(&["update-ref", "refs/remotes/origin/train", &two]);
+        (d, r, one, two)
+    }
+
+    fn state(r: &Path) -> PathBuf {
+        r.join(".git/paddock-pre-push")
+    }
+
+    /// A pass of the push gate for `sha`, made the only way a pass is made: through `measure`.
+    fn pass_for(r: &Path, sha: &str) -> paddock_cli::Outcome {
+        let subject = crate::pre_push::outcome::subject_of(r, Some(sha));
+        paddock_cli::measure(
+            paddock_cli::CheckId::new("pre-push"),
+            subject,
+            crate::pre_push::exec::tool(),
+            paddock_cli::outcome::UnixSeconds(1),
+            || Ok(Vec::new()),
+        )
+    }
+
+    fn push_line(sha: &str) -> String {
+        format!("refs/heads/x {sha} refs/heads/main {}\n", "0".repeat(40))
+    }
+
+    #[test]
+    fn a_commit_on_a_remote_branch_without_evidence_is_checked_not_passed() {
+        let (_d, r, _one, two) = repo();
+        let l = fake(None, Err("no run"));
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        assert!(found.is_none(), "origin/train holds it, but that is no evidence");
+    }
+
+    #[test]
+    fn a_pass_record_of_the_exact_sha_and_tree_is_the_evidence() {
+        let (_d, r, one, two) = repo();
+        let l = fake(None, Err("no run"));
+        known::write_record(
+            &r,
+            &state(&r),
+            &two,
+            "origin/main",
+            &["fmt crates".into()],
+            1_700_000_000,
+            &pass_for(&r, &two),
+        )
+        .unwrap();
+        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        let found = found.unwrap();
+        assert!(
+            matches!(&found[..], [Evidence::Record { id, outcome: paddock_cli::Outcome::KnownCommit(_) }] if *id == format!("{}@1700000000", &two[..12])),
+            "{found:?}"
+        );
+        assert!(trail[0].contains("pass record"), "{trail:?}");
+        // The record of another sha is no evidence; a record whose tree changed is none either.
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&one), &l);
+        assert!(found.is_none());
+        std::fs::copy(
+            state(&r).join("records").join(format!("{two}.json")),
+            state(&r).join("records").join(format!("{one}.json")),
+        )
+        .unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, &[one], &l);
+        assert!(found.is_none(), "a record is read only for its own sha");
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let text = std::fs::read_to_string(&rec).unwrap();
+        let tree = text.split("\"tree\":\"").nth(1).unwrap().split('"').next().unwrap().to_string();
+        std::fs::write(&rec, text.replace(&tree, &"0".repeat(40))).unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, &[two], &l);
+        assert!(found.is_none(), "the tree id no longer matches");
+    }
+
+    #[test]
+    fn a_complete_green_ci_run_counts_only_when_the_pushed_remote_has_the_sha_as_a_tip() {
+        let (_d, r, _one, two) = repo();
+        let tip = format!("{two}\trefs/heads/train/x\n");
+        let green = fake(Some(&tip), Ok(8053));
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), std::slice::from_ref(&two), &green);
+        assert!(
+            matches!(
+                found.as_deref(),
+                Some([Evidence::CiRun {
+                    run: 8053,
+                    outcome: paddock_cli::Outcome::KnownCommit(_)
+                }])
+            ),
+            "{found:?}"
+        );
+        assert!(trail.iter().any(|t| t.contains("git ls-remote origin (live)")), "{trail:?}");
+        for (ls, remote) in [
+            (None, Some("origin")),
+            (Some("1111\trefs/heads/other\n"), Some("origin")),
+            (Some(tip.as_str()), None),
+        ] {
+            let l = fake(ls, Ok(8053));
+            let (found, _) = known::find(&r, &state(&r), remote, std::slice::from_ref(&two), &l);
+            assert!(found.is_none(), "{ls:?} {remote:?}");
+            assert!(
+                !l.asked.borrow().iter().any(|a| a.starts_with("ci ")),
+                "no CI lookup without a confirmed tip"
+            );
+        }
+        let red = fake(Some(&tip), Err("red or partial"));
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), &[two], &red);
+        assert!(
+            found.is_none() && trail.last().unwrap().contains("no complete green CI run"),
+            "{trail:?}"
+        );
+    }
+
+    #[test]
+    fn evidence_applies_only_to_the_hooks_push_with_nothing_overridden() {
+        let pushed = vec!["a".repeat(40)];
+        assert!(known::applicable(&args(), &pushed));
+        assert!(!known::applicable(&args(), &[]), "a delete-only push has no commit");
+        for tweak in [
+            (|a: &mut PrePushArgs| a.base = Some("origin/main".into())) as fn(&mut PrePushArgs),
+            |a| a.files = vec!["x".into()],
+            |a| a.only = vec!["fmt".into()],
+            |a| a.dry_run = true,
+            |a| a.refs_from_stdin = false,
+        ] {
+            let mut a = args();
+            tweak(&mut a);
+            assert!(!known::applicable(&a, &pushed));
+            // Only the no-stdin tweak is a full run (a person's working-tree run may leave a record); every other tweak is partial.
+            assert_eq!(
+                known::recordable(&a, 0, 0, Exit::Ok),
+                !a.refs_from_stdin,
+                "no record from a partial run"
+            );
+        }
+        assert!(known::recordable(&args(), 0, 0, Exit::Ok));
+        assert!(!known::recordable(&args(), 1, 0, Exit::Ok) && !known::recordable(&args(), 0, 1, Exit::Ok));
+        assert!(!known::recordable(&args(), 0, 0, Exit::NotMeasured) && !known::recordable(&args(), 0, 0, Exit::Findings));
+    }
+
+    #[test]
+    fn the_known_commit_report_is_its_own_verdict_and_says_not_re_checked() {
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
+        let rep = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &push_line(&two),
+            &fake(None, Err("x")),
+        )
+        .unwrap();
+        assert_eq!(rep.exit, Exit::Ok);
+        assert_eq!(rep.data["verdict"], "known_commit");
+        assert_eq!(rep.data["not_rechecked"], true);
+        assert_eq!(rep.data["commits"][0]["sha"], two.as_str());
+        assert_eq!(rep.data["commits"][0]["evidence"]["kind"], "record");
+        assert_eq!(rep.data["remote"], "origin");
+        assert!(rep.data.get("passed").is_none(), "it is not a measured pass: {}", rep.data);
+        assert!(rep.text.starts_with("pre-push: not re-checked: known commit"), "{}", rep.text);
+        let log = std::fs::read_to_string(state(&r).join("known-commits.log")).unwrap();
+        assert!(
+            log.contains(&two) && log.contains("remote=origin") && log.contains("pass record"),
+            "{log}"
+        );
+    }
+
+    /// ADR 0089 amendment (rows 3 and 7): the known commit is an outcome that names the commit and tree it stands on, exits 0 and
+    /// says `not_rechecked`; a consumer asking about another tree (merge check) refuses it, and a record without evidence is none.
+    #[test]
+    fn the_known_commit_outcome_names_its_tree_and_a_consumer_about_another_tree_refuses_it() {
+        use paddock_cli::outcome::{Sha, TreeId};
+        use paddock_cli::{Outcome, Subject};
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
+        let rep = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &push_line(&two),
+            &fake(None, Err("x")),
+        )
+        .unwrap();
+        let tree = git_text(&r, &["rev-parse", &format!("{two}^{{tree}}")]).unwrap().trim().to_string();
+        let ask = Subject::Commit {
+            sha: Sha::new(two.as_str()),
+            tree: TreeId::new(tree.as_str()),
+        };
+        let wire = &rep.data["outcome"];
+        assert_eq!(wire["status"], "known-commit");
+        assert_eq!(wire["not_rechecked"], true);
+        assert!(
+            matches!(Outcome::from_wire(wire, &ask, true), Outcome::KnownCommit(_)),
+            "the pre-push hook accepts it"
+        );
+        assert!(
+            matches!(Outcome::from_wire(wire, &ask, false), Outcome::NotMeasured(_)),
+            "merge check does not"
+        );
+        let other = Subject::Commit {
+            sha: Sha::new("0".repeat(40)),
+            tree: TreeId::new(tree),
+        };
+        assert!(
+            matches!(Outcome::from_wire(wire, &other, true), Outcome::NotMeasured(_)),
+            "another commit"
+        );
+        // A record written before evidence existed (no `evidence`) proves nothing.
+        let rec = state(&r).join("records").join(format!("{two}.json"));
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rec).unwrap()).unwrap();
+        v.as_object_mut().unwrap().remove("evidence");
+        std::fs::write(&rec, v.to_string()).unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &fake(None, Err("x")));
+        assert!(found.is_none());
+    }
+
+    /// Only a `Clean` outcome can leave a record: findings, not measured and an empty run cannot.
+    #[test]
+    fn only_a_pass_leaves_a_record() {
+        let (_d, r, _one, two) = repo();
+        for not_a_pass in [
+            paddock_cli::Outcome::NotMeasured(paddock_cli::Reason::new("x")),
+            paddock_cli::Outcome::NotApplicable(paddock_cli::Reason::new("x")),
+        ] {
+            assert!(known::write_record(&r, &state(&r), &two, "b", &[], 1, &not_a_pass).is_err());
+        }
+        assert!(!state(&r).join("records").join(format!("{two}.json")).exists());
+    }
+
+    #[test]
+    fn a_delete_only_push_and_an_explicit_base_never_use_evidence() {
+        let (_d, r, _one, two) = repo();
+        known::write_record(&r, &state(&r), &two, "origin/main", &[], 5, &pass_for(&r, &two)).unwrap();
+        let l = fake(None, Err("x"));
+        let delete = format!("(delete) {} refs/heads/old {}\n", "0".repeat(40), two);
+        let got = command_in(
+            &PrePushArgs {
+                root: Some(r.clone()),
+                ..args()
+            },
+            &r,
+            &delete,
+            &l,
+        );
+        assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+        let a = PrePushArgs {
+            root: Some(r.clone()),
+            base: Some("origin/main".into()),
+            ..args()
+        };
+        let got = command_in(&a, &r, &push_line(&two), &l);
+        assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+    }
+
+    fn reads<'a>(files: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |p| files.iter().find(|(n, _)| *n == p).map(|(_, t)| t.to_string())
+    }
+    const MANIFEST: &str = r#"{"dependencies":{"yaml":"^2.9.1"}}"#;
+    const LOCK: &str = r#"{"packages":{"node_modules/yaml":{"version":"2.9.1"}}}"#;
+
+    #[test]
+    fn the_node_install_is_stale_when_a_version_differs_missing_or_unreadable_and_ready_when_equal() {
+        let ok = [
+            ("node_modules/.package-lock.json", LOCK),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        assert_eq!(node_env_problem(false, &reads(&ok)), None);
+        let old = r#"{"packages":{"node_modules/yaml":{"version":"2.8.0"}}}"#;
+        let stale = [
+            ("node_modules/.package-lock.json", old),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        let why = node_env_problem(false, &reads(&stale)).unwrap();
+        assert!(why.contains("2.8.0") && why.contains("2.9.1"), "{why}");
+        let gone = [
+            ("node_modules/.package-lock.json", r#"{"packages":{}}"#),
+            ("package-lock.json", LOCK),
+            ("conformance/package.json", MANIFEST),
+        ];
+        assert!(node_env_problem(false, &reads(&gone)).unwrap().contains("missing"));
+        assert!(node_env_problem(false, &reads(&[])).unwrap().contains("nothing is installed"));
+        assert!(
+            node_env_problem(false, &reads(&ok[..2])).is_some(),
+            "an unreadable manifest is a problem, not a pass"
+        );
+        assert!(
+            node_env_problem(true, &reads(&ok))
+                .unwrap()
+                .contains("throw-away worktree has no node_modules")
+        );
+    }
+}
+
+/// A stale npm install made conformance fail with "yaml cannot be loaded", which counted as a finding (2026-11-13).
+#[test]
+fn a_missing_conformance_install_is_environment_not_ready_never_a_failure_or_pass() {
+    let mut f = facts();
+    f.conformance_env = Some("node_modules/yaml is missing".into());
+    let planned = plan_gates(&plan(), &change(&["conformance/a.mjs"]), &f);
+    let Some(Planned::NotMeasured { reason, next, .. }) = planned
+        .iter()
+        .find(|p| matches!(p, Planned::NotMeasured { id, .. } if id == "conformance"))
+    else {
+        panic!("conformance must be NotMeasured (exit 6, ADR 0089 A2), not run: {planned:?}");
+    };
+    assert!(reason.starts_with("environment not ready"), "{reason}");
+    assert!(next.contains("npm ci --ignore-scripts -w conformance"), "{next}");
+    assert!(!ids(&planned).contains(&"conformance".to_string()), "it does not run");
+}
+
+mod base_choice {
+    use super::super::known::Lookups;
+    use super::super::{PrePushArgs, Pushed, command_in};
+    use crate::plan_repo::git_text;
+    use std::path::{Path, PathBuf};
+
+    /// A new ref `w` at `tip` pushed to `remote`: the shape most tests here need.
+    fn choose_base(root: &Path, remote: Option<&str>, tip: &str, look: &dyn Lookups) -> (String, String) {
+        let p = Pushed {
+            local_ref: "refs/heads/w".into(),
+            sha: tip.into(),
+            remote_ref: "refs/heads/w".into(),
+            remote_sha: "0".repeat(40),
+        };
+        super::super::choose_base(root, &p, remote, "origin/main", look)
+    }
+
+    /// `git ls-remote` as the remote would answer it: a fixed text or unreachable.
+    pub struct Remote(Option<String>);
+    impl Lookups for Remote {
+        fn ls_remote(&self, _: &str) -> Option<String> {
+            self.0.clone()
+        }
+        fn ci_green(&self, _: &str) -> Result<u64, String> {
+            Err("no run".into())
+        }
+    }
+    /// The remote's branches as `ls-remote` text, from refs/remotes/origin/* of the fixture (the sha each ref points at).
+    pub fn live(r: &Path) -> Remote {
+        let refs = git_text(r, &["for-each-ref", "--format=%(objectname)\t%(refname)", "refs/remotes/origin/"]).unwrap();
+        Remote(Some(
+            refs.lines()
+                .map(|l| l.replacen("refs/remotes/origin/", "refs/heads/", 1) + "\n")
+                .collect(),
+        ))
+    }
+
+    /// main: m1; train (origin/train/t): m1-t1-t2.
+    fn repo() -> (tempfile::TempDir, PathBuf) {
+        let d = tempfile::tempdir().unwrap();
+        let r = d.path().join("r");
+        std::fs::create_dir(&r).unwrap();
+        for a in [
+            &["init", "-q", "-b", "main"][..],
+            &["config", "user.email", "t@t"],
+            &["config", "user.name", "t"],
+        ] {
+            git_text(&r, a).unwrap();
+        }
+        commit(&r, "m1");
+        git_text(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
+        git_text(&r, &["checkout", "-q", "-b", "train"]).unwrap();
+        commit(&r, "t1");
+        commit(&r, "t2");
+        git_text(&r, &["update-ref", "refs/remotes/origin/train/t", "HEAD"]).unwrap();
+        (d, r)
+    }
+    fn commit(r: &Path, f: &str) {
+        std::fs::write(r.join(f), f).unwrap();
+        git_text(r, &["add", f]).unwrap();
+        git_text(r, &["commit", "-q", "-m", f]).unwrap();
+    }
+    fn sha(r: &Path, rev: &str) -> String {
+        git_text(r, &["rev-parse", rev]).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn a_branch_made_from_a_train_branch_is_measured_from_the_trains_live_tip() {
+        let (_d, r) = repo();
+        let train = sha(&r, "origin/train/t");
+        commit(&r, "w1");
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        assert_eq!(base, train, "{why}");
+        assert!(
+            why.contains("train/t") && why.contains("fewest new commits, 1") && why.contains("live"),
+            "{why}"
+        );
+    }
+
+    #[test]
+    fn a_branch_made_from_main_is_measured_from_main() {
+        let (_d, r) = repo();
+        let main = sha(&r, "origin/main");
+        git_text(&r, &["checkout", "-q", "-b", "w", "origin/main"]).unwrap();
+        commit(&r, "w1");
+        let (base, _) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        // Main and the train are equally far (one new commit): the train wins the tie, and both give main as the merge base.
+        let mb = git_text(&r, &["merge-base", &base, "HEAD"]).unwrap();
+        assert_eq!(mb.trim(), main);
+    }
+
+    #[test]
+    fn main_merged_into_a_train_based_branch_is_still_measured_from_the_train() {
+        let (_d, r) = repo();
+        let train = sha(&r, "origin/train/t");
+        git_text(&r, &["checkout", "-q", "main"]).unwrap();
+        commit(&r, "m2");
+        git_text(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]).unwrap();
+        git_text(&r, &["checkout", "-q", "-b", "w", "origin/train/t"]).unwrap();
+        commit(&r, "w1");
+        git_text(&r, &["merge", "-q", "--no-edit", "origin/main"]).unwrap();
+        let (base, why) = choose_base(&r, Some("origin"), &sha(&r, "HEAD"), &live(&r));
+        assert_eq!(base, train, "{why}");
+    }
+
+    #[test]
+    fn an_unreachable_remote_or_no_remote_falls_back_to_origin_main_and_says_so() {
+        let (_d, r) = repo();
+        commit(&r, "w1");
+        let tip = sha(&r, "HEAD");
+        let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
+        assert_eq!(base, "origin/main");
+        assert!(
+            why.contains("could not be read") && why.contains("measuring from origin/main"),
+            "{why}"
+        );
+        let (base, why) = choose_base(&r, None, &tip, &live(&r));
+        assert_eq!((base.as_str(), why.contains("no remote was named")), ("origin/main", true));
+        // Tips this clone has no object for are skipped.
+        let (base, why) = choose_base(
+            &r,
+            Some("origin"),
+            &tip,
+            &Remote(Some(format!("{}\trefs/heads/x\n", "1".repeat(40)))),
+        );
+        assert_eq!(base, "origin/main", "{why}");
+    }
+
+    #[test]
+    fn every_pushed_commit_already_on_the_remote_is_never_an_empty_pass_it_measures_from_origin_main() {
+        let (_d, r) = repo();
+        let two = sha(&r, "origin/train/t");
+        let (base, why) = choose_base(&r, Some("origin"), &two, &live(&r));
+        assert_eq!(base, "origin/main", "{why}");
+        assert!(why.contains("already on origin's train/t") && why.contains("no evidence"), "{why}");
+    }
+
+    #[test]
+    fn a_push_already_on_the_remote_without_evidence_runs_the_checks_instead_of_nothing_to_check() {
+        let (_d, r) = repo();
+        let two = sha(&r, "origin/train/t");
+        let args = PrePushArgs {
+            root: Some(r.clone()),
+            base: None,
+            remote: Some("origin".into()),
+            only: vec![],
+            dry_run: true,
+            files: vec![],
+            refs_from_stdin: true,
+            linux: false,
+            accept_not_measured: vec![],
+        };
+        let line = format!("refs/heads/x {two} refs/heads/main {}\n", "0".repeat(40));
+        let got = command_in(&args, &r, &line, &live(&r));
+        assert!(got.as_ref().map_or(true, |rep| !rep.text.contains("nothing to check")), "{got:?}");
+    }
+}
+
 /// A scratch repository with a helper to commit and to fake remote-tracking refs (no network).
 struct Repo {
     _d: tempfile::TempDir,
@@ -894,6 +1473,15 @@ impl Repo {
     fn remote(&self, name: &str, sha: &str) {
         self.git(&["update-ref", &format!("refs/remotes/origin/{name}"), sha]);
     }
+
+    /// What `git ls-remote origin` would print for the branches faked with [`Repo::remote`].
+    fn live(&self) -> base_choice::Remote {
+        base_choice::live(&self.root)
+    }
+
+    fn choose(&self, p: &super::Pushed) -> (String, String) {
+        super::choose_base(&self.root, p, Some("origin"), "origin/main", &self.live())
+    }
 }
 
 fn new_ref(local: &str, sha: &str) -> super::Pushed {
@@ -917,10 +1505,10 @@ fn a_new_branch_cut_from_a_train_is_measured_against_the_train_not_main() {
     r.remote("train/2026-11-12-7", &t2);
     r.git(&["checkout", "-q", "-b", "fix"]);
     let f1 = r.commit("f1");
-    let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
-    assert_eq!(base, "origin/train/2026-11-12-7", "{why}");
+    let (base, why) = r.choose(&new_ref("fix", &f1));
+    assert_eq!(base, t2, "{why}");
     assert!(
-        why.contains("the nearest of") && why.contains("1 commit(s) ahead") && why.contains(" ms"),
+        why.contains("train/2026-11-12-7") && why.contains("fewest new commits, 1") && why.contains(" ms"),
         "{why}"
     );
 }
@@ -939,32 +1527,36 @@ fn an_existing_remote_ref_is_measured_from_its_old_commit() {
         remote_ref: "refs/heads/fix".into(),
         remote_sha: f1.clone(),
     };
-    let (base, why) = super::choose_base(&r.root, &p, "origin/main");
+    let (base, why) = r.choose(&p);
     assert_eq!(base, f1);
     assert!(why.contains("exists on the remote"), "{why}");
-    // Its old commit is not here: say so and fall back to a remote branch it descends from.
+    // Its old commit is not here: say so and measure from the nearest live remote branch tip (main here).
     let gone = super::Pushed {
         remote_sha: "1".repeat(40),
         ..p
     };
-    let (base, why) = super::choose_base(&r.root, &gone, "origin/main");
-    assert_eq!(base, "origin/main");
+    let (base, why) = r.choose(&gone);
+    assert_eq!(base, c1);
     assert!(why.contains("not here (fetch it)"), "{why}");
 }
 
 #[test]
-fn with_no_remote_branch_to_descend_from_the_base_is_main_and_says_so() {
+fn with_no_usable_remote_branch_the_base_is_main_and_says_so() {
     let r = Repo::new();
     let c1 = r.commit("a");
-    let (base, why) = super::choose_base(&r.root, &new_ref("main", &c1), "origin/main");
+    // Nothing listed by the remote: origin/main, said so.
+    let (base, why) = r.choose(&new_ref("main", &c1));
     assert_eq!(base, "origin/main");
-    assert!(why.contains("is an ancestor of the pushed commit, so origin/main"), "{why}");
-    // An unrelated remote branch is not an ancestor either.
+    assert!(
+        why.contains("no tracking upstream, train branch or main") && why.contains("measuring from origin/main"),
+        "{why}"
+    );
+    // A sibling feature branch is no candidate either.
     r.git(&["checkout", "-q", "--orphan", "other"]);
     let o1 = r.commit("o");
     r.git(&["checkout", "-q", "main"]);
     r.remote("other", &o1);
-    let (base, _) = super::choose_base(&r.root, &new_ref("main", &c1), "origin/main");
+    let (base, _) = r.choose(&new_ref("main", &c1));
     assert_eq!(base, "origin/main");
 }
 
@@ -983,11 +1575,8 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     r.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
     r.git(&["config", "branch.fix.remote", "origin"]);
     r.git(&["config", "branch.fix.merge", "refs/heads/main"]);
-    let (base, why) = super::choose_base(&r.root, &new_ref("fix", &f1), "origin/main");
-    assert_eq!(
-        base, "origin/train/x",
-        "an upstream that is main must not beat a nearer train: {why}"
-    );
+    let (base, why) = r.choose(&new_ref("fix", &f1));
+    assert_eq!(base, t1, "an upstream that is main must not beat a nearer train: {why}");
     // At the same distance the tracking upstream wins.
     let r3 = Repo::new();
     let c3 = r3.commit("a");
@@ -999,10 +1588,13 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     let f3 = r3.commit("f");
     r3.git(&["config", "branch.fix.remote", "origin"]);
     r3.git(&["config", "branch.fix.merge", "refs/heads/main"]);
-    let (base, why) = super::choose_base(&r3.root, &new_ref("fix", &f3), "origin/main");
+    let (base, why) = r3.choose(&new_ref("fix", &f3));
     assert_eq!(
-        (base.as_str(), why.contains("its tracking upstream")),
-        ("origin/main", true),
+        (
+            base.as_str(),
+            why.contains("main (read live") && why.contains("its tracking upstream")
+        ),
+        (c3.as_str(), true),
         "{why}"
     );
     // Same distance to main and to a train: the train.
@@ -1012,34 +1604,138 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     r2.remote("train/y", &c);
     r2.git(&["checkout", "-q", "-b", "fix"]);
     let f = r2.commit("f");
-    assert_eq!(super::choose_base(&r2.root, &new_ref("fix", &f), "origin/main").0, "origin/train/y");
+    let why = r2.choose(&new_ref("fix", &f)).1;
+    assert!(why.contains("train/y (read live"), "{why}");
 }
 
 #[test]
 fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output() {
-    use super::exec::Verdict;
     let zero = "0".repeat(40);
     let input = format!("refs/heads/a aaa refs/heads/a {zero}\nrefs/heads/gone {zero} refs/heads/gone bbb\nbad line\n");
     let got = super::parse_push(&input);
     assert_eq!(got.len(), 1);
     assert_eq!((got[0].sha.as_str(), got[0].remote_ref.as_str()), ("aaa", "refs/heads/a"));
-    let nm = |id: &str| {
-        (
-            id.to_string(),
-            Verdict::NotMeasured {
-                reason: "r".into(),
-                next: "n".into(),
-            },
-        )
-    };
+    let nm = |id: &str| (id.to_string(), Row::not_measured("r", "n"));
     let report = render(
         "h",
         &[
             nm("clippy-windows apps/dyno"),
-            ("fmt crates".into(), Verdict::Passed { secs: 1.0 }),
+            ("fmt crates".into(), ran_ok("fmt crates", 1.0)),
             nm("clippy crates"),
         ],
     );
     let last = report.text.lines().last().unwrap();
     assert_eq!(last, "NOT MEASURED (2): clippy-windows apps/dyno; clippy crates");
+}
+
+#[test]
+fn a_branch_that_merged_its_train_in_is_measured_from_the_train_not_its_own_old_tip() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    let f1 = r.commit("f1");
+    // The train moves on after the branch was pushed; the branch then merges it in and adds a commit.
+    r.git(&["checkout", "-q", "-b", "train", &c1]);
+    r.commit("t1");
+    let t2 = r.commit("t2");
+    r.remote("main", &c1);
+    r.remote("train/9", &t2);
+    r.git(&["checkout", "-q", "fix"]);
+    r.git(&["merge", "-q", "--no-edit", "train"]);
+    let m = r.commit("f2");
+    let p = super::Pushed {
+        local_ref: "refs/heads/fix".into(),
+        sha: m,
+        remote_ref: "refs/heads/fix".into(),
+        remote_sha: f1,
+    };
+    let (base, why) = r.choose(&p);
+    assert_eq!(base, t2, "the old tip would count t1 and t2 as new: {why}");
+}
+
+#[test]
+fn queue_time_and_run_time_are_reported_apart_and_the_pass_counts_only_the_run() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        timing: Some(Timing { queued: 12.0, ran: 3.0 }),
+        ..Fake::default()
+    };
+    let (rows, timings) = run_all_timed(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 2,
+            budget: Duration::from_secs(900),
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    assert!(
+        rows.iter()
+            .all(|(_, v)| v.kind() == Kind::Skipped || (v.kind() == Kind::Passed && (v.secs - 3.0).abs() < 1e-9)),
+        "a pass shows the run time, not the wall time: {rows:?}"
+    );
+    assert_eq!(timings["fmt crates"], Timing { queued: 12.0, ran: 3.0 });
+    let report = render_timed("h", &rows, &timings);
+    assert!(
+        report.text.contains("ok            fmt crates") && report.text.contains("3.0 s run, 12.0 s queued"),
+        "{}",
+        report.text
+    );
+    let gate = report.data["gates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["id"] == "fmt crates")
+        .unwrap()
+        .clone();
+    assert_eq!((gate["run_secs"].as_f64(), gate["queued_secs"].as_f64()), (Some(3.0), Some(12.0)));
+}
+
+#[test]
+fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed() {
+    let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
+    let fake = Fake {
+        no_slot: vec!["clippy crates".into()],
+        ..Fake::default()
+    };
+    let (rows, timings) = run_all_timed(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 2,
+            budget: Duration::from_secs(900),
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    let v = verdicts(&rows);
+    let Some((reason, next)) = nm(&v["clippy crates"]) else {
+        panic!("{:?}", v["clippy crates"])
+    };
+    assert!(reason.contains("never got a heavy slot") && reason.contains("31.0 s"), "{reason}");
+    assert!(next.contains("heavy status") && next.contains("PADDOCK_QUEUE_MAX"), "{next}");
+    let report = render_timed("h", &rows, &timings);
+    assert_eq!(report.exit, Exit::NotMeasured);
+    assert!(report.text.contains("NOT MEASURED  clippy crates"), "{}", report.text);
+}
+
+/// ADR 0089 amendment A2: an environment that is not ready is not measured (exit 6), not a broken check (exit 7).
+#[test]
+fn an_environment_not_ready_ends_the_run_with_exit_6_not_7() {
+    let mut f = facts();
+    f.conformance_env = Some("node_modules/yaml is missing".into());
+    let planned = plan_gates(&plan(), &change(&["conformance/a.mjs"]), &f);
+    let rows = run_all(
+        &planned.into_iter().filter(|p| !matches!(p, Planned::Run(_))).collect::<Vec<_>>(),
+        &Fake::default(),
+        1,
+    );
+    let report = render("h", &rows);
+    assert_eq!(report.exit, Exit::NotMeasured, "{}", report.text);
+    assert!(
+        report.text.contains("NOT MEASURED") && report.text.contains("not a finding in your change"),
+        "{}",
+        report.text
+    );
 }

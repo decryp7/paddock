@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openAiApp, openChat, runCommand, waitAnswered } from './ai-support';
 import { openMenu } from './menu-support';
-import { hideInspectorFlyout } from './app';
+import { gridRows, hideInspectorFlyout } from './app';
 
 // The assistant chat against the scripted AI mock (src/app/core/mock/mock-ai-backend.ts): streaming with tool
 // chips, evidence links, and proposals applied through the normal save paths.
@@ -31,7 +31,7 @@ test.describe('AI chat', () => {
 
   test('the Context menu chooses what is sent; chats are created and exported', async ({ page }, testInfo) => {
     await openAiApp(page);
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     await hideInspectorFlyout(page);
     const chat = await openChat(page);
     const context = chat.getByTestId('ai-context-menu');

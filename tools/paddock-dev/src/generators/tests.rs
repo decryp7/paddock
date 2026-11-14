@@ -71,6 +71,12 @@ impl Runner for Fake {
             .push(format!("{} :: {}", dir.file_name().unwrap().to_string_lossy(), argv.join(" ")));
         self.answers.get(&argv[1]).cloned().unwrap_or(Ran::exit(0, ""))
     }
+    fn subject(&self, _root: &Path) -> paddock_cli::Subject {
+        paddock_cli::Subject::Files {
+            head: paddock_cli::outcome::Sha::new("h"),
+            digest: paddock_cli::outcome::Sha256::new("d"),
+        }
+    }
     fn exists(&self, path: &Path) -> bool {
         let rel = path.strip_prefix("/r").unwrap().to_string_lossy().into_owned();
         rel.is_empty() || rel == "crates" || self.files.contains(&rel)
@@ -447,6 +453,22 @@ mod real {
         assert!(calls(&f).is_empty());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_build_root_reached_through_a_link_into_the_home_is_refused_too() {
+        // The one home guard (paddock_env::home_guard, shared with heavy) resolves links; a plain prefix test did not.
+        let f = fixture(PASS_THROUGH);
+        let home = f.dir.path().join("home");
+        std::fs::create_dir_all(home.join("builds")).unwrap();
+        let link = f.dir.path().join("looks-external");
+        std::os::unix::fs::symlink(home.join("builds"), &link).unwrap();
+        let mut e = env(&f);
+        e.insert("HOME".into(), home.display().to_string());
+        e.insert("PADDOCK_DEV_TARGET_DIR".into(), link.display().to_string());
+        let why = Real::with(&f.repo, e, Vec::new()).target_dir("crates").unwrap_err();
+        assert!(why.contains("under your home folder"), "{why}");
+    }
+
     #[test]
     fn heavy_refusing_the_slot_is_not_the_checks_verdict() {
         let f = fixture("echo 'heavy 0.1 (macos) exit 0x4b: the lock could not be taken. Next: x' >&2; exit 75");
@@ -476,4 +498,163 @@ fn the_default_build_roots_are_the_disk_settings_roots() {
     let roots = crate::disk::config::Settings::resolve(&Default::default(), &|k| env.get(k).cloned()).roots;
     assert_eq!(roots, [std::path::PathBuf::from("/nope/a"), std::path::PathBuf::from("/nope/b")]);
     assert!(!include_str!("run.rs").contains("DEFAULT_ROOTS"), "run.rs names no machine path");
+}
+
+/// ADR 0089 amendment 4: the pass is made only by `measure`, from the check's own exit 0, and says what it is a pass of.
+#[test]
+fn a_current_generator_carries_its_evidence_and_the_exit_comes_only_from_the_outcomes() {
+    let fake = Fake::default();
+    let r = run(&fake, &["ui/a.ts"], false, &[]);
+    assert_eq!(r.exit, Exit::Ok);
+    let o = &r.data["results"][0]["outcome"];
+    assert_eq!(o["status"], "clean");
+    assert_eq!(o["evidence"]["check"], "gen:i18n");
+    assert_eq!(o["evidence"]["subject"]["kind"], "files");
+}
+
+/// "Delete the check": a generator whose check could not run (the program gone) gives 6, never 0; "skip the gate": a worker
+/// that never stored its result gives 6 as well.
+#[test]
+fn a_deleted_check_and_a_skipped_worker_are_exit_6_not_a_pass() {
+    let mut fake = Fake::default();
+    fake.answers
+        .insert("i18n.mjs".into(), Ran::Unavailable("node is not installed".into()));
+    assert_eq!(run(&fake, &["ui/a.ts"], false, &[]).exit, Exit::NotMeasured);
+    let lost = super::run::Checked {
+        id: "x".into(),
+        line: "l".into(),
+        regenerate: "r".into(),
+        cost: super::registry::Cost::Fast,
+        outcome: paddock_cli::Outcome::NotMeasured(paddock_cli::Reason::new("the check did not run (a worker ended early)")),
+        took: std::time::Duration::ZERO,
+        built: None,
+    };
+    assert_eq!(super::exit_of(&[lost]), Exit::NotMeasured);
+}
+
+/// A cargo check that compiles: its build is a phase of its own, before the run and outside the run's hang guard.
+const BUILT: &str = r#"
+version = 1
+[[generator]]
+id = "wire"
+what = "TypeScript from Rust"
+build = ["cargo", "test", "--no-run", "-p", "app", "--lib"]
+check = ["cargo", "test", "-p", "app", "--lib", "generated_types"]
+regenerate = "WRITE=1 cargo test -p app --lib generated_types"
+cwd = "crates"
+paths = ["crates/**"]
+cost = "heavy"
+drift_marker = ["test result: FAILED"]
+"#;
+
+/// Records each start with the limit it got and how long it "took": the build is slow (longer than the run's whole guard).
+#[derive(Default)]
+struct Timed {
+    /// `argv[2]` (`--no-run` for the build) -> what it does; a missing one exits 0.
+    answers: BTreeMap<String, Ran>,
+    started: Mutex<Vec<(String, std::time::Duration)>>,
+}
+
+impl Runner for Timed {
+    fn run(&self, _dir: &Path, argv: &[String], limit: std::time::Duration, spec: &super::run::Spec) -> Ran {
+        assert!(
+            spec.heavy && spec.workspace == "crates",
+            "both phases queue for the slot in the workspace's folder"
+        );
+        self.started.lock().unwrap().push((argv.join(" "), limit));
+        self.answers.get(&argv[2]).cloned().unwrap_or(Ran::exit(0, ""))
+    }
+    fn exists(&self, _path: &Path) -> bool {
+        true
+    }
+    fn subject(&self, _root: &Path) -> paddock_cli::Subject {
+        paddock_cli::Subject::Files {
+            head: paddock_cli::outcome::Sha::new("h"),
+            digest: paddock_cli::outcome::Sha256::new("d"),
+        }
+    }
+}
+
+fn run_built(fake: &Timed) -> (Report, Vec<String>) {
+    let reg = Registry::parse(BUILT).unwrap();
+    let lines = Mutex::new(Vec::new());
+    let r = check_with(&reg, Path::new("/r"), &["crates/a.rs".into()], false, &[], fake, &|l| {
+        lines.lock().unwrap().push(l.to_string())
+    })
+    .unwrap();
+    (r, lines.into_inner().unwrap())
+}
+
+#[test]
+fn the_build_runs_first_as_its_own_phase_and_only_the_run_is_under_the_run_guard() {
+    use super::registry::Cost;
+    let fake = Timed::default();
+    let (r, lines) = run_built(&fake);
+    assert_eq!(r.exit, Exit::Ok, "{}", r.text);
+    let started = fake.started.lock().unwrap().clone();
+    assert_eq!(started.len(), 2, "{started:?}");
+    assert_eq!(started[0].0, "cargo test --no-run -p app --lib", "the build comes first");
+    assert_eq!(started[0].1, run::build_limit(), "the build has its own bound");
+    assert_eq!(started[1].0, "cargo test -p app --lib generated_types");
+    assert_eq!(
+        started[1].1,
+        run::limit(Cost::Heavy),
+        "the run gets its whole guard, whatever the build took"
+    );
+    // Both phases are logged with their own duration (ER-27), and the result carries the build's.
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("gen wire: building [heavy] cd crates && cargo test --no-run")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|l| l.starts_with("gen wire: built in ")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.starts_with("gen wire: running [heavy]")), "{lines:?}");
+    let res = &r.data["results"][0];
+    assert!(res["build_seconds"].is_number(), "{res}");
+}
+
+#[test]
+fn a_build_that_fails_or_overruns_is_not_measured_and_the_check_never_starts() {
+    let mut fake = Timed::default();
+    fake.answers.insert("--no-run".into(), Ran::TimedOut);
+    let (r, lines) = run_built(&fake);
+    assert_eq!(r.exit, Exit::NotMeasured, "{}", r.text);
+    assert_eq!(fake.started.lock().unwrap().len(), 1, "the run is not started after a failed build");
+    let detail = r.data["results"][0]["detail"].as_str().unwrap().to_string();
+    assert!(
+        detail.contains("the build phase") && detail.contains(&format!("{} s", run::build_limit().as_secs())),
+        "{detail}"
+    );
+    assert!(lines.iter().any(|l| l.contains("gen wire: build NOT MEASURED")), "{lines:?}");
+
+    let mut fake = Timed::default();
+    fake.answers.insert(
+        "--no-run".into(),
+        Ran::exit(101, "error: could not compile `app` (lib test) due to 1 previous error"),
+    );
+    let (r, _) = run_built(&fake);
+    assert_eq!(r.exit, Exit::NotMeasured, "a build error is never drift: {}", r.text);
+    assert!(r.data["results"][0]["detail"].as_str().unwrap().contains("could not compile"));
+}
+
+#[test]
+fn a_check_that_still_compiles_after_its_build_is_flagged() {
+    // The build command must build what the check runs; a check that compiles anyway was timed with its build in it.
+    let mut fake = Timed::default();
+    fake.answers.insert(
+        "-p".into(),
+        Ran::exit(
+            0,
+            "   Compiling app v0.1.0 (/r/crates/app)\n    Finished `test` profile\ntest result: ok.",
+        ),
+    );
+    let (r, lines) = run_built(&fake);
+    assert_eq!(r.exit, Exit::Ok);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("::warning::gen wire: the check compiled after its build phase")),
+        "{lines:?}"
+    );
 }

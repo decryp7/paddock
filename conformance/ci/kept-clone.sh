@@ -25,7 +25,8 @@
 # made again (one ::warning:: naming the key).
 # The checkout's credentials (its http extraheader) are passed to git through the environment, never in a command line, never kept.
 # Environment: RUNNER_OS, GITHUB_WORKSPACE, GITHUB_ENV, NAME (the kept folder's name), PROFILE, KEPT_CLONE_PROFILES (the profile file,
-# default checkout-profiles.txt beside this script), PADDOCK_KEPT_CLONE_TIMEOUT (seconds per phase, default 900).
+# default checkout-profiles.txt beside this script), PADDOCK_KEPT_CLONE_TIMEOUT (seconds per phase, default 900),
+# PADDOCK_KEPT_CLONE_TIMEOUT_<ID> (one phase's own limit: RESOLVE, CREATE, CLEAN, FETCH, CHECKOUT, VERIFY, LINK; default the general one).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 tool=kept-clone
@@ -33,7 +34,8 @@ if [ "${RUNNER_OS:?RUNNER_OS is not set}" = Linux ]; then exit 0; fi # Linux job
 started=$SECONDS
 profiles="${KEPT_CLONE_PROFILES:-$here/checkout-profiles.txt}"
 profile="${PROFILE:?PROFILE is not set}"
-limit="${PADDOCK_KEPT_CLONE_TIMEOUT:-900}"
+general_limit="${PADDOCK_KEPT_CLONE_TIMEOUT:-900}"
+limit="$general_limit"
 max_mib="${PADDOCK_KEPT_CLONE_MAX_MIB:-3072}"
 hint="list and end processes using the CI home's src folder on the runner (a git or an editor left from an earlier job), then re-run the job."
 scratch="$(mktemp -d)"
@@ -55,6 +57,14 @@ g() { # noisy: a failure names the command in the phase's stderr (ER-27)
   gq "$@" || rc=$?
   [ "$rc" = 0 ] || echo "kept-clone: git $sub failed (exit $rc)" >&2
   return "$rc"
+}
+# phase <ID> <label> <function>: `bounded` with the phase's own limit, PADDOCK_KEPT_CLONE_TIMEOUT_<ID> (a whole number above 0), else the
+# general one.
+phase() {
+  local var="PADDOCK_KEPT_CLONE_TIMEOUT_$1" own
+  own="${!var:-}"
+  if [[ "$own" =~ ^[1-9][0-9]*$ ]]; then limit="$own"; else limit="$general_limit"; fi
+  bounded "$2" "$3"
 }
 last_lines() { grep -v '^[[:space:]]*$' "$scratch/err" | tail -n 4 | tr '\r\n' '  '; } # whole lines, never cut in the middle of a path
 
@@ -101,7 +111,7 @@ fallback() {
 
 folder="$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9._-' '_')"
 resolve_stable() { bash "$here/job-isolation.sh" path src "$folder"; }
-if ! bounded "resolve the job slot's kept folder" resolve_stable; then
+if ! phase RESOLVE "resolve the job slot's kept folder" resolve_stable; then
   cat "$scratch/err" >&2
   fallback "no kept folder of this job's slot (see the message above)"
 fi
@@ -157,7 +167,7 @@ unlink_caches() {
 create_clone() { unlink_caches && rm -rf "$stable" && mkdir -p "$(dirname "$stable")" && g clone -q --no-checkout --no-tags --depth=1 --filter=blob:none "$url" "$stable" &&
     echo 1 > "$stable/.git/paddock-kept-clone"; }
 if [ "$mode" = created ]; then
-  if ! bounded "create the clone" create_clone; then
+  if ! phase CREATE "create the clone" create_clone; then
     cat "$scratch/err" >&2
     fallback "could not create the clone at $stable ($(last_lines))"
   fi
@@ -206,15 +216,15 @@ verify_clone() {
 }
 # bring_up: clean (a reused clone), fetch, check out, verify; each phase bounded. Exit 0 when the clone is at the commit.
 bring_up() {
-  if [ "$mode" != created ]; then bounded "clean" clean_clone || return 1; fi
-  bounded "fetch $sha" fetch_commit && bounded "check out" checkout_commit && bounded "verify" verify_clone
+  if [ "$mode" != created ]; then phase CLEAN "clean" clean_clone || return 1; fi
+  phase FETCH "fetch $sha" fetch_commit && phase CHECKOUT "check out" checkout_commit && phase VERIFY "verify" verify_clone
 }
 if ! bring_up; then
   # Once more on a new clone: a lock or a half-written file of an earlier job is the usual cause.
   echo "::warning::kept-clone: the clone at $stable could not be brought to $sha ($(last_lines)); removing its locks and making it again."
   find "$stable/.git" -maxdepth 3 -name '*.lock' -type f -exec rm -f {} + 2>/dev/null || true
   mode=created
-  if ! bounded "create the clone" create_clone; then
+  if ! phase CREATE "create the clone" create_clone; then
     fallback "could not make the clone again at $stable ($(last_lines))"
   fi
   bring_up || fallback "the clone at $stable could not be brought to $sha ($(last_lines))"
@@ -234,7 +244,7 @@ link_work_folder() {
   rm -rf "$old" || echo "kept-clone: could not delete the replaced work folder $old" >&2
 }
 if [ "$RUNNER_OS" != Windows ]; then
-  if ! bounded "link $ws to $stable" link_work_folder; then
+  if ! phase LINK "link $ws to $stable" link_work_folder; then
     echo "::warning::kept-clone: could not link $ws to $stable ($(last_lines)); steps build from PADDOCK_WORKSPACE."
   fi
 fi

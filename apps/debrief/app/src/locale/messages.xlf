@@ -5470,49 +5470,49 @@
         <source>Stop the AI&apos;s browser</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/browser/ai-browsing-chip.ts</context>
-          <context context-type="linenumber">30</context>
+          <context context-type="linenumber">31</context>
         </context-group>
       </trans-unit>
       <trans-unit id="browser.chip.stopTitle" datatype="html">
         <source>Stop the AI&apos;s browser</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/browser/ai-browsing-chip.ts</context>
-          <context context-type="linenumber">30</context>
+          <context context-type="linenumber">31</context>
         </context-group>
       </trans-unit>
       <trans-unit id="browser.chip.waiting" datatype="html">
         <source>Waiting for you in the browser window: <x id="host" equiv-text="host"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/browser/ai-browsing-chip.ts</context>
-          <context context-type="linenumber">66</context>
+          <context context-type="linenumber">68</context>
         </context-group>
       </trans-unit>
       <trans-unit id="browser.chip.reading" datatype="html">
         <source>Reading</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/browser/ai-browsing-chip.ts</context>
-          <context context-type="linenumber">68</context>
+          <context context-type="linenumber">70</context>
         </context-group>
       </trans-unit>
       <trans-unit id="browser.chip.searching" datatype="html">
         <source>Searching</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/browser/ai-browsing-chip.ts</context>
-          <context context-type="linenumber">70</context>
+          <context context-type="linenumber">72</context>
         </context-group>
       </trans-unit>
       <trans-unit id="browser.chip.browsing" datatype="html">
         <source>The AI is browsing</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/browser/ai-browsing-chip.ts</context>
-          <context context-type="linenumber">72</context>
+          <context context-type="linenumber">74</context>
         </context-group>
       </trans-unit>
       <trans-unit id="browser.chip.stopFailed" datatype="html">
         <source>Could not stop the AI (<x id="reason" equiv-text="why"/>). Press Stop to try again.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/browser/ai-browsing-chip.ts</context>
-          <context context-type="linenumber">89</context>
+          <context context-type="linenumber">95</context>
         </context-group>
       </trans-unit>
       <trans-unit id="browser.runtime.title" datatype="html">
@@ -7495,56 +7495,56 @@
         <source>Copied path</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">25</context>
+          <context context-type="linenumber">26</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.store.copied.oldValue" datatype="html">
         <source>Copied old value</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">26</context>
+          <context context-type="linenumber">27</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.store.copied.newValue" datatype="html">
         <source>Copied new value</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">27</context>
+          <context context-type="linenumber">28</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.store.copied.other" datatype="html">
         <source>Copied <x id="label" equiv-text="label"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">28</context>
+          <context context-type="linenumber">29</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.store.exported.one" datatype="html">
         <source>Exported <x id="count" equiv-text="rows"/> row to <x id="path" equiv-text="path"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">33</context>
+          <context context-type="linenumber">34</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.store.exported.other" datatype="html">
         <source>Exported <x id="count" equiv-text="rows"/> rows to <x id="path" equiv-text="path"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">34</context>
+          <context context-type="linenumber">35</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.store.clipboardUnavailable" datatype="html">
         <source>The clipboard is not available</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">253</context>
+          <context context-type="linenumber">263</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.store.exportFailed" datatype="html">
         <source>Could not export the diff: <x id="error" equiv-text="errorMessage(e)"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/config-diff/config-diff.store.ts</context>
-          <context context-type="linenumber">265</context>
+          <context context-type="linenumber">275</context>
         </context-group>
       </trans-unit>
       <trans-unit id="configDiff.provide.view.title" datatype="html">
@@ -11508,14 +11508,14 @@
         <source>Timestamp</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">24</context>
+          <context context-type="linenumber">25</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.part.level" datatype="html">
         <source>Level</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">25</context>
+          <context context-type="linenumber">26</context>
         </context-group>
         <note priority="1" from="description">Part of a log line</note>
         <note priority="1" from="meaning">Log severity level</note>
@@ -11524,189 +11524,189 @@
         <source>Message</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">26</context>
+          <context context-type="linenumber">27</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.timestampsIntro" datatype="html">
         <source>Debrief read the lines of <x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span class=&quot;mono&quot;&gt;"/><x id="INTERPOLATION" equiv-text="{{ name() }}"/><x id="CLOSE_TAG_SPAN" ctype="x-span" equiv-text="&lt;/span&gt;"/> but not their timestamps, so those events are missing from the timeline. Tell it how the timestamps are written.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">41,42</context>
+          <context context-type="linenumber">42,43</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.newParserIntro" datatype="html">
         <source>Show Debrief how a log line of <x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span class=&quot;mono&quot;&gt;"/><x id="INTERPOLATION" equiv-text="{{ name() }}"/><x id="CLOSE_TAG_SPAN" ctype="x-span" equiv-text="&lt;/span&gt;"/> is built: it saves a new parser for this kind of file (now read with <x id="INTERPOLATION_1" equiv-text="{{ baseParser() }}"/>).</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">43,45</context>
+          <context context-type="linenumber">44,46</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.intro" datatype="html">
         <source>Debrief did not recognise <x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span class=&quot;mono&quot;&gt;"/><x id="INTERPOLATION" equiv-text="{{ name() }}"/><x id="CLOSE_TAG_SPAN" ctype="x-span" equiv-text="&lt;/span&gt;"/>. Show it how a log line is built and it will read this kind of file from now on.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">45</context>
+          <context context-type="linenumber">46</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.helpLabel" datatype="html">
         <source>Format wizard</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">45</context>
+          <context context-type="linenumber">46</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.helpText" datatype="html">
         <source>Select the timestamp, then the level, then the message on a sample line and press the matching button. Debrief builds a regular expression from your marks and shows how the first lines parse.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">45,48</context>
+          <context context-type="linenumber">46,49</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.retry" datatype="html">
         <source>Retry</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">49,52</context>
+          <context context-type="linenumber">50,53</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.modes" datatype="html">
         <source>How to describe the format</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">52</context>
+          <context context-type="linenumber">53</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.modeMarks" datatype="html">
         <source>Mark on a sample line</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">53,54</context>
+          <context context-type="linenumber">54,55</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.modeTemplate" datatype="html">
         <source>Serilog output template</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">54,55</context>
+          <context context-type="linenumber">55,56</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.modeTimestamps" datatype="html">
         <source>Timestamp format</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">56,60</context>
+          <context context-type="linenumber">57,61</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.sampleLine" datatype="html">
         <source>Sample line</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">62,63</context>
+          <context context-type="linenumber">63,64</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.selectHint" datatype="html">
         <source>Select part of the line with the mouse or Shift+arrows, then press a button:</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">67,68</context>
+          <context context-type="linenumber">68,69</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.sampleLineLabel" datatype="html">
         <source>Sample line</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">68</context>
+          <context context-type="linenumber">69</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.clearMarks" datatype="html">
         <source>Clear marks</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">83,86</context>
+          <context context-type="linenumber">84,87</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.timestampFormat" datatype="html">
         <source>Timestamp format</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">87,88</context>
+          <context context-type="linenumber">88,89</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.timestampSuggested" datatype="html">
         <source>Debrief checked this format against the lines it could not read.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">92,94</context>
+          <context context-type="linenumber">93,95</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.timestampHint" datatype="html">
         <source>.NET style (dd/MM/yyyy HH:mm:ss.fff) or strftime (%d/%m/%Y %H:%M:%S%.f). It is added to the timestamp formats of the parser that reads this file.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">94,96</context>
+          <context context-type="linenumber">95,97</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.outputTemplate" datatype="html">
         <source>Output template</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">97,98</context>
+          <context context-type="linenumber">98,99</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.generated" datatype="html">
         <source>Generated pattern</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">103,104</context>
+          <context context-type="linenumber">104,105</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.aiLabel" datatype="html">
         <source>Suggest regex with AI</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">105</context>
+          <context context-type="linenumber">106</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.aiHint" datatype="html">
         <source>The local model proposes a pattern for these lines; the preview checks it</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">105</context>
+          <context context-type="linenumber">106</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.checking" datatype="html">
         <source>Checking the sample…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">111,112</context>
+          <context context-type="linenumber">112,113</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.summary" datatype="html">
         <source><x id="START_TAG_STRONG" ctype="x-strong" equiv-text="&lt;strong&gt;"/><x id="INTERPOLATION" equiv-text="{{ preview()!.total }}"/><x id="CLOSE_TAG_STRONG" ctype="x-strong" equiv-text="&lt;/strong&gt;"/> events parsed from the sample, <x id="INTERPOLATION_1" equiv-text="{{ preview()!.skipped }}"/> lines skipped. Lines that do not start an event (such as stack traces) are attached to the previous event.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">112,113</context>
+          <context context-type="linenumber">113,114</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.previewLabel" datatype="html">
         <source>Parse preview</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">115</context>
+          <context context-type="linenumber">116</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.col.time" datatype="html">
         <source>Time</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">116</context>
+          <context context-type="linenumber">117</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.col.level" datatype="html">
         <source>Level</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">116</context>
+          <context context-type="linenumber">117</context>
         </context-group>
         <note priority="1" from="description">Column header</note>
         <note priority="1" from="meaning">Log severity level</note>
@@ -11715,231 +11715,238 @@
         <source>Message</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">116,117</context>
+          <context context-type="linenumber">117,118</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.cancel" datatype="html">
         <source>Cancel</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">128,129</context>
+          <context context-type="linenumber">129,130</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.markHint" datatype="html">
         <source>Mark a timestamp and a message to generate a pattern.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">166</context>
+          <context context-type="linenumber">167</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.applying" datatype="html">
         <source>Applying…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">167</context>
+          <context context-type="linenumber">168</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.save" datatype="html">
         <source>Save parser and re-read</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">168</context>
+          <context context-type="linenumber">169</context>
         </context-group>
       </trans-unit>
       <trans-unit id="format.wizard.saved" datatype="html">
         <source>Saved the parser <x id="id" equiv-text="id"/>; the files are read again.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/format/format-wizard.ts</context>
-          <context context-type="linenumber">319</context>
+          <context context-type="linenumber">325</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.note" datatype="html">
         <source>Note</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">42</context>
+          <context context-type="linenumber">43</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.notesMore" datatype="html">
         <source><x id="note" equiv-text="line"/> (+<x id="more" equiv-text="notes!.length - 1"/> more)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">43</context>
+          <context context-type="linenumber">44</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.title" datatype="html">
         <source>Events</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">114,115</context>
+          <context context-type="linenumber">123,124</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.subtitle" datatype="html">
         <source>of <x id="TOTAL" equiv-text="{{ fmt(data.summary()?.total ?? 0) //i18n(ph=&quot;total&quot;) }}"/> · sorted by time <x id="DIRECTION" equiv-text="{{ prefs.descending() ? &apos;↓&apos; : &apos;↑&apos; //i18n(ph=&quot;direction&quot;) }}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">116,117</context>
+          <context context-type="linenumber">125,126</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.anchorMissed" datatype="html">
         <source>That event is hidden by the current filters.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">118,120</context>
+          <context context-type="linenumber">127,129</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.sortToggle" datatype="html">
         <source>Toggle sort order</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">121</context>
+          <context context-type="linenumber">130</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.columns" datatype="html">
         <source><x id="START_TAG_DEBRIEF_ICON" ctype="x-debrief_icon" equiv-text="&lt;debrief-icon name=&quot;columns&quot; [size]=&quot;14&quot; /&gt;"/><x id="CLOSE_TAG_DEBRIEF_ICON" ctype="x-debrief_icon" equiv-text="&lt;debrief-icon name=&quot;columns&quot; [size]=&quot;14&quot; /&gt;"/> Columns</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">125,126</context>
+          <context context-type="linenumber">134,135</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.filterFields.placeholder" datatype="html">
         <source>Filter fields</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">128</context>
+          <context context-type="linenumber">137</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.filterFields.aria" datatype="html">
         <source>Filter fields</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">128</context>
+          <context context-type="linenumber">137</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.columns.listLabel" datatype="html">
         <source>Columns</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">129</context>
+          <context context-type="linenumber">138</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.aria" datatype="html">
         <source>Events</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">148</context>
+          <context context-type="linenumber">157</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.marker" datatype="html">
         <source>Marker</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">158,159</context>
+          <context context-type="linenumber">167,168</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.time" datatype="html">
         <source>Time <x id="DIRECTION" equiv-text="{{ prefs.descending() ? &apos;↓&apos; : &apos;↑&apos; //i18n(ph=&quot;direction&quot;) }}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">160,161</context>
+          <context context-type="linenumber">169,170</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.level" datatype="html">
         <source>Level</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">162,163</context>
+          <context context-type="linenumber">171,172</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.instance" datatype="html">
         <source>Instance</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">163,164</context>
+          <context context-type="linenumber">172,173</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.header.message" datatype="html">
         <source>Message</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">167,169</context>
+          <context context-type="linenumber">176,178</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.untimedTitle" datatype="html">
         <source>This event has no timestamp, so it is not on the timeline</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">198</context>
+          <context context-type="linenumber">207</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.untimed" datatype="html">
         <source>no time</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">198,199</context>
+          <context context-type="linenumber">207,208</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.partialMatchTitle" datatype="html">
         <source>Partial match: the search text appears inside a word</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">207</context>
+          <context context-type="linenumber">216</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.partialMatch" datatype="html">
         <source>partial</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">207</context>
+          <context context-type="linenumber">216</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.loading" datatype="html">
         <source>Loading</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">210</context>
+          <context context-type="linenumber">219</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.error.summary" datatype="html">
         <source>Couldn&apos;t load events.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">221</context>
+          <context context-type="linenumber">230</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.sort.newest" datatype="html">
         <source>Newest first</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">318</context>
+          <context context-type="linenumber">330</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.sort.oldest" datatype="html">
         <source>Oldest first</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">318</context>
+          <context context-type="linenumber">330</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.empty.filtered" datatype="html">
         <source>No events match the current filters.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">320</context>
+          <context context-type="linenumber">332</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.empty.noFiles" datatype="html">
         <source>No events: nothing is open yet.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">320</context>
+          <context context-type="linenumber">332</context>
         </context-group>
       </trans-unit>
       <trans-unit id="grid.removeColumn" datatype="html">
         <source>Remove column <x id="column" equiv-text="column"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
-          <context context-type="linenumber">324</context>
+          <context context-type="linenumber">336</context>
+        </context-group>
+      </trans-unit>
+      <trans-unit id="grid.jumpGaveUp" datatype="html">
+        <source>Could not go to the event: the filters kept changing. Try again.</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/grid/events-grid.ts</context>
+          <context context-type="linenumber">590</context>
         </context-group>
       </trans-unit>
       <trans-unit id="health.host.region" datatype="html">
@@ -13159,74 +13166,74 @@
         <source><x id="START_TAG_SPAN" ctype="x-span" equiv-text="&lt;span aria-hidden=&quot;true&quot;&gt;"/><x id="INTERPOLATION" equiv-text="{{ open() ? &apos;▾&apos; : &apos;▸&apos; }}"/><x id="CLOSE_TAG_SPAN" ctype="x-span" equiv-text="&lt;/span&gt;"/> Context </source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">23,25</context>
+          <context context-type="linenumber">24,26</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.loadError" datatype="html">
         <source>Could not load the source lines: <x id="ERROR" equiv-text="{{ e //i18n(ph=&quot;error&quot;) }}"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">33,34</context>
+          <context context-type="linenumber">34,35</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.retry" datatype="html">
         <source>Retry</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">34,36</context>
+          <context context-type="linenumber">35,37</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.linesAria" datatype="html">
         <source>Source lines around the event</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">37</context>
+          <context context-type="linenumber">38</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.more" datatype="html">
         <source>More</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">45,46</context>
+          <context context-type="linenumber">46,47</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.radius" datatype="html">
         <source>±<x id="RADIUS" equiv-text="{{ radius() //i18n(ph=&quot;radius&quot;) }}"/> lines</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">47,48</context>
+          <context context-type="linenumber">48,49</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.loading" datatype="html">
         <source>Loading…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">50,54</context>
+          <context context-type="linenumber">51,55</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.copy" datatype="html">
         <source>Copy</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">80</context>
+          <context context-type="linenumber">81</context>
         </context-group>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">156</context>
+          <context context-type="linenumber">158</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.copied" datatype="html">
         <source>Copied</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">152</context>
+          <context context-type="linenumber">154</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.context.copyFailed" datatype="html">
         <source>Copy failed</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/inspector/context-section.ts</context>
-          <context context-type="linenumber">154</context>
+          <context context-type="linenumber">156</context>
         </context-group>
       </trans-unit>
       <trans-unit id="inspector.title" datatype="html">
@@ -18282,91 +18289,91 @@
         <source>Loading</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">28</context>
+          <context context-type="linenumber">29</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.addToReport.title" datatype="html">
         <source>Add to report</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">38</context>
+          <context context-type="linenumber">39</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.exportPng.title" datatype="html">
         <source>Export PNG</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">39</context>
+          <context context-type="linenumber">40</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.exportSvg.title" datatype="html">
         <source>Export SVG</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">40</context>
+          <context context-type="linenumber">41</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.empty" datatype="html">
         <source>No numeric values for <x id="INTERPOLATION" equiv-text="{{ def().y }}"/> in the current results.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">49,50</context>
+          <context context-type="linenumber">50,51</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.addToReport.aria" datatype="html">
         <source>Add chart <x id="title" equiv-text="this.def().title"/> to report</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">107</context>
+          <context context-type="linenumber">108</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.exportPng.aria" datatype="html">
         <source>Export chart <x id="title" equiv-text="this.def().title"/> as PNG</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">108</context>
+          <context context-type="linenumber">109</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.exportSvg.aria" datatype="html">
         <source>Export chart <x id="title" equiv-text="this.def().title"/> as SVG</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">109</context>
+          <context context-type="linenumber">110</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.remove" datatype="html">
         <source>Remove chart <x id="title" equiv-text="this.def().title"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">110</context>
+          <context context-type="linenumber">111</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.subtitle" datatype="html">
         <source><x id="y" equiv-text="y"/> · per <x id="bucket" equiv-text="bucket"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">122</context>
+          <context context-type="linenumber">123</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.subtitleSplit" datatype="html">
         <source><x id="y" equiv-text="y"/> · per <x id="bucket" equiv-text="bucket"/> · split by <x id="fields" equiv-text="fields"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">124</context>
+          <context context-type="linenumber">125</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.noteMoment" datatype="html">
         <source>Add note at this moment…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">176</context>
+          <context context-type="linenumber">177</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.notePoint" datatype="html">
         <source>Add note to this point (<x id="series" equiv-text="p.series"/>)…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/metrics/chart-card.ts</context>
-          <context context-type="linenumber">177</context>
+          <context context-type="linenumber">178</context>
         </context-group>
       </trans-unit>
       <trans-unit id="metrics.chart.other" datatype="html">
@@ -32486,189 +32493,189 @@
         <source> Creates a copy of this project (.debriefz) that you can share. It is built from the redacted text of every text source (JSON and text logs), so its events, field statistics, search index, notes, AI chats, saved queries and reports contain none of the values the selected rules find. </source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">26,29</context>
+          <context context-type="linenumber">27,30</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.result.title" datatype="html">
         <source>Copy created</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">34,35</context>
+          <context context-type="linenumber">35,36</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.result.summary" datatype="html">
         <source><x id="INTERPOLATION" equiv-text="{{ r.sources }}"/> sources and <x id="INTERPOLATION_1" equiv-text="{{ count(r.events) }}"/> events written (<x id="INTERPOLATION_2" equiv-text="{{ size(r.bytes) }}"/>).</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">35,36</context>
+          <context context-type="linenumber">36,37</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.result.hitsLabel" datatype="html">
         <source>Values redacted per rule</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">36</context>
+          <context context-type="linenumber">37</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.result.excluded" datatype="html">
         <source>Left out of the copy:</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">45,46</context>
+          <context context-type="linenumber">46,47</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.done" datatype="html">
         <source>Done</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">56,59</context>
+          <context context-type="linenumber">57,60</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.detectors" datatype="html">
         <source>What to redact</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">62,63</context>
+          <context context-type="linenumber">63,64</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.customRule" datatype="html">
         <source>custom rule</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">74,76</context>
+          <context context-type="linenumber">75,77</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.mode" datatype="html">
         <source>How to replace values</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">80,81</context>
+          <context context-type="linenumber">81,82</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.title" datatype="html">
         <source>Preview</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">92,94</context>
+          <context context-type="linenumber">93,95</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.scanned" datatype="html">
         <source>Scanned <x id="INTERPOLATION" equiv-text="{{ p.summary.scanned }}"/> events, <x id="INTERPOLATION_1" equiv-text="{{ p.summary.changed }}"/> would change.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">96,97</context>
+          <context context-type="linenumber">97,98</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.truncated" datatype="html">
         <source>Only the first events were scanned for this preview; the copy covers all of them.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">98,100</context>
+          <context context-type="linenumber">99,101</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.hitsCaption" datatype="html">
         <source>Values found per rule</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">101,103</context>
+          <context context-type="linenumber">102,104</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.zero" datatype="html">
         <source>{VAR_PLURAL, plural, =0 {} =1 {1 other rule found nothing.} other {<x id="INTERPOLATION"/> other rules found nothing.}}</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">112,115</context>
+          <context context-type="linenumber">113,116</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.before" datatype="html">
         <source>Before</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">118,119</context>
+          <context context-type="linenumber">119,120</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.after" datatype="html">
         <source>After</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">119,121</context>
+          <context context-type="linenumber">120,122</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.leftOut" datatype="html">
         <source>Left out of the copy</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">126,128</context>
+          <context context-type="linenumber">127,129</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.preview.loading" datatype="html">
         <source>Looking at your events…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">137,141</context>
+          <context context-type="linenumber">138,142</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.note.sources" datatype="html">
         <source>Sources in formats that cannot be redacted (binary formats such as event logs and dumps, CSV, XML) are left out and listed.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">142,143</context>
+          <context context-type="linenumber">143,144</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.note.pictures" datatype="html">
         <source>Note images, attachments and video frames are not included: pictures cannot be redacted.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">143,144</context>
+          <context context-type="linenumber">144,145</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.note.profile" datatype="html">
         <source>The profile&apos;s own redaction rules are not carried into the copy. Clock corrections are kept.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">144,147</context>
+          <context context-type="linenumber">145,148</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.cancel" datatype="html">
         <source>Cancel</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">152,153</context>
+          <context context-type="linenumber">153,154</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.creating" datatype="html">
         <source>Creating the copy…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">155,156</context>
+          <context context-type="linenumber">156,157</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.retry" datatype="html">
         <source>Try again</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">157,159</context>
+          <context context-type="linenumber">158,160</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.create" datatype="html">
         <source>Create copy…</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">159,162</context>
+          <context context-type="linenumber">160,163</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.pickTitle" datatype="html">
         <source>Save redacted copy</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">314</context>
+          <context context-type="linenumber">309</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.filter" datatype="html">
         <source>Debrief project</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/share/redacted-copy/redacted-copy-dialog.ts</context>
-          <context context-type="linenumber">315</context>
+          <context context-type="linenumber">310</context>
         </context-group>
       </trans-unit>
       <trans-unit id="share.redactedCopy.detector.bearerToken" datatype="html">

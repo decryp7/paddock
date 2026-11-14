@@ -4,6 +4,7 @@ mod helpers;
 mod logging;
 mod mixed;
 mod ported;
+mod priority;
 mod procutil;
 mod props;
 mod real;
