@@ -38,7 +38,12 @@ pub struct Seen {
 /// Reads the process table once. `carry` is the `(NAME, value)` an environment must hold for [`Seen::carries`]; `names` the
 /// texts one of which a command line must contain for [`Seen::names`]. A process whose start time cannot be read is left out (nothing
 /// could act on it by identity). Empty when the table cannot be read.
+///
+/// The identities are read first, the facts after (as `processes_mentioning` does, ADR 0033): a pid handed on between the two
+/// keeps the identity of the process that had it first, so acting on the row finds the new holder and leaves it alone. A row whose
+/// identity no longer holds after its group was read is left out.
 pub fn look(carry: Option<(&str, &str)>, names: &[&str]) -> Vec<Seen> {
+    let identities = crate::usage::snapshot();
     let Ok(mut sys) = System::new() else {
         return Vec::new();
     };
@@ -56,12 +61,17 @@ pub fn look(carry: Option<(&str, &str)>, names: &[&str]) -> Vec<Seen> {
         .filter(|(_, p)| p.thread_kind().is_none())
         .filter_map(|(pid, p)| {
             let pid = pid.as_u32();
-            let id = ProcessId::of(pid)?;
+            let id = crate::usage::identity(&identities, pid)?;
             let same_user = same_user(p.user_id());
+            let group = group_of(pid);
+            // The group (and the facts above) belong to the process the identity names only if it still holds the pid.
+            if ProcessId::of(pid) != Some(id) {
+                return None;
+            }
             Some(Seen {
                 id,
                 parent: p.parent().map(Pid::as_u32),
-                group: group_of(pid),
+                group,
                 same_user,
                 zombie: matches!(p.status(), ProcessStatus::Zombie | ProcessStatus::Dead),
                 carries: same_user
@@ -109,6 +119,14 @@ pub fn group_of(_: u32) -> Option<u32> {
     None
 }
 
+/// Whether this process leads its own process group (Unix): true under nextest, which starts every test in a group of its own
+/// and ends that group on a timeout. A test helper then never makes a new group (ADR 0103): its children stay in the group the
+/// runner ends. Always false on Windows (no groups; a kill-on-close job covers it).
+pub fn leads_own_group() -> bool {
+    let me = std::process::id();
+    group_of(me) == Some(me)
+}
+
 /// Makes `cmd` lead a process group of its own when it starts (Unix; nothing on Windows), so the group is one the caller made.
 pub fn own_group(cmd: &mut Command) {
     crate::sys::own_group(cmd);
@@ -129,7 +147,8 @@ pub fn become_child_subreaper() -> bool {
 }
 
 /// Linux: collects `id` if it is an ended child of this process (an orphan re-parented to a subreaper), so it leaves the table.
-/// Never for a child whose `std::process::Child` someone still holds: its `wait` would then fail. Does nothing elsewhere.
+/// Only for a process the caller knows was re-parented (it started below another process): a child the caller started itself
+/// may still be held by a `std::process::Child`, whose `wait` would then lose its exit status. Does nothing elsewhere.
 pub fn reap_zombie(id: ProcessId) {
     #[cfg(target_os = "linux")]
     if crate::sys::is_zombie(id.pid())

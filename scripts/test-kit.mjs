@@ -5,8 +5,10 @@
 //   lines written, files made; any change counts) has not changed for `noProgressMs`. Without `progress` that bound is a plain hang
 //   guard from the start. `now` and `sleep` are injectable, so the schedule is tested without a wall clock.
 // - Reaper: every process a test started ends with the test, and nothing else does (ER-14, rule 53). The same rules as
-//   paddock_testkit_start::Reaper: it acts only on its own children (each in a session and process group of its own, with the
-//   reaper's token PADDOCK_REAPER_ID in its environment), the descendants a sampler saw below them, and processes of this user
+//   paddock_testkit_start::Reaper: it acts only on its own children (with the reaper's token PADDOCK_REAPER_ID in their
+//   environment; they stay in the test's process group, never a new group or session: ADR 0103's "a test helper never makes a
+//   new group or session while the test leads one", and under node --test the file's process leads none, measured, so a group
+//   kill of whatever runs the tests still reaches them), the descendants a sampler saw below them, and processes of this user
 //   started after the reaper that are in one of its groups, carry its token (readable on Linux only: macOS shows no other
 //   process's environment) or name a folder it made (scratchIn) while being orphans or children of this process. Each is ended alone, by pid after its start
 //   time is checked again; never a process group, never by a pattern. With `{ inherit: true }` the token goes into this process's
@@ -99,6 +101,9 @@ const same = (a, b) => a.pid === b.pid && a.lstart === b.lstart;
 
 /** The rows of `table` that are the test's, with the first reason that holds (the pure rule; the same as the Rust reaper's). */
 export function choose(table, { roots, below, groups, created, uid, me, token, folders, carry = carries }) {
+  // A group counts while its leader is still the process seen leading it, or while no process holds the leader's pid (a group
+  // keeps its id while it has members, and the id is not handed on before it is empty).
+  const live = new Set([...groups].filter(([, leader]) => { const r = table.find((t) => t.pid === leader.pid); return !r || same(r, leader); }).map(([g]) => g));
   const out = [];
   // lstart has whole seconds, and Linux counts a start from a boot time in whole seconds (a process started 0.7 s after the
   // reaper showed 0.3 s before it in node:24-bookworm, 2026-11-15): one second of slack below the floor. The folder and the token
@@ -110,7 +115,7 @@ export function choose(table, { roots, below, groups, created, uid, me, token, f
     if (roots.some((r) => same(r, row))) how = 'child';
     else if (below.some((b) => same(b, row))) how = 'below a child';
     else if (row.uid !== uid || !(row.started >= since)) how = null;
-    else if (groups.has(row.pgid)) how = 'in a group the reaper made';
+    else if (live.has(row.pgid)) how = 'in a group the reaper made';
     else if (carry(row.pid, TOKEN_VAR, token)) how = "carries the reaper's token";
     else if ((row.ppid === 1 || row.ppid === me) && folders.some((f) => row.command.includes(f))) how = 'names a folder the reaper made';
     if (how) out.push({ pid: row.pid, lstart: row.lstart, how });
@@ -128,7 +133,7 @@ export class Reaper {
     this.created = Date.now();
     this.roots = [];
     this.below = [];
-    this.groups = new Set();
+    this.groups = new Map(); // a group's id to its leader's identity
     this.folders = [];
     this.stopped = false;
     this.pace = 0;
@@ -151,15 +156,15 @@ export class Reaper {
     clearTimeout(this.timer);
   }
 
-  /** Starts a child (node's spawn) in a session and group of its own, with the token in its environment, and keeps its identity. */
+  /** Starts a child (node's spawn) with the token in its environment, in this process's group, and keeps its identity. */
   spawn(command, args = [], options = {}) {
     const env = { ...(options.env ?? process.env), [TOKEN_VAR]: this.token };
-    const child = spawn(command, args, { ...options, env, detached: true });
+    const child = spawn(command, args, { ...options, env, detached: false });
     if (child.pid) {
       const row = processTable().find((p) => p.pid === child.pid);
       if (row) {
         this.roots.push({ pid: row.pid, lstart: row.lstart });
-        if (row.pgid === row.pid) this.groups.add(row.pid);
+        if (row.pgid === row.pid) this.groups.set(row.pid, { pid: row.pid, lstart: row.lstart });
       }
     }
     return child;
@@ -186,7 +191,7 @@ export class Reaper {
         if (!seen.has(p.pid) && seen.has(p.ppid)) {
           seen.add(p.pid);
           if (!this.below.some((b) => same(b, p))) this.below.push({ pid: p.pid, lstart: p.lstart });
-          if (p.pgid === p.pid) this.groups.add(p.pid);
+          if (p.pgid === p.pid) this.groups.set(p.pid, { pid: p.pid, lstart: p.lstart });
           grew = true;
         }
       }

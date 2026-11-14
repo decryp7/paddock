@@ -71,7 +71,7 @@ test('the process table fails closed: a ps that cannot run throws instead of lis
 test('the rule chooses only what it can prove: children, their descendants, its groups, its token, orphans naming its folder', () => {
   const created = Date.parse('Sun Nov 15 01:00:00 2026');
   const row = (pid, over = {}) => ({ pid, ppid: 500, pgid: pid, uid: 501, started: created + 1000, lstart: `L${pid}`, command: 'x', ...over });
-  const facts = { roots: [{ pid: 10, lstart: 'L10' }], below: [{ pid: 11, lstart: 'L11' }], groups: new Set([10]), created, uid: 501, me: 42, token: 't', folders: ['/s/reaper-t-0'], carry: (pid) => pid === 13 };
+  const facts = { roots: [{ pid: 10, lstart: 'L10' }], below: [{ pid: 11, lstart: 'L11' }], groups: new Map([[10, { pid: 10, lstart: 'L10' }]]), created, uid: 501, me: 42, token: 't', folders: ['/s/reaper-t-0'], carry: (pid) => pid === 13 };
   const table = [
     row(10), row(11), row(12, { pgid: 10 }), row(13), row(14, { ppid: 1, command: 'sh /s/reaper-t-0' }),
     row(15, { command: 'sh /s/reaper-t-0' }), // names the folder with a live parent: not proven
@@ -85,6 +85,16 @@ test('the rule chooses only what it can prove: children, their descendants, its 
   ]);
   // A pid handed on (the same pid, another start time) is not the child.
   assert.deepEqual(choose([row(10, { lstart: 'other', pgid: 99 })], facts), []);
+});
+
+test('a group counts while its leader is the process seen, or while no process holds its pid', () => {
+  const created = Date.parse('Sun Nov 15 01:00:00 2026');
+  const row = (pid, over = {}) => ({ pid, ppid: 500, pgid: 10, uid: 501, started: created + 1000, lstart: `L${pid}`, command: 'x', ...over });
+  const facts = { roots: [], below: [], groups: new Map([[10, { pid: 10, lstart: 'L10' }]]), created, uid: 501, me: 42, token: 't', folders: [], carry: () => false };
+  const pids = (table) => choose(table, facts).map((c) => c.pid);
+  assert.deepEqual(pids([row(10), row(12)]), [10, 12]);
+  assert.deepEqual(pids([row(12)]), [12], 'the leader is gone; the group keeps its id while it has members');
+  assert.deepEqual(pids([row(10, { lstart: 'another' }), row(12)]), [], 'pid 10 is another process: the group id may be someone else\'s');
 });
 
 /** A shell that starts `sleep 20` under a second shell whose $0 is `arg`, in a group of its own (set -m), prints its pid, then waits for a line. */
@@ -162,4 +172,27 @@ test('another reaper\'s child is left alone, and the token is in its environment
     await exited;
   }
   assert.deepEqual(await b.reap(), []);
+});
+
+test('a runner that kills the test\'s group also ends the reaper\'s children', unix, async () => {
+  // The fake runner is this test: it starts a "test" (a node process) leading a group of its own, as a runner's timeout kill
+  // expects, kills that group (its own child's, nothing else) and checks that the reaper's `sleep 60` ended with it, although the
+  // reaper never got to reap. Safe while red: a child that escaped is a sleep that ends by itself.
+  const kit = new URL('./test-kit.mjs', import.meta.url).href;
+  const script = `import { Reaper } from ${JSON.stringify(kit)};
+const r = new Reaper('under a fake runner');
+const c = r.spawn('sleep', ['60'], { stdio: 'ignore' });
+console.log('pid ' + c.pid);
+setInterval(() => {}, 1000);`;
+  const test = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+  const exited = once(test, 'exit');
+  let text = '';
+  for await (const chunk of test.stdout) { text += chunk; if (/pid \d+\n/.test(text)) break; }
+  const pid = Number(/pid (\d+)/.exec(text)[1]);
+  const sleep = processTable().find((t) => t.pid === pid);
+  assert.ok(sleep, 'the reaper\'s child runs');
+  process.kill(-test.pid, 'SIGKILL'); // the test's group: this test's own child leads it
+  await exited;
+  await waitProgressing('the reaper\'s child to end with the test\'s group', () => !runningAs(sleep), { noProgressMs: 30_000 }).catch(() => {});
+  assert.ok(!runningAs(sleep), `the reaper's child ${pid} outlived a runner that killed the test's group`);
 });

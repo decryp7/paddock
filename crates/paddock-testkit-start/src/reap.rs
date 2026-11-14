@@ -1,8 +1,12 @@
 //! Every process a test started ends with the test, and nothing else does (ADR 0103, ER-14, rule 53). [`Reaper`] acts only on
 //! processes it can prove the test created:
 //!
-//! - the children it started ([`Reaper::spawn`]): each leads a process group of its own (Unix) and joins a kill-on-close job
-//!   (Windows), and carries the reaper's token, `PADDOCK_REAPER_ID=<random>`, in its environment;
+//! - the children it started ([`Reaper::spawn`]): each carries the reaper's token, `PADDOCK_REAPER_ID=<random>`, in its
+//!   environment and joins a kill-on-close job (Windows). A test helper never makes a new group or session while the test leads
+//!   one (ADR 0103, after Bazel's "Tests may create subprocesses, but not process groups or sessions"): under nextest, which
+//!   starts each test in a group of its own and ends that group on a timeout, a child stays in the test's group, so a timeout
+//!   that never lets the reaper run still ends it. Only when the test does not lead a group (a plain `cargo test`) does a child
+//!   lead a group of its own;
 //! - every descendant a sampler saw below one of them while they ran (from [`SAMPLE_FIRST`] backing off to [`SAMPLE_EVERY`]);
 //!   a descendant that leads a group of its own (a detached child) adds that group to the reaper's groups;
 //! - a process of this user, started after the reaper was made, that is in one of the reaper's groups or carries its token
@@ -11,7 +15,9 @@
 //!   ([`Reaper::scratch_in`]: its name holds the token) and that is an orphan (its parent is init) or a child of this test
 //!   process (started by the test itself, or an orphan re-parented to it as Linux's child subreaper).
 //!
-//! Anything else is left alone, whatever its command line says. A child is ended with its tree (its own group); every other
+//! A group counts only while its leader is the process the reaper saw lead it, or no process holds the leader's pid (a group
+//! keeps its id while it has members). Anything else is left alone, whatever its command line says. A child is ended with its
+//! tree (`kill_tree`: its group only when it leads one); every other
 //! process is ended alone, by identity (`paddock_proc::end`), never by a group or a pattern. On Linux the test process becomes a
 //! child subreaper, so orphans stay in its tree. [`Reaper::reap`] (or drop, also when the test panics partway) ends them, waits
 //! until they are gone and returns what it had to end; a test that must leave nothing running asserts that the list is empty.
@@ -40,8 +46,8 @@ pub const GONE_WITHIN: Duration = Duration::from_secs(15);
 struct Seen {
     roots: Vec<ProcessId>,
     below: BTreeSet<ProcessId>,
-    /// Process groups the reaper made (its children's) or saw a descendant make.
-    groups: BTreeSet<u32>,
+    /// The leaders of the process groups the reaper made (its children's) or saw a descendant make, by identity.
+    groups: BTreeSet<ProcessId>,
 }
 
 /// The guard for the processes of one test (see the module). Not `Clone`: one per test, dropped at its end.
@@ -114,11 +120,14 @@ impl Reaper {
         &self.token
     }
 
-    /// Starts `cmd` with the reaper's token in its environment, leading a process group of its own (Unix) and in a kill-on-close
-    /// job (Windows), and keeps its identity. The child is the caller's to wait on; the reaper ends it only if it still runs.
+    /// Starts `cmd` with the reaper's token in its environment and in a kill-on-close job (Windows), and keeps its identity. It
+    /// stays in the test's process group when the test leads one (nextest), and leads a group of its own otherwise. The child is
+    /// the caller's to wait on; the reaper ends it only if it still runs.
     pub fn spawn(&self, cmd: &mut Command) -> std::io::Result<Child> {
         cmd.env(TOKEN_VAR, &self.token);
-        own::own_group(cmd);
+        if !own::leads_own_group() {
+            own::own_group(cmd);
+        }
         let child = cmd.spawn()?;
         #[cfg(windows)]
         if let Ok(job) = own::KillOnClose::assign(&child) {
@@ -131,7 +140,7 @@ impl Reaper {
             let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
             seen.roots.push(id);
             if own::group_of(id.pid()) == Some(id.pid()) {
-                seen.groups.insert(id.pid());
+                seen.groups.insert(id);
             }
         }
         sample(&self.seen);
@@ -225,7 +234,11 @@ impl Reaper {
         let began = Instant::now();
         let mut pause = FIRST;
         let left = loop {
-            for e in todo.iter().filter(|e| !roots.contains(&e.id)) {
+            // Only a process seen below a child can have been re-parented to this process: never one the test started itself.
+            for e in todo
+                .iter()
+                .filter(|e| e.how == "below a child" && !roots.contains(&e.id))
+            {
                 own::reap_zombie(e.id);
             }
             let left: Vec<u32> = todo
@@ -261,13 +274,26 @@ impl Drop for Reaper {
 struct Facts<'a> {
     roots: &'a [ProcessId],
     below: &'a BTreeSet<ProcessId>,
-    groups: &'a BTreeSet<u32>,
+    groups: &'a BTreeSet<ProcessId>,
     created: StartTime,
     me: u32,
 }
 
 /// The rows of `table` that are the test's, each once, with the first reason that holds (the pure rule of the module).
 fn choose(table: &[Row], f: &Facts<'_>) -> Vec<Ended> {
+    // A group counts while its leader is still the process seen leading it, or while no process holds the leader's pid (the
+    // group keeps its id while it has members, and its id is not handed on before it is empty).
+    let groups: BTreeSet<u32> = f
+        .groups
+        .iter()
+        .filter(
+            |leader| match table.iter().find(|r| r.id.pid() == leader.pid()) {
+                Some(r) => r.id == **leader,
+                None => true,
+            },
+        )
+        .map(|leader| leader.pid())
+        .collect();
     let mut out: Vec<Ended> = Vec::new();
     for row in table.iter().filter(|r| !r.zombie && r.id.pid() != f.me) {
         let since = row.id.started() >= f.created;
@@ -279,7 +305,7 @@ fn choose(table: &[Row], f: &Facts<'_>) -> Vec<Ended> {
             Some("below a child")
         } else if !ours || !since {
             None
-        } else if row.group.is_some_and(|g| f.groups.contains(&g)) {
+        } else if row.group.is_some_and(|g| groups.contains(&g)) {
             Some("in a group the reaper made")
         } else if row.carries {
             Some("carries the reaper's token")
@@ -308,10 +334,10 @@ fn sample(seen: &Mutex<Seen>) {
             found.extend(paddock_proc::descendants_of(root));
         }
     }
-    let leaders: Vec<u32> = found
+    let leaders: Vec<ProcessId> = found
         .iter()
         .filter(|d| own::group_of(d.pid()) == Some(d.pid()))
-        .map(|d| d.pid())
+        .copied()
         .collect();
     let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
     seen.below.extend(found);
@@ -351,7 +377,7 @@ mod rule_tests {
     fn facts<'a>(
         roots: &'a [ProcessId],
         below: &'a BTreeSet<ProcessId>,
-        groups: &'a BTreeSet<u32>,
+        groups: &'a BTreeSet<ProcessId>,
     ) -> Facts<'a> {
         Facts {
             roots,
@@ -380,7 +406,10 @@ mod rule_tests {
 
     #[test]
     fn nothing_started_before_the_reaper_or_of_another_user_is_chosen_by_token_group_or_folder() {
-        let (b, g) = (BTreeSet::new(), BTreeSet::from([9]));
+        let (b, g) = (
+            BTreeSet::new(),
+            BTreeSet::from([ProcessId::new(9, StartTime::from_micros(999))]),
+        );
         let mut old = row(9, 999);
         old.carries = true;
         old.names = true;
@@ -398,6 +427,28 @@ mod rule_tests {
                 "another user's process"
             );
         }
+    }
+
+    #[test]
+    fn a_group_counts_while_its_leader_is_the_process_seen_or_no_process_holds_its_pid() {
+        let leader = row(10, 2_000);
+        let mut member = row(12, 2_200);
+        member.group = Some(10);
+        let (b, groups) = (BTreeSet::new(), BTreeSet::from([leader.id]));
+        let chosen = |table: &[Row]| {
+            choose(table, &facts(&[], &b, &groups))
+                .iter()
+                .map(|e| e.id.pid())
+                .collect::<Vec<_>>()
+        };
+        // The leader runs: the group is the reaper's (the leader itself is chosen as a member of its own group too).
+        assert_eq!(chosen(&[leader.clone(), member.clone()]), [10, 12]);
+        // The leader is gone and nobody holds pid 10: the group keeps its id while it has members.
+        assert_eq!(chosen(std::slice::from_ref(&member)), [12]);
+        // Pid 10 is another process now: the group id may be someone else's, so nothing is chosen by it.
+        let mut other = row(10, 9_000);
+        other.group = Some(10);
+        assert!(chosen(&[other, member]).is_empty());
     }
 
     #[test]
@@ -421,7 +472,7 @@ mod rule_tests {
         let mut carrier = row(13, 2_300);
         carrier.carries = true;
         let below = BTreeSet::from([desc.id]);
-        let groups = BTreeSet::from([10]);
+        let groups = BTreeSet::from([root.id]);
         let roots = [root.id];
         let chosen = choose(
             &[root, desc, grouped, carrier],
@@ -609,6 +660,80 @@ mod tests {
         assert!(
             own::has_ended(parent) && own::has_ended(g),
             "the parent or the grandchild outlived a test that panicked"
+        );
+    }
+
+    /// Set when this test binary runs as "the test" under [`a_runner_that_ends_the_tests_group_also_ends_the_reapers_children`].
+    const UNDER_RUNNER: &str = "PADDOCK_REAPER_TEST_UNDER_RUNNER";
+
+    /// The test a fake runner starts: a reaper starts `sleep 60`, the test prints its pid and blocks until the runner kills it, so
+    /// the reaper never runs. Run by itself (without the variable), it does nothing.
+    #[test]
+    fn under_a_fake_runner() {
+        if std::env::var_os(UNDER_RUNNER).is_none() {
+            return;
+        }
+        let reaper = Reaper::new("under a fake runner");
+        let mut child = reaper
+            .spawn(
+                paddock_proc::command("sleep")
+                    .arg("60")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null()),
+            )
+            .unwrap();
+        println!("pid {}", child.id());
+        std::io::stdout().flush().unwrap();
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        drop(reaper);
+        let _ = child.wait();
+    }
+
+    /// nextest starts each test in a process group of its own and, on a timeout, kills that group, so no drop runs. A reaper's
+    /// child must be in that group to end with it (round 2 of the ADR 0103 review). The fake runner here is this test: it starts
+    /// this binary as the test above, leading a group of its own as nextest does, kills that group (its own child's, nothing
+    /// else) and checks that the reaper's `sleep` ended with it. Safe while red: a child that escaped is a `sleep 60` that ends by
+    /// itself.
+    #[test]
+    fn a_runner_that_ends_the_tests_group_also_ends_the_reapers_children() {
+        use std::os::unix::process::CommandExt;
+        let exe = std::env::current_exe().unwrap();
+        let mut test = paddock_proc::command(&exe)
+            .args([
+                "--exact",
+                "reap::tests::under_a_fake_runner",
+                "--nocapture",
+                "--test-threads",
+                "1",
+            ])
+            .env(UNDER_RUNNER, "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let mut sleep = None;
+        for line in BufReader::new(test.stdout.take().unwrap()).lines() {
+            let line = line.unwrap();
+            // libtest prints the test's name and "... " on the same line before the test's own output.
+            if let Some((_, pid)) = line.rsplit_once("pid ") {
+                sleep = ProcessId::of(pid.trim().parse().unwrap());
+                break;
+            }
+        }
+        let sleep = sleep.expect("the test under the fake runner printed its child's pid");
+        // The runner's timeout: SIGKILL to the test's group, which this test made for its own child.
+        paddock_proc::end_unreaped_group(test.id());
+        let _ = test.wait();
+        // conformance: hang-guard — 30 s only stops a sleep that escaped the group (it ends by itself after 60 s)
+        let gone =
+            paddock_testkit::poll_until_within(Duration::from_secs(30), || own::has_ended(sleep));
+        assert!(
+            gone,
+            "the reaper's child {} outlived a runner that killed the test's group",
+            sleep.pid()
         );
     }
 
