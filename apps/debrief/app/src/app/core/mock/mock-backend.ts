@@ -518,13 +518,19 @@ export class MockBackend implements DebriefBackend {
   }
 
   queryPage(request: PageRequest): Promise<Page> {
-    return (
-      this.failing('queryPage') ??
-      this.delay(() => {
-        const page = this.redactPage(this.options.syntheticTotal ? syntheticPage(request, this.syntheticCount()) : this.engine.page(this.windowed(request)));
-        return this.options.corruptMarkers ? { ...page, rows: page.rows.map((r) => ({ ...r, markers: undefined as never })) } : page;
-      }, 20)
-    );
+    return this.failing('queryPage') ?? this.readMockPage(request);
+  }
+
+  /**
+   * A page as `queryPage` answers it, but no call of that command: the other mocks read their records here (analysis, share,
+   * search), where the engine computes the answer itself. It never takes one of `mockFail`'s simulated `queryPage` failures,
+   * which belong to the UI's own calls. Use it through `mockRecordsPage()`.
+   */
+  readMockPage(request: PageRequest): Promise<Page> {
+    return this.delay(() => {
+      const page = this.redactPage(this.options.syntheticTotal ? syntheticPage(request, this.syntheticCount()) : this.engine.page(this.windowed(request)));
+      return this.options.corruptMarkers ? { ...page, rows: page.rows.map((r) => ({ ...r, markers: undefined as never })) } : page;
+    }, 20);
   }
 
   searchPartial(query: Query): Promise<PartialMatches | null> {

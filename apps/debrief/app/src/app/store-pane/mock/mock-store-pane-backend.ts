@@ -19,6 +19,7 @@ import type { DebriefBackend } from '../../core/backend';
 import { CmdError } from '../../core/cmd-error';
 import { EMPTY_QUERY } from '../../core/workspace/query.store';
 import type { StorePaneBackend } from '../store-pane-backend';
+import { mockRecordsPage } from '../../core/mock/mock-records-page';
 
 const MB = 1024 * 1024;
 /** Rows per mock segment (the engine's are 1M). */
@@ -245,7 +246,7 @@ export class MockStorePaneBackend implements StorePaneBackend {
     }
     if (/\bfrom\s+(debrief\.)?events\b/i.test(text)) {
       const limit = Number(/\blimit\s+(\d+)/i.exec(text)?.[1] ?? MAX_ROWS + 1);
-      const page = await this.debrief.queryPage({ query: EMPTY_QUERY, offset: 0, limit: Math.min(limit, MAX_ROWS + 1, 5_000), descending: false });
+      const page = await mockRecordsPage(this.debrief, { query: EMPTY_QUERY, offset: 0, limit: Math.min(limit, MAX_ROWS + 1, 5_000), descending: false });
       const rows = page.rows.map((r) => [r.id, r.ts === null ? null : new Date(r.ts).toISOString().replace('T', ' ').replace('Z', ''), r.level, r.message]);
       const truncated = rows.length > MAX_ROWS || (limit > MAX_ROWS && s.total > MAX_ROWS);
       return {

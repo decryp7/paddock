@@ -33,6 +33,7 @@ import { MockFiles } from '../../core/mock/mock-import';
 import { MOCK_DETECTORS, mockRedactCfg, mockRedactionPreview, MockRedactor } from './mock-redact';
 import { mockJobs, mockSteps } from '../../jobs/mock-jobs';
 import { CmdError } from '../../core/cmd-error';
+import { mockRecordsPage } from '../../core/mock/mock-records-page';
 
 /** How long a mock export takes (`?mockExportMs=`, default instant), to see it as a job in the Jobs pane. */
 export function mockExportMs(search = typeof window === 'undefined' ? '' : window.location.search): number {
@@ -114,7 +115,7 @@ export class MockShareBackend extends ShareBackend {
   /** What the profile's rules would change in the first page of matching events (the engine scans up to 200,000). */
   async redactionSummary(request: RedactionSummaryRequest): Promise<RedactionSummary> {
     const r = new MockRedactor(mockRedactCfg(await this.profileModel()), 'summary');
-    const page = await this.debrief.queryPage({ query: request.query, offset: 0, limit: 5000, descending: false, anchor: null });
+    const page = await mockRecordsPage(this.debrief, { query: request.query, offset: 0, limit: 5000, descending: false, anchor: null });
     const counts: Record<string, number> = {};
     const samples = [];
     let changed = 0;
@@ -150,7 +151,7 @@ export class MockShareBackend extends ShareBackend {
         if ('error' in out) throw new Error(out.error.message);
         const limit = Math.min(100, Math.max(1, tile.limit ?? 100));
         if (out.result.kind === 'table') return { kind: 'table', columns: out.result.columns, rows: out.result.rows.slice(0, limit), truncated: out.result.rows.length > limit };
-        const page = await this.debrief.queryPage({ query: { ...EMPTY_QUERY }, offset: 0, limit: 1_000_000, descending: false, anchor: null });
+        const page = await mockRecordsPage(this.debrief, { query: { ...EMPTY_QUERY }, offset: 0, limit: 1_000_000, descending: false, anchor: null });
         const byId = new Map(page.rows.map((r) => [r.id, r]));
         const rows = out.result.ids.slice(0, limit).map((id) => {
           const r = byId.get(id);
@@ -285,7 +286,7 @@ export class MockShareBackend extends ShareBackend {
   async redactedCopyPreview(options: RedactedCopyOptions): Promise<RedactedCopyPreview> {
     const r = await this.copyRedactor(options, 'copy-preview');
     const scope = await this.copyScope();
-    const page = await this.debrief.queryPage({ query: { ...EMPTY_QUERY }, offset: 0, limit: 5000, descending: false, anchor: null });
+    const page = await mockRecordsPage(this.debrief, { query: { ...EMPTY_QUERY }, offset: 0, limit: 5000, descending: false, anchor: null });
     const rows = page.rows.filter((row) => scope.textIds.has(row.source));
     const counts: Record<string, number> = {};
     const samples = [];

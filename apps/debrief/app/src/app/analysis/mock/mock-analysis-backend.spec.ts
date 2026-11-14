@@ -2,7 +2,8 @@ import { TestBed } from '@angular/core/testing';
 import { RecordView } from '../../core/api.types';
 import { AnalysisBackend, TauriAnalysisBackend } from '../../core/analysis-backend';
 import { QlQuery, QueryProgress } from '../../core/api.types';
-import { MockAnalysisBackend } from './mock-analysis-backend';
+import { MockAnalysisBackend, recordsFrom } from './mock-analysis-backend';
+import { MockBackend } from '../../core/mock/mock-backend';
 import { EMPTY_QUERY } from '../../core/workspace.store';
 import { DEMO_START } from '../../core/mock/mock-data';
 import { allRecords, provideAnalysisTesting } from '../test-setup';
@@ -256,5 +257,15 @@ describe('MockAnalysisBackend streaming', () => {
     const b = new Plain(async () => [] as never[]);
     expect(await b.runQueryStreaming(q({ ql: '| stats count()' }), 'c', () => undefined)).toMatchObject({ result: { kind: 'table' } });
     expect(await b.cancelQuery('c')).toBe(false);
+  });
+
+  it("reads its records without taking a simulated queryPage failure meant for the grid's commands", async () => {
+    // `?mockFail=queryPage:N` fails the first N calls the UI makes. The engine computes an analysis itself, so the mock's
+    // own read of the records is no such call: before, whichever panel asked first at start-up took the failures
+    // (resilience-panels.e2e.ts:34 in CI 8091: queryAnomalies and overview failed, the grid did not).
+    const debrief = new MockBackend({ latency: false, fail: { queryPage: 1 } });
+    const analysis = new MockAnalysisBackend(recordsFrom(debrief));
+    await expect(analysis.queryAnomalies(q())).resolves.toMatchObject({ coverage: expect.anything() });
+    await expect(debrief.queryPage({ query: EMPTY_QUERY, offset: 0, limit: 1, descending: false })).rejects.toThrow('Simulated queryPage failure');
   });
 });

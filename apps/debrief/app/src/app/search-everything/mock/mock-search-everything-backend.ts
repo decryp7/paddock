@@ -5,6 +5,7 @@ import type { DebriefBackend } from '../../core/backend';
 import type { NotesBackend } from '../../notes/notes-backend';
 import { CmdError } from '../../core/cmd-error';
 import type { SearchEverythingBackend } from '../search-everything-backend';
+import { mockRecordsPage } from '../../core/mock/mock-records-page';
 
 const DEFAULT_PER_KIND = 8;
 const MAX_PER_KIND = 50;
@@ -248,7 +249,7 @@ export class MockSearchEverythingBackend implements SearchEverythingBackend {
     const query: Query = { levels: [], text, textMode: 'words', regex: false, caseSensitive: false, filters: [], groupBy: [], groups: [], markers: [] };
     const [summary, page, groups, notes, knowledge] = await Promise.all([
       this.workspace.workspaceSummary(),
-      this.workspace.queryPage({ query, offset: 0, limit, descending: false }),
+      mockRecordsPage(this.workspace, { query, offset: 0, limit, descending: false }),
       this.sources.analysis().queryExceptions({ ...query, text: '' }),
       this.noteHits(needles, holds),
       this.knowledgeHits(needles, holds),
