@@ -8,7 +8,8 @@
 //! comment are not read; a justified site carries `// conformance: layout-guess — <reason>` on the line or the line above.
 
 use super::finding::Finding;
-use super::jsre::{DOT, WS, has_reason, line_at, rx, trim};
+use super::inline_waiver::{InlineWaiver, recognise};
+use super::jsre::{WS, line_at, rx, trim};
 use super::mask::mask_rust;
 use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -24,12 +25,6 @@ const IMPLEMENTATION: [&str; 3] = [
 
 static SCOPE: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:crates|tools|apps|scripts)/"));
 static VENDORED: LazyLock<Regex> = LazyLock::new(|| rx(r"^apps/[^/]+/vendor/"));
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*layout-guess\s*([—–-]+)"));
-static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*layout-guess"));
-/// The reason after the marker and its dashes: what the JavaScript `/marker\s*[—–-]+\s*(\S.{2,})/` captures.
-static WAIVER_REASON: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"conformance:\s*layout-guess\s*[—–-]+\s*(\S{DOT}{{2,}})")));
-/// One reason for the test code of a file (a test module that only uses `deps` as filler data): its sites are waived with it.
-static FILE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"conformance:\s*file-layout-guess\s*[—–-]+\s*(\S{DOT}{{2,}})")));
 static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"current_exe|OUT_DIR|deps"));
 
 const START: &str = r"(?:current_exe\s*\(|\bOUT_DIR\b)";
@@ -92,7 +87,7 @@ pub fn test_module_lines(text: &str) -> Vec<(usize, usize)> {
             if *b == b'{' {
                 depth += 1;
             } else if *b == b'}' {
-                depth -= 1;
+                depth = depth.saturating_sub(1);
                 if depth == 0 {
                     end = i;
                     break;
@@ -111,10 +106,8 @@ pub struct Guess {
     pub line: usize,
     /// What it does, in a sentence.
     pub what: &'static str,
-    /// The waiver comment: `Some(true)` with a reason, `Some(false)` without one, `None` for no comment.
-    pub waived: Option<bool>,
-    /// The reason of the waiver (the site's, else the file's); empty when there is none.
-    pub reason: String,
+    /// The waiver comment: the site's, else the file's (`file-layout-guess`), else a bare site comment.
+    pub waived: InlineWaiver,
 }
 
 /// `text` with the lines that start with `prefix` (after white space) emptied and a trailing comment (white space, then `prefix`) cut
@@ -145,9 +138,9 @@ pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
         }
     }
     hits.sort_by_key(|h| (h.0, h.1));
-    let file_reason = FILE_WAIVER.captures(text).map(|c| c[1].to_string()).unwrap_or_default();
+    let file_waiver = recognise(text, "file-layout-guess");
     let under_tests = UNDER_TESTS.is_match(file);
-    let test_lines = if !file_reason.is_empty() && !shell && !under_tests {
+    let test_lines = if matches!(file_waiver, InlineWaiver::Reason(_)) && !shell && !under_tests {
         test_module_lines(text)
     } else {
         Vec::new()
@@ -176,23 +169,12 @@ pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
                 ""
             }
         );
-        let site_reason = if has_reason(&near, &WAIVER) {
-            WAIVER_REASON.captures(&near).map(|c| c[1].to_string())
-        } else {
-            None
+        let waived = match (recognise(&near, "layout-guess"), &file_waiver) {
+            (site @ InlineWaiver::Reason(_), _) => site,
+            (_, file @ InlineWaiver::Reason(_)) if file_waives(line) => file.clone(),
+            (site, _) => site,
         };
-        let (waived, reason) = match site_reason {
-            Some(r) => (Some(true), r),
-            None if !file_reason.is_empty() && file_waives(line) => (Some(true), file_reason.clone()),
-            None if BARE_WAIVER.is_match(&near) => (Some(false), String::new()),
-            None => (None, String::new()),
-        };
-        out.push(Guess {
-            line,
-            what,
-            waived,
-            reason,
-        });
+        out.push(Guess { line, what, waived });
     }
     out
 }
@@ -207,6 +189,10 @@ impl Check for C120 {
 
     fn rule(&self) -> u32 {
         40
+    }
+
+    fn mode(&self) -> super::Mode {
+        super::Mode::ReportOnly
     }
 
     fn title(&self) -> &'static str {
@@ -255,35 +241,24 @@ impl Check for C120 {
                 continue;
             }
             for g in layout_guesses(&text, shell, f) {
-                match g.waived {
-                    Some(true) => findings.push(
-                        Finding::warn(
-                            "C120",
-                            40,
-                            f,
-                            g.line,
-                            format!("{}: right in one cargo layout, a wrong folder in the other", g.what),
-                            fix,
-                        )
-                        .inline_waived(g.reason),
-                    ),
-                    Some(false) => findings.push(Finding::warn(
+                let site = Finding::warn(
+                    "C120",
+                    40,
+                    f,
+                    g.line,
+                    format!("{}: right in one cargo layout, a wrong folder in the other", g.what),
+                    fix,
+                );
+                findings.push(g.waived.apply(site, || {
+                    Finding::warn(
                         "C120",
                         40,
                         f,
                         g.line,
                         "the layout-guess waiver gives no reason",
                         "Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`.",
-                    )),
-                    None => findings.push(Finding::warn(
-                        "C120",
-                        40,
-                        f,
-                        g.line,
-                        format!("{}: right in one cargo layout, a wrong folder in the other", g.what),
-                        fix,
-                    )),
-                }
+                    )
+                }));
             }
         }
         let has_src = ctx.tree_files().iter().any(|f| f.ends_with(".rs") || f.ends_with(".sh"));

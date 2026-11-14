@@ -32,7 +32,8 @@ const CASES: [(&str, &str); 6] = [
 fn options(root: &Path, app: &str) -> RunOptions {
     RunOptions {
         root: root.to_path_buf(),
-        app: app.into(),
+        config: paddock_dev::check::config::Config::bare(app),
+        scope: None,
         only: Some(vec!["C122".into()]),
         files: None,
         today: "2026-11-13".into(),

@@ -5,25 +5,22 @@
 //! `// conformance: pid-liveness — <reason>` on the line or the line above.
 
 use super::Ctx;
+use super::baseline::{self, Growth, reconcile};
 use super::finding::Finding;
-use super::jsre::{has_reason, is_js_space, line_at, rx, units};
+use super::inline_waiver::{InlineWaiver, recognise};
+use super::jsre::{is_js_space, line_at, rx, units};
 use super::mask::mask_units;
-use paddock_proc::{Limits, command, run_bounded};
 use regex::Regex;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 /// The baseline of the known sites.
 pub const LIVENESS_BASELINE: &str = "conformance/baselines/C53.json";
 const NAMES: [&str; 3] = ["is_alive", "may_be_alive", "presence"];
 const IMPLEMENTATION: [&str; 1] = ["crates/paddock-proc/src/sys.rs"];
 
-static WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*pid-liveness\s*([—–-]+)"));
-static BARE_WAIVER: LazyLock<Regex> = LazyLock::new(|| rx(r"conformance:\s*pid-liveness"));
 static VENDORED: LazyLock<Regex> = LazyLock::new(|| rx(r"^apps/[^/]+/vendor/"));
 static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"is_alive|may_be_alive|presence|kill|OpenProcess|Pid::from")); // conformance: pid-kill — a pattern that finds these words in source text; nothing here ends a process
 static USE: LazyLock<Regex> = LazyLock::new(|| rx(r"\buse\s+paddock_proc::(?:\{([^}]*)\}|(\*|\w+(?:\s+as\s+\w+)?))"));
@@ -44,7 +41,7 @@ pub struct Liveness {
     /// What it does, in a sentence.
     pub what: String,
     /// The waiver: `Some(true)` with a reason, `Some(false)` without one, `None`.
-    pub waived: Option<bool>,
+    pub waived: InlineWaiver,
     /// The text of the line.
     pub text: String,
 }
@@ -177,13 +174,7 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
                     ""
                 }
             );
-            let waived = if has_reason(&near, &WAIVER) {
-                Some(true)
-            } else if BARE_WAIVER.is_match(&near) {
-                Some(false)
-            } else {
-                None
-            };
+            let waived = recognise(&near, "pid-liveness");
             Liveness {
                 line,
                 what: h.what,
@@ -220,6 +211,7 @@ struct Site {
     hash: String,
 }
 
+#[derive(Clone)]
 struct Entry {
     file: String,
     line: Option<usize>,
@@ -241,128 +233,26 @@ fn entries_of(raw: &str) -> Option<Vec<Entry>> {
     )
 }
 
-/// The result of [`reconcile`], as indexes: the sites with no entry, the entries with no site, and the moved pairs (site, entry).
-struct Reconciled {
-    fresh: Vec<usize>,
-    stale: Vec<usize>,
-    moved: Vec<(usize, usize)>,
+/// The key of a site or an entry: its file and the hash of its line; the loose key is the hash alone.
+fn exact_key(e: &Entry) -> String {
+    format!("{}\u{0}{}", e.file, e.hash)
 }
 
-/// Matches sites against baseline entries as the JavaScript `reconcile` does: first by file and hash, then the leftovers by hash
-/// alone, but only where `can_move(site, entry)` allows (a site check lets only an entry whose file is gone move; the growth check
-/// lets any). A pairing it refuses leaves the site fresh. Counts are per key, so two identical lines in two files never hide a
-/// real addition.
-fn reconcile(current: &[(&str, &str)], base: &[(&str, &str)], can_move: impl Fn(usize, usize) -> bool) -> Reconciled {
-    let mut buckets: HashMap<(&str, &str), VecDeque<usize>> = HashMap::new();
-    for (i, k) in base.iter().enumerate() {
-        buckets.entry(*k).or_default().push_back(i);
-    }
-    let mut unmatched: BTreeSet<usize> = (0..base.len()).collect();
-    let mut rest = Vec::new();
-    for (n, k) in current.iter().enumerate() {
-        match buckets.get_mut(k).and_then(VecDeque::pop_front) {
-            Some(i) => {
-                unmatched.remove(&i);
-            }
-            None => rest.push(n),
-        }
-    }
-    let mut pool: HashMap<&str, Vec<usize>> = HashMap::new();
-    for &i in &unmatched {
-        pool.entry(base[i].1).or_default().push(i);
-    }
-    let (mut fresh, mut moved) = (Vec::new(), Vec::new());
-    for n in rest {
-        let hit = pool.get_mut(current[n].1).and_then(|list| {
-            let at = list.iter().position(|&i| can_move(n, i))?;
-            Some(list.remove(at))
-        });
-        match hit {
-            Some(i) => {
-                unmatched.remove(&i);
-                moved.push((n, i));
-            }
-            None => fresh.push(n),
-        }
-    }
-    Reconciled {
-        fresh,
-        stale: unmatched.into_iter().collect(),
-        moved,
-    }
-}
-
-/// `git args` in `root`: standard output, or the error line the JavaScript reports (`Command failed: git ...`) and the standard error.
-fn git(root: &Path, args: &[&str]) -> Result<String, (String, String)> {
-    let mut cmd = command("git");
-    cmd.arg("-C").arg(root).args(args);
-    let failed = |e: String| (format!("Command failed: git {}", args.join(" ")), e);
-    match run_bounded(cmd, Limits::new(Duration::from_secs(120)).max_output(1 << 26)) {
-        Ok(out) if out.success() => Ok(out.stdout_text()),
-        Ok(out) => Err(failed(out.stderr_text())),
-        Err(e) => Err(failed(e.to_string())),
-    }
+fn loose_key(e: &Entry) -> String {
+    e.hash.clone()
 }
 
 /// The entries the baseline at the merge base lacks, or the reason it cannot be measured (`baselineGrowth`).
-enum Growth {
-    Added {
-        base: String,
-        added: usize,
-        /// Entries the baseline rewrote to another file since the merge base: (hash, from file, to file).
-        moved: Vec<(String, String, String)>,
-    },
-    Reason(String),
-}
-
-fn growth(root: &Path, base_ref: &str, current: &[Entry]) -> Growth {
-    let lookup = || -> Result<String, (String, String)> {
-        let head = git(root, &["rev-parse", "HEAD"])?.trim_matches(is_js_space).to_string();
-        let mut base = git(root, &["merge-base", "HEAD", base_ref])?.trim_matches(is_js_space).to_string();
-        if base == head {
-            base = git(root, &["rev-parse", "HEAD^1"])?.trim_matches(is_js_space).to_string();
-        }
-        Ok(base)
-    };
-    let base = match lookup() {
-        Ok(b) => b,
-        Err((msg, _)) => {
-            let first: String = msg.split('\n').next().unwrap_or("").chars().take(120).collect();
-            return Growth::Reason(format!("no merge base ({first})"));
-        }
-    };
-    let spec = format!("{base}:{LIVENESS_BASELINE}");
-    let text = match git(root, &["show", &spec]) {
-        Ok(t) => t,
-        Err((_, stderr)) => {
-            let missing = ["does not exist", "exists on disk, but not in", "not in"]
-                .iter()
-                .any(|p| stderr.contains(p));
-            return if missing {
-                Growth::Added {
-                    base,
-                    added: 0,
-                    moved: Vec::new(),
-                }
-            } else {
-                Growth::Reason(format!("the baseline at {} cannot be read", &base[..base.len().min(9)]))
-            };
-        }
-    };
-    let entries_old = entries_of(&text).unwrap_or_default();
-    let old: Vec<(&str, &str)> = entries_old.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
-    let now: Vec<(&str, &str)> = current.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
-    let r = reconcile(&now, &old, |_, _| true);
-    let moved = r
-        .moved
-        .iter()
-        .map(|&(n, i)| (current[n].hash.clone(), entries_old[i].file.clone(), current[n].file.clone()))
-        .collect();
-    Growth::Added {
-        base,
-        added: r.fresh.len(),
-        moved,
-    }
+fn growth(root: &Path, base_ref: &str, current: &[Entry]) -> Growth<Entry> {
+    baseline::growth(
+        root,
+        base_ref,
+        LIVENESS_BASELINE,
+        current,
+        &entries_of,
+        &exact_key,
+        Some(&loose_key),
+    )
 }
 
 /// What the liveness half found and what it could not measure.
@@ -390,8 +280,18 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
         }
         for k in pid_liveness(&text, f) {
             match k.waived {
-                Some(true) => {}
-                Some(false) => out.push(Finding::error(
+                InlineWaiver::Reason(reason) => out.push(
+                    Finding::error(
+                        "C53",
+                        53,
+                        f,
+                        k.line,
+                        format!("{}: the pid may belong to another process by now", k.what),
+                        fix,
+                    )
+                    .inline_waived(reason),
+                ),
+                InlineWaiver::NoReason => out.push(Finding::error(
                     "C53",
                     53,
                     f,
@@ -399,7 +299,7 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
                     "the pid-liveness waiver gives no reason",
                     "Write `// conformance: pid-liveness — <why this pid cannot have been handed on>`.",
                 )),
-                None => sites.push(Site {
+                InlineWaiver::No => sites.push(Site {
                     file: f.clone(),
                     line: k.line,
                     what: k.what,
@@ -428,10 +328,18 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
         };
     }
     let entries = raw.map(|r| entries_of(&r).unwrap_or_default()).unwrap_or_default();
-    let old: Vec<(&str, &str)> = entries.iter().map(|e| (e.file.as_str(), e.hash.as_str())).collect();
-    let now: Vec<(&str, &str)> = sites.iter().map(|s| (s.file.as_str(), s.hash.as_str())).collect();
+    let now: Vec<Entry> = sites
+        .iter()
+        .map(|s| Entry {
+            file: s.file.clone(),
+            line: Some(s.line),
+            hash: s.hash.clone(),
+        })
+        .collect();
     // A moved site passes without a baseline edit only when its entry's file is gone from the tree (as the JavaScript `sourceGone`).
-    let matched = reconcile(&now, &old, |_, i| !root.join(old[i].0).exists());
+    let matched = reconcile(&now, &entries, &exact_key, Some(&loose_key), &|_, i| {
+        !root.join(&entries[i].file).exists()
+    });
     for &(n, i) in &matched.moved {
         let s = &sites[n];
         out.push(Finding::warn(
@@ -484,7 +392,8 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
                 "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.",
             )),
             Growth::Added { base, added, moved } => {
-                for (hash, from, to) in &moved {
+                for m in &moved {
+                    let (hash, from, to) = (&m.from.hash, &m.from.file, &entries[m.current].file);
                     out.push(Finding::warn(
                         "C53",
                         53,
@@ -520,7 +429,22 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
 
 #[cfg(test)]
 mod tests {
-    use super::reconcile;
+    use super::{Entry, exact_key, loose_key};
+    use crate::check::baseline::{Reconciled, reconcile as generic};
+
+    fn e(file: &str, hash: &str) -> Entry {
+        Entry {
+            file: file.into(),
+            line: None,
+            hash: hash.into(),
+        }
+    }
+
+    fn reconcile(cur: &[(&str, &str)], base: &[(&str, &str)], can: impl Fn(usize, usize) -> bool) -> Reconciled {
+        let cur: Vec<Entry> = cur.iter().map(|(f, h)| e(f, h)).collect();
+        let base: Vec<Entry> = base.iter().map(|(f, h)| e(f, h)).collect();
+        generic(&cur, &base, &exact_key, Some(&loose_key), &can)
+    }
 
     #[test]
     fn a_moved_site_is_neither_fresh_nor_stale() {

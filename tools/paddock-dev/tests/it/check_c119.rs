@@ -32,7 +32,8 @@ fn js(root: &Path) -> Value {
 fn rust(root: &Path) -> Value {
     let opts = RunOptions {
         root: root.to_path_buf(),
-        app: "paddock".into(),
+        config: paddock_dev::check::config::Config::bare("paddock"),
+        scope: None,
         only: Some(vec!["C119".into()]),
         files: None,
         today: paddock_dev::check::today_utc(),
