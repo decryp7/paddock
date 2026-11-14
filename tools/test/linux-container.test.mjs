@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { calls, run, scratch, shim } from './helpers.mjs';
+import { calls, run, scratch, shim, write } from './helpers.mjs';
 
 /** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set; `build` reads its Dockerfile from stdin like the real one (an unread pipe would end the script's printf with SIGPIPE). */
 function docker({ ps = '' } = {}) {
@@ -42,12 +43,12 @@ test('an existing image is reused; a command after -- replaces the default; user
   assert.match(runLine, /spotter-linux-dev:1 sh -c ls \/proc \| head$/);
 });
 
-test('--clean removes only containers with this app\'s label and only its two volumes', () => {
+test('--clean removes only containers with this app\'s label and only its volumes (registry, amd64 and arm64 targets)', () => {
   const bin = docker({ ps: 'abc123 def456' });
   const r = go(bin, ['--id', 'dyno', '--clean']);
   assert.equal(r.status, 0, r.out);
   const log = calls(bin);
-  assert.deepEqual(log, ['docker ps -aq --filter label=paddock.tools=dyno', 'docker rm -f abc123 def456', 'docker volume rm -f dyno-cargo-registry dyno-linux-target']);
+  assert.deepEqual(log, ['docker ps -aq --filter label=paddock.tools=dyno', 'docker rm -f abc123 def456', 'docker volume rm -f dyno-cargo-registry dyno-linux-target dyno-linux-target-arm64']);
   const none = docker();
   go(none, ['--id', 'dyno', '--clean']);
   assert.ok(!calls(none).some((l) => l.startsWith('docker rm')), 'no container, no rm');
@@ -74,4 +75,104 @@ test('--image runs a ready image as it is: no inspect, no build, the platform pa
   const runLine = log.at(-1);
   assert.match(runLine, /^docker run --rm --label paddock\.tools=paddock --cpus 4 --memory 12g --platform linux\/amd64 /);
   assert.match(runLine, / reg\.example\/ci:v2 rustc --version$/);
+});
+
+/** A repository root with the files --ci-image reads. */
+function ciRepo() {
+  return write(scratch(), {
+    'ci-image/VERSION': '3\n',
+    'ci-image/Dockerfile': 'FROM ${GARAGE_IMAGE}\n',
+    'ci-image/garage-arm64.Dockerfile': 'FROM base\n',
+    'ci-image/fetch-verified.sh': '#!/bin/sh\n',
+    'ci-image/verify.sh': '#!/bin/sh\n',
+  });
+}
+const EMULATION = /warning: linux\/amd64 runs under emulation/;
+
+test('--ci-image on an arm64 host builds the native image once (garage stand-in, then ci-image/Dockerfile) and runs it as linux/arm64', () => {
+  const bin = docker();
+  const repo = ciRepo();
+  const r = go(bin, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'cargo', 'nextest', 'run'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+  assert.equal(r.status, 0, r.out);
+  assert.doesNotMatch(r.out, EMULATION);
+  const log = calls(bin);
+  const builds = log.filter((l) => l.startsWith('docker build'));
+  assert.equal(builds.length, 2, log.join('\n'));
+  assert.match(builds[0], /^docker build --platform linux\/arm64 --label paddock\.tools=paddock -f \S+\/ci-image\/garage-arm64\.Dockerfile -t paddock-garage-local:arm64-([0-9a-f]{12}) /);
+  const sum = builds[0].match(/arm64-([0-9a-f]{12})/)[1];
+  assert.ok(builds[1].includes(`--build-arg GARAGE_IMAGE=paddock-garage-local:arm64-${sum} -f ${repo}/ci-image/Dockerfile -t paddock-ci-local:v3-arm64-${sum}`), builds[1]);
+  const runLine = log.at(-1);
+  assert.match(runLine, /--platform linux\/arm64 /);
+  assert.match(runLine, /type=volume,source=paddock-linux-target-arm64,target=\/target/);
+  assert.ok(log.includes('docker volume create --label paddock.tools=paddock paddock-linux-target-arm64'));
+  assert.ok(runLine.endsWith(` paddock-ci-local:v3-arm64-${sum} cargo nextest run`), runLine);
+
+  const again = docker();
+  const r2 = go(again, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'aarch64', HAVE_IMAGE: '1' });
+  assert.equal(r2.status, 0, r2.out);
+  assert.ok(!calls(again).some((l) => l.startsWith('docker build')), 'a built image is reused');
+  assert.ok(calls(again).at(-1).includes(`paddock-ci-local:v3-arm64-${sum} true`), 'same files, same tag');
+});
+
+test('--ci-image on an amd64 host, or with --platform linux/amd64, runs the registry image; amd64 on an arm64 host warns about emulation', () => {
+  const repo = ciRepo();
+  const native = docker();
+  const r = go(native, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'x86_64' });
+  assert.equal(r.status, 0, r.out);
+  assert.doesNotMatch(r.out, EMULATION);
+  assert.ok(!calls(native).some((l) => l.startsWith('docker build') || l.includes('image inspect')));
+  assert.match(calls(native).at(-1), /--platform linux\/amd64 .* dev\.decryptology\.net\/decryp7\/paddock-ci:v3 true$/);
+
+  const emulated = docker();
+  const e = go(emulated, ['--id', 'paddock', '--root', repo, '--ci-image', '--platform', 'linux/amd64', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+  assert.equal(e.status, 0, e.out);
+  assert.match(e.out, EMULATION);
+  assert.match(e.out, /a failed exec is not reported/i);
+  assert.match(calls(emulated).at(-1), /--platform linux\/amd64 .* dev\.decryptology\.net\/decryp7\/paddock-ci:v3 true$/);
+
+  const ready = docker();
+  const w = go(ready, ['--id', 'paddock', '--image', 'reg.example/ci:v2', '--platform', 'linux/amd64', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' });
+  assert.equal(w.status, 0, w.out);
+  assert.match(w.out, EMULATION, 'a ready image under emulation warns too');
+});
+
+test('--ci-image refuses --image beside it and fails with one error line when ci-image/VERSION is missing', () => {
+  const bin = docker();
+  assert.equal(go(bin, ['--id', 'paddock', '--ci-image', '--image', 'x', '--', 'true']).status, 2);
+  const r = go(bin, ['--id', 'paddock', '--root', scratch(), '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'x86_64' });
+  assert.equal(r.status, 1, r.out);
+  assert.match(r.out, /::error::linux-container: cannot read .*ci-image\/VERSION/);
+  assert.ok(!calls(bin).some((l) => l.startsWith('docker run')), 'nothing was run');
+});
+
+test('a linked worktree gets its common git folder read-only at its own path, a tmpfs pre-push state folder and safe.directory', () => {
+  const bin = docker();
+  const common = realpathSync(write(scratch(), { 'HEAD': 'ref: refs/heads/main\n', 'worktrees/wt/commondir': '../..\n', 'worktrees/wt/HEAD': 'x\n' }));
+  const wt = write(scratch(), { '.git': `gitdir: ${common}/worktrees/wt\n` });
+  const r = go(bin, ['--id', 'paddock', '--root', wt, '--image', 'img', '--', 'git', 'status'], { PADDOCK_LINUX_HOST_ARCH: 'x86_64' });
+  assert.equal(r.status, 0, r.out);
+  const runLine = calls(bin).at(-1);
+  assert.ok(runLine.includes(`type=bind,source=${wt},target=/work,readonly`), runLine);
+  assert.ok(runLine.includes(`type=bind,source=${common},target=${common},readonly`), runLine);
+  assert.ok(!runLine.includes(`target=${common}/worktrees/wt,`), 'a git folder inside the common one is not mounted twice');
+  assert.ok(runLine.includes(`type=tmpfs,target=${common}/paddock-pre-push`), runLine);
+  assert.match(runLine, /-e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe\.directory -e GIT_CONFIG_VALUE_0=\*/);
+  assert.ok(existsSync(join(common, 'paddock-pre-push')), 'the mount point exists');
+
+  const elsewhere = realpathSync(write(scratch(), { 'commondir': `${common}\n`, 'HEAD': 'x\n' }));
+  const wt2 = write(scratch(), { '.git': `gitdir: ${elsewhere}\n` });
+  const bin2 = docker();
+  go(bin2, ['--id', 'paddock', '--root', wt2, '--image', 'img', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'x86_64' });
+  const line2 = calls(bin2).at(-1);
+  assert.ok(line2.includes(`source=${common},target=${common},readonly`) && line2.includes(`source=${elsewhere},target=${elsewhere},readonly`), line2);
+});
+
+test('a checkout with a .git folder needs no extra git mount; its pre-push state folder is a tmpfs under /work', () => {
+  const bin = docker();
+  const repo = write(scratch(), { '.git/HEAD': 'ref: refs/heads/main\n' });
+  const r = go(bin, ['--id', 'paddock', '--root', repo, '--image', 'img', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'x86_64' });
+  assert.equal(r.status, 0, r.out);
+  const runLine = calls(bin).at(-1);
+  assert.ok(!runLine.includes('type=bind,source=' + repo + '/.git'), runLine);
+  assert.ok(runLine.includes('type=tmpfs,target=/work/.git/paddock-pre-push'), runLine);
 });

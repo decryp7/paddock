@@ -2006,3 +2006,20 @@ kept the child), or, when you must act on a pid, check immediately before the ki
 that its start time is later than your own command's start; if either is unknown or differs, do not kill: report it to its
 owner or the coordinator. Never `pkill -f` or `kill` by a name pattern (`lefthook`, `cargo`, `node`) because every agent runs
 the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
+
+## The local Linux gate could not judge a worktree, and amd64 emulation hid failed execs (2026-11-14)
+Train 10's local Linux container run (the CI image, `--platform linux/amd64`, on the Apple Silicon Mac) failed in four ways that
+also failed on main, none of them in the code: a worktree's `.git` file named a git folder the container did not have (about 35
+paddock-dev tests: "not a git repository"); the read-only `/work` refused `dev check --pre-push`'s logs in
+`<git common dir>/paddock-pre-push` (os error 30); under qemu-user a failed exec is not reported to the parent, so every
+missing-program test failed (paddock-proc's six, heavy's exit-127 test, paddock-dev's slotflow, input_hash, slots and idle_run);
+the kept-clone parity test ran past its one-second phase limits under emulation (it passes natively); and the prune parity test
+differs on OrbStack's btrfs, where an empty folder has no blocks and a few bytes of length: GNU `du -sk --apparent-size` prints
+0 for 18 bytes, the Rust port (`ci_host::prune::size_in_units`) rounds up to 1, so only the Rust side removes the folder at a
+1 KB cap (CI's ext4 gives every folder a 4 KB block, which hides it; open, owned by paddock-dev). The emulation class had been seen twice before:
+f08362a29 (Spotter's notifier, 2026-10-30) and feat/heavy-priority-lane (2026-11-13). What changed: `tools/linux-container.sh`
+mounts a worktree's git folders read-only at their own paths with a tmpfs pre-push state folder, and `--ci-image` runs the CI
+image natively (linux/arm64 on the Mac, built locally from `ci-image/` on `ci-image/garage-arm64.Dockerfile`, the same pins) and
+warns whenever amd64 is emulated. CI's Linux jobs stay on their native amd64 runners. **Rule for agents:** run the local Linux
+gate with `--ci-image` and no `--platform`; a missing-program or timing failure seen only under emulation is not a finding.
+**Class: environment-only failures of the local Linux gate (amd64 emulation on Apple Silicon).**

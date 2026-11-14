@@ -99,6 +99,34 @@ describe('pins', () => {
   });
 });
 
+describe('garage-arm64.Dockerfile (the local arm64 stand-in for garage, tools/linux-container.sh --ci-image)', () => {
+  const standin = read('ci-image/garage-arm64.Dockerfile');
+  const code = standin.replace(/^#.*$/gm, '');
+  const pin = (name) => {
+    const m = standin.match(new RegExp(`^ARG ${name}=(\\S+)$`, 'm'));
+    assert.ok(m, `ARG ${name} is missing from garage-arm64.Dockerfile`);
+    return m[1];
+  };
+
+  test('the base is the garage base pinned by digest, and Rust and Node are the family pins', () => {
+    assert.match(standin, /^FROM catthehacker\/ubuntu@sha256:[0-9a-f]{64}$/m);
+    assert.equal(pin('RUST_VERSION'), arg('RUST_VERSION'));
+    assert.equal(pin('NODE_VERSION').split('.')[0], arg('NODE_MAJOR'));
+  });
+
+  test('every download goes through the checksum-verified fetch: no raw curl, nothing piped into a shell', () => {
+    assert.ok(!/\bcurl\b/.test(code), 'a raw curl');
+    assert.ok(!/\|\s*(ba)?sh\b/.test(code), 'a download piped into a shell');
+    const sums = [...standin.matchAll(/^ARG (\w+_SHA256_ARM64)=(\S+)$/gm)];
+    assert.equal(sums.length, 5, sums.map((x) => x[1]).join(', '));
+    for (const [, name, value] of sums) {
+      assert.match(value, /^[0-9a-f]{64}$/, name);
+      assert.ok(code.includes(`"$${name}"`), `${name} is not used by a fetch`);
+    }
+    assert.equal((code.match(/fetch-verified "/g) || []).length, 5);
+  });
+});
+
 describe('the workflow and ci.yml', () => {
   const version = read('ci-image/VERSION').trim();
   const image = `dev.decryptology.net/decryp7/paddock-ci:v${version}`;
