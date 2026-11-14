@@ -454,7 +454,9 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
     );
     report.data["outcome"] = run_outcome.json();
     report.data["outcomes"] = shared.json();
-    if let Some(sha) = checked.filter(|_| known::recordable(args, accept.len(), extra.len(), report.exit)) {
+    if let Some(sha) =
+        checked.filter(|_| known::recordable(args, accept.len(), extra.len(), report.exit) && outcome::leaves_record(&run_outcome))
+    {
         let passed: Vec<String> = rows
             .iter()
             .filter(|(_, v)| v.kind() == Kind::Passed)

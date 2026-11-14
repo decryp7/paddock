@@ -479,6 +479,35 @@ fn a_timeout_is_not_measured_and_does_not_tell_you_to_fix_lints() {
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
 }
 
+/// A gate that ran and exited 0, as a row.
+fn ran_ok(id: &str, secs: f64) -> Row {
+    let done = Done {
+        success: true,
+        how: "exit 0".into(),
+        tail: String::new(),
+        log: None,
+    };
+    Row::from_run(id, &test_subject(), &done, "", secs)
+}
+
+/// ADR 0089: the row reads how the run ended; a failed run is a finding, never a pass (delete `done.success` and this goes red).
+#[test]
+fn a_row_from_a_run_reads_its_exit() {
+    let run = |success: bool| Done {
+        success,
+        how: if success { "exit 0" } else { "exit 1" }.into(),
+        tail: String::new(),
+        log: None,
+    };
+    assert_eq!(
+        Row::from_run("g", &test_subject(), &run(true), "g (exit 1)", 1.0).kind(),
+        Kind::Passed
+    );
+    let failed = Row::from_run("g", &test_subject(), &run(false), "g (exit 1)", 1.0);
+    assert_eq!(failed.kind(), Kind::Failed);
+    assert!(failed.reason().contains("g (exit 1)"));
+}
+
 #[test]
 fn the_worst_finding_decides_the_exit_code_7_then_5_then_6() {
     let nm = Row::not_measured("r", "n");
@@ -489,7 +518,7 @@ fn the_worst_finding_decides_the_exit_code_7_then_5_then_6() {
     assert_eq!(render("h", &all).exit, Exit::CheckBroken);
     assert_eq!(render("h", &all[..2]).exit, Exit::Findings);
     assert_eq!(render("h", &all[..1]).exit, Exit::NotMeasured);
-    assert_eq!(render("h", &[row("x", &Row::passed("x", &test_subject(), 0.1))]).exit, Exit::Ok);
+    assert_eq!(render("h", &[row("x", &ran_ok("x", 0.1))]).exit, Exit::Ok);
 }
 
 #[test]
@@ -1572,7 +1601,7 @@ fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output
         "h",
         &[
             nm("clippy-windows apps/dyno"),
-            ("fmt crates".into(), Row::passed("fmt crates", &test_subject(), 1.0)),
+            ("fmt crates".into(), ran_ok("fmt crates", 1.0)),
             nm("clippy crates"),
         ],
     );

@@ -97,9 +97,17 @@ impl Row {
         }
     }
 
-    /// The gate `id` ran and passed.
-    pub fn passed(id: &str, subject: &Subject, secs: f64) -> Row {
-        let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || Ok(Vec::new()));
+    /// The gate `id` ran to its end (not cut short): the measurement reads how it ended. A clean exit finds nothing; any other ends in
+    /// one failing finding with `cause` in one line. `tail` and `next` are the caller's to set on a failure.
+    pub fn from_run(id: &str, subject: &Subject, done: &Done, cause: impl Into<String>, secs: f64) -> Row {
+        let cause = cause.into();
+        let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || {
+            if done.success {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![Finding::failing(cause)])
+            }
+        });
         Row::plain(o, secs, String::new(), String::new())
     }
 
@@ -183,7 +191,6 @@ pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject) -
     let started = Instant::now();
     match exec.run(gate, left) {
         Err(e) => Row::not_measured(e, "install the program, then re-run `./dev check --pre-push`"),
-        Ok(done) if done.success => Row::passed(&gate.id, subject, started.elapsed().as_secs_f64()),
         Ok(done) if done.cut_short() => Row::not_measured(
             format!(
                 "{} ({}) before it finished{}",
@@ -209,14 +216,18 @@ pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject) -
                 _ => gate.next.clone(),
             };
             let full = done.log.as_ref().map_or(String::new(), |l| format!(" Full output: {l}."));
-            Row::failed(
+            let mut row = Row::from_run(
                 &gate.id,
                 subject,
+                &done,
                 format!("{} ({})", gate.rerun(), done.how),
-                done.tail.trim_end().to_string(),
-                format!("{hint}. Re-run alone: {}.{full}", gate.rerun()),
                 started.elapsed().as_secs_f64(),
-            )
+            );
+            if !done.success {
+                row.tail = done.tail.trim_end().to_string();
+                row.next = format!("{hint}. Re-run alone: {}.{full}", gate.rerun());
+            }
+            row
         }
     }
 }

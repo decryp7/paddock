@@ -58,8 +58,8 @@ fn row_outcome(id: &str, row: &Row, subject: &Subject) -> (Outcome, Option<Strin
 }
 
 /// The rows folded by the shared [`Verdict`] (a scoped run: a gate the change does not reach has nothing to do), and the run's own
-/// outcome: findings when a row failed, broken or not measured with the rows named, not measured when no row ran and passed, else a
-/// pass for `subject`.
+/// outcome: findings when a row failed, broken or not measured with the rows named, not applicable when every row was skipped, not measured when no
+/// row ran and passed, else a pass for `subject`.
 pub fn fold(rows: &[(String, Row)], subject: &Subject) -> (Verdict, Outcome) {
     let items: Vec<(String, Outcome, Option<String>)> = rows
         .iter()
@@ -76,6 +76,13 @@ pub fn fold(rows: &[(String, Row)], subject: &Subject) -> (Verdict, Outcome) {
             .collect::<Vec<_>>()
             .join("; ")
     };
+    // Every row skipped: the change reaches no gate, so nothing was checked (not applicable, never a pass).
+    if !rows.is_empty() && rows.iter().all(|(_, r)| r.kind() == Kind::Skipped) {
+        let run = Outcome::NotApplicable(Reason::new(
+            "every gate was skipped: the change reaches none of them, so nothing was checked",
+        ));
+        return (verdict, run);
+    }
     let run = measure(CheckId::new("pre-push"), subject.clone(), tool(), UnixSeconds::now(), || {
         let broken = named(|r| r.kind() == Kind::Broken);
         if !broken.is_empty() {
@@ -95,13 +102,18 @@ pub fn fold(rows: &[(String, Row)], subject: &Subject) -> (Verdict, Outcome) {
         // A pass comes only from a gate that ran and passed (ADR 0089): a run of only skipped or excused rows proved nothing.
         if !rows.iter().any(|(_, r)| r.kind() == Kind::Passed) {
             return Err(Unmeasured::NotMeasured(Reason::new(
-                "no gate ran and passed: every row was skipped (the change does not reach it) or excused by a person's --accept-not-measured",
+                "no gate ran and passed: the rows were skipped or excused by a person's --accept-not-measured",
             )));
         }
         // Accepted rows pass the push (the exit is unchanged) but are not proven: the shared verdict names them.
         Ok(Vec::new())
     });
     (verdict, run)
+}
+
+/// Whether a run may leave a pass record for a later push: only a clean run, never one that skipped or excused everything.
+pub fn leaves_record(run: &Outcome) -> bool {
+    matches!(run, Outcome::Clean(_))
 }
 
 /// The outcome of a run that found nothing to check (a person's run with nothing changed since the base): not applicable, never a
@@ -112,6 +124,7 @@ pub fn nothing_to_check(base: &str) -> Outcome {
 
 #[cfg(test)]
 mod tests {
+    use super::super::exec::Done;
     use super::*;
     use paddock_cli::Exit;
 
@@ -123,7 +136,13 @@ mod tests {
     }
 
     fn passed() -> Row {
-        Row::passed("x", &subject(), 1.0)
+        let done = Done {
+            success: true,
+            how: "exit 0".into(),
+            tail: String::new(),
+            log: None,
+        };
+        Row::from_run("x", &subject(), &done, "", 1.0)
     }
 
     fn rows(list: Vec<(&str, Row)>) -> Vec<(String, Row)> {
@@ -171,26 +190,36 @@ mod tests {
         assert_eq!(run.json()["status"], "not-measured");
     }
 
-    /// ADR 0089: a pass comes only from a check that ran and passed; a run of only skipped rows proved nothing.
+    /// ADR 0089: a pass comes only from a gate that ran and passed; a run of only skipped rows reached nothing.
     #[test]
-    fn all_skipped_is_not_measured_never_a_pass() {
-        let (_, run) = fold(&rows(vec![("a", Row::skipped("no")), ("b", Row::skipped("no"))]), &subject());
-        assert_eq!(run.json()["status"], "not-measured");
+    fn all_skipped_is_not_applicable_never_a_pass() {
+        let (v, run) = fold(&rows(vec![("a", Row::skipped("no")), ("b", Row::skipped("no"))]), &subject());
+        assert_eq!(run.json()["status"], "not-applicable");
+        assert_eq!(v.exit(), Exit::Ok);
+        assert!(!leaves_record(&run));
     }
 
-    /// The same for a run in which every row was excused by a person's override.
+    /// A run in which every row was excused by a person's override ran nothing: not measured, and no record.
     #[test]
     fn all_excused_is_not_measured_never_a_pass() {
-        let mut acc = Row::not_measured("no docker", "n");
-        acc.excused_by = Some("alex".into());
-        let mut acc2 = Row::not_measured("no vm", "n");
-        acc2.excused_by = Some("alex".into());
-        let (_, run) = fold(&rows(vec![("a", acc), ("b", acc2)]), &subject());
+        let excused = |why: &str| {
+            let mut r = Row::not_measured(why, "n");
+            r.excused_by = Some("alex".into());
+            r
+        };
+        let (v, run) = fold(&rows(vec![("a", excused("no docker")), ("b", excused("no vm"))]), &subject());
         assert_eq!(run.json()["status"], "not-measured");
-        let mut acc3 = Row::not_measured("no vm", "n");
-        acc3.excused_by = Some("alex".into());
-        let (_, run) = fold(&rows(vec![("a", acc3), ("b", Row::skipped("no"))]), &subject());
+        assert_eq!(v.exit(), Exit::Ok);
+        assert!(!leaves_record(&run));
+        let (_, run) = fold(&rows(vec![("a", excused("no vm")), ("b", Row::skipped("no"))]), &subject());
         assert_eq!(run.json()["status"], "not-measured");
+        assert!(!leaves_record(&run));
+    }
+
+    #[test]
+    fn a_pass_leaves_a_record() {
+        let (_, run) = fold(&rows(vec![("fmt", passed()), ("skip", Row::skipped("no"))]), &subject());
+        assert!(leaves_record(&run));
     }
 
     #[test]
