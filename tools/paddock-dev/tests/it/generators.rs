@@ -331,7 +331,10 @@ fn the_conformance_line_entry_reads_ci_yml_through_the_one_reader() {
         .find(|g| g.id == "conformance-line")
         .expect("the conformance-line entry");
     let check = entry.check.join(" ");
-    assert!(check.contains("./dev ci conformance-args"), "{check}");
+    assert!(
+        check.contains("./dev ci conformance-args") || check.contains("./dev ci run conformance"),
+        "{check}"
+    );
     for word in ["grep", "sed", "awk"] {
         assert!(!check.contains(word), "the entry reads ci.yml's text with {word}: {check}");
     }

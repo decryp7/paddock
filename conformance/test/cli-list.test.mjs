@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { test } from 'node:test';
 import { COMMANDS, listChecks, main } from '../src/cli.mjs';
 import { checks } from '../src/checks/index.mjs';
+import { makeApp } from './helpers.mjs';
 
 const SCOPES = ['root', 'apps', 'both'];
 const MODES = ['gate', 'report-only'];
@@ -42,4 +43,13 @@ test('main: list --json and commands --json print JSON', async () => {
   assert.deepEqual(JSON.parse(cmds[0]), COMMANDS);
   assert.ok(COMMANDS.includes('commit-lint'));
   assert.ok(!COMMANDS.includes('copies'), 'copies --check-register is planned (ADR 0034 WP-1), not built');
+});
+
+test('the printed report keeps its documented shape: the outcomes (with their times) decide the exit and are not printed', async () => {
+  const root = makeApp({ 'paddock.waivers.toml': '' });
+  const lines = [];
+  const code = await main(['--app', 'paddock', '--root', root, '--only', 'C57', '--json'], { log: (s) => lines.push(s), err() {}, env: {} });
+  assert.equal(code, 0, lines.join('\n'));
+  const report = JSON.parse(lines.join('\n'));
+  assert.deepEqual(Object.keys(report), ['app', 'checks', 'findings', 'waived', 'errors', 'warnings']);
 });
