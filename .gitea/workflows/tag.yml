@@ -15,7 +15,7 @@
 #   - the app's version source says the tag's version;
 #   - the newest FULL run of the app's gate workflow on exactly that sha is green, asked of `./dev ci verdict` (built from main;
 #     tools/paddock-dev/src/ci_runs/verdict.rs, the one reader of the runs for this answer). Full means its plan job logged
-#     `plan verdict: complete=true` after deciding (plan_since::COMPLETE_LINE; debrief.yml and ci.yml print it), a push to main
+#     `plan verdict: complete=true` after deciding (plan_since::COMPLETE_LINE; debrief.yml and ci.yml print it, the other app workflows through the shared plan action given `full:`), a push to main
 #     included: a push whose plan skipped it tested nothing, and the refusal names the last fully tested commit. A since_run rerun or
 #     a base dispatch is never full, so it cannot clear a red full run; unreadable is not measured, never a pass;
 #   - for an app tag, the tag gates the release workflows also run (`./dev gates ratchet`, `./dev check ipc-endpoints --tag`).

@@ -87,7 +87,11 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
   `cliff-paths`, `setup-node`, `bundle-check` (an app's own script run on Linux and macOS with the bundle folder, e.g. Dyno's run paths); new optional secret `APPLE_SIGNING_IDENTITY`. The release job runs for `<tag-prefix>v*` tags (was `v*`), and the
   bundle job checks the tag's version against the app's `tauri.conf.json` first (`conformance/ci/check-tag.mjs`). Artifacts are uploaded
   from `$PADDOCK_WORKSPACE/dist` (a contract test pins this for every job that uses `stable-workspace`).
-- `plan` action: inputs `app`, `tag-pattern`, `nightly-marker`, `token`. `macos-verify`: `tauri-conf`. `host-cleanup`: `process-patterns`
+- `plan` action: inputs `app`, `tag-pattern`, `nightly-marker`, `token`, `release`, `full`. It prints the line
+  `plan verdict: complete=` after it decided (`complete=true` only when `run` is true and `full` is `'true'`; the app workflows with a `since_run` input do not use this action);
+  a release workflow passes `full:` equal to the condition its `gates` job runs under (conformance `ci-verdict-reader.test.mjs`
+  checks it). `./dev ci verdict` reads the plan job of a run as the first job named `plan` or `plan ...`; `ci.yml`'s inner
+  `plan (affected projects)` job prints a line too (exact-name matching is left until a real run is recorded). `macos-verify`: `tauri-conf`. `host-cleanup`: `process-patterns`
   (`pkill -f`; scope each to the app's own temp path, never `gitea-runner`, which is the real runner). `publish-release`: `tag-prefix`,
   `latest-tag` (skipped for a pre-release tag), `notes-extra`. `tauri-bundle`: `root`, `apple-signing-identity`.
 
