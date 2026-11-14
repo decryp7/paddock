@@ -6,10 +6,10 @@ import { spawn, spawnSync } from 'node:child_process';
 import { chmodSync, closeSync, readdirSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { after, before, describe, test } from 'node:test';
+import { after, afterEach, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
-import { macOnly, warmDev } from './vm-test-support.mjs';
+import { endHolders, macOnly, warmDev } from './vm-test-support.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), 'utf8');
@@ -17,13 +17,20 @@ const read = (p) => readFileSync(join(here, p), 'utf8');
 const tempRoot = (() => { const r = spawnSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }); return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : '/tmp'; })();
 const scratch = mkdtempSync(join(tempRoot, 'vm-win-test-'));
 const fakeVm = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, '.paddock-fake-vm'), 'test\n'); return dir; };
-after(() => rmSync(scratch, { recursive: true, force: true }));
-before(warmDev);
 
 // The interim VM lock (scripts/vm-lock.sh) is always taken under a scratch root, never the host's real one.
 const lockTmp = join(scratch, 'lock-tmp'); // owner folders of the lock's holders live here, so a holder killed by a test ends with the scratch folder
 mkdirSync(lockTmp, { recursive: true });
 const lockEnv = { TMPDIR: lockTmp, PADDOCK_VM_LOCK_ROOT: join(scratch, 'lock-root'), PADDOCK_VM_LOCK_HELD: '', PADDOCK_DEV: join(here, '..', 'dev') };
+before(() => { lockEnv.PADDOCK_DEV = warmDev(); });
+/** ER-14: no `slot hold` outlives the test that started it (a holder killed with its script's group leaves its detached holder
+ * until the owner folder goes); this ends it, and fails the test if one had to be killed. */
+const guardHolders = async () => {
+  const killed = await endHolders(scratch);
+  assert.deepEqual(killed, [], 'a slot holder ignored the removal of its owner folder and had to be killed');
+};
+afterEach(guardHolders);
+after(async () => { await guardHolders(); rmSync(scratch, { recursive: true, force: true }); });
 const run = (script, args, env = {}) =>
   spawnSync('bash', [join(here, script), ...args], { encoding: 'utf8', env: { ...process.env, ...lockEnv, ...env } });
 
@@ -474,11 +481,17 @@ exit 0`);
     let err = '';
     child.stderr.on('data', (d) => { err += d; });
     const exited = new Promise((r) => child.on('exit', (code, sig) => r({ code, sig })));
-    for (let i = 0; i < 300 && t.hung().length === 0; i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 30 s bound that only stops a hung child
-    assert.ok(t.hung().length > 0, 'the step is waiting');
-    child.kill('SIGTERM');
-    const { code } = await exited;
-    killHung(t);
+    let code;
+    try {
+      for (let i = 0; i < 300 && t.hung().length === 0; i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 30 s bound that only stops a hung child
+      assert.ok(t.hung().length > 0, `the step is waiting; vm-win.sh said so far: ${err}`);
+    } finally {
+      // Whatever the poll found, the script ends here: a vm-win.sh left running holds the VM lock, and every later lock test then
+      // fails on it (run 8099: "held by vm-win-admin-setup" in nine tests after this one failed, ER-14).
+      child.kill('SIGTERM');
+      ({ code } = await exited);
+      killHung(t);
+    }
     assert.equal(code, 143, err);
     stopsAndReverts(t);
     assert.equal(t.running(), false);
@@ -676,8 +689,9 @@ describe('the VM lock', () => {
     const exited = new Promise((r) => child.on('exit', r));
     // A poll of a condition: the bound only stops a hung child, the verdict never depends on the time taken.
     for (let i = 0; i < 150 && !existsSync(marker); i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a hung child
-    assert.ok(existsSync(marker), `${label} took the lock`);
-    return { stop: async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; } };
+    const stop = async () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { /* gone */ } await exited; await guardHolders(); };
+    if (!existsSync(marker)) { await stop(); assert.fail(`${label} did not take the lock`); } // a holder that never got the lock must not outlive the test either
+    return { stop };
   };
 
   test('holding() returns only once its own holder has the lock, also when an earlier call used the same label', async () => {
