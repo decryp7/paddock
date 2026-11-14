@@ -42,8 +42,10 @@ jobs:
           dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           schedule-workflow: nightly.yml
 
-  # The disk summary of the night: what is on the work disks (d7, d8), who owns it, what is reclaimable and what grew most in the
-  # last 7 days (`./dev disk report --summary`, read-only: nothing is cleaned here). Disk fills whether or not main changed, so it
+  # The disk summary of the night: what is in the dev-targets folder (docs/dev-setup.md, "Where things live"), who owns it, what is
+  # reclaimable and what grew most in the last 7 days (`./dev disk report --summary`, read-only: nothing is cleaned here). The runner's
+  # checkout has no `paddock.worktreeRoot`, so the folder comes from PADDOCK_DEV_TARGETS in the runner's environment; without it the
+  # summary says "not measured" (ER-33) instead of scanning nothing. Disk fills whether or not main changed, so it
   # does not wait for the gate (the night's skip of an unchanged main or a train in CI does not apply). Informational: not in
   # `mark`'s needs, and its failure never fails the night.
   disk-summary:
@@ -63,6 +65,11 @@ jobs:
       - uses: ./.gitea/actions/job-isolation
       - name: Scan and report
         run: |
+          if [ -z "${PADDOCK_DEV_TARGETS:-}" ]; then
+            echo "not measured: PADDOCK_DEV_TARGETS is not set on this runner" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::disk summary not measured: PADDOCK_DEV_TARGETS is not set on this runner. Next step: set it in the runner's environment to the dev-targets folder (docs/dev-setup.md)."
+            exit 0
+          fi
           ./dev disk scan
           ./dev disk report --summary >> "$GITHUB_STEP_SUMMARY"
       - uses: ./.gitea/actions/job-isolation
