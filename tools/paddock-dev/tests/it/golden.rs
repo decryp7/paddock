@@ -175,6 +175,10 @@ const SAMPLES: &[&[&str]] = &[
     &["diagrams/paddock.xml"],
     // An app's Cargo.toml and capabilities are read by conformance C48.
     &["apps/dyno/app/src-tauri/Cargo.toml"],
+    // The hooks' tests run in the tools job: a hook, places.rs (their parity test) and the copies register mark it.
+    &[".claude/hooks/worktree-guard.py"],
+    &["tools/paddock-dev/src/places.rs"],
+    &["docs/known-copies.toml"],
 ];
 
 #[test]

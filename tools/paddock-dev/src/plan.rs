@@ -103,6 +103,10 @@ static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^li
 /// The planner and its tests: besides the scripts' owners, this tool's golden test runs them as its oracle.
 static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(\.test)?\.mjs$"));
 
+/// What the hooks' parity test (`.claude/hooks/paddockpaths-parity.test.sh`) runs against: `places.rs` and the copies register. A change
+/// marks the tools job. Mirrors `HOOKS_PARITY_INPUT` in `scripts/affected.mjs`.
+static HOOKS_PARITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^(tools/paddock-dev/src/places\.rs|docs/known-copies\.toml)$"));
+
 /// The JS conformance runner and what it reads: this tool's parity tests run it over fixtures and the live tree (C39, C53).
 /// Mirrors `PARITY_INPUT` in `scripts/affected.mjs`.
 static PARITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^conformance/(src|bin|baselines)/.+\.(mjs|json)$"));
@@ -284,6 +288,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^(renovate/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)"), &["tools"]),
         (re(r"^\.gitleaks\.toml$"), &["conformance"]),
         (re(r"^wiki-lint\.json$"), &["tools"]),
+        (re(r"^\.claude/hooks/"), &["tools"]),
     ]
 });
 
@@ -532,6 +537,12 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                 }
             }
             continue;
+        }
+        if HOOKS_PARITY_INPUT.is_match(f) {
+            st.mark(
+                Some("tools".to_string()),
+                format!("the hooks' parity test (.claude/hooks/paddockpaths-parity.test.sh) reads {f}"),
+            );
         }
         if PLANNER_FILES.is_match(f) {
             st.mark(
@@ -1134,6 +1145,20 @@ mod tests {
             assert_eq!(
                 (&p["tools"], &p["docs"], &p["crates"], &p["all"]),
                 (&json!(true), &json!(false), &json!(false), &json!(false)),
+                "{f}"
+            );
+        }
+        // the hooks' tests run in the tools job: a hook, places.rs (their parity test) or the copies register marks it, and no more
+        for f in [
+            ".claude/hooks/worktree-guard.py",
+            ".claude/hooks/paddockpaths-parity.test.sh",
+            "tools/paddock-dev/src/places.rs",
+            "docs/known-copies.toml",
+        ] {
+            let p = plan(&[f]);
+            assert_eq!(
+                (&p["tools"], &p["all"], &p["crates"], &p["apps"]),
+                (&json!(true), &json!(false), &json!(false), &json!([])),
                 "{f}"
             );
         }
