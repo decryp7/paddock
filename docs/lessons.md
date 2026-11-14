@@ -2089,3 +2089,18 @@ base tag and tool versions as recorded in `ci-image/garage-release.txt` and chec
 apt packages float, and there is no Chrome for Testing or draw.io) and warns whenever amd64 is emulated. CI's Linux jobs stay on their native amd64 runners. **Rule for agents:** run the local Linux
 gate with `--ci-image` and no `--platform`; a missing-program or timing failure seen only under emulation is not a finding.
 **Class: environment-only failures of the local Linux gate (amd64 emulation on Apple Silicon).**
+
+## The push gate ran out of budget on work, not on queue time; a local base would have hidden commits (ADR 0102 amendment, 2026-11-15)
+Five pushes on 2026-11-14/15 were "not measured" by the 15-minute budget. The blamed cause was queue time; the logs said
+otherwise (queued 0 to 194 s, run 766 to 815 s): branches stacked on a train that was built locally and not yet pushed (or only
+partly) planned Clippy for every workspace the train touched (280 and 461 files), and a person's run always measured from
+origin/main. The first fix measured such a branch from the local train; review found that this drops the train's unpushed
+commits from the check while `git push` still sends them, and that any local ref named `train/*` could shrink a check. The fix
+that landed uses one definition, git's own: check the commits the remote lacks (`rev-list <tip> --not --remotes`), from the
+nearest commit of the remote the push contains, verified live; a person's run uses the same choice. Pass records name their
+base commit and count only against a base the remote has. The queue keeps its own bound, now for the whole push, and heavy
+steps of one push run one at a time while light rows go on.
+**Rule:** before fixing "it ran out of time", read the run and queue time each row reports; and a check's scope is defined by
+what the push sends, never by local names. Pushing a train before stacking work on it keeps the checks small.
+**Class: the pre-push gate's scope differs from what the push sends (an old base measured more; a local base would have
+measured less); earlier: the 2026-11-12 base choice from origin/main for train-based branches.**
