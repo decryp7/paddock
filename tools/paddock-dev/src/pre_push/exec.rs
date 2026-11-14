@@ -422,13 +422,14 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -
 }
 
 /// The command that puts a heavy step through the machine-wide slot: [`heavy_prefix`], else the `heavy` built from the tree at
-/// `root` (once, kept in `built`; `left` bounds that build). The one resolver of the push gate and of `./dev gen check`, so
-/// both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_HEAVY=off`.
+/// `root` (once, kept in `built`; `left` bounds that build), held under a name of this run's own for as long as `built` lives
+/// ([`super::heavy_tool::Held`]), so another agent pruning or replacing the shared cache cannot fail a later step. The one
+/// resolver of the push gate and of `./dev gen check`, so both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_HEAVY=off`.
 pub fn heavy_command_for(
     root: &Path,
     env: &HashMap<String, String>,
     has_tool: &dyn Fn(&str) -> bool,
-    built: &std::sync::OnceLock<Result<PathBuf, String>>,
+    built: &std::sync::OnceLock<Result<super::heavy_tool::Held, String>>,
     left: Duration,
 ) -> Result<Vec<String>, String> {
     if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
@@ -443,8 +444,13 @@ pub fn heavy_command_for(
     if !found.is_empty() {
         return Ok(found);
     }
-    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left)) {
-        Ok(bin) => Ok(vec![bin.display().to_string(), "run".into(), "pre-push".into(), "--".into()]),
+    match built.get_or_init(|| super::heavy_tool::ensure(root, env, left).and_then(|bin| super::heavy_tool::hold(&bin, env))) {
+        Ok(held) => Ok(vec![
+            held.path().display().to_string(),
+            "run".into(),
+            "pre-push".into(),
+            "--".into(),
+        ]),
         Err(e) => Err(e.clone()),
     }
 }
@@ -477,7 +483,7 @@ pub struct RealExec {
     /// Set by SIGINT or SIGTERM: the running gates' process trees are ended.
     pub stop: Arc<AtomicBool>,
     /// The `heavy` built from tools/heavy when none is on PATH, built once per run (or the reason it could not be).
-    pub built_heavy: std::sync::OnceLock<Result<PathBuf, String>>,
+    pub built_heavy: std::sync::OnceLock<Result<super::heavy_tool::Held, String>>,
     /// When the push gate's budget ends: the build of heavy is cut off there.
     pub budget_end: Instant,
     /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).

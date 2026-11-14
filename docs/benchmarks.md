@@ -1270,3 +1270,27 @@ The per-gate times of `./dev check --pre-push` on a shared-crate change (about 1
   shared), one test per case, and bounded.sh's first second of naps at 0.05 s instead of 0.2 s (a kept clone's six phases each waited
   at least one nap). No limit was raised. The CI stall of single `./dev` calls past 60 s in run 8099 was not reproduced here (CPU load to
   200 and a 4 × 6 GB write load gave at most 1.0 s per wrapper call): not measured. Raw output in the agent's scratch folder, not kept.
+
+## gen check: cold build of a generator's test binary (2026-11-14, fix/gen-check-build-first)
+
+Question: how long does the build phase of the slowest `./dev gen check` entry take cold, so its own bound (`build_limit()` in
+`tools/paddock-dev/src/generators/run.rs`) rests on a measurement (ER-12)? Before this branch the build ran inside the check's
+1800 s hang guard; on train 10 and on the vault run2 (2026-11-14) `ts-debrief-wire` hit that guard cold and passed once the
+folder was warm, so cold build plus run was more than 1800 s there.
+
+- **Machine:** Mac mini (arm64), freshly rebooted (up 19 minutes), 1-minute load 29 at the start (5-minute 73), 42 at the end,
+  peaks near 190 from other agents during the run
+- **Command:** `./dev heavy -- cargo test --no-run -p debrief-app --lib` in `apps/debrief` (the entry's `build`), commit
+  0a78cae1f, `CARGO_BUILD_JOBS=2`, empty `CARGO_TARGET_DIR`, no `RUSTC_WRAPPER` (no sccache), libduckdb from `cargo xtask libduckdb`
+- **Runs:** 1 (a cold build is one event per folder)
+- **Numbers:**
+
+  | What | Time |
+  |---|---|
+  | cargo inside the heavy slot (607 crates compiled) | 866 s (cargo: 14 m 25 s); slot wait 0 s |
+  | wall, including building this branch's `./dev` and `heavy` | 1021 s (user 1290 s, sys 47 s) |
+
+- **Memory measure:** not measured
+- **Bound chosen:** 3600 s for the build phase, about 4x the measured 866 s: the train 10 run under heavier load needed more than
+  1800 s for build plus run, and the bound is a hang guard, not a budget. The check's own guard stays 1800 s and now covers only
+  the run. Not measured: a cold build at load 150 or more, and the other entries' builds (all smaller workspaces or crates).

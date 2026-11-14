@@ -38,6 +38,10 @@ pub struct Generator {
     pub what: String,
     /// The check: a program and its arguments (no shell unless it names one). Exit status 0 means current. Empty for a manual entry.
     pub check: Vec<String>,
+    /// The command that compiles what `check` runs (for example `cargo test --no-run ...`), run first as a phase of its own with
+    /// its own bound, so a cold build never eats the check's hang guard. Required when `check` is a cargo command that compiles
+    /// (`test`, `run`, `bench`); empty otherwise.
+    pub build: Vec<String>,
     /// The command that regenerates the files, as the text shown in the error (run from `cwd`).
     pub regenerate: String,
     /// The folder the commands run in, relative to the repository root.
@@ -72,7 +76,20 @@ impl Generator {
 
     /// The command line as a person would type it, for logs and errors.
     pub fn check_line(&self) -> String {
-        let args: Vec<String> = self.check.iter().map(|a| quote(a)).collect();
+        self.line_of(&self.check)
+    }
+
+    /// The build command line as a person would type it (empty when the entry has no build).
+    pub fn build_line(&self) -> String {
+        if self.build.is_empty() {
+            String::new()
+        } else {
+            self.line_of(&self.build)
+        }
+    }
+
+    fn line_of(&self, argv: &[String]) -> String {
+        let args: Vec<String> = argv.iter().map(|a| quote(a)).collect();
         if self.cwd == "." {
             args.join(" ")
         } else {
@@ -148,6 +165,7 @@ impl Registry {
                 "requires",
                 "manual",
                 "drift_marker",
+                "build",
             ];
             for k in t.keys().filter(|k| !known.contains(&k.as_str())) {
                 errors.push(format!("{at}: unknown key `{k}` (known: {})", known.join(", ")));
@@ -160,6 +178,18 @@ impl Registry {
                 )),
                 (Some(_), false) => errors.push(format!("{at}: `manual` and `check` exclude each other")),
                 _ => {}
+            }
+            let build = strings_of(t, "build");
+            if build.is_empty() && compiles(&check) {
+                errors.push(format!(
+                    "{at}: `build` is required: `check` is a cargo command that compiles, so name the command that builds what it runs (for example [\"cargo\", \"test\", \"--no-run\", ...]); gen check runs it first with its own bound, so a cold build does not count against the check's hang guard"
+                ));
+            }
+            if !build.is_empty() && compiles(&check) && (selectors(&build) != selectors(&check) || !build.iter().any(|a| a == "--no-run")) {
+                errors.push(format!(
+                    "{at}: `build` must build exactly what `check` runs: the same cargo subcommand, packages, targets and features as the check, plus `--no-run` (build {:?}, check {:?})",
+                    build, check
+                ));
             }
             let regenerate = text_of(t, "regenerate");
             if regenerate.is_empty() {
@@ -200,6 +230,7 @@ impl Registry {
                 id,
                 what,
                 check,
+                build,
                 regenerate,
                 cwd,
                 paths,
@@ -228,6 +259,56 @@ impl Registry {
     pub fn get(&self, id: &str) -> Option<&Generator> {
         self.generators.iter().find(|g| g.id == id)
     }
+}
+
+/// Whether `check` is a cargo command that compiles before it runs (`cargo [+toolchain] test|run|bench`).
+fn compiles(check: &[String]) -> bool {
+    let mut words = check.iter().map(String::as_str);
+    if words.next() != Some("cargo") {
+        return false;
+    }
+    let sub = words.find(|w| !w.starts_with('+'));
+    matches!(sub, Some("test" | "run" | "bench"))
+}
+
+/// What a cargo command builds: its subcommand and the flags that choose packages, targets, features and profile (with their
+/// values), sorted. A test filter or `--no-run` does not change what is built.
+fn selectors(argv: &[String]) -> Vec<String> {
+    const VALUED: [&str; 8] = [
+        "-p",
+        "--package",
+        "--test",
+        "--bin",
+        "--example",
+        "--bench",
+        "--features",
+        "--profile",
+    ];
+    const BARE: [&str; 9] = [
+        "--lib",
+        "--bins",
+        "--tests",
+        "--workspace",
+        "--all-features",
+        "--all-targets",
+        "--no-default-features",
+        "--release",
+        "--locked",
+    ];
+    let mut out = Vec::new();
+    let mut words = argv.iter().skip(1).filter(|w| !w.starts_with('+'));
+    if let Some(sub) = words.next() {
+        out.push(format!("sub {sub}"));
+    }
+    while let Some(w) = words.next() {
+        if VALUED.contains(&w.as_str()) {
+            out.push(format!("{w} {}", words.next().map_or("", String::as_str)));
+        } else if BARE.contains(&w.as_str()) || w.starts_with("--features=") || w.starts_with("--package=") {
+            out.push(w.clone());
+        }
+    }
+    out.sort();
+    out
 }
 
 fn globs(list: &[String]) -> (Vec<Regex>, Vec<String>) {
@@ -352,6 +433,49 @@ cost = "fast"
         assert!(ok.generators[0].check.is_empty());
         assert!(Registry::parse(&entry("manual = \"x\"\ncheck = [\"a\"]")).unwrap_err()[0].contains("exclude each other"));
         assert!(Registry::parse(&entry("")).unwrap_err()[0].contains("or `manual ="));
+    }
+
+    #[test]
+    fn a_cargo_check_that_compiles_names_its_build_and_the_build_is_kept() {
+        let entry = |check: &str, extra: &str| {
+            format!(
+                "version = 1\n[[generator]]\nid = \"a\"\nwhat = \"w\"\nregenerate = \"r\"\npaths = [\"p\"]\ncost = \"heavy\"\ncheck = {check}\n{extra}\n"
+            )
+        };
+        for check in [
+            r#"["cargo", "test", "-p", "x"]"#,
+            r#"["cargo", "run", "--bin", "y"]"#,
+            r#"["cargo", "+nightly", "test"]"#,
+        ] {
+            let errs = Registry::parse(&entry(check, "")).unwrap_err().join("\n");
+            assert!(errs.contains("`build` is required"), "{check}: {errs}");
+        }
+        let ok = Registry::parse(&entry(
+            r#"["cargo", "test", "-p", "x", "t"]"#,
+            r#"build = ["cargo", "test", "--no-run", "-p", "x"]"#,
+        ))
+        .unwrap();
+        assert_eq!(ok.generators[0].build, ["cargo", "test", "--no-run", "-p", "x"]);
+        assert_eq!(ok.generators[0].build_line(), "cargo test --no-run -p x");
+        // A build that builds something else than the check runs is refused.
+        let errs = Registry::parse(&entry(
+            r#"["cargo", "test", "-p", "x", "--lib", "t"]"#,
+            r#"build = ["cargo", "test", "--no-run", "-p", "y", "--lib"]"#,
+        ))
+        .unwrap_err()
+        .join("\n");
+        assert!(errs.contains("must build exactly what `check` runs"), "{errs}");
+        let errs = Registry::parse(&entry(
+            r#"["cargo", "test", "-p", "x", "t"]"#,
+            r#"build = ["cargo", "test", "-p", "x"]"#,
+        ))
+        .unwrap_err()
+        .join("\n");
+        assert!(errs.contains("plus `--no-run`"), "{errs}");
+        // Checks that compile nothing need no build.
+        assert!(Registry::parse(&entry(r#"["cargo", "metadata", "--locked"]"#, "")).is_ok());
+        assert!(Registry::parse(&entry(r#"["sh", "-c", "cargo hakari verify"]"#, "")).is_ok());
+        assert!(Registry::parse(&entry(r#"["node", "x.mjs"]"#, "build = []")).is_ok());
     }
 
     #[test]

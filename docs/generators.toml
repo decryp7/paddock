@@ -11,6 +11,10 @@
 #   what        one line: what is generated and what makes it stale.
 #   check       the program and its arguments as an array (no shell unless the entry names `sh -c`). Exit status 0 = current.
 #               It must change nothing in the tree.
+#   build       the program and its arguments that compile what `check` runs (`cargo test --no-run` with the check's package,
+#               targets and features, without its test filter). Required when `check` is `cargo test`, `cargo run` or
+#               `cargo bench`. `gen check` runs it first, as a phase with its own bound and logged duration, so a cold build never
+#               counts against the check's hang guard; a check that still compiles afterwards is warned about.
 #   regenerate  the command that fixes drift, as the text the error shows. `none: <what to do instead>` when no command can.
 #   cwd         the folder both run in, relative to the repository root (default ".").
 #   paths       globs (`*` and `?` stay in a folder, `**` crosses folders) of the inputs and outputs: a change to one makes the
@@ -254,6 +258,7 @@ cost = "heavy"
 id = "ts-debrief-wire"
 what = "Debrief's TypeScript wire types, generated from the Rust DTOs with ts-rs"
 check = ["cargo", "test", "-p", "debrief-app", "--lib", "generated_types"]
+build = ["cargo", "test", "--no-run", "-p", "debrief-app", "--lib"]
 regenerate = "DEBRIEF_WRITE_TYPES=1 cargo test -p debrief-app --lib generated_types   # in apps/debrief"
 cwd = "apps/debrief"
 paths = ["apps/debrief/crates/**/*.rs", "apps/debrief/app/src-tauri/**/*.rs", "apps/debrief/**/Cargo.toml", "apps/debrief/Cargo.lock"]
@@ -275,6 +280,7 @@ cost = "fast"
 id = "ts-dyno-widgets"
 what = "Dyno's widget wire types and golden tables for the UI, generated from dyno-core"
 check = ["cargo", "test", "-p", "dyno-core", "--lib", "widgets::"]
+build = ["cargo", "test", "--no-run", "-p", "dyno-core", "--lib"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test -p dyno-core --lib widgets::   # in apps/dyno"
 cwd = "apps/dyno"
 paths = ["apps/dyno/crates/dyno-core/**", "apps/dyno/Cargo.lock", "crates/paddock-widgets/**"]
@@ -286,6 +292,7 @@ drift_marker = ["test result: FAILED"]
 id = "ts-pitwall-widgets"
 what = "Pitwall's widget wire types for the UI, generated from pitwall-core"
 check = ["cargo", "test", "-p", "pitwall-core", "--lib", "widgets::generated"]
+build = ["cargo", "test", "--no-run", "-p", "pitwall-core", "--lib"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test -p pitwall-core --lib widgets::generated   # in apps/pitwall"
 cwd = "apps/pitwall"
 paths = ["apps/pitwall/crates/pitwall-core/**", "apps/pitwall/Cargo.lock", "crates/paddock-widgets/**"]
@@ -297,6 +304,7 @@ drift_marker = ["test result: FAILED"]
 id = "ts-dyno-shell"
 what = "Dyno's command names and dialog contracts for the UI, generated from its command and dialog tables"
 check = ["cargo", "test", "--test", "shell"]
+build = ["cargo", "test", "--no-run", "--test", "shell"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test --test shell   # in apps/dyno/app/src-tauri"
 cwd = "apps/dyno/app/src-tauri"
 paths = ["apps/dyno/app/src-tauri/**", "apps/dyno/crates/**/*.rs", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
@@ -308,6 +316,7 @@ drift_marker = ["test result: FAILED"]
 id = "ts-pitwall-shell"
 what = "Pitwall's command names and dialog contracts for the UI, generated from its command and dialog tables"
 check = ["cargo", "test", "--test", "it", "shell"]
+build = ["cargo", "test", "--no-run", "--test", "it"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test --test it shell   # in apps/pitwall/app/src-tauri"
 cwd = "apps/pitwall/app/src-tauri"
 paths = ["apps/pitwall/app/src-tauri/**", "apps/pitwall/crates/**/*.rs", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
@@ -319,6 +328,7 @@ drift_marker = ["test result: FAILED"]
 id = "ts-shell-demo"
 what = "The shell demo's command names and dialog contracts for the UI, generated from its tables"
 check = ["cargo", "test", "--test", "app"]
+build = ["cargo", "test", "--no-run", "--test", "app"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test --test app   # in apps/shell-demo/src-tauri"
 cwd = "apps/shell-demo/src-tauri"
 paths = ["apps/shell-demo/src-tauri/**", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
@@ -330,6 +340,7 @@ drift_marker = ["test result: FAILED"]
 id = "ts-workbench-demo"
 what = "The workbench demo's dialog contracts for the UI, generated from its table"
 check = ["cargo", "test", "--test", "app"]
+build = ["cargo", "test", "--no-run", "--test", "app"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test --test app   # in apps/workbench-demo/src-tauri"
 cwd = "apps/workbench-demo/src-tauri"
 paths = ["apps/workbench-demo/src-tauri/**", "crates/paddock-commands/**", "crates/paddock-dialogs/**", "crates/paddock-shell/**"]
@@ -341,6 +352,7 @@ drift_marker = ["test result: FAILED"]
 id = "ts-shared-crates"
 what = "the shared crates' TypeScript (ts-rs types, command names, dialog contracts, fixtures), command_names.rs and window-classes.toml, each written by its crate's `generated` test"
 check = ["cargo", "test", "--workspace", "--all-features", "--lib", "generated"]
+build = ["cargo", "test", "--no-run", "--workspace", "--all-features", "--lib"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test -p <crate> --all-features --lib generated   # in crates; the failing test names the crate"
 cwd = "crates"
 paths = ["crates/**/*.rs", "crates/**/Cargo.toml", "crates/Cargo.lock", "ui/projects/paddock-ui/**/generated/**"]
@@ -379,6 +391,7 @@ cost = "heavy"
 id = "per-machine-installer"
 what = "The Windows per-machine installer include and its stop-image list, generated by paddock-service from each app's Tauri config"
 check = ["cargo", "test", "-p", "paddock-service", "--lib", "per_machine"]
+build = ["cargo", "test", "--no-run", "-p", "paddock-service", "--lib"]
 regenerate = "PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine   # in crates"
 cwd = "crates"
 paths = ["crates/paddock-service/**", "crates/paddock-setup/nsis/**", "apps/*/app/src-tauri/tauri*.conf.json", "apps/*/app/src-tauri/windows/**"]

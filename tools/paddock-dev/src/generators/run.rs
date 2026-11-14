@@ -19,6 +19,17 @@ pub fn limit(cost: Cost) -> Duration {
         Cost::Heavy => Duration::from_secs(1800),
     }
 }
+/// The longest the build phase of an entry with `build` may take: a hang guard of its own, so a cold build never counts against
+/// the run's guard ([`limit`]). Measured: see [`BUILD_LIMIT_SOURCE`].
+pub fn build_limit() -> Duration {
+    BUILD_LIMIT
+}
+const BUILD_LIMIT: Duration = Duration::from_secs(BUILD_LIMIT_SECS);
+/// About 4x the measured cold build of the largest entry (`ts-debrief-wire`: 866 s at load 29 to 42, 2 jobs, no sccache; recorded in
+/// [`BUILD_LIMIT_SOURCE`]); train 10 needed more than 1800 s for build plus run under heavier load. A hang guard, not a budget.
+const BUILD_LIMIT_SECS: u64 = 3600;
+/// Where the build bound's measurement is recorded (rule 48).
+pub const BUILD_LIMIT_SOURCE: &str = "docs/benchmarks.md, \"gen check: cold build of a generator's test binary\"";
 /// Fast checks that run at once: scripts over files, not builds.
 const PARALLEL: usize = 4;
 
@@ -92,7 +103,8 @@ pub struct Real {
     env: HashMap<String, String>,
     /// Build-folder roots tried when `PADDOCK_DEV_TARGET_DIR` is not set (`./dev disk`'s configured roots), first that exists.
     default_roots: Vec<PathBuf>,
-    built_heavy: OnceLock<Result<PathBuf, String>>,
+    /// The heavy built from the tree, held for this whole run (never the shared cache path: see `heavy_tool::Held`).
+    built_heavy: OnceLock<Result<crate::pre_push::heavy_tool::Held, String>>,
 }
 
 impl Real {
@@ -303,6 +315,8 @@ pub struct Checked {
     pub outcome: Outcome,
     /// How long it took (zero when it did not run).
     pub took: Duration,
+    /// How long its build phase took (`None`: the entry has no build, or it never started).
+    pub built: Option<Duration>,
 }
 
 /// Runs the checks of `due` in `root`: the fast ones up to [`PARALLEL`] at a time, then the heavy ones one by one. Results are
@@ -337,6 +351,7 @@ pub fn execute(root: &Path, due: &[&Generator], runner: &dyn Runner, log: &(dyn 
                 cost: g.cost,
                 outcome: Outcome::NotMeasured(Reason::new("the check did not run (a worker ended early)")),
                 took: Duration::ZERO,
+                built: None,
             })
         })
         .collect()
@@ -372,13 +387,15 @@ fn store(slot: &Mutex<Option<Checked>>, c: Checked) {
 }
 
 fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: &(dyn Fn(&str) + Sync)) -> Checked {
-    let done = |outcome: Outcome, took: Duration| Checked {
+    let mut built = None;
+    let done = |outcome: Outcome, took: Duration, built: Option<Duration>| Checked {
         id: g.id.clone(),
         line: g.check_line(),
         regenerate: g.regenerate_line(),
         cost: g.cost,
         outcome,
         took,
+        built,
     };
     if let Some(missing) = g.requires.iter().find(|r| !runner.exists(&root.join(r))) {
         let c = done(
@@ -386,6 +403,7 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: 
                 "not on this tree: {missing} is missing (the check needs it: install or build what provides it, or merge the branch that adds it)"
             ))),
             Duration::ZERO,
+            None,
         );
         log(&format!("gen {}: NOT MEASURED, not on this tree ({missing} is missing)", g.id));
         return c;
@@ -394,20 +412,40 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: 
     if !runner.exists(&dir) {
         let why = format!("the folder {} does not exist on this tree", g.cwd);
         log(&format!("gen {}: NOT MEASURED, {why}", g.id));
-        return done(Outcome::NotMeasured(Reason::new(why)), Duration::ZERO);
+        return done(Outcome::NotMeasured(Reason::new(why)), Duration::ZERO, None);
+    }
+    let spec = Spec {
+        heavy: g.cost == Cost::Heavy,
+        workspace: &g.cwd,
+    };
+    // Phase 1, the build: its own bound and its own logged duration (ER-27), so a cold build never eats the run's guard (ER-12).
+    if !g.build.is_empty() {
+        log(&format!("gen {}: building [{}] {}", g.id, g.cost.name(), g.build_line()));
+        let start = Instant::now();
+        let ran = runner.run(&dir, &g.build, build_limit(), &spec);
+        let took = start.elapsed();
+        built = Some(took);
+        if let Some(why) = build_failed(ran) {
+            log(&format!("gen {}: build NOT MEASURED in {:.1}s", g.id, took.as_secs_f64()));
+            return done(Outcome::NotMeasured(Reason::new(why)), Duration::ZERO, built);
+        }
+        log(&format!("gen {}: built in {:.1}s", g.id, took.as_secs_f64()));
     }
     log(&format!("gen {}: running [{}] {}", g.id, g.cost.name(), g.check_line()));
     let start = Instant::now();
-    let ran = runner.run(
-        &dir,
-        &g.check,
-        limit(g.cost),
-        &Spec {
-            heavy: g.cost == Cost::Heavy,
-            workspace: &g.cwd,
-        },
-    );
+    let ran = runner.run(&dir, &g.check, limit(g.cost), &spec);
     let took = start.elapsed();
+    if !g.build.is_empty()
+        && let Ran::Exited { text, .. } = &ran
+        && text.lines().any(|l| l.trim_start().starts_with("Compiling "))
+    {
+        log(&format!(
+            "::warning::gen {}: the check compiled after its build phase, so its build [{}] does not build what it runs and the run was timed with a build in it. Next: make `build` in {} match the check's package, targets and features",
+            g.id,
+            g.build_line(),
+            super::registry::PATH
+        ));
+    }
     let tool = ToolVersion::new(concat!("paddock-dev ", env!("CARGO_PKG_VERSION")));
     let outcome = measure(
         CheckId::new(format!("gen:{}", g.id)),
@@ -436,7 +474,29 @@ fn one(root: &Path, g: &Generator, runner: &dyn Runner, subject: &Subject, log: 
         _ => "NOT MEASURED",
     };
     log(&format!("gen {}: {word} in {:.1}s", g.id, took.as_secs_f64()));
-    done(outcome, took)
+    done(outcome, took, built)
+}
+
+/// Why a build phase gave no binary to run (`None`: it built). A build that did not finish is never drift: NOT MEASURED.
+fn build_failed(ran: Ran) -> Option<String> {
+    match ran {
+        Ran::Exited { code: Some(0), .. } => None,
+        Ran::Exited { code, tail, text } => Some(format!(
+            "the build phase failed ({}), so the check did not run{}: {tail}",
+            code.map_or_else(|| "ended by a signal".to_string(), |c| format!("status {c}")),
+            broken_tool(&text).map(|w| format!(" ({w})")).unwrap_or_default()
+        )),
+        Ran::Unavailable(why) => Some(format!("the build phase could not start: {why}")),
+        Ran::SlotWait(who) => Some(format!(
+            "the build phase waited {} s, its hang guard, for the machine-wide heavy slot and never started ({who}); run it again when the machine is quieter",
+            build_limit().as_secs()
+        )),
+        Ran::TimedOut => Some(format!(
+            "the build phase did not finish within {} s, its own bound, and was ended. Next: build it once by hand to see why",
+            build_limit().as_secs()
+        )),
+        Ran::OutputCap => Some("the build phase wrote more output than the cap (4 MiB) and was ended".into()),
+    }
 }
 
 #[cfg(test)]
