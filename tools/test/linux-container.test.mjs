@@ -161,9 +161,10 @@ test('a linked worktree gets its common git folder read-only at its own path, a 
   assert.ok(runLine.includes(`type=bind,source=${common},target=${common},readonly`), runLine);
   assert.ok(!runLine.includes(`target=${common}/worktrees/wt,`), 'a git folder inside the common one is not mounted twice');
   assert.ok(runLine.includes(`type=tmpfs,target=${common}/paddock-pre-push`), runLine);
-  assert.ok(runLine.includes(' -e GIT_CONFIG_GLOBAL=/tmp/paddock-linux-gitconfig '), runLine);
-  assert.doesNotMatch(runLine, /GIT_CONFIG_COUNT/);
-  assert.ok(runLine.endsWith(' img sh -c printf "[safe]\\n\\tdirectory = *\\n" > "$GIT_CONFIG_GLOBAL" && exec "$@" linux-container git status'), runLine);
+  // safe.directory comes from the CI image's /etc/gitconfig, as in CI: no GIT_* variable, no wrapper, so the command's own HOME
+  // and its .gitconfig are read as usual (paddock-dev's kept_fixture turns git maintenance off through a temp HOME's .gitconfig).
+  assert.doesNotMatch(runLine, / -e GIT_/);
+  assert.ok(runLine.endsWith(' img git status'), runLine);
   assert.ok(existsSync(join(common, 'paddock-pre-push')), 'the mount point exists');
 
   const elsewhere = realpathSync(write(scratch(), { 'commondir': `${common}\n`, 'HEAD': 'x\n' }));
@@ -206,4 +207,30 @@ test('a new arm64 build removes this id\'s older local CI images and keeps the n
   const nobuild = docker({ images });
   go(nobuild, ['--id', 'paddock', '--root', repo, '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64', HAVE_IMAGE: '1' });
   assert.ok(!calls(nobuild).some((l) => l.startsWith('docker image')  && !l.startsWith('docker image inspect')), 'no build, no clean-up');
+});
+
+/** Every `-e NAME=` the script passes to docker run. */
+const envNames = (line) => [...line.matchAll(/ -e ([A-Z_][A-Z0-9_]*)=/g)].map((m) => m[1]);
+
+test('env parity with CI: the container gets only variables the Linux jobs of CI set too, and never a GIT_* one', () => {
+  // CI's jobs set these (.gitea/workflows/ci.yml `CARGO_TERM_COLOR: always`; CARGO_TARGET_DIR and CARGO_BUILD_JOBS through the
+  // build-folder action and the job's share of the cores); HOME, CARGO_HOME and the /tmp target only in PADDOCK_LINUX_USER mode,
+  // where a user without a home needs them, as the runner's own user has them.
+  const ci = new Set(['CARGO_TARGET_DIR', 'CARGO_BUILD_JOBS', 'CARGO_TERM_COLOR']);
+  const userMode = new Set(['HOME', 'CARGO_HOME']);
+  const common = realpathSync(write(scratch(), { 'HEAD': 'x\n', 'worktrees/wt/commondir': '../..\n', 'worktrees/wt/HEAD': 'x\n' }));
+  const wt = write(scratch(), { '.git': `gitdir: ${common}/worktrees/wt\n` });
+  const cases = [
+    [['--id', 'paddock', '--root', wt, '--image', 'img', '--', 'true'], {}, ci],
+    [['--id', 'paddock', '--root', ciRepo(), '--ci-image', '--', 'true'], { PADDOCK_LINUX_HOST_ARCH: 'arm64' }, ci],
+    [['--id', 'paddock', '--root', wt, '--image', 'img', '--', 'true'], { PADDOCK_LINUX_USER: '1000:1000' }, new Set([...ci, ...userMode])],
+  ];
+  for (const [args, env, allowed] of cases) {
+    const bin = docker();
+    const r = go(bin, args, { PADDOCK_LINUX_HOST_ARCH: 'x86_64', ...env });
+    assert.equal(r.status, 0, r.out);
+    const names = envNames(calls(bin).at(-1));
+    assert.ok(names.length > 0, 'the run line was read');
+    for (const n of names) assert.ok(allowed.has(n) && !n.startsWith('GIT_'), `${n} is set in the container but not by CI's jobs`);
+  }
 });

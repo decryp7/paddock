@@ -21,8 +21,9 @@
 # removes this id's older local images (paddock-ci-local, paddock-garage-local; about 11 GB a pair); --clean removes them all.
 # A linked worktree's git folders (its own and the common one) are mounted read-only at their own paths, so git works inside; the
 # pre-push state folder (<common git dir>/paddock-pre-push) is a tmpfs there, so `dev check --pre-push` can write its logs without
-# touching the host's. CARGO_TARGET_DIR (/target, a volume) and /tmp are the other writable places. git's safe.directory comes
-# from a global config file the container writes to /tmp at start (GIT_CONFIG_GLOBAL), because the repository's owner is the host user.
+# touching the host's. CARGO_TARGET_DIR (/target, a volume) and /tmp are the other writable places. git accepts the host user's
+# repository because the CI image's /etc/gitconfig marks every directory safe, as in CI; the script sets no GIT_* variable, so a
+# command's own HOME and its .gitconfig work as they do there.
 # Environment: DOCKER (default docker), PADDOCK_LINUX_BASE_IMAGE (rust:1-bookworm), PADDOCK_LINUX_CPUS (4), PADDOCK_LINUX_JOBS (2),
 # PADDOCK_LINUX_HOST_ARCH (default `uname -m`; tests pretend with it), PADDOCK_LINUX_CI_REGISTRY (dev.decryptology.net/decryp7/paddock-ci),
 # PADDOCK_LINUX_RUN_LABEL (an extra label, `key=value`, on the container: `dev check --pre-push` finds and stops its own container by it), PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
@@ -168,11 +169,6 @@ fi
 if [ -n "$state" ]; then
   # The mount point must exist in the read-only folder; it is the pre-push tool's own state folder, made empty if missing.
   mkdir -p "$state" 2>/dev/null && git_args+=(--mount "type=tmpfs,target=$state_in")
-  # The repository belongs to the host user; git refuses another owner's repository unless it is marked safe. A global config file
-  # in the container's /tmp says so, written before the command starts (nothing is added to the command's own config variables).
-  git_args+=(-e GIT_CONFIG_GLOBAL=/tmp/paddock-linux-gitconfig)
-  # shellcheck disable=SC2016 # expanded by the container's sh, not here
-  set -- sh -c 'printf "[safe]\n\tdirectory = *\n" > "$GIT_CONFIG_GLOBAL" && exec "$@"' linux-container "$@"
 fi
 
 exec "$docker" run --rm --label "$label" ${PADDOCK_LINUX_RUN_LABEL:+--label "$PADDOCK_LINUX_RUN_LABEL"} --cpus "$cpus" --memory "$memory" \
