@@ -4,6 +4,7 @@ import { Platform } from '../../core/platform';
 import { UiStateRegistry } from '../../lifecycle/ui-state';
 import { ProjectService, PROJECT_EXTENSION } from '../../projects/project.service';
 import { formatBytes, formatCount } from '../../shared/format/units';
+import { LatestRequest } from '../../shared/latest-request';
 import { errorMessage } from '../../tools/tool-errors';
 import { DIALOG_REF } from '../../ui/dialog.service';
 import { OverwriteGuard } from '../../ui/overwrite-guard';
@@ -229,7 +230,8 @@ export class RedactedCopyDialog implements OnInit {
   protected readonly result = signal<RedactedExport | null>(null);
   private readonly ready = signal(false);
   private timer: ReturnType<typeof setTimeout> | undefined;
-  private generation = 0;
+  /** The latest preview request wins; closing the dialog cancels it (ADR 0071). */
+  private readonly previews = new LatestRequest(inject(DestroyRef));
 
   /** The copy can be created when the engine accepted the picks and the preview is current. */
   protected readonly canCreate = computed(() => this.ready() && !this.busy() && !this.previewing() && !this.previewError() && this.preview() !== null);
@@ -286,23 +288,16 @@ export class RedactedCopyDialog implements OnInit {
   /** Asks the engine again after the last change (older answers that arrive late are ignored). */
   private refresh(delay = PREVIEW_DEBOUNCE_MS): void {
     clearTimeout(this.timer);
-    const generation = ++this.generation;
+    // An answer for the options before this change is stale from now on, not only once the next request starts.
+    this.previews.cancel();
     this.previewing.set(true);
     this.timer = setTimeout(() => {
-      this.backend.redactedCopyPreview(this.options()).then(
-        (p) => {
-          if (generation !== this.generation) return;
-          this.preview.set(p);
-          this.previewError.set(null);
-          this.previewing.set(false);
-        },
-        (e: unknown) => {
-          if (generation !== this.generation) return;
-          this.preview.set(null);
-          this.previewError.set(errorMessage(e));
-          this.previewing.set(false);
-        },
-      );
+      void this.previews.run(() => this.backend.redactedCopyPreview(this.options())).then((answer) => {
+        if (answer.status === 'stale') return;
+        this.preview.set(answer.status === 'done' ? answer.value : null);
+        this.previewError.set(answer.status === 'failed' ? errorMessage(answer.error) : null);
+        this.previewing.set(false);
+      });
     }, delay);
   }
 

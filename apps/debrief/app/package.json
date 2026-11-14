@@ -9,6 +9,7 @@
     "pretest": "node scripts/check-dialog-commands.mjs",
     "test": "ng test",
     "lint": "ng lint && node scripts/lint-styles.mjs && node scripts/lint-effects.mjs && node scripts/check-dialog-commands.mjs",
+    "lint:report": "DEBRIEF_LINT_REPORT=1 eslint src e2e",
     "e2e": "playwright test",
     "e2e:install": "playwright install --with-deps chromium webkit",
     "e2e:shell-baseline": "DEBRIEF_SHELL_BASELINE=1 playwright test --project=shell-baseline-chromium --project=shell-baseline-webkit",

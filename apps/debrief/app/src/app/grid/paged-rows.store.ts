@@ -2,6 +2,7 @@ import { signal } from '@angular/core';
 import { Page, PageRequest, Query, RecordView } from '../core/api.types';
 import { describeError } from '../core/logger';
 import { Debouncer } from '../shared/throttle';
+import { LatestRequest } from '../shared/latest-request';
 
 /** Rows per page fetched from the engine. */
 export const PAGE = 500;
@@ -54,7 +55,7 @@ export interface PagedRowsOptions {
 
 /**
  * The events grid's rows, without any DOM: a sparse cache of pages for one query and sort order, fetched on demand,
- * bounded (pages far from the view are evicted), keyed by a generation so late answers for an old query are dropped.
+ * bounded (pages far from the view are evicted), in rounds (ADR 0071) so late answers for an old query are dropped.
  * A page that failed is not asked for again until `retry` (scrolling over it must not hammer a failing engine).
  * While the user scrolls, missing pages are fetched only once scrolling pauses (`fill`).
  */
@@ -78,7 +79,9 @@ export class PagedRowsStore {
   private readonly inflight = new Set<number>();
   private stale = new Set<number>();
   private readonly failed = new Set<number>();
-  private gen = 0;
+  /** One round of page requests per query, live refresh or full retry; `dispose` ends the last one (ADR 0071). */
+  private readonly rounds = new LatestRequest();
+  private round = this.rounds.begin();
   private currentQuery: Query | null = null;
   private desc = false;
   private scrolledAt = Number.NEGATIVE_INFINITY;
@@ -101,11 +104,6 @@ export class PagedRowsStore {
     return this.desc;
   }
 
-  /** Changes on every reset, live refresh and full retry: answers to older requests are dropped. */
-  get generation(): number {
-    return this.gen;
-  }
-
   /** Pages in memory (for tests and diagnostics). */
   get pageCount(): number {
     return this.pages.size;
@@ -121,7 +119,7 @@ export class PagedRowsStore {
 
   /** A new query or sort order: drops everything and fetches the first page. */
   reset(query: Query, descending: boolean): void {
-    this.gen++;
+    this.round = this.rounds.begin();
     this.currentQuery = query;
     this.desc = descending;
     this.pages = new Map();
@@ -144,7 +142,7 @@ export class PagedRowsStore {
    */
   liveRefresh(mode: LiveMode, first: number, last: number): void {
     const oldTotal = this.total();
-    this.gen++;
+    this.round = this.rounds.begin();
     this.inflight.clear();
     this.failed.clear();
     this.error.set(null);
@@ -193,7 +191,7 @@ export class PagedRowsStore {
     this.error.set(null);
     if (!this.loaded() || !this.pages.size) {
       this.failed.clear();
-      this.gen++;
+      this.round = this.rounds.begin();
       this.inflight.clear();
       void this.fetchPage(0);
       return;
@@ -224,35 +222,39 @@ export class PagedRowsStore {
   /** Stops waiting for scrolling to pause. */
   dispose(): void {
     this.idle.cancel();
+    this.rounds.cancel();
   }
 
   private async fetchPage(page: number): Promise<void> {
-    const gen = this.gen;
+    const round = this.round;
     const query = this.currentQuery;
     if (!query) return;
     this.inflight.add(page);
-    try {
-      const res = await this.options.fetch({ query, offset: page * this.pageSize, limit: this.pageSize, descending: this.desc, anchor: null });
-      if (gen !== this.gen) return;
-      this.pages.set(page, res.rows);
-      this.stale.delete(page);
-      this.failed.delete(page);
-      this.evictFar(this.options.centre?.() ?? 0);
-      this.total.set(res.total);
-      this.loaded.set(true);
-      this.error.set(null);
-      this.options.onTotal?.(res.total);
-      this.arriveLive(res.total);
-      this.bump();
-      this.options.onPage?.();
-    } catch (e) {
-      if (gen === this.gen) {
-        this.failed.add(page);
-        this.error.set(describeError(e));
-      }
-    } finally {
+    const answer = await LatestRequest.settle(round, () =>
+      this.options.fetch({ query, offset: page * this.pageSize, limit: this.pageSize, descending: this.desc, anchor: null }),
+    );
+    // A stale answer's page may be in flight again for the new round: leave its marker alone.
+    if (answer.status === 'stale') return;
+    if (answer.status === 'failed') {
       this.inflight.delete(page);
+      this.failed.add(page);
+      this.error.set(describeError(answer.error));
+      return;
     }
+    const res = answer.value;
+    this.pages.set(page, res.rows);
+    this.stale.delete(page);
+    this.failed.delete(page);
+    // Still marked in flight here, so eviction keeps the page that just arrived.
+    this.evictFar(this.options.centre?.() ?? 0);
+    this.inflight.delete(page);
+    this.total.set(res.total);
+    this.loaded.set(true);
+    this.error.set(null);
+    this.options.onTotal?.(res.total);
+    this.arriveLive(res.total);
+    this.bump();
+    this.options.onPage?.();
   }
 
   private arriveLive(newTotal: number): void {

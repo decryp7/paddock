@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 
 // Narrow windows: the filter bar folds range, time zone and Clear all into a ⋯ menu (bar < 1000 px), the Explorer
@@ -60,7 +60,7 @@ test.describe('narrow window', () => {
 
   test('the message column stays readable at 900 px and the grid does not overflow the window', async ({ page }) => {
     await resize(page, 900);
-    const msg = page.locator('debrief-events-grid [role=row].row').first().locator('.msg');
+    const msg = gridRows(page).first().locator('.msg');
     await expect(msg).toBeVisible();
     // The grid re-lays out after the window's resize: poll, never read once (a single read raced the layout and saw 120 px).
     await expect.poll(async () => (await msg.boundingBox())!.width).toBeGreaterThan(200);

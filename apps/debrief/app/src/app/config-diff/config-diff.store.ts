@@ -1,5 +1,6 @@
 import { OverwriteGuard } from '../ui/overwrite-guard';
-import { computed, inject } from '@angular/core';
+import { computed, DestroyRef, inject } from '@angular/core';
+import { LatestRequest } from '../shared/latest-request';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import {
   CHANGE_KINDS,
@@ -68,7 +69,7 @@ interface ConfigDiffState {
   meta: DiffMeta | null;
   /** Fetched pages by page number; cleared whenever the view changes. */
   pages: Record<number, DiffRow[]>;
-  /** Bumped on every view change; answers for older generations are dropped. */
+  /** Bumped on every view change (the view resets its scroll); a new round of page requests starts with it (ADR 0071). */
   generation: number;
   loading: boolean;
   error: string | null;
@@ -131,6 +132,10 @@ export const ConfigDiffStore = signalStore(
   })),
   withMethods((store, backend = inject(ConfigDiffBackend), picker = inject(ConfigDiffPicker), overwrite = inject(OverwriteGuard)) => {
     const inFlight = new Set<string>();
+    // One round of page requests per view (ADR 0071): a view change starts a new round, and answers of older rounds,
+    // or after the store is destroyed, are dropped.
+    const pages = new LatestRequest(inject(DestroyRef));
+    let round = pages.begin();
 
     const options = (offset: number): DiffOptions => ({
       compare: { ignore: store.ignore() ?? store.defaultIgnore(), caseInsensitive: store.caseInsensitive() },
@@ -143,9 +148,15 @@ export const ConfigDiffStore = signalStore(
       if (!store.ready() || store.pages()[page] || inFlight.has(key)) return;
       inFlight.add(key);
       patchState(store, { loading: true });
+      const mine = round;
       try {
-        const result = await backend.diff(store.left().trim(), store.right().trim(), options(page * PAGE_SIZE));
-        if (generation !== store.generation()) return;
+        const answer = await LatestRequest.settle(mine, () => backend.diff(store.left().trim(), store.right().trim(), options(page * PAGE_SIZE)));
+        if (answer.status === 'stale') return;
+        if (answer.status === 'failed') {
+          patchState(store, { error: errorMessage(answer.error), meta: null, pages: {} });
+          return;
+        }
+        const result = answer.value;
         const meta: DiffMeta = {
           left: result.left,
           right: result.right,
@@ -155,16 +166,15 @@ export const ConfigDiffStore = signalStore(
           caseInsensitive: result.caseInsensitive,
         };
         patchState(store, (s) => ({ meta, pages: { ...s.pages, [page]: result.rows }, error: null }));
-      } catch (e) {
-        if (generation === store.generation()) patchState(store, { error: errorMessage(e), meta: null, pages: {} });
       } finally {
         inFlight.delete(key);
-        if (generation === store.generation()) patchState(store, { loading: false });
+        if (!mine.aborted) patchState(store, { loading: false });
       }
     };
 
     /** Drops fetched rows (the view changed) and loads the first page again. */
     const refresh = async (keepSelection = false): Promise<void> => {
+      round = pages.begin();
       patchState(store, (s) => ({ pages: {}, generation: s.generation + 1, selected: keepSelection ? s.selected : null, notice: null }));
       await fetchPage(0);
     };

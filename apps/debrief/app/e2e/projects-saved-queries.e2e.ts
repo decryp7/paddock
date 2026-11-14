@@ -38,7 +38,7 @@ test.describe('saved queries and highlight rules', () => {
       return { width: s.width, color: s.backgroundColor };
     });
     expect(bar).toEqual({ width: '4px', color: 'rgb(233, 174, 63)' });
-    await expect(page.locator('debrief-events-grid [role=row].row:not(.hl) .lvl', { hasText: 'ERR' })).toHaveCount(0);
+    await expect(page.locator('debrief-events-grid [role=row].row:not(.placeholder):not(.hl) .lvl', { hasText: 'ERR' })).toHaveCount(0);
 
     await rules.getByRole('button', { name: 'Delete rule @level' }).click();
     await expect(rules).toHaveCount(0);

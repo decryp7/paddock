@@ -1,10 +1,10 @@
 import { expect, Locator, Page } from '@playwright/test';
-import { openAppWith } from './mock-url';
+import { gridRows, openAppWith } from './mock-url';
 
 /** Opens the app with the scripted AI mock (fast streaming) plus `extra` switches, and waits for the grid. */
 export async function openAiApp(page: Page, extra = ''): Promise<void> {
   await openAppWith(page, `?mockAiStepMs=5${extra ? `&${extra}` : ''}`);
-  await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+  await expect(gridRows(page).first()).toBeVisible();
 }
 
 /** Lets everything the mocks hold (`mockHold`, `mockJobsHold`) go on. */
@@ -33,7 +33,7 @@ export async function waitAnswered(panel: Locator): Promise<void> {
 
 /** Right-clicks the first grid row and returns the context menu. */
 export async function rowMenu(page: Page): Promise<Locator> {
-  await page.locator('debrief-events-grid [role=row].row').first().click({ button: 'right' });
+  await gridRows(page).first().click({ button: 'right' });
   const menu = page.getByRole('menu', { name: 'Actions' });
   await expect(menu).toBeVisible();
   return menu;

@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { nextRender, openApp } from './app';
+import { gridRows, nextRender, openApp } from './app';
 import { chooseMenu, openMenu } from './menu-support';
 
 // Windows, the close prompt and background work against the browser build's mock windowing backend
@@ -40,7 +40,7 @@ test('New window opens a second window with its own workspace', async ({ page, c
   await expect(statusBar(second)).toContainText('No files open');
   await page.bringToFront();
   await expect(statusBar(page).locator('.strong')).toHaveText(sources);
-  await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+  await expect(gridRows(page).first()).toBeVisible();
 
   // The first window lists the new one in its Window menu.
   const windows = await openMenu(page, 'Window');

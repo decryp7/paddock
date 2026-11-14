@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { expandFields, openApp, parseCount } from './app';
+import { expandFields, gridRows, openApp, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 
 /** Selects the first occurrence of `pattern` in the inspector message, like dragging over it. */
@@ -19,7 +19,7 @@ async function selectInMessage(page: Page, pattern: string): Promise<void> {
 
 async function selectRowWithMessage(page: Page, text: string): Promise<void> {
   await page.getByTestId('query-field').fill(text);
-  const row = page.locator('debrief-events-grid [role=row].row').first();
+  const row = gridRows(page).first();
   await expect(row).toContainText(text);
   await row.click();
   await expect(page.locator('debrief-inspector .message')).toContainText(text);
@@ -33,7 +33,7 @@ test.describe('context actions from data', () => {
     await expect(total).toHaveText(/^\d[\d,]*$/);
     const before = parseCount(await total.innerText());
 
-    await page.locator('debrief-events-grid [role=row].row').first().click({ button: 'right' });
+    await gridRows(page).first().click({ button: 'right' });
     const menu = page.getByRole('menu', { name: 'Actions' });
     await expect(menu).toBeVisible();
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
@@ -53,7 +53,7 @@ test.describe('context actions from data', () => {
   });
 
   test('the menu is keyboard accessible and Escape returns focus', async ({ page }) => {
-    const row = page.locator('debrief-events-grid [role=row].row').first();
+    const row = gridRows(page).first();
     await row.click();
     await page.getByRole('grid', { name: 'Events' }).focus();
     await page.keyboard.press('Shift+F10');
@@ -67,7 +67,7 @@ test.describe('context actions from data', () => {
   });
 
   test('inspector property menu filters by the value', async ({ page }) => {
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     const prop = page.locator('debrief-inspector .prop').filter({ has: page.locator('.k', { hasText: /^MachineName$/ }) });
     await prop.click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Only this MachineName' }).click();
@@ -88,7 +88,7 @@ test.describe('context actions from data', () => {
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('status').filter({ hasText: 'mask step' })).toBeVisible();
     await page.getByTestId('query-field').fill('Slow request');
-    await expect(page.locator('debrief-events-grid [role=row].row').first()).toContainText('***');
+    await expect(gridRows(page).first()).toContainText('***');
   });
 
   test('extract dialog proposes a regex, previews matches and adds a field', async ({ page }, testInfo) => {
@@ -106,7 +106,7 @@ test.describe('context actions from data', () => {
   });
 
   test('mark dialog adds a marker rule', async ({ page }, testInfo) => {
-    await page.locator('debrief-events-grid [role=row].row').first().click();
+    await gridRows(page).first().click();
     await page.getByRole('button', { name: 'More actions…' }).click();
     await page.getByRole('menuitem', { name: 'Mark events like this…' }).click();
     const dialog = page.getByRole('dialog', { name: 'Mark events like this' });

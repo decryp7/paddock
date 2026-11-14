@@ -1,10 +1,10 @@
 import { expect, Page, test } from '@playwright/test';
-import { openApp } from './app';
+import { gridRows, openApp } from './app';
 import { expectNoSeriousViolations } from './axe';
 
 async function selectRowWithMessage(page: Page, text: string): Promise<void> {
   await page.getByTestId('query-field').fill(text);
-  const row = page.locator('debrief-events-grid [role=row].row').first();
+  const row = gridRows(page).first();
   await expect(row).toContainText(text);
   await row.click();
   await expect(page.locator('debrief-inspector .message')).toContainText(text);
@@ -25,7 +25,7 @@ test.describe('timeline markers', () => {
   test('highlight lines with a regex and a badge, then reorder, disable and delete', async ({ page }, testInfo) => {
     test.setTimeout(90_000);
     await selectRowWithMessage(page, 'Slow request');
-    await page.locator('debrief-events-grid [role=row].row').first().click({ button: 'right' });
+    await gridRows(page).first().click({ button: 'right' });
     await page.getByRole('menuitem', { name: 'Highlight lines…' }).click();
 
     const dialog = page.getByRole('dialog', { name: 'Highlight lines' });

@@ -1,5 +1,5 @@
 import { expect, Locator, Page, test } from '@playwright/test';
-import { gridTotal, parseCount } from './app';
+import { gridRows, gridTotal, parseCount } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
 import { chooseMenu } from './menu-support';
@@ -70,7 +70,7 @@ test.describe('live tail: follow now', () => {
     await expect.poll(() => timelineFrom(page), { timeout: 10_000 }).toBeGreaterThan(to1 - 60_000);
     // The grid follows newest-first at the top.
     await page.getByRole('button', { name: /Oldest first/ }).click();
-    const first = page.locator('debrief-events-grid [role=row].row').first();
+    const first = gridRows(page).first();
     await expect(first).toContainText(/Live event|Process stats/);
     const t1 = await first.textContent();
     await expect.poll(() => first.textContent(), { timeout: 10_000 }).not.toBe(t1);
@@ -128,7 +128,7 @@ test.describe('live tail: alerts', () => {
     await expect(level('Fatal')).toHaveAttribute('aria-pressed', 'true');
     await expect(level('Information')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.getByTestId('resume-following')).toBeVisible();
-    await expect(page.locator('debrief-events-grid [role=row].row').first()).toBeVisible();
+    await expect(gridRows(page).first()).toBeVisible();
   });
 
   test('mute this kind for 15 min stops its toasts', async ({ page }) => {

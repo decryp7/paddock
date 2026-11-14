@@ -46,11 +46,11 @@ test.describe('events grid with 50 million rows', () => {
       const first = eventId(await gridRows(page).first().textContent());
       expect(first).toBeLessThanOrEqual(0 + 10);
     }).toPass();
-    await expect(page.locator('debrief-events-grid .row', { hasText: 'Synthetic event 10' }).first()).toBeAttached();
+    await expect(gridRows(page).filter({ hasText: 'Synthetic event 10' }).first()).toBeAttached();
     // About a hundred rows further (the row height comes from the theme and density).
     const rowH = await page.locator('debrief-events-grid').evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue('--row-h')));
     await page.mouse.wheel(0, 110 * rowH - 260);
-    await expect(page.locator('debrief-events-grid .row', { hasText: 'Synthetic event 110' }).first()).toBeAttached();
+    await expect(gridRows(page).filter({ hasText: 'Synthetic event 110' }).first()).toBeAttached();
   });
 
   test('keyboard: End, Home, arrows and pages move the selection and keep it on screen', async ({ page }) => {

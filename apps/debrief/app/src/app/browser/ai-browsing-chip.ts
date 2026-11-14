@@ -3,6 +3,7 @@ import { Icon } from '../shared/icon';
 import { BrowserBackend, ChatBrowserBackend } from './browser-backend';
 import { BrowserActivityStore } from './browser-activity.store';
 import { AiDriver } from './browser.types';
+import { Logger } from '../core/logger';
 
 /**
  * "The AI is browsing — Stop" in the status bar while a chat's agent mode or a research job drives the browser window
@@ -54,6 +55,7 @@ export class AiBrowsingChip {
   protected readonly store = inject(BrowserActivityStore);
   private readonly browser = inject(BrowserBackend);
   private readonly chat = inject(ChatBrowserBackend);
+  private readonly logger = inject(Logger);
   protected readonly stopping = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly waiting = computed(() => this.store.activity() === 'waitingForYou');
@@ -77,6 +79,8 @@ export class AiBrowsingChip {
   async stop(d: AiDriver): Promise<void> {
     this.stopping.set(true);
     this.error.set(null);
+    // Logged so a chip that stays after Stop can be explained from a bundle: what was stopped, and who drives after.
+    this.logger.info('browser', 'Stop pressed on the AI browsing chip', { Driver: d.kind });
     try {
       try {
         if (d.kind === 'agent') await this.chat.stop(d.sessionId);
@@ -84,8 +88,10 @@ export class AiBrowsingChip {
       } finally {
         await this.browser.stopAll();
       }
+      this.logger.info('browser', 'AI browsing stopped', { Driver: d.kind, DriverAfter: this.store.driver()?.kind ?? 'none' });
     } catch (e) {
       const why = e instanceof Error ? e.message : String(e);
+      this.logger.warn('browser', 'Stopping the AI browsing failed', { Driver: d.kind, Error: why });
       this.error.set($localize`:@@browser.chip.stopFailed:Could not stop the AI (${why}:reason:). Press Stop to try again.`);
     } finally {
       this.stopping.set(false);

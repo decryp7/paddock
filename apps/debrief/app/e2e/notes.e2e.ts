@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { runCommand } from './analysis-support';
 import { expectNoSeriousViolations } from './axe';
-import { openAppWith } from './mock-url';
+import { gridRows, openAppWith } from './mock-url';
 
 // Notes (ADR 0021) against the browser build's mock notes backend (src/app/notes/mock/mock-notes-backend.ts): a note
 // on an event row shows a glyph on the row and is listed in the Notes panel, which jumps back to the event; an area
@@ -10,7 +10,7 @@ import { openAppWith } from './mock-url';
 test('a note on an event row is marked on the row, listed and jumped to', async ({ page }, testInfo) => {
   test.slow();
   await openAppWith(page, '');
-  const row = page.locator('debrief-events-grid [role=row].row').nth(2);
+  const row = gridRows(page).nth(2);
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
   await page.getByRole('menu', { name: 'Actions' }).getByRole('menuitem', { name: 'Add note…' }).click();
