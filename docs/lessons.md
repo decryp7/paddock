@@ -2047,3 +2047,16 @@ env overrides, and refuse with a `Blocked: ... Next step: ...` message when they
 (`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
 config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
 **Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
+
+## The push gate ran out of budget because it measured from too old a base (ADR 0102 amendment, 2026-11-15)
+Five pushes on 2026-11-14/15 were "not measured" by the 15-minute budget. The blamed cause was queue time; the logs said
+otherwise (queued 0 to 194 s, run 766 to 815 s). A branch stacked on a train that was built locally and not yet pushed (or only
+partly) was measured from origin's older train or main, so a change to tools/paddock-dev and .claude/hooks planned Clippy for
+every workspace the train touched (280 and 461 files). A person's run ahead of the push always used origin/main. Fix: the base is
+the nearest of the shared bases, local trains and pushed branches the commit contains included, for a push and a person's run
+alike, and the header names it with its distance and the runners-up; a pass record names its base commit and counts only for a
+push measured from that base or an older one (records had stored `origin/main` for every run). The queue keeps its own bound,
+now for the whole push, and heavy steps of one push run one at a time so their queue is all waiting for others.
+**Rule:** before fixing "it ran out of time", read the run and queue time each row reports; a budget is spent by too much work
+as often as by waiting. **Class: the pre-push gate measures more than the change (an old base); earlier: the 2026-11-12 base
+choice from origin/main for train-based branches, fixed by reading the remote's tips live.**

@@ -76,3 +76,36 @@ never crowd out a release; nothing enforced it.
   know the bound or the limits; it ignores the new flags it never receives (mixed use is unchanged: the marker format is the same).
 - `tools/paddock-dev/src/pre_push`: `budget.rs` (pure), `exec.rs` (the flags, the credit), `mod.rs` (the ref decision, the table).
 - Train 10 changes `pre_push/mod.rs`'s base choice; the overlap is the `RealExec { .. }` literal (two new fields) and `render`.
+
+## Amendment 2026-11-15: one heavy step in flight, a queue allowance per push, and the base of a stacked branch
+
+Five pushes on 2026-11-14/15 were "not measured" by the 15-minute budget (logs in the agents' scratch folders: hooks-ci
+`prepush.out`/`rerun.out`, gen-check-build `push.txt`, vmtool-keptclone `push.log`, test-timing `prepush3.txt`). In each, the
+time queued was small next to the run time (for example 194 s queued against 815 s run): the budget ran out because the push
+was measured from too old a base (280 to 461 changed files, Clippy for every workspace a train touched, while the branch's own
+change touched one or two). The run of train 10 that counted queue time against the budget (837 s for one Clippy) predates
+points 3 and 4 above.
+
+1. **Base.** The candidates are the remote ref's old commit, the tracking upstream, the `train/*` branches and main of the
+   push's remote (live; their remote-tracking refs when the remote cannot be read or no longer lists them), any other
+   remote-tracking branch the pushed commit contains (a branch stacked on a pushed branch, newest 20), and the local `train/*`
+   branches (newest 40; a train being built is often not pushed, or only partly). The fewest new commits wins; ties go in that
+   order. A candidate that already holds the pushed commit is skipped (nothing new would be measured, and nothing measured is no
+   evidence), so the next nearest is used; before, such a commit was measured from origin/main. A person's run (no push) measures HEAD the same way, its own
+   remote-tracking branch as the old commit. The header names the base, its distance, the next two candidates and how long the
+   count took (ER-27). A local base only shapes which lints this gate runs; the train's own push and its full CI check the train.
+   CI's plan is unchanged: a branch push plans everything, a pull request plans from its merge base, as this does from the
+   nearest shared base.
+2. **Pass records name their base.** A record stores `base_commit`; it counts for a push only when that commit is the push's
+   base or an ancestor of it, directly or through the records of the bases in between (at most 8). A record measured from a
+   nearer base checked less than a push from an older base needs. The record also stores the base the run really used (it
+   stored `origin/main` for every run before).
+3. **One heavy step of a push in flight.** heavy has one slot (more only with `HEAVY_DIR`/`HEAVY_SLOTS`), so two heavy steps of
+   one push only queue behind each other. The gate now starts the next heavy step after the previous one has ended and its queue
+   time is on the clock, so every second a heavy step queues is waiting for others, and the run time a step starts with is exact.
+4. **A queue allowance per push.** `QUEUE_MAX` (30 min, `PADDOCK_QUEUE_MAX`) now bounds all heavy steps of a push together:
+   each step gets what is left as its `--queue-max`; a step that would start after it is spent is "not measured" with
+   `queued N s in all, load L` and the next step (`heavy status`, re-run `--only <gate>`). A push waits at most 15 min of run plus
+   30 min of queue. Basis: heavy's activity log, 145 pre-push steps, queue p50 21 s, p90 386 s, p99 993 s, max 1,187 s
+   ([benchmarks](../benchmarks.md#2026-11-15-pre-push-heavy-queue-times-fixpre-push-base-and-budget)); the value is unchanged,
+   only its scope.

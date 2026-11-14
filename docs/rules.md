@@ -216,8 +216,11 @@ changes here, every app's copy is updated in the same change.
     (an import or helper used only by a unix-gated test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in
     tests"), conformance with ci.yml's own list, commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
     changed, also CI's workspace Clippy on Linux in the CI image (`--cpus 4 --memory 12g`). A gate that cannot run (no Docker, no
-    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). Lint and type-check of the touched TS
-    files stay by hand until WP-3. Then dispatch with `./dev`
+    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). It measures a push from the nearest
+    shared base (the ref's old commit, main, the trains of the remote and local trains, a pushed branch it is stacked on; the header
+    says which and why), and its 15 minutes count run time only; time queued for the heavy slot behind other agents has its own
+    allowance of 30 min per push and is reported apart (ADR 0102 and its 2026-11-15 amendment). Lint and type-check of the touched
+    TS files stay by hand until WP-3. Then dispatch with `./dev`
     and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
     `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
     (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea

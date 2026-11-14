@@ -1,7 +1,7 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
 use super::budget::Timing;
-use super::exec::{Done, Exec, Kind, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
+use super::exec::{Done, Exec, Kind, Limits, QUEUE_MAX, Row, RunOpts, decide, run_all_timed, run_all_with, test_subject};
 use super::gates::{Change, Facts, Gate, Need, Planned, plan_gates};
 use super::{accept_not_measured, parse_refs, render, render_timed};
 use paddock_cli::Exit;
@@ -200,6 +200,8 @@ struct Fake {
     /// Gates that never got a slot: `how` is heavy's queue-limit text.
     no_slot: Vec<String>,
     ran: Mutex<Vec<String>>,
+    /// The limits every gate was started with.
+    limits: Mutex<Vec<(String, Limits)>>,
 }
 
 impl Exec for Fake {
@@ -209,7 +211,8 @@ impl Exec for Fake {
     fn docker_up(&self) -> bool {
         !self.no_docker
     }
-    fn run(&self, g: &Gate, _left: Duration) -> Result<Done, String> {
+    fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
+        self.limits.lock().unwrap().push((g.id.clone(), limits));
         self.ran.lock().unwrap().push(g.id.clone());
         assert!(!self.panics.contains(&g.id), "a runner bug");
         if self.unstartable.contains(&g.id) {
@@ -364,7 +367,7 @@ fn a_docker_failure_names_its_cause() {
         fn docker_up(&self) -> bool {
             true
         }
-        fn run(&self, _: &Gate, _: Duration) -> Result<Done, String> {
+        fn run(&self, _: &Gate, _: Limits) -> Result<Done, String> {
             Ok(Done {
                 success: false,
                 how: "exit 137".into(),
@@ -448,6 +451,7 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
         &RunOpts {
             workers: 2,
             budget: Duration::ZERO,
+            queue: QUEUE_MAX,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
         },
@@ -465,6 +469,7 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
         &RunOpts {
             workers: 1,
             budget: Duration::from_secs(60),
+            queue: QUEUE_MAX,
             stop: &AtomicBool::new(true),
             subject: &test_subject(),
         },
@@ -998,7 +1003,7 @@ mod known_commit {
     fn a_commit_on_a_remote_branch_without_evidence_is_checked_not_passed() {
         let (_d, r, _one, two) = repo();
         let l = fake(None, Err("no run"));
-        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &["origin/main"], &l);
         assert!(found.is_none(), "origin/train holds it, but that is no evidence");
     }
 
@@ -1016,7 +1021,7 @@ mod known_commit {
             &pass_for(&r, &two),
         )
         .unwrap();
-        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &l);
+        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &["origin/main"], &l);
         let found = found.unwrap();
         assert!(
             matches!(&found[..], [Evidence::Record { id, outcome: paddock_cli::Outcome::KnownCommit(_) }] if *id == format!("{}@1700000000", &two[..12])),
@@ -1024,20 +1029,20 @@ mod known_commit {
         );
         assert!(trail[0].contains("pass record"), "{trail:?}");
         // The record of another sha is no evidence; a record whose tree changed is none either.
-        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&one), &l);
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&one), &["origin/main"], &l);
         assert!(found.is_none());
         std::fs::copy(
             state(&r).join("records").join(format!("{two}.json")),
             state(&r).join("records").join(format!("{one}.json")),
         )
         .unwrap();
-        let (found, _) = known::find(&r, &state(&r), None, &[one], &l);
+        let (found, _) = known::find(&r, &state(&r), None, &[one], &["origin/main"], &l);
         assert!(found.is_none(), "a record is read only for its own sha");
         let rec = state(&r).join("records").join(format!("{two}.json"));
         let text = std::fs::read_to_string(&rec).unwrap();
         let tree = text.split("\"tree\":\"").nth(1).unwrap().split('"').next().unwrap().to_string();
         std::fs::write(&rec, text.replace(&tree, &"0".repeat(40))).unwrap();
-        let (found, _) = known::find(&r, &state(&r), None, &[two], &l);
+        let (found, _) = known::find(&r, &state(&r), None, &[two], &["origin/main"], &l);
         assert!(found.is_none(), "the tree id no longer matches");
     }
 
@@ -1046,7 +1051,7 @@ mod known_commit {
         let (_d, r, _one, two) = repo();
         let tip = format!("{two}\trefs/heads/train/x\n");
         let green = fake(Some(&tip), Ok(8053));
-        let (found, trail) = known::find(&r, &state(&r), Some("origin"), std::slice::from_ref(&two), &green);
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), std::slice::from_ref(&two), &["origin/main"], &green);
         assert!(
             matches!(
                 found.as_deref(),
@@ -1064,7 +1069,7 @@ mod known_commit {
             (Some(tip.as_str()), None),
         ] {
             let l = fake(ls, Ok(8053));
-            let (found, _) = known::find(&r, &state(&r), remote, std::slice::from_ref(&two), &l);
+            let (found, _) = known::find(&r, &state(&r), remote, std::slice::from_ref(&two), &["origin/main"], &l);
             assert!(found.is_none(), "{ls:?} {remote:?}");
             assert!(
                 !l.asked.borrow().iter().any(|a| a.starts_with("ci ")),
@@ -1072,7 +1077,7 @@ mod known_commit {
             );
         }
         let red = fake(Some(&tip), Err("red or partial"));
-        let (found, trail) = known::find(&r, &state(&r), Some("origin"), &[two], &red);
+        let (found, trail) = known::find(&r, &state(&r), Some("origin"), &[two], &["origin/main"], &red);
         assert!(
             found.is_none() && trail.last().unwrap().contains("no complete green CI run"),
             "{trail:?}"
@@ -1182,7 +1187,14 @@ mod known_commit {
         let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rec).unwrap()).unwrap();
         v.as_object_mut().unwrap().remove("evidence");
         std::fs::write(&rec, v.to_string()).unwrap();
-        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&two), &fake(None, Err("x")));
+        let (found, _) = known::find(
+            &r,
+            &state(&r),
+            None,
+            std::slice::from_ref(&two),
+            &["origin/main"],
+            &fake(None, Err("x")),
+        );
         assert!(found.is_none());
     }
 
@@ -1222,6 +1234,39 @@ mod known_commit {
         };
         let got = command_in(&a, &r, &push_line(&two), &l);
         assert!(got.as_ref().map_or(true, |rep| rep.data["verdict"] != "known_commit"), "{got:?}");
+    }
+
+    /// A record measured from a nearer base (a local train, a branch's old commit) checked less than a push from an older base
+    /// needs: it counts only for a push measured from its own base or a newer one, or through the records of the bases between.
+    #[test]
+    fn a_pass_record_counts_only_for_a_push_measured_from_its_base_or_an_older_one() {
+        let (_d, r, one, two) = repo();
+        std::fs::write(r.join("a.txt"), "3\n").unwrap();
+        git_text(&r, &["commit", "-q", "-am", "three"]).unwrap();
+        let three = git_text(&r, &["rev-parse", "HEAD"]).unwrap().trim().to_string();
+        let l = fake(None, Err("no run"));
+        known::write_record(&r, &state(&r), &three, &two, &[], 5, &pass_for(&r, &three)).unwrap();
+        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[one.as_str()], &l);
+        assert!(found.is_none(), "{trail:?}");
+        assert!(
+            trail[0].contains("measured from") && trail[0].contains(&two[..12]) && trail[0].contains("no valid pass record of its own"),
+            "{trail:?}"
+        );
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[two.as_str()], &l);
+        assert!(found.is_some(), "its own base");
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[three.as_str()], &l);
+        assert!(found.is_some(), "a newer base");
+        // Through the record of the base in between: two was measured from one, so three's record covers a push from one.
+        known::write_record(&r, &state(&r), &two, &one, &[], 5, &pass_for(&r, &two)).unwrap();
+        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[one.as_str()], &l);
+        assert!(found.is_some(), "{trail:?}");
+        // A record that does not name its base commit proves nothing.
+        let rec = state(&r).join("records").join(format!("{three}.json"));
+        let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rec).unwrap()).unwrap();
+        v.as_object_mut().unwrap().remove("base_commit");
+        std::fs::write(&rec, v.to_string()).unwrap();
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[three.as_str()], &l);
+        assert!(found.is_none());
     }
 
     fn reads<'a>(files: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
@@ -1388,35 +1433,54 @@ mod base_choice {
     }
 
     #[test]
-    fn an_unreachable_remote_or_no_remote_falls_back_to_origin_main_and_says_so() {
+    fn an_unreachable_remote_or_no_remote_uses_the_remote_tracking_refs_and_says_so() {
         let (_d, r) = repo();
+        let train = sha(&r, "origin/train/t");
         commit(&r, "w1");
         let tip = sha(&r, "HEAD");
         let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
-        assert_eq!(base, "origin/main");
+        assert_eq!(base, train, "{why}");
         assert!(
-            why.contains("could not be read") && why.contains("measuring from origin/main"),
+            why.contains("could not be read (remote-tracking refs instead)") && why.contains("origin/train/t (remote-tracking ref)"),
             "{why}"
         );
         let (base, why) = choose_base(&r, None, &tip, &live(&r));
-        assert_eq!((base.as_str(), why.contains("no remote was named")), ("origin/main", true));
-        // Tips this clone has no object for are skipped.
+        assert_eq!(
+            (base.as_str(), why.contains("no remote was named")),
+            (train.as_str(), true),
+            "{why}"
+        );
+        // Tips this clone has no object for are skipped; a remote-tracking ref the live list no longer has still counts, said so.
         let (base, why) = choose_base(
             &r,
             Some("origin"),
             &tip,
             &Remote(Some(format!("{}\trefs/heads/x\n", "1".repeat(40)))),
         );
+        assert_eq!(base, train, "{why}");
+        assert!(why.contains("not on the remote any more"), "{why}");
+        // Nothing usable at all: origin/main, said so.
+        git_text(&r, &["update-ref", "-d", "refs/remotes/origin/train/t"]).unwrap();
+        git_text(&r, &["update-ref", "-d", "refs/remotes/origin/main"]).unwrap();
+        let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
         assert_eq!(base, "origin/main", "{why}");
+        assert!(why.contains("measuring from origin/main"), "{why}");
     }
 
     #[test]
-    fn every_pushed_commit_already_on_the_remote_is_never_an_empty_pass_it_measures_from_origin_main() {
+    fn every_pushed_commit_already_on_the_remote_is_never_an_empty_pass_it_measures_from_the_next_base() {
         let (_d, r) = repo();
         let two = sha(&r, "origin/train/t");
         let (base, why) = choose_base(&r, Some("origin"), &two, &live(&r));
-        assert_eq!(base, "origin/main", "{why}");
+        assert_eq!(base, sha(&r, "origin/main"), "{why}");
         assert!(why.contains("already on origin's train/t") && why.contains("no evidence"), "{why}");
+        // A commit already pushed under another branch name keeps the base that branch was measured from (its pass record stays
+        // valid), never main.
+        commit(&r, "w1");
+        let w1 = sha(&r, "HEAD");
+        git_text(&r, &["update-ref", "refs/remotes/origin/fix/x", &w1]).unwrap();
+        let (base, why) = choose_base(&r, Some("origin"), &w1, &live(&r));
+        assert_eq!(base, two, "{why}");
     }
 
     #[test]
@@ -1666,6 +1730,7 @@ fn queue_time_and_run_time_are_reported_apart_and_the_pass_counts_only_the_run()
         &RunOpts {
             workers: 2,
             budget: Duration::from_secs(900),
+            queue: QUEUE_MAX,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
         },
@@ -1705,6 +1770,7 @@ fn a_step_that_never_got_a_slot_is_not_measured_with_its_queue_time_never_passed
         &RunOpts {
             workers: 2,
             budget: Duration::from_secs(900),
+            queue: QUEUE_MAX,
             stop: &AtomicBool::new(false),
             subject: &test_subject(),
         },
@@ -1738,4 +1804,261 @@ fn an_environment_not_ready_ends_the_run_with_exit_6_not_7() {
         "{}",
         report.text
     );
+}
+
+/// A heavy step that waits `queued` for other agents (it moves the fake clock the budget is read on by that much, as the wait
+/// would) and then runs at once; it records how many heavy steps of the push were in flight together and the limits each started
+/// with.
+struct Queued {
+    queued: Duration,
+    start: std::time::Instant,
+    /// Microseconds the fake clock has moved.
+    moved: std::sync::atomic::AtomicU64,
+    in_flight: std::sync::atomic::AtomicUsize,
+    most: std::sync::atomic::AtomicUsize,
+    limits: Mutex<Vec<(String, Limits)>>,
+    /// Steps that have entered `run`, and a signal for each entry.
+    entered: Mutex<usize>,
+    entry: std::sync::Condvar,
+}
+
+impl Queued {
+    fn new(queued: Duration) -> Queued {
+        Queued {
+            queued,
+            start: std::time::Instant::now(),
+            moved: Default::default(),
+            in_flight: Default::default(),
+            most: Default::default(),
+            limits: Mutex::new(Vec::new()),
+            entered: Mutex::new(0),
+            entry: std::sync::Condvar::new(),
+        }
+    }
+}
+
+impl Exec for Queued {
+    fn has_tool(&self, _: &str) -> bool {
+        true
+    }
+    fn docker_up(&self) -> bool {
+        true
+    }
+    fn load(&self) -> Option<f64> {
+        Some(28.0)
+    }
+    fn now(&self) -> std::time::Instant {
+        self.start + Duration::from_micros(self.moved.load(std::sync::atomic::Ordering::SeqCst))
+    }
+    fn run(&self, g: &Gate, limits: Limits) -> Result<Done, String> {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.limits.lock().unwrap().push((g.id.clone(), limits));
+        let now = self.in_flight.fetch_add(1, SeqCst) + 1;
+        self.most.fetch_max(now, SeqCst);
+        // Wait for a second step to enter while this one is in flight: it does at once unless the push holds it back. The
+        // bound only ends the wait when it is held back (the expected case), it settles nothing.
+        let mut n = self.entered.lock().unwrap();
+        *n += 1;
+        self.entry.notify_all();
+        let mine = *n;
+        let _held = self
+            .entry
+            .wait_timeout_while(n, Duration::from_millis(200), |n| *n == mine)
+            .unwrap();
+        drop(_held);
+        self.moved.fetch_add(u64::try_from(self.queued.as_micros()).unwrap(), SeqCst);
+        self.in_flight.fetch_sub(1, SeqCst);
+        Ok(Done {
+            success: true,
+            how: "exit 0".into(),
+            tail: String::new(),
+            log: None,
+            timing: Some(Timing {
+                queued: self.queued.as_secs_f64(),
+                ran: 0.0,
+            }),
+        })
+    }
+}
+
+fn heavy_gate(id: &str, rank: u8) -> Planned {
+    Planned::Run(Gate {
+        id: id.into(),
+        cwd: String::new(),
+        program: "true".into(),
+        args: vec![],
+        env: Vec::new(),
+        heavy: true,
+        need: Need::Nothing,
+        rank,
+        next: "fix it".into(),
+    })
+}
+
+/// 2026-11-14/15: rows of a push at load 28 were "not measured" because time spent waiting for the heavy slot was charged to the
+/// 15-minute run budget. The run budget counts run time only: steps that queued for others three times the whole budget still get
+/// all of it, and the time queued is reported apart.
+#[test]
+fn a_long_queue_for_other_agents_does_not_eat_the_run_budget() {
+    let budget = Duration::from_millis(100);
+    let fake = Queued::new(Duration::from_millis(150));
+    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 2), heavy_gate("clippy c", 3)];
+    let (rows, timings) = run_all_timed(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 3,
+            budget,
+            queue: Duration::from_secs(60),
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
+    for (id, l) in fake.limits.lock().unwrap().iter() {
+        assert!(
+            l.run > budget / 2,
+            "{id} started with {:?} of run time: the queue ate the budget",
+            l.run
+        );
+    }
+    assert_eq!(timings.len(), 3, "every row's queue time is reported: {timings:?}");
+}
+
+/// Heavy has one machine-wide slot: two heavy steps of one push in flight together only queue behind each other, and that wait
+/// would be credited as waiting for others (the budget would grow with the number of workers).
+#[test]
+fn a_push_has_one_heavy_step_in_flight_at_a_time() {
+    let fake = Queued::new(Duration::from_millis(30));
+    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 1), heavy_gate("clippy c", 1)];
+    let rows = run_all_with(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 3,
+            budget: Duration::from_secs(60),
+            queue: Duration::from_secs(60),
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
+    assert_eq!(fake.most.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// The queue has its own bound, for the whole push: each step may wait only what is left of it, and a step that would start after
+/// it is spent is not measured with the time queued and the load, and says what to do next.
+#[test]
+fn the_queue_allowance_bounds_the_whole_push_and_a_row_it_stops_says_queued_and_load() {
+    let fake = Queued::new(Duration::from_millis(60));
+    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 2), heavy_gate("clippy c", 3)];
+    let allowance = Duration::from_millis(100);
+    let rows = run_all_with(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 1,
+            budget: Duration::from_secs(60),
+            queue: allowance,
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    let v = verdicts(&rows);
+    assert!(passed(&v["clippy a"]) && passed(&v["clippy b"]), "{rows:?}");
+    let limits = fake.limits.lock().unwrap().clone();
+    assert_eq!(limits[0].1.queue, allowance);
+    assert!(
+        limits[1].1.queue <= allowance - Duration::from_millis(60),
+        "the second step waits only what is left: {limits:?}"
+    );
+    let Some((reason, next)) = nm(&v["clippy c"]) else {
+        panic!("{:?}", v["clippy c"])
+    };
+    assert!(
+        reason.starts_with("never started: the push's queue allowance") && reason.contains("queued 0.1 s in all, load 28.0"),
+        "{reason}"
+    );
+    assert!(next.contains("heavy status") && next.contains("--only clippy"), "{next}");
+}
+
+/// The 2026-11-14/15 shape: train 10 is being built locally (partly pushed or not at all), a fix branch is stacked on it. Measured
+/// from origin's older train or main, the push planned Clippy for every workspace the train touched (280 and 461 files) and ran out
+/// of budget; measured from the local train it plans only its own diff.
+#[test]
+fn a_branch_stacked_on_a_local_train_plans_only_its_own_diff() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.remote("main", &c1);
+    r.git(&["checkout", "-q", "-b", "train/2026-11-13-9"]);
+    let t1 = r.commit("t1");
+    r.remote("train/2026-11-13-9", &t1);
+    r.git(&["checkout", "-q", "-b", "train/2026-11-14-10"]);
+    let t2 = r.commit("t2");
+    let t3 = r.commit("t3");
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    let f1 = r.commit("f1");
+    let (base, why) = r.choose(&new_ref("fix", &f1));
+    assert_eq!(base, t3, "{why}");
+    assert!(
+        why.contains("local train/2026-11-14-10") && why.contains("fewest new commits, 1") && why.contains("next nearest"),
+        "{why}"
+    );
+    let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&f1)).unwrap();
+    assert_eq!(change.files, vec!["f1".to_string()], "only the branch's own diff");
+    // Partly pushed (origin has train 10 at t2): the local tip is still nearer.
+    r.remote("train/2026-11-14-10", &t2);
+    assert_eq!(r.choose(&new_ref("fix", &f1)).0, t3);
+    // A local train at the pushed commit itself is no base (nothing would be measured), and the pushed branch is never its own.
+    let (base, why) = r.choose(&new_ref("other", &t3));
+    assert_eq!(base, t2, "{why}");
+    let own = super::Pushed {
+        remote_sha: t2.clone(),
+        ..new_ref("train/2026-11-14-10", &t3)
+    };
+    let (base, why) = r.choose(&own);
+    assert_eq!(base, t2, "{why}");
+    assert!(why.contains("its old commit"), "{why}");
+}
+
+/// A branch stacked on another pushed branch is measured from that branch (a remote-tracking ref it contains), not from main.
+#[test]
+fn a_branch_stacked_on_a_pushed_sibling_is_measured_from_the_sibling() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.remote("main", &c1);
+    r.git(&["checkout", "-q", "-b", "feat/a"]);
+    r.commit("a1");
+    let a2 = r.commit("a2");
+    r.remote("feat/a", &a2);
+    r.git(&["checkout", "-q", "-b", "feat/b"]);
+    let b1 = r.commit("b1");
+    let (base, why) = r.choose(&new_ref("feat/b", &b1));
+    assert_eq!(base, a2, "{why}");
+    assert!(
+        why.contains("origin/feat/a (remote-tracking ref the pushed commit contains)"),
+        "{why}"
+    );
+}
+
+/// A person's run ahead of a push plans what the push will: HEAD's nearest shared base, not origin/main.
+#[test]
+fn a_persons_run_is_measured_from_the_nearest_base_like_its_push() {
+    let r = Repo::new();
+    let c1 = r.commit("a");
+    r.remote("main", &c1);
+    r.git(&["checkout", "-q", "-b", "train/2026-11-14-10"]);
+    let t1 = r.commit("t1");
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    r.commit("f1");
+    let (base, why) = super::person_base(&r.root, None, "origin/main", &r.live());
+    assert_eq!(base, t1, "{why}");
+    assert!(
+        why.starts_with("a person's run: HEAD of branch fix") && why.contains("local train/2026-11-14-10"),
+        "{why}"
+    );
+    // Its own pushed copy at HEAD is the base (the uncommitted changes are what is checked), not a reason to measure from main.
+    let f1 = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    r.remote("fix", &f1);
+    assert_eq!(super::person_base(&r.root, None, "origin/main", &r.live()).0, f1);
 }
