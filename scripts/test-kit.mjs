@@ -49,7 +49,7 @@ export async function waitProgressing(what, done, { noProgressMs = HANG_GUARD_MS
 /** The process table: [{ pid, ppid, pgid, started, command }] (`ps`, Unix). Empty when it cannot be read. */
 export function processTable() {
   if (process.platform === 'win32') return [];
-  const r = spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,pgid=,lstart=,command='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+  const r = spawnSync('ps', ['-A', '-ww', '-o', 'pid=,ppid=,pgid=,lstart=,command='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
   if (r.status !== 0) return [];
   const rows = [];
   for (const line of r.stdout.split('\n')) {
