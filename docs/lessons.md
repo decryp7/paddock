@@ -2006,3 +2006,14 @@ kept the child), or, when you must act on a pid, check immediately before the ki
 that its start time is later than your own command's start; if either is unknown or differs, do not kill: report it to its
 owner or the coordinator. Never `pkill -f` or `kill` by a name pattern (`lefthook`, `cargo`, `node`) because every agent runs
 the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
+
+## Tests summed their steps under one bound and failed on the loaded Mac (2026-11-14, ADR 0103)
+CI runs 8050, 8060, 8061, 8066, 8090 and 8099 failed tests that were never hung: the kept-clone parity tests ran 20-24 jobs one
+after the other under nextest's 60 s (25.6 s quiet), a Debrief test made 50 001 files to reach a product limit (4.8 s quiet, 90 s
+in CI), the crash model's CPU work slowed 9x under other jobs' load, and a VM lock test that failed partway left a detached
+`slot hold` that failed nine tests after it. Each fix on train 11 was right and by hand. **Rule:** a test's verdict depends on each
+step's progress, not on a sum of steps; independent cases run side by side (`paddock_testkit::both` / `run_cases`); a wait for
+several steps is `wait_progressing` (Rust) or `waitProgressing` (scripts/test-kit.mjs), which back off; every process a test
+starts goes through a `Reaper` (Rust `paddock_testkit_start`, Node `scripts/test-kit.mjs`), which ends detached grandchildren too;
+a limit is tested with a small limit; a CPU-bound test gets a measured size class, not a raised default. C125 (provisional, ADR
+0103's C1xx) lists the shapes, report-only. **Class: tests time out on the loaded Mac (ADR 0102 is the machine side).**

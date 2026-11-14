@@ -1294,3 +1294,39 @@ folder was warm, so cold build plus run was more than 1800 s there.
 - **Bound chosen:** 3600 s for the build phase, about 4x the measured 866 s: the train 10 run under heavier load needed more than
   1800 s for build plus run, and the bound is a hang guard, not a budget. The check's own guard stays 1800 s and now covers only
   the run. Not measured: a cold build at load 150 or more, and the other entries' builds (all smaller workspaces or crates).
+
+## Test timing redesign (2026-11-14, feat/test-timing-redesign, ADR 0103)
+
+### 2026-11-14, test timing redesign
+
+Question: what do the migrated tests cost before and after ADR 0103's helpers, and what do the helpers themselves cost on the
+loaded machine (the reaper's look at the process table, the crash model with and without a test group)?
+
+- **Commit:** base 1ecc53eee (train 11) → this branch
+- **Machine:** the shared Mac mini (14 cores, macOS 27.2), with the CI runners and other agents running (about 890 processes)
+- **Load:** other agents' 1-minute load 8-78 during the session; the crash-model A/B with 6 extra `yes` burners (scratch
+  `model-load.sh`, `timeout 600` on each, ended on exit) at load 27-32, interleaved before/after, two rounds each
+- **Build:** debug test binaries, `CARGO_BUILD_JOBS=2`; nextest 0.9.152; node 24
+- **Command:** `cargo nextest run -p debrief-core --lib -E 'test(a_scan_stops_at_the_entry_limit_and_says_so)'` (before: train 11's
+  file, after: this branch); `NEXTEST_TEST_THREADS=8 cargo nextest run --config-file <before|after>.toml --profile ci -p paddock-service
+  --test it -E 'test(/^model::the_crash_model_/)'`; `cargo nextest run --test it -E 'test(/^host_steps::/)'` (tools/paddock-dev);
+  `node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs`; an ignored probe test of `Reaper` (50 looks with one live child,
+  10 marker scans, removed after the measurement)
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | debrief scan-limit test, quiet | 4.845 s (50 001 files) | 0.013 s (21 files) | nextest 60 s (CI: 90.4 s TMT, run 8061) | pass |
+  | crash model, 9 tests, slowest test, 6 burners, load 27-32 | 6.8 / 8.5 s (no group) | 6.2 / 6.8 s (group of 2) | nextest 60 s (CI: 59-60 s, run 8066) | group not kept: wall 7-9 s → 20-22 s |
+  | paddock-dev `host_steps::*`, 37 tests, whole run | 15.3 s (load ~30-60) | 13.0 / 16.7 s (load ~30 / 78) | none | no change beyond the shared machine's noise; 0 leaks found |
+  | VM lock + VM win, whole run | 98 s, 71/71 (load 25) | 99 s before the poll migration, 98 s after it (committed tree, load 11-13), 71/71, 0 processes reaped | none | pass |
+  | `Reaper` look at the process table, one live child, load 60 | — | 18.2 ms | — | sampler capped at one look per 0.5 s |
+  | `processes_mentioning` (marker scan), load 60 | — | 24-29 ms | — | once per reap |
+  | Node kit tests (`scripts/test-kit.test.mjs`), 3 runs | — | 2.87-2.90 s, 6/6 | none | pass |
+
+- **Notes:** the crash model's slowdown in CI (9x) comes from other jobs' load: two at a time lowered the slowest test only a little
+  and tripled the wall time, so the tests got a size-class override (120 s, with this measurement in the waiver) instead. The
+  host_steps comparison is dominated by the other agents' load (30 → 78 between runs); it shows no cost of the reaper above that
+  noise. Two VM runs in between took 138-146 s: tools/paddock-dev had uncommitted changes, so the tests ran the `./dev` wrapper
+  instead of the cached binary (82d5ee496's cost, 0.17-0.4 s per call); on the committed tree it was 98 s again. Raw output in the
+  agent's scratch folder, not kept.
