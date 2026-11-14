@@ -15,13 +15,24 @@
 //! - a private global git config, `.gitconfig` in the private home, which git finds through `HOME` (no `GIT_CONFIG_GLOBAL`, so a test
 //!   that names another home gets that home's `.gitconfig`, as on a machine): `maintenance.auto=false`, `gc.auto=0`, a test identity
 //!   and `safe.directory=*` (the system config, where CI's image names it, is not read), so no test's git starts background maintenance;
+//!   written only when the home has none (a `new_in` home the test prepared keeps its own); `GIT_CEILING_DIRECTORIES` names the temp
+//!   root, so the trust stops there (CVE-2022-24765);
 //! - fixed values that make git deterministic: an author and committer identity, no system git config.
 //!
 //! Everything else a test needs is a named addition (`.env("NAME", value)`), which is also what a reader of the test sees.
-//! [`ALLOWED_NAMES`] lists every name a fresh command carries; the tests of this module compare a real child's environment with
+//! [`allowed_names`] lists every name a fresh command carries; the tests of this module compare a real child's environment with
 //! it, so a variable added here without being listed fails.
 //!
-//! The command derefs to [`std::process::Command`], so `args`, `current_dir`, `output`, `spawn` and the rest are the usual ones.
+//! The command wraps a [`std::process::Command`] and has its own `arg`, `args`, `current_dir`, `env`, `output`, `spawn` and the rest;
+//! it derefs to the `Command` read-only (`get_program`, `get_envs`), never mutably, so nothing can reach past the listed set.
+//!
+//! The program is resolved once, when the command is made: a bare name (`node`, `git`) becomes the full path found on the **test
+//! process's** `PATH`. [`TestCommand::path_first`] and `env("PATH", ..)` change only the child's own lookups, never which program
+//! starts: to start a stand-in, name it by its path.
+//!
+//! A child [`TestCommand::spawn`] starts is a [`TestChild`], which ends that child through its handle when it drops. What the child
+//! starts below it is not the testkit's to end (it has no `paddock_proc`): start the command through
+//! `paddock_testkit_start::Reaper::spawn_test` when it does (ADR 0100 D8, ADR 0103).
 
 use std::ffi::{OsStr, OsString};
 use std::ops::{Deref, DerefMut};
@@ -70,8 +81,12 @@ const FIXED: &[(&str, &str)] = &[
     ("NO_COLOR", "1"),
 ];
 
+/// The private global git config: no background maintenance or gc, a test identity, every folder trusted (see the module).
+const GITCONFIG: &str = "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n[safe]\n\tdirectory = *\n";
+
 /// The folders the private home and temp variables name (see [`TestCommand::private_dir`]).
 const REDIRECTED: &[&str] = &[
+    "GIT_CEILING_DIRECTORIES",
     "HOME",
     "USERPROFILE",
     "APPDATA",
@@ -170,15 +185,24 @@ impl TestCommand {
             // A failure surfaces as the child's own error about its home.
             let _ = std::fs::create_dir_all(d);
         }
-        // The private global git config, read through HOME: no background maintenance or gc (a detached `git maintenance` holds
+        // The private global git config, read through HOME (GITCONFIG): no background maintenance or gc (a detached `git maintenance` holds
         // `objects/maintenance.lock` and a bare clone made meanwhile copies it: the kept-clone fixture hit that 104 times in 1200 under
         // load), a test identity, and every folder trusted, since GIT_CONFIG_NOSYSTEM hides the system config where the CI image and the
         // local Linux container name `safe.directory` (a worktree mounted there belongs to another user).
-        let _ = std::fs::write(
-            home.join(".gitconfig"),
-            "[maintenance]\n\tauto = false\n[gc]\n\tauto = 0\n[user]\n\tname = Paddock Test\n\temail = test@example.invalid\n[safe]\n\tdirectory = *\n",
-        );
-        let vars: [(&str, PathBuf); 11] = [
+        // Only when the home has none, and whole: written to a temporary file, then linked into place, which never replaces a
+        // file (a test that prepared a `new_in` home keeps its own; children sharing one home never see half a file).
+        let config = home.join(".gitconfig");
+        if !config.exists()
+            && let Ok(mut staged) = tempfile::NamedTempFile::new_in(&home)
+            && std::io::Write::write_all(&mut staged, GITCONFIG.as_bytes()).is_ok()
+        {
+            // `persist_noclobber` links the file into place and fails, leaving the other one, when one appeared meanwhile.
+            let _ = staged.persist_noclobber(&config);
+        }
+        // With every folder trusted, git must not look for a repository above the temp root (CVE-2022-24765: a `.git` another user
+        // planted in a shared `/tmp`); a repository a test made below it is still found.
+        let vars: [(&str, PathBuf); 12] = [
+            ("GIT_CEILING_DIRECTORIES", std::env::temp_dir()),
             ("HOME", home.clone()),
             ("USERPROFILE", home.clone()),
             ("APPDATA", home.join("AppData/Roaming")),
@@ -236,6 +260,7 @@ impl TestCommand {
     }
 
     /// Puts `dir` first on the child's `PATH` (a folder of stand-in programs); the curated folders follow. A second call puts its folder in front of the first.
+    /// It changes the child's own lookups only: the program this command starts was resolved when it was made (see the module).
     pub fn path_first(&mut self, dir: &Path) -> &mut TestCommand {
         let mut first: Vec<PathBuf> = vec![dir.to_path_buf()];
         if let Some((_, Some(v))) = self.cmd.get_envs().find(|(k, _)| *k == "PATH") {
@@ -404,6 +429,16 @@ pub struct TestChild {
 }
 
 impl TestChild {
+    /// A child started from a [`TestCommand`] taken apart with [`TestCommand::into_parts`] (a runner that starts the plain command
+    /// itself, such as `paddock_testkit_start::Reaper::spawn_test`), with the guard that keeps its private folder.
+    #[must_use]
+    pub fn from_parts(child: Child, guard: PrivateGuard) -> TestChild {
+        TestChild {
+            child: Some(child),
+            private: guard.0,
+        }
+    }
+
     /// The private folder of the command that started this child.
     #[must_use]
     pub fn private_dir(&self) -> &Path {
@@ -462,7 +497,7 @@ impl Drop for TestChild {
 
 /// Keeps the private folder of a [`TestCommand`] that was taken apart with [`TestCommand::into_parts`].
 #[derive(Debug)]
-pub struct PrivateGuard(#[allow(dead_code)] Arc<PrivateDir>);
+pub struct PrivateGuard(Arc<PrivateDir>);
 
 impl Deref for TestCommand {
     type Target = Command;

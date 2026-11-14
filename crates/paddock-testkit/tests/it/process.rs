@@ -202,9 +202,10 @@ fn a_spawned_child_keeps_its_private_home_after_the_builder_is_dropped() {
         "the child could not write to its home"
     );
 }
+/// The kill itself is proved by identity in paddock-testkit-start (`reap::tests`), which has `paddock_proc`.
 #[cfg(unix)]
 #[test]
-fn a_dropped_test_child_is_killed_and_its_private_folder_goes_with_it() {
+fn a_dropped_test_childs_private_folder_goes_with_it() {
     let child = TestCommand::new("sh")
         .args(["-c", "read x"])
         .stdin(std::process::Stdio::piped())
@@ -275,5 +276,57 @@ fn a_childs_git_trusts_any_folder_since_the_system_config_is_not_read() {
         "*",
         "{}",
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// `new_in` leaves a `.gitconfig` the test already wrote into the home it names (review of a8fca0ebd, P2 4: it was overwritten, and
+/// two children sharing a home rewrote it under each other).
+#[test]
+fn new_in_keeps_the_gitconfig_a_test_wrote_into_its_home() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("home")).unwrap();
+    std::fs::write(
+        dir.path().join("home/.gitconfig"),
+        "[user]\n\tname = Kept\n",
+    )
+    .unwrap();
+    let out = TestCommand::new_in("git", dir.path())
+        .args(["config", "--global", "user.name"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "Kept");
+}
+
+/// `safe.directory=*` trusts every folder, so git must not look for a repository above the temp root (CVE-2022-24765: a `.git`
+/// another user planted in a shared `/tmp`): `GIT_CEILING_DIRECTORIES` names it. A repository below it is still found.
+#[test]
+fn a_childs_git_stops_at_the_temp_root_and_still_finds_a_repository_below_it() {
+    let ceiling = TestCommand::new("git")
+        .environment()
+        .into_iter()
+        .find(|(k, _)| k == "GIT_CEILING_DIRECTORIES")
+        .map(|(_, v)| std::path::PathBuf::from(v));
+    assert_eq!(ceiling, Some(std::env::temp_dir()));
+    let repo = tempfile::tempdir().unwrap();
+    let init = TestCommand::new("git")
+        .args(["init", "-q"])
+        .current_dir(repo.path())
+        .output()
+        .unwrap();
+    assert!(
+        init.status.success(),
+        "{}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    std::fs::create_dir(repo.path().join("sub")).unwrap();
+    let top = TestCommand::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(repo.path().join("sub"))
+        .output()
+        .unwrap();
+    assert!(
+        top.status.success(),
+        "{}",
+        String::from_utf8_lossy(&top.stderr)
     );
 }

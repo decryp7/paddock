@@ -263,9 +263,8 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
     // (ER-14). The order matters: wait for the step itself, then reap, then read the pipes to their end, so a leaked process that
     // still holds a pipe cannot keep the read (and the test) waiting.
     let reaper = paddock_testkit_start::Reaper::new("a host step");
-    let mut child = reaper
-        .spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))
-        .unwrap();
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = reaper.spawn_test(cmd).unwrap();
     let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
