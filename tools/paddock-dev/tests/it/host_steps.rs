@@ -160,7 +160,12 @@ fn tree(fx: &Fx) -> Vec<String> {
     let written = regex::Regex::new(r"(?m)^# Written by .*$").unwrap();
     let mut stack = vec![root.clone()];
     while let Some(d) = stack.pop() {
-        let mut entries: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().collect();
+        // A folder the test made unreadable is listed as such (a step that removed it would leave no line).
+        let Ok(listing) = std::fs::read_dir(&d) else {
+            out.push(format!("unreadable {}", d.strip_prefix(&root).unwrap().display()));
+            continue;
+        };
+        let mut entries: Vec<_> = listing.flatten().collect();
         entries.sort_by_key(|e| e.file_name());
         for e in entries {
             let p = e.path();
@@ -644,6 +649,64 @@ fn prune_folder_removes_the_incremental_caches_first_then_the_folder_and_never_f
     // A bad cap is a usage error in both (the messages go to standard error).
     let bad = same(&layout(1, 1), &prune_folder("<ROOT>/ci/build", "many"));
     assert_eq!(bad.code, 2);
+}
+
+/// The size both sides compare is the same number by design, not by luck: the larger of the allocated kilobytes and the length of
+/// the regular files (hard links once, the total rounded up). Folder lengths are not content: GNU `du --apparent-size` counts them
+/// as 0 while BSD `du -A` counts them and rounds each entry up, and Rust counted them too, so a folder of empty folders was 0 KB in
+/// the shell and 1 KB in Rust on btrfs (OrbStack, where an empty folder has 0 blocks and a length of 18 bytes), and 2 KB in the
+/// shell against 1 KB in Rust on APFS.
+#[test]
+fn prune_folder_sizes_count_file_content_only_the_same_on_every_file_system() {
+    let empty_folders = |fx: &Fx| {
+        for d in ["ci/build/debug/incremental", "ci/build/dist", "ci/build/release"] {
+            std::fs::create_dir_all(fx.p(d)).unwrap();
+        }
+    };
+    for cap in ["1", "2"] {
+        let kept = same(&empty_folders, &prune_folder("<ROOT>/ci/build", cap));
+        assert_eq!(kept.stdout, "", "a folder of empty folders is 0 KB under a cap of {cap}");
+    }
+}
+
+/// A folder the runner's user cannot read (another user's leftover, a locked cache) must not change the size: GNU `find` then exits
+/// non-zero, and the script's old `stat -c ... || stat -f ...` ran BSD's form on GNU, whose file-system lines (`ID: 12e9...`) awk
+/// read as a size of about 1.2e10, so a folder under its cap was removed. Only a user other than root sees it (root reads the
+/// folder); the test says so and checks nothing as root.
+#[test]
+#[cfg(unix)]
+fn prune_folder_with_an_unreadable_subfolder_keeps_a_folder_under_its_cap() {
+    use std::os::unix::fs::PermissionsExt;
+    let setup = |fx: &Fx| {
+        fx.big("ci/build/debug/data", 8);
+        fx.big("ci/build/locked/inner", 4);
+        std::fs::set_permissions(fx.p("ci/build/locked"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    };
+    let unlock = |fx: &Fx| {
+        let locked = fx.p("ci/build/locked");
+        if locked.exists() {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    };
+    let (a, b) = (fixture(), fixture());
+    setup(&a);
+    setup(&b);
+    if std::fs::read_dir(a.p("ci/build/locked")).is_ok() {
+        unlock(&a);
+        unlock(&b);
+        return skip_note("running as root, which reads a 000 folder: the unreadable case cannot be made here (run it as another user)");
+    }
+    let step = prune_folder("<ROOT>/ci/build", "100000");
+    let shell = run_one(&a, &step, false);
+    let rust = run_one(&b, &step, true);
+    unlock(&a);
+    unlock(&b);
+    assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
+    assert_eq!(rust.stdout, "", "12 KB is under a cap of 100000 KB: nothing is removed");
+}
+
+fn skip_note(why: &str) {
+    eprintln!("not measured: {why}");
 }
 
 fn prune_ci(dir: &'static str, slot: &'static str, drop: bool) -> Step {

@@ -1153,7 +1153,7 @@ fn c121_tree() -> tempfile::TempDir {
     let files: &[(&str, &str)] = &[
         (
             "conformance/c121-allow.json",
-            "{\"allow\":[{\"path\":\"conformance/test/\",\"reason\":\"tests of checks of workflows\"},{\"path\":\"scripts/ok.test.mjs\",\"reason\":\"reads a workflow as its subject\"}]}",
+            "{\"allow\":[{\"path\":\"conformance/test/x.test.mjs\",\"site\":\"a.match(/x/)\",\"reason\":\"tests of checks of workflows\"},{\"path\":\"scripts/ok.test.mjs\",\"site\":\"sed .gitea/workflows/ci.yml\",\"reason\":\"reads a workflow as its subject\",\"count\":2},{\"path\":\"scripts/gone.test.mjs\",\"site\":\"grep\",\"reason\":\"a stale entry\"}]}",
         ),
         (
             "docs/a.toml",
@@ -1183,7 +1183,11 @@ fn c121_tree() -> tempfile::TempDir {
             "conformance/test/x.test.mjs",
             "const t = a.match(/x/); // .gitea/workflows/ci.yml\n",
         ),
-        ("scripts/ok.test.mjs", "sed .gitea/workflows/ci.yml\n"),
+        // two identical sites, one entry with `count: 2`; a third, other site in the same file is still reported
+        (
+            "scripts/ok.test.mjs",
+            "sed .gitea/workflows/ci.yml\nsed .gitea/workflows/ci.yml\ngrep x .gitea/workflows/ci.yml\n",
+        ),
         (
             "scripts/bad.test.mjs",
             "const r = new RegExp(\"x\").test(readFileSync('.gitea/workflows/ci.yml'));\nconst m = t.matchAll(/x/g); // workflows/ci.yml\n",
@@ -1231,12 +1235,19 @@ fn c121_flags_the_shapes_it_names_and_only_as_warnings() {
             ("docs/c.toml".to_string(), 1),
             ("scripts/bad.test.mjs".to_string(), 1),
             ("scripts/bad.test.mjs".to_string(), 2),
+            ("scripts/ok.test.mjs".to_string(), 3),
             ("tools/t/src/tests.rs".to_string(), 1),
             ("tools/t/tests/it/a.rs".to_string(), 2),
+            // the entry for a file that is gone is stale
+            ("conformance/c121-allow.json".to_string(), 1),
         ]
     );
+    assert!(r.findings.iter().any(|f| {
+        f.message
+            .contains("stale allow entry (scripts/gone.test.mjs: grep) matches no site")
+    }));
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
-    assert_eq!(r.warnings(), 7);
+    assert_eq!(r.warnings(), 9);
 }
 
 #[test]
@@ -1280,7 +1291,11 @@ fn c124_tree() -> tempfile::TempDir {
             "conformance/c124-allow.json",
             "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"site\":\"NotMeasured\",\"reason\":\"the seed, shrink only\"},{\"path\":\"tools/paddock-dev/src/gone.rs\",\"site\":\"x\",\"reason\":\"a stale entry\"},{\"path\":\"tools/paddock-dev/src/two.rs\",\"site\":\"Clean,\",\"reason\":\"an ambiguous entry\"}]}",
         ),
-        ("tools/paddock-dev/src/two.rs", "enum A {\n    Clean,\n}\nenum B {\n    Clean,\n}\n"),
+        // two result enums with the same `Clean,` line (an ambiguous entry), and a phase enum whose `Clean` is no result
+        (
+            "tools/paddock-dev/src/two.rs",
+            "enum A {\n    Clean,\n    Failed,\n}\nenum B {\n    Clean,\n    Stale,\n}\nenum PhaseId {\n    Resolve,\n    Clean,\n}\n",
+        ),
         (
             "tools/paddock-dev/src/a.rs",
             "pub enum V {\n    Green { run: u64 },\n    NotMeasured(String),\n}\n",

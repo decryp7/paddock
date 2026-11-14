@@ -2,7 +2,9 @@
 // "a gate gives its verdict from an indirect signal" recurred at rows 2 to 7 of the amendment's table).
 // Flagged, one site at a time, in the gate and check tools' Rust (`tools/paddock-dev/src/`, `crates/paddock-bench/src/`) outside test code (a `tests/`
 // folder, `tests.rs`, `*_test.rs`, and everything after a file's first `#[cfg(test)]`):
-// - a local enum with a `NotMeasured`, `Clean`, `Pass`, `Current` or `Green` variant: a second result type (use `paddock_cli::Outcome`);
+// - the `NotMeasured`, `Clean`, `Pass`, `Current` or `Green` variants of a local enum that is a result type, one with a `NotMeasured`
+//   variant or two or more result words (`Clean`, `Pass`, `Passed`, `Current`, `Green`, `Red`, `Stale`, `Fail`, `Failed`, `Findings`):
+//   a second result type (use `paddock_cli::Outcome`); one such word among others names a phase or a command (`PhaseId::Clean`);
 // - a JSON object literal with a `"status"`, `"verdict"` or `"outcome"` key: a result a consumer would read without evidence
 //   (use `Outcome::json()`, read it with `Outcome::from_wire`);
 // - `fn fails(&self) -> bool` or `fn passed(&self) -> bool`: the bool conversion the shared type forbids;
@@ -12,16 +14,21 @@
 //   reads as a pass; return the not-measured outcome when the check cannot look, or build the findings from what it saw.
 // In JavaScript, outside `conformance/src/outcome.mjs`: an object literal `status: 'clean'` (a pass made by hand).
 // Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line, so an edit
-// that moves the line keeps the entry) and a reason. A whole file or folder is never allowed. An entry that matches no site is
-// stale (remove it) and one that matches several is ambiguous (lengthen it), as PHPStan's reportUnmatchedIgnoredErrors does. A shrink-only seed, expected to empty
+// that moves the line keeps the entry) and a reason, read and counted by the shared allow list (`util/allow-list.mjs`, also C121's): a
+// whole file or folder is never allowed, an entry that matches no site is stale and one that matches more than its `count` is
+// ambiguous, as PHPStan's reportUnmatchedIgnoredErrors does. A shrink-only seed, expected to empty
 // out as each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { unwaivable, warn } from '../finding.mjs';
+import { AllowList, parseAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c124-allow.json';
 const RUST = /^(?:tools\/paddock-dev\/src|crates\/paddock-bench\/src)\/.*\.rs$/;
 const OWNER = /^crates\/paddock-cli\//;
 const TEST_PATH = /(?:^|\/)(?:tests?|__tests__)\/|(?:^|\/)tests\.rs$|_test\.rs$/;
 const VARIANT = /^\s*(NotMeasured|Clean|Pass|Current|Green)\b/;
+// The words of a result: an enum is a second result type when it has a `NotMeasured` variant or two or more of these (`Earlier { Clean,
+// Failed }`), never for one word among others (`PhaseId { Resolve, Clean, Fetch }`, `DiskCommand { Clean(..) }`: a phase or a command).
+const RESULT_WORD = /^\s*(NotMeasured|Clean|Pass|Passed|Current|Green|Red|Stale|Fail|Failed|Findings)\b/;
 const ENUM = /^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+\w+/;
 const JSON_KEY = /"(?:status|verdict|outcome)"\s*:/;
 const BOOL_FN = /\bfn\s+(?:fails|passed)\s*\(\s*&self\s*\)\s*->\s*bool\b/;
@@ -43,20 +50,29 @@ export function flaggedRust(path, text) {
   const body = end < 0 ? lines : lines.slice(0, end);
   let depth = -1; // brace depth inside an enum, -1 outside
   let header = ''; // the enum's own line: its name is part of a variant's site, so `NotMeasured,` of two enums are two sites
+  let candidates = []; // the enum's flaggable variants, kept until the enum closes and shows whether it is a result type
+  let words = new Set(); // the enum's result words
   body.forEach((line, i) => {
     const t = line.trim();
     if (t.startsWith('//')) return;
     if (depth < 0 && ENUM.test(line) && line.includes('{')) {
       depth = 0;
       header = t;
+      candidates = [];
+      words = new Set();
     }
     if (depth >= 0) {
       if (depth === 1) {
         const v = VARIANT.exec(line);
-        if (v) out.push({ line: i + 1, text: `${header} ${t}`, what: `an enum variant \`${v[1]}\` (a second result type)` });
+        if (v) candidates.push({ line: i + 1, text: `${header} ${t}`, what: `an enum variant \`${v[1]}\` (a second result type)` });
+        const w = RESULT_WORD.exec(line);
+        if (w) words.add(w[1]);
       }
       for (const c of line) depth += c === '{' ? 1 : c === '}' ? -1 : 0;
-      if (depth <= 0) depth = -1;
+      if (depth <= 0) {
+        depth = -1;
+        if (words.has('NotMeasured') || words.size >= 2) out.push(...candidates);
+      }
     }
     if (JSON_KEY.test(line) && /json!|serde_json/.test(text)) out.push({ line: i + 1, text: line, what: 'a JSON result object with a status, verdict or outcome key' });
     if (BOOL_FN.test(line)) out.push({ line: i + 1, text: line, what: 'a `fails`/`passed` bool on a result type' });
@@ -73,7 +89,8 @@ export function flaggedRust(path, text) {
     const line = code.slice(0, m.index).split('\n').length;
     out.push({ line, text: body[line - 1], what: 'a `measure` whose closure always returns an empty list (an empty measurement reads as a pass)' });
   }
-  return out;
+  // An enum's variants are known only when it closes: back in line order (stable, as the Rust host sorts).
+  return out.sort((a, b) => a.line - b.line);
 }
 
 /** [{ line, what, text }] of every hand-made pass in the JavaScript text of `path`. */
@@ -87,26 +104,8 @@ export function flaggedJs(path, text) {
   return out;
 }
 
-/** The allow list: [{ path, reason }], or throws why it cannot be read. */
-export function parseAllow(text) {
-  let v;
-  try {
-    v = JSON.parse(text);
-  } catch (e) {
-    throw new Error(`${ALLOW} is not JSON: ${e.message}`);
-  }
-  if (!Array.isArray(v?.allow)) throw new Error(`${ALLOW} has no \`allow\` array`);
-  return v.allow.map((e) => {
-    const path = typeof e?.path === 'string' ? e.path : '';
-    const site = typeof e?.site === 'string' ? e.site.trim() : '';
-    const reason = typeof e?.reason === 'string' ? e.reason.trim() : '';
-    if (!path || !site || [...reason].length < 8) throw new Error(`${ALLOW}: every entry needs a path, a site (a piece of the flagged line) and a reason of at least 8 characters`);
-    return { path, site, reason };
-  });
-}
-
-/** The indexes of the entries that name this site: the file and a piece of the flagged line. */
-export const matchingEntries = (allow, path, text) => allow.flatMap((a, i) => (a.path === path && String(text ?? '').includes(a.site) ? [i] : []));
+/** The allow list: [{ path, site, reason, count }], or throws why it cannot be read (the shared parser, util/allow-list.mjs). */
+export const parseAllow = (text) => parseAllowList(text, ALLOW);
 
 export default {
   id: 'C124',
@@ -116,15 +115,14 @@ export default {
   rule: 21,
   run(ctx) {
     const raw = ctx.read(ALLOW);
-    let allow = [];
+    let allow;
     try {
       if (raw === null || raw === undefined) throw new Error(`${ALLOW} cannot be read`);
-      allow = parseAllow(raw);
+      allow = new AllowList(ALLOW, parseAllow(raw));
     } catch (e) {
       return [unwaivable(warn('C124', 21, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c124-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "..."}]}.'), 'check-broken')];
     }
     const out = [];
-    const hits = allow.map(() => 0);
     const scanned = new Set();
     for (const f of ctx.files()) {
       const rust = RUST.test(f);
@@ -133,19 +131,11 @@ export default {
       if (text === null || text === undefined) continue;
       scanned.add(f);
       for (const { line, what, text: at } of rust ? flaggedRust(f, text) : flaggedJs(f, text)) {
-        const named = matchingEntries(allow, f, at);
-        named.forEach((n) => hits[n]++);
-        if (named.length) continue;
+        if (allow.allows(f, at)) continue;
         out.push(warn('C124', 21, f, line, `builds a gate result by hand: ${what}`, FIX));
       }
     }
-    allow.forEach((a, n) => {
-      if (hits[n] === 0 && (scanned.has(a.path) || ctx.read(a.path) === null || ctx.read(a.path) === undefined)) {
-        out.push(warn('C124', 21, ALLOW, 1, `stale allow entry (${a.path}: ${a.site}) matches no site`, 'Remove it from conformance/c124-allow.json.'));
-      } else if (hits[n] > 1) {
-        out.push(warn('C124', 21, ALLOW, 1, `ambiguous allow entry (${a.path}: ${a.site}) matches ${hits[n]} sites`, 'Lengthen its `site` so it names one line.'));
-      }
-    });
-    return out;
+    const looked = (path) => scanned.has(path) || ctx.read(path) === null || ctx.read(path) === undefined;
+    return [...out, ...allow.warnings('C124', 21, looked)];
   },
 };

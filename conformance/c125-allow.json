@@ -1,0 +1,565 @@
+{
+  "history": [
+    {
+      "path": "docs/lessons.md",
+      "reason": "Lessons record what happened, with the paths of the day; rewriting them would falsify the record"
+    },
+    {
+      "path": "docs/benchmarks.md",
+      "reason": "Benchmark results record the machine and folders they were measured on (rule 48)"
+    },
+    {
+      "path": "docs/adr/",
+      "reason": "ADRs record the decision and its evidence as they were when accepted"
+    },
+    {
+      "path": "docs/audits/",
+      "reason": "Dated audits record the tree and machine as they were audited"
+    },
+    {
+      "path": "docs/research/",
+      "reason": "Dated research notes record where their raw data was at the time"
+    },
+    {
+      "path": "docs/wiki/",
+      "reason": "The wiki is retired (ER-30, 2026-11-12): frozen pages, read by no tool"
+    },
+    {
+      "path": "apps/*/docs/adr/",
+      "reason": "App ADRs record the decision and its evidence as they were when accepted"
+    },
+    {
+      "path": "apps/*/docs/research/",
+      "reason": "Dated app research notes and their raw results record where the data was at the time"
+    },
+    {
+      "path": "apps/*/docs/performance.md",
+      "reason": "Benchmark results record the machine and folders they were measured on (rule 48)"
+    }
+  ],
+  "allow": [
+    {
+      "path": "apps/debrief/app/src/app/video/mock/mock-video-backend.ts",
+      "site": "/Volumes/OldDisk",
+      "reason": "Debrief's video mock: an invented disk that is gone, for the missing-recording state",
+      "count": 2
+    },
+    {
+      "path": "apps/debrief/app/src/app/video/video-view.spec.ts",
+      "site": "/Volumes/OldDisk",
+      "reason": "Debrief's video mock: an invented disk that is gone, for the missing-recording state"
+    },
+    {
+      "path": "apps/dyno/app/src-tauri/src/login.rs",
+      "site": "/Volumes/Dyno",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src-tauri/src/mcp_readings.rs",
+      "site": "/Volumes/Work",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src-tauri/src/report.rs",
+      "site": "/Volumes/Dyno",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/disk-map.contract.spec.ts",
+      "site": "/Volumes/Macintosh",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/disk-map.contract.spec.ts",
+      "site": "/Volumes/Media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/disk-map.contract.spec.ts",
+      "site": "/Volumes/Photos",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/disk-map.wire.json",
+      "site": "/Volumes/Macintosh",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/disk-map.wire.json",
+      "site": "/Volumes/Media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/disk-map.wire.json",
+      "site": "/Volumes/Photos",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock-backend.ts",
+      "site": "/Volumes/Example-Archive-Drive-With-A-Long-Name",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock-backend.ts",
+      "site": "/Volumes/Spare",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock/disk-map.spec.ts",
+      "site": "/Volumes/Media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock/disk-map.spec.ts",
+      "site": "/Volumes/Photos",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 7
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock/disk-map.ts",
+      "site": "/Volumes/Media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock/disk-map.ts",
+      "site": "/Volumes/Photos",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock/widgets.ts",
+      "site": "/Volumes/Projects",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/core/mock/widgets.ts",
+      "site": "/Volumes/V",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/features/benchmarks/bench-model.spec.ts",
+      "site": "/Volumes/X",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/features/disk-map/disk-map-page.spec.ts",
+      "site": "/Volumes/Media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 4
+    },
+    {
+      "path": "apps/dyno/app/src/app/features/reports/reports-page.spec.ts",
+      "site": "/Volumes/Spare",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/state/bench.store.spec.ts",
+      "site": "/Volumes/A",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/app/src/app/state/bench.store.spec.ts",
+      "site": "/Volumes/B",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 4
+    },
+    {
+      "path": "apps/dyno/app/src/app/state/disk-map.store.spec.ts",
+      "site": "/Volumes/Media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 4
+    },
+    {
+      "path": "apps/dyno/app/src/app/state/disk-map.store.spec.ts",
+      "site": "/Volumes/Photos",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/bench.rs",
+      "site": "/Volumes/not-here",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/bench_disk_target.rs",
+      "site": "/Volumes/Gone",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/bench_disk_target.rs",
+      "site": "/Volumes/RO",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/bench_disk_target.rs",
+      "site": "/Volumes/Share",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/bench_disk_target.rs",
+      "site": "/Volumes/USB",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 7
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/bench_scratch.rs",
+      "site": "/Volumes/USB",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/centre.rs",
+      "site": "/Volumes/Alex",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/volumes.rs",
+      "site": "/Volumes/a",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/volumes.rs",
+      "site": "/Volumes/b",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/volumes.rs",
+      "site": "/Volumes/media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 6
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/volumes.rs",
+      "site": "/Volumes/usb",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/volumes.rs",
+      "site": "/Volumes/x",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/dyno/crates/dyno-agent/src/disk/volumes.rs",
+      "site": "/Volumes/y",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/bench.rs",
+      "site": "/Volumes/A",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 6
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/bench.rs",
+      "site": "/Volumes/B",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/bench/disk.rs",
+      "site": "/Volumes/A",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/bench/disk.rs",
+      "site": "/Volumes/Macintosh",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/bench/disk.rs",
+      "site": "/Volumes/X",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/disk/reason.rs",
+      "site": "/Volumes/Backups",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/disk/reason.rs",
+      "site": "/Volumes/USB",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/disk/volume.rs",
+      "site": "/Volumes/M",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/disk/volume.rs",
+      "site": "/Volumes/Media",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/disk/volume.rs",
+      "site": "/Volumes/Photos",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/disk/volume.rs",
+      "site": "/Volumes/Work",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/disk/volume.rs",
+      "site": "/Volumes/com.apple.",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/report.rs",
+      "site": "/Volumes/Backup",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/report.rs",
+      "site": "/Volumes/Example",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/report.rs",
+      "site": "/Volumes/Small",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover.rs",
+      "site": "/Volumes/Backup",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/mod.rs",
+      "site": "/Volumes/Backup",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/Backup",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/Data",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/NAS",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/Odd",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/Time",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/V",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/X",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-core/src/widgets/popover_values/tests.rs",
+      "site": "/Volumes/Y",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/macos/volumes.rs",
+      "site": "/Volumes/Work",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/sensors.rs",
+      "site": "/Volumes/usb",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk"
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/volumes.rs",
+      "site": "/Volumes/Work",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 2
+    },
+    {
+      "path": "apps/dyno/crates/dyno-platform/src/volumes.rs",
+      "site": "/Volumes/usb",
+      "reason": "Dyno is a disk monitor: invented volume names (or macOS's own) as test data, mock readings and examples, not a machine's disk",
+      "count": 3
+    },
+    {
+      "path": "apps/pitcrew/docs/design/environment.html",
+      "site": "/Volumes/build",
+      "reason": "Design mock: invented runner folders",
+      "count": 15
+    },
+    {
+      "path": "apps/pitcrew/docs/design/environment.html",
+      "site": "/Volumes/scratch",
+      "reason": "Design mock: invented runner folders",
+      "count": 4
+    },
+    {
+      "path": "apps/spotter/app/src/app/core/mock-backend.ts",
+      "site": "/Volumes/Builds",
+      "reason": "Spotter's folder source: an invented build share as a default, an example or test data",
+      "count": 3
+    },
+    {
+      "path": "apps/spotter/app/src/app/core/mock/mock-data.ts",
+      "site": "/Volumes/Builds",
+      "reason": "Spotter's folder source: an invented build share as a default, an example or test data"
+    },
+    {
+      "path": "apps/spotter/app/src/app/core/mock/mock-extraction.ts",
+      "site": "/Volumes/Builds",
+      "reason": "Spotter's folder source: an invented build share as a default, an example or test data"
+    },
+    {
+      "path": "apps/spotter/crates/spotter-core/src/config.rs",
+      "site": "/Volumes/Data",
+      "reason": "Spotter's folder source: an invented build share as a default, an example or test data",
+      "count": 2
+    },
+    {
+      "path": "apps/spotter/crates/spotter-sources/src/folder.rs",
+      "site": "/Volumes/Builds",
+      "reason": "Spotter's folder source: an invented build share as a default, an example or test data",
+      "count": 2
+    },
+    {
+      "path": "crates/paddock-diag/tests/it/hostile.rs",
+      "site": "/Volumes/Work",
+      "reason": "Hostile-input test data: an invented user path the redaction must handle"
+    },
+    {
+      "path": "crates/paddock-service/src/launch.rs",
+      "site": "/Volumes/Dyno",
+      "reason": "Test data: an installer image (DMG) mounted under /Volumes, the place a user could run the app from"
+    },
+    {
+      "path": "scripts/vm-smoke/login-probe-mac.sh",
+      "site": "/Volumes/My",
+      "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"
+    },
+    {
+      "path": "scripts/vm-smoke/run.mjs",
+      "site": "/Volumes/My",
+      "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"
+    },
+    {
+      "path": "scripts/vm-win.test.mjs",
+      "site": "/Volumes/no-such-volume-paddock-test",
+      "reason": "A volume that cannot exist, so a regression cannot leave a folder behind",
+      "count": 3
+    },
+    {
+      "path": "tools/macos-vm-smoke.sh",
+      "site": "/Volumes/My",
+      "reason": "The guest-side mount point of the VM's shared folder (macOS Virtualization framework), not a host disk"
+    },
+    {
+      "path": "tools/paddock-dev/src/ci_host/boot_volume.rs",
+      "site": "/Volumes/My",
+      "reason": "Fake mounts of the boot-volume tests: invented volume names",
+      "count": 2
+    },
+    {
+      "path": "tools/paddock-dev/src/ci_host/boot_volume.rs",
+      "site": "/Volumes/ci",
+      "reason": "Fake mounts of the boot-volume tests: invented volume names",
+      "count": 26
+    },
+    {
+      "path": "tools/paddock-dev/src/ci_host/boot_volume.rs",
+      "site": "/Volumes/other",
+      "reason": "Fake mounts of the boot-volume tests: invented volume names",
+      "count": 4
+    },
+    {
+      "path": "tools/paddock-dev/src/ci_runs/record.rs",
+      "site": "/Volumes/disk",
+      "reason": "The scrubbed placeholder that recorded CI paths are rewritten to (ER-14)"
+    },
+    {
+      "path": "tools/paddock-dev/src/disk/check.rs",
+      "site": "/Volumes/gog",
+      "reason": "An invented df answer for the parser and host-step tests"
+    },
+    {
+      "path": "tools/paddock-dev/tests/ci-triage/log-36215.txt",
+      "site": "/Volumes/disk",
+      "reason": "Recorded CI log, scrubbed to the placeholder disk (ER-14)"
+    },
+    {
+      "path": "tools/paddock-dev/tests/ci-triage/log-36219.txt",
+      "site": "/Volumes/disk",
+      "reason": "Recorded CI log, scrubbed to the placeholder disk (ER-14)"
+    },
+    {
+      "path": "tools/paddock-dev/tests/it/host_steps.rs",
+      "site": "/Volumes/Ext",
+      "reason": "An invented df answer for the parser and host-step tests",
+      "count": 2
+    },
+    {
+      "path": "ui/projects/paddock-ui/shell/diagnostics/src/backend.ts",
+      "site": "/Volumes/Backup",
+      "reason": "Shell diagnostics mock: an invented backup disk for the failed-export state"
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/cancel.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 3
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/import.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 39
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/loop.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 18
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/probe.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 16
+    },
+    {
+      "path": "apps/debrief/docs/research/2026-10-28-duckdb-server-mode/results/query.txt",
+      "site": "/Volumes/d7sst7/dev-targets/target/research-quack",
+      "reason": "Raw output of the dated DuckDB server-mode research run (2026-10-28), kept as the harness printed it; the note beside it is history",
+      "count": 6
+    }
+  ]
+}

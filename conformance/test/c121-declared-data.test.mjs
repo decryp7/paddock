@@ -3,7 +3,9 @@ import { test } from 'node:test';
 import { flagged, kindOf, parseAllow } from '../src/checks/C121-declared-data.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
-const ALLOW = JSON.stringify({ allow: [{ path: 'conformance/test/', reason: 'tests of checks of workflows' }] });
+const ALLOW = JSON.stringify({ allow: [{ path: 'conformance/test/x.test.mjs', site: 'text.match(/x/)', reason: 'tests of checks of workflows' }] });
+/** The line and what of each site (the line's text is what an allow entry's `site` is looked for in). */
+const lw = (sites) => sites.map(({ line, what }) => ({ line, what }));
 
 test('C121 kinds: registries and test files are read, fixtures and other files are not', () => {
   assert.equal(kindOf('docs/generators.toml'), 'registry');
@@ -16,16 +18,16 @@ test('C121 kinds: registries and test files are read, fixtures and other files a
 
 test('C121 bad: a registry or a test that runs a text tool over a workflow (bddd2947c)', () => {
   const sed = `check = ["sh", "-c", "args=$(sed -n 's/^X: \\"\\(.*\\)\\"$/\\1/p' .gitea/workflows/ci.yml | head -1)"]`;
-  assert.deepEqual(flagged('registry', `a = 1\n${sed}\n`), [{ line: 2, what: '`sed`' }]);
-  assert.deepEqual(flagged('test', 'Command::new("grep").arg("x").arg(".gitea/workflows/ci.yml");\n'), [{ line: 1, what: '`grep`' }]);
-  assert.deepEqual(flagged('registry', 'check = ["sh", "-c", "rg -n x workflows/ci.yml"]\n'), [{ line: 1, what: '`rg`' }]);
+  assert.deepEqual(lw(flagged('registry', `a = 1\n${sed}\n`)), [{ line: 2, what: '`sed`' }]);
+  assert.deepEqual(lw(flagged('test', 'Command::new("grep").arg("x").arg(".gitea/workflows/ci.yml");\n')), [{ line: 1, what: '`grep`' }]);
+  assert.deepEqual(lw(flagged('registry', 'check = ["sh", "-c", "rg -n x workflows/ci.yml"]\n')), [{ line: 1, what: '`rg`' }]);
 });
 
 test('C121 bad: a regular expression over a workflow, in a test only', () => {
   const line = 'const hit = readFileSync(".gitea/workflows/ci.yml", "utf8").match(/x/);\n';
-  assert.deepEqual(flagged('test', line), [{ line: 1, what: 'a regular expression' }]);
+  assert.deepEqual(lw(flagged('test', line)), [{ line: 1, what: 'a regular expression' }]);
   assert.deepEqual(flagged('registry', line), []);
-  assert.deepEqual(flagged('test', 'let re = Regex::new("x"); let t = include_str!(".gitea/workflows/ci.yml");\n'), [{ line: 1, what: 'a regular expression' }]);
+  assert.deepEqual(lw(flagged('test', 'let re = Regex::new("x"); let t = include_str!(".gitea/workflows/ci.yml");\n')), [{ line: 1, what: 'a regular expression' }]);
 });
 
 test('C121 good: comments, other files and the accessor', () => {
@@ -38,9 +40,10 @@ test('C121 good: comments, other files and the accessor', () => {
   assert.deepEqual(flagged('registry', 'what = "the sedate .gitea/workflows/ci.yml reader"\n'), []);
 });
 
-test('C121 allow list: needs a path and a reason, matches a folder or a file', () => {
-  assert.deepEqual(parseAllow(ALLOW), [{ path: 'conformance/test/', reason: 'tests of checks of workflows' }]);
-  assert.throws(() => parseAllow('{"allow":[{"path":"x","reason":"short"}]}'), /reason of at least 8/);
+test('C121 allow list: one site per entry, never a folder or a whole file', () => {
+  assert.deepEqual(parseAllow(ALLOW), [{ path: 'conformance/test/x.test.mjs', site: 'text.match(/x/)', reason: 'tests of checks of workflows', count: 1 }]);
+  assert.throws(() => parseAllow('{"allow":[{"path":"conformance/test/","reason":"tests of checks of workflows"}]}'), /site/);
+  assert.throws(() => parseAllow('{"allow":[{"path":"x","site":"y","reason":"short"}]}'), /reason of at least 8/);
   assert.throws(() => parseAllow('{}'), /no `allow` array/);
   assert.throws(() => parseAllow('nope'), /not JSON/);
 });
@@ -59,4 +62,14 @@ test('C121 through the runner: warnings only, the allow list spares its folder, 
   assert.equal(broken.length, 1);
   assert.equal(broken[0].unwaivable, true);
   assert.match(broken[0].message, /cannot look/);
+});
+
+test('C121 allow list: another site in an allowed file is still reported, and a stale entry warns', async () => {
+  const found = await findingsOf('C121', makeApp({
+    'conformance/c121-allow.json': ALLOW,
+    'conformance/test/x.test.mjs': 'const t = text.match(/x/); // .gitea/workflows/ci.yml\nconst u = other.match(/y/); // .gitea/workflows/ci.yml\n',
+  }));
+  assert.deepEqual(found.map((f) => [f.file, f.line]), [['conformance/test/x.test.mjs', 2]]);
+  const stale = await findingsOf('C121', makeApp({ 'conformance/c121-allow.json': ALLOW, 'conformance/test/x.test.mjs': 'const t = 1;\n' }));
+  assert.deepEqual(stale.map((f) => [f.file, /stale allow entry/.test(f.message)]), [['conformance/c121-allow.json', true]]);
 });

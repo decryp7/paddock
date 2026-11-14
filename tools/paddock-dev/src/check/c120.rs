@@ -6,6 +6,7 @@
 //!
 //! The port of `conformance/src/checks/C120-layout-guess.mjs`, finding for finding (the oracle test compares them). Lines that start with a
 //! comment are not read; a justified site carries `// conformance: layout-guess — <reason>` on the line or the line above.
+//! A waiver that waives no site is a warning of its own, at the comment ([`unused_waivers`]).
 
 use super::finding::Finding;
 use super::inline_waiver::{CommentView, InlineWaiver, Kind};
@@ -25,7 +26,7 @@ const IMPLEMENTATION: [&str; 3] = [
 
 static SCOPE: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:crates|tools|apps|scripts)/"));
 static VENDORED: LazyLock<Regex> = LazyLock::new(|| rx(r"^apps/[^/]+/vendor/"));
-static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"current_exe|OUT_DIR|deps"));
+static PREFILTER: LazyLock<Regex> = LazyLock::new(|| rx(r"current_exe|OUT_DIR|deps|layout-guess"));
 
 const START: &str = r"(?:current_exe\s*\(|\bOUT_DIR\b)";
 
@@ -170,6 +171,33 @@ pub fn layout_guesses(text: &str, shell: bool, file: &str) -> Vec<Guess> {
     out
 }
 
+/// The 1-based lines of the waiver comments in one source that waive no guess: unused site waivers and unused file waivers
+/// (ESLint's `--report-unused-disable-directives`). A waiver outlives the code it was for otherwise, and would silently waive a new
+/// guess written under it.
+pub fn unused_waivers(text: &str, shell: bool, file: &str) -> Vec<usize> {
+    if !text.contains("layout-guess") {
+        return Vec::new();
+    }
+    let view = CommentView::of(text, if shell { Kind::Shell } else { Kind::Rust });
+    let file_marker = view.reasoned_lines("file-layout-guess").first().copied();
+    let mut used = std::collections::BTreeSet::new();
+    for g in layout_guesses(text, shell, file) {
+        if let Some(site) = view.waiver_line(g.line, "layout-guess") {
+            used.insert(site);
+        } else if let (InlineWaiver::Reason(_), Some(m)) = (&g.waived, file_marker) {
+            used.insert(m);
+        }
+    }
+    let mut out: Vec<usize> = view
+        .reasoned_lines("layout-guess")
+        .into_iter()
+        .chain(view.reasoned_lines("file-layout-guess"))
+        .filter(|n| !used.contains(n))
+        .collect();
+    out.sort_unstable();
+    out
+}
+
 /// The check.
 pub struct C120;
 
@@ -250,6 +278,16 @@ impl Check for C120 {
                         "Write `// conformance: layout-guess — <why this cannot be the other cargo layout>`.",
                     )
                 }));
+            }
+            for line in unused_waivers(&text, shell, f) {
+                findings.push(Finding::warn(
+                    "C120",
+                    40,
+                    f,
+                    line,
+                    "this layout-guess waiver waives no site: the guess it was for is gone or moved",
+                    "Remove the comment, or move it to the line it is for; an unused waiver would waive a new guess written under it.",
+                ));
             }
         }
         let has_src = ctx.tree_files().iter().any(|f| f.ends_with(".rs") || f.ends_with(".sh"));

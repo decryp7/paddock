@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { flaggedJs, flaggedRust, matchingEntries, parseAllow } from '../src/checks/C124-gate-outcomes.mjs';
+import { ALLOW, flaggedJs, flaggedRust, parseAllow } from '../src/checks/C124-gate-outcomes.mjs';
+import { AllowList } from '../src/util/allow-list.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const DEV = 'tools/paddock-dev/src/x/mod.rs';
@@ -48,10 +49,11 @@ test('C124 bad: a measurement that always returns an empty list', () => {
 
 test('C124 allow list: per site, never a whole file', () => {
   const allow = parseAllow('{"allow": [{"path": "a/b.rs", "site": "|| Ok(Vec::new())", "reason": "a reason that is long enough"}]}');
-  assert.deepEqual(allow, [{ path: 'a/b.rs', site: '|| Ok(Vec::new())', reason: 'a reason that is long enough' }]);
-  assert.deepEqual(matchingEntries(allow, 'a/b.rs', 'x(|| Ok(Vec::new()))'), [0]);
-  assert.deepEqual(matchingEntries(allow, 'a/b.rs', 'enum Verdict { NotMeasured }'), []);
-  assert.deepEqual(matchingEntries(allow, 'a/c.rs', 'x(|| Ok(Vec::new()))'), []);
+  assert.deepEqual(allow, [{ path: 'a/b.rs', site: '|| Ok(Vec::new())', reason: 'a reason that is long enough', count: 1 }]);
+  const list = () => new AllowList(ALLOW, allow);
+  assert.equal(list().allows('a/b.rs', 'x(|| Ok(Vec::new()))'), true);
+  assert.equal(list().allows('a/b.rs', 'enum Verdict { NotMeasured }'), false);
+  assert.equal(list().allows('a/c.rs', 'x(|| Ok(Vec::new()))'), false);
   assert.throws(() => parseAllow('{"allow": [{"path": "a/b.rs", "reason": "a reason that is long enough"}]}'), /site/);
   assert.throws(() => parseAllow('{"allow": [{"path": "a", "site": "x"}]}'), /reason/);
   assert.throws(() => parseAllow('nope'), /not JSON/);
@@ -85,4 +87,15 @@ test('C124 allow list: a stale entry and an ambiguous entry are warnings', async
   assert.equal(amb.some((x) => /ambiguous/.test(x.message)), true);
   const ok = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('NotMeasured,'), [f]: 'enum A {\n    NotMeasured,\n}\n' }));
   assert.deepEqual(ok, []);
+});
+
+test('C124 flags the variants of a result enum, not one result word among a phase or command enum', () => {
+  // kept_clone.rs's phases: `Clean` is a step, not a gate result (a finding on train 11, fixed in the check).
+  assert.deepEqual(flaggedRust(DEV, 'enum PhaseId {\n    Resolve,\n    Create,\n    Clean,\n    Fetch,\n}\n'), []);
+  assert.deepEqual(flaggedRust(DEV, 'pub enum DiskCommand {\n    Clean(CleanArgs),\n    Scan(ScanArgs),\n}\n'), []);
+  // Two result words, or a NotMeasured, make a result type: its flaggable variants are reported, in line order.
+  const earlier = flaggedRust(DEV, 'pub enum Earlier {\n    Clean,\n    Failed(String),\n    Unknown(String),\n}\n');
+  assert.deepEqual(earlier.map((f) => f.line), [2]);
+  const nm = flaggedRust(DEV, 'enum Probe {\n    Ok,\n    NotMeasured,\n}\nfn f() { json!({"status": 1}); }\n');
+  assert.deepEqual(nm.map((f) => f.line), [3, 5]);
 });

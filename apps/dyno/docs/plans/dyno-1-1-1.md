@@ -25,8 +25,8 @@
 - Estimates: **raw ranges in agent-days**, including tests and review fixes. They are guesses: none of these items has an ADR
   with work packages yet (memory: firm estimates only after a design). Packages that need a design first are marked
   **needs design**; their range is wider and is firmed up once the design exists.
-- Sources read: coordinator log `/Volumes/d7sst7/dev-targets/handoff/2026-10-29-overnight.md` (outside the repo; cited as
-  `log:<line>`), Defender research note `/Volumes/d7sst7/dev-targets/scratch/defender-research/NOTE.md` (outside the repo;
+- Sources read: coordinator log `<dev-targets>/handoff/2026-10-29-overnight.md` (outside the repo; cited as
+  `log:<line>`), Defender research note `<dev-targets>/scratch/defender-research/NOTE.md` (outside the repo;
   cited as `note §n`, recommendations R1-R10), [docs/rules.md](../../../../docs/rules.md), Dyno ADRs
   [0022](../adr/0022-helper-installed-with-the-app.md) and [0027](../adr/0027-helper-for-1-1-0.md), family ADR 0053 (only on
   `origin/docs/dyno-adr-0053-amend1`), the format of [debrief-1-2.md](../../../../docs/plans/debrief-1-2.md) and Dyno's helper
