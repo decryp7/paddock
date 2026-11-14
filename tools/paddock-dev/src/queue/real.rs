@@ -142,7 +142,12 @@ pub fn blame_of(status: &Status) -> Blame {
         Status::Flaky {
             also_on_baseline: true, ..
         }
+        | Status::Failed {
+            also_on_baseline: true, ..
+        }
         | Status::OnBaseline => Blame::OnMain,
+        // Failed on every attempt: the flake history beside it does not make it anyone else's.
+        Status::Failed { .. } => Blame::New,
         Status::Flaky { .. } => Blame::Flaky,
         Status::Unknown(_) => Blame::Unknown,
     }

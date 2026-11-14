@@ -29,7 +29,7 @@ on:
         type: boolean
         default: false
       since_run:
-        description: "Rerun only what failed in this finished ci.yml run (its number): the failed jobs, and inside a job that failed only in nextest only its failed tests (./dev plan --since-run; ER-10). Passed jobs do not run; a full run before landing catches the rest."
+        description: "Rerun only what failed in this finished ci.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number): the failed jobs, and inside a job that failed only in nextest only its failed tests (./dev plan --since-run; ER-10). Passed jobs do not run; a full run before landing catches the rest."
         required: false
         default: ""
   # nightly.yml: everything, with WebKit.

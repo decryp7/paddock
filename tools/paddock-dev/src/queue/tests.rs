@@ -1131,6 +1131,20 @@ fn a_flaky_failure_is_still_red_and_blamed_unless_it_also_failed_on_main() {
         Blame::OnMain
     );
     assert_eq!(real::blame_of(&Status::OnBaseline), Blame::OnMain);
+    assert_eq!(
+        real::blame_of(&Status::Failed {
+            history: Some((3, 154)),
+            also_on_baseline: false
+        }),
+        Blame::New
+    );
+    assert_eq!(
+        real::blame_of(&Status::Failed {
+            history: None,
+            also_on_baseline: true
+        }),
+        Blame::OnMain
+    );
     assert_eq!(real::blame_of(&Status::Unknown("x".into())), Blame::Unknown);
     let mut w = World::new();
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"]), (2, "ui/b.ts", &["ui"])]);

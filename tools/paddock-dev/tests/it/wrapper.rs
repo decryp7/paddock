@@ -503,6 +503,8 @@ fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf
             rustup_body.replace("MARKER", &marker.display().to_string())
         ),
     );
+    // The install is checked by running cargo and the components the file asks for (clippy here); a test may replace this one.
+    write_script(&shims.join("cargo"), "echo cargo 1.90.0");
     (shims, log)
 }
 
@@ -584,6 +586,128 @@ fn ensure_toolchain_succeeds_when_the_compiler_runs_after_the_install() {
         !String::from_utf8_lossy(&second.stderr).contains("installing"),
         "{}",
         String::from_utf8_lossy(&second.stderr)
+    );
+}
+
+/// A rustup whose install leaves the toolchain broken in the way `what` names, as the Windows runner's 1.100.0 after two jobs
+/// installed it at once (CI run 8060: "cargo-clippy is not applicable to the toolchain") and after a repair uninstalled it under
+/// running jobs (run 8063: "can't find crate for `std`"). Returns the shims and rustup's log.
+#[cfg(unix)]
+fn rustup_installing_broken(f: &Fixture, what: &str) -> (PathBuf, PathBuf) {
+    let (shims, log) = rustup_without_toolchain(f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'; exit 0");
+    let marker = f.cargo_home.path().join("installed");
+    match what {
+        "clippy" => write_script(
+            &shims.join("cargo"),
+            "if [ \"$1 $2\" = 'clippy --version' ]; then echo \"error: the 'cargo-clippy' binary is not applicable to the toolchain\" >&2; exit 1; fi\necho cargo 1.90.0",
+        ),
+        "std" => write_script(
+            &shims.join("rustc"),
+            &format!(
+                "[ -e '{}' ] || {{ echo \"error: toolchain '1.90.0' is not installed\" >&2; exit 1; }}\ncase \"$*\" in *.rs*) echo \"error[E0463]: can't find crate for 'std'\" >&2; exit 1 ;; esac\nprintf 'rustc 1.90.0\\nbinary: rustc\\ncommit-hash: aaaa\\ncommit-date: d\\nhost: test-host\\nrelease: 1.90.0\\nLLVM version: 1\\n'",
+                marker.display()
+            ),
+        ),
+        other => panic!("unknown breakage {other}"),
+    }
+    (shims, log)
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::Output {
+    // Run from outside any repository: the setup-rust action calls this mode before anything else is set up.
+    let outside = tempfile::tempdir().unwrap();
+    Command::new("sh")
+        .arg(f.root().join("dev"))
+        .arg("--install-toolchain")
+        .args(args)
+        .current_dir(outside.path())
+        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
+        .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
+        .env_remove("RUSTUP_TOOLCHAIN")
+        .output()
+        .unwrap()
+}
+
+/// ER-26 (runs 8027, 8028, 8060, 8063): a toolchain whose install finished but whose std, cargo, clippy or rustfmt does not work is an
+/// error that names the manual repair, done with no jobs running. CI never uninstalls a toolchain: other jobs on the runner may be
+/// compiling with it (run 8063: a repair's uninstall took std away from four running jobs).
+#[cfg(unix)]
+#[test]
+fn a_broken_toolchain_is_an_error_naming_the_manual_repair_and_is_never_uninstalled() {
+    for (what, says) in [("clippy", "cargo clippy does not run"), ("std", "a std program does not compile")] {
+        let f = Fixture::new();
+        let (shims, log) = rustup_installing_broken(&f, what);
+        let out = install_toolchain(&f, &shims, &["1.90.0", "clippy", ""]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(1), "{what}: {err}");
+        assert_eq!(err.matches("::error::").count(), 1, "{what}: one error line (ER-27): {err}");
+        assert!(
+            err.contains(says) && err.contains("with no jobs running") && err.contains("rustup toolchain uninstall 1.90.0"),
+            "{what}: {err}"
+        );
+        let log = std::fs::read_to_string(log).unwrap();
+        assert!(!log.contains("uninstall"), "{what}: CI never uninstalls: {log}");
+        assert_eq!(log.matches("toolchain install").count(), 1, "{what}: {log}");
+        assert!(
+            !f.cargo_home.path().join("rustup/.paddock-install-1.90.0.lock").exists(),
+            "{what}: the lock is released on failure too"
+        );
+    }
+}
+
+/// ./dev's own install (a machine whose rustc does not run) checks the toolchain the same way and never uninstalls it either.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test (git, sh, bash); nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+#[test]
+fn ensure_toolchain_refuses_a_broken_install_without_uninstalling_it() {
+    let f = Fixture::new();
+    let (shims, log) = rustup_installing_broken(&f, "clippy");
+    let out = Command::new("sh")
+        .arg(f.root().join("dev"))
+        .arg("--ensure-toolchain")
+        .current_dir(f.root())
+        .env("PATH", format!("{}:{}", shims.display(), std::env::var("PATH").unwrap()))
+        .env("CARGO_HOME", f.cargo_home.path())
+        .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
+        .env_remove("RUSTC")
+        .env_remove("CARGO_BUILD_RUSTC")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_ne!(out.status.code(), Some(0), "{err}");
+    assert!(
+        err.contains("cargo clippy does not run") && err.contains("with no jobs running"),
+        "{err}"
+    );
+    assert!(!std::fs::read_to_string(log).unwrap().contains("uninstall"));
+}
+
+/// A working toolchain passes the check after its install, with the components and targets asked for.
+#[cfg(unix)]
+#[test]
+fn a_working_toolchain_passes_the_check_after_its_install() {
+    let f = Fixture::new();
+    let (shims, log) = rustup_without_toolchain(
+        &f,
+        "[ \"$1\" = --version ] && echo 'rustup 9.9.9 (test)'; [ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'; exit 0",
+    );
+    let out = install_toolchain(&f, &shims, &["1.90.0", "clippy", "x86_64-pc-windows-msvc"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(0), "{err}");
+    // ER-26: the job log shows which rustup and which compiler it got, so drift (a self-update, a new stable) is visible.
+    assert!(err.contains("rustup 9.9.9 (test)") && err.contains("rustc 1.90.0"), "{err}");
+    let log = std::fs::read_to_string(log).unwrap();
+    assert!(
+        log.contains("toolchain install 1.90.0 --profile minimal --component clippy --target x86_64-pc-windows-msvc --no-self-update"),
+        "{log}"
     );
 }
 

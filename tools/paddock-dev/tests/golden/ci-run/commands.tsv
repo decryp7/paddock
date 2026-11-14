@@ -1,7 +1,7 @@
 # The commands CI ran before the gate executor (the `gates model` of ci.yml and app-gates at 11c365fc4, before CI-in-Rust WP-3):
 # `job` rows are every command of a root job, `app` rows the commands an app contract adds to its legs. The executor's contracts must
 # produce exactly these (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_ci_ran_before_the_executor`).
-# Two deliberate changes since then (WP-3 review): C119 joined the conformance list, and the setup-rust and sccache-stats actions' own lines are rows of the five jobs that now run it first (ui, e2e, tools, icons, eslint-preset). Since train 9: the setup-rust action settles the image's pinned toolchain and stable (Rust 1.100, chore/rust-1-100) and prints the cargo build-dir layout opt-out on Windows (fix/spotter-win-cmdline-1-100).
+# Two deliberate changes since then (WP-3 review): C119 joined the conformance list, and the setup-rust and sccache-stats actions' own lines are rows of the five jobs that now run it first (ui, e2e, tools, icons, eslint-preset). Since train 9: the setup-rust action settles the image's pinned toolchain and stable (Rust 1.100, chore/rust-1-100) and prints the cargo build-dir layout opt-out on Windows (fix/spotter-win-cmdline-1-100). The install itself became `./dev --install-toolchain` (locked, checked and repaired, after CI run 8060).
 # kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
 app	dyno	macos-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	dyno	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app dyno --root apps/dyno --only C13 --paddock .
@@ -116,9 +116,6 @@ job	conformance			TOOLCHAIN=${TOOLCHAIN:-stable
 job	conformance			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	conformance			VERSION=0.19.0
 job	conformance			Windows-x86_64)          T=x86_64-pc-windows-msvc
-job	conformance			args+=(--component "$c"
-job	conformance			args+=(--target "$t"
-job	conformance			args=(--profile minimal
 job	conformance			bash "conformance/ci/kit.sh" build-jobs
 job	conformance			bash "conformance/ci/kit.sh" host sccache-stats
 job	conformance			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
@@ -134,7 +131,6 @@ job	conformance			dl=$(mktemp -d
 job	conformance			do
 job	conformance			echo "$DEST" >> "$GITHUB_PATH"
 job	conformance			echo "$kv"
-job	conformance			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
 job	conformance			echo "::error::rustup is not installed on this runner"
 job	conformance			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
 job	conformance			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
@@ -165,7 +161,6 @@ job	conformance			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ER
 job	conformance			for c in 
 job	conformance			for kv in "${SETTINGS[@]}"
 job	conformance			for name in "" stable
-job	conformance			for t in 
 job	conformance			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
 job	conformance			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	conformance			iso="conformance/ci/job-isolation.sh"
@@ -182,13 +177,10 @@ job	conformance			npm ci --ignore-scripts -w conformance
 job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	conformance			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
 job	conformance			printf '%s\n' "$installed"
-job	conformance			rc=$?
-job	conformance			rc=0
 job	conformance			redis
 job	conformance			rm -rf "$dl"
 job	conformance			rustc --version
 job	conformance			rustup default ""
-job	conformance			rustup toolchain install "" "${args[@]}" --no-self-update
 job	conformance			rustup toolchain list 2>/dev/null
 job	conformance			sccache --show-stats >/dev/null 2>&1
 job	conformance			sccache --start-server
@@ -196,11 +188,10 @@ job	conformance			sccache --stop-server >/dev/null 2>&1
 job	conformance			sccache --version
 job	conformance			settle ""
 job	conformance			settle "$name"
+job	conformance			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	conformance			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	conformance			then
 job	conformance			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	conformance			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-job	conformance			why="exit $rc"
 job	conformance			{
 job	conformance			} >> "$GITHUB_ENV"
 job	conformance		conformance	npm test
@@ -245,9 +236,6 @@ job	crates			TOOLCHAIN=${TOOLCHAIN:-stable
 job	crates			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	crates			VERSION=0.19.0
 job	crates			Windows-x86_64)          T=x86_64-pc-windows-msvc
-job	crates			args+=(--component "$c"
-job	crates			args+=(--target "$t"
-job	crates			args=(--profile minimal
 job	crates			bash "conformance/ci/kit.sh" build-jobs
 job	crates			bash "conformance/ci/kit.sh" host sccache-stats
 job	crates			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
@@ -263,7 +251,6 @@ job	crates			dl=$(mktemp -d
 job	crates			do
 job	crates			echo "$DEST" >> "$GITHUB_PATH"
 job	crates			echo "$kv"
-job	crates			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
 job	crates			echo "::error::rustup is not installed on this runner"
 job	crates			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
 job	crates			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
@@ -294,7 +281,6 @@ job	crates			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	crates			for c in 
 job	crates			for kv in "${SETTINGS[@]}"
 job	crates			for name in "" stable
-job	crates			for t in 
 job	crates			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
 job	crates			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	crates			iso="conformance/ci/job-isolation.sh"
@@ -309,13 +295,10 @@ job	crates			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
 job	crates			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	crates			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
 job	crates			printf '%s\n' "$installed"
-job	crates			rc=$?
-job	crates			rc=0
 job	crates			redis
 job	crates			rm -rf "$dl"
 job	crates			rustc --version
 job	crates			rustup default ""
-job	crates			rustup toolchain install "" "${args[@]}" --no-self-update
 job	crates			rustup toolchain list 2>/dev/null
 job	crates			sccache --show-stats >/dev/null 2>&1
 job	crates			sccache --start-server
@@ -323,11 +306,10 @@ job	crates			sccache --stop-server >/dev/null 2>&1
 job	crates			sccache --version
 job	crates			settle ""
 job	crates			settle "$name"
+job	crates			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	crates			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	crates			then
 job	crates			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	crates			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-job	crates			why="exit $rc"
 job	crates			{
 job	crates			} >> "$GITHUB_ENV"
 job	crates		crates	bash ../conformance/ci/kit.sh host guardian-as-user
@@ -380,9 +362,6 @@ job	e2e			TOOLCHAIN=${TOOLCHAIN:-stable
 job	e2e			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	e2e			VERSION=0.19.0
 job	e2e			Windows-x86_64)          T=x86_64-pc-windows-msvc
-job	e2e			args+=(--component "$c"
-job	e2e			args+=(--target "$t"
-job	e2e			args=(--profile minimal
 job	e2e			bash "conformance/ci/kit.sh" build-jobs
 job	e2e			bash "conformance/ci/kit.sh" host node-caches "ui" "e2e-1"
 job	e2e			bash "conformance/ci/kit.sh" host node-caches "ui" "e2e-2"
@@ -400,7 +379,6 @@ job	e2e			dl=$(mktemp -d
 job	e2e			do
 job	e2e			echo "$DEST" >> "$GITHUB_PATH"
 job	e2e			echo "$kv"
-job	e2e			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
 job	e2e			echo "::error::rustup is not installed on this runner"
 job	e2e			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
 job	e2e			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
@@ -431,7 +409,6 @@ job	e2e			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	e2e			for c in 
 job	e2e			for kv in "${SETTINGS[@]}"
 job	e2e			for name in "" stable
-job	e2e			for t in 
 job	e2e			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
 job	e2e			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	e2e			iso="conformance/ci/job-isolation.sh"
@@ -447,13 +424,10 @@ job	e2e			npm ci
 job	e2e			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	e2e			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
 job	e2e			printf '%s\n' "$installed"
-job	e2e			rc=$?
-job	e2e			rc=0
 job	e2e			redis
 job	e2e			rm -rf "$dl"
 job	e2e			rustc --version
 job	e2e			rustup default ""
-job	e2e			rustup toolchain install "" "${args[@]}" --no-self-update
 job	e2e			rustup toolchain list 2>/dev/null
 job	e2e			sccache --show-stats >/dev/null 2>&1
 job	e2e			sccache --start-server
@@ -461,11 +435,10 @@ job	e2e			sccache --stop-server >/dev/null 2>&1
 job	e2e			sccache --version
 job	e2e			settle ""
 job	e2e			settle "$name"
+job	e2e			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	e2e			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	e2e			then
 job	e2e			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	e2e			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-job	e2e			why="exit $rc"
 job	e2e			{
 job	e2e			} >> "$GITHUB_ENV"
 job	e2e		ui	npx playwright test --shard=1/2
@@ -511,9 +484,6 @@ job	eslint-preset			TOOLCHAIN=${TOOLCHAIN:-stable
 job	eslint-preset			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	eslint-preset			VERSION=0.19.0
 job	eslint-preset			Windows-x86_64)          T=x86_64-pc-windows-msvc
-job	eslint-preset			args+=(--component "$c"
-job	eslint-preset			args+=(--target "$t"
-job	eslint-preset			args=(--profile minimal
 job	eslint-preset			bash "conformance/ci/kit.sh" build-jobs
 job	eslint-preset			bash "conformance/ci/kit.sh" host node-caches "" "${{ github.job }}"
 job	eslint-preset			bash "conformance/ci/kit.sh" host sccache-stats
@@ -530,7 +500,6 @@ job	eslint-preset			dl=$(mktemp -d
 job	eslint-preset			do
 job	eslint-preset			echo "$DEST" >> "$GITHUB_PATH"
 job	eslint-preset			echo "$kv"
-job	eslint-preset			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
 job	eslint-preset			echo "::error::rustup is not installed on this runner"
 job	eslint-preset			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
 job	eslint-preset			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
@@ -561,7 +530,6 @@ job	eslint-preset			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_
 job	eslint-preset			for c in 
 job	eslint-preset			for kv in "${SETTINGS[@]}"
 job	eslint-preset			for name in "" stable
-job	eslint-preset			for t in 
 job	eslint-preset			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
 job	eslint-preset			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	eslint-preset			iso="conformance/ci/job-isolation.sh"
@@ -577,13 +545,10 @@ job	eslint-preset			npm ci
 job	eslint-preset			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	eslint-preset			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
 job	eslint-preset			printf '%s\n' "$installed"
-job	eslint-preset			rc=$?
-job	eslint-preset			rc=0
 job	eslint-preset			redis
 job	eslint-preset			rm -rf "$dl"
 job	eslint-preset			rustc --version
 job	eslint-preset			rustup default ""
-job	eslint-preset			rustup toolchain install "" "${args[@]}" --no-self-update
 job	eslint-preset			rustup toolchain list 2>/dev/null
 job	eslint-preset			sccache --show-stats >/dev/null 2>&1
 job	eslint-preset			sccache --start-server
@@ -591,11 +556,10 @@ job	eslint-preset			sccache --stop-server >/dev/null 2>&1
 job	eslint-preset			sccache --version
 job	eslint-preset			settle ""
 job	eslint-preset			settle "$name"
+job	eslint-preset			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	eslint-preset			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	eslint-preset			then
 job	eslint-preset			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	eslint-preset			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-job	eslint-preset			why="exit $rc"
 job	eslint-preset			{
 job	eslint-preset			} >> "$GITHUB_ENV"
 job	eslint-preset		eslint	npm test
@@ -640,9 +604,6 @@ job	icons			TOOLCHAIN=${TOOLCHAIN:-stable
 job	icons			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	icons			VERSION=0.19.0
 job	icons			Windows-x86_64)          T=x86_64-pc-windows-msvc
-job	icons			args+=(--component "$c"
-job	icons			args+=(--target "$t"
-job	icons			args=(--profile minimal
 job	icons			bash "conformance/ci/kit.sh" build-jobs
 job	icons			bash "conformance/ci/kit.sh" host node-caches "ui" "${{ github.job }}"
 job	icons			bash "conformance/ci/kit.sh" host sccache-stats
@@ -659,7 +620,6 @@ job	icons			dl=$(mktemp -d
 job	icons			do
 job	icons			echo "$DEST" >> "$GITHUB_PATH"
 job	icons			echo "$kv"
-job	icons			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
 job	icons			echo "::error::rustup is not installed on this runner"
 job	icons			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
 job	icons			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
@@ -690,7 +650,6 @@ job	icons			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	icons			for c in 
 job	icons			for kv in "${SETTINGS[@]}"
 job	icons			for name in "" stable
-job	icons			for t in 
 job	icons			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
 job	icons			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	icons			iso="conformance/ci/job-isolation.sh"
@@ -707,13 +666,10 @@ job	icons			npm ci
 job	icons			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	icons			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
 job	icons			printf '%s\n' "$installed"
-job	icons			rc=$?
-job	icons			rc=0
 job	icons			redis
 job	icons			rm -rf "$dl"
 job	icons			rustc --version
 job	icons			rustup default ""
-job	icons			rustup toolchain install "" "${args[@]}" --no-self-update
 job	icons			rustup toolchain list 2>/dev/null
 job	icons			sccache --show-stats >/dev/null 2>&1
 job	icons			sccache --start-server
@@ -721,11 +677,10 @@ job	icons			sccache --stop-server >/dev/null 2>&1
 job	icons			sccache --version
 job	icons			settle ""
 job	icons			settle "$name"
+job	icons			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	icons			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	icons			then
 job	icons			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	icons			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-job	icons			why="exit $rc"
 job	icons			{
 job	icons			} >> "$GITHUB_ENV"
 job	icons		icons	npm test
@@ -770,9 +725,6 @@ job	tools			TOOLCHAIN=${TOOLCHAIN:-stable
 job	tools			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	tools			VERSION=0.19.0
 job	tools			Windows-x86_64)          T=x86_64-pc-windows-msvc
-job	tools			args+=(--component "$c"
-job	tools			args+=(--target "$t"
-job	tools			args=(--profile minimal
 job	tools			bash "conformance/ci/kit.sh" build-jobs
 job	tools			bash "conformance/ci/kit.sh" host sccache-stats
 job	tools			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
@@ -791,7 +743,6 @@ job	tools			dpkg-deb -x "$RUNNER_TEMP/drawio.deb" "$RUNNER_TEMP/drawio"
 job	tools			echo "$DEST" >> "$GITHUB_PATH"
 job	tools			echo "$kv"
 job	tools			echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."
-job	tools			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
 job	tools			echo "::error::rustup is not installed on this runner"
 job	tools			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
 job	tools			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
@@ -825,7 +776,6 @@ job	tools			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	tools			for c in 
 job	tools			for kv in "${SETTINGS[@]}"
 job	tools			for name in "" stable
-job	tools			for t in 
 job	tools			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
 job	tools			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	tools			iso="conformance/ci/job-isolation.sh"
@@ -845,13 +795,10 @@ job	tools			node scripts/svg-drift.mjs
 job	tools			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	tools			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
 job	tools			printf '%s\n' "$installed"
-job	tools			rc=$?
-job	tools			rc=0
 job	tools			redis
 job	tools			rm -rf "$dl"
 job	tools			rustc --version
 job	tools			rustup default ""
-job	tools			rustup toolchain install "" "${args[@]}" --no-self-update
 job	tools			rustup toolchain list 2>/dev/null
 job	tools			sccache --show-stats >/dev/null 2>&1
 job	tools			sccache --start-server
@@ -859,13 +806,12 @@ job	tools			sccache --stop-server >/dev/null 2>&1
 job	tools			sccache --version
 job	tools			settle ""
 job	tools			settle "$name"
+job	tools			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1
 job	tools			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	tools			then
 job	tools			unzip -q "$dl/$NAME.$EXT" -d "$dl"
 job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1
-job	tools			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-job	tools			why="exit $rc"
 job	tools			{
 job	tools			} >> "$GITHUB_ENV"
 job	ui			"$PADDOCK_DEV" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
@@ -909,9 +855,6 @@ job	ui			TOOLCHAIN=${TOOLCHAIN:-stable
 job	ui			TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
 job	ui			VERSION=0.19.0
 job	ui			Windows-x86_64)          T=x86_64-pc-windows-msvc
-job	ui			args+=(--component "$c"
-job	ui			args+=(--target "$t"
-job	ui			args=(--profile minimal
 job	ui			bash "conformance/ci/kit.sh" build-jobs
 job	ui			bash "conformance/ci/kit.sh" host node-caches "ui" "${{ github.job }}"
 job	ui			bash "conformance/ci/kit.sh" host sccache-stats
@@ -928,7 +871,6 @@ job	ui			dl=$(mktemp -d
 job	ui			do
 job	ui			echo "$DEST" >> "$GITHUB_PATH"
 job	ui			echo "$kv"
-job	ui			echo "::error::rustup could not install the  toolchain ($why). Run 'rustup toolchain install ' on the runner to see why."
 job	ui			echo "::error::rustup is not installed on this runner"
 job	ui			echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"
 job	ui			echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"
@@ -959,7 +901,6 @@ job	ui			export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
 job	ui			for c in 
 job	ui			for kv in "${SETTINGS[@]}"
 job	ui			for name in "" stable
-job	ui			for t in 
 job	ui			have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
 job	ui			installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	ui			iso="conformance/ci/job-isolation.sh"
@@ -975,13 +916,10 @@ job	ui			npm ci
 job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	ui			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
 job	ui			printf '%s\n' "$installed"
-job	ui			rc=$?
-job	ui			rc=0
 job	ui			redis
 job	ui			rm -rf "$dl"
 job	ui			rustc --version
 job	ui			rustup default ""
-job	ui			rustup toolchain install "" "${args[@]}" --no-self-update
 job	ui			rustup toolchain list 2>/dev/null
 job	ui			sccache --show-stats >/dev/null 2>&1
 job	ui			sccache --start-server
@@ -989,11 +927,10 @@ job	ui			sccache --stop-server >/dev/null 2>&1
 job	ui			sccache --version
 job	ui			settle ""
 job	ui			settle "$name"
+job	ui			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
 job	ui			tar -xzf "$dl/$NAME.$EXT" -C "$dl"
 job	ui			then
 job	ui			unzip -q "$dl/$NAME.$EXT" -d "$dl"
-job	ui			why="$why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
-job	ui			why="exit $rc"
 job	ui			{
 job	ui			} >> "$GITHUB_ENV"
 job	ui		ui	node ../scripts/publish.mjs --skip-build

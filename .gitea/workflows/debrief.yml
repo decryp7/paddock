@@ -36,7 +36,7 @@ on:
         type: boolean
         default: false
       since_run:
-        description: "Rerun only what failed in this finished debrief.yml run (its number): the failed jobs, the failed e2e shards, inside rust tests only the failed nextest tests and inside the frontend job only the failed vitest files (./dev plan --ci --app debrief; ER-10). A full run's failures need bundles: true too. A full run before landing catches the rest."
+        description: "Rerun only what failed in this finished debrief.yml run (its API id, as ./dev ci dispatch and ./dev wait --ci-run print it; not its run number): the failed jobs, the failed e2e shards, inside rust tests only the failed nextest tests and inside the frontend job only the failed vitest files (./dev plan --ci --app debrief; ER-10). A full run's failures need bundles: true too. A full run before landing catches the rest."
         required: false
         default: ""
 
