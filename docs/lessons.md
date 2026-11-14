@@ -2071,3 +2071,21 @@ process), never the real dangerous one. A tool that ends processes never acts on
 (ADR 0103) acts only on its own children, what it saw below them, its groups, its token, and orphans naming a folder it made
 with a random name. **Class: acting on processes by a name or pattern
 (rule 53; the lefthook kill of 2026-11-14 above).**
+
+## The local Linux gate could not judge a worktree, and amd64 emulation hid failed execs (2026-11-14)
+Train 10's local Linux container run (the CI image, `--platform linux/amd64`, on the Apple Silicon Mac) failed in four ways that
+also failed on main, none of them in the code: a worktree's `.git` file named a git folder the container did not have (about 35
+paddock-dev tests: "not a git repository"); the read-only `/work` refused `dev check --pre-push`'s logs in
+`<git common dir>/paddock-pre-push` (os error 30); under qemu-user a failed exec is not reported to the parent, so every
+missing-program test failed (paddock-proc's six, heavy's exit-127 test, paddock-dev's slotflow, input_hash, slots and idle_run);
+the kept-clone parity test ran past its one-second phase limits under emulation (it passes natively); and the prune parity test
+differs on OrbStack's btrfs, where an empty folder has no blocks and a few bytes of length: GNU `du -sk --apparent-size` prints
+0 for 18 bytes, the Rust port (`ci_host::prune::size_in_units`) rounds up to 1, so only the Rust side removes the folder at a
+1 KB cap (CI's ext4 gives every folder a 4 KB block, which hides it; open, owned by paddock-dev). The emulation class had been seen twice before:
+f08362a29 (Spotter's notifier, 2026-10-30) and feat/heavy-priority-lane (2026-11-13). What changed: `tools/linux-container.sh`
+mounts a worktree's git folders read-only at their own paths with a tmpfs pre-push state folder, and `--ci-image` runs the CI
+image natively (linux/arm64 on the Mac, built locally from `ci-image/Dockerfile` on `ci-image/garage-arm64.Dockerfile`: garage's
+base tag and tool versions as recorded in `ci-image/garage-release.txt` and checked by verify.sh, paddock-ci's own pins on top;
+apt packages float, and there is no Chrome for Testing or draw.io) and warns whenever amd64 is emulated. CI's Linux jobs stay on their native amd64 runners. **Rule for agents:** run the local Linux
+gate with `--ci-image` and no `--platform`; a missing-program or timing failure seen only under emulation is not a finding.
+**Class: environment-only failures of the local Linux gate (amd64 emulation on Apple Silicon).**
