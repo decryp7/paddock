@@ -18,17 +18,15 @@ unit=1048576
 [ "${PADDOCK_PRUNE_UNIT:-gb}" = kb ] && unit=1
 # The larger of the allocated size and the length of the regular files (hard links once, the total rounded up to a kilobyte). A file
 # system that allocates late (ZFS, btrfs, a compressed volume) reports next to nothing in `du` for data written a moment ago, which kept a
-# full folder under the cap on a runner. The length is summed here, not by `du`: GNU `du --apparent-size` counts folders as 0 and
-# BSD `du -A` counts them and rounds each entry up, so the two disagreed on a folder of empty folders. `ci prune-folder`
-# (tools/paddock-dev/src/ci_host/prune.rs, `sizes`) counts the same way.
-file_bytes() {
-  { find "$dir" -type f -exec stat -c '%d:%i %s' {} + 2>/dev/null || find "$dir" -type f -exec stat -f '%d:%i %z' {} +; } |
-    sort -u | awk '{ s += $2 } END { printf "%.0f\n", s }'
-}
+# full folder under the cap on a runner. The length comes from the kit's one GNU/BSD helper (`kit.sh portable file-bytes`), not from
+# `du`: GNU `du --apparent-size` counts folders as 0 and BSD `du -A` counts them and rounds each entry up. What cannot be read counts
+# 0 on both sides, as in `ci prune-folder` (tools/paddock-dev/src/ci_host/prune.rs, `sizes`), which counts the same way.
+kit="$(cd "$(dirname "$0")/.." && pwd)/conformance/ci/kit.sh"
 size() {
   local used apparent
-  used=$(du -sk "$dir" | cut -f1)
-  apparent=$(file_bytes)
+  used=$(du -sk "$dir" 2>/dev/null | cut -f1 || true)
+  [[ "$used" =~ ^[0-9]+$ ]] || used=0
+  apparent=$(sh "$kit" portable file-bytes "$dir")
   [[ "$apparent" =~ ^[0-9]+$ ]] || apparent=0
   apparent=$(( (apparent + 1023) / 1024 ))
   echo $(( (apparent > used ? apparent : used) / unit ))

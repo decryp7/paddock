@@ -66,7 +66,8 @@ use() {
 }
 # The move is a rename only on one volume. Across volumes `mv` (and a clone) copies the whole checkout, which took 7 to
 # 293 s on a loaded Mac and hit the bound nine times (runs 7706 to 7761): build in place instead, and say how to fix it.
-volume_of() { stat -c %d "$1" 2>/dev/null || stat -f %d "$1"; }
+# The device number, from the kit's one GNU/BSD helper (a failed GNU `stat -c` must never fall through to BSD's form).
+volume_of() { sh "$here/../kit.sh" portable volume-of "$1"; }
 # A volume that cannot be read is unknown, never "the same": two empty answers must not let the move run.
 same_volume() {
   local a b

@@ -45,6 +45,37 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 
+# kit.sh portable <what> <path>: the one place the shell kit tells GNU tools from BSD ones. The flavour is probed once from the tool
+# itself (`stat -c` and `find -printf` exist only in GNU), never from the exit status of the real call: `stat -c ... || stat -f ...`
+# ran BSD's form on GNU whenever the first call failed (a vanished file, an unreadable folder), and GNU `stat -f` prints the file
+# system's lines, which a sum read as a size of about 1.2e10 (review of fix/c125-and-arm64-tests, P1-1; the old
+# `du -A || du --apparent-size` was the same shape). Answered before anything else here runs: no toolchain, no kit choice.
+#   portable volume-of <path>    the device number of the volume that holds <path> (fails, printing nothing, when it cannot be read)
+#   portable file-bytes <dir>    the length in bytes of the regular files below <dir>, hard links once; what cannot be read counts 0
+if [ "${1:-}" = portable ]; then
+  gnu_stat() { stat -c %s / >/dev/null 2>&1; }
+  case "${2:-}" in
+    volume-of)
+      if gnu_stat; then exec stat -c %d "${3:?volume-of needs a path}" 2>/dev/null; fi
+      exec stat -f %d "${3:?volume-of needs a path}" 2>/dev/null
+      ;;
+    file-bytes)
+      d="${3:?file-bytes needs a folder}"
+      {
+        if find / -maxdepth 0 -printf '' >/dev/null 2>&1; then find "$d" -type f -printf '%D:%i %s\n'
+        elif gnu_stat; then find "$d" -type f -exec stat -c '%d:%i %s' {} +
+        else find "$d" -type f -exec stat -f '%d:%i %z' {} +
+        fi
+      } 2>/dev/null | grep -E '^[0-9]+:[0-9]+ [0-9]+$' | sort -u | awk '{ s += $2 } END { printf "%.0f\n", s }'
+      exit 0
+      ;;
+    *)
+      echo "usage: kit.sh portable volume-of <path> | file-bytes <dir>" >&2
+      exit 2
+      ;;
+  esac
+fi
+
 # kit_choice: prints "<dev|shell> <reason>".
 kit_choice() {
   if [ "${PADDOCK_CI_KIT:-}" = shell ]; then echo "shell PADDOCK_CI_KIT=shell"; return; fi
@@ -232,7 +263,7 @@ case "${1:-}" in
     exec node "$here/build-env.mjs"
     ;;
   *)
-    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | build-env | host <step> <args>" >&2
+    echo "usage: kit.sh which | isolation <args> | build-jobs [<split>] | build-env | host <step> <args> | portable <what> <path>" >&2
     exit 2
     ;;
 esac
