@@ -1983,3 +1983,11 @@ for a step's pipe after the step ends and then ends every process of the step's 
 `acquire` clears the inherit flag of every handle it has before it starts the holder, and refuses to start one when it cannot
 (`tools/paddock-dev/src/fds.rs`). Lesson: a process meant to outlive its step must carry nothing of the step; on Windows that
 means the whole handle table, and a check of the standard handles alone passes while the real chain fails.
+
+## An agent killed another agent's process because it assumed the pid was its own (rule 53, 2026-11-14)
+The train-11 integrator killed `lefthook run pre-commit` (pid 34522), which belonged to another agent's worktree: it took the
+pid for its own hook run without checking the process's working folder or start time. Rule 53 (verify pid plus start time, and
+the owner, immediately before acting on a process) covers an agent's own process handling too, not only the product's code: a pid
+read earlier or found in `ps` is a hint. Before a kill, check the process's cwd (it must be inside your own worktree) and its
+start time against your own start of the command, or hold the child handle you spawned. **Class: acting on a reusable OS name
+without identity (rule 53).**

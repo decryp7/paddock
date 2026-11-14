@@ -25,16 +25,17 @@ export function jobText(text, id) {
 const VERDICT_ECHO = 'echo "plan verdict: complete=$complete"';
 
 /** The plan job's code lines (comments dropped). */
-const planCode = (text) =>
-  (jobText(text, 'plan') ?? '')
+const codeLines = (body) =>
+  body
     .split('\n')
     .filter((l) => !l.trim().startsWith('#'))
-    .map((l) => l.trim());
+    .map((l) => l.trim())
+    .filter(Boolean);
+const planCode = (text) => codeLines(jobText(text, 'plan') ?? '');
 
 /** Why a workflow's plan job does not print the verdict marker after its decision, or null when it does. */
-export function markerProblem(text) {
-  if (jobText(text, 'plan') == null) return 'it has no `plan` job';
-  const code = planCode(text);
+export function markerProblem(text, code = planCode(text)) {
+  if (code.length === 0) return 'it has no `plan` job';
   const at = code.indexOf(VERDICT_ECHO);
   if (at < 0) return `its plan job does not \`${VERDICT_ECHO}\` (plan_since::COMPLETE_LINE)`;
   const decided = code.findLastIndex((l) => /^(?:\.\/dev plan\b|run=\$\(|echo "run=|node scripts\/affected\.mjs|grep -q|if \[ "\$EVENT")/.test(l) || /^echo "(?:run|crate_legs|paddock_dev_legs)=/.test(l) || /\|\| echo "(?:crate_legs|paddock_dev_legs)=/.test(l));
@@ -44,8 +45,7 @@ export function markerProblem(text) {
 }
 
 /** The three lines that decide `complete` (from `complete=false` to the echo) of a plan job. */
-export function verdictSnippet(text) {
-  const code = planCode(text);
+export function verdictSnippet(text, code = planCode(text)) {
   const at = code.indexOf(VERDICT_ECHO);
   const from = code.lastIndexOf('complete=false', at);
   return from < 0 || at < 0 ? null : code.slice(from, at + 1).join('\n');
@@ -70,6 +70,11 @@ function gateWorkflows(root) {
   return [...out].sort();
 }
 
+const ACTION = 'actions/plan/action.yml';
+const actionText = () => readFileSync(join(PADDOCK, '.gitea', ACTION), 'utf8');
+/** Release workflows whose plan job is the shared plan action (it prints the verdict line; the workflow passes `full`). */
+const ACTION_WORKFLOWS = ['spotter-release.yml'];
+
 const text = (w) => readFileSync(join(PADDOCK, '.gitea', 'workflows', w), 'utf8');
 
 test('every gate workflow prints the verdict marker after its plan decided (the tag gate reads it through ./dev ci verdict)', () => {
@@ -79,6 +84,22 @@ test('every gate workflow prints the verdict marker after its plan decided (the 
     const p = markerProblem(text(w));
     assert.equal(p, null, `${w}: ${p}. Without the marker a dispatch run is never full, so the tag workflow refuses the app's tag as "not full".`);
   }
+});
+
+test('the shared plan action prints the verdict marker after deciding, and its release callers pass the scope', () => {
+  const code = codeLines(actionText());
+  assert.equal(markerProblem(null, code), null);
+  for (const w of ACTION_WORKFLOWS) {
+    const plan = jobText(text(w), 'plan') ?? '';
+    assert.match(plan, /uses: \.\/\.gitea\/actions\/plan/, `${w}: its plan job uses the plan action`);
+    assert.match(plan, /^\s+full: \S/m, `${w}: its plan job passes \`full:\` to the plan action (the scope of the run)`);
+    assert.doesNotMatch(plan, /plan verdict/, `${w}: no hand-written copy of the verdict line`);
+  }
+  const snippet = verdictSnippet(null, code);
+  const say = (env) => runSnippet(snippet, { run: 'true', PLAN_MODE_FULL: 'true', PLAN_SINCE_RUN: '', ...env });
+  assert.equal(say({}), 'plan verdict: complete=true');
+  assert.equal(say({ run: 'false' }), 'plan verdict: complete=false');
+  assert.equal(say({ PLAN_MODE_FULL: 'false' }), 'plan verdict: complete=false');
 });
 
 test('the verdict is complete=true only for a plan that ran, a full mode and no since_run (the snippets, run in bash)', () => {

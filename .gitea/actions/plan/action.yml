@@ -25,6 +25,12 @@ inputs:
   release:
     description: "'true' in a release workflow (a rule 54 dispatch counts as a release): ./dev never downloads its tool, whatever the ref (ADR 0022 section 3.3)."
     default: "false"
+  full:
+    description: "'true' when this run tests everything its plan can reach (a tag, a gates dispatch), the scope of the `plan verdict: complete=` line `./dev ci verdict` reads (plan_since::COMPLETE_LINE). Default 'false': never full."
+    default: "false"
+  since-run:
+    description: "The run id a rerun of failures reads (a workflow's since_run input); non-empty makes the verdict line say complete=false. Empty: not a rerun."
+    default: ""
 outputs:
   run:
     description: "'true' or 'false'; later jobs use if: needs.plan.outputs.run == 'true'."
@@ -54,6 +60,8 @@ runs:
         GREEN: ${{ steps.green.outputs.cache-hit }}
         APP: ${{ inputs.app }}
         SCHEDULE_WORKFLOW: ${{ inputs.schedule-workflow }}
+        PLAN_MODE_FULL: ${{ inputs.full }}
+        PLAN_SINCE_RUN: ${{ inputs.since-run }}
         TAG_PATTERN: ${{ inputs.tag-pattern }}
         PLAN_TOKEN: ${{ inputs.token }}
         PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
@@ -83,3 +91,8 @@ runs:
         fi
         echo "run=$run" >> "$GITHUB_OUTPUT"
         echo "train-skip=$train_skip" >> "$GITHUB_OUTPUT"
+        # The line `./dev ci verdict` trusts (plan_since::COMPLETE_LINE), printed after every decision above: the plan ran its jobs,
+        # this is not a rerun of failures and the caller says the mode is full.
+        complete=false
+        if [ "$run" = true ] && [ -z "$PLAN_SINCE_RUN" ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
+        echo "plan verdict: complete=$complete"
