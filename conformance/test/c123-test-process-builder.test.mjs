@@ -45,3 +45,32 @@ test('C123: any CARGO_BIN_EXE binary, also through a name bound to it, and the m
   assert.deepEqual(lines('fn t() {\n    let p = std::env::var("PATH").unwrap();\n    TestCommand::new("x").env("PATH", p);\n}\n'), [2]);
   assert.deepEqual(lines('fn t() {\n    let p = std::env::var("PATH").unwrap();\n    check(p);\n}\n'), []);
 });
+
+// Review of a8fca0ebd (P2 3): the gaps, each a probe that failed before the fix.
+test('C123: a function that returns a built binary binds its name, as a const does', () => {
+  assert.deepEqual(lines('fn child_program() -> PathBuf {\n    PathBuf::from(env!("CARGO_BIN_EXE_x"))\n}\nfn t() {\n    Command::new(child_program());\n}\n'), [5]);
+});
+
+test('C123: rustc, rustup, npm, npx, .exe spellings and a path joined to dev are judged', () => {
+  const t = 'fn t() {\n    Command::new("rustc");\n    Command::new("rustup");\n    Command::new("npm");\n    Command::new("npx");\n    Command::new("cargo.exe");\n    Command::new(env!("RUSTC"));\n    Command::new(std::env::var("RUSTC").unwrap());\n    Command::new(root.join("dev"));\n}\n';
+  assert.deepEqual(lines(t), [2, 3, 4, 5, 6, 7, 8, 9]);
+});
+
+test('C123: TestCommand named only in a comment does not count for the function', () => {
+  assert.deepEqual(lines('fn t() {\n    // TestCommand is not used here\n    let bin = env!("CARGO_BIN_EXE_paddock-dev"); // nor TestCommand\n    run(bin);\n}\n'), [3]);
+});
+
+test('C123: any cfg naming test opens the test part, cfg(not(test)) does not', async () => {
+  const src = 'fn run() {\n    Command::new("cargo");\n}\n#[cfg(all(test, unix))]\nmod tests {\n    fn t() {\n        Command::new("cargo");\n    }\n}\n';
+  assert.deepEqual(lines(src, 'crates/a/src/lib.rs'), [7]);
+  assert.deepEqual(lines('#[cfg(not(test))]\nfn run() {\n    Command::new("cargo");\n}\n', 'crates/a/src/lib.rs'), []);
+  const f = await findingsOf('C123', makeApp({ 'a/src/lib.rs': src, 'a/tests/x.rs': 'fn t() {}\n' }), { app: 'paddock' });
+  assert.deepEqual(f.map((x) => `${x.file}:${x.line}`), ['a/src/lib.rs:7']);
+});
+
+test('C123: a pub function of a shared module binds its name in the other test files of its crate only', async () => {
+  const common = 'pub fn child_program() -> PathBuf {\n    PathBuf::from(env!("CARGO_BIN_EXE_x"))\n}\n';
+  const user = 'fn t() {\n    paddock_proc::command(child_program());\n}\n';
+  const f = await findingsOf('C123', makeApp({ 'a/tests/it/common/mod.rs': common, 'a/tests/it/edges.rs': user, 'b/tests/it/other.rs': user }), { app: 'paddock' });
+  assert.deepEqual(f.map((x) => `${x.file}:${x.line}`), ['a/tests/it/edges.rs:2']);
+});

@@ -5,7 +5,6 @@ use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::process::Command;
 
 /// Files outside the dependency folders that cargo reads for this build.
 const EXTRAS: [&str; 3] = ["tools/paddock-dev", "crates/Cargo.toml", ".cargo/config.toml"];
@@ -15,7 +14,7 @@ const HEAVY_EXTRAS: [&str; 3] = ["tools/heavy", "crates/Cargo.toml", ".cargo/con
 /// The triple this machine builds for. Metadata is read for it alone: the path dependencies are the same on every platform, and
 /// resolving the others would need registry crates (Windows, Android) that an offline machine never downloaded.
 fn host_triple() -> String {
-    let out = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+    let out = TestCommand::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
         .arg("-vV")
         .output()
         .unwrap();

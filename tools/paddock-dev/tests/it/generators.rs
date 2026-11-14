@@ -281,7 +281,7 @@ fn every_cargo_test_target_and_package_the_registry_names_exists() {
 fn a_tool_lockfile_entry_marks_the_manifest_of_every_shared_crate_the_tool_depends_on() {
     let root = repo_root();
     let reg = Registry::parse(&fs::read_to_string(root.join("docs/generators.toml")).unwrap()).unwrap();
-    let rustc = Command::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
+    let rustc = TestCommand::new(std::env::var("RUSTC").unwrap_or_else(|_| "rustc".into()))
         .arg("-vV")
         .output()
         .unwrap();

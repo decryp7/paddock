@@ -75,13 +75,32 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
         ),
         ("crates/a/src/plain.rs", "fn run() {\n    Command::new(\"cargo\");\n}\n"),
         (
+            "crates/b/tests/it/common/mod.rs",
+            "pub fn child_program() -> PathBuf {\n    PathBuf::from(env!(\"CARGO_BIN_EXE_x\"))\n}\n",
+        ),
+        (
+            "crates/b/tests/it/gaps.rs",
+            "fn t() {\n    paddock_proc::command(child_program());\n    Command::new(\"rustc\");\n    Command::new(\"npx.cmd\");\n    Command::new(env!(\"RUSTC\"));\n    Command::new(root.join(\"dev\"));\n    // TestCommand only in a comment\n    let bin = env!(\"CARGO_BIN_EXE_paddock-dev\");\n    run(bin);\n}\n",
+        ),
+        (
+            "crates/b/src/lib.rs",
+            "#[cfg(not(test))]\nfn run() {\n    Command::new(\"cargo\");\n}\n#[cfg(all(test, unix))]\nmod tests {\n    fn t() {\n        Command::new(\"node\");\n    }\n}\n",
+        ),
+        (
+            "crates/c/tests/it/other.rs",
+            "fn t() {\n    paddock_proc::command(child_program());\n}\n",
+        ),
+        (
             "crates/a/tests/it/waived.rs",
             "fn t() {\n    // conformance: test-env \u{2014} a probe of the shell\n    Command::new(\"cargo\");\n}\nfn u() {\n    // conformance: test-env\n    Command::new(\"cargo\");\n}\n",
         ),
     ]);
     let (a, b) = (js(d.path()), rust(d.path()));
     assert_eq!(a, b);
-    assert_eq!(a["warnings"], 9, "bad.rs 4, bound.rs 3, lib.rs 1, the bare waiver 1: {a}");
+    assert_eq!(
+        a["warnings"], 16,
+        "bad.rs 4, bound.rs 3, lib.rs 1, the bare waiver 1, gaps.rs 6, b's lib.rs 1 (c's other.rs 0: another crate): {a}"
+    );
 }
 
 #[test]
