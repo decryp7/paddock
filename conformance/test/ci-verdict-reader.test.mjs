@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { test } from 'node:test';
 import { PADDOCK } from './helpers.mjs';
+import { conjuncts, expr, job as workflowJob, loadWorkflow, stepsUsing } from './lib/workflow.mjs';
 
 // ---- the marker ---------------------------------------------------------------------------------------------------------------
 // `./dev ci verdict` trusts the line `plan verdict: complete=true` (plan_since::COMPLETE_LINE), which the plan job prints AFTER its
@@ -101,10 +102,12 @@ test('the shared plan action prints the verdict marker after deciding, and its r
     assert.match(plan, /^\s+full: \S/m, `${w}: its plan job passes \`full:\` to the plan action (the scope of the run)`);
     assert.doesNotMatch(plan, /plan verdict/, `${w}: no hand-written copy of the verdict line`);
     // The scope is exactly the condition under which the workflow's gates job runs (its `if:` less the plan's `run` term).
-    const full = /^\s+full: \$\{\{ (.+) \}\}\s*$/m.exec(plan)?.[1];
-    const gatesIf = /^ {4}if: \$\{\{ needs\.plan\.outputs\.run == 'true' && \((.+)\) \}\}\s*$/m.exec(jobText(text(w), 'gates') ?? '')?.[1];
-    assert.ok(full && gatesIf, `${w}: could not read the full: expression or the gates job's if: (${full} / ${gatesIf})`);
-    assert.equal(full, gatesIf, `${w}: full: must equal the gates job's condition`);
+    const wf = loadWorkflow(w);
+    const full = expr(stepsUsing(workflowJob(wf, 'plan'), './.gitea/actions/plan')[0]?.with?.full);
+    const [runTerm, scope, ...rest] = conjuncts(workflowJob(wf, 'gates').if);
+    assert.equal(runTerm, "needs.plan.outputs.run == 'true'", `${w}: the gates job runs only when the plan says so`);
+    assert.ok(full && scope && rest.length === 0, `${w}: could not read the full: expression or the gates job's if: (${full} / ${scope})`);
+    assert.equal(full, scope.replace(/^\((.*)\)$/, '$1'), `${w}: full: must equal the gates job's condition`);
   }
   const snippet = verdictSnippet(null, code);
   const say = (env) => runSnippet(snippet, { run: 'true', PLAN_MODE_FULL: 'true', ...env });
