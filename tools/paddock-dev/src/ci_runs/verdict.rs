@@ -18,6 +18,9 @@
 
 use super::client::{Client, RunInfo};
 use crate::plan_since::{COMPLETE_LINE, read_complete, workflow_file};
+use paddock_cli::outcome::{
+    CheckId, Evidence, Finding, LiveRepo, Outcome, Reason, RunId, Sha, Subject, ToolVersion, TreeId, UnixSeconds, measure,
+};
 use paddock_cli::{Exit, Report};
 
 /// What the check found.
@@ -255,15 +258,58 @@ fn last_full(client: &mut Client, workflow: &str, not_sha: &str) -> Option<Strin
         .map(|r| r.head_sha.clone())
 }
 
-/// The report of a verdict: data, one line, and the exit code.
-pub fn report(v: &Verdict, workflow: &str, sha: &str) -> Report {
+/// The verdict as the shared outcome (ADR 0089 amendment, WP-T4): a green full run is [`Outcome::KnownCommit`] with the run as its
+/// evidence, made only by `Evidence::adopt` after `live` has re-read the commit (the one caller of `Evidence::ci_run`, held by C124);
+/// red is failing findings; anything else is not measured. The exit comes from this outcome, never from the enum.
+pub fn outcome(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Outcome {
+    let tool = || ToolVersion::new(concat!("paddock-dev ci verdict ", env!("CARGO_PKG_VERSION")));
+    let check = || CheckId::new(format!("ci-verdict:{workflow}"));
+    match v {
+        Verdict::Green { run } => {
+            let evidence = Evidence::ci_run(check(), workflow, RunId(*run), Sha::new(sha), tool(), UnixSeconds::now());
+            Evidence::adopt(evidence, live)
+        }
+        Verdict::Red { run, reason } => {
+            let subject = match run {
+                Some(run) => Subject::CiRun {
+                    workflow: workflow.to_string(),
+                    run: RunId(*run),
+                    sha: Sha::new(sha),
+                },
+                None => Subject::Commit {
+                    sha: Sha::new(sha),
+                    tree: live.tree_of(&Sha::new(sha)).unwrap_or_else(|| TreeId::new("unknown")),
+                },
+            };
+            measure(check(), subject, tool(), UnixSeconds::now(), || {
+                Ok(vec![Finding::failing(reason.clone())])
+            })
+        }
+        Verdict::NotMeasured(why) => Outcome::NotMeasured(Reason::new(why.clone())),
+    }
+}
+
+/// The report of a verdict: data, one line, and the exit code, all read from its shared [`outcome`].
+pub fn report(v: &Verdict, workflow: &str, sha: &str, live: &dyn LiveRepo) -> Report {
     let head = format!("{workflow} on {}", short(sha));
-    let (kind, run, text, exit) = match v {
-        Verdict::Green { run } => ("green", Some(*run), format!("{head}: full green (run {run})"), Exit::Ok),
-        Verdict::Red { run, reason } => ("red", *run, format!("{head}: red or partial. {reason}"), Exit::Findings),
-        Verdict::NotMeasured(why) => ("not_measured", None, format!("{head}: not measured. {why}"), Exit::NotMeasured),
+    let o = outcome(v, workflow, sha, live);
+    let (kind, run, text, exit) = match (&o, v) {
+        (Outcome::KnownCommit(_), Verdict::Green { run }) => ("green", Some(*run), format!("{head}: full green (run {run})"), Exit::Ok),
+        (Outcome::Clean(_) | Outcome::KnownCommit(_), _) => (
+            "not_measured",
+            None,
+            format!("{head}: not measured. a pass without a matching run"),
+            Exit::NotMeasured,
+        ),
+        (Outcome::Findings(_), Verdict::Red { run, reason }) => ("red", *run, format!("{head}: red or partial. {reason}"), Exit::Findings),
+        (other, _) => (
+            "not_measured",
+            None,
+            format!("{head}: not measured. {}", other.detail()),
+            Exit::NotMeasured,
+        ),
     };
-    let data = serde_json::json!({"verdict": kind, "workflow": workflow, "sha": sha, "run": run, "detail": text});
+    let data = serde_json::json!({"verdict": kind, "workflow": workflow, "sha": sha, "run": run, "detail": text, "outcome": o.json()});
     Report::new(data, text).with_exit(exit)
 }
 
@@ -331,7 +377,7 @@ mod tests {
     }
 
     fn code(v: &Verdict) -> i32 {
-        report(v, "ci.yml", SHA).exit.code()
+        report(v, "ci.yml", SHA, &Knows(true)).exit.code()
     }
 
     #[test]
@@ -578,13 +624,22 @@ mod tests {
         assert!(matches!(&v, Verdict::NotMeasured(w) if w.contains("more than 200")), "{v:?}");
     }
 
+    /// A repository that knows the commit, standing in for the live one.
+    struct Knows(bool);
+    impl LiveRepo for Knows {
+        fn tree_of(&self, _: &Sha) -> Option<TreeId> {
+            self.0.then(|| TreeId::new("t1"))
+        }
+    }
+
     #[test]
     fn the_report_names_the_run_the_workflow_and_the_next_step() {
-        let r = report(&Verdict::Green { run: 5 }, "ci.yml", SHA);
+        let r = report(&Verdict::Green { run: 5 }, "ci.yml", SHA, &Knows(true));
         assert_eq!(r.data["verdict"], "green");
         assert_eq!(r.data["run"], 5);
+        assert_eq!(r.data["outcome"]["status"], "known-commit");
         assert!(r.text.contains("ci.yml") && r.text.contains(&SHA[..10]), "{}", r.text);
-        let r = report(&Verdict::NotMeasured("no run".into()), "ci.yml", SHA);
+        let r = report(&Verdict::NotMeasured("no run".into()), "ci.yml", SHA, &Knows(true));
         assert_eq!(r.data["verdict"], "not_measured");
         assert_eq!(r.exit, Exit::NotMeasured);
         let r = report(
@@ -594,8 +649,42 @@ mod tests {
             },
             "ci.yml",
             SHA,
+            &Knows(true),
         );
         assert_eq!(r.data["verdict"], "red");
         assert_eq!(r.exit, Exit::Findings);
+    }
+
+    /// "Delete the check": a green answer for a commit the repository does not have is not measured, never a pass.
+    #[test]
+    fn a_green_run_for_a_commit_the_repository_lacks_is_not_measured() {
+        let r = report(&Verdict::Green { run: 5 }, "ci.yml", SHA, &Knows(false));
+        assert_eq!(r.exit, Exit::NotMeasured);
+        assert_eq!(r.data["verdict"], "not_measured");
+    }
+
+    /// "Skip the gate": a consumer given this command's exit code alone, or JSON without evidence, or evidence for another commit,
+    /// reads not measured.
+    #[test]
+    fn a_consumer_never_reads_the_exit_code_alone_as_a_pass() {
+        let asked = Subject::Commit {
+            sha: Sha::new(SHA),
+            tree: TreeId::new("t1"),
+        };
+        for wire in [
+            serde_json::json!({}),
+            serde_json::json!({"status": "known-commit"}),
+            serde_json::json!({"status": "clean"}),
+        ] {
+            assert!(matches!(Outcome::from_wire(&wire, &asked, true), Outcome::NotMeasured(_)), "{wire}");
+        }
+        let green = report(&Verdict::Green { run: 5 }, "ci.yml", SHA, &Knows(true)).data["outcome"].clone();
+        let other = Subject::Commit {
+            sha: Sha::new("ffff"),
+            tree: TreeId::new("t1"),
+        };
+        assert!(matches!(Outcome::from_wire(&green, &other, true), Outcome::NotMeasured(_)));
+        assert!(matches!(Outcome::from_wire(&green, &asked, false), Outcome::NotMeasured(_)));
+        assert!(matches!(Outcome::from_wire(&green, &asked, true), Outcome::KnownCommit(_)));
     }
 }

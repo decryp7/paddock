@@ -1,6 +1,6 @@
 // C121: a test or a registry entry reads another part of the repository's declared data through its accessor, never by grepping or
 // slicing the file's text (rule 79, ADR 0098 WP-2; the instance that started it: bddd2947c, a registry entry that ran `sed` over
-// ci.yml for a line that train 7 had moved, while `ci_line::conformance_args` already read it).
+// ci.yml for a line that train 7 had moved, while `ci_run::contract::conformance_args` already read it).
 // Flagged, one line at a time:
 // - in a registry (`docs/*.toml`): a line that names a workflow (`.gitea/workflows/`) and runs a text tool (grep, egrep, fgrep, sed,
 //   awk, rg, perl);

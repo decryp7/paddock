@@ -404,6 +404,7 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
         return Err(CliError::usage(format!("--sha {:?} is not a full 40-hex commit id.", a.sha))
             .with_hint("Pass the whole sha (`git rev-parse HEAD`)."));
     }
+    let root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let v = match token() {
         Err(_) => verdict::Verdict::NotMeasured("GITEA_TOKEN is not set, so the runs cannot be read".into()),
         Ok(token) => {
@@ -412,7 +413,7 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
             verdict::verdict(&mut client, &a.workflow, &a.sha)
         }
     };
-    let r = verdict::report(&v, &a.workflow, &a.sha);
+    let r = verdict::report(&v, &a.workflow, &a.sha, &crate::pre_push::outcome::GitRepo(&root));
     if r.exit != Exit::Ok {
         eprintln!("::error::ci verdict: {}", r.text);
     }

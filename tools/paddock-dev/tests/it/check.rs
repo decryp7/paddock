@@ -1268,3 +1268,113 @@ fn live_c121_findings_equal_the_js_port_on_a_fixture_tree_and_on_this_tree() {
         assert_eq!(got, want, "C121 on {app}");
     }
 }
+
+// ---- C124 (ADR 0089 amendment WP-T6): the Rust host's check against its JavaScript original ------------------------------------
+
+/// A tree with every shape C124 reads: a result enum, JSON result keys, a bool on a result, a call outside its owner, an allowed
+/// file, test code, comments and a hand-made JavaScript pass.
+fn c124_tree() -> tempfile::TempDir {
+    let d = tempfile::tempdir().unwrap();
+    let files: &[(&str, &str)] = &[
+        (
+            "conformance/c124-allow.json",
+            "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"reason\":\"the seed, shrink only\"}]}",
+        ),
+        (
+            "tools/paddock-dev/src/a.rs",
+            "pub enum V {\n    Green { run: u64 },\n    NotMeasured(String),\n}\n",
+        ),
+        (
+            "tools/paddock-dev/src/b.rs",
+            "let v = json!({\"status\": \"clean\"});\nlet w = json!({\"verdict\": k, \"id\": 1});\n",
+        ),
+        (
+            "tools/paddock-dev/src/c.rs",
+            "impl R {\n    pub fn fails(&self) -> bool { true }\n}\nlet e = Evidence::ci_run(a, b);\n",
+        ),
+        ("tools/paddock-dev/src/ci_runs/verdict.rs", "let e = Evidence::adopt(x, &repo);\n"),
+        ("tools/paddock-dev/src/ok.rs", "pub enum V {\n    NotMeasured,\n}\n"),
+        (
+            "tools/paddock-dev/src/d.rs",
+            "// json!({\"status\": \"clean\"})\nfn x() {}\n#[cfg(test)]\nmod tests {\n    fn t() { json!({\"status\": 1}); }\n}\n",
+        ),
+        ("tools/paddock-dev/tests/it/e.rs", "let v = json!({\"status\": \"clean\"});\n"),
+        ("crates/paddock-cli/src/outcome/mod.rs", "enum X {\n    NotMeasured,\n}\n"),
+        ("conformance/src/runner.mjs", "return { status: 'clean', findings: [] };\n"),
+        ("conformance/src/outcome.mjs", "const o = { status: 'clean' };\n"),
+        ("scripts/x.test.mjs", "const r = { status: 'clean' };\n"),
+    ];
+    for (p, t) in files {
+        let to = d.path().join(p);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::write(to, t).unwrap();
+    }
+    d
+}
+
+const JS_RUN_C124: &str = r#"
+import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+const { runChecks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/runner.mjs')).href);
+const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP, only: ['C124'], options: {} });
+process.stdout.write(JSON.stringify(r));
+"#;
+
+fn c124_options(root: &Path, app: &str) -> RunOptions {
+    RunOptions {
+        only: Some(vec!["C124".into()]),
+        config: paddock_dev::check::config::Config::bare(app),
+        ..options(root)
+    }
+}
+
+#[test]
+fn c124_flags_the_shapes_it_names_and_only_as_warnings() {
+    let tree = c124_tree();
+    let r = run_checks(&c124_options(tree.path(), "fixture"), &registry()).unwrap();
+    let got: Vec<(String, usize)> = r.findings.iter().map(|f| (f.file.clone(), f.line)).collect();
+    assert_eq!(
+        got,
+        [
+            ("conformance/src/runner.mjs".to_string(), 1),
+            ("tools/paddock-dev/src/a.rs".to_string(), 2),
+            ("tools/paddock-dev/src/a.rs".to_string(), 3),
+            ("tools/paddock-dev/src/b.rs".to_string(), 1),
+            ("tools/paddock-dev/src/b.rs".to_string(), 2),
+            ("tools/paddock-dev/src/c.rs".to_string(), 2),
+            ("tools/paddock-dev/src/c.rs".to_string(), 4),
+        ]
+    );
+    assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
+}
+
+/// "Delete the check": with its allow list gone the check cannot look, and that is an error no waiver covers, never a pass.
+#[test]
+fn c124_without_its_allow_list_cannot_look() {
+    let tree = c124_tree();
+    std::fs::remove_file(tree.path().join("conformance/c124-allow.json")).unwrap();
+    let r = run_checks(&c124_options(tree.path(), "fixture"), &registry()).unwrap();
+    assert!(
+        r.errors() > 0,
+        "a check that could not read its allow list is an error no waiver covers"
+    );
+}
+
+#[test]
+fn live_c124_findings_equal_the_js_original_on_a_fixture_tree_and_on_this_tree() {
+    if !has_node() {
+        return skip("node is not installed");
+    }
+    let tree = c124_tree();
+    for (root, app) in [(tree.path().to_path_buf(), "fixture"), (repo_root(), "paddock")] {
+        let js: Value = serde_json::from_str(&node(
+            JS_RUN_C124,
+            &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", app.into())],
+        ))
+        .unwrap();
+        let r = run_checks(&c124_options(&root, app), &registry()).unwrap();
+        let (got, want) = (shared_part(&r.json()), shared_part(&js));
+        assert_eq!(got["findings"], want["findings"], "C124 on {app}");
+        assert_eq!(got, want, "C124 on {app}");
+    }
+}

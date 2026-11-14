@@ -396,7 +396,7 @@ changes here, every app's copy is updated in the same change.
 ## Declared data (user, 2026-11-13; ADR 0098)
 79. **Tests read declared data through its accessor** (ER-42). A test, lint list or registry entry that needs data another part of the
     repository declares (a workflow's command line, a manifest's dependencies, a register's rows, where a file lives) reads it
-    through the one accessor that owns that data (`ci_line::conformance_args`, `cargo metadata`, the register's parser, a
+    through the one accessor that owns that data (`ci_run::contract::conformance_args`, `cargo metadata`, the register's parser, a
     constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
     crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
     remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
