@@ -16,6 +16,15 @@ test('C125 bad: the 2026-11-14 shapes, a stale disk default in a guard, a script
   assert.deepEqual(machinePaths('<string>/Volumes/disk 2/x</string>').map((m) => m.literal), ['/Volumes/disk']);
 });
 
+test('C125 bad: an escaped literal (a regular expression) is a machine path too, reported unescaped', () => {
+  // 2026-11-14: scripts/vm-win.test.mjs matched /only drives \/Volumes\/d8sst7\/vm-data\/.../ and C125 did not see it.
+  assert.deepEqual(machinePaths('assert.match(e, /only drives \\/Volumes\\/d8sst7\\/vm-data\\/x/);\n'), [
+    { line: 1, literal: '/Volumes/d8sst7/vm-data/x/' }, // the closing / of the regular expression joins it, as a trailing / always does
+  ]);
+  assert.deepEqual(machinePaths(String.raw`re = r"\/Volumes\/Data"`).map((m) => m.literal), ['/Volumes/Data']);
+  assert.deepEqual(machinePaths(String.raw`firmlink \/System\/Volumes\/Data and \/Volumes\/<disk>`), []);
+});
+
 test('C125 good: placeholders, other paths that contain Volumes, no Volumes at all', () => {
   assert.deepEqual(machinePaths('Worktree: <a folder under /Volumes/<disk>/dev-targets/wt/>\n'), []);
   assert.deepEqual(machinePaths('see /Volumes/... and /Volumes/$DISK and /Volumes/*\n'), []);

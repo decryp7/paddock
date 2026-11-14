@@ -4,7 +4,8 @@
 // and so switched the ER-2 check off (fix/guard-paths-derived, a5907d18c, 2026-11-14). Derive the path instead (git, `paddock.worktreeRoot`,
 // an environment variable, a setting) and fail closed when it cannot be derived.
 //
-// Flagged: every `/Volumes/<name>` literal (the name starts with a letter or digit, so `/Volumes/<disk>` and `/Volumes/...` are
+// Flagged: every `/Volumes/<name>` literal, also with its slashes escaped (`\/Volumes\/<name>`, a regular expression), reported
+// unescaped (the name starts with a letter or digit, so `/Volumes/<disk>` and `/Volumes/...` are
 // placeholders, not paths; a letter, digit, `_`, `.` or `~` right before it, as in `/System/Volumes/Data`, makes it part of
 // another path) in every text file of the tree. One finding per literal.
 // Not read:
@@ -34,21 +35,22 @@ export const IMPLEMENTATION = new Set([
 export const CHECKOUT = new Set(['.git', '.paddock-owner.toml']);
 /** Files that are never text: not read. */
 const BINARY = /\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst|7z|whl|wasm|dmg|pkg|msi|exe|dll|so|dylib|a|lib|rlib|o|obj|pdb|ttf|otf|woff2?|mp3|mp4|mov|wav|webm|parquet|duckdb|sqlite|db|evtx|dmp|bin|onnx|safetensors)$/i;
-const LITERAL = /\/Volumes\/[A-Za-z0-9][A-Za-z0-9_.+@-]*(?:\/[A-Za-z0-9_.+@-]*)*/g;
+// A `/` may be escaped (`\/`, a regular expression literal): the finding names the path unescaped.
+const LITERAL = /\\?\/Volumes\\?\/[A-Za-z0-9][A-Za-z0-9_.+@-]*(?:\\?\/[A-Za-z0-9_.+@-]*)*/g;
 const BEFORE = /[A-Za-z0-9_.~]/;
 const FIX = 'Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason.';
 
 /** [{ line, literal }] of every machine disk path in `text`. */
 export function machinePaths(text) {
   const out = [];
-  if (!text.includes('/Volumes/')) return out;
+  if (!text.includes('Volumes')) return out;
   let line = 1;
   let from = 0;
   for (const m of text.matchAll(LITERAL)) {
     if (m.index > 0 && BEFORE.test(text[m.index - 1])) continue;
     for (let i = from; i < m.index; i++) if (text.charCodeAt(i) === 10) line++;
     from = m.index;
-    out.push({ line, literal: m[0] });
+    out.push({ line, literal: m[0].replaceAll('\\/', '/') });
   }
   return out;
 }
