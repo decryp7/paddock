@@ -45,37 +45,35 @@ def kill_args(argv):
     return sig, ops, lists
 
 
-LISTERS = {"pgrep", "ps", "pidof", "lsof", "fuser", "jobs"}
-
-
 def kill_shaped(c, cmds):
-    """Whether a command whose program is named at run time takes what only a kill takes: every argument a pid, a job, a signal
-    or a value of a substitution, with at least one pid, job or substitution; or pids from a listing through xargs; or a
-    substitution that names kill. A program with any other argument (`build`, `server.mjs`, a file) is not a kill."""
+    """Whether a command whose program is named at run time is shaped like a kill: its first argument after any signal options
+    (`-9`, `-KILL`, `-s SIG`, `-n N`, `--`) is a pid, a job or a substitution's value, whatever follows; it takes its arguments
+    from xargs and has none of its own; or one of its substitutions names kill. A first argument such as `build`, `server.mjs`
+    or a file makes it not a kill."""
     if any(os.path.basename(x) in BY_NAME | {"kill"} for f in c.subs for x in f.argv):
         return True
-    if c.xargs:
-        k = c.idx - 1
-        while k >= 0 and cmds[k].term == "|":
-            if cmds[k].argv and os.path.basename(cmds[k].argv[0]) in LISTERS:
-                return True
-            k -= 1
-    args, operand, after_dashes, prev_sig = c.argv[1:], False, False, False
-    if not args:
+    args = c.argv[1:]
+    if c.xargs and not args:
+        return True
+    k = 0
+    while k < len(args):
+        x = args[k]
+        if x == "--":
+            k += 1
+            break
+        if x in ("-s", "-n", "--signal"):
+            k += 2
+        elif KILLISH.match(x) and x.startswith("-") and not PID.match(x[1:]):
+            k += 1
+        elif x.startswith("-") and PID.match(x[1:]) and k + 1 < len(args):
+            k += 1   # `-9 PID`: a numeric signal before an operand
+        else:
+            break
+    if k >= len(args):
         return False
-    for x in args:
-        tainted = x in c.tainted or "$(..)" in x or "`..`" in x
-        if prev_sig:
-            prev_sig = False
-        elif x == "--" and not after_dashes:
-            after_dashes = True
-        elif x in ("-s", "-n", "--signal") and not after_dashes:
-            prev_sig = True
-        elif tainted or PID.match(x.lstrip("-")) and (after_dashes or not x.startswith("-")) or x.startswith("%"):
-            operand = True
-        elif not (KILLISH.match(x) and not after_dashes):
-            return False
-    return operand
+    first = args[k]
+    tainted = first in c.tainted or "$(..)" in first or "`..`" in first
+    return tainted or first.startswith("%") or bool(PID.match(first.lstrip("-")))
 
 
 def own_worktree(d):

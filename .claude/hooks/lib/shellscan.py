@@ -373,12 +373,13 @@ _DEFAULT = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):?-([^}$`]*)\}")
 
 
 def expand(word, vars_, home=None):
-    """Resolves `$NAME`, `${NAME}` and `${NAME:-default}` (the default when NAME is unknown) from the variables the scan has
-    seen; `$HOME` is the home folder unless the command set it. Anything else stays as written."""
+    """Resolves `$NAME` and `${NAME}` from the variables the scan has seen, and `${NAME:-default}` from them, else from the
+    hook's own environment (the agent's shell has the same one), the default only when NAME is unset or empty there too; `$HOME`
+    is the home folder unless the command set it. Anything else stays as written."""
     if "$" not in word:
         return word
     known = vars_ if home is None or "HOME" in vars_ else dict(vars_, HOME=home)
-    word = _DEFAULT.sub(lambda m: known.get(m.group(1), m.group(2)), word)
+    word = _DEFAULT.sub(lambda m: known.get(m.group(1)) or os.environ.get(m.group(1)) or m.group(2), word)
     return _VAR.sub(lambda m: known.get(m.group(1) or m.group(2), m.group(0)), word)
 
 

@@ -162,4 +162,6 @@ expect "agent export LEFTHOOK_EXCLUDE then push on a later line" deny agent "$WT
 expect "agent LEFTHOOK=0 then export LEFTHOOK then commit" deny agent "$WT" "LEFTHOOK=0; export LEFTHOOK; git commit -m x"
 expect "agent export LEFTHOOK=1 then commit" allow agent "$WT" "export LEFTHOOK=1; git commit -m x"
 expect "coordinator export LEFTHOOK=0 then commit" allow coord "$WT" "export LEFTHOOK=0; git commit -m x"
+# The shared shell-forms corpus: every scanner bypass and false refusal found so far, judged by every guard.
+bash "$here/lib/shell-forms.sh" worktree-guard "$H" || fail=1
 exit $fail

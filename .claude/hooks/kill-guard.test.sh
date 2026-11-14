@@ -53,48 +53,13 @@ expect "kill 0 (the whole group)" deny agent "$own" 'kill 0'
 expect "kill -9 -1 (everything)" deny agent "$own" 'kill -9 -1'
 expect "mixed: one own, one other" deny agent "$own" "kill $mine $theirs"
 KILL_GUARD_ROOT_PID=$lone expect "own worktree, but not from this Claude session" deny agent "$own" "kill $mine"
-# --- bypass shapes the shared scanner sees through (lib/shellscan.py)
-expect "ANSI-C quoted kill (hex)" deny agent "$own" "\$'\\x6bill' -9 $theirs"
-expect "ANSI-C quoted kill (octal)" deny agent "$own" "\$'k\\151ll' $theirs"
-expect "ANSI-C quoted pkill" deny agent "$own" "\$'pkill' -f lefthook"
-expect "alias k=kill, then k PID" deny agent "$own" "alias k=kill; k $theirs"
-expect "alias kk='kill -9', then kk PID" deny agent "$own" "alias kk='kill -9'; kk $theirs"
-expect "script (BSD form) runs kill" deny agent "$own" "script -q /dev/null kill $theirs"
-expect "script -c runs kill" deny agent "$own" "script -q -c 'kill -9 $theirs' /dev/null"
-expect "fuser -k" deny agent "$own" 'fuser -k 8080/tcp'
-expect "fuser -km" deny agent "$own" 'fuser -km /Volumes/x'
-expect "killall5" deny agent "$own" 'killall5 -9'
-expect "program from a substitution with a pid" deny agent "$own" '$(echo kill) 34522'
-expect "program from backticks with a signal" deny agent "$own" '`which kill` -9 34522'
-expect "program from an unknown variable with a pid" deny agent "$own" '${K} 34522'
-expect "a run-time program fed pids by a substitution" deny agent "$own" '"$KILLER" $(pgrep -f lefthook)'
-expect "a run-time program fed pids by backticks" deny agent "$own" '$KILLER `pgrep x`'
-expect "pgrep through xargs into a run-time program" deny agent "$own" 'pgrep x | xargs "$KILLER"'
-expect "a program built by printf, fed by pgrep" deny agent "$own" "\"\$(printf 'k%sll' i)\" \$(pgrep x)"
-expect "a run-time program with a signal and a pid" deny agent "$own" '"$K" -9 34522'
-expect "a run-time program with -- and a group" deny agent "$own" '"$K" -- -34522'
-# run-time programs that are not kills
-expect "\$HOME cargo with a thread count" allow agent "$own" '"$HOME/.cargo/bin/cargo" test -- --test-threads 1'
-expect "\$CARGO with a job count" allow agent "$own" '"$CARGO" build -j 2'
-expect "\$NODE with a port" allow agent "$own" '"$NODE" server.mjs --port 8080'
-expect "\${PYTHON:-python3} with a count" allow agent "$own" '"${PYTHON:-python3}" bench.py 100'
-expect "\$EDITOR with a file and a line" allow agent "$own" '$EDITOR file 3'
-expect "find through xargs into a run-time program" allow agent "$own" 'find . -name "*.rs" | xargs "$EDITOR"'
-# regression rows: forms that already worked
-expect "env wrapper" deny agent "$own" "env FOO=1 kill $theirs"
-expect "timeout wrapper" deny agent "$own" "timeout 5 kill $theirs"
-expect "command builtin" deny agent "$own" "command kill $theirs"
-expect "eval" deny agent "$own" "eval kill $theirs"
+# --- bypass shapes and false refusals: lib/shell-forms.tsv (run at the end); here only what needs this test's processes
+expect "ANSI-C quoted kill of another agent's pid" deny agent "$own" "\$'\\x6bill' -9 $theirs"
+expect "alias of kill on another agent's pid" deny agent "$own" "alias k=kill; k $theirs"
 expect "heredoc fed to bash" deny agent "$own" "bash <<'X'
 kill $theirs
 X"
-# not kills
-expect "fuser without -k lists" allow agent "$own" 'fuser -v 8080/tcp'
-expect "a program from a variable without pid-like arguments" allow agent "$own" '"${PYTHON:-python3}" -I x.py'
-expect "a program from a substitution building" allow agent "$own" '$(command -v cargo) build --release'
-expect "ANSI-C text in an echo" allow agent "$own" "echo \$'kill 1\\n'"
-expect "an alias of something else" allow agent "$own" 'alias ll="ls -l"; ll /tmp'
-expect "script that records a build" allow agent "$own" 'script -q /dev/null cargo build'
+expect "ANSI-C quoted kill of an own process" allow agent "$own" "\$'\\x6bill' $mine"
 # --- the real proof path: the session's process from CLAUDE_PID, and from the nearest `claude`-named ancestor
 CLAUDE_PID=$$ KILL_GUARD_ROOT_PID='' expect "CLAUDE_PID: own descendant in the worktree" allow agent "$own" "kill $mine"
 CLAUDE_PID=$lone KILL_GUARD_ROOT_PID='' expect "CLAUDE_PID: another session's process" deny agent "$own" "kill $mine"
@@ -137,4 +102,6 @@ out=$(jq -nc --arg c 'pkill -f lefthook' '{tool_name:"Bash",agent_id:"a",tool_in
 case "$out" in *"rule 53"*"Next step"*TaskStop*) echo "ok: message names rule 53 and the next step" ;; *) echo "FAIL: message ($out)"; fail=1 ;; esac
 # A non-Bash tool and bad input are allowed (never fails closed).
 out=$(printf 'not json' | "$H" 2>/dev/null); case "$out" in *deny*) echo "FAIL: bad input denied"; fail=1 ;; *) echo "ok: bad input allowed" ;; esac
+# The shared shell-forms corpus: every scanner bypass and false refusal found so far, judged by every guard.
+bash "$here/lib/shell-forms.sh" kill-guard "$H" || fail=1
 exit $fail
