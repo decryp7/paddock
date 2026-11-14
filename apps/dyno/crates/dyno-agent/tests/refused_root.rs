@@ -9,6 +9,7 @@
 use dyno_agent::paths::Dirs;
 use dyno_agent::{Running, StartError};
 use dyno_platform::fake::Fake;
+use paddock_testkit::TestCommand;
 
 fn start(dirs: Dirs) -> Result<Running, StartError> {
     let fake = Fake::new();
@@ -19,12 +20,8 @@ fn start(dirs: Dirs) -> Result<Running, StartError> {
 /// hanging the suite. A watchdog thread ends the child through `paddock_proc` when the run is not over in time; the test then fails on the
 /// exit code.
 #[cfg(unix)]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "runs the dyno-agent binary under test itself, on a temporary data folder"
-)]
 fn run_bounded(root: &std::path::Path) -> std::process::Output {
-    let child = std::process::Command::new(env!("CARGO_BIN_EXE_dyno-agent"))
+    let child = TestCommand::new(env!("CARGO_BIN_EXE_dyno-agent"))
         .arg("run")
         .env("DYNO_DATA_DIR", root)
         .stdout(std::process::Stdio::piped())
@@ -152,7 +149,7 @@ fn windows_a_data_folder_everyone_can_write_stops_the_start_before_the_lock_and_
     assert!(text.contains("did not start") && text.contains("DYNO_DATA_DIR"), "{text}");
     let after: Vec<_> = std::fs::read_dir(&root).unwrap().flatten().map(|e| e.file_name()).collect();
     assert_eq!(before, after, "no lock file or database was created");
-    let run = std::process::Command::new(env!("CARGO_BIN_EXE_dyno-agent"))
+    let run = TestCommand::new(env!("CARGO_BIN_EXE_dyno-agent"))
         .arg("run")
         .env("DYNO_DATA_DIR", &root)
         .output()
@@ -164,10 +161,6 @@ fn windows_a_data_folder_everyone_can_write_stops_the_start_before_the_lock_and_
 /// login has no standard error and the refused folder is not written to. The test's account folders are temporary ones (ER-14), so the
 /// real profile is not touched; the line names the folder, the cause and the next step.
 #[test]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "runs the dyno-agent binary under test itself, on a temporary data folder and temporary account folders"
-)]
 fn a_refused_start_leaves_its_reason_in_the_os_logs_folder() {
     let tmp = paddock_testkit::private_tempdir().unwrap();
     let home = tmp.path().join("home");
@@ -175,7 +168,7 @@ fn a_refused_start_leaves_its_reason_in_the_os_logs_folder() {
     let root = tmp.path().join("data");
     std::fs::create_dir(&root).unwrap();
     open_to_everyone(&root);
-    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_dyno-agent"));
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_dyno-agent"));
     cmd.arg("run").env("DYNO_DATA_DIR", &root).env_remove("DYNO_HOME");
     for var in [
         "HOME",

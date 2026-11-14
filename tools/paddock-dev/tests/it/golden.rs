@@ -12,6 +12,7 @@
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{Request, plan_for, plan_on_graph, read_graph};
 use paddock_repo_graph::GitHistory;
+use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -72,7 +73,7 @@ const samples = JSON.parse(process.env.PADDOCK_GOLDEN_SAMPLES);
 const plans = samples.map((files) => planFor({ files, explain: true }).plan);
 process.stdout.write(JSON.stringify({ plans, cargoRuns: seen.size }));
 "#;
-    let out = Command::new("node")
+    let out = TestCommand::new("node")
         .args(["--input-type=module", "-e", DRIVER])
         .env("PADDOCK_GOLDEN_SCRIPT", repo_root().join("scripts/affected.mjs"))
         .env("PADDOCK_GOLDEN_SAMPLES", serde_json::to_string(samples).unwrap())
@@ -184,7 +185,7 @@ const SAMPLES: &[&[&str]] = &[
 
 #[test]
 fn live_plan_matches_affected_mjs_on_sample_change_sets() {
-    if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
+    if !repo_root().join("scripts/affected.mjs").exists() || TestCommand::new("node").arg("--version").output().is_err() {
         skip("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
@@ -375,7 +376,7 @@ fn the_recorded_cases_cover_what_the_review_asked_for() {
 // The command line: `dev plan` against what `affected.mjs` answered (recorded) and against the script itself (live)
 
 /// What a caller of the planner sees of one run, with commit ids masked (they differ per run). Mirrors `generate.mjs`.
-fn run_cli(program: &mut Command, root: &Path, case: &Value) -> Value {
+fn run_cli(program: &mut TestCommand, root: &Path, case: &Value) -> Value {
     let dir = tempfile::tempdir().unwrap();
     let head = String::from_utf8(
         Command::new("git")
@@ -462,7 +463,7 @@ fn recorded_command_line_cases_match_what_affected_mjs_answered_on_the_fixture_r
         let expected: Value =
             serde_json::from_str(&std::fs::read_to_string(golden_dir().join("expected/cli").join(format!("{name}.json"))).unwrap())
                 .unwrap();
-        let mut program = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut program = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         program.arg("plan");
         let got = run_cli(&mut program, &root, case);
         if got != expected {
@@ -474,7 +475,7 @@ fn recorded_command_line_cases_match_what_affected_mjs_answered_on_the_fixture_r
 
 #[test]
 fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() {
-    if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
+    if !repo_root().join("scripts/affected.mjs").exists() || TestCommand::new("node").arg("--version").output().is_err() {
         skip("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
@@ -492,9 +493,9 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
     }
     let mut failures = Vec::new();
     for case in &cli_cases() {
-        let mut node = Command::new("node");
+        let mut node = TestCommand::new("node");
         node.arg("scripts/affected.mjs");
-        let mut ours = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut ours = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         ours.arg("plan");
         let (a, b) = (run_cli(&mut node, &root, case), run_cli(&mut ours, &root, case));
         if a != b {
@@ -508,7 +509,8 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
 const HISTORY_RUN_LIMIT: Duration = Duration::from_secs(180);
 
 /// A child of the history comparison, bounded (the whole tree is ended at the limit): its standard output, or a failed test.
-fn bounded(cmd: Command, what: &str, base: &str, head: &str) -> Vec<u8> {
+fn bounded(cmd: TestCommand, what: &str, base: &str, head: &str) -> Vec<u8> {
+    let (cmd, _private) = cmd.into_parts();
     let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(HISTORY_RUN_LIMIT))
         .unwrap_or_else(|e| panic!("{what} {base}..{head} could not run: {e}"));
     match out.outcome {
@@ -527,7 +529,7 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
     if only_on_the_linux_leg("the first-parent history comparison") {
         return;
     }
-    if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
+    if !repo_root().join("scripts/affected.mjs").exists() || TestCommand::new("node").arg("--version").output().is_err() {
         skip("scripts/affected.mjs or node is not available");
         return;
     }
@@ -555,13 +557,13 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
             paddock_testkit::case(format!("{base}..{head}"), move || {
                 let (script, ours) = paddock_testkit::both(
                     || {
-                        let mut node = Command::new("node");
+                        let mut node = TestCommand::new("node");
                         node.current_dir(repo_root())
                             .args(["scripts/affected.mjs", &base, &head, "--explain"]);
                         bounded(node, "node scripts/affected.mjs", &base, &head)
                     },
                     || {
-                        let mut plan = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+                        let mut plan = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
                         plan.current_dir(repo_root()).args(["plan", &base, &head, "--explain"]);
                         bounded(plan, "paddock-dev plan", &base, &head)
                     },
@@ -591,7 +593,7 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
 // sample do not reach every job): uncommitted edits in a copy of this repository, the script as the oracle.
 
 fn node_available() -> bool {
-    repo_root().join("scripts/affected.mjs").exists() && Command::new("node").arg("--version").output().is_ok()
+    repo_root().join("scripts/affected.mjs").exists() && TestCommand::new("node").arg("--version").output().is_ok()
 }
 
 #[test]
@@ -600,7 +602,7 @@ fn live_ci_jobs_table_equals_the_one_affected_mjs_exports() {
         skip("scripts/affected.mjs or node is not available");
         return;
     }
-    let out = Command::new("node")
+    let out = TestCommand::new("node")
         .current_dir(repo_root())
         .args([
             "-e",
@@ -827,7 +829,7 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     // The jobs of ci.yml that CI_JOBS names, from the script's own table; one action, one reusable workflow, one script of
     // conformance/ci and a helper it imports.
     let jobs: Value = serde_json::from_slice(
-        &Command::new("node")
+        &TestCommand::new("node")
             .current_dir(repo_root())
             .args([
                 "-e",
@@ -901,7 +903,7 @@ fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::ato
     for (rel, job) in edits {
         touch(&copy, rel, job.as_deref());
         let started = Instant::now();
-        let script = Command::new("node")
+        let script = TestCommand::new("node")
             .current_dir(&copy)
             .args(["scripts/affected.mjs", "--files", rel, "--explain"])
             .output()
@@ -970,7 +972,7 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
         let original = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, format!("{original}{add}")).unwrap();
         let started = Instant::now();
-        let script = Command::new("node")
+        let script = TestCommand::new("node")
             .current_dir(&copy)
             .args(["scripts/affected.mjs", "--files", rel, "--explain"])
             .output()

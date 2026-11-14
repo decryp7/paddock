@@ -4,9 +4,9 @@
 //! script instead (for example the current one in engineering-rules). A test that did not run must not pass (ER-33), so
 //! there is no skip.
 use super::Fixture;
+use paddock_testkit::TestCommand;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::process::Command;
 
 /// The oracle script: `WORKTREE_SH`, else the pinned copy.
 fn script() -> PathBuf {
@@ -32,7 +32,7 @@ fn the_pinned_oracle_names_its_source_commit() {
 // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
 #[allow(clippy::disallowed_methods)]
 fn sh(fx: &Fixture, args: &[&str]) -> String {
-    let out = Command::new("bash")
+    let out = TestCommand::new("bash")
         .arg(script())
         .args(args)
         .env("WT_REPO", &fx.primary)

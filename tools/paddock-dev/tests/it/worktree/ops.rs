@@ -863,7 +863,7 @@ fn a_claim_stays_fast_while_a_slow_add_runs() {
                 "agent-S",
             ],
         )
-        .env("PATH", path_env)
+        .path_first(&path_env)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -1038,7 +1038,7 @@ fn drop_says_so_when_the_lock_could_not_be_put_back() {
     );
     let out = fx
         .cmd(&fx.primary, &["worktree", "drop", p(&path), "--agent", "agent-R"])
-        .env("PATH", path_env)
+        .path_first(&path_env)
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -1057,7 +1057,7 @@ fn two_adds_with_different_roots_cannot_nest_through_a_reservation() {
     let (path_env, reached) = fx.fake_slow_add("nest");
     let slow = fx
         .cmd(&fx.primary, &["worktree", "add", "a", "--base", "origin/main", "--owner", "a:b"])
-        .env("PATH", path_env)
+        .path_first(&path_env)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

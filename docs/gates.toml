@@ -214,6 +214,14 @@ review_by = 2027-01-07
 approved = "user"
 
 [[report_only]]
+id = "C123"
+reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C123-test-process-builder.mjs (and its Rust port, tools/paddock-dev/src/check/c123.rs) and the mode to gate. Every existing Rust test spawn of ./dev, cargo or node is migrated onto paddock_testkit::TestCommand in the same change (no baseline); JavaScript tests are not judged (ADR 0100 follow-up)"
+owner = "ADR 0100 (2026-11-13)"
+since = 2026-11-13
+review_by = 2026-12-13
+approved = "user"
+
+[[report_only]]
 id = "C125"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id in C125-machine-paths.mjs and c125.rs, then flip the warnings to errors and the mode to gate. First count 2026-11-14: 105 warnings in 40 files (92 in 34 after the review of 2026-11-15), every one a path on the d7sst7 or d8sst7 disk (stale disk names: guards, VM scripts, dev-tool defaults, briefs, dev docs); invented test volumes are listed per site in conformance/c125-allow.json, history documents are skipped by path there. Even while report-only, a file C125 cannot read is an unwaivable not-measured error at that file (ER-33), not a warning"
 owner = "ER-21 class: stale machine paths after a disk move (fix/guard-paths-derived)"

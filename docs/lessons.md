@@ -2047,6 +2047,18 @@ env overrides, and refuse with a `Blocked: ... Next step: ...` message when they
 (`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
 config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
 **Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
+## A test child that inherits the machine's environment reads the machine (tests, 2026-11-13)
+Twice in one day a new environment lookup in a tool reached real machine state through tests: the pre-push integration tests ran
+the real heavy steps (`PATH` found `heavy.sh`), and on `fix/precommit-heavy-slot` the helper `dev()` found the real
+engineering-rules `heavy.sh` through `ENGINEERING_RULES` and the checkout beside the repository, and took machine-wide slots in
+`~/.cache/heavy-slots` (ER-14). Patching each test (`2ff5f5072`) leaves every other spawn site open for the next lookup, because
+a deny-list never contains the variable that bites next. Fix (ADR 0100): `paddock_testkit::TestCommand` starts `./dev`, `cargo` and
+`node` from an empty environment plus an allow-list (`allowed_names()`), with a private `HOME` and temp folder and a curated
+`PATH`; check C123 (report-only) flags a test that starts one of them any other way. Two things the cleaner environment exposed
+at once, both real: `lsof` lives in `/usr/sbin`, which a curated `PATH` must name, and `ps -o lstart=` prints another date format
+in a clean locale, so a test that compares a stamp must start `ps` through the same builder as the program that reads it.
+Lesson: give a test child what the test names and nothing else; Cargo's own test support removes a list of variables and
+keeps the rest, which is the shape that failed here.
 
 the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
 

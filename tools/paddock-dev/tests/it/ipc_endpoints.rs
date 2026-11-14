@@ -6,6 +6,7 @@ use paddock_dev::ipc_endpoints::{
     FAULTS, PRIMITIVES, RATCHET, REGISTER, RatchetEntry, SCENARIOS, Site, blocked_by, check, check_with, parse_ratchet, scan, scan_with,
     tag_matches,
 };
+use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 
 fn fixtures() -> PathBuf {
@@ -393,7 +394,7 @@ app = "dyno"
         ratchet_text,
     );
     #[allow(clippy::disallowed_methods, reason = "runs the built binary under test as a plain child")]
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["check", "ipc-endpoints", "--root"])
         .arg(dir.path())
         .output()
@@ -411,7 +412,7 @@ fn a_release_run_warns_once_per_report_only_row_of_its_app() {
     let dir = repo(&[("src/server.rs", SERVER), ("tests/endings.rs", TEST_FILE)], GOOD_REGISTER, &two);
     let run_with = |tag: &str, json: bool| {
         #[allow(clippy::disallowed_methods, reason = "runs the built binary under test as a plain child")]
-        let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["check", "ipc-endpoints", "--root"])
             .arg(dir.path())
             .args(["--tag", tag])
@@ -476,7 +477,7 @@ blocks_tag = "dyno-v*"
     );
     #[allow(clippy::disallowed_methods, reason = "runs the built binary under test as a plain child")]
     let dev = |args: &[&str]| {
-        let out = std::process::Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args(["check", "ipc-endpoints", "--root"])
             .arg(dir.path())
             .args(args)

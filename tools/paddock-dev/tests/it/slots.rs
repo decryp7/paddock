@@ -2,6 +2,7 @@
 //! owner folder that disappears.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 use paddock_slots::{FsLocks, SlotId, SlotLocks};
+use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
@@ -10,7 +11,7 @@ use std::time::Duration;
 const POLL: &str = "20";
 
 fn dev(args: &[&str]) -> (i32, Value, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["--json"])
         .args(args)
         .output()
@@ -223,7 +224,7 @@ fn eight_parallel_acquires_get_eight_distinct_slots() {
 }
 
 fn idle_run(root: &Path, slot: &str, command: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+    TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["ci", "slot", "idle-run", "--slot", slot, "--root", root.to_str().unwrap(), "--"])
         .args(command)
         .output()
@@ -237,6 +238,7 @@ fn idle_run_runs_only_on_an_idle_slot_and_holds_it_until_the_command_ends() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
+    // conformance: test-env — the path is an argument that `idle_run` (a TestCommand) runs under `ci slot idle-run`
     let bin = env!("CARGO_BIN_EXE_paddock-dev");
     let r = root.to_str().unwrap();
     // Free: the command runs, and while it runs the slot is busy (it looks at the slot itself).
@@ -285,7 +287,10 @@ fn the_holder_does_not_keep_an_inherited_pipe_open() {
     );
     std::thread::spawn(move || {
         // `output()` returns only when every holder of the pipe's write end has closed it.
-        let out = Command::new("sh").args(["-c", script, bin, &job_arg, &root_arg]).output().unwrap();
+        let out = TestCommand::new("sh")
+            .args(["-c", script, bin, &job_arg, &root_arg])
+            .output()
+            .unwrap();
         let _ = tx.send(out.status.code());
     });
     let code = rx
@@ -314,7 +319,7 @@ fn the_step_output_pipe_closes_when_acquire_ends_even_though_the_holder_lives_on
     );
     std::thread::spawn(move || {
         // `output()` returns only when every holder of the stdout and stderr pipes has closed it.
-        let out = Command::new(bin)
+        let out = TestCommand::new(bin)
             .args([
                 "ci",
                 "slot",
@@ -411,7 +416,7 @@ fn a_program_inside_the_job_folder_cannot_hold_a_slot() {
     std::fs::create_dir_all(job.join("bin")).unwrap();
     let copy = job.join("bin").join(if cfg!(windows) { "paddock-dev.exe" } else { "paddock-dev" });
     std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &copy).unwrap();
-    let out = Command::new(&copy)
+    let out = TestCommand::new(&copy)
         .args([
             "--json",
             "ci",

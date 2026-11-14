@@ -4,20 +4,14 @@
 //! `unknown` case are compared too.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
-fn run(program: &mut Command, sha: Option<&str>, env_file: &Path) -> (i32, String, String) {
-    program.env_clear();
-    for k in ["PATH", "HOME", "SystemRoot", "TMPDIR", "TEMP"] {
-        if let Ok(v) = std::env::var(k) {
-            program.env(k, v);
-        }
-    }
+fn run(program: &mut TestCommand, sha: Option<&str>, env_file: &Path) -> (i32, String, String) {
     program.env("GITHUB_ENV", env_file).current_dir(repo());
     if let Some(s) = sha {
         program.env("GITHUB_SHA", s);
@@ -48,11 +42,11 @@ fn the_rust_command_and_the_script_append_and_print_the_same() {
         std::fs::write(&a, "A=1\n").unwrap();
         std::fs::write(&b, "A=1\n").unwrap();
         let rust = run(
-            paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev")).args(["ci", "build-env"]),
+            TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev")).args(["ci", "build-env"]),
             sha,
             &a,
         );
-        let node = run(paddock_proc::command("node").arg("conformance/ci/build-env.mjs"), sha, &b);
+        let node = run(TestCommand::new("node").arg("conformance/ci/build-env.mjs"), sha, &b);
         assert_eq!(rust, node, "GITHUB_SHA={sha:?}");
         assert!(rust.1.starts_with("A=1\nPADDOCK_BUILD_COMMIT="), "{}", rust.1);
     }
@@ -60,7 +54,7 @@ fn the_rust_command_and_the_script_append_and_print_the_same() {
 
 #[test]
 fn without_a_github_env_file_it_only_prints() {
-    let out = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["ci", "build-env"])
         .env_remove("GITHUB_ENV")
         .env("GITHUB_SHA", "0123456789abcdef")

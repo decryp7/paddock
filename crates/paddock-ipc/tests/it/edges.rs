@@ -3,7 +3,7 @@
 //! ignores a stream cancel, and an oversized frame that names no call.
 
 use crate::common;
-use common::{GUARD, T, child_program, pair, pair_with, raw};
+use common::{GUARD, T, child_command, pair, pair_with, raw};
 use paddock_ipc::frame::{FrameLimit, MIN_FRAME, ProtocolVersion};
 use paddock_ipc::link::{
     ClientConfig, Discovery, Launcher, LinkClient, LinkServer, LinkState, Replace, ServerConfig,
@@ -89,7 +89,7 @@ fn a_link_server_refuses_a_wrong_token_and_keeps_serving() {
 
 /// A companion of `build`, returned once it printed `ready`.
 fn companion(discovery: &Path, build: &str) -> paddock_proc::Supervised {
-    let mut cmd = paddock_proc::command(child_program());
+    let mut cmd = child_command(&discovery.with_extension("env"));
     cmd.arg("companion")
         .arg(discovery)
         .arg(build)
@@ -133,7 +133,7 @@ struct Spawner {
 
 impl Launcher for Spawner {
     fn launch(&self) -> Result<(), String> {
-        let mut cmd = paddock_proc::command(child_program());
+        let mut cmd = child_command(&self.discovery.with_extension("env"));
         cmd.arg("companion")
             .arg(&self.discovery)
             .arg(&self.build)
@@ -376,7 +376,7 @@ fn a_service_serves_its_link_on_a_fixed_endpoint() {
 /// Runs the test child's `mode` (an `out-of-files` mode) and returns what the host and the client saw.
 #[cfg(unix)]
 fn out_of_files(mode: &str) -> (String, String, String) {
-    let out = paddock_proc::command(child_program())
+    let out = paddock_testkit::TestCommand::new(common::child_program())
         .arg(mode)
         .output()
         .unwrap();
@@ -445,7 +445,7 @@ fn a_link_server_with_no_descriptor_left_to_accept_tells_the_waiting_client_why(
     use paddock_ipc::endpoint::Stream;
     use paddock_ipc::frame;
     let dir = tempfile::tempdir().unwrap();
-    let mut cmd = paddock_proc::command(child_program());
+    let mut cmd = child_command(&dir.path().join("env"));
     cmd.arg("link-out-of-files")
         .arg(dir.path().join("link.json"))
         .stdin(Stdio::piped())

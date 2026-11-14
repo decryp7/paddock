@@ -11,6 +11,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -236,7 +237,7 @@ fn base_env(fx: &Fx) -> Vec<(String, String)> {
 fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
     // Standard error joins standard output in the order written (`exec 2>&1`): `ci isolation`'s own messages go to standard error in
     // the script, and the step prints them with its own lines, so the two are compared as the job log shows them.
-    let mut cmd = paddock_proc::command("sh");
+    let mut cmd = TestCommand::new("sh");
     cmd.args(["-c", "exec 2>&1; exec \"$@\"", "sh"]);
     if rust {
         cmd.arg(env!("CARGO_BIN_EXE_paddock-dev"));
@@ -250,7 +251,7 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
             .args(step.shell[1..].iter().map(|a| fill(a, fx)));
     }
     let cwd = step.cwd.map_or_else(repo, |c| fx.p(c));
-    cmd.current_dir(cwd).env_clear();
+    cmd.current_dir(cwd);
     for (k, v) in base_env(fx)
         .into_iter()
         .chain(step.env.iter().map(|(k, v)| (k.to_string(), fill(v, fx))))
@@ -267,9 +268,8 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
     // (ER-14). The order matters: wait for the step itself, then reap, then read the pipes to their end, so a leaked process that
     // still holds a pipe cannot keep the read (and the test) waiting.
     let reaper = paddock_testkit_start::Reaper::new("a host step");
-    let mut child = reaper
-        .spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))
-        .unwrap();
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = reaper.spawn_test(cmd).unwrap();
     let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
@@ -938,10 +938,9 @@ fn host_cleanup_ends_a_real_process_of_the_job_and_only_that_one() {
     env.extend([("RUNNER_OS", "macOS"), ("PADDOCK_CI_SLOT", "s2")].map(|(k, v)| (k.to_string(), v.to_string())));
     env.push(("PADDOCK_JOB_TEMP".into(), fx.p("tmp").display().to_string()));
     env.push(("RUNNER_TEMP".into(), fx.p("tmp").display().to_string()));
-    let out = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["ci", "host-cleanup", "--id", "pitwall", "--process-pattern", "{tmp}[/\\\\]marker-x"])
         .current_dir(fx.p("work"))
-        .env_clear()
         .envs(env)
         .output()
         .unwrap();
@@ -1440,7 +1439,7 @@ const KEPT_PHASES: [(&str, &str, &str); 7] = [
 fn kept_phase_is_bounded_by_its_own_limit(id: &str) {
     let (id, word, label) = KEPT_PHASES.iter().find(|(i, ..)| *i == id).expect("a phase of KEPT_PHASES");
     assert!(!word.is_empty(), "{id} runs no git, so no git can hang in it");
-    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let shim = format!(
         "case \" $* \" in *\"{word}\"*) exec /bin/sleep 30;; esac\nexec '{}' \"$@\"",
         real.trim()
@@ -1509,7 +1508,7 @@ fn kept_clone_every_phase_that_runs_git_has_its_own_limit_test() {
 fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
     // A `git fetch` that sleeps: the fetch phase is bounded (1 s, its own limit; every other phase keeps the default, so a slow clone
     // under load cannot reach a limit), then the work folder is expanded to the profile.
-    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let setup = move |fx: &Fx| {
         fx.script(
             "bin/git",
@@ -1534,7 +1533,7 @@ fn kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit() {
     // `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase. The shell reads the work folder's commit and origin before any phase, without
     // that limit; the Rust command bounded them by it, so under load (a `git rev-parse` over 1 s with the hung-phase test's 1 s limit,
     // 4 of 204 runs) it failed the job with `cannot read the commit and the origin` where the shell went on.
-    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let setup = move |fx: &Fx| {
         fx.script(
             "bin/git",
@@ -1598,9 +1597,8 @@ fn bounded_sh(body: &str) -> String {
     );
     let fx = fixture();
     fx.script("bin/pgrep", "case \"$2\" in 100) echo 101;; 101) echo 102;; esac");
-    let out = paddock_proc::command("bash")
+    let out = TestCommand::new("bash")
         .args(["-c", &script])
-        .env_clear()
         .env("PATH", format!("{}:/usr/bin:/bin", fx.p("bin").display()))
         .env("SCRATCH", fx.p("work"))
         .output()
@@ -1783,7 +1781,7 @@ fn guardian() -> Step {
 
 /// bash before 4.4 (macOS ships 3.2) fails `"${as_user[@]}"` of an empty array under `set -u`: the script is for the Linux image (bash 5).
 fn bash_too_old_for_the_script() -> bool {
-    let out = paddock_proc::command("bash")
+    let out = TestCommand::new("bash")
         .args(["-c", "echo $((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1]))"])
         .output()
         .unwrap();

@@ -147,6 +147,19 @@ impl Reaper {
         Ok(child)
     }
 
+    /// Starts a [`paddock_testkit::TestCommand`] as [`Reaper::spawn`] starts a plain command, and hands back its
+    /// [`paddock_testkit::TestChild`]: the child keeps its listed environment and private folders, ends its own child through its
+    /// handle when it drops, and everything that child started below it ends with this reaper (ADR 0100 D8). The testkit cannot do
+    /// this itself: it has no `paddock_proc` (that crate's tests use the testkit).
+    pub fn spawn_test(
+        &self,
+        cmd: paddock_testkit::TestCommand,
+    ) -> std::io::Result<paddock_testkit::TestChild> {
+        let (mut cmd, guard) = cmd.into_parts();
+        let child = self.spawn(&mut cmd)?;
+        Ok(paddock_testkit::TestChild::from_parts(child, guard))
+    }
+
     /// Makes a folder for the test under `parent`, named with the token, and returns it. An orphan whose command line names it
     /// is ended too; a folder made after the reaper cannot be named by a process that started before it.
     pub fn scratch_in(&mut self, parent: &Path) -> std::io::Result<PathBuf> {
@@ -526,6 +539,64 @@ mod tests {
     fn let_parent_end(child: &mut Child) {
         child.stdin.take().unwrap().write_all(b"\n").unwrap();
         assert!(child.wait().unwrap().success());
+    }
+
+    /// A `TestChild` ends the child it holds when it drops (through its own handle), and its private folder goes after (review of
+    /// a8fca0ebd, P2 1: a child that waited on its stdin ended by itself when the stdin closed, so the kill was never seen).
+    #[test]
+    fn a_dropped_test_child_is_killed_by_its_handle_and_its_private_folder_goes() {
+        let child = paddock_testkit::TestCommand::new("sh")
+            .args(["-c", "exec sleep 30"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let id = ProcessId::of(child.id()).expect("the child runs");
+        let private = child.private_dir().to_path_buf();
+        assert!(id.confirmed_running(), "the child runs until the drop");
+        drop(child);
+        assert!(
+            own::has_ended(id),
+            "the child {} outlived its TestChild",
+            id.pid()
+        );
+        assert!(!private.exists(), "the private folder outlived the child");
+    }
+
+    /// What a `TestCommand` child started below it ends with the test when the child was started through the reaper
+    /// (`spawn_test`, ADR 0100 D8 and ADR 0103): the `TestChild` ends its own child, the reaper the rest.
+    #[test]
+    fn a_test_commands_grandchild_ends_with_the_reaper_it_was_started_through() {
+        let reaper = Reaper::new("the TestCommand grandchild test");
+        let mut cmd = paddock_testkit::TestCommand::new("sh");
+        cmd.args([
+            "-c",
+            "set -m; sh -c 'sleep 20; exit 0' </dev/null >/dev/null 2>&1 & echo $!; exec sleep 20",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+        let mut child = reaper.spawn_test(cmd).unwrap();
+        let g = grandchild(&mut child);
+        let c = ProcessId::of(child.id()).expect("the child runs");
+        reaper.observe();
+        drop(child);
+        assert!(
+            own::has_ended(c),
+            "the child {} outlived its TestChild",
+            c.pid()
+        );
+        assert!(
+            g.confirmed_running(),
+            "the grandchild outlives the child (the leak this guards)"
+        );
+        let ended = reaper.reap();
+        assert!(
+            own::has_ended(g),
+            "the grandchild {} outlived the reaper",
+            g.pid()
+        );
+        assert!(ended.iter().any(|e| e.id == g), "{ended:?}");
     }
 
     #[test]

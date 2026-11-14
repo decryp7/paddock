@@ -15,6 +15,7 @@
 //! This is a declaration check, not a grep for use sites: it catches a new ungated double on any OS, before anyone wires it. The
 //! no-fake tests in each OS module and `scripts/check-shipped.test.mjs` cover the rest.
 
+use paddock_testkit::TestCommand;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -420,9 +421,10 @@ struct Package {
 
 fn workspace() -> (PathBuf, BTreeMap<String, Package>) {
     let dyno = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap();
-    let mut cmd = dyno_platform::process::command(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
+    let mut cmd = TestCommand::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()));
     cmd.args(["metadata", "--no-deps", "--format-version", "1", "--offline"])
         .current_dir(&dyno);
+    let (cmd, _private) = cmd.into_parts();
     let out = dyno_platform::process::run_with_timeout(cmd, std::time::Duration::from_secs(120)).expect("cargo metadata runs");
     assert!(
         out.status.success(),
