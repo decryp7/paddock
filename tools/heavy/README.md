@@ -106,10 +106,10 @@ the observed OS start time (`Evidence`), every break, put-back and stale removal
 ## Rollout
 
 1. **Install** from the registry once the tag workflow has published `paddock-heavy`:
-   `cargo install paddock-heavy --registry decryp7 --locked --root /Volumes/d7sst7/dev-targets/heavy` (the binary lands in
+   `cargo install paddock-heavy --registry decryp7 --locked --root <dev-targets>/heavy` (the binary lands in
    `.../heavy/bin/heavy`). Check with `heavy --version` and `heavy status`.
-2. **Switch the agents' `plock`** (`/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock`) to a thin wrapper:
-   `exec /Volumes/d7sst7/dev-targets/heavy/bin/heavy "$@"` with `HEAVY_DIR=/private/tmp/claude-501` exported (the same folder, so
+2. **Switch the agents' `plock`** (`<dev-targets>/scratch/pitcrew-lock/plock`; [`<dev-targets>`](../../docs/dev-setup.md#where-things-live)) to a thin wrapper:
+   `exec <dev-targets>/heavy/bin/heavy "$@"` with `HEAVY_DIR=/private/tmp/claude-501` exported (the same folder, so
    running shell and Rust holders interoperate). Keep the old script as `plock.sh.bak`. Slots stay at 1. Builds with a target
    folder under `~` are now refused (exit 78).
 3. **engineering-rules:** make `scripts/heavy.sh` exec the binary when present
