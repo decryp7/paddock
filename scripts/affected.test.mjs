@@ -242,7 +242,7 @@ describe('the graph of this tree', () => {
   });
 
   test('the hooks tests (.claude/hooks/*.test.sh) run in the tools job: a hook, places.rs (the parity test) or the copies register marks it', () => {
-    for (const f of ['.claude/hooks/worktree-guard.py', '.claude/hooks/paddockpaths-parity.test.sh', '.claude/hooks/lib/paddockpaths.py', 'tools/paddock-dev/src/places.rs', 'docs/known-copies.toml']) {
+    for (const f of ['.claude/hooks/worktree-guard.py', '.claude/hooks/paddockpaths-parity.test.sh', '.claude/hooks/lib/paddockpaths.py', '.claude/settings.json', 'tools/paddock-dev/src/places.rs', 'docs/known-copies.toml']) {
       const r = run(f);
       assert.equal(r.tools, true, f);
       assert.equal(r.all, false, f);

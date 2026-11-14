@@ -288,7 +288,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^(renovate/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)"), &["tools"]),
         (re(r"^\.gitleaks\.toml$"), &["conformance"]),
         (re(r"^wiki-lint\.json$"), &["tools"]),
-        (re(r"^\.claude/hooks/"), &["tools"]),
+        (re(r"^\.claude/(hooks/|settings\.json$)"), &["tools"]),
     ]
 });
 
@@ -1152,6 +1152,7 @@ mod tests {
         for f in [
             ".claude/hooks/worktree-guard.py",
             ".claude/hooks/paddockpaths-parity.test.sh",
+            ".claude/settings.json",
             "tools/paddock-dev/src/places.rs",
             "docs/known-copies.toml",
         ] {

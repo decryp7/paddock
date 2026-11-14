@@ -367,7 +367,7 @@ const OWNERS = [
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
   [/^\.gitleaks\.toml$/, ['conformance']], // the secret scan's allow-list: the conformance job runs the scan
   [/^wiki-lint\.json$/, ['tools']], // the settings of tools/wiki, which lints docs/wiki (ER-30)
-  [/^\.claude\/hooks\//, ['tools']], // the hooks and their tests (`*.test.sh`), which the tools job's `hooks` step runs
+  [/^\.claude\/(hooks\/|settings\.json$)/, ['tools']], // the hooks, their tests (`*.test.sh`, which the tools job's `hooks` step runs) and the settings that wire them
 ];
 
 /**
