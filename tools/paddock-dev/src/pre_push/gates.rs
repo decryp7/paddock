@@ -277,7 +277,8 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         });
     }
     out.push(linux_clippy(change, facts));
-    out.push(conformance(plan, facts));
+    out.push(conformance(facts));
+    out.push(conformance_tests(facts));
     out.extend(commit_lint(change));
     if plan["apps"].as_array().is_some_and(|a| a.iter().any(|x| x == "pitwall")) {
         let mut args = vec!["--test".to_string()];
@@ -420,20 +421,22 @@ fn linux_clippy(change: &Change, facts: &Facts) -> Planned {
     Planned::Run(g)
 }
 
-fn conformance(plan: &Value, facts: &Facts) -> Planned {
+/// Conformance's npm install is not usable: the row did not look (exit 6), which is not a finding in the change.
+fn conformance_not_ready(id: &str, facts: &Facts) -> Option<Planned> {
+    facts.conformance_env.as_ref().map(|cause| Planned::NotMeasured {
+        id: id.to_string(),
+        reason: format!("environment not ready: {cause}"),
+        next: "run `npm ci --ignore-scripts -w conformance` in the main checkout, then re-run `./dev check --pre-push`; this is not a finding in your change".into(),
+    })
+}
+
+/// The conformance row runs on every push, whatever changed and whatever the plan says (ER-41, user 2026-11-14): its checks read
+/// app code, specs and workflows, and a check skipped on the change that brings in its class never sees it. The planner marks
+/// conformance on every plan too (`conformance always runs`); this gate does not depend on that.
+fn conformance(facts: &Facts) -> Planned {
     let id = "conformance".to_string();
-    if plan["conformance"] != true {
-        return Planned::Skip {
-            id,
-            reason: "the plan does not reach the conformance job".into(),
-        };
-    }
-    if let Some(cause) = &facts.conformance_env {
-        return Planned::NotMeasured {
-            id,
-            reason: format!("environment not ready: {cause}"),
-            next: "run `npm ci --ignore-scripts -w conformance` in the main checkout, then re-run `./dev check --pre-push`; this is not a finding in your change".into(),
-        };
+    if let Some(p) = conformance_not_ready(&id, facts) {
+        return p;
     }
     match &facts.conformance {
         // The contract was read and is well-formed; the gate runs it through the executor, as CI does (`./dev ci run conformance paddock`),
@@ -446,6 +449,28 @@ fn conformance(plan: &Value, facts: &Facts) -> Planned {
         Some(Err(e)) => Planned::Broken { id, cause: e.clone(), next: "fix the `conformance` object in conformance/paddock.ci.json (app, root, only, strict)".into() },
         None => Planned::Broken { id, cause: "the conformance contract was not read".into(), next: "report this: the caller of plan_gates must fill Facts::conformance".into() },
     }
+}
+
+/// The conformance package's own tests (`cd conformance && npm test`), on every push like the row above (ER-41): a test there reads
+/// the whole tree (lib-usage.test.mjs failed on fix/spotter-release-plan-verdict, 2026-11-14, while its touched-file tests passed).
+/// Run through the executor, as CI's conformance job does (`./dev ci run conformance tests`, the `tests` list of
+/// conformance/paddock.ci.json).
+fn conformance_tests(facts: &Facts) -> Planned {
+    let id = "conformance-tests";
+    conformance_not_ready(id, facts).unwrap_or_else(|| {
+        Planned::Run(Gate {
+            program: facts.dev_exe.clone(),
+            args: strs(&["ci", "run", "conformance", "tests"]),
+            ..gate(
+                id.into(),
+                "",
+                "",
+                &[],
+                0,
+                "fix the test it names (`cd conformance && npm test`; CI's conformance job runs the same)".into(),
+            )
+        })
+    })
 }
 
 fn commit_lint(change: &Change) -> Vec<Planned> {

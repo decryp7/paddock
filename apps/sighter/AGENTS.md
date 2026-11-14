@@ -4,7 +4,7 @@ Sighter finds UI elements by sight: a recorder, a labelling and training studio,
 query. The stack follows the Paddock family: a Rust core, a Tauri 2 shell and an Angular UI. **No product code exists
 yet**; the design is `docs/proposal.md` (open questions pending). Read it and `docs/suite-lessons.md` before building.
 
-<!-- paddock:block rules rev=35e04459 -->
+<!-- paddock:block rules rev=dccdaabc -->
 ## Paddock rules (binding)
 
 The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/rules.md) (the source; update there first). Where an older rule in this file disagrees, these win.
@@ -21,7 +21,10 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
 4. **When CI fails:** fix and re-run only the failed tests locally, push once; never push fix by fix to see what CI says.
    Lint and type-check the touched files before every push.
 5. **Every bug fix starts with a failing regression test.** A test-only failure is fixed properly (deterministic, no
-   sleeps), never silently skipped.
+   sleeps or raised timeouts), never silently skipped. No limit (timeout, retry, wait, budget, tolerance, cap) is
+   raised without a named, measured cause recorded next to it (ER-12); otherwise the cause is fixed. A new gate, CI job or
+   check starts report-only and blocks only after its first green run on the real tree, recorded by run id where the
+   gate is defined (ER-41).
    A reviewer of a bug fix runs a mutation check on it (user, 2026-10-30), in their own worktree: for Rust,
    `cargo mutants --in-diff <diff> -p <crate> --timeout-multiplier 3` with `CARGO_BUILD_JOBS=2` (install once with
    `cargo install cargo-mutants --locked`); for TypeScript, revert the fix and run the new test. The review reports whether
@@ -39,7 +42,7 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
    container of the user's, and Docker was down for about 15 minutes.
     Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture; a check fails on real-looking values (ER-14; 2026-11-12). Paddock's planned check C110 does this.
 8. **Every lesson goes into [lessons.md](https://dev.decryptology.net/decryp7/paddock/src/branch/main/docs/lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
-    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; running conformance on every change is planned (ER-41).
+    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; conformance runs on every change: CI plans its job for every change (`conformance always runs` in `scripts/affected.mjs` and `./dev plan`), and the push gate runs the conformance row and the conformance tests on every push (ER-41; user, 2026-11-14).
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.
     A tag or landing counts only a complete CI run on that exact commit, not a skipped run, a failed-only rerun or an in-place retry; `./dev ci verdict` is the one reader (planned; ER-15; 2026-11-12).
@@ -199,6 +202,10 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
 ### CI economy (user, 2026-10-29)
 50. **CI runs only what a change needs, once.**
     (a) At most one CI run per branch head. Before dispatching, cancel any queued run on the same branch with an older head.
+    The branch's one run is the trial run: `./dev ci dispatch ci.yml --trial <branch>` merges the branch head onto the open train
+    (origin/main when none is open) in its own clone, reports a conflict with its files instead of dispatching, and dispatches
+    with `base` = the target's sha, so the one run sees the combined tree (ADR 0098 WP-4; report-only for the reviewer until
+    its first green trial run is recorded in the ADR).
     (b) Do not dispatch while review fixes are pending. Dispatch once after the last fix, and do not re-dispatch just to
     refresh against main; merge main right before landing.
     (c) A branch already merged into another branch gets no CI of its own.
@@ -212,7 +219,8 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     in parallel and bounded by the machine's load: `./dev check --pre-push` (the pre-push hook runs it): `cargo fmt --check`,
     clippy on the host and, for Windows, `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings`
     (an import or helper used only by a unix-gated test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in
-    tests"), conformance with ci.yml's own list, commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
+    tests"), conformance with ci.yml's own list and the conformance tests (`cd conformance && npm test`, both on every push, ER-41),
+    commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
     changed, also CI's workspace Clippy on Linux in the CI image (`--cpus 4 --memory 12g`). A gate that cannot run (no Docker, no
     cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). Lint and type-check of the touched TS
     files stay by hand until WP-3. Then dispatch with `./dev`
@@ -232,6 +240,12 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     landing (ER-10) is a plain dispatch without `since_run`.
     *Why:* CI runners are the scarcest resource, and every wasted run delays a release.
     (j) Every merge into a train or integration branch runs at merge time the checks that fail only on combined code (workspace-hack, publish dry run, conformance), not first in the full run (ER-8; 2026-11-12).
+    (k) The member gate (ADR 0098): the integrator runs `./dev merge check --gates <merge>` after each member's merge, which runs
+    the fast gates of `./dev check --pre-push` on the combined tree with `--base <merge>^1`. A member that fails them is taken
+    out (the train is reset to `<merge>^1` in the integrator's own worktree) and sent back to its author with the failing
+    rows; it is not fixed on the train. The gate is report-only (printed, exit unchanged) until its first green run on a real
+    train is recorded in ADR 0098, and sends members back from then on. For a failed train run, `./dev ci triage <run> --members
+    <train-base>` names the members whose change reaches each new failure (the queue's own rule). Tests stay once per train.
 
 ### Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
@@ -384,6 +398,20 @@ The family's binding rules, copied from [paddock/docs/rules.md](https://dev.decr
     *Why:* on 2026-11-10 synthetic experiments showed that a branch run can poison what a later tag run reads (an sccache
     entry, a kept build folder, the cargo registry), and every rule 54 dispatch had given the updater key to `npm ci`
     (`tauri-bundle.sh:55`), so every install script of every branch could read the key that signs updates.
+
+### Declared data (user, 2026-11-13; ADR 0098)
+79. **Tests read declared data through its accessor** (ER-42). A test, lint list or registry entry that needs data another part of the
+    repository declares (a workflow's command line, a manifest's dependencies, a register's rows, where a file lives) reads it
+    through the one accessor that owns that data (`ci_run::contract::conformance_args`, `cargo metadata`, the register's parser, a
+    constant the owning module exports), never by grepping or slicing that file's text. A source audit that must read another
+    crate's code names the file through a path the owner exports and ends its span at an item boundary, not at a comment it
+    remembers. A hand list that must equal generated data (heavy's `inputs.txt`) is generated, or its test prints the
+    regenerate command (ER-40). Checked where cheap: C121 (report-only until its first green run on the real tree) flags a
+    registry entry or test that runs `grep`, `sed`, `awk` or a regular expression over `.gitea/workflows/*.yml`; slicing another
+    file's text by anchors and hard-coded paths into another crate are not linted, so review and the train's test run cover them.
+    *Why:* on train 8 (2026-11-13) eight fixes after the merges were combination failures; `bddd2947c` was a second reader of
+    data that already had an accessor (`./dev ci conformance-args` now), `0308201b4` a span ended at a comment the author
+    remembered, `11c365fc4` a path into another area's layout, `be69a31f6` a hand list that had to equal `cargo metadata`.
 
 ### Monorepo (ADR 0014 §10; effective for an app from its import into `paddock/apps/<app>`, for Paddock from the first import)
 Until an app is imported, rules 2, 3, 8, 9, 39 and 42 above apply to it as written. From its import, these replace them:
