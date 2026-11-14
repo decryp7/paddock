@@ -301,6 +301,12 @@ impl WatchState {
 /// most [`MAX_SCAN_ENTRIES`] entries and [`MAX_SCAN_DEPTH`] levels deep. The flag says a limit cut the scan. Unreadable
 /// folders and files that vanish during the scan are skipped.
 pub fn scan_folder(root: &Path, accept: &dyn Fn(&Path) -> bool) -> (Vec<FileStamp>, bool) {
+    scan_folder_within(root, accept, MAX_SCAN_ENTRIES)
+}
+
+/// [`scan_folder`] with an entry limit of the caller's: the test of the cut uses a small one instead of making
+/// [`MAX_SCAN_ENTRIES`] files (50 001 file creations took 90 s on the loaded CI Mac, run 8061; ADR 0103).
+fn scan_folder_within(root: &Path, accept: &dyn Fn(&Path) -> bool, max_entries: usize) -> (Vec<FileStamp>, bool) {
     let mut out = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut entries = 0usize;
@@ -308,7 +314,7 @@ pub fn scan_folder(root: &Path, accept: &dyn Fn(&Path) -> bool) -> (Vec<FileStam
         let Ok(read) = std::fs::read_dir(&dir) else { continue };
         for entry in read.flatten() {
             entries += 1;
-            if entries > MAX_SCAN_ENTRIES {
+            if entries > max_entries {
                 return (out, true);
             }
             let Ok(kind) = entry.file_type() else { continue };
@@ -603,12 +609,23 @@ mod tests {
         let root = root_scratch.path().join(format!("debrief-scan-limit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
-        for i in 0..=MAX_SCAN_ENTRIES {
+        // The cut is the same code at any limit: a limit of 20 needs 21 files, not 50 001 (ADR 0103: the work of a test does not
+        // grow with a product constant). The product's own limit is the one `scan_folder` passes.
+        const LIMIT: usize = 20;
+        for i in 0..=LIMIT {
             std::fs::write(root.join(format!("{i}.log")), b"").unwrap();
         }
-        let (found, cut) = scan_folder(&root, &|_| true);
+        let (found, cut) = scan_folder_within(&root, &|_| true, LIMIT);
         assert!(cut);
-        assert!(found.len() <= MAX_SCAN_ENTRIES);
+        assert!(found.len() <= LIMIT);
+        let (all, cut) = scan_folder_within(&root, &|_| true, LIMIT + 1);
+        assert!(!cut && all.len() == LIMIT + 1, "{} files, cut {cut}", all.len());
+        let (all, cut) = scan_folder(&root, &|_| true);
+        assert!(
+            !cut && all.len() == LIMIT + 1,
+            "scan_folder uses MAX_SCAN_ENTRIES: {} files, cut {cut}",
+            all.len()
+        );
         std::fs::remove_dir_all(&root).ok();
     }
 }
