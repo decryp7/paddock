@@ -607,6 +607,24 @@ fn prune_folder_removes_the_incremental_caches_first_then_the_folder_and_never_f
     assert_eq!(bad.code, 2);
 }
 
+/// The size both sides compare is the same number by design, not by luck: the larger of the allocated kilobytes and the length of
+/// the regular files (hard links once, the total rounded up). Folder lengths are not content: GNU `du --apparent-size` counts them
+/// as 0 while BSD `du -A` counts them and rounds each entry up, and Rust counted them too, so a folder of empty folders was 0 KB in
+/// the shell and 1 KB in Rust on btrfs (OrbStack, where an empty folder has 0 blocks and a length of 18 bytes), and 2 KB in the
+/// shell against 1 KB in Rust on APFS.
+#[test]
+fn prune_folder_sizes_count_file_content_only_the_same_on_every_file_system() {
+    let empty_folders = |fx: &Fx| {
+        for d in ["ci/build/debug/incremental", "ci/build/dist", "ci/build/release"] {
+            std::fs::create_dir_all(fx.p(d)).unwrap();
+        }
+    };
+    for cap in ["1", "2"] {
+        let kept = same(&empty_folders, &prune_folder("<ROOT>/ci/build", cap));
+        assert_eq!(kept.stdout, "", "a folder of empty folders is 0 KB under a cap of {cap}");
+    }
+}
+
 fn prune_ci(dir: &'static str, slot: &'static str, drop: bool) -> Step {
     let mut shell = vec!["tools/prune-ci-build-folder.sh", dir, "1"];
     let mut rust = vec!["prune-build-folder", "--max-gb", "1"];
