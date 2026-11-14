@@ -1330,3 +1330,36 @@ loaded machine (the reaper's look at the process table, the crash model with and
   noise. Two VM runs in between took 138-146 s: tools/paddock-dev had uncommitted changes, so the tests ran the `./dev` wrapper
   instead of the cached binary (82d5ee496's cost, 0.17-0.4 s per call); on the committed tree it was 98 s again. Raw output in the
   agent's scratch folder, not kept.
+
+### 2026-11-15, test timing redesign, review round 1
+
+Question: what do the tests migrated in ADR 0103's second round cost before and after, and does the debrief-app session test's
+CI timeout reproduce under local load?
+
+- **Commit:** base c48ffe017 (this branch after merging train 11 at 31cdde673) → this branch
+- **Machine:** the shared Mac mini (14 cores, macOS 27.2), with the CI runners and other agents running; Linux runs in the
+  `paddock-ci-local:v3-arm64` and `node:24-bookworm` images (`--cpus 2-4`, `--memory 2-8g`)
+- **Load:** other agents' 1-minute load 18-29; the session-test load run with 6 extra `yes` burners (scratch `session-load.sh`,
+  `timeout 600` each, ended on exit) at load 19-27
+- **Build:** debug test binaries, `CARGO_BUILD_JOBS=2`; nextest 0.9.152; node 24
+- **Command:** `cargo nextest run --test it -E 'test(/^golden::live_/)'` (tools/paddock-dev, before) and `-E 'test(/^golden::live_(range|workflow)/)'`
+  (after); `cargo nextest run -p debrief-app --lib -E 'test(/workspace_commands::tests::a_session_/)'` (3 runs before, 4 after);
+  `NEXTEST_TEST_THREADS=8 cargo nextest run --profile ci -p debrief-app --lib -E 'test(/workspace_commands::tests::/)'` with 6
+  burners (5 runs)
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | golden `live_range_plans_...` (5 first-parent ranges) | 85.8 s, load 27 | 33.2 s, load 29 | ci override 480 s | pass |
+  | golden `live_workflow_action_and_script_edits_...` (25 edits) | 21.0 s, load 27 | 12.3 s, load 29 | ci override 480 s (CI: SLOW 80-121 s) | pass |
+  | debrief-app session test, quiet | 1.4-2.1 s (one test, three steps) | 1.0 s and 1.3 s (two tests, two steps each) | nextest 90 s (CI: 92.5 s TMT, run 8061) | pass |
+  | the same, 6 burners, load 19-27, 5 runs | 1.8-2.0 s | not run | nextest 90 s | the CI timeout did not reproduce at this load |
+  | debrief-app session test in CI run 8061 (from its wait log) | import 29.6 s, reopen 12.4 s, import again 20.0 s | at most one import and one step per test | nextest 90 s | an estimate from the log, not measured |
+  | Node `processTable()` (one `ps`), 863 processes, load 16 | — | 28.75 ms | — | sampler backs off to 0.5 s |
+  | Rust reaper tests, red (candidates() empty) / green | 4 of 10 failed, no process ended by the test | 17/17 three times (macOS), 112/112 twice with paddock-testkit (Linux) | none | pass |
+  | Node kit tests, red (choose empty) / green | 3 of 9 failed in 1 s, no process ended by the test | 9/9 three times (macOS), three times (node:24-bookworm) | none | pass |
+
+- **Notes:** the session test's CI wait log shows each step 10-20 times slower than here; the local load (at most 6 burners, the
+  agents' cap) does not reach that, so the split rests on the log's per-step times, not on a local reproduction. macOS 27 shows
+  no other process's environment (`ps -E` and sysinfo's `environ()` both return none for a same-user `sleep` given a variable),
+  so the reaper's token is read on Linux only. Raw output in the agent's scratch folder, not kept.

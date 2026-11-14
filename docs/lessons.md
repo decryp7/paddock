@@ -2066,6 +2066,7 @@ existed. The red run (three runs between 00:12:04 and 00:12:40 +08, from file ti
 three runs in a row; that included the agent's own shell and very likely other agents' running shell commands (their wrappers
 name `/tmp/claude-…` files). **Rule:** a failing-first test must be safe in its failing state: when the missing behaviour is a
 guard against a destructive action, the red test feeds an input that the action cannot harm (here a short marker that matches no
-process), never the real dangerous one. A tool that ends processes by a pattern refuses a pattern that is not unique to its
-owner (both kits: at least 12 characters, the test's scratch folder). **Class: acting on processes by a name or pattern
+process), never the real dangerous one. A tool that ends processes never acts on a pattern match alone: the rebuilt reaper
+(ADR 0103) acts only on its own children, what it saw below them, its groups, its token, and orphans naming a folder it made
+with a random name. **Class: acting on processes by a name or pattern
 (rule 53; the lefthook kill of 2026-11-14 above).**
