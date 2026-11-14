@@ -959,7 +959,10 @@ mod tests {
             lines[0].starts_with("run 7963 debrief.yml@refs/heads/train/2026-11-11-5 at 607bb7928: 3 failing"),
             "{t}"
         );
-        assert!(lines[0].contains("2 new, 1 already failing, 0 flaky, 0 failed every attempt, 0 unknown"), "{t}");
+        assert!(
+            lines[0].contains("2 new, 1 already failing, 0 flaky, 0 failed every attempt, 0 unknown"),
+            "{t}"
+        );
         assert!(
             lines
                 .iter()
