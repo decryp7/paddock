@@ -98,10 +98,15 @@ impl Page {
 
     /// [`Page::call`] with the step it belongs to, for the log.
     fn call_while(&self, method: &str, params: Value, phase: &str) -> Result<Value> {
+        self.call_within(method, params, phase, CALL)
+    }
+
+    /// [`Page::call_while`], its answer waited for at most `wait` (the caller's own remaining time).
+    fn call_within(&self, method: &str, params: Value, phase: &str, wait: Duration) -> Result<Value> {
         if self.is_closed() {
             return Err(Error::Closed);
         }
-        self.closed_wins(self.answering.ask(Some(&self.session), method, params, phase, CALL))
+        self.closed_wins(self.answering.ask(Some(&self.session), method, params, phase, wait))
     }
 
     fn closed_wins<T>(&self, r: Result<T>) -> Result<T> {
@@ -162,9 +167,18 @@ impl Page {
 
     /// Evaluates a JavaScript expression in the page and returns its value.
     pub fn evaluate(&self, expression: &str) -> Result<Value> {
-        let r = self.call(
+        self.evaluate_within(expression, CALL)
+    }
+
+    /// [`Page::evaluate`], its answer waited for at most `wait`: a caller that polls inside its own time passes what is
+    /// left of it, so one look the browser answers late cannot outlast the caller's time (the fixed [`CALL`] ended a 15 s
+    /// wait at 10 s in the canonical driver, CI run 8060). A timeout names the command and `wait`.
+    pub fn evaluate_within(&self, expression: &str, wait: Duration) -> Result<Value> {
+        let r = self.call_within(
             "Runtime.evaluate",
             json!({"expression": expression, "returnByValue": true, "awaitPromise": true, "timeout": 8000}),
+            "driving the page",
+            wait,
         )?;
         if let Some(d) = r.get("exceptionDetails") {
             let m = d
@@ -199,18 +213,36 @@ impl Page {
 
     /// A bounded excerpt of the visible text, for challenge detection.
     pub fn text_excerpt(&self) -> Result<String> {
-        let v = self.evaluate("document.body ? document.body.innerText.slice(0, 4000) : ''")?;
+        self.text_excerpt_within(CALL)
+    }
+
+    fn text_excerpt_within(&self, wait: Duration) -> Result<String> {
+        let v = self.evaluate_within("document.body ? document.body.innerText.slice(0, 4000) : ''", wait)?;
         Ok(v.as_str().unwrap_or("").to_string())
     }
 
     pub fn load_finished(&self) -> Result<bool> {
-        Ok(self.evaluate("document.readyState")?.as_str() == Some("complete"))
+        self.load_finished_within(CALL)
+    }
+
+    /// [`Page::load_finished`], its answer waited for at most `wait` ([`Page::evaluate_within`]).
+    pub fn load_finished_within(&self, wait: Duration) -> Result<bool> {
+        Ok(self.evaluate_within("document.readyState", wait)?.as_str() == Some("complete"))
     }
 
     /// The challenge this page shows, if any.
     pub fn challenge(&self) -> Result<Option<crate::Challenge>> {
+        self.challenge_within(CALL)
+    }
+
+    /// [`Page::challenge`], each of its looks waited for at most `wait` ([`Page::evaluate_within`]).
+    pub fn challenge_within(&self, wait: Duration) -> Result<Option<crate::Challenge>> {
         let i = self.info()?;
-        Ok(crate::detect_challenge(&i.url, &i.title, &self.text_excerpt().unwrap_or_default()))
+        Ok(crate::detect_challenge(
+            &i.url,
+            &i.title,
+            &self.text_excerpt_within(wait).unwrap_or_default(),
+        ))
     }
 
     /// A PNG of the page, base64-encoded (diagnostics of the live test).

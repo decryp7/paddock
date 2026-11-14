@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 const CALL: Duration = Duration::from_secs(10);
 const POLL: Duration = Duration::from_millis(100);
+/// What [`Page::wait_ready`]'s timeout names when no look at the page was answered before the page's time ran out.
+pub const READINESS_UNANSWERED: &str = "the page's readiness check";
 /// Largest document returned.
 pub const MAX_HTML: usize = 16 << 20;
 
@@ -125,7 +127,12 @@ impl Page {
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value> {
-        self.conn.call(Some(&self.session), method, params, CALL)
+        self.call_within(method, params, CALL)
+    }
+
+    /// A command to the page's session whose answer is waited for at most `wait`.
+    fn call_within(&self, method: &str, params: Value, wait: Duration) -> Result<Value> {
+        self.conn.call(Some(&self.session), method, params, wait)
     }
 
     /// Waits, at most `timeout`, until the navigation that was running when the page was attached has committed or
@@ -192,10 +199,21 @@ impl Page {
 
     /// Evaluates a JavaScript expression in the page and returns its value.
     pub fn evaluate(&self, expression: &str) -> Result<Value> {
-        let r = self.call(
-            "Runtime.evaluate",
-            json!({"expression": expression, "returnByValue": true, "awaitPromise": true, "timeout": 8000}),
-        )?;
+        self.evaluate_within(expression, CALL)
+    }
+
+    /// [`Page::evaluate`], its answer waited for at most `wait`. A timeout names the script, not "a command".
+    fn evaluate_within(&self, expression: &str, wait: Duration) -> Result<Value> {
+        let r = self
+            .call_within(
+                "Runtime.evaluate",
+                json!({"expression": expression, "returnByValue": true, "awaitPromise": true, "timeout": 8000}),
+                wait,
+            )
+            .map_err(|e| match e {
+                Error::Timeout(_) => Error::Timeout("a script in the page (Runtime.evaluate)"),
+                e => e,
+            })?;
         if let Some(d) = r.get("exceptionDetails") {
             let m = d
                 .pointer("/exception/description")
@@ -209,6 +227,11 @@ impl Page {
 
     /// One observation of the page. `selector` is the element the watch waits for.
     pub fn snapshot(&self, selector: Option<&str>) -> Result<Snapshot> {
+        self.snapshot_within(selector, CALL)
+    }
+
+    /// [`Page::snapshot`], its answer waited for at most `wait`.
+    fn snapshot_within(&self, selector: Option<&str>, wait: Duration) -> Result<Snapshot> {
         let sel = match selector {
             // JSON string literals are valid JavaScript string literals.
             Some(s) => format!(
@@ -222,7 +245,7 @@ impl Page {
 pw: !!document.querySelector('input[type=password]'), url: location.href, title: document.title, \
 text: document.body ? document.body.innerText.slice(0, 4000) : ''}})"
         );
-        let v = self.evaluate(&expr)?;
+        let v = self.evaluate_within(&expr, wait)?;
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         Ok(Snapshot {
             url: s("url"),
@@ -236,19 +259,31 @@ text: document.body ? document.body.innerText.slice(0, 4000) : ''}})"
     }
 
     /// Polls until the page is ready, shows a challenge, or `timeout` passes.
+    ///
+    /// `timeout` is the only bound of the looks too: a look the browser answers late (a starved host) is waited for while
+    /// the page has time left, never cut at a fixed per-command deadline (CI run 8060: a fixed 10 s ended a 15 s wait with
+    /// `Timeout("a command")`). When the time runs out during a look, the outcome is the last answered look's verdict, or
+    /// [`Error::Timeout`] naming [`READINESS_UNANSWERED`] when no look was answered at all.
     pub fn wait_ready(&self, selector: Option<&str>, rule: &Rule, timeout: Duration) -> Result<Outcome> {
         let end = Instant::now() + timeout;
+        let mut last: Option<Readiness> = None;
         loop {
             if self.conn.is_closed() {
                 return Err(Error::Closed);
             }
-            let snap = self.snapshot(selector)?;
+            let left = end.saturating_duration_since(Instant::now());
+            let snap = match (self.snapshot_within(selector, left), last) {
+                (Err(Error::Timeout(_)), Some(last)) => return Ok(Outcome::TimedOut(last)),
+                (Err(Error::Timeout(_)), None) => return Err(Error::Timeout(READINESS_UNANSWERED)),
+                (r, _) => r?,
+            };
             let obs = Observation {
                 load_finished: snap.load_finished,
                 element_present: snap.element_present,
                 quiet: Duration::from_millis(snap.quiet_ms),
             };
-            let last = ready::readiness(&obs, rule);
+            let now = ready::readiness(&obs, rule);
+            last = Some(now);
             let challenge = challenge::detect(&challenge::Signals {
                 url: &snap.url,
                 title: &snap.title,
@@ -261,11 +296,11 @@ text: document.body ? document.body.innerText.slice(0, 4000) : ''}})"
                     return Ok(Outcome::Challenge(c));
                 }
             }
-            if last == Readiness::Ready {
+            if now == Readiness::Ready {
                 return Ok(Outcome::Ready);
             }
             if Instant::now() >= end {
-                return Ok(Outcome::TimedOut(last));
+                return Ok(Outcome::TimedOut(now));
             }
             std::thread::sleep(POLL);
         }
@@ -671,6 +706,7 @@ mod tests {
             slow_start,
             flood,
             frame_tree,
+            silent_evaluate,
         } = script;
         // The main frame: `F` from the frame tree, or (when the frame tree fails) the target id, as Chrome uses it.
         let main = if frame_tree { "F" } else { "T1" };
@@ -721,6 +757,9 @@ mod tests {
                         json!({"method": "Page.lifecycleEvent", "sessionId": "S1", "params": {"frameId": "C", "name": i.to_string()}}),
                     );
                 }
+            }
+            if method == "Runtime.evaluate" && silent_evaluate {
+                continue;
             }
             let result = match method.as_str() {
                 "Target.createTarget" => json!({"targetId": "T1"}),
@@ -802,12 +841,15 @@ mod tests {
         flood: bool,
         /// `Page.getFrameTree` answers (main frame `F`, distinct from the target id `T1`); false: it fails.
         frame_tree: bool,
+        /// `Runtime.evaluate` is never answered (a browser too starved to run the page's script, CI run 8060).
+        silent_evaluate: bool,
     }
 
     const SLOW: Script = Script {
         slow_start: true,
         flood: false,
         frame_tree: true,
+        silent_evaluate: false,
     };
 
     impl FakeCdp {
@@ -907,6 +949,22 @@ mod tests {
         assert_eq!(page.session, "S1");
         let looks = life.borrow().looks;
         assert!(looks >= 5000, "opened after {looks} looks, before the browser answered");
+    }
+
+    /// Regression (CI run 8060, `a_missing_element_times_out_as_failed` on the loaded CI Mac): a look at the page that the
+    /// browser did not answer within a fixed 10 s ended the wait with `Timeout("a command")`, inside a 15 s page budget. The
+    /// page's own time now bounds every look; when no look was answered before it ran out, the error says so. The fake never
+    /// answers `Runtime.evaluate`: before the fix the wait ended after the fixed 10 s with "a command".
+    #[test]
+    fn a_look_the_browser_does_not_answer_ends_with_the_pages_time_and_says_so() {
+        let f = FakeCdp::start(Script {
+            slow_start: false,
+            silent_evaluate: true,
+            ..SLOW
+        });
+        let p = f.page();
+        let e = p.wait_ready(Some("#absent"), &Rule::default(), Duration::from_millis(300));
+        assert!(matches!(&e, Err(Error::Timeout(m)) if *m == READINESS_UNANSWERED), "{e:?}");
     }
 
     /// Regression (Windows CI runs 6473 and 6563): a load sent right after the tab was created, while its own first
