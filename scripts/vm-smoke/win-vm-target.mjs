@@ -11,8 +11,14 @@ import { isMain } from '../../conformance/src/util/is-main.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** The environment ./dev runs under: only PATH and HOME (the tool's cache and rustup), so no variable can pick a planted binary. */
-const devEnv = () => ({ PATH: [join(process.env.HOME ?? '', '.cargo', 'bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin', '/opt/homebrew/bin', '/usr/local/bin'].join(':'), HOME: process.env.HOME ?? '' });
+/** Build and toolchain variables that pass to ./dev when set: none of them can pick a cached paddock-dev binary. */
+const DEV_ENV_KEEP = ['CARGO_BUILD_JOBS', 'RUSTUP_HOME', 'CARGO_HOME', 'RUSTUP_TOOLCHAIN'];
+/** The environment ./dev runs under: PATH, HOME (the tool's cache and rustup) and DEV_ENV_KEEP, so no variable can pick a planted binary. */
+const devEnv = () => ({
+  PATH: [join(process.env.HOME ?? '', '.cargo', 'bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin', '/opt/homebrew/bin', '/usr/local/bin'].join(':'),
+  HOME: process.env.HOME ?? '',
+  ...Object.fromEntries(DEV_ENV_KEEP.filter((k) => process.env[k]).map((k) => [k, process.env[k]])),
+});
 
 /**
  * One folder from `./dev places` (dev-targets, dev-disk, vm-data, lock-root, main-checkout; docs/dev-setup.md), run through the

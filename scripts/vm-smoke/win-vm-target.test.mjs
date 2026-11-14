@@ -35,6 +35,16 @@ test('the folder comes from the repository\'s own ./dev places --pinned, and its
   assert.deepEqual(calls[0][1].filter((a) => !a.startsWith('/')), ['places', '--get', 'vm-data', '--repo', '--pinned']);
   // No variable of the caller reaches ./dev: only PATH and HOME (the cache), so PADDOCK_DEV_HOME and the like cannot pick a binary.
   assert.deepEqual(Object.keys(calls[0][2].env).sort(), ['HOME', 'PATH']);
+  // Four build and toolchain variables pass when set (none can pick a cached paddock-dev binary); the ones that can are still dropped.
+  const keep = { CARGO_BUILD_JOBS: '2', RUSTUP_HOME: '/srv/x/rustup', CARGO_HOME: '/srv/x/cargo', RUSTUP_TOOLCHAIN: 'x', PADDOCK_DEV_HOME: '/planted', PADDOCK_DEV: '/planted/dev' };
+  const old = Object.fromEntries(Object.keys(keep).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, keep);
+  try {
+    devPlace('vm-data', { pinned: true, run });
+  } finally {
+    for (const [k, v] of Object.entries(old)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
+  assert.deepEqual(Object.keys(calls[1][2].env).sort(), ['CARGO_BUILD_JOBS', 'CARGO_HOME', 'HOME', 'PATH', 'RUSTUP_HOME', 'RUSTUP_TOOLCHAIN']);
   const refuse = () => { const e = new Error('exit 2'); e.stderr = 'error: The dev-targets folder cannot be derived: no worktree root is set.\n'; throw e; };
   assert.throws(() => devPlace('vm-data', { pinned: true, run: refuse }), /--pinned` failed: error: The dev-targets folder cannot be derived/);
   assert.throws(() => devPlace('vm-data', { run: () => '' }), /printed nothing/);
@@ -80,10 +90,12 @@ test('target.sh runs ./dev with an empty environment: PADDOCK_DEV_HOME and PADDO
     mkdirSync(join(dir, 'scripts', 'vm-win'), { recursive: true });
     copyFileSync(join(here, '..', 'vm-win', 'target.sh'), join(dir, 'scripts', 'vm-win', 'target.sh'));
     // A stand-in ./dev that reports what it inherited.
-    writeFileSync(join(dir, 'dev'), '#!/bin/sh\necho "/srv/x/${PADDOCK_DEV_HOME:-none}-${PADDOCK_DEV:-none}-${PADDOCK_DEV_TARGETS:-none}"\n', { mode: 0o755 });
+    writeFileSync(join(dir, 'dev'), '#!/bin/sh\necho "/srv/x/${PADDOCK_DEV_HOME:-none}-${PADDOCK_DEV:-none}-${PADDOCK_DEV_TARGETS:-none}-${CARGO_BUILD_JOBS:-none}-${RUSTUP_HOME:-none}-${CARGO_HOME:-none}-${RUSTUP_TOOLCHAIN:-none}"\n', { mode: 0o755 });
     const out = execFileSync('bash', ['-c', 'source "$1"; printf %s "$WIN_VM_DIR"', 'x', join(dir, 'scripts', 'vm-win', 'target.sh')], {
-      encoding: 'utf8', env: { ...process.env, PADDOCK_DEV_HOME: '/planted', PADDOCK_DEV: '/planted/dev', PADDOCK_DEV_TARGETS: '/planted' },
+      encoding: 'utf8', env: { ...process.env, PADDOCK_DEV_HOME: '/planted', PADDOCK_DEV: '/planted/dev', PADDOCK_DEV_TARGETS: '/planted',
+        CARGO_BUILD_JOBS: '2', RUSTUP_HOME: 'r', CARGO_HOME: 'c', RUSTUP_TOOLCHAIN: 't' },
     });
-    assert.equal(out, '/srv/x/none-none-none/paddock-win11-test');
+    // The four build variables pass; the ones that could pick a binary do not.
+    assert.equal(out, '/srv/x/none-none-none-2-r-c-t/paddock-win11-test');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
