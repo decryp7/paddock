@@ -2,8 +2,14 @@
 # Tests for docker-guard.sh. Run: bash .claude/hooks/docker-guard.test.sh
 here=$(cd "$(dirname "$0")" && pwd)
 H="$here/docker-guard.sh"
-MAIN=/Volumes/d8sst7/dev.decryptology.net/paddock
-WT=/Volumes/d8sst7/dev-targets/wt/some-agent
+# Paths are built at run time; the guard derives its allowed folders from `git config paddock.worktreeRoot`.
+TMP=$(cd "$(mktemp -d)" && pwd -P); trap 'rm -rf "$TMP"' EXIT
+MAIN=$TMP/elsewhere/paddock-main
+git init -q "$MAIN" || exit 1
+git -C "$MAIN" config paddock.worktreeRoot "$TMP/dev-targets/wt"
+WT=$TMP/dev-targets/wt/some-agent
+export CLAUDE_PROJECT_DIR=$MAIN
+unset DOCKER_GUARD_OK_DIRS
 fail=0
 expect() { # name want who cwd command
   if [ "$3" = agent ]; then x='{"agent_id":"a1"}'; else x='{}'; fi
@@ -38,7 +44,7 @@ expect "docker image prune (dangling only) is allowed" allow agent "$WT" 'docker
 expect "docker compose down in the main checkout" deny agent "$MAIN" 'docker compose down'
 expect "docker-compose down in the main checkout" deny agent "$MAIN" 'docker-compose down -v'
 expect "docker compose down in own worktree" allow agent "$WT" 'docker compose down'
-expect "docker compose -f file in a scratch folder" allow agent "$MAIN" 'docker compose -f /Volumes/d8sst7/dev-targets/scratch/x/compose.yml down'
+expect "docker compose -f file in a scratch folder" allow agent "$MAIN" "docker compose -f $TMP/dev-targets/scratch/x/compose.yml down"
 expect "docker compose up in main is not down" allow agent "$MAIN" 'docker compose up -d'
 # --- Docker and OrbStack themselves
 expect "orb stop" deny agent "$WT" 'orb stop'
@@ -104,6 +110,10 @@ expect "docker rm --help" allow agent "$WT" 'docker rm --help'
 # --- the coordinator is not refused
 expect "coordinator docker stop \$(docker ps -q)" allow coord "$MAIN" 'docker stop $(docker ps -q)'
 expect "coordinator orb stop" allow coord "$MAIN" 'orb stop'
+# --- no worktree root to derive from: compose down fails closed
+mkdir -p "$TMP/bare" && git init -q "$TMP/bare/r"
+out=$(jq -nc --arg d "$TMP/bare/r" '{tool_name:"Bash",cwd:$d,agent_id:"a",tool_input:{command:"docker compose down"}}' | CLAUDE_PROJECT_DIR="$TMP/bare/r" "$H" 2>/dev/null)
+case "$out" in *'"deny"'*"Next step"*) echo "ok: underivable folders refuse with a next step" ;; *) echo "FAIL: underivable folders must refuse"; fail=1 ;; esac
 # --- fail open, message
 out=$(echo 'not json' | "$H" 2>/dev/null); [ -z "$out" ] && echo "ok: bad input allows" || { echo "FAIL: bad input"; fail=1; }
 out=$(jq -nc '{tool_name:"Bash",cwd:"/x",agent_id:"a",tool_input:{command:"docker stop"}}' | "$H")
