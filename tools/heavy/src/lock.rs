@@ -383,8 +383,9 @@ impl Heavy {
         v
     }
 
-    /// The suffix of the first live high marker's name (markers of dead processes are removed).
-    pub fn live_high_marker(&self, who: &str) -> Option<String> {
+    /// The live high markers as (name suffix, age in seconds); markers of dead processes are removed.
+    pub fn live_high_markers(&self, who: &str) -> Vec<(String, u64)> {
+        let mut out = Vec::new();
         for f in self.dir_entries(HIGH_PREFIX) {
             let b = file_name(&f);
             let suffix = &b[HIGH_PREFIX.len()..];
@@ -395,7 +396,8 @@ impl Heavy {
             let ep = record::parse_marker_epoch(&bytes).or_else(|| mtime(&f));
             let pid = record::marker_pid(suffix);
             if pid.is_some_and(|p| pid_alive(&*self.procs, p, ep)) {
-                return Some(suffix.to_string());
+                out.push((suffix.to_string(), self.now().saturating_sub(ep.unwrap_or(0))));
+                continue;
             }
             let evid = pid.map_or("pid not a number".to_string(), |p| evidence(&*self.procs, p, ep));
             self.blog(&format!("{who} removed the stale high-priority marker {b}"));
@@ -406,7 +408,65 @@ impl Heavy {
             );
             let _ = fs::remove_file(&f);
         }
-        None
+        out
+    }
+
+    /// The suffix of the first live high marker that still counts: not older than `priority_max`, and not seen by a waiter that
+    /// has itself waited `priority_max` (`waited` seconds). The bound is what keeps priority from starving anyone for good.
+    pub fn counting_high_marker(&self, who: &str, waited: u64) -> (Option<String>, Vec<String>) {
+        let (mut counts, mut ignored) = (None, Vec::new());
+        for (m, age) in self.live_high_markers(who) {
+            let max = self.marker_max(&m).as_secs();
+            if age >= max || waited >= max {
+                ignored.push(m);
+            } else if counts.is_none() {
+                counts = Some(m);
+            }
+        }
+        (counts, ignored)
+    }
+
+    /// The bound of a marker: a CI job's has its own (`ci_priority_max`), every other priority run's is `priority_max`.
+    pub fn marker_max(&self, suffix: &str) -> Duration {
+        if record::is_ci_marker(suffix) {
+            self.cfg.ci_priority_max
+        } else {
+            self.cfg.priority_max
+        }
+    }
+
+    /// Announces a CI job (`name` starts with `ci-`) on this host: a high marker held by `pid`, the job's long-lived process.
+    /// It goes with that process (a dead holder's marker is removed by the next run that sees it) and is ignored after
+    /// `ci_priority_max`, so a crashed or hung job cannot hold every agent for good. Err: the marker could not be written.
+    pub fn mark(&self, name: &str, pid: u32) -> Result<PathBuf, String> {
+        let _ = fs::create_dir_all(&self.cfg.root);
+        let m = self.cfg.root.join(format!("{HIGH_PREFIX}{pid}-{}", record::sanitize_name(name)));
+        let tmp = self.tmp_name("high.");
+        // The holder started before this call: its record epoch is now.
+        let body = record::format_marker(pid, "ci", self.now());
+        if fs::write(&tmp, body).is_err() || fs::rename(&tmp, &m).is_err() {
+            let _ = fs::remove_file(&tmp);
+            return Err(format!(
+                "cannot write the marker {} (is {} writable and not full?)",
+                m.display(),
+                self.cfg.root.display()
+            ));
+        }
+        self.log
+            .info("heavy.mark", "announced a CI job", &[("Name", json!(name)), ("Pid", json!(pid))]);
+        Ok(m)
+    }
+
+    /// Removes the marker `mark` wrote; true when there was one.
+    pub fn unmark(&self, name: &str, pid: u32) -> bool {
+        let m = self.cfg.root.join(format!("{HIGH_PREFIX}{pid}-{}", record::sanitize_name(name)));
+        let gone = fs::remove_file(&m).is_ok();
+        self.log.info(
+            "heavy.mark",
+            "CI job marker removed",
+            &[("Name", json!(name)), ("Pid", json!(pid)), ("Was", json!(gone))],
+        );
+        gone
     }
 
     /// Prunes dead tickets; returns (my position 1-based or 0, queue length, name of the head).
@@ -621,6 +681,7 @@ pub struct Acquirer<'a> {
     last_note: u64,
     last_reason: String,
     waited_micros: u64,
+    bound_said: bool,
 }
 
 impl<'a> Acquirer<'a> {
@@ -641,6 +702,7 @@ impl<'a> Acquirer<'a> {
             last_note: t0,
             last_reason: String::new(),
             waited_micros: 0,
+            bound_said: false,
         };
         if a.req.high {
             let m = h
@@ -722,15 +784,36 @@ impl<'a> Acquirer<'a> {
             if self.held.is_some() {
                 return Poll::Held;
             }
-            if !self.req.high
-                && let Some(hm) = h.live_high_marker(&name)
-            {
-                self.wait_for(
-                    "high",
-                    &format!("a high-priority run goes first ({hm})"),
-                    &[("Reason", json!("high-priority")), ("Marker", json!(hm))],
-                );
-                return Poll::Waiting;
+            if !self.req.high {
+                let waited = h.now().saturating_sub(self.t0);
+                let (counts, ignored) = h.counting_high_marker(&name, waited);
+                if !ignored.is_empty() && !self.bound_said {
+                    self.bound_said = true;
+                    let msg = format!(
+                        "{name} no longer yields to the priority run(s) {} (priority bound {} s reached, waited {waited}s)",
+                        ignored.join(", "),
+                        ignored.iter().map(|m| h.marker_max(m).as_secs()).max().unwrap_or(0)
+                    );
+                    (h.say)(&msg);
+                    h.alog(&msg);
+                    h.log.warn(
+                        "heavy.priority",
+                        &msg,
+                        &[
+                            ("Markers", json!(ignored)),
+                            ("PriorityMaxSeconds", json!(h.cfg.priority_max.as_secs())),
+                            ("WaitedSeconds", json!(waited)),
+                        ],
+                    );
+                }
+                if let Some(hm) = counts {
+                    self.wait_for(
+                        "high",
+                        &format!("a high-priority run goes first ({hm})"),
+                        &[("Reason", json!("high-priority")), ("Marker", json!(hm))],
+                    );
+                    return Poll::Waiting;
+                }
             }
             let old = h.cfg.root.join(OLD_NAME);
             if old.is_dir() {
@@ -792,7 +875,11 @@ impl<'a> Acquirer<'a> {
                             "queue wait over",
                             &[("Phase", json!("queue_wait")), ("DurationMs", json!(self.waited_micros / 1000))],
                         );
-                        if let Some(m) = self.marker.take() {
+                        // One slot: the lock itself keeps the others out, so the marker goes now (the shell plock does the same).
+                        // Several slots: it stays until release, or a free slot would let a normal run in beside the priority run.
+                        if h.cfg.slots == 1
+                            && let Some(m) = self.marker.take()
+                        {
                             let _ = fs::remove_file(m);
                         }
                         let _ = fs::remove_file(&self.ticket);

@@ -116,6 +116,59 @@ fn acquires_uses_releases_and_sweeps_with_the_real_binary() {
     assert!(text(&h.run(&["status"], &[], false).stdout).contains("s1 free"));
 }
 
+/// A stand-in for `heavy` that records its arguments (a throw-away script, never a real queue).
+fn fake_heavy(root: &Path, exit: i32) -> (PathBuf, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let log = root.join("heavy-calls");
+    let bin = root.join("fake-heavy");
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh\necho \"$@\" >> '{}'\necho 'fake heavy says no' >&2\nexit {exit}\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+    (bin, log)
+}
+
+#[test]
+fn a_host_job_announces_itself_to_the_agents_heavy_queue_for_as_long_as_it_holds_its_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "tools tools shared\n");
+    let (bin, calls) = fake_heavy(d.path(), 0);
+    let envs = [("PADDOCK_HEAVY_BIN", bin.to_str().unwrap())];
+    let acq = h.run(&["acquire"], &envs, false);
+    assert!(acq.status.success(), "{}", text(&acq.stderr));
+    let holder = std::fs::read_to_string(h.ci.join("slots/s1.owner")).unwrap();
+    let pid = holder.lines().find_map(|l| l.strip_prefix("pid=")).unwrap().to_string();
+    assert_eq!(std::fs::read_to_string(&calls).unwrap().trim(), format!("mark ci-s1 --pid {pid}"));
+    assert!(text(&acq.stderr).contains("announced ci-s1"), "{}", text(&acq.stderr));
+    let rel = h.run(&["release"], &envs, true);
+    assert!(rel.status.success(), "{}", text(&rel.stderr));
+    let all = std::fs::read_to_string(&calls).unwrap();
+    assert_eq!(all.lines().last().unwrap(), format!("mark --remove ci-s1 --pid {pid}"), "{all}");
+}
+
+#[test]
+fn a_heavy_that_fails_or_is_missing_is_said_and_never_stops_the_job() {
+    let d = tempfile::tempdir().unwrap();
+    let h = Host::new(d.path(), "tools tools shared\n");
+    let (bin, _) = fake_heavy(d.path(), 75);
+    let failing = h.run(&["acquire"], &[("PADDOCK_HEAVY_BIN", bin.to_str().unwrap())], false);
+    assert!(failing.status.success(), "{}", text(&failing.stderr));
+    let err = text(&failing.stderr);
+    assert!(
+        err.contains("::warning::job-isolation: `heavy mark ci-s1") && err.contains("fake heavy says no"),
+        "{err}"
+    );
+    assert!(h.run(&["release"], &[], true).status.success());
+    let none = h.run(&["acquire"], &[("PADDOCK_HEAVY_BIN", "/nonexistent/heavy")], false);
+    assert!(none.status.success());
+    assert!(text(&none.stderr).contains("could not be started"), "{}", text(&none.stderr));
+}
+
 #[test]
 fn the_amended_layouts_key_by_source_retire_old_folders_once_and_never_retire_a_current_one() {
     let d = tempfile::tempdir().unwrap();

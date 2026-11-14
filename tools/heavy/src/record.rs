@@ -143,6 +143,11 @@ pub fn marker_pid(suffix: &str) -> Option<u32> {
     digits(suffix.split('-').next().unwrap_or("")).and_then(|p| u32::try_from(p).ok())
 }
 
+/// Whether a marker's name suffix (`<pid>-<name>`) is a CI job's: its name starts with `ci-` (`heavy mark ci-<slot>`).
+pub fn is_ci_marker(suffix: &str) -> bool {
+    suffix.split_once('-').is_some_and(|(_, name)| name.starts_with("ci-"))
+}
+
 /// A marker's name part: every byte outside `A-Za-z0-9._-` becomes `_` (as `tr -c` does, per byte).
 pub fn sanitize_name(name: &str) -> String {
     name.bytes()
@@ -230,6 +235,7 @@ mod tests {
         assert_eq!(marker_pid("123-agent"), Some(123));
         assert_eq!(marker_pid("99999999-x y z"), Some(99_999_999));
         assert_eq!(marker_pid("abc-x"), None);
+        assert!(is_ci_marker("123-ci-s2") && !is_ci_marker("123-agent") && !is_ci_marker("123-ci"));
         assert_eq!(sanitize_name("a b/é"), "a_b___");
         assert_eq!(parse_marker_epoch(b"1\nx\n55\n"), Some(55));
         assert_eq!(parse_marker_epoch(b"1\nx\n"), None);
