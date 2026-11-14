@@ -257,14 +257,32 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
             cmd.env(k, fill(v, fx));
         }
     }
-    // ADR 0103: every process the step starts ends with it. The reaper follows the step's tree and ends anything still running that
-    // it saw or that names the fixture (a hung git shim's `sleep`, a holder a phase limit left), and the test fails on a leak (ER-14).
-    let reaper = paddock_testkit_start::Reaper::marked("a host step", &fx.root());
-    let out = reaper
+    // ADR 0103: every process the step starts ends with it. The step runs in a group of the reaper's with its token; the reaper ends
+    // anything of the step still running (a hung git shim's `sleep`, a holder a phase limit left), and the test fails on a leak
+    // (ER-14). The order matters: wait for the step itself, then reap, then read the pipes to their end, so a leaked process that
+    // still holds a pipe cannot keep the read (and the test) waiting.
+    let reaper = paddock_testkit_start::Reaper::new("a host step");
+    let mut child = reaper
         .spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))
-        .and_then(std::process::Child::wait_with_output)
         .unwrap();
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = std::io::Read::read_to_end(&mut p, &mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+    let status = child.wait().unwrap();
     let left = reaper.reap();
+    let out = std::process::Output {
+        status,
+        stdout: stdout.join().expect("the stdout reader panicked"),
+        stderr: stderr.join().expect("the stderr reader panicked"),
+    };
     assert!(
         left.is_empty(),
         "the {} step left processes running after it ended: {left:?}",
