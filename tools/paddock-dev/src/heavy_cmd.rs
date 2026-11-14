@@ -3,6 +3,7 @@
 //! `heavy` built from tools/heavy). When none can be found it is an error with the next step: never an unthrottled run.
 
 use crate::pre_push::exec::{BUDGET, heavy_command_for, on_path};
+use crate::pre_push::heavy_tool::Held;
 use clap::Args;
 use paddock_cli::{CliError, Report};
 use serde_json::json;
@@ -24,7 +25,7 @@ pub fn plan(
     env: &HashMap<String, String>,
     has: &dyn Fn(&str) -> bool,
     root: &Path,
-    built: &OnceLock<Result<PathBuf, String>>,
+    built: &OnceLock<Result<Held, String>>,
 ) -> Result<Vec<String>, String> {
     let prefix = heavy_command_for(root, env, has, built, BUDGET).map_err(|why| {
         format!("dev heavy: no machine-wide heavy slot, so `{}` was not started: {why}. Next: put `heavy` or `heavy.sh` on PATH, set PADDOCK_HEAVY, or fix the build of tools/heavy", command[0])
@@ -48,6 +49,8 @@ pub fn command(a: &HeavyArgs) -> Result<Report, CliError> {
         .args(args)
         .status()
         .map_err(|e| CliError::failure(format!("dev heavy: cannot start {program}: {e}")))?;
+    // The hold ends with the command (and before `exit`, which runs no destructors).
+    drop(built);
     if status.success() {
         return Ok(Report::new(json!({ "ok": true }), ""));
     }

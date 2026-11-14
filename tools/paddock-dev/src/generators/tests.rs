@@ -493,3 +493,124 @@ fn the_default_build_roots_are_the_disk_settings_roots() {
     assert_eq!(roots, [std::path::PathBuf::from("/nope/a"), std::path::PathBuf::from("/nope/b")]);
     assert!(!include_str!("run.rs").contains("DEFAULT_ROOTS"), "run.rs names no machine path");
 }
+
+/// A cargo check that compiles: its build is a phase of its own, before the run and outside the run's hang guard.
+const BUILT: &str = r#"
+version = 1
+[[generator]]
+id = "wire"
+what = "TypeScript from Rust"
+build = ["cargo", "test", "--no-run", "-p", "app", "--lib"]
+check = ["cargo", "test", "-p", "app", "--lib", "generated_types"]
+regenerate = "WRITE=1 cargo test -p app --lib generated_types"
+cwd = "crates"
+paths = ["crates/**"]
+cost = "heavy"
+drift_marker = ["test result: FAILED"]
+"#;
+
+/// Records each start with the limit it got and how long it "took": the build is slow (longer than the run's whole guard).
+#[derive(Default)]
+struct Timed {
+    /// `argv[2]` (`--no-run` for the build) -> what it does; a missing one exits 0.
+    answers: BTreeMap<String, Ran>,
+    started: Mutex<Vec<(String, std::time::Duration)>>,
+}
+
+impl Runner for Timed {
+    fn run(&self, _dir: &Path, argv: &[String], limit: std::time::Duration, spec: &super::run::Spec) -> Ran {
+        assert!(
+            spec.heavy && spec.workspace == "crates",
+            "both phases queue for the slot in the workspace's folder"
+        );
+        self.started.lock().unwrap().push((argv.join(" "), limit));
+        self.answers.get(&argv[2]).cloned().unwrap_or(Ran::exit(0, ""))
+    }
+    fn exists(&self, _path: &Path) -> bool {
+        true
+    }
+}
+
+fn run_built(fake: &Timed) -> (Report, Vec<String>) {
+    let reg = Registry::parse(BUILT).unwrap();
+    let lines = Mutex::new(Vec::new());
+    let r = check_with(&reg, Path::new("/r"), &["crates/a.rs".into()], false, &[], fake, &|l| {
+        lines.lock().unwrap().push(l.to_string())
+    })
+    .unwrap();
+    (r, lines.into_inner().unwrap())
+}
+
+#[test]
+fn the_build_runs_first_as_its_own_phase_and_only_the_run_is_under_the_run_guard() {
+    use super::registry::Cost;
+    let fake = Timed::default();
+    let (r, lines) = run_built(&fake);
+    assert_eq!(r.exit, Exit::Ok, "{}", r.text);
+    let started = fake.started.lock().unwrap().clone();
+    assert_eq!(started.len(), 2, "{started:?}");
+    assert_eq!(started[0].0, "cargo test --no-run -p app --lib", "the build comes first");
+    assert_eq!(started[0].1, run::build_limit(), "the build has its own bound");
+    assert_eq!(started[1].0, "cargo test -p app --lib generated_types");
+    assert_eq!(
+        started[1].1,
+        run::limit(Cost::Heavy),
+        "the run gets its whole guard, whatever the build took"
+    );
+    // Both phases are logged with their own duration (ER-27), and the result carries the build's.
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("gen wire: building [heavy] cd crates && cargo test --no-run")),
+        "{lines:?}"
+    );
+    assert!(lines.iter().any(|l| l.starts_with("gen wire: built in ")), "{lines:?}");
+    assert!(lines.iter().any(|l| l.starts_with("gen wire: running [heavy]")), "{lines:?}");
+    let res = &r.data["results"][0];
+    assert!(res["build_seconds"].is_number(), "{res}");
+}
+
+#[test]
+fn a_build_that_fails_or_overruns_is_not_measured_and_the_check_never_starts() {
+    let mut fake = Timed::default();
+    fake.answers.insert("--no-run".into(), Ran::TimedOut);
+    let (r, lines) = run_built(&fake);
+    assert_eq!(r.exit, Exit::NotMeasured, "{}", r.text);
+    assert_eq!(fake.started.lock().unwrap().len(), 1, "the run is not started after a failed build");
+    let detail = r.data["results"][0]["detail"].as_str().unwrap().to_string();
+    assert!(
+        detail.contains("the build phase") && detail.contains(&format!("{} s", run::build_limit().as_secs())),
+        "{detail}"
+    );
+    assert!(lines.iter().any(|l| l.contains("gen wire: build NOT MEASURED")), "{lines:?}");
+
+    let mut fake = Timed::default();
+    fake.answers.insert(
+        "--no-run".into(),
+        Ran::exit(101, "error: could not compile `app` (lib test) due to 1 previous error"),
+    );
+    let (r, _) = run_built(&fake);
+    assert_eq!(r.exit, Exit::NotMeasured, "a build error is never drift: {}", r.text);
+    assert!(r.data["results"][0]["detail"].as_str().unwrap().contains("could not compile"));
+}
+
+#[test]
+fn a_check_that_still_compiles_after_its_build_is_flagged() {
+    // The build command must build what the check runs; a check that compiles anyway was timed with its build in it.
+    let mut fake = Timed::default();
+    fake.answers.insert(
+        "-p".into(),
+        Ran::exit(
+            0,
+            "   Compiling app v0.1.0 (/r/crates/app)\n    Finished `test` profile\ntest result: ok.",
+        ),
+    );
+    let (r, lines) = run_built(&fake);
+    assert_eq!(r.exit, Exit::Ok);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("::warning::gen wire: the check compiled after its build phase")),
+        "{lines:?}"
+    );
+}

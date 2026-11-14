@@ -66,11 +66,13 @@ pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Res
             home.join("bin").join(format!("heavy-{}", h.hash)).join(exe("heavy")),
         )
     };
-    if !h.dirty && cached.is_file() {
-        if runs(&cached, env) {
-            return Ok(cached);
-        }
-        let _ = std::fs::remove_file(&cached);
+    // A cached binary that fails its probe is not removed: a probe that timed out on a loaded machine is no proof the file is
+    // broken, and another agent may be running it. The build below replaces it by an atomic rename, which leaves every running
+    // copy and every hold intact.
+    if !h.dirty && cached.is_file() && runs(&cached, env) {
+        // A hit is use: `./dev`'s prune of `bin/` spares a folder used within a day (best effort; a miss costs a rebuild).
+        touch(cached.parent().unwrap_or(&home));
+        return Ok(cached);
     }
     if left.is_zero() {
         return Err(format!(
@@ -139,6 +141,77 @@ fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, l
     Ok(built)
 }
 
+/// Marks `dir` as used now (its modification time), so an age-based prune keeps it. Errors are ignored: it is only a hint.
+fn touch(dir: &Path) {
+    let _ = std::fs::File::open(dir).and_then(|f| f.set_modified(std::time::SystemTime::now()));
+}
+
+/// A run's own hold on a cached `heavy`: a hard link (else a copy) under `<cache>/held/`, outside `bin/`, which `./dev` prunes
+/// and other agents' builds replace. A run resolves heavy once and starts it many times over minutes or hours; holding its own
+/// name means no other agent's prune, probe or publish can take it away between those starts (2026-11-14: six generators of
+/// one `gen check` found the shared binary gone). Removed when dropped.
+#[derive(Debug)]
+pub struct Held {
+    path: PathBuf,
+}
+
+impl Held {
+    /// The held binary: start this, never the shared cache path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for Held {
+    fn drop(&mut self) {
+        // Our own unique name, made by `hold`: nothing else is removed (ER-14).
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// How old a hold must be before a later `hold` removes it as left behind by a run that was killed: no run lasts a week.
+const STALE_HOLD: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// Holds the cached binary `bin` for this run (see [`Held`]). `Err` is the whole explanation.
+pub fn hold(bin: &Path, env: &HashMap<String, String>) -> Result<Held, String> {
+    let dir = home(env)?.join("held");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot hold heavy: cannot make {}: {e}. Next: make it writable", dir.display()))?;
+    sweep(&dir);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let path = dir.join(exe(&format!("heavy-{}-{nanos:x}", std::process::id())));
+    // A hard link costs nothing and keeps the file alive whatever happens to the cache's name; a copy where links do not work.
+    std::fs::hard_link(bin, &path)
+        .or_else(|_| std::fs::copy(bin, &path).map(|_| ()))
+        .map_err(|e| {
+            format!(
+                "cannot hold heavy: {} could not be linked or copied to {}: {e}. Next: run the command again (another agent may have replaced the cache at that moment)",
+                bin.display(),
+                path.display()
+            )
+        })?;
+    // ER-27: which binary this run starts, so a later "not found" names the hold, not the shared cache.
+    eprintln!("heavy: this run holds {} as {}", bin.display(), path.display());
+    Ok(Held { path })
+}
+
+/// Removes holds older than [`STALE_HOLD`] (a run that was killed before its hold was dropped).
+fn sweep(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let old = e
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > STALE_HOLD);
+        if old && e.file_name().to_string_lossy().starts_with("heavy-") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 /// Publishes `built` as `bin` by an atomic rename from a name of our own beside it.
 fn publish(built: &Path, bin: &Path) -> Result<(), String> {
     let dir = bin.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -147,4 +220,56 @@ fn publish(built: &Path, bin: &Path) -> Result<(), String> {
     std::fs::copy(built, &tmp)
         .and_then(|_| std::fs::rename(&tmp, bin))
         .map_err(|e| format!("cannot publish heavy into {}: {e}", dir.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fake_heavy(home: &Path) -> PathBuf {
+        let dir = home.join("bin").join("heavy-abc");
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join(exe("heavy"));
+        std::fs::write(&bin, "#!/bin/sh\necho held\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        bin
+    }
+
+    #[test]
+    fn a_held_heavy_survives_another_agent_removing_or_replacing_the_cache() {
+        let home = tempfile::tempdir().unwrap();
+        let env = HashMap::from([("PADDOCK_DEV_HOME".to_string(), home.path().display().to_string())]);
+        let cached = fake_heavy(home.path());
+        let held = hold(&cached, &env).unwrap();
+        assert_ne!(held.path(), cached, "the run uses its own name, not the shared cache's");
+        assert!(
+            !held.path().starts_with(home.path().join("bin")),
+            "outside the folder `./dev` prunes"
+        );
+        // Another agent's `./dev` prunes the cache folder (or a failed `--version` probe removes the binary) mid-run.
+        std::fs::remove_dir_all(home.path().join("bin")).unwrap();
+        assert!(held.path().is_file(), "the held binary is still there for the later steps");
+        #[cfg(unix)]
+        {
+            let out = paddock_proc::command(held.path()).output().unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "held");
+        }
+        // Dropping the hold removes the run's own name, and only it.
+        let path = held.path().to_path_buf();
+        drop(held);
+        assert!(!path.exists(), "the hold is removed when the run ends");
+        assert!(home.path().join("held").is_dir());
+    }
+
+    #[test]
+    fn a_missing_cached_binary_cannot_be_held_and_says_why() {
+        let home = tempfile::tempdir().unwrap();
+        let env = HashMap::from([("PADDOCK_DEV_HOME".to_string(), home.path().display().to_string())]);
+        let why = hold(&home.path().join("bin/heavy-x/heavy"), &env).err().unwrap();
+        assert!(why.contains("cannot hold heavy") && why.contains("Next:"), "{why}");
+    }
 }

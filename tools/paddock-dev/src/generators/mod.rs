@@ -74,7 +74,13 @@ pub fn lines_of(results: &[Checked]) -> Vec<String> {
     let mut out = Vec::new();
     for r in results {
         match &r.verdict {
-            Verdict::Current => out.push(format!("gen {}: current ({:.1}s) [{}]", r.id, r.took.as_secs_f64(), r.line)),
+            Verdict::Current => out.push(format!(
+                "gen {}: current ({:.1}s{}) [{}]",
+                r.id,
+                r.took.as_secs_f64(),
+                r.built.map(|b| format!(", built in {:.1}s", b.as_secs_f64())).unwrap_or_default(),
+                r.line
+            )),
             Verdict::Stale(tail) => out.push(format!(
                 "::error::gen {}: STALE [{}]: {tail}. Next step: run `{}`, review and commit the result, then `./dev gen check --only {}`.",
                 r.id, r.line, r.regenerate, r.id
@@ -99,7 +105,8 @@ pub fn json_of(results: &[Checked]) -> serde_json::Value {
                 Verdict::NotMeasured(w) => ("not measured", w.clone()),
             };
             json!({"id": r.id, "verdict": verdict, "detail": detail, "check": r.line, "regenerate": r.regenerate,
-                   "cost": r.cost.name(), "seconds": r.took.as_secs_f64()})
+                   "cost": r.cost.name(), "seconds": r.took.as_secs_f64(),
+                   "build_seconds": r.built.map(|b| b.as_secs_f64())})
         })
         .collect()
 }
