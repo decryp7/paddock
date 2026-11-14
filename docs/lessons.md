@@ -1991,3 +1991,15 @@ the owner, immediately before acting on a process) covers an agent's own process
 read earlier or found in `ps` is a hint. Before a kill, check the process's cwd (it must be inside your own worktree) and its
 start time against your own start of the command, or hold the child handle you spawned. **Class: acting on a reusable OS name
 without identity (rule 53).**
+
+## An agent killed another agent's process because it assumed the pid was its own (rule 53, 2026-11-14)
+The train-11 integrator killed `lefthook run pre-commit` (pid 34522), which belonged to another agent's worktree: it took the
+pid for its own hook run without checking the process's working folder or start time. Earlier instances of the same class: a
+test's close killed another test's browser by a reused pid (2026-10-30, above), Dyno read `agent.json` and acted on a pid that
+had outlived its agent, and Dyno's launcher dropped the handle of its first child and could end only the newest (both
+2026-10-30). Rule 53 covers an agent's own process handling too, not only the product's code: a pid read earlier or found in
+`ps` or `pgrep` is a hint, never an owner. **Rule for agents:** end only a process whose handle you hold (you spawned it and
+kept the child), or, when you must act on a pid, check immediately before the kill that its cwd is inside your own worktree and
+that its start time is later than your own command's start; if either is unknown or differs, do not kill: report it to its
+owner or the coordinator. Never `pkill -f` or `kill` by a name pattern (`lefthook`, `cargo`, `node`) because every agent runs
+the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
