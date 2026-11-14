@@ -7,17 +7,17 @@
     },
     {
       "path": "tools/paddock-dev/src/check/outcome.rs",
-      "site": "NotMeasured,",
+      "site": "pub enum Outcome { NotMeasured,",
       "reason": "Seed 2026-11-13 (shrink only): the Rust conformance host still has its own two-value Outcome (WP-T2 Rust half: replace with paddock_cli::Outcome)"
     },
     {
       "path": "tools/paddock-dev/src/check/record.rs",
-      "site": "Clean,",
+      "site": "pub enum Status { Clean,",
       "reason": "Seed 2026-11-13 (shrink only): the run record Status (Clean, NotMeasured) of the Rust host (WP-T2 Rust half)"
     },
     {
       "path": "tools/paddock-dev/src/check/record.rs",
-      "site": "NotMeasured,",
+      "site": "pub enum Status { NotMeasured,",
       "reason": "Seed 2026-11-13 (shrink only): the run record Status (Clean, NotMeasured) of the Rust host (WP-T2 Rust half)"
     },
     {
@@ -32,17 +32,17 @@
     },
     {
       "path": "tools/paddock-dev/src/ci_runs/verdict.rs",
-      "site": "Green {",
+      "site": "pub enum Verdict { Green {",
       "reason": "Seed 2026-11-13 (shrink only): ci verdict Verdict{Green,Red,NotMeasured} and its Evidence::ci_run owner (WP-T4)"
     },
     {
       "path": "tools/paddock-dev/src/ci_runs/verdict.rs",
-      "site": "NotMeasured(String),",
+      "site": "pub enum Verdict { NotMeasured(String),",
       "reason": "Seed 2026-11-13 (shrink only): ci verdict Verdict{Green,Red,NotMeasured} and its Evidence::ci_run owner (WP-T4)"
     },
     {
       "path": "tools/paddock-dev/src/ci_runs/verdict.rs",
-      "site": "Clean,",
+      "site": "pub enum Earlier { Clean,",
       "reason": "Seed 2026-11-13 (shrink only): ci verdict Verdict{Green,Red,NotMeasured} and its Evidence::ci_run owner (WP-T4)"
     },
     {
@@ -52,7 +52,7 @@
     },
     {
       "path": "tools/paddock-dev/src/disk/mod.rs",
-      "site": "Clean(clean::CleanArgs),",
+      "site": "pub enum DiskCommand { Clean(clean::CleanArgs),",
       "reason": "Seed 2026-11-13 (shrink only): a disk cleanliness state, not a gate result"
     },
     {
@@ -72,7 +72,7 @@
     },
     {
       "path": "tools/paddock-dev/src/load.rs",
-      "site": "NotMeasured(String),",
+      "site": "pub enum CiQueue { NotMeasured(String),",
       "reason": "Seed 2026-11-13 (shrink only): the machine-load verdict, not a gate result"
     },
     {
@@ -122,17 +122,12 @@
     },
     {
       "path": "tools/paddock-dev/src/pre_push/exec.rs",
-      "site": "NotMeasured,",
+      "site": "pub enum Kind { NotMeasured,",
       "reason": "Seed 2026-11-13 (shrink only): the pre-push row type exec::Verdict (WP-T3 part: rows fold into outcomes at the boundary; the row type stays)"
     },
     {
-      "path": "tools/paddock-dev/src/pre_push/exec.rs",
-      "site": "let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || Ok(Vec::new()));",
-      "reason": "Row::passed: the gate ran and its exit status was checked by the caller before this row is built; the measurement is that run, and the row's evidence is the commit and tree (ADR 0089 A-table row 3)"
-    },
-    {
       "path": "tools/paddock-dev/src/pre_push/gates.rs",
-      "site": "NotMeasured {",
+      "site": "pub enum Planned { NotMeasured {",
       "reason": "Seed 2026-11-13 (shrink only): Planned::NotMeasured, a planning row for the table (WP-T3)"
     },
     {
@@ -167,12 +162,12 @@
     },
     {
       "path": "tools/paddock-dev/src/worktree/mod.rs",
-      "site": "Clean(CleanArgs),",
+      "site": "pub enum WorktreeCommand { Clean(CleanArgs),",
       "reason": "Seed 2026-11-13 (shrink only): a worktree state (clean or dirty), not a gate result"
     },
     {
       "path": "tools/paddock-dev/src/worktree/primary.rs",
-      "site": "NotMeasured,",
+      "site": "pub enum Severity { NotMeasured,",
       "reason": "Seed 2026-11-13 (shrink only): the primary checkout probe (RT-3), its own not-measured state"
     }
   ]

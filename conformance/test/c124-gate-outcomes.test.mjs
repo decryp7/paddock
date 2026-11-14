@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { flaggedJs, flaggedRust, isAllowed, parseAllow } from '../src/checks/C124-gate-outcomes.mjs';
+import { flaggedJs, flaggedRust, matchingEntries, parseAllow } from '../src/checks/C124-gate-outcomes.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const DEV = 'tools/paddock-dev/src/x/mod.rs';
@@ -35,7 +35,12 @@ test('C124 bad: a measurement that always returns an empty list', () => {
   assert.equal(flaggedRust(DEV, 'let o = measure(id, s, t, now, || Ok(Vec::new()));\n').length, 1);
   assert.equal(flaggedRust(DEV, 'let o = measure(id, s, t, now, || Ok(vec![]));\n').length, 1);
   const multi = 'let o = measure(\n    id,\n    s,\n    || {\n        Ok(Vec::default())\n    },\n);\n';
-  assert.deepEqual(flaggedRust(DEV, multi).map((f) => f.line), [5]);
+  assert.deepEqual(flaggedRust(DEV, multi).map((f) => [f.line, f.text]), [[1, 'let o = measure(']]); // the `measure(` line is the site
+  assert.equal(flaggedRust(DEV, 'let o = measure(id, s, t, now, || Ok(Default::default()));\n').length, 1);
+  // comments are not code, and the match ends with the call: the next arm is another measurement
+  assert.equal(flaggedRust(DEV, '// measure(a, || Ok(Vec::new()))\nlet o = measure(a, b, c, d, || Ok(found));\n').length, 0);
+  assert.equal(flaggedRust(DEV, 'let o = measure(a, b, c, d, || Ok(found));\nlet p = other(|| Ok(Vec::new()));\n').length, 0);
+  assert.equal(flaggedRust(DEV, 'let o = measure(a, b, c, d, || {\n    // Ok(Vec::new())\n    Ok(found)\n});\n').length, 0);
   assert.equal(flaggedRust(DEV, 'let o = measure(id, s, t, now, || Ok(vec![Finding::failing(c)]));\n').length, 0);
   assert.equal(flaggedRust(DEV, 'let o = measure(id, s, t, now, || Ok(found));\n').length, 0);
   assert.equal(flaggedRust(DEV, 'let a = Ok(Vec::new());\nlet o = measure(id, s, t, now, || Ok(found));\n').length, 0);
@@ -44,9 +49,9 @@ test('C124 bad: a measurement that always returns an empty list', () => {
 test('C124 allow list: per site, never a whole file', () => {
   const allow = parseAllow('{"allow": [{"path": "a/b.rs", "site": "|| Ok(Vec::new())", "reason": "a reason that is long enough"}]}');
   assert.deepEqual(allow, [{ path: 'a/b.rs', site: '|| Ok(Vec::new())', reason: 'a reason that is long enough' }]);
-  assert.equal(isAllowed(allow, 'a/b.rs', 'x(|| Ok(Vec::new()))'), true);
-  assert.equal(isAllowed(allow, 'a/b.rs', 'enum Verdict { NotMeasured }'), false);
-  assert.equal(isAllowed(allow, 'a/c.rs', 'x(|| Ok(Vec::new()))'), false);
+  assert.deepEqual(matchingEntries(allow, 'a/b.rs', 'x(|| Ok(Vec::new()))'), [0]);
+  assert.deepEqual(matchingEntries(allow, 'a/b.rs', 'enum Verdict { NotMeasured }'), []);
+  assert.deepEqual(matchingEntries(allow, 'a/c.rs', 'x(|| Ok(Vec::new()))'), []);
   assert.throws(() => parseAllow('{"allow": [{"path": "a/b.rs", "reason": "a reason that is long enough"}]}'), /site/);
   assert.throws(() => parseAllow('{"allow": [{"path": "a", "site": "x"}]}'), /reason/);
   assert.throws(() => parseAllow('nope'), /not JSON/);
@@ -57,13 +62,27 @@ test('C124 through the runner: warnings only, the allow list spares a file, a mi
   const root = makeApp({
     'conformance/c124-allow.json': '{"allow": [{"path": "tools/paddock-dev/src/ok.rs", "site": "NotMeasured", "reason": "the seed, shrink only"}]}',
     [DEV]: bad,
-    'tools/paddock-dev/src/ok.rs': bad,
-    // a listed file does not hide a different site in it
-    'tools/paddock-dev/src/part.rs': `${bad}fn f() { let o = measure(a, b, c, d, || Ok(Vec::new())); }\n`,
+    // a listed file does not hide a different, unlisted site in it
+    'tools/paddock-dev/src/ok.rs': `${bad}fn f() { let o = measure(a, b, c, d, || Ok(Vec::new())); }\n`,
   });
   const found = await findingsOf('C124', root);
-  assert.deepEqual(found.map((f) => [f.file, f.severity]).sort(), [['tools/paddock-dev/src/part.rs', 'warn'], ['tools/paddock-dev/src/part.rs', 'warn'], [DEV, 'warn']]);
+  assert.deepEqual(found.map((f) => [f.file, f.severity]).sort(), [['tools/paddock-dev/src/ok.rs', 'warn'], [DEV, 'warn']]);
+  assert.match(found.find((f) => f.file === 'tools/paddock-dev/src/ok.rs').message, /empty list/);
   const none = makeApp({ [DEV]: bad });
   const broken = await findingsOf('C124', none);
   assert.equal(broken.some((f) => f.outcome === 'check-broken'), true);
+});
+
+test('C124 allow list: a stale entry and an ambiguous entry are warnings', async () => {
+  const two = 'enum A {\n    NotMeasured,\n}\nenum B {\n    NotMeasured,\n}\n';
+  const f = 'tools/paddock-dev/src/two.rs';
+  const allow = (site, path = f) => JSON.stringify({ allow: [{ path, site, reason: 'a reason long enough' }] });
+  const stale = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('Clean,'), [f]: two }));
+  assert.equal(stale.some((x) => x.file === 'conformance/c124-allow.json' && /stale/.test(x.message)), true);
+  const gone = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('x', 'tools/paddock-dev/src/gone.rs') }));
+  assert.equal(gone.some((x) => /stale/.test(x.message)), true);
+  const amb = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('NotMeasured,'), [f]: two }));
+  assert.equal(amb.some((x) => /ambiguous/.test(x.message)), true);
+  const ok = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('NotMeasured,'), [f]: 'enum A {\n    NotMeasured,\n}\n' }));
+  assert.deepEqual(ok, []);
 });

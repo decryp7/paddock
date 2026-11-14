@@ -1278,8 +1278,9 @@ fn c124_tree() -> tempfile::TempDir {
     let files: &[(&str, &str)] = &[
         (
             "conformance/c124-allow.json",
-            "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"reason\":\"the seed, shrink only\"}]}",
+            "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"site\":\"NotMeasured\",\"reason\":\"the seed, shrink only\"},{\"path\":\"tools/paddock-dev/src/gone.rs\",\"site\":\"x\",\"reason\":\"a stale entry\"},{\"path\":\"tools/paddock-dev/src/two.rs\",\"site\":\"Clean,\",\"reason\":\"an ambiguous entry\"}]}",
         ),
+        ("tools/paddock-dev/src/two.rs", "enum A {\n    Clean,\n}\nenum B {\n    Clean,\n}\n"),
         (
             "tools/paddock-dev/src/a.rs",
             "pub enum V {\n    Green { run: u64 },\n    NotMeasured(String),\n}\n",
@@ -1293,7 +1294,10 @@ fn c124_tree() -> tempfile::TempDir {
             "impl R {\n    pub fn fails(&self) -> bool { true }\n}\nlet e = Evidence::ci_run(a, b);\n",
         ),
         ("tools/paddock-dev/src/ci_runs/verdict.rs", "let e = Evidence::adopt(x, &repo);\n"),
-        ("tools/paddock-dev/src/ok.rs", "pub enum V {\n    NotMeasured,\n}\n"),
+        (
+            "tools/paddock-dev/src/ok.rs",
+            "pub enum V {\n    NotMeasured,\n}\nfn f() { let o = measure(a, b, c, d, || Ok(Vec::new())); }\n",
+        ),
         (
             "tools/paddock-dev/src/d.rs",
             "// json!({\"status\": \"clean\"})\nfn x() {}\n#[cfg(test)]\nmod tests {\n    fn t() { json!({\"status\": 1}); }\n}\n",
@@ -1343,7 +1347,19 @@ fn c124_flags_the_shapes_it_names_and_only_as_warnings() {
             ("tools/paddock-dev/src/b.rs".to_string(), 2),
             ("tools/paddock-dev/src/c.rs".to_string(), 2),
             ("tools/paddock-dev/src/c.rs".to_string(), 4),
+            // a listed file does not hide a different, unlisted site in it
+            ("tools/paddock-dev/src/ok.rs".to_string(), 4),
+            // an entry that matches nothing is stale, one that matches two sites is ambiguous
+            ("conformance/c124-allow.json".to_string(), 1),
+            ("conformance/c124-allow.json".to_string(), 1),
         ]
+    );
+    let said = |needle: &str| r.findings.iter().any(|f| f.message.contains(needle));
+    assert!(said("always returns an empty list"), "the empty measurement is named");
+    assert!(said("stale allow entry (tools/paddock-dev/src/gone.rs"), "the stale entry is named");
+    assert!(
+        said("ambiguous allow entry (tools/paddock-dev/src/two.rs: Clean,) matches 2 sites"),
+        "the ambiguous entry is named"
     );
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
 }

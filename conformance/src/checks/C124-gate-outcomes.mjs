@@ -7,12 +7,13 @@
 //   (use `Outcome::json()`, read it with `Outcome::from_wire`);
 // - `fn fails(&self) -> bool` or `fn passed(&self) -> bool`: the bool conversion the shared type forbids;
 // - a call of `Evidence::ci_run(` or `Evidence::adopt(` outside the modules that own them (`ci_runs/verdict.rs`, `pre_push/known.rs`
-//   until WP-T4 moves the CI reader's evidence to `ci_runs::verdict`).
+//   until WP-T4 moves the CI reader's evidence to `ci_runs::verdict`);
+// - `measure(.., || Ok(Vec::new()))` (also `vec![]`, `Vec::default()`, `Default::default()`): a measurement that always finds nothing
+//   reads as a pass; return the not-measured outcome when the check cannot look, or build the findings from what it saw.
 // In JavaScript, outside `conformance/src/outcome.mjs`: an object literal `status: 'clean'` (a pass made by hand).
-// - `measure(.., || Ok(Vec::new()))` (also `vec![]`, `Vec::default()`): a measurement that always finds nothing reads as a pass;
-//   return the not-measured outcome when the check cannot look, or build the findings from what it saw.
 // Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line, so an edit
-// that moves the line keeps the entry) and a reason. A whole file or folder is never allowed. A shrink-only seed, expected to empty
+// that moves the line keeps the entry) and a reason. A whole file or folder is never allowed. An entry that matches no site is
+// stale (remove it) and one that matches several is ambiguous (lengthen it), as PHPStan's reportUnmatchedIgnoredErrors does. A shrink-only seed, expected to empty
 // out as each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { unwaivable, warn } from '../finding.mjs';
 
@@ -28,8 +29,9 @@ const CALL = /\b(?:Evidence|Proof)::(?:ci_run|adopt)\s*\(/;
 const CALL_OWNERS = new Set(['tools/paddock-dev/src/ci_runs/verdict.rs', 'tools/paddock-dev/src/pre_push/known.rs']);
 const JS_FILE = /^(?:conformance\/(?:src|bin)|scripts|tools)\/.*\.mjs$/;
 const JS_PASS = /\bstatus\s*:\s*['"]clean['"]/;
-// `measure(` .. `|| Ok(Vec::new())`: the closure of a measurement that is always empty (up to the first `;`, so one call at a time).
-const EMPTY_MEASURE = /\bmeasure\s*\([^;]*?\|\|\s*(?:\{\s*)?Ok\(\s*(?:Vec::new\(\)|vec!\s*\[\s*\]|Vec::default\(\))\s*\)/g;
+// The closure of a measurement that is always empty: the last argument of a `measure(` call is `|| Ok(<empty>)`, with or without braces.
+const EMPTY_TAIL = /\|\|\s*(?:\{\s*)?Ok\(\s*(?:Vec::new\(\)|vec!\s*\[\s*\]|Vec::default\(\)|Default::default\(\))\s*\)\s*;?\s*\}?\s*,?\s*$/;
+const MEASURE_CALL = /\bmeasure\s*\(/g;
 const FIX = 'Build the result with `paddock_cli::measure` (or `Evidence::adopt`) and print it with `Outcome::json()`; read another gate\'s result with `Outcome::from_wire`, never its exit code (ADR 0089 amendment 2026-11-13).';
 
 /** [{ line, what, text }] of every site in the Rust text `text` of `path`. */
@@ -40,14 +42,18 @@ export function flaggedRust(path, text) {
   const end = lines.findIndex((l) => /^\s*#\[cfg\(test\)\]/.test(l));
   const body = end < 0 ? lines : lines.slice(0, end);
   let depth = -1; // brace depth inside an enum, -1 outside
+  let header = ''; // the enum's own line: its name is part of a variant's site, so `NotMeasured,` of two enums are two sites
   body.forEach((line, i) => {
     const t = line.trim();
     if (t.startsWith('//')) return;
-    if (depth < 0 && ENUM.test(line) && line.includes('{')) depth = 0;
+    if (depth < 0 && ENUM.test(line) && line.includes('{')) {
+      depth = 0;
+      header = t;
+    }
     if (depth >= 0) {
       if (depth === 1) {
         const v = VARIANT.exec(line);
-        if (v) out.push({ line: i + 1, text: line, what: `an enum variant \`${v[1]}\` (a second result type)` });
+        if (v) out.push({ line: i + 1, text: `${header} ${t}`, what: `an enum variant \`${v[1]}\` (a second result type)` });
       }
       for (const c of line) depth += c === '{' ? 1 : c === '}' ? -1 : 0;
       if (depth <= 0) depth = -1;
@@ -56,11 +62,16 @@ export function flaggedRust(path, text) {
     if (BOOL_FN.test(line)) out.push({ line: i + 1, text: line, what: 'a `fails`/`passed` bool on a result type' });
     if (CALL.test(line) && !CALL_OWNERS.has(path)) out.push({ line: i + 1, text: line, what: 'a call of `Evidence::ci_run`/`adopt` outside its owner' });
   });
-  const code = body.join('\n');
-  for (const m of code.matchAll(EMPTY_MEASURE)) {
-    const at = m.index + m[0].lastIndexOf('Ok');
-    const line = code.slice(0, at).split('\n').length;
-    out.push({ line, text: body[line - 1], what: 'a `measure` whose closure always returns `Ok(Vec::new())` (an empty measurement reads as a pass)' });
+  // Comment lines are blanked (line numbers stay), then each `measure(` call is cut at its balanced closing parenthesis.
+  const code = body.map((l) => (l.trim().startsWith('//') ? '' : l)).join('\n');
+  for (const m of code.matchAll(MEASURE_CALL)) {
+    let depth = 1;
+    let k = m.index + m[0].length;
+    for (; k < code.length && depth > 0; k++) depth += code[k] === '(' ? 1 : code[k] === ')' ? -1 : 0;
+    const call = code.slice(m.index + m[0].length, k - 1);
+    if (depth !== 0 || !EMPTY_TAIL.test(call)) continue;
+    const line = code.slice(0, m.index).split('\n').length;
+    out.push({ line, text: body[line - 1], what: 'a `measure` whose closure always returns an empty list (an empty measurement reads as a pass)' });
   }
   return out;
 }
@@ -94,8 +105,8 @@ export function parseAllow(text) {
   });
 }
 
-/** True when an entry names this site: the file and a piece of the flagged line. */
-export const isAllowed = (allow, path, text) => allow.some((a) => a.path === path && String(text ?? '').includes(a.site));
+/** The indexes of the entries that name this site: the file and a piece of the flagged line. */
+export const matchingEntries = (allow, path, text) => allow.flatMap((a, i) => (a.path === path && String(text ?? '').includes(a.site) ? [i] : []));
 
 export default {
   id: 'C124',
@@ -113,16 +124,28 @@ export default {
       return [unwaivable(warn('C124', 21, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c124-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "..."}]}.'), 'check-broken')];
     }
     const out = [];
+    const hits = allow.map(() => 0);
+    const scanned = new Set();
     for (const f of ctx.files()) {
       const rust = RUST.test(f);
       if (!rust && !JS_FILE.test(f)) continue;
       const text = ctx.read(f);
       if (text === null || text === undefined) continue;
+      scanned.add(f);
       for (const { line, what, text: at } of rust ? flaggedRust(f, text) : flaggedJs(f, text)) {
-        if (isAllowed(allow, f, at)) continue;
+        const named = matchingEntries(allow, f, at);
+        named.forEach((n) => hits[n]++);
+        if (named.length) continue;
         out.push(warn('C124', 21, f, line, `builds a gate result by hand: ${what}`, FIX));
       }
     }
+    allow.forEach((a, n) => {
+      if (hits[n] === 0 && (scanned.has(a.path) || ctx.read(a.path) === null || ctx.read(a.path) === undefined)) {
+        out.push(warn('C124', 21, ALLOW, 1, `stale allow entry (${a.path}: ${a.site}) matches no site`, 'Remove it from conformance/c124-allow.json.'));
+      } else if (hits[n] > 1) {
+        out.push(warn('C124', 21, ALLOW, 1, `ambiguous allow entry (${a.path}: ${a.site}) matches ${hits[n]} sites`, 'Lengthen its `site` so it names one line.'));
+      }
+    });
     return out;
   },
 };
