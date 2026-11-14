@@ -41,7 +41,7 @@ import { Logger, withFailureLogging } from './logger';
 import { isTauri } from './platform';
 import { listenHere } from '../windowing/window-events';
 import { browserMocks } from './mock-registry';
-import { registerRawBackend } from './raw-backend';
+import { MOCK_WORKSPACE } from './mock-workspace';
 import { jobValue } from '../jobs/job-value';
 
 /** Everything the UI can ask the backend. Injected as a class token. */
@@ -293,22 +293,21 @@ export function isLiveAlert(payload: unknown): payload is LiveAlert {
  * Uses the Rust backend inside Tauri, and an in-memory demo dataset in a plain browser (ng serve).
  * Failed commands are logged (command name and redacted error) by a decorator and passed to the `FailureReporter`.
  */
-export function provideBackend(): Provider {
-  return {
-    provide: DebriefBackend,
-    useFactory: () => {
-      const logger = inject(Logger);
-      const logging = { onFailure: reportBackendFailures() };
-      if (isTauri()) return withFailureLogging<DebriefBackend>(new TauriBackend(), logger, logging);
-      // The demo: the raw mock answers; `?mockFail=` failures are injected here, for the UI's calls only, inside the logging
-      // proxy so they are logged like real failures. The other mock backends read `rawBackend(...)` of this, never the wrapper.
-      const mocks = browserMocks();
-      const search = window.location.search;
-      const raw = new mocks.MockBackend(mocks.mockOptionsFromSearch(search));
-      const failing = mocks.withMockFailures(raw, { fail: mocks.mockFailuresFromSearch(search) });
-      const uiFacing = withFailureLogging<DebriefBackend>(failing, logger, logging);
-      registerRawBackend(uiFacing, raw);
-      return uiFacing;
+export function provideBackend(): Provider[] {
+  return [
+    // The raw mock (see `MOCK_WORKSPACE`); never created inside Tauri.
+    { provide: MOCK_WORKSPACE, useFactory: () => new (browserMocks().MockBackend)(browserMocks().mockOptionsFromSearch(window.location.search)) },
+    {
+      provide: DebriefBackend,
+      useFactory: () => {
+        const logger = inject(Logger);
+        const logging = { onFailure: reportBackendFailures() };
+        if (isTauri()) return withFailureLogging<DebriefBackend>(new TauriBackend(), logger, logging);
+        // The demo: `?mockFail=` failures are injected here, for the UI's calls only, inside the logging proxy so they are
+        // logged like real failures. The other mock backends read `MOCK_WORKSPACE`, never this one.
+        const failing = browserMocks().withMockFailures(inject(MOCK_WORKSPACE), { fail: browserMocks().mockFailuresFromSearch(window.location.search), latency: browserMocks().mockOptionsFromSearch(window.location.search).latency });
+        return withFailureLogging<DebriefBackend>(failing, logger, logging);
+      },
     },
-  };
+  ];
 }

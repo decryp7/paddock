@@ -15,6 +15,7 @@ import { ShareBackend, TauriShareBackend } from './share-backend';
 import { createShareBackend, provideShare } from './share.plugin';
 import { at } from '../../testing/must';
 import { mockJobs } from '../jobs/mock-jobs';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 const invoke = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => 'ok'));
 
@@ -69,7 +70,7 @@ describe('provideShare', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: Logger, useClass: MemoryLogger },
-        { provide: DebriefBackend, useValue: debrief },
+        { provide: DebriefBackend, useValue: debrief }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend },
         { provide: AnalysisBackend, useValue: new MockAnalysisBackend(recordsFrom(debrief)) },
         provideShare(),
       ],

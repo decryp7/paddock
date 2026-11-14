@@ -10,7 +10,7 @@ export { MOCK_FFMPEG_PATH, MOCK_LOCATED_PATH, MOCK_VIDEO_PATHS, MockVideoBackend
 export { MockBackend } from './core/mock/mock-backend';
 export { MockStartupBackend } from './core/startup/mock-startup-backend';
 export { mockFailuresFromSearch, mockOptionsFromSearch } from './core/mock/mock-options';
-export { withMockFailures } from './core/mock/mock-failures';
+export { UI_FACING_BACKEND, withMockFailures } from './core/mock/mock-failures';
 export { MOCK_CAPTURE_PATHS } from './core/mock/mock-profiling-data';
 export { MockProfilingBackend } from './core/mock/mock-profiling';
 export { MockUxBackend } from './core/mock/mock-ux-backend';

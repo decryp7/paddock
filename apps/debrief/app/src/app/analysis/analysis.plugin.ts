@@ -1,6 +1,5 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
 import { AnalysisBackend, TauriAnalysisBackend } from '../core/analysis-backend';
-import { DebriefBackend } from '../core/backend';
 import { reportBackendFailures } from '../core/failure-reporter';
 import { Logger, withFailureLogging } from '../core/logger';
 import { isTauri } from '../core/platform';
@@ -10,7 +9,7 @@ import { analysisActivityItems } from './analysis-activity';
 import { ANALYSIS_COMMANDS_CONTRIBUTIONS } from './analysis.contributions';
 import { browserMocks } from '../core/mock-registry';
 import { contributeFrom } from '../extensions/contributions';
-import { rawBackend } from '../core/raw-backend';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 /** The analysis views; they open from the palette, menus and the Analyze activity. Queries are typed in the filter bar. */
 export const ANALYSIS_VIEWS: DebriefView[] = [
@@ -27,7 +26,7 @@ export const ANALYSIS_VIEWS: DebriefView[] = [
 
 /** The engine-backed analysis backend inside Tauri, the mock (derived from the demo records) in a browser. */
 export function createAnalysisBackend(): AnalysisBackend {
-  const backend: AnalysisBackend = isTauri() ? new TauriAnalysisBackend() : new (browserMocks().MockAnalysisBackend)(browserMocks().recordsFrom(rawBackend(inject(DebriefBackend))));
+  const backend: AnalysisBackend = isTauri() ? new TauriAnalysisBackend() : new (browserMocks().MockAnalysisBackend)(browserMocks().recordsFrom(inject(MOCK_WORKSPACE)));
   return withFailureLogging<AnalysisBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
 

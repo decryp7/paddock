@@ -37,6 +37,7 @@ export function mockFailuresFromSearch(search: string): Partial<Record<Failable,
  *   ?mockTotal=50000000       synthetic result of that many events (lazily generated)
  *   ?mockFacet=10000          every field has that many distinct values
  *   ?mockFail=queryPage:2     the first N calls of a command reject (comma separated; see `mockFailuresFromSearch`)
+ *   ?mockLatency=0           answer at once instead of after the simulated delay (tests that need no real time)
  *   ?mockHold=getProfile      answers of a command wait until `globalThis.__debriefMockRelease()` (comma separated)
  *   ?mockCorrupt=markers      page rows arrive without `markers`, as a buggy backend would send them
  *   ?mockLiveMs=300           interval of the live tail events (default 1500; 250 with mockLive)
@@ -66,6 +67,7 @@ export function mockOptionsFromSearch(search: string): MockBackendOptions {
     const alert = nonNegativeInt(p.get('mockLiveAlertMs'));
     if (alert !== undefined) options.liveAlertMs = alert;
   }
+  if (p.get('mockLatency') === '0') options.latency = false;
   if (p.get('mockCorrupt') === 'markers') options.corruptMarkers = true;
   if (p.get('mockLongNames') === '1') options.longNames = true;
   const slow = positiveInt(p.get('mockSlowImport'));

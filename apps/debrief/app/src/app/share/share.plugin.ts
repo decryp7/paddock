@@ -1,6 +1,5 @@
 import { EnvironmentProviders, inject, makeEnvironmentProviders } from '@angular/core';
 import { AnalysisBackend } from '../core/analysis-backend';
-import { DebriefBackend } from '../core/backend';
 import { reportBackendFailures } from '../core/failure-reporter';
 import { Logger, withFailureLogging } from '../core/logger';
 import { isTauri } from '../core/platform';
@@ -11,11 +10,11 @@ import { ShareBackend, TauriShareBackend } from './share-backend';
 import { SHARE_CONTRIBUTIONS } from './share.contributions';
 import { snapshotRedaction } from './snapshot-redaction';
 import { browserMocks } from '../core/mock-registry';
-import { rawBackend } from '../core/raw-backend';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 /** The engine-backed share backend inside Tauri, the mock (over the mock workspace) in a browser. */
 export function createShareBackend(): ShareBackend {
-  const backend: ShareBackend = isTauri() ? new TauriShareBackend() : new (browserMocks().MockShareBackend)(rawBackend(inject(DebriefBackend)), inject(AnalysisBackend));
+  const backend: ShareBackend = isTauri() ? new TauriShareBackend() : new (browserMocks().MockShareBackend)(inject(MOCK_WORKSPACE), inject(AnalysisBackend));
   return withFailureLogging<ShareBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
 

@@ -13,13 +13,12 @@ import {
   SearchAllRequest,
 } from '../core/api.types';
 import { AnalysisBackend } from '../core/analysis-backend';
-import { DebriefBackend } from '../core/backend';
 import { reportBackendFailures } from '../core/failure-reporter';
 import { Logger, withFailureLogging } from '../core/logger';
 import { browserMocks } from '../core/mock-registry';
 import { isTauri } from '../core/platform';
 import { NotesBackend } from '../notes/notes-backend';
-import { rawBackend } from '../core/raw-backend';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 /**
  * Search everything as the UI sees it: the engine searches the window's events, sources, fields, marker kinds, notes and
@@ -75,7 +74,7 @@ export class TauriSearchEverythingBackend extends SearchEverythingBackend {
 export function createSearchEverythingBackend(): SearchEverythingBackend {
   const injector = inject(Injector);
   const mock = () =>
-    new (browserMocks().MockSearchEverythingBackend)(rawBackend(inject(DebriefBackend)), {
+    new (browserMocks().MockSearchEverythingBackend)(inject(MOCK_WORKSPACE), {
       notes: () => injector.get(NotesBackend),
       knowledge: () => injector.get(KnowledgeBackend),
       analysis: () => injector.get(AnalysisBackend),

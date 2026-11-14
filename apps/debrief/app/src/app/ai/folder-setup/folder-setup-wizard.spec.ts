@@ -22,6 +22,7 @@ import { FolderSetupPreview } from './proposal-preview';
 import { folderSetupCommands } from './folder-setup.commands';
 import { FolderSetupLauncher, hasOpenFiles } from './provide-folder-setup';
 import { ProposalPreview } from './folder-setup.types';
+import { MOCK_WORKSPACE } from '../../core/mock-workspace';
 
 function setup(aiMode: 'ready' | 'setup' | 'off' = 'off') {
   const workspace = new MockBackend({ latency: false });
@@ -29,7 +30,7 @@ function setup(aiMode: 'ready' | 'setup' | 'off' = 'off') {
   const ref = { close: vi.fn(), closed: new Promise(() => undefined) };
   TestBed.configureTestingModule({
     providers: [
-      { provide: DebriefBackend, useValue: workspace },
+      { provide: DebriefBackend, useValue: workspace }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend },
       { provide: FolderSetupBackend, useValue: new MockFolderSetupBackend(workspace, { stageMs: 0 }) },
       { provide: AiBackend, useValue: new MockAiBackend({ mode: aiMode, stepMs: 0 }) },
       { provide: Logger, useClass: MemoryLogger },

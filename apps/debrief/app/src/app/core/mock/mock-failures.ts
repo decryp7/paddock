@@ -1,6 +1,9 @@
 import { type Failable } from './mock-options';
 import { type MockClock, systemMockClock } from './mock-clock';
 
+/** Reads `true` on a backend that `withMockFailures` made: the one the UI receives (a test asserts no mock holds it). */
+export const UI_FACING_BACKEND = Symbol('uiFacingBackend');
+
 export interface MockFailureOptions {
   /** The first N calls of each named command reject with a simulated error. */
   fail: Partial<Record<Failable, number>>;
@@ -23,6 +26,7 @@ export function withMockFailures<T extends object>(backend: T, options: MockFail
   const latency = options.latency ?? true;
   return new Proxy(backend, {
     get(target, prop, receiver) {
+      if (prop === UI_FACING_BACKEND) return true;
       const value = Reflect.get(target, prop, receiver);
       if (typeof prop !== 'string' || typeof value !== 'function' || !((left[prop] ?? 0) > 0)) return value;
       return (...args: unknown[]) => {

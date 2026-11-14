@@ -2,6 +2,7 @@ import { Component, EnvironmentProviders, Provider, signal } from '@angular/core
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MarkerKind, PluginInfo, Query } from '../app/core/api.types';
 import { DebriefBackend } from '../app/core/backend';
+import { MOCK_WORKSPACE } from '../app/core/mock-workspace';
 import { Logger, LogProps } from '../app/core/logger';
 import { DEMO_START, MockDataset, MockRecord } from '../app/core/mock/mock-data';
 import { MockBackend, MockBackendOptions } from '../app/core/mock/mock-backend';
@@ -113,6 +114,8 @@ export function provideFakeDock(dock = new FakeDock()): Provider[] {
 export function provideTinyBackendBare(backend: DebriefBackend = tinyBackend()): Provider[] {
   return [
     { provide: DebriefBackend, useValue: backend },
+    // The mock backends of a test read the same workspace (the browser build gives them the raw one: `MOCK_WORKSPACE`).
+    { provide: MOCK_WORKSPACE, useExisting: DebriefBackend },
     { provide: Logger, useFactory: () => new MemoryLogger() },
   ];
 }

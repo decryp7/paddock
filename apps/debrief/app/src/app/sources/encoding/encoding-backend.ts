@@ -1,12 +1,11 @@
 import { inject, Injectable } from '@angular/core';
 import { invoke } from '../../core/activity/ipc';
 import { EncodingOption } from '../../core/api.types';
-import { DebriefBackend } from '../../core/backend';
 import { reportBackendFailures } from '../../core/failure-reporter';
 import { Logger, withFailureLogging } from '../../core/logger';
 import { browserMocks } from '../../core/mock-registry';
 import { isTauri } from '../../core/platform';
-import { rawBackend } from '../../core/raw-backend';
+import { MOCK_WORKSPACE } from '../../core/mock-workspace';
 
 /**
  * The text-encoding commands: the engine detects each source's encoding at import and re-reads one source with an
@@ -36,6 +35,6 @@ export class TauriEncodingBackend extends EncodingBackend {
 }
 
 export function createEncodingBackend(): EncodingBackend {
-  const backend: EncodingBackend = isTauri() ? new TauriEncodingBackend() : new (browserMocks().MockEncodingBackend)(rawBackend(inject(DebriefBackend)));
+  const backend: EncodingBackend = isTauri() ? new TauriEncodingBackend() : new (browserMocks().MockEncodingBackend)(inject(MOCK_WORKSPACE));
   return withFailureLogging<EncodingBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

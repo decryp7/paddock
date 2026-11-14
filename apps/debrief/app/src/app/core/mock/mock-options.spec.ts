@@ -8,11 +8,12 @@ describe('mockOptionsFromSearch', () => {
   });
 
   it('reads the switches', () => {
-    expect(mockOptionsFromSearch('?mockTotal=50000000&mockFacet=10000&mockLiveMs=300&mockCorrupt=markers&mockFail=queryPage:2')).toEqual({
+    expect(mockOptionsFromSearch('?mockTotal=50000000&mockFacet=10000&mockLiveMs=300&mockCorrupt=markers&mockFail=queryPage:2&mockLatency=0')).toEqual({
       syntheticTotal: 50_000_000,
       syntheticFacetValues: 10_000,
       liveMs: 300,
       corruptMarkers: true,
+      latency: false,
     });
   });
 

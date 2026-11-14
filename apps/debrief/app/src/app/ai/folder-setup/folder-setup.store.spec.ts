@@ -16,6 +16,7 @@ import { FolderRefinement } from './folder-setup.types';
 import { recommendedSelection, toggleSelection, withoutDependents, withRequirements, FolderSetupStore } from './folder-setup.store';
 import { SetupProposal } from './folder-setup.types';
 import { mockSetup, MockFolderSetupBackend, MockFolderSetupOptions } from './mock-folder-setup-backend';
+import { MOCK_WORKSPACE } from '../../core/mock-workspace';
 
 function p(id: string, extra: Partial<SetupProposal> = {}): SetupProposal {
   return {
@@ -68,7 +69,7 @@ function setup(options: MockFolderSetupOptions = { stageMs: 0 }) {
   const backend = new MockFolderSetupBackend(workspace, options);
   TestBed.configureTestingModule({
     providers: [
-      { provide: DebriefBackend, useValue: workspace },
+      { provide: DebriefBackend, useValue: workspace }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend },
       { provide: FolderSetupBackend, useValue: backend },
       { provide: Logger, useClass: MemoryLogger },
     ],
@@ -237,7 +238,7 @@ describe('FolderSetupStore as background jobs', () => {
     };
     TestBed.configureTestingModule({
       providers: [
-        { provide: DebriefBackend, useValue: workspace },
+        { provide: DebriefBackend, useValue: workspace }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend },
         { provide: FolderSetupBackend, useValue: backend },
         { provide: JobsBackend, useValue: jobs },
         { provide: Logger, useClass: MemoryLogger },

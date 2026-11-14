@@ -2,13 +2,12 @@ import { inject, Injectable } from '@angular/core';
 import { invoke } from '../core/activity/ipc';
 import { IncidentRequest, IssueReport, IssueMatch, Playbook, PlaybookLibrary, PlaybookRestore, PlaybookRun, PlaybookStepResult, PlaybookStep, Report } from '../core/api.types';
 import { AiStatusStore } from '../ai/ai-status.store';
-import { DebriefBackend } from '../core/backend';
 import { reportBackendFailures } from '../core/failure-reporter';
 import { Logger, withFailureLogging } from '../core/logger';
 import { browserMocks } from '../core/mock-registry';
 import { isTauri } from '../core/platform';
 import type { Narrative } from '../ai/ai.types';
-import { rawBackend } from '../core/raw-backend';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 /**
  * Known issues (ADR 0039): the knowledge files' declared issues matched by the engine, and the AI's suggestions
@@ -111,16 +110,16 @@ function mockHasModel(): () => boolean {
 }
 
 export function createKnownIssuesBackend(): KnownIssuesBackend {
-  const backend: KnownIssuesBackend = isTauri() ? new TauriKnownIssuesBackend() : new (browserMocks().MockKnownIssuesBackend)(rawBackend(inject(DebriefBackend)), mockHasModel());
+  const backend: KnownIssuesBackend = isTauri() ? new TauriKnownIssuesBackend() : new (browserMocks().MockKnownIssuesBackend)(inject(MOCK_WORKSPACE), mockHasModel());
   return withFailureLogging<KnownIssuesBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
 
 export function createIncidentBackend(): IncidentBackend {
-  const backend: IncidentBackend = isTauri() ? new TauriIncidentBackend() : new (browserMocks().MockIncidentBackend)(rawBackend(inject(DebriefBackend)), mockHasModel());
+  const backend: IncidentBackend = isTauri() ? new TauriIncidentBackend() : new (browserMocks().MockIncidentBackend)(inject(MOCK_WORKSPACE), mockHasModel());
   return withFailureLogging<IncidentBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
 
 export function createPlaybookBackend(): PlaybookBackend {
-  const backend: PlaybookBackend = isTauri() ? new TauriPlaybookBackend() : new (browserMocks().MockPlaybookBackend)(rawBackend(inject(DebriefBackend)));
+  const backend: PlaybookBackend = isTauri() ? new TauriPlaybookBackend() : new (browserMocks().MockPlaybookBackend)(inject(MOCK_WORKSPACE));
   return withFailureLogging<PlaybookBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
