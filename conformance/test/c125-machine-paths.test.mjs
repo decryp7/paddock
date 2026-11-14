@@ -32,7 +32,7 @@ test('C125 path patterns: ** any folders, * one name, a trailing / the folder', 
   assert.equal(globRegExp('apps/*/docs/adr/').test('apps/dyno/x/docs/adr/0001.md'), false);
   assert.equal(globRegExp('**/CHANGELOG.md').test('CHANGELOG.md'), true);
   assert.equal(globRegExp('**/CHANGELOG.md').test('apps/dyno/CHANGELOG.md'), true);
-  assert.equal(globRegExp('docs/lessons.md').test('docs/lessons.md.bak'), false);
+  assert.equal(globRegExp('notes/kept.md').test('notes/kept.md.bak'), false);
 });
 
 test('C125 allow file: both lists, a reason on every entry, a count of at least 1 (a whole float is its integer)', () => {

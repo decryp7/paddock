@@ -305,7 +305,7 @@ mod tests {
         assert!(!glob_regex("apps/*/docs/adr/").is_match("apps/dyno/x/docs/adr/0001.md"));
         assert!(glob_regex("**/CHANGELOG.md").is_match("CHANGELOG.md"));
         assert!(glob_regex("**/CHANGELOG.md").is_match("apps/dyno/CHANGELOG.md"));
-        assert!(!glob_regex("docs/lessons.md").is_match("docs/lessons.md.bak"));
+        assert!(!glob_regex("notes/kept.md").is_match("notes/kept.md.bak"));
         assert!(!glob_regex("docs/adr/").is_match("docs/adrs.md"));
     }
 
