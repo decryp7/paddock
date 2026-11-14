@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { calls, run, scratch, shim, write } from './helpers.mjs';
+import { TOOLS, calls, run, scratch, shim, write } from './helpers.mjs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { job, loadWorkflow, loadYaml } from '../../conformance/test/lib/workflow.mjs';
 
 /** A fake docker: records every call; `image inspect` fails (no image yet) unless HAVE_IMAGE is set; `build` reads its Dockerfile from stdin like the real one (an unread pipe would end the script's printf with SIGPIPE). */
 function docker({ ps = '', images = [] } = {}) {
@@ -18,8 +21,8 @@ test('first use builds the labelled image, creates the labelled volumes and runs
   const r = go(bin, ['--id', 'dyno', '--root', repo, '--packages', 'dyno-platform']);
   assert.equal(r.status, 0, r.out);
   const log = calls(bin);
-  assert.match(log[0], /docker image inspect dyno-linux-dev:1/);
-  assert.match(log[1], /docker build --label paddock\.tools=dyno -t dyno-linux-dev:1 -/);
+  assert.match(log[0], /docker image inspect dyno-linux-dev:2/);
+  assert.match(log[1], /docker build --label paddock\.tools=dyno -t dyno-linux-dev:2 -/);
   assert.match(log[2], /docker volume create --label paddock\.tools=dyno dyno-cargo-registry/);
   assert.match(log[3], /docker volume create --label paddock\.tools=dyno dyno-linux-target/);
   const runLine = log[4];
@@ -40,7 +43,7 @@ test('an existing image is reused; a command after -- replaces the default; user
   const runLine = log.at(-1);
   assert.match(runLine, /--cpus 2 /);
   assert.match(runLine, /--user 1000:1000 -e HOME=\/tmp\/home -e CARGO_HOME=\/tmp\/cargo-home -e CARGO_TARGET_DIR=\/tmp\/target/);
-  assert.match(runLine, /spotter-linux-dev:1 sh -c ls \/proc \| head$/);
+  assert.match(runLine, /spotter-linux-dev:2 sh -c ls \/proc \| head$/);
 });
 
 test('--clean removes only containers with this app\'s label and only its volumes (registry, amd64 and arm64 targets)', () => {
@@ -210,14 +213,48 @@ test('a new arm64 build removes this id\'s older local CI images and keeps the n
 });
 
 /** Every `-e NAME=` the script passes to docker run. */
-const envNames = (line) => [...line.matchAll(/ -e ([A-Z_][A-Z0-9_]*)=/g)].map((m) => m[1]);
+const envOf = (line) => Object.fromEntries([...line.matchAll(/ -e ([A-Z_][A-Z0-9_]*)=(\S*)/g)].map((m) => [m[1], m[2]]));
 
-test('env parity with CI: the container gets only variables the Linux jobs of CI set too, and never a GIT_* one', () => {
-  // CI's jobs set these (.gitea/workflows/ci.yml `CARGO_TERM_COLOR: always`; CARGO_TARGET_DIR and CARGO_BUILD_JOBS through the
-  // build-folder action and the job's share of the cores); HOME, CARGO_HOME and the /tmp target only in PADDOCK_LINUX_USER mode,
-  // where a user without a home needs them, as the runner's own user has them.
-  const ci = new Set(['CARGO_TARGET_DIR', 'CARGO_BUILD_JOBS', 'CARGO_TERM_COLOR']);
-  const userMode = new Set(['HOME', 'CARGO_HOME']);
+/** The CARGO_TERM_COLOR values ci.yml's jobs set, read through the workflow accessor (rule 79). */
+function ciTermColors() {
+  const wf = loadWorkflow('ci.yml');
+  const values = new Set();
+  if (wf.env?.CARGO_TERM_COLOR) values.add(wf.env.CARGO_TERM_COLOR);
+  for (const id of Object.keys(wf.jobs)) {
+    const v = job(wf, id).env?.CARGO_TERM_COLOR;
+    if (v) values.add(v);
+  }
+  return values;
+}
+
+/**
+ * Each variable the container gets, beside where CI sets it (or why the local value differs). `ci` is read from its owner in the
+ * test below, so a CI change that drops or changes it turns the test red.
+ */
+const PARITY = {
+  CARGO_BUILD_JOBS: { owner: 'conformance/ci/build-jobs.sh', why: 'the one place CI sets it, written to $GITHUB_ENV (the build-jobs action and setup-rust run it)' },
+  CARGO_TERM_COLOR: { local: 'never', ci: 'always', why: "CI's log viewer renders colour; local output goes to files and greps, where colour codes split the words" },
+  CARGO_TARGET_DIR: { local: ['/target', '/tmp/target'], ci: null, why: '/tmp/target in PADDOCK_LINUX_USER mode. CI names the build folder in .cargo/ci.toml (the build-folder action), which the read-only /work cannot take; never set in CI, because sccache hashes it' },
+  HOME: { userMode: true, why: 'PADDOCK_LINUX_USER runs as a user without a home; the runner user has one' },
+  CARGO_HOME: { userMode: true, why: 'as HOME: that user cannot write the image cargo home' },
+};
+
+test('env parity with CI: every variable the container gets is declared with its CI source or the reason it differs; never GIT_*', () => {
+  // The declared CI facts still hold, read from their owners.
+  assert.deepEqual([...ciTermColors()], [PARITY.CARGO_TERM_COLOR.ci], 'ci.yml no longer sets CARGO_TERM_COLOR as declared: update PARITY');
+  // The owner is run, not read: on a Linux runner with a set share it writes CARGO_BUILD_JOBS to the job's environment file.
+  const ghenv = join(scratch(), 'github-env');
+  writeFileSync(ghenv, '');
+  const bj = spawnSync('bash', [join(TOOLS, '..', PARITY.CARGO_BUILD_JOBS.owner)], {
+    encoding: 'utf8',
+    env: { PATH: '/usr/bin:/bin', HOME: scratch(), GITHUB_ENV: ghenv, RUNNER_OS: 'Linux', PADDOCK_CI_BUILD_JOBS: '3' },
+  });
+  assert.equal(bj.status, 0, bj.stderr);
+  assert.match(readFileSync(ghenv, 'utf8'), /^CARGO_BUILD_JOBS=3$/m, `${PARITY.CARGO_BUILD_JOBS.owner} no longer sets CARGO_BUILD_JOBS`);
+  const buildFolder = loadYaml('.gitea', 'actions', 'build-folder', 'action.yml');
+  assert.match(buildFolder.description, /never CARGO_TARGET_DIR/, 'the build-folder action now sets CARGO_TARGET_DIR: drop the local deviation');
+  const ci = new Set(Object.keys(PARITY).filter((k) => !PARITY[k].userMode));
+  const userMode = new Set(Object.keys(PARITY).filter((k) => PARITY[k].userMode));
   const common = realpathSync(write(scratch(), { 'HEAD': 'x\n', 'worktrees/wt/commondir': '../..\n', 'worktrees/wt/HEAD': 'x\n' }));
   const wt = write(scratch(), { '.git': `gitdir: ${common}/worktrees/wt\n` });
   const cases = [
@@ -229,8 +266,20 @@ test('env parity with CI: the container gets only variables the Linux jobs of CI
     const bin = docker();
     const r = go(bin, args, { PADDOCK_LINUX_HOST_ARCH: 'x86_64', ...env });
     assert.equal(r.status, 0, r.out);
-    const names = envNames(calls(bin).at(-1));
-    assert.ok(names.length > 0, 'the run line was read');
-    for (const n of names) assert.ok(allowed.has(n) && !n.startsWith('GIT_'), `${n} is set in the container but not by CI's jobs`);
+    const got = envOf(calls(bin).at(-1));
+    assert.ok(Object.keys(got).length > 0, 'the run line was read');
+    for (const [n, v] of Object.entries(got)) {
+      assert.ok(allowed.has(n) && !n.startsWith('GIT_'), `${n} is set in the container but not declared in PARITY`);
+      if (PARITY[n].local) assert.ok([].concat(PARITY[n].local).includes(v), `${n}=${v}: the declared local value is ${PARITY[n].local}`);
+    }
   }
+});
+
+test('the image built from PADDOCK_LINUX_BASE_IMAGE marks every directory safe in its system gitconfig, with no GIT_* variable', () => {
+  const bin = scratch('paddock-bin-');
+  shim(bin, 'docker', `case "$1 $2" in "image inspect") false;; "build "*) cat > "${bin}/dockerfile";; esac`);
+  const r = go(bin, ['--id', 'dyno', '--packages', 'dyno-platform']);
+  assert.equal(r.status, 0, r.out);
+  assert.match(readFileSync(join(bin, 'dockerfile'), 'utf8'), /^RUN rustup component add clippy rustfmt && git config --system --add safe\.directory "\*"$/m);
+  assert.doesNotMatch(calls(bin).at(-1), / -e GIT_/);
 });

@@ -22,8 +22,12 @@
 # A linked worktree's git folders (its own and the common one) are mounted read-only at their own paths, so git works inside; the
 # pre-push state folder (<common git dir>/paddock-pre-push) is a tmpfs there, so `dev check --pre-push` can write its logs without
 # touching the host's. CARGO_TARGET_DIR (/target, a volume) and /tmp are the other writable places. git accepts the host user's
-# repository because the CI image's /etc/gitconfig marks every directory safe, as in CI; the script sets no GIT_* variable, so a
-# command's own HOME and its .gitconfig work as they do there.
+# repository through the image's /etc/gitconfig (`[safe] directory = *`): the CI image has it, as in CI, and the image this script
+# builds from PADDOCK_LINUX_BASE_IMAGE gets it in its build; an --image of another kind needs its own. The script sets no GIT_*
+# variable, so a command's own HOME and its .gitconfig work as they do in CI.
+# Environment inside: CARGO_BUILD_JOBS (CI sets it too) and CARGO_TERM_COLOR=never (CI: always, for its log viewer; local output
+# goes to files and greps, where colour codes would split the words), and CARGO_TARGET_DIR=/target (CI points cargo at its build
+# folder through .cargo/ci.toml instead, which a read-only /work cannot take).
 # Environment: DOCKER (default docker), PADDOCK_LINUX_BASE_IMAGE (rust:1-bookworm), PADDOCK_LINUX_CPUS (4), PADDOCK_LINUX_JOBS (2),
 # PADDOCK_LINUX_HOST_ARCH (default `uname -m`; tests pretend with it), PADDOCK_LINUX_CI_REGISTRY (dev.decryptology.net/decryp7/paddock-ci),
 # PADDOCK_LINUX_RUN_LABEL (an extra label, `key=value`, on the container: `dev check --pre-push` finds and stops its own container by it), PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
@@ -62,7 +66,7 @@ remove_local_images() {
   return 0
 }
 base_image="${PADDOCK_LINUX_BASE_IMAGE:-rust:1-bookworm}"
-image="$id-linux-dev:1"
+image="$id-linux-dev:2"
 cpus="${PADDOCK_LINUX_CPUS:-4}"
 jobs="${PADDOCK_LINUX_JOBS:-2}"
 memory="${PADDOCK_LINUX_MEMORY:-12g}"
@@ -126,7 +130,8 @@ if [ "$ci_image" = 1 ]; then
 elif [ -n "$ready_image" ]; then
   image="$ready_image" # a ready image (for example the CI image) is run as it is: no layer of ours, no rustup
 elif ! "$docker" image inspect "$image" >/dev/null 2>&1; then
-  printf 'FROM %s\nRUN rustup component add clippy rustfmt\n' "$base_image" | "$docker" build --label "$label" -t "$image" -
+  printf 'FROM %s\nRUN rustup component add clippy rustfmt && git config --system --add safe.directory "*"\n' "$base_image" \
+    | "$docker" build --label "$label" -t "$image" -
 fi
 "$docker" volume create --label "$label" "$registry_volume" >/dev/null
 # arm64 builds keep their own target volume: one shared with amd64 runs would rebuild everything at every switch.
