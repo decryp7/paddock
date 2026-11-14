@@ -1668,3 +1668,24 @@ fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_i
         "the self-hold is quiet"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn empty_cache_folders_are_a_group_of_their_own_and_never_take_the_cache_with_them() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    for i in 0..7 {
+        let d = home.join(format!("bin/empty-{i}"));
+        std::fs::create_dir_all(&d).unwrap();
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 86_400 - i * 100);
+        std::fs::File::open(&d).unwrap().set_modified(t).unwrap();
+    }
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!(code, 0, "{err}");
+    assert!(home.join("bin").join(&hash).is_dir(), "the tool just built is still cached: {err}");
+    let empty_left = (0..7).filter(|i| home.join(format!("bin/empty-{i}")).exists()).count();
+    assert_eq!(empty_left, 5, "the empty folders keep five, like any tool");
+}

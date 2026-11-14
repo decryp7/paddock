@@ -514,8 +514,10 @@ prune_cache() {
   [ -d "$_root" ] || return 0
   # shellcheck disable=SC2012 # as above; ls -t is the portable newest-first order
   ls -t "$_root" | while IFS= read -r _e; do
-    [ -d "$_root/$_e" ] && printf '%s\t%s\n' "$(cache_tool "$_root/$_e")" "$_e"
-  done | awk -F '\t' '++n[$1] > 5 { print $1 "\t" $2 }' | while IFS="$(printf '\t')" read -r _tool _old; do
+    # `/` separates the fields: it is in no file name, and unlike a tab it keeps an empty tool (an empty folder) a field of its own.
+    [ -d "$_root/$_e" ] && printf '%s/%s\n' "$(cache_tool "$_root/$_e")" "$_e"
+  done | awk -F / '++n[$1] > 5 { print $1 "/" $2 }' | while IFS=/ read -r _tool _old; do
+    [ -n "$_old" ] || continue
     _d=$_root/$_old
     [ -n "$(find "$_d" -maxdepth 0 -mmin +1440 2>/dev/null)" ] || continue
     if [ -n "$(find "$_d" -type f -links +1 2>/dev/null | head -n 1)" ]; then
