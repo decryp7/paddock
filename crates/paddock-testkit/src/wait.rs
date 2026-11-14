@@ -237,12 +237,26 @@ pub enum Look<T> {
 /// several steps in a row, where one total budget would add up every step's cost on a loaded host (runs 8060-8099).
 ///
 /// The bound of the whole test stays nextest's: keep `no_progress` well under it, so a stall fails here with this message first.
-pub fn wait_progressing<T>(
+pub fn wait_progressing<T>(what: &str, no_progress: Duration, look: impl FnMut() -> Look<T>) -> T {
+    let began = Instant::now();
+    wait_progressing_on(
+        what,
+        no_progress,
+        look,
+        &mut || began.elapsed(),
+        &mut std::thread::sleep,
+    )
+}
+
+/// [`wait_progressing`] on a clock and a sleep of the caller's (the kit's tests drive both, so the schedule and the stall rule
+/// are tested without real time).
+fn wait_progressing_on<T>(
     what: &str,
     no_progress: Duration,
     mut look: impl FnMut() -> Look<T>,
+    now: &mut dyn FnMut() -> Duration,
+    sleep: &mut dyn FnMut(Duration),
 ) -> T {
-    let began = Instant::now();
     let mut guard: Option<StallGuard> = None;
     let mut pause = FIRST;
     loop {
@@ -250,14 +264,14 @@ pub fn wait_progressing<T>(
             Look::Done(v) => return v,
             Look::At(level) => level,
         };
-        let g = guard.get_or_insert_with(|| StallGuard::new(no_progress, began.elapsed(), level));
-        if g.stalled(level, began.elapsed()) {
+        let at = now();
+        let g = guard.get_or_insert_with(|| StallGuard::new(no_progress, at, level));
+        if g.stalled(level, at) {
             panic!(
-                "{what} made no progress for {no_progress:?}: it stood at {level} (after {:?} in all; a slow host that keeps moving passes, only a stall fails)",
-                began.elapsed()
+                "{what} made no progress for {no_progress:?}: it stood at {level} (after {at:?} in all; a slow host that keeps moving passes, only a stall fails)"
             );
         }
-        std::thread::sleep(pause);
+        sleep(pause);
         pause = (pause * 2).min(LAST);
     }
 }
@@ -368,16 +382,52 @@ mod tests {
         );
     }
 
+    /// A fake clock and sleep for [`wait_progressing_on`]: time moves only when the wait sleeps.
+    fn on_fake<T>(
+        what: &str,
+        no_progress: Duration,
+        mut look: impl FnMut(Duration) -> Look<T>,
+    ) -> (T, Vec<Duration>) {
+        let t = std::cell::Cell::new(Duration::ZERO);
+        let mut pauses = Vec::new();
+        let v = wait_progressing_on(
+            what,
+            no_progress,
+            || look(t.get()),
+            &mut || t.get(),
+            &mut |d| {
+                pauses.push(d);
+                t.set(t.get() + d);
+            },
+        );
+        (v, pauses)
+    }
+
+    #[test]
+    fn a_progressing_wait_sleeps_the_backoff_schedule_between_looks() {
+        let mut looks = 0;
+        let ((), pauses) = on_fake("a condition", Duration::from_secs(5), |_| {
+            looks += 1;
+            if looks == 6 {
+                Look::Done(())
+            } else {
+                Look::At(looks)
+            }
+        });
+        let want: Vec<Duration> = (0..5).map(|i| (FIRST * 2u32.pow(i)).min(LAST)).collect();
+        assert_eq!(pauses, want);
+        assert!(pauses.windows(2).all(|w| w[1] == (w[0] * 2).min(LAST)));
+    }
+
     #[test]
     fn a_progressing_wait_outlasts_its_no_progress_bound_while_the_level_moves() {
-        // 400 ms of work that moves every 10 ms: four times the 100 ms no-progress bound in total, never stalled.
-        let began = Instant::now();
-        let v = wait_progressing("a moving level", Duration::from_millis(100), || {
-            let t = began.elapsed().as_millis() as u64;
-            if t >= 400 {
-                Look::Done(t)
+        // 400 ms of fake time, moving every 10 ms: four times the 100 ms no-progress bound in total, never stalled.
+        let (v, _) = on_fake("a moving level", Duration::from_millis(100), |t| {
+            let ms = t.as_millis() as u64;
+            if ms >= 400 {
+                Look::Done(ms)
             } else {
-                Look::At(t / 10)
+                Look::At(ms / 10)
             }
         });
         assert!(v >= 400, "{v}");
@@ -385,56 +435,25 @@ mod tests {
 
     #[test]
     fn a_progressing_wait_fails_after_the_bound_once_the_level_stops_and_names_it() {
-        let began = Instant::now();
-        let e = std::panic::catch_unwind(|| {
-            wait_progressing::<()>("a stuck level", Duration::from_millis(80), || {
+        let stuck_at = std::cell::Cell::new(Duration::ZERO);
+        let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            on_fake::<()>("a stuck level", Duration::from_millis(80), |t| {
+                stuck_at.set(t);
                 // Moves for 150 ms, then stands at 15 for good.
-                Look::At((began.elapsed().as_millis() as u64 / 10).min(15))
+                Look::At((t.as_millis() as u64 / 10).min(15))
             })
-        })
+        }))
         .unwrap_err();
-        let took = began.elapsed();
         let m = e.downcast_ref::<String>().unwrap();
         assert!(
             m.contains("a stuck level made no progress for 80ms: it stood at 15"),
             "{m}"
         );
-        // Not a total budget from the start (80 ms) and not much after the stall's own bound (150 + 80 ms).
-        assert!(took >= Duration::from_millis(230), "{took:?}");
-    }
-
-    #[test]
-    fn a_progressing_wait_backs_off_instead_of_polling_at_a_fixed_pace() {
-        // A fixed 0.2 s nap (bounded.sh before e0fdd0286) would answer a condition that holds after 5 ms only at 200 ms; a fixed fast
-        // pace would look thousands of times in 300 ms. The kit's backoff does neither.
-        let began = Instant::now();
-        let mut looks = 0u32;
-        wait_progressing("a quick condition", Duration::from_secs(5), || {
-            looks += 1;
-            if began.elapsed() >= Duration::from_millis(5) {
-                Look::Done(())
-            } else {
-                Look::At(u64::from(looks))
-            }
-        });
+        // A lower bound only: not a total budget from the start (80 ms), but the stall's own bound after the last move (150 + 80 ms).
         assert!(
-            began.elapsed() < Duration::from_millis(60),
-            "answered late: {:?}",
-            began.elapsed()
-        );
-        let began = Instant::now();
-        let mut looks = 0u32;
-        wait_progressing("a slower condition", Duration::from_secs(5), || {
-            looks += 1;
-            if began.elapsed() >= Duration::from_millis(300) {
-                Look::Done(())
-            } else {
-                Look::At(u64::from(looks))
-            }
-        });
-        assert!(
-            looks < 40,
-            "{looks} looks in 300 ms: a fixed fast pace, not a backoff"
+            stuck_at.get() >= Duration::from_millis(230),
+            "{:?}",
+            stuck_at.get()
         );
     }
 
