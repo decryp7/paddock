@@ -1294,3 +1294,26 @@ folder was warm, so cold build plus run was more than 1800 s there.
 - **Bound chosen:** 3600 s for the build phase, about 4x the measured 866 s: the train 10 run under heavier load needed more than
   1800 s for build plus run, and the bound is a hang guard, not a budget. The check's own guard stays 1800 s and now covers only
   the run. Not measured: a cold build at load 150 or more, and the other entries' builds (all smaller workspaces or crates).
+
+## Conformance tests in the push gate (2026-11-14, ci/conformance-every-change)
+
+Question: what does running the conformance row and the conformance tests on every push (ER-41) add to `./dev check --pre-push`?
+The conformance row already ran on every push (the plan marks conformance on every change since b013e1142); the new row is
+`conformance-tests` (`./dev ci run conformance tests`, that is `cd conformance && npm test`, 1000 tests).
+
+- **Machine:** the shared Mac mini (arm64), other agents running; 1-minute load given per run
+- **Tree:** this branch on train/2026-11-14-11 (1ecc53eee), warm `node_modules`, `./dev` already built
+- **Runs:** 3 of the conformance tests, 2 of the conformance row
+
+  | What | Load (1 min) | Seconds |
+  |---|---:|---:|
+  | `./dev ci run conformance tests`, alone | 57 | 75.6 |
+  | `./dev ci run conformance tests`, alone | 40 to 27 | 71.2 |
+  | `conformance-tests` row inside `./dev check --pre-push --refs-from-stdin --remote origin` | 22.7 | 71.1 |
+  | `./dev ci run conformance paddock` (the row), alone | 57 | 24.6 |
+  | `conformance` row inside the same pre-push run | 22.7 | 31.8 |
+
+- **Added time per push:** about 71 to 76 s of run time for `conformance-tests`. At a load of 20 or more the gate runs one row at a
+  time, so that is added wall time (the measured push gate took 4 min 3 s in all, 94 s of it queued for the heavy slot); on a
+  quieter machine (three rows at a time) it overlaps the Clippy rows. It fits the 15 minute budget.
+- **Not measured:** a run at a load under 10 (three rows at a time), and the conformance tests on Linux or Windows.
