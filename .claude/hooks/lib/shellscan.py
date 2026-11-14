@@ -114,6 +114,12 @@ def _lex(s, i, closer, level):
                     i += 1
             i += 1
             continue
+        if c == "$" and s.startswith("$'", i):
+            j, word = _ansi_c(s, i + 2)
+            buf.append(word)
+            inword = True
+            i = j
+            continue
         if c == "$":
             if s.startswith("$((", i):
                 i = _skip_arith(s, i + 3)
@@ -266,6 +272,43 @@ def _lex(s, i, closer, level):
     return toks, i
 
 
+_ANSI = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "e": "\x1b", "E": "\x1b", "f": "\f", "v": "\v",
+         "\\": "\\", "'": "'", '"': '"', "?": "?"}
+
+
+def _ansi_c(s, i):
+    """The text of an ANSI-C quoted word `$'...'` whose body starts at i, and the index after its closing quote. Decodes the
+    escapes a shell does (`\\n`, `\\x6b`, `\\153`, `\\u006b`), so `$'\\x6bill'` is seen as `kill`."""
+    n, out = len(s), []
+    while i < n and s[i] != "'":
+        c = s[i]
+        if c == "\\" and i + 1 < n:
+            e = s[i + 1]
+            if e in _ANSI:
+                out.append(_ANSI[e])
+                i += 2
+            elif e in "xuU":
+                width = {"x": 2, "u": 4, "U": 8}[e]
+                j = i + 2
+                while j < n and j < i + 2 + width and s[j] in "0123456789abcdefABCDEF":
+                    j += 1
+                out.append(chr(int(s[i + 2:j], 16)) if j > i + 2 else "\\" + e)
+                i = j
+            elif e in "01234567":
+                j = i + 1
+                while j < n and j < i + 4 and s[j] in "01234567":
+                    j += 1
+                out.append(chr(int(s[i + 1:j], 8) & 0xFF))
+                i = j
+            else:
+                out.append(c + e)
+                i += 2
+        else:
+            out.append(c)
+            i += 1
+    return i + 1, "".join(out)
+
+
 def _skip_arith(s, i):
     """Index after the `))` closing an arithmetic expression whose `((` ended at i."""
     n, depth = len(s), 0
@@ -323,6 +366,7 @@ class _State:
         self.chain_cond = False
         self.maybe_wrong = False
         self.at_chain_start = True
+        self.aliases = {}
 
 
 def expand(word, vars_):
@@ -452,6 +496,14 @@ def _finish(st, words, redirs, term, depth, heredoc_refs=()):
                     st.exported.append(a)
             elif w[0] == "export" and a in st.vars:
                 st.exported.append("%s=%s" % (a, st.vars[a]))
+    if k < len(w) and w[k] in st.aliases:
+        w = w[:k] + st.aliases[w[k]] + w[k + 1:]
+        cmd.words = w
+    if w[:1] == ["alias"]:
+        for a in w[1:]:
+            if _ASSIGN.match(a):
+                name, _, val = a.partition("=")
+                st.aliases[name] = val.split()
     env = list(w[:k]) if k < len(w) else []
     flags = set()
     argv = _strip(w[k:] if k < len(w) else [], env, flags)
@@ -478,6 +530,23 @@ def _finish(st, words, redirs, term, depth, heredoc_refs=()):
                     texts += st.prev.heredocs
         elif base == "eval":
             texts.append(" ".join(argv[1:]))
+        elif base == "script":
+            rest, inner = argv[1:], None
+            while rest and rest[0].startswith("-") and rest[0] != "--":
+                if rest[0] in ("-c", "--command") and len(rest) > 1:
+                    inner = rest[1]
+                    break
+                if rest[0].startswith("--command="):
+                    inner = rest[0].split("=", 1)[1]
+                    break
+                rest = rest[2 if rest[0] in ("-F", "-t", "-T", "-I", "-O", "-B", "-E", "-o", "-m") else 1:]
+            if inner is not None:
+                texts.append(inner)
+            else:
+                if rest[:1] == ["--"]:
+                    rest = rest[1:]
+                if len(rest) > 1:   # the first word is the typescript file; what follows is the command
+                    texts.append(" ".join(rest[1:]))
         elif base == "watch":
             rest = argv[1:]
             while rest and rest[0].startswith("-"):
@@ -601,6 +670,13 @@ def git_invocation(cmd, home=None):
     if k >= len(a):
         return None
     return eff, a[k], a[k + 1:]
+
+
+def dynamic_argv0(cmd):
+    """True when the program a command runs is computed at run time (`$(..)`, backticks, or a variable the scan could not
+    resolve), so no guard can tell what it is."""
+    a = cmd.argv
+    return bool(a) and ("$(..)" in a[0] or "`..`" in a[0] or "$" in a[0])
 
 
 def next_cmd(cmds, cmd):

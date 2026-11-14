@@ -53,6 +53,55 @@ expect "kill 0 (the whole group)" deny agent "$own" 'kill 0'
 expect "kill -9 -1 (everything)" deny agent "$own" 'kill -9 -1'
 expect "mixed: one own, one other" deny agent "$own" "kill $mine $theirs"
 KILL_GUARD_ROOT_PID=$lone expect "own worktree, but not from this Claude session" deny agent "$own" "kill $mine"
+# --- bypass shapes the shared scanner sees through (lib/shellscan.py)
+expect "ANSI-C quoted kill (hex)" deny agent "$own" "\$'\\x6bill' -9 $theirs"
+expect "ANSI-C quoted kill (octal)" deny agent "$own" "\$'k\\151ll' $theirs"
+expect "ANSI-C quoted pkill" deny agent "$own" "\$'pkill' -f lefthook"
+expect "alias k=kill, then k PID" deny agent "$own" "alias k=kill; k $theirs"
+expect "alias kk='kill -9', then kk PID" deny agent "$own" "alias kk='kill -9'; kk $theirs"
+expect "script (BSD form) runs kill" deny agent "$own" "script -q /dev/null kill $theirs"
+expect "script -c runs kill" deny agent "$own" "script -q -c 'kill -9 $theirs' /dev/null"
+expect "fuser -k" deny agent "$own" 'fuser -k 8080/tcp'
+expect "fuser -km" deny agent "$own" 'fuser -km /Volumes/x'
+expect "killall5" deny agent "$own" 'killall5 -9'
+expect "program from a substitution with a pid" deny agent "$own" '$(echo kill) 34522'
+expect "program from backticks with a signal" deny agent "$own" '`which kill` -9 34522'
+expect "program from an unknown variable with a pid" deny agent "$own" '${K} 34522'
+# regression rows: forms that already worked
+expect "env wrapper" deny agent "$own" "env FOO=1 kill $theirs"
+expect "timeout wrapper" deny agent "$own" "timeout 5 kill $theirs"
+expect "command builtin" deny agent "$own" "command kill $theirs"
+expect "eval" deny agent "$own" "eval kill $theirs"
+expect "heredoc fed to bash" deny agent "$own" "bash <<'X'
+kill $theirs
+X"
+# not kills
+expect "fuser without -k lists" allow agent "$own" 'fuser -v 8080/tcp'
+expect "a program from a variable without pid-like arguments" allow agent "$own" '"${PYTHON:-python3}" -I x.py'
+expect "a program from a substitution building" allow agent "$own" '$(command -v cargo) build --release'
+expect "ANSI-C text in an echo" allow agent "$own" "echo \$'kill 1\\n'"
+expect "an alias of something else" allow agent "$own" 'alias ll="ls -l"; ll /tmp'
+expect "script that records a build" allow agent "$own" 'script -q /dev/null cargo build'
+# --- the real proof path: the session's process from CLAUDE_PID, and from the nearest `claude`-named ancestor
+CLAUDE_PID=$$ KILL_GUARD_ROOT_PID='' expect "CLAUDE_PID: own descendant in the worktree" allow agent "$own" "kill $mine"
+CLAUDE_PID=$lone KILL_GUARD_ROOT_PID='' expect "CLAUDE_PID: another session's process" deny agent "$own" "kill $mine"
+# A symlink named `claude` to bash: the process is named after the link (a copy of a system bash is killed by macOS).
+fake="$base/bin/claude"; mkdir -p "$base/bin"; ln -s "$(command -v bash)" "$fake"
+check() { # name want got
+  if [ "$3" = "$2" ]; then echo "ok: $1"; else echo "FAIL: $1 (want $2, got $3)"; fail=1; fi
+}
+viaclaude() { # want(mine|theirs): runs the hook under a process named `claude`, with its own child or another agent's pid
+  out=$(KILL_GUARD_ROOT_PID='' CLAUDE_PID='' HOOK="$H" OWN="$own" THEIRS="$theirs" MINE="$mine" T="$1" "$fake" -c '
+    if [ "$T" = theirs ]; then p=$THEIRS; elif [ "$T" = sibling ]; then p=$MINE; else (cd "$OWN" && exec sleep 300) >/dev/null 2>&1 & p=$!; fi
+    jq -nc --arg c "kill $p" --arg d "$OWN" "{tool_name:\"Bash\",agent_id:\"a1\",cwd:\$d,tool_input:{command:\$c}}" | "$HOOK" 2>/dev/null
+    [ "$T" = mine ] && kill "$p"
+    :')
+  case "$out" in *'"deny"'*) echo deny ;; *) echo allow ;; esac
+}
+check "claude ancestor: its own child in the worktree" allow "$(viaclaude mine)"
+check "claude ancestor: another agent's process" deny "$(viaclaude theirs)"
+# In the worktree but not under the nearest `claude` (it is the test shell's child): the nearest one is the session, not any above.
+check "claude ancestor: the nearest claude is the session" deny "$(viaclaude sibling)"
 # --- allowed: proven own processes and job references
 expect "kill %1" allow agent "$own" 'kill %1'
 expect "kill -9 %build" allow agent "$own" 'kill -9 %build'

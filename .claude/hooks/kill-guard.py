@@ -7,12 +7,14 @@ import shellscan
 NAME = "kill-guard"
 WHY = ("A pid is a hint, never an owner (rule 53): on 2026-11-14 an integrator killed another agent's pre-commit by pid, "
        "and every agent runs the same tools.")
-NEXT = ("Next step: end your own background task with the TaskStop tool, `kill %<job>` or `kill $!` in the command that "
-        "started it, or `cd <your worktree> && kill <pid>` for a process of yours running there (paddock_proc tools through "
-        "`./dev` are fine). Otherwise report the process to its owner or the coordinator.")
-BY_NAME = {"pkill", "killall", "pgrep-kill"}
+NEXT = ("Next step: start a long process with the Bash tool's run_in_background so the TaskStop tool can end it, or end it with "
+        "`kill %<job>` or `kill $!` in the command that started it, or `cd <your worktree> && kill <pid>` for a process of yours "
+        "running there (paddock_proc tools through `./dev` are fine). A process started with nohup, setsid or disown, or one "
+        "running in a scratch folder, cannot be proven yours: report it to its owner or the coordinator instead.")
+BY_NAME = {"pkill", "killall", "killall5", "pgrep-kill"}
 SIG_ARG = {"-s", "-n", "--signal"}
 PID = re.compile(r"^[0-9]+$")
+KILLISH = re.compile(r"^(-?[0-9]+|%.*|-s|--signal|-(SIG)?(HUP|INT|QUIT|ILL|TRAP|ABRT|KILL|USR1|USR2|SEGV|PIPE|ALRM|TERM|STOP|CONT|TSTP))$")
 PROC_TIMEOUT = 3
 
 
@@ -172,7 +174,13 @@ def check(c, cmds, prover):
     a = c.argv
     if not a:
         return None
+    if shellscan.dynamic_argv0(c) and (any(KILLISH.match(x) for x in a[1:]) or any(
+            os.path.basename(x) in BY_NAME | {"kill"} for f in c.subs for x in f.argv[:1] + f.argv[1:])):
+        return refuse("`%s` is a program named at run time with pid-like arguments, so the hook cannot see whether it is a kill"
+                      % a[0])
     n = os.path.basename(a[0])
+    if n == "fuser" and any(x == "--kill" or (x.startswith("-") and not x.startswith("--") and "k" in x[1:]) for x in a[1:]):
+        return refuse("`fuser -k` ends every process that uses a file, whoever owns it")
     if n in BY_NAME:
         return refuse("`%s` ends processes by name, and other agents run the same programs" % n)
     if n != "kill":
