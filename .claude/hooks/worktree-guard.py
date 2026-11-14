@@ -51,6 +51,44 @@ def is_write(sub, args):
     return False
 
 
+CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--show-origin", "--show-scope",
+                     "--name-only", "--null", "-z", "--type", "--bool", "--int", "--path", "--default", "--includes", "--no-includes"}
+CONFIG_WRITE_FLAGS = {"--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e"}
+CONFIG_SCOPE = {"--local", "--global", "--system", "--worktree", "--file", "-f", "--blob"}
+
+
+def paddock_config_write(args):
+    """True when `git config <args>` writes a `paddock.*` key or the `paddock` section (the shared common config that names the
+    machine's dev folders, docs/dev-setup.md); reads are False."""
+    if not args:
+        return False
+    keys = [a for a in args if not a.startswith("-")]
+    sub = None
+    if keys and keys[0] in ("get", "list", "set", "unset", "rename-section", "remove-section", "edit"):
+        sub, keys = keys[0], keys[1:]
+    names_paddock = any(k.lower() == "paddock" or k.lower().startswith("paddock.") for k in keys[:1])
+    if not names_paddock and not (sub == "edit" or "--edit" in args or "-e" in args):
+        return False
+    if sub in ("get", "list"):
+        return False
+    if sub in ("set", "unset", "rename-section", "remove-section", "edit"):
+        return True
+    if any(a in CONFIG_WRITE_FLAGS for a in args):
+        return True
+    if any(a in CONFIG_READ_FLAGS for a in args):
+        return False
+    # `git config <key> <value>` writes; `git config <key>` reads (values of --file and the like are not keys).
+    positional, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in ("--file", "-f", "--blob", "--type", "--default"):
+            skip = True
+        elif not a.startswith("-"):
+            positional.append(a)
+    return len(positional) >= 2
+
+
 def closes_with_exit(cmds, cmd):
     """True when what follows `cd X ||` stops the script: `exit`/`return`, alone or inside a { ...; } group."""
     nxt = cmds[cmd.idx + 1] if cmd.idx + 1 < len(cmds) else None
@@ -111,6 +149,10 @@ def decide(data):
             if bypass or (sub in ("commit", "push") and "--no-verify" in args) or (sub == "commit" and short_n(args)):
                 return ("Blocked: git hooks are bypassed (%s). Hooks must pass: cherry-pick the hook fix or stop and report "
                         "(no bypass)." % (bypass[0] if bypass else "--no-verify"))
+        if is_agent and sub == "config" and paddock_config_write(args):
+            return ("Blocked: `git config` writes a `paddock.*` key by a subagent. It lives in the common config every worktree "
+                    "shares and moves the dev, VM, lock and disk folders for everyone (docs/dev-setup.md, \"Where things "
+                    "live\"). Next step: stop and ask the coordinator; read it with `git config --get` or `./dev places`.")
         if not is_write(sub, args):
             continue
         if c.after_cd_chain:
