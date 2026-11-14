@@ -55,3 +55,10 @@ kill %job	-	kill %1	allow	allow	allow	allow
 kill $! of the command's own job	-	sleep 100 & kill $!	allow	allow	allow	allow
 docker stop via ANSI-C quoting	-	$'docker' stop $(docker ps -q)	allow	deny	allow	allow
 docker prune via an alias	-	alias d=docker; d system prune -f	allow	deny	allow	allow
+git config --fixed-value paddock.* write	-	git config --fixed-value paddock.worktreeRoot /x /old	allow	allow	deny	allow
+git config --replace-all --fixed-value paddock.* write	-	git config --replace-all --fixed-value paddock.worktreeRoot /x /old	allow	allow	deny	allow
+git config -z paddock.* write	-	git config -z paddock.worktreeRoot /z	allow	allow	deny	allow
+git config --null paddock.* write	-	git config --null paddock.worktreeRoot /z	allow	allow	deny	allow
+git config --includes paddock.* write	-	git config --includes paddock.worktreeRoot /z	allow	allow	deny	allow
+git config --no-includes paddock.* write	-	git config --no-includes paddock.worktreeRoot /z	allow	allow	deny	allow
+git config --show-scope paddock.* write	-	git config --show-scope paddock.worktreeRoot x	allow	allow	deny	allow
