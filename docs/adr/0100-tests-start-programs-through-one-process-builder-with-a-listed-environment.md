@@ -1,7 +1,8 @@
 # 100. Tests start programs through one process builder with a listed environment
 
-- Status: Accepted 2026-11-13 (user: the redesign was approved for building, ER-21); built on `feat/test-env-builder`.
-  Nothing else is open except the follow-up in D3.
+- Status: Accepted 2026-11-13 (user: the redesign was approved for building, ER-21); built on `feat/test-env-builder`, which
+  merged train 11 at its head `49e1a97cc` (2026-11-15) and ADR 0103's `feat/test-timing-redesign` at `031a11c3d`. Nothing else is
+  open except the follow-up in D3.
 - Date: 2026-11-13
 - Related: ER-14 (tests never touch the user's machine), ER-21 / rule 40 (a recurring class gets a redesign), ER-22 / rule 42
   (share first), ER-24 (heavy slots), ER-37 / rule 76 (common practice), ER-41 (new checks start report-only); ADR 0077
@@ -45,7 +46,8 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
 - `PATH` is **curated**: the folder of the cargo that runs the test (`CARGO`, so also `rustc`), the folders of `node` and
   `git` as the test process finds them, then (Windows) Git for Windows' `usr/bin` and `bin`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the Windows folder). The folder of `node` is added whole, so on a Homebrew Mac it exposes `/opt/homebrew/bin` (other Homebrew tools, not the slot tool); a narrower PATH would need a private folder of links to `node` and `git`, which Windows cannot make cheaply, so it is accepted and named here.
   `path_first(dir)` puts a test's stand-in folder first; `.env("PATH", ..)` replaces it whole. A bare program name is
-  resolved once, at construction, to a full path.
+  resolved once, at construction, against the **test process's** `PATH`: `path_first` and `env("PATH", ..)` change only the
+  child's own lookups, never which program starts (a test that starts a stand-in names it by its path).
 - the toolchain: `RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN` and `CARGO_BUILD_JOBS` (a bound, ER-24) as the test process has them, and, when unset, the real
   `~/.cargo` and `~/.rustup` named explicitly (a redirected `HOME` would otherwise hide the offline registry and the
   toolchains); on Windows `SystemRoot`, `ComSpec`, `PATHEXT` and a few more. These are `PASSED_THROUGH` and the only
@@ -54,7 +56,11 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   that names another home lost that home's `.gitconfig`, the P1 of fix/linux-container-gate 88c06e902): `maintenance.auto=false`,
   `gc.auto=0`, a test identity and `safe.directory=*` (`GIT_CONFIG_NOSYSTEM` hides the system config, where the CI image and the
   local Linux container trust a checkout another user owns), so no test's git starts background maintenance (a detached `git maintenance` held `objects/maintenance.lock` and a bare clone made
-  meanwhile copied it: the kept-clone fixture hit that 104 times in 1200 runs under load);
+  meanwhile copied it: the kept-clone fixture hit that 104 times in 1200 runs under load). It is written only when the home has
+  none, through a temporary file linked into place (`persist_noclobber`), so a `new_in` home the test prepared keeps its own and
+  children sharing a home never see half a file. Because every folder is trusted, `GIT_CEILING_DIRECTORIES` names the temp root:
+  git never looks for a repository above it (CVE-2022-24765, a `.git` planted in a shared `/tmp`), while a repository a test makes
+  below it is still found;
 - fixed values: a git author and committer, `GIT_CONFIG_NOSYSTEM=1`, `NO_COLOR=1`.
 
 `allowed_names()` lists every name a fresh command carries. Everything else a test needs is a **named addition**
@@ -63,23 +69,30 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
 
 **One check, C123** (Rust host `tools/paddock-dev/src/check/c123.rs`, JavaScript port
 `conformance/src/checks/C123-test-process-builder.mjs`, held equal by `tools/paddock-dev/tests/it/check_c123.rs`): in a Rust
-test file, a constructor (`Command::new`, `paddock_proc::command`, `quiet_command`) whose first argument is the paddock-dev
-binary, cargo, `node` or `dev` is a finding, and in `tools/paddock-dev` so is `sh` or `bash` (the wrapper script `./dev` and
-the CI scripts run under a shell); so is any other use of `env!("CARGO_BIN_EXE_paddock-dev")` or of cargo's path in a function
-that does not name `TestCommand`. A justified case carries `conformance: test-env — <why>`. It is report-only (ER-41: a
-warning) until its first green run on main, recorded in `docs/gates.toml`.
+test file, a constructor (`Command::new`, `paddock_proc::command`, `quiet_command`) whose first argument is a built binary
+(`CARGO_BIN_EXE_*`, or a name bound to one: a `const`, `static`, `let` or a function returning one, in the file or `pub` in another
+test file of the same crate), cargo, rustc, rustup, `node`, `npm`, `npx`, `dev` or a path joined to `dev` (also spelled with `.exe`
+or `.cmd`) is a finding, and in `tools/paddock-dev` so is `sh` or `bash` (the wrapper script `./dev` and the CI scripts run under a
+shell); so is any other use of `env!("CARGO_BIN_EXE_paddock-dev")` or of cargo's path in a function whose code (comments left out)
+does not name `TestCommand`. In a file under `src/` the test part starts at the first `#[cfg(..)]` that names `test` (not
+`not(test)`). A justified case carries `conformance: test-env — <why>`. It is report-only (ER-41: a warning) until its first
+green run on main, recorded in `docs/gates.toml`.
 
-**Every existing spawn site is migrated in the same change** (no baseline). The final rule, run on the tree at `adf56b5e7` (`git archive`,
-`node conformance/bin/paddock-conformance.mjs --app paddock --root <archive> --only C123`, 2026-11-13), lists 118 findings in 49 files
-(the first, narrower version of the rule listed 74 on the same tree; a reviewer's count of 101 in 36 files used another reading of
-"spawn"). The migration is in the commits. Two checks keep the rule from decaying: the module's own test starts a real child
+Known false negatives (accepted; a text check cannot see them without a Rust parser): a program held in a variable
+(`let p = "cargo"; Command::new(p)`), an alias (`use std::process::Command as Cmd`), a block comment that names `TestCommand` (only
+line comments are left out), and a spawn in a non-test helper module that tests call.
+
+**Every existing spawn site is migrated in the same change** (no baseline). The rule of 2026-11-13, run on the tree at `adf56b5e7`
+(`git archive`, `node conformance/bin/paddock-conformance.mjs --app paddock --root <archive> --only C123`), listed 118 findings in 49
+files (the first, narrower version of the rule listed 74 on the same tree; a reviewer's count of 101 in 36 files used another reading
+of "spawn"); 110 of them were spawn sites migrated in 50 files across 8 workspaces (the other 8 were uses of the binary in functions
+that already built a `TestCommand` once the rule read whole functions), and the rule ends at 0 there. Merging train 11 (`49e1a97cc`)
+brought 20 new sites in 9 files of `tools/paddock-dev/tests/it`, and the widened rule of the review of `a8fca0ebd` 8 more (6 in
+`crates/paddock-ipc` through its shared `child_program()`, `rustc` in `generators.rs` and `inputs.rs`); all are migrated, and the
+check counts 0 findings and 0 waivers on the branch. The migration is in the commits. Two checks keep the rule from decaying: the module's own test starts a real child
 under a machine environment full of poisoned variables and compares its environment with `allowed_names()`; and the
 pre-push test starts `./dev check --pre-push` with a machine that has a `heavy.sh` of its own (`ENGINEERING_RULES`,
 `HEAVY_LOCK_DIR`) and fails when that script runs, a slot folder is made, or the fake cargo sees a name nobody listed.
-
-One more product change falls out: a **named `ENGINEERING_RULES` is the only place** `sibling_heavy` looks. A folder
-without `heavy.sh` means "none", not "try the checkout beside this repository", so a test can name an empty folder and the
-machine's own checkout is never found (a test that did not, reached it through the repository layout, not the environment).
 
 ## What exists (ER-22: look before adding)
 
@@ -105,13 +118,17 @@ machine's own checkout is never found (a test that did not, reached it through t
   environment (`TEST_TMPDIR`, a fixed `TZ`, locale variables unset) and "should not depend on the presence, absence, or
   value of any environment variable not listed"; `--test_env` forwards named ones. That is this design: a documented list,
   named additions, a private temp folder.
-- **Nix** builds and **git's** own `t/test-lib.sh` (which unsets or fixes the variables git reads and points `HOME` at
-  the trash directory) take the same position: the test owns `HOME`, `TMPDIR` and the git config.
+- **Nix** builds start from an empty environment plus what the derivation names, with a private `HOME` (`/homeless-shelter`)
+  and `TMPDIR`: the allow-list shape.
+- **git's** own `t/test-lib.sh` points `HOME` at the trash directory and fixes a few values (`TZ`, the author and committer),
+  but it keeps the environment it was started with and **unsets a list** of the `GIT_*` and locale variables it knows: a
+  deny-list, like Cargo's. Both own `HOME` and the git config.
 - The OS vendors give no test-environment standard; for `HOME`/`XDG_*` the XDG Base Directory specification is the contract
   the redirected variables follow.
 
-Common practice is therefore "private home, listed environment". The deny-list of Cargo is the cheaper, weaker option and
-is offered as a decision below.
+Common practice is therefore split: Bazel and Nix list the environment, Cargo and git keep it and remove what they know;
+all of them give the test a private home. The deny-list of Cargo and git is the cheaper, weaker option and is offered as the
+common-practice decision below (D1).
 
 ## Cost (ER-37)
 
@@ -123,7 +140,9 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
 
 ## Decisions
 
-- **D1 (decided): allow-list, not deny-list.** Empty environment plus `allowed_names()`.
+- **D1 (decided): allow-list, not deny-list.** Empty environment plus `allowed_names()`. The common-practice option is
+  Cargo's and git's deny-list (keep the environment, redirect `HOME`/`TMPDIR`, remove a named list): about 0.4 agent-day, but
+  it does not stop the next lookup, which is the class this ADR exists for; not chosen.
 - **D2 (decided): migrate every site now, no baseline** (the user: the foundation is built complete and right). The check
   lists no baseline file; `docs/gates.toml` carries the report-only entry (ER-41).
 - **D3 (open, follow-up): JavaScript tests.** About 50 test files in `conformance/test`, `scripts/*.test.mjs` and the apps'
@@ -131,8 +150,10 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
   judged by C123 and have no builder yet; a JavaScript `testProcess()` in `conformance/test/helpers.mjs` and a C123 arm that
   reads `.mjs` would be about 0.5 agent-day. Not done here: the incidents were Rust tests, and a second builder needs the
   parity rule applied once more.
+- **D4 (decided): git is not in C123.** `git` reads `HOME` and the git config, which `TestCommand` redirects when it is
+  used; plain `Command::new("git")` fixtures (about 60) keep working. If a git-config incident appears, add it to the check.
 - **D5 (decided, review of f39597fbb P1-3): every `CARGO_BIN_EXE_*` binary a test starts itself.** The check judges a constructor
-  whose argument is `env!("CARGO_BIN_EXE_<any>")` or a name bound to one in the same file, so the slot tool (`tools/heavy`, whose
+  whose argument is `env!("CARGO_BIN_EXE_<any>")` or a name bound to one (see the check above), so the slot tool (`tools/heavy`, whose
   tests removed a deny-list of `HEAVY_*` variables by hand), the apps' programs and the wiki tool are covered. A binary handed to the
   code under test, which starts it through its own spawn API (`SpawnSpec`, `WorkerConfig`, `Builtins`), is the product's spawn and is
   not judged. Cost: about 0.3 agent-day (`tools/heavy` and `debrief-collect` gain a dev-dependency on the testkit; the heavy
@@ -144,12 +165,15 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
   `LLVM_PROFILE_FILE`, the `CARGO_LLVM_COV*` variables, `CARGO_INCREMENTAL`), so a program built under coverage is the one the
   run measures. Used by Debrief's store-worker build and Pitcrew's fake runner; the Dyno tests only run `cargo tree` and
   `cargo metadata`, which compile nothing.
-- **D8 (decided, last review): `spawn()` returns a `TestChild`.** It derefs to the `Child`, holds the command's private folders until
-  it is waited on or dropped (a child that writes to its `HOME` after the builder dropped used to find it deleted), and kills and
-  reaps a child still running when it drops, through the handle it owns (ADR 0033: never a bare pid). `paddock_proc` is not used
-  because it depends on the testkit in its own tests.
-- **D4 (decided): git is not in C123.** `git` reads `HOME` and the git config, which `TestCommand` redirects when it is
-  used; plain `Command::new("git")` fixtures (about 60) keep working. If a git-config incident appears, add it to the check.
+- **D8 (decided, last review; amended after the review of `a8fca0ebd`): `spawn()` returns a `TestChild`.** It derefs to the
+  `Child`, holds the command's private folders until it is waited on or dropped (a child that writes to its `HOME` after the builder
+  dropped used to find it deleted), and kills and reaps a child still running when it drops, through the handle it owns (ADR 0033:
+  never a bare pid). **Descendants** are ADR 0103's: `paddock_testkit_start::Reaper::spawn_test(cmd)` starts a `TestCommand` through
+  the reaper (its token, its groups, never a new group while the test leads one under nextest) and hands back the `TestChild`
+  (`TestChild::from_parts`), so the child ends with its handle and everything below it with the reaper (rule 55: one
+  mechanism). `TestChild` does not end descendants itself because the testkit cannot use `paddock_proc` (that crate's tests use the
+  testkit; the dependency made a publish cycle, ci.yml 7989): a test whose child starts its own children uses `spawn_test`. Both
+  are tested by identity in `paddock-testkit-start` (`reap::tests`).
 
 ## Consequences
 
