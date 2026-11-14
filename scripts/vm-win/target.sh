@@ -10,13 +10,22 @@
 WIN_VM_NAME=paddock-win11-test
 # The repository's own ./dev, never PADDOCK_DEV: the program that names the target must not come from the environment either.
 _win_vm_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# ./dev runs under `env -i` with only a fixed PATH and HOME (the tool's cache, ~/.paddock-dev, and rustup): no variable
+# (PADDOCK_DEV_HOME, PADDOCK_DEV_TARGET_DIR, PADDOCK_DEV_DOWNLOAD and the like) can make the wrapper pick a planted binary.
+# The first run after the tool's inputs change builds paddock-dev (about 35 s measured on 2026-11-15, minutes on a cold machine).
+# CARGO_BUILD_JOBS, RUSTUP_HOME, CARGO_HOME and RUSTUP_TOOLCHAIN pass when set: none of them can pick a cached binary.
+_win_vm_dev() {
+  local keep=() v
+  for v in CARGO_BUILD_JOBS RUSTUP_HOME CARGO_HOME RUSTUP_TOOLCHAIN; do [ -n "${!v:-}" ] && keep+=("$v=${!v}"); done
+  env -i PATH="$HOME/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin" HOME="$HOME" ${keep[@]+"${keep[@]}"} "$_win_vm_repo/dev" "$@"
+}
 # Empty when it cannot be derived: then only fake mode passes, and the real VM is refused with the reason (fail closed).
 WIN_VM_DIR_UNKNOWN=""
-if _win_vm_data="$("$_win_vm_repo/dev" places --pinned --get vm-data --repo "$_win_vm_repo" 2>/dev/null)" && [ -n "$_win_vm_data" ]; then
+if _win_vm_data="$(_win_vm_dev places --pinned --get vm-data --repo "$_win_vm_repo" 2>/dev/null)" && [ -n "$_win_vm_data" ]; then
   WIN_VM_DIR="$_win_vm_data/$WIN_VM_NAME"
 else
   WIN_VM_DIR=""
-  WIN_VM_DIR_UNKNOWN="$("$_win_vm_repo/dev" places --pinned --get vm-data --repo "$_win_vm_repo" 2>&1 >/dev/null | tail -1)"
+  WIN_VM_DIR_UNKNOWN="$(_win_vm_dev places --pinned --get vm-data --repo "$_win_vm_repo" 2>&1 >/dev/null | tail -1)"
 fi
 
 # A path with links resolved; a missing last part is resolved through its parent (prepare.sh creates the folder).

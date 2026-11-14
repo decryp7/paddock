@@ -120,6 +120,60 @@ fn entry<'a>(list: &'a [Entry], check: &Check) -> Option<&'a Entry> {
 
 const REGISTER: &str = "docs/gates.toml";
 
+/// A `[[report_only]]` id that names a CI test step rather than a check: `step:<project>/<phase>`, the phase of a project's
+/// `paddock.ci.json` that a workflow runs as `./dev ci run <project> <phase>` with `continue-on-error`. It has the same
+/// `review_by` limit as a check, so the flip to blocking is enforced by the date (ER-41).
+const STEP_PREFIX: &str = "step:";
+
+/// What is wrong with a `step:<project>/<phase>` entry, with the next step: the step is gone, or it already blocks.
+fn step_entry_problem(id: &str, src: &Sources, model: &ci::CiModel) -> Option<(String, &'static str)> {
+    let Some((project, phase)) = id.strip_prefix(STEP_PREFIX).and_then(|r| r.split_once('/')) else {
+        return Some((
+            format!("[[report_only]] {id} is not `step:<project>/<phase>`"),
+            "Write the id as step:<project>/<phase>, for example step:tools/hooks.",
+        ));
+    };
+    let commands: Result<Vec<String>, String> = src
+        .root_contracts
+        .get(project)
+        .or_else(|| src.contracts.get(project))
+        .ok_or_else(|| format!("no contract for `{project}`"))
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(t).map_err(|e| e.to_string()))
+        .and_then(|c| crate::ci_run::contract::phase_lines(&c, project, phase))
+        .map(|l| {
+            super::shell::commands(&l.join("\n"), Some(String::new()))
+                .into_iter()
+                .map(|c| c.text)
+                .collect()
+        });
+    let Ok(commands) = commands else {
+        return Some((
+            format!("[[report_only]] {id} names a step that no longer exists"),
+            "Remove the entry (the project or its phase is gone from its paddock.ci.json).",
+        ));
+    };
+    let origin = crate::ci_run::contract::repo_path_of(project);
+    let statuses: Vec<ci::Status> = model
+        .lines
+        .iter()
+        .filter(|l| l.origin.as_deref() == Some(origin.as_str()) && commands.contains(&l.text))
+        .flat_map(|l| l.levels.values().copied())
+        .collect();
+    if statuses.is_empty() {
+        return Some((
+            format!("[[report_only]] {id} names a step that no workflow runs"),
+            "Remove the entry, or add the workflow step `./dev ci run <project> <phase>`.",
+        ));
+    }
+    if statuses.iter().all(|s| *s == ci::Status::Gated) {
+        return Some((
+            format!("[[report_only]] {id} is stale: the step blocks now"),
+            "Remove the entry (the step's continue-on-error is gone).",
+        ));
+    }
+    None
+}
+
 /// Runs C100.
 pub fn evaluate(input: &Input) -> Outcome {
     let mut out = Outcome::default();
@@ -560,7 +614,10 @@ pub fn evaluate(input: &Input) -> Outcome {
         ("report_only", &reg.report_only),
         ("level", &reg.level),
     ] {
-        for e in list.iter().filter(|e| !ids.contains(&e.id)) {
+        for e in list
+            .iter()
+            .filter(|e| !ids.contains(&e.id) && !(kind == "report_only" && e.id.starts_with(STEP_PREFIX)))
+        {
             finding(
                 &mut out,
                 Some(REGISTER),
@@ -581,6 +638,11 @@ pub fn evaluate(input: &Input) -> Outcome {
                 format!("[[planned]] {} is stale: the check exists now", p.id),
                 "Remove the entry.",
             );
+        }
+    }
+    for e in reg.report_only.iter().filter(|e| e.id.starts_with(STEP_PREFIX)) {
+        if let Some((message, fix)) = step_entry_problem(&e.id, input.sources, &model) {
+            finding(&mut out, Some(REGISTER), None, &e.id, message, fix);
         }
     }
     let present: BTreeSet<(String, String)> = out
@@ -772,6 +834,69 @@ mod tests {
         fn failure(&self) -> Option<String> {
             Some("scripts/affected-marks.mjs: it did not finish within 60 seconds".into())
         }
+    }
+
+    /// `run`, with a workflow of its own and the contract of a root project (`tools`).
+    fn run_step(register: &str, workflow: &str, tools_contract: Option<&str>) -> Outcome {
+        let tree = MemTree::new(&[]);
+        let mut sources = Sources::default();
+        sources.workflows.insert(".gitea/workflows/ci.yml".into(), workflow.into());
+        if let Some(c) = tools_contract {
+            sources.root_contracts.insert("tools".into(), c.into());
+        }
+        evaluate(&Input {
+            tree: &tree,
+            sources: &sources,
+            conformance_list: Ok(LIST.into()),
+            conformance_commands: Some(r#"["list","commands"]"#.into()),
+            dev_commands: ["gates", "gates check"].iter().map(|s| s.to_string()).collect(),
+            register_text: Some(register.to_string()),
+            base_register_text: None,
+            history: Vec::new(),
+            today: Date::parse("2026-11-10").unwrap(),
+            release_tag: None,
+            planner: &AllMarks,
+            history_error: None,
+            warn: false,
+            shallow: false,
+        })
+    }
+
+    const STEP_CI: &str = "on:\n  pull_request:\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: ./dev ci run tools hooks\n        continue-on-error: true\n";
+    const STEP_CONTRACT: &str = r#"{"hooks": ["bash .claude/hooks/run-tests.sh"]}"#;
+    fn step_register(review_by: &str) -> String {
+        format!(
+            "{REG_HEAD}\n[[report_only]]\nid = \"step:tools/hooks\"\nreason = \"x\"\nowner = \"o\"\nsince = 2026-11-08\nreview_by = {review_by}\napproved = \"coordinator\"\n"
+        )
+    }
+
+    #[test]
+    fn a_report_only_test_step_is_registered_by_step_id_and_the_flip_is_enforced() {
+        let step = |o: &Outcome| {
+            messages(o)
+                .into_iter()
+                .filter(|m| m.contains("step:tools/hooks"))
+                .collect::<Vec<_>>()
+        };
+        // a continue-on-error step with an entry: no finding about the entry
+        assert!(step(&run_step(&step_register("2026-12-06"), STEP_CI, Some(STEP_CONTRACT))).is_empty());
+        // the entry's review_by passes: the same finding as for a check
+        let m = step(&run_step(&step_register("2026-11-09"), STEP_CI, Some(STEP_CONTRACT)));
+        assert!(m.iter().any(|x| x.contains("review_by 2026-11-09 has passed")), "{m:?}");
+        // the step blocks (continue-on-error removed): the entry is stale
+        let blocking = STEP_CI.replace("        continue-on-error: true\n", "");
+        let m = step(&run_step(&step_register("2026-12-06"), &blocking, Some(STEP_CONTRACT)));
+        assert!(m.iter().any(|x| x.contains("is stale: the step blocks now")), "{m:?}");
+        // no workflow runs it, or the phase is gone
+        let none = "on:\n  pull_request:\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n";
+        let m = step(&run_step(&step_register("2026-12-06"), none, Some(STEP_CONTRACT)));
+        assert!(m.iter().any(|x| x.contains("no workflow runs")), "{m:?}");
+        let m = step(&run_step(&step_register("2026-12-06"), STEP_CI, Some(r#"{"tests": []}"#)));
+        assert!(m.iter().any(|x| x.contains("no longer exists")), "{m:?}");
+        // a malformed id
+        let bad = step_register("2026-12-06").replace("step:tools/hooks", "step:tools");
+        let m = messages(&run_step(&bad, STEP_CI, Some(STEP_CONTRACT)));
+        assert!(m.iter().any(|x| x.contains("is not `step:<project>/<phase>`")), "{m:?}");
     }
 
     #[test]

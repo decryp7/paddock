@@ -91,6 +91,9 @@ export const GLOBAL = [
 
 /** The planner and its tests: besides the scripts' owners, the `dev` tool's golden test runs them as its oracle. */
 export const PLANNER_FILES = /^scripts\/affected(\.test)?\.mjs$/;
+/** What the hooks' parity test (.claude/hooks/paddockpaths-parity.test.sh) runs against: the Rust twin of lib/paddockpaths.py and its register. A change marks the tools job. Mirrors `HOOKS_PARITY_INPUT` in tools/paddock-dev/src/plan.rs. */
+export const HOOKS_PARITY_INPUT = /^(tools\/paddock-dev\/src\/places\.rs|docs\/known-copies\.toml)$/;
+
 /** The JS conformance runner and what it reads: tools/paddock-dev's parity tests run it over fixtures and the live tree (C39, C53). */
 export const PARITY_INPUT = /^conformance\/(src|bin|baselines)\/.+\.(mjs|json)$/;
 
@@ -364,6 +367,7 @@ const OWNERS = [
   [/^(renovate\/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)/, ['tools']], // checked by scripts/affected.test.mjs
   [/^\.gitleaks\.toml$/, ['conformance']], // the secret scan's allow-list: the conformance job runs the scan
   [/^wiki-lint\.json$/, ['tools']], // the settings of tools/wiki, which lints docs/wiki (ER-30)
+  [/^\.claude\/(hooks\/|settings\.json$)/, ['tools']], // the hooks, their tests (`*.test.sh`, which the tools job's `hooks` step runs) and the settings that wire them
 ];
 
 /**
@@ -696,6 +700,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       }
       continue;
     }
+    if (HOOKS_PARITY_INPUT.test(f)) mark('tools', `the hooks' parity test (.claude/hooks/paddockpaths-parity.test.sh) reads ${f}`);
     if (PLANNER_FILES.test(f)) mark('paddock-dev', `its golden test compares ${f} (tools/paddock-dev/tests/it/golden.rs)`);
     if (RUST_INPUTS.some((r) => r.test(f))) {
       for (const p of ['crates', 'paddock-dev']) mark(p, `rust input ${f}`);

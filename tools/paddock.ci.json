@@ -12,6 +12,9 @@
   "affected": [
     "node --test scripts/affected.test.mjs"
   ],
+  "hooks": [
+    "bash .claude/hooks/run-tests.sh"
+  ],
   "svg-drift": [
     "node scripts/svg-drift.mjs"
   ]

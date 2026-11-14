@@ -241,6 +241,17 @@ describe('the graph of this tree', () => {
     assert.ok(!run('docs/adr/0014-monorepo-under-paddock.md').tools);
   });
 
+  test('the hooks tests (.claude/hooks/*.test.sh) run in the tools job: a hook, places.rs (the parity test) or the copies register marks it', () => {
+    for (const f of ['.claude/hooks/worktree-guard.py', '.claude/hooks/paddockpaths-parity.test.sh', '.claude/hooks/lib/paddockpaths.py', '.claude/settings.json', 'tools/paddock-dev/src/places.rs', 'docs/known-copies.toml']) {
+      const r = run(f);
+      assert.equal(r.tools, true, f);
+      assert.equal(r.all, false, f);
+      assert.deepEqual(r.apps, [], f);
+    }
+    assert.equal(run('.claude/hooks/x.sh').crates, false);
+    assert.equal(run('tools/paddock-dev/src/plan.rs').tools, false);
+  });
+
   test("the secret scan's allow-list marks the conformance job only, where the scan runs", () => {
     const g = run('.gitleaks.toml');
     assert.deepEqual([g.conformance, g.all, g.crates, g.ui, g.apps], [true, false, false, false, []]);

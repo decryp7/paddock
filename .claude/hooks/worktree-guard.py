@@ -51,10 +51,28 @@ def is_write(sub, args):
     return False
 
 
-CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--show-origin", "--show-scope",
-                     "--name-only", "--null", "-z", "--type", "--bool", "--int", "--path", "--default", "--includes", "--no-includes"}
+# An allow-list: a subagent's `git config` that names `paddock` passes only as a lookup (these flags, the get/list subcommands, or one
+# bare key). Every other option (-z, --includes, --show-scope, --fixed-value ...) only modifies a read or a write, so it decides nothing.
+CONFIG_LOOKUP_FLAGS = {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"}
 CONFIG_WRITE_FLAGS = {"--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "--edit", "-e"}
 CONFIG_SCOPE = {"--local", "--global", "--system", "--worktree", "--file", "-f", "--blob"}
+
+
+CONFIG_VALUE_OPTIONS = ("--file", "-f", "--blob", "--type", "-t", "--default", "--comment")
+
+
+def _config_positionals(args):
+    """The arguments of `git config` that are not options or the values of options that take one (`--file x`, `-f x`; the
+    joined `--file=x` starts with a dash and is skipped as an option)."""
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in CONFIG_VALUE_OPTIONS:
+            skip = True
+        elif not a.startswith("-"):
+            out.append(a)
+    return out
 
 
 def paddock_config_write(args):
@@ -62,7 +80,7 @@ def paddock_config_write(args):
     machine's dev folders, docs/dev-setup.md); reads are False."""
     if not args:
         return False
-    keys = [a for a in args if not a.startswith("-")]
+    keys = _config_positionals(args)
     sub = None
     if keys and keys[0] in ("get", "list", "set", "unset", "rename-section", "remove-section", "edit"):
         sub, keys = keys[0], keys[1:]
@@ -75,18 +93,10 @@ def paddock_config_write(args):
         return True
     if any(a in CONFIG_WRITE_FLAGS for a in args):
         return True
-    if any(a in CONFIG_READ_FLAGS for a in args):
+    if any(a in CONFIG_LOOKUP_FLAGS for a in args):
         return False
-    # `git config <key> <value>` writes; `git config <key>` reads (values of --file and the like are not keys).
-    positional, skip = [], False
-    for a in args:
-        if skip:
-            skip = False
-        elif a in ("--file", "-f", "--blob", "--type", "--default"):
-            skip = True
-        elif not a.startswith("-"):
-            positional.append(a)
-    return len(positional) >= 2
+    # `git config <key> <value>` writes; `git config <key>` reads. The type options (--type, --bool, ...) only canonicalise.
+    return len(keys) >= 2
 
 
 def closes_with_exit(cmds, cmd):
