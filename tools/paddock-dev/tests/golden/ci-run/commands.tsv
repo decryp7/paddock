@@ -728,6 +728,7 @@ job	tools			Windows-x86_64)          T=x86_64-pc-windows-msvc
 job	tools			bash "conformance/ci/kit.sh" build-jobs
 job	tools			bash "conformance/ci/kit.sh" host sccache-stats
 job	tools			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
+job	tools			bash .claude/hooks/run-tests.sh
 job	tools			bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb"
 job	tools			cargo --version
 job	tools			case "$RUNNER_OS-$(uname -m)" in
