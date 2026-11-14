@@ -2005,4 +2005,7 @@ had outlived its agent, and Dyno's launcher dropped the handle of its first chil
 kept the child), or, when you must act on a pid, check immediately before the kill that its cwd is inside your own worktree and
 that its start time is later than your own command's start; if either is unknown or differs, do not kill: report it to its
 owner or the coordinator. Never `pkill -f` or `kill` by a name pattern (`lefthook`, `cargo`, `node`) because every agent runs
-the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
+the same tools. **Class: acting on a reusable OS name without identity (rule 53).** Enforced since 2026-11-14 by the blocking
+hook `.claude/hooks/kill-guard.sh` (with its `.test.sh`): an agent's `pkill`, `killall`, `xargs kill` and `kill <pid>` are refused
+unless the pid is a `%job`, `$!` from the same command, or a live descendant of this Claude session whose working folder is in
+the agent's own worktree.
