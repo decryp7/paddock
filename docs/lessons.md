@@ -2035,3 +2035,14 @@ yet, so no runner time went on it. A member gate runs no tests by design (ADR 00
 merged tree (through the heavy slot), fixes what fails in one combination commit, and pushes once; touched-module tests are not
 enough for a merge that changes shared lists (check registries, goldens, lint allow lists). **Class: train-time combination
 failures (ADR 0098; train 8's eight fixes, above).**
+
+## The guards kept a disk path that no longer existed (2026-11-14)
+After all dev data moved to `/Volumes/vault-dev`, `worktree-guard.py` still defaulted its main checkout to the old `d8sst7` path
+and `docker-guard.py` its allowed folders to the old `d8sst7`/`d7sst7` dev-targets, and no env override was set. The worktree
+guard stopped recognising the real main checkout, so the ER-2 protection (no subagent git write in main) was silently off; their
+tests hard-coded the same paths, so they stayed green. Fix: the guards derive the main checkout from git (the common dir of
+`$CLAUDE_PROJECT_DIR`, else of the hook's own folder) and the allowed folders from `git config paddock.worktreeRoot`, keep their
+env overrides, and refuse with a `Blocked: ... Next step: ...` message when they cannot derive
+(`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
+config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
+**Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).

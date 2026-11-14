@@ -26,7 +26,7 @@ expect "rm of a root-level file is refused" deny Bash command "rm $S/a.txt"
 expect "touch in root is refused" deny Bash command "touch $S/a.txt"
 expect "reading the root is allowed" allow Bash command "ls $S/ && cat $S/notes.md"
 expect "unrelated command is allowed" allow Bash command "git status"
-expect "Write outside scratchpad is allowed" allow Write file_path /Volumes/d8sst7/dev-targets/x/a.txt
+expect "Write outside scratchpad is allowed" allow Write file_path /somewhere/else/x/a.txt
 # The coordinator (no agent marker in the input) is refused too: the rule has no agent/coordinator split.
 expect "coordinator has no exemption for the root" deny Write file_path "$S/c.md"
 # The refusal names the next step.

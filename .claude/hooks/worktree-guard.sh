@@ -8,5 +8,6 @@
 #     last `cd` target, else the hook input's cwd. Read-only git, fetch and `worktree add|list|lock` stay allowed.
 #     A subagent is told from the coordinator by `agent_id` in the hook input; the coordinator is not refused here.
 # Never fails closed: a parse problem allows the command and warns on stderr.
-# WORKTREE_GUARD_MAIN overrides the main checkout path (tests).
+# The main checkout is derived from git (CLAUDE_PROJECT_DIR, else this folder); WORKTREE_GUARD_MAIN overrides it. If it cannot be
+# derived, a subagent's git write is refused.
 exec python3 -I -B "$(dirname "$0")/worktree-guard.py"
