@@ -85,14 +85,19 @@ pub fn trim_log(log: &str) -> String {
         r"^\s*(Job: |Starting \d+ tests?|(FAIL|TIMEOUT|TMT|SIG\w*|FLAKY|FLKY\S*|TRY \d+ (FAIL|TIMEOUT|PASS|SIG\w*))\b|Summary \[|.*tests? (were |was )?not run|Cancelling due to|##\[error\]|::error::)",
     );
     let Ok(keep) = keep else { return String::new() };
-    // Runner work folders name the runner and the disk: `/Volumes/<disk>/gitea-runners/<runner>/work/...`.
+    // Runner work folders name the runner and the disk: `/Volumes/<disk>/gitea-runners/<runner>/work/...`; any other folder on a
+    // named disk (the CI home `/Volumes/<disk>/ci/home/...`) names the disk too, so every disk name becomes the placeholder.
     let paths = regex::Regex::new(r"/Volumes/[^/\s]+/gitea-runners/[^/\s]+");
+    let disks = regex::Regex::new(r"/Volumes/[^/\s'`]+");
     let mut out = String::new();
     for l in log.lines() {
         if keep.is_match(&plain(l)) {
-            match &paths {
-                Ok(p) => out.push_str(&p.replace_all(l, "/Volumes/disk/gitea-runners/runner-1")),
-                Err(_) => out.push_str(l),
+            match (&paths, &disks) {
+                (Ok(p), Ok(d)) => {
+                    let l = p.replace_all(l, "/Volumes/disk/gitea-runners/runner-1");
+                    out.push_str(&d.replace_all(&l, "/Volumes/disk"));
+                }
+                _ => out.push_str(l),
             }
             out.push('\n');
         }
@@ -239,12 +244,13 @@ mod tests {
             &format!("{api}/runs/7/jobs?limit=50&page=1"),
             json!({"total_count": 1, "jobs": [{"id": 9, "name": "j", "conclusion": "failure", "runner_name": "box-1", "steps": []}]}),
         );
-        f.log(9, "2026-01-01T00:00:00.0Z Job: rust-test\nnoise from box-1 and Jane Doe\n##[error]failed in /Volumes/d7sst7/gitea-runners/box-1/work/abc\n2026-01-01T00:00:01.0Z      Summary [ 1.0s] 2 tests run: 1 passed, 1 failed\n");
+        let vol = "/Volumes";
+        f.log(9, &format!("2026-01-01T00:00:00.0Z Job: rust-test\nnoise from box-1 and Jane Doe\n##[error]failed in {vol}/realdisk7/gitea-runners/box-1/work/abc\n::error::move the checkout to {vol}/realdisk7/ci/home/src/job-s3\n2026-01-01T00:00:01.0Z      Summary [ 1.0s] 2 tests run: 1 passed, 1 failed\n"));
         let files = record(&mut f, "https://real.example.net", "jdoe/paddock", "t", &[7], &mut |_| {}).unwrap();
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["log-9.txt", "jobs-7.json", "run-7.json", "runs-1.json"]);
         for (n, text) in &files {
-            for real in ["jdoe", "Jane", "real.example.net", "box-1", "d7sst7", "noreply"] {
+            for real in ["jdoe", "Jane", "real.example.net", "box-1", "realdisk7", "noreply"] {
                 assert!(!text.contains(real), "{n} holds {real}");
             }
         }

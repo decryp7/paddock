@@ -35,7 +35,7 @@ Sources: [releasing](releasing.md); [Dyno releasing, Before tagging](../../apps/
 
 ### 5. How does the heavy-step lock work?
 Expected: `plock run [--high] [--no-gate] <agent> -- <cmd>` takes an atomic lock directory with an owner record, waits for load below 30, runs, releases; broken only by the tool when the owner pid is gone or its start time differs, logged; never remove it by hand.
-Sources: [ci-and-runners](ci-and-runners.md); src: `/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock`.
+Sources: [ci-and-runners](ci-and-runners.md); src: `/srv/disk-a/dev-targets/scratch/pitcrew-lock/plock`.
 
 ### 6. Why must a child's start not be judged on a fixed wait?
 Expected: a loaded or cold machine, or an OS that stops the app, makes a fixed window expire while nothing is wrong; the start judge looks at run state, CPU time, progress and a ready handshake (ADR 0031); Dyno doubled its agent after a fixed 5 s.
