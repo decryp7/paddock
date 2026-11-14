@@ -285,7 +285,9 @@ changes here, every app's copy is updated in the same change.
     membership, never by parent pids alone. Kills go through `paddock_proc` (`kill_tree`, `end`, `ask`, `terminate`,
     `Supervised`). Clippy's `disallowed-methods` (lint/clippy.toml: `libc::kill`, `libc::killpg`, nix's `kill`/`killpg`,
     sysinfo's `Process::kill`/`kill_with`) and conformance check C53 (`taskkill`, kill commands, `Stop-Process`,
-    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
+    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it; for an agent's own Bash commands the
+    blocking hook `.claude/hooks/kill-guard.sh` does (since 2026-11-14: `pkill`, `killall`, `xargs kill` and a `kill` of a
+    pid it cannot prove is the agent's own are refused). ADR
     [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
     is the same rule for ports.
     A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held

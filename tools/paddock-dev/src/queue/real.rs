@@ -386,7 +386,7 @@ pub fn planner_command(me: &Path, trusted: &Path, main: &str, head: &str, parent
 
 /// The planner as a child of this tool in `trusted` (a checkout of main), without the queue's token.
 pub fn run_planner(trusted: &Path, main: &str, head: &str) -> Result<serde_json::Value, String> {
-    let me = std::env::current_exe().map_err(|e| format!("cannot find this program: {e}"))?;
+    let me = crate::tool_cache::self_exe().map_err(|e| format!("cannot find this program: {e}"))?;
     let parent: Vec<String> = std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect();
     let mut c = planner_command(&me, trusted, main, head, &parent);
     let out = c.output().map_err(|e| format!("cannot start the planner: {e}"))?;

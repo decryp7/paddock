@@ -84,6 +84,7 @@ pub mod slots;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
 #[cfg(all(test, unix))]
 mod test_sleeper;
+pub mod tool_cache;
 pub mod wait;
 pub mod wait_lock;
 pub mod worktree;
