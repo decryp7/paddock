@@ -1,0 +1,290 @@
+[
+ {
+  "name": "rust.nested_after_inner",
+  "lang": "rust",
+  "text": "/* a /* b */ conformance: pid-kill — a real reason here */\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.nested_quote",
+  "lang": "rust",
+  "text": "/* a /* b */ \" */\n// conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.raw_hash3",
+  "lang": "rust",
+  "text": "let s = r###\"x\"## conformance: pid-kill — a real reason here \"###;\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "rust.raw_in_comment_ok",
+  "lang": "rust",
+  "text": "let s = r#\"a\"#; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.byte_str",
+  "lang": "rust",
+  "text": "let s = b\"conformance: pid-kill — a real reason here\";\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "rust.byte_raw",
+  "lang": "rust",
+  "text": "let s = br#\"conformance: pid-kill — a real reason here\"#;\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "rust.c_raw_backslash",
+  "lang": "rust",
+  "text": "let s = cr\"C:\\\"; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.r_raw_backslash",
+  "lang": "rust",
+  "text": "let s = r\"C:\\\"; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.char_dq",
+  "lang": "rust",
+  "text": "let c = '\"'; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.char_bslash",
+  "lang": "rust",
+  "text": "let c = '\\\\'; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.lifetime",
+  "lang": "rust",
+  "text": "fn f<'a>(x: &'a str) {} // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.lifetime_static_dq",
+  "lang": "rust",
+  "text": "fn f(x: &'static str) -> char { '\"' } // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.string_marker",
+  "lang": "rust",
+  "text": "let s = \"conformance: pid-kill — a real reason here\";\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "rust.string_multiline",
+  "lang": "rust",
+  "text": "let s = \"x\nconformance: pid-kill — a real reason here\n\";\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "rust.escaped_quote",
+  "lang": "rust",
+  "text": "let s = \"a\\\"b\"; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.byte_char_dq",
+  "lang": "rust",
+  "text": "let c = b'\"'; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.ident_r",
+  "lang": "rust",
+  "text": "let r = \"q\"; let br = 1; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.macro_raw",
+  "lang": "rust",
+  "text": "println!(r\"conformance: pid-kill — a real reason here\");\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "rust.slash_in_string",
+  "lang": "rust",
+  "text": "let u = \"http://x\"; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.doc_comment",
+  "lang": "rust",
+  "text": "/// conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.non_bmp_char",
+  "lang": "rust",
+  "text": "let c = '😀'; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.raw_ident",
+  "lang": "rust",
+  "text": "let r#type = 1; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "rust.raw_ident_then_str",
+  "lang": "rust",
+  "text": "let r#type = \"a\"; // conformance: pid-kill — a real reason here\nkill(pid);",
+  "tag": "pid-kill",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.sq_hash",
+  "lang": "shell",
+  "text": "run: echo '# conformance: dev-before-toolchain — a real reason here'\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "hash.dq_hash",
+  "lang": "shell",
+  "text": "run: echo \"# conformance: dev-before-toolchain — a real reason here\"\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "none"
+ },
+ {
+  "name": "hash.apostrophe_plain_yaml",
+  "lang": "yaml",
+  "text": "- name: don't build # conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.apostrophe_shell_comment_after",
+  "lang": "shell",
+  "text": "echo \"it's\" # conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.dollar_hash",
+  "lang": "shell",
+  "text": "echo ${#var} # conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.url_frag",
+  "lang": "shell",
+  "text": "curl http://x/#frag # conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.heredoc",
+  "lang": "shell",
+  "text": "cat <<EOF\n# conformance: dev-before-toolchain — a real reason here\nEOF\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 4,
+  "expect": "none"
+ },
+ {
+  "name": "hash.multiline_sq",
+  "lang": "shell",
+  "text": "echo 'a\n # conformance: dev-before-toolchain — a real reason here\n'\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 4,
+  "expect": "none"
+ },
+ {
+  "name": "hash.yaml_block_scalar",
+  "lang": "yaml",
+  "text": "run: |\n  # conformance: dev-before-toolchain — a real reason here\n  ./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 3,
+  "expect": "none"
+ },
+ {
+  "name": "hash.yaml_dq_escape",
+  "lang": "yaml",
+  "text": "run: \"a\\\"b\" # conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.sq_in_dq",
+  "lang": "shell",
+  "text": "echo \"a'b\" # conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.tab_before_hash",
+  "lang": "shell",
+  "text": "echo a\t# conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ },
+ {
+  "name": "hash.dollar_sq",
+  "lang": "shell",
+  "text": "echo $'a\\'b' # conformance: dev-before-toolchain — a real reason here\n./dev x",
+  "tag": "dev-before-toolchain",
+  "line": 2,
+  "expect": "reason"
+ }
+]

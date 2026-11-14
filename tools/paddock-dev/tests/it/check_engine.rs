@@ -161,6 +161,51 @@ fn a_report_file_that_cannot_be_written_is_an_io_error_with_the_cause_and_the_ne
     }
 }
 
+/// A waiver marker inside a string literal is data, not a waiver: the same marker in a comment is one. Both hosts agree.
+#[test]
+fn a_marker_in_a_string_literal_is_no_waiver_in_either_host() {
+    let d = tree(&[
+        (
+            "crates/a/tests/s.rs",
+            "fn a() {\n    let m = \"// conformance: freed-port — handed to a child that retries\";\n    let p = TcpListener::bind(\"127.0.0.1:0\").unwrap().local_addr().unwrap().port();\n}\nfn b() {\n    let p = TcpListener::bind(\"127.0.0.1:0\").unwrap().local_addr().unwrap().port(); // conformance: freed-port — handed to a child\n}\n",
+        ),
+        (
+            "crates/a/src/k.rs",
+            "fn a(h: HANDLE) {\n    let m = r#\"// conformance: pid-kill — a handle this process owns\"#;\n    unsafe { TerminateProcess(h, 1) };\n}\n",
+        ),
+        (
+            "crates/a/src/l.rs",
+            "// conformance: file-layout-guess — \"filler data\"\n#[cfg(test)]\nmod tests {\n    const M: &str = \"// conformance: layout-guess — pinned layout\";\n    fn a() { let q = base.join(\"deps\"); }\n}\n",
+        ),
+        (
+            ".gitea/workflows/w.yml",
+            "jobs:\n  a:\n    steps:\n      - run: echo \"# conformance: dev-before-toolchain — the image has the only compiler\" && ./dev x\n",
+        ),
+    ]);
+    let r = same(&["--app", "paddock", "--root", d.path().to_str().unwrap(), "--only", PORTED, "--json"]);
+    let v: Value = serde_json::from_str(&r.stdout).unwrap();
+    let waived: Vec<String> = v["waived"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| format!("{}:{}", w["file"].as_str().unwrap(), w["line"]))
+        .collect();
+    assert_eq!(
+        waived,
+        ["crates/a/tests/s.rs:6", "crates/a/src/l.rs:5"],
+        "only the real comments waive; the file marker is a real comment"
+    );
+    let sites: Vec<String> = v["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| format!("{}:{}", f["file"].as_str().unwrap(), f["line"]))
+        .collect();
+    for want in ["crates/a/tests/s.rs:3", "crates/a/src/k.rs:3", ".gitea/workflows/w.yml:4"] {
+        assert!(sites.iter().any(|s| s == want), "{want} stays a finding: {sites:?}");
+    }
+}
+
 /// Every kind of inline waiver of the four ported checks, the bare ones, and a dated waiver beside them.
 fn waiver_tree() -> tempfile::TempDir {
     tree(&[
@@ -178,12 +223,7 @@ fn waiver_tree() -> tempfile::TempDir {
         ),
         (
             "crates/a/src/l.rs",
-            // The file marker is built in two pieces: written whole in this file it would be a live waiver for this file (a marker in a
-            // string literal is read like a comment).
-            concat!(
-                "// conformance: file-",
-                "layout-guess — filler data only\nfn p() { let z = base.join(\"deps\"); }\n#[cfg(test)]\nmod tests {\n    fn a() { let q = base.join(\"deps\"); }\n}\nfn b() {\n    // conformance: layout-guess — pinned layout\n    let q = base.join(\"deps\");\n}\n"
-            ),
+            "// conformance: file-layout-guess — filler data only\nfn p() { let z = base.join(\"deps\"); }\n#[cfg(test)]\nmod tests {\n    fn a() { let q = base.join(\"deps\"); }\n}\nfn b() {\n    // conformance: layout-guess — pinned layout\n    let q = base.join(\"deps\");\n}\n",
         ),
         (
             "crates/a/src/l2.rs",

@@ -25,7 +25,7 @@
 // Limits: a pid passed to another program by other means (a script file, a shell string built at run time) is not seen.
 // A justified site carries `// conformance: pid-kill — <reason>` on the line or the line above.
 import { error, warn } from '../finding.mjs';
-import { applyInlineWaiver, inlineWaiver } from '../util/inline-waiver.mjs';
+import { applyInlineWaiver, commentView } from '../util/inline-waiver.mjs';
 import { maskRust } from './C39-freed-port.mjs';
 import { againstBaseline, baselineGrowth, growthMovedWarning, lineHash, movedWarning, sourceGone } from './C71-test-timing.mjs';
 
@@ -56,7 +56,7 @@ const lineAt = (text, index) => text.slice(0, index).split('\n').length;
 /** The pid kills in one Rust source: [{ line, what, waived: 'reason' | 'no-reason' | undefined }]. */
 export function pidKills(text) {
   const masked = maskRust(text);
-  const lines = text.split('\n');
+  const view = commentView(text, 'rust');
   const hits = [];
   for (const { re, what } of PATTERNS) for (const m of masked.matchAll(re)) hits.push({ index: m.index, what });
   for (const { re, quote } of PROGRAMS) {
@@ -72,9 +72,8 @@ export function pidKills(text) {
     .sort((a, b) => a.index - b.index)
     .map(({ index, what, followUp }) => {
       const line = lineAt(masked, index);
-      const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
       // A follow-up marker is waived only in paddock.waivers.toml (dated), never inline.
-      const waived = followUp ? { state: 'none' } : inlineWaiver(near, 'pid-kill');
+      const waived = followUp ? { state: 'none' } : view.waiver(line, 'pid-kill');
       return { line, what, waived };
     });
 }
@@ -87,6 +86,7 @@ export function pidLiveness(text, file = '') {
   if (IMPLEMENTATION.has(file)) return [];
   const masked = maskRust(text);
   const lines = text.split('\n');
+  const view = commentView(text, 'rust');
   const hits = [];
   const add = (re, what, ok = () => true) => {
     for (const m of masked.matchAll(re)) if (ok(m)) hits.push({ index: m.index, what: what(m) });
@@ -119,8 +119,7 @@ export function pidLiveness(text, file = '') {
     .sort((a, b) => a.index - b.index)
     .map(({ index, what }) => {
       const line = lineAt(masked, index);
-      const near = [lines[line - 1] ?? '', lines[line - 2] ?? ''].join('\n');
-      const waived = inlineWaiver(near, 'pid-liveness');
+      const waived = view.waiver(line, 'pid-liveness');
       return { line, what, waived, text: lines[line - 1] ?? '' };
     });
 }

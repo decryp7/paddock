@@ -21,6 +21,44 @@ pub enum InlineWaiver {
     Reason(String),
 }
 
+/// What a file's comments are written in: Rust, shell (C120's `.sh` files) or YAML (workflows).
+pub use super::lex::Kind;
+
+/// `text` with everything but its comments blanked (newlines kept, so lines and columns stay), read off the language's real lexer or
+/// parser (`lex`). A waiver marker in a string literal, a here-document or a block scalar is data, not a waiver (ER-33): [`CommentView`]
+/// reads only this text. The port of `commentsOf`.
+pub fn comments_of(text: &str, kind: Kind) -> String {
+    super::lex::comments_only(text, kind)
+}
+
+/// The comments of one file, read by line: what a check asks to find out whether a site is waived.
+pub struct CommentView {
+    lines: Vec<String>,
+    whole: String,
+}
+
+impl CommentView {
+    /// Reads the comments of `text`.
+    pub fn of(text: &str, kind: Kind) -> CommentView {
+        let whole = comments_of(text, kind);
+        CommentView {
+            lines: whole.split('\n').map(str::to_string).collect(),
+            whole,
+        }
+    }
+
+    /// The waiver comment for `tag` on the 1-based `line` or the line above.
+    pub fn waiver(&self, line: usize, tag: &str) -> InlineWaiver {
+        let at = |n: usize| n.checked_sub(1).and_then(|i| self.lines.get(i)).map_or("", String::as_str);
+        recognise(&format!("{}\n{}", at(line), at(line.wrapping_sub(1))), tag)
+    }
+
+    /// The waiver comment for `tag` anywhere in the file (a file-level marker).
+    pub fn file(&self, tag: &str) -> InlineWaiver {
+        recognise(&self.whole, tag)
+    }
+}
+
 /// The waiver comment for `tag` in `near` (the site's line and the line above, as the check defines them).
 pub fn recognise(near: &str, tag: &str) -> InlineWaiver {
     let tag = regex::escape(tag);

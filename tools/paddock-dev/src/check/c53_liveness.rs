@@ -7,7 +7,7 @@
 use super::Ctx;
 use super::baseline::{self, Growth, reconcile};
 use super::finding::Finding;
-use super::inline_waiver::{InlineWaiver, recognise};
+use super::inline_waiver::{CommentView, InlineWaiver, Kind};
 use super::jsre::{is_js_space, line_at, rx, units};
 use super::mask::mask_units;
 use regex::Regex;
@@ -70,6 +70,7 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
     }
     let mask_u = mask_units(&text.encode_utf16().collect::<Vec<u16>>());
     let masked = String::from_utf16_lossy(&mask_u);
+    let view = CommentView::of(text, Kind::Rust);
     let lines: Vec<&str> = text.split('\n').collect();
     let mut hits: Vec<Hit> = Vec::new();
     let at = |start: usize| units(&masked[..start]);
@@ -166,15 +167,7 @@ pub fn pid_liveness(text: &str, file: &str) -> Vec<Liveness> {
         .map(|h| {
             let line = line_at(&masked, masked_byte(&masked, h.index));
             let own = lines.get(line - 1).copied().unwrap_or("");
-            let near = format!(
-                "{own}\n{}",
-                if line >= 2 {
-                    lines.get(line - 2).copied().unwrap_or("")
-                } else {
-                    ""
-                }
-            );
-            let waived = recognise(&near, "pid-liveness");
+            let waived = view.waiver(line, "pid-liveness");
             Liveness {
                 line,
                 what: h.what,

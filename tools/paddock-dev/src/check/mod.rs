@@ -19,6 +19,7 @@ pub mod conformance;
 pub mod finding;
 pub mod inline_waiver;
 pub mod jsre;
+pub mod lex;
 pub mod mask;
 pub mod outcome;
 pub mod record;
