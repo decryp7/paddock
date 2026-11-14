@@ -17,7 +17,7 @@ kill_tree() {
 }
 
 bounded() {
-  local label="$1" fn="$2" start=$SECONDS pid rc=0
+  local label="$1" fn="$2" start=$SECONDS pid rc=0 polls=0 nap
   echo "$tool: $label ..."
   "$fn" > "$scratch/out" 2> "$scratch/err" &
   pid=$!
@@ -33,7 +33,10 @@ bounded() {
       echo "::error::$tool: '$label' did not finish within ${limit} s. Last output: $(grep -v '^[[:space:]]*$' "$scratch/err" | tail -n 4 | tr '\r\n' '  '). Next step: $hint"
       exit 1
     fi
-    sleep 0.2
+    # Short naps first: most phases end within a fraction of a second, and a fixed 0.2 s nap made each of them last at least 0.2 s (a
+    # kept clone has six phases, 1.2 s of naps per job). After the first second the nap is 0.2 s, so a long phase costs few wake-ups.
+    polls=$((polls + 1)); if [ "$polls" -le 20 ]; then nap=0.05; else nap=0.2; fi
+    sleep "$nap"
   done
   wait "$pid" || rc=$?
   echo "$tool: $label: $([ "$rc" = 0 ] && echo done || echo "failed (exit $rc)") in $((SECONDS - start)) s"
