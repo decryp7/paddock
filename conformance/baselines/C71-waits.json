@@ -18,52 +18,52 @@
   },
   {
    "file": "apps/debrief/app/e2e/jobs.e2e.ts",
-   "line": 131,
+   "line": 134,
    "hash": "360e99428f1b345c"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 49,
+   "line": 62,
    "hash": "0287c977a81d66ce"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 53,
+   "line": 66,
    "hash": "2c07f8c7289be69e"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 56,
+   "line": 69,
    "hash": "8f25609435c500ef"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 57,
+   "line": 70,
    "hash": "9adf9b75f96fc439"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 63,
+   "line": 76,
    "hash": "6847b4517d41a1b9"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 82,
+   "line": 95,
    "hash": "14eb6355a7e8486d"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 92,
+   "line": 105,
    "hash": "dfb5b5c1087ff797"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 95,
+   "line": 108,
    "hash": "3021d81d89bcc177"
   },
   {
    "file": "apps/debrief/app/e2e/live-tail.e2e.ts",
-   "line": 282,
+   "line": 295,
    "hash": "e5b2b78dd37bb966"
   },
   {
@@ -87,18 +87,8 @@
    "hash": "0287c977a81d66ce"
   },
   {
-   "file": "apps/debrief/app/e2e/resilience-panels.e2e.ts",
-   "line": 48,
-   "hash": "b8d0d0edf03269e0"
-  },
-  {
    "file": "apps/debrief/app/e2e/store-pane.e2e.ts",
    "line": 49,
-   "hash": "b8d0d0edf03269e0"
-  },
-  {
-   "file": "apps/debrief/app/e2e/timeline.e2e.ts",
-   "line": 110,
    "hash": "b8d0d0edf03269e0"
   },
   {
@@ -118,7 +108,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 1081,
+   "line": 1088,
    "hash": "95aab429f1af29ca"
   },
   {
@@ -158,22 +148,22 @@
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 736,
+   "line": 874,
    "hash": "e272f55e7ec51758"
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 783,
+   "line": 921,
    "hash": "676993104842a43a"
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 787,
+   "line": 925,
    "hash": "7cc1b1c6a5d6352d"
   },
   {
    "file": "apps/debrief/app/src/app/grid/events-grid.spec.ts",
-   "line": 813,
+   "line": 951,
    "hash": "7b94eae104c584c0"
   },
   {
@@ -208,12 +198,12 @@
   },
   {
    "file": "apps/debrief/app/src/app/problems/problems.spec.ts",
-   "line": 326,
+   "line": 327,
    "hash": "c52ea8c0ecc3c491"
   },
   {
    "file": "apps/debrief/app/src/app/problems/problems.spec.ts",
-   "line": 362,
+   "line": 363,
    "hash": "f57b3203c747cb46"
   },
   {
@@ -293,12 +283,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-ai/tests/it/net_tls.rs",
-   "line": 101,
-   "hash": "0048facccccd9480"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-ai/tests/it/net_tls.rs",
-   "line": 129,
+   "line": 134,
    "hash": "0048facccccd9480"
   },
   {
@@ -323,7 +308,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-plugin-dotnet/tests/it/real_runtime.rs",
-   "line": 135,
+   "line": 145,
    "hash": "385c662ab7d8fcb8"
   },
   {
@@ -428,17 +413,17 @@
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 18,
+   "line": 19,
    "hash": "f10fd4a9764e1296"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 39,
+   "line": 40,
    "hash": "841ec89584288017"
   },
   {
    "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 50,
+   "line": 51,
    "hash": "f10fd4a9764e1296"
   },
   {
@@ -523,7 +508,7 @@
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 1160,
+   "line": 1165,
    "hash": "3b1612fbbdd37813"
   },
   {
@@ -673,7 +658,7 @@
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/helper_live_via.rs",
-   "line": 70,
+   "line": 71,
    "hash": "c76f077e0c8484f1"
   },
   {
@@ -798,7 +783,7 @@
   },
   {
    "file": "apps/pitcrew/crates/pitcrew-service/tests/supervision.rs",
-   "line": 203,
+   "line": 197,
    "hash": "082ea6dc96b24c63"
   },
   {
@@ -858,7 +843,7 @@
   },
   {
    "file": "apps/spotter/crates/spotter-render/src/launch.rs",
-   "line": 710,
+   "line": 736,
    "hash": "96b36236ccb611ba"
   },
   {
@@ -943,7 +928,7 @@
   },
   {
    "file": "crates/paddock-chromium/tests/it/real_browser.rs",
-   "line": 457,
+   "line": 459,
    "hash": "0564475c4ca2e4f6"
   },
   {
@@ -1028,42 +1013,42 @@
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1271,
+   "line": 1360,
    "hash": "896497588f0e6f25"
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1330,
+   "line": 1469,
    "hash": "5000346a5defa4ea"
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1363,
+   "line": 1502,
    "hash": "6d00eff513507941"
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1369,
+   "line": 1508,
    "hash": "ebe7c89b9658a76f"
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1375,
+   "line": 1514,
    "hash": "2f9f4afc4efe35d1"
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1388,
+   "line": 1527,
    "hash": "e5f58bf792ea9c86"
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1436,
+   "line": 1575,
    "hash": "728033546948769a"
   },
   {
    "file": "crates/paddock-ipc/src/peer.rs",
-   "line": 1464,
+   "line": 1603,
    "hash": "2069be913d71a9e8"
   },
   {
@@ -1213,12 +1198,12 @@
   },
   {
    "file": "crates/paddock-window/src/tauri/tests.rs",
-   "line": 1512,
+   "line": 1516,
    "hash": "7da214ff96c1146d"
   },
   {
    "file": "tools/paddock-dev/tests/it/worktree/mod.rs",
-   "line": 172,
+   "line": 173,
    "hash": "5d151640414272a4"
   }
  ]

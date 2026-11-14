@@ -1,5 +1,6 @@
 import { T0, SEC, tinyDataset } from '../../../testing/helpers';
 import { MockBackend } from './mock-backend';
+import { withMockFailures } from './mock-failures';
 import { mockAnnotations, MOCK_ANNOTATION_OWNER } from './mock-annotations';
 import { effectiveMarkers, MOCK_PLUGIN_KINDS } from './mock-plugin-markers';
 import { MockRecord } from './mock-data';
@@ -38,7 +39,7 @@ describe('mockAnnotations', () => {
   });
 
   it('is served by the mock backend, which can also fail on demand', async () => {
-    const b = new MockBackend({ latency: false, dataset: tinyDataset, fail: { annotations: 1 } });
+    const b = withMockFailures(new MockBackend({ latency: false, dataset: tinyDataset }), { latency: false, fail: { annotations: 1 } });
     await expect(b.annotations({})).rejects.toContain('Simulated annotations failure');
     expect((await b.annotations({})).length).toBeGreaterThan(0);
     const metrics = await b.pluginEvents();

@@ -1,4 +1,5 @@
 import { MockBackend } from './mock-backend';
+import { withMockFailures } from './mock-failures';
 import { MockRecord } from './mock-data';
 import { DEFAULT_RUN_RULE, mockDurationMs, mockPreviewSpans, mockQueryRuns, mockRunAnnotations, RunContext, spanRules } from './mock-runs';
 import { markerKind, tinyBackend } from '../../../testing/helpers';
@@ -112,7 +113,7 @@ describe('mock runs', () => {
     expect((await b.annotations({ from: 0, to: 1 })).filter((a) => a.run)).toEqual([]);
     const p = await b.previewSpans({ draft: { kind: 'r', label: 'R', start: { type: 'markers', kinds: ['start'] }, stop: { type: 'markers', kinds: ['stop'] }, per: 'instance' } });
     expect(p.summary?.runs).toBe(reply.total);
-    const failing = new MockBackend({ latency: false, fail: { queryRuns: 1, previewSpans: 1 } });
+    const failing = withMockFailures(new MockBackend({ latency: false }), { latency: false, fail: { queryRuns: 1, previewSpans: 1 } });
     await expect(failing.queryRuns({})).rejects.toBeTruthy();
     await expect(failing.previewSpans({ draft: { kind: 'r', label: '', start: { type: 'markers', kinds: [] }, stop: { type: 'markers', kinds: [] }, per: 'instance' } })).rejects.toBeTruthy();
   });

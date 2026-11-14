@@ -1,7 +1,6 @@
 import { invoke } from './activity/ipc';
 import { inject, Provider } from '@angular/core';
 import { InstalledPluginDto, InstalledPluginsDto, PackageReviewDto, PermissionDto, Report } from './api.types';
-import { DebriefBackend } from './backend';
 import { jobValue } from '../jobs/job-value';
 import { reportBackendFailures } from './failure-reporter';
 import { Logger, withFailureLogging } from './logger';
@@ -31,6 +30,7 @@ import {
 } from './tools.types';
 import { hasSkew } from './skew-backend';
 import { browserMocks } from './mock-registry';
+import { MOCK_WORKSPACE } from './mock-workspace';
 
 /** Names of the events the shell emits. */
 export const OPEN_EVENT = 'debrief://open';
@@ -366,17 +366,17 @@ export class TauriToolsBackend extends ToolsBackend {
 
 /** The real backend inside Tauri, the in-memory mock in a plain browser (ng serve, e2e). */
 export function provideToolsBackend(): Provider[] {
+  // The mock reads the workspace raw (`MOCK_WORKSPACE`): a `?mockFail=` failure is meant for the UI's own calls.
+  const mockTools = () => {
+    const debrief = inject(MOCK_WORKSPACE);
+    return new (browserMocks().MockToolsBackend)(
+      undefined,
+      () => debrief.workspaceSummary(),
+      hasSkew(debrief) ? (source, offsetMs) => debrief.setSourceOffset({ kind: 'manual', source, offsetMs }) : undefined,
+    );
+  };
   const factory = () => {
-    const debrief = inject(DebriefBackend);
-    const real = isTauri()
-      ? new TauriToolsBackend()
-      : new (browserMocks().MockToolsBackend)(
-          undefined,
-          () => debrief.workspaceSummary(),
-          hasSkew(debrief)
-            ? (source, offsetMs) => debrief.setSourceOffset({ kind: 'manual', source, offsetMs })
-            : undefined,
-        );
+    const real = isTauri() ? new TauriToolsBackend() : mockTools();
     return withFailureLogging<ToolsBackend>(real, inject(Logger), {
       onFailure: reportBackendFailures(),
     });

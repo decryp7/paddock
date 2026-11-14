@@ -98,16 +98,14 @@ test.describe('timeline and analysis', () => {
   });
 
   test('a failed timeline request shows an inline error with Retry', async ({ page }) => {
-    // The panel asks again when its width is measured, so more than one request fails before Retry succeeds.
-    await openAppWith(page, '?mockFail=queryTimeline:3&mockSnapshots=off');
+    // The panel asks twice at start-up (again once its width is measured), so two failures leave the card up; Retry is the third call.
+    await openAppWith(page, '?mockFail=queryTimeline:2&mockSnapshots=off');
     const card = page.locator('debrief-timeline-panel .err-card');
     await expect(card).toContainText("Couldn't load the timeline.");
     await expect(card).toContainText('Simulated queryTimeline failure');
     await expect(page.locator('[data-testid=notification][data-cause="workspace.error"]')).toHaveCount(0);
-    await expect(async () => {
-      if (await card.count()) await card.getByRole('button', { name: 'Retry' }).click();
-      await expect(card).toHaveCount(0, { timeout: 1500 });
-    }).toPass({ timeout: 15_000 });
+    await card.getByRole('button', { name: 'Retry' }).click();
+    await expect(card).toHaveCount(0);
     await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible();
   });
 });

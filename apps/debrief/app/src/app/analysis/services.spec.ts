@@ -21,6 +21,7 @@ import { MockAnalysisBackend } from './mock/mock-analysis-backend';
 import { QlQuery } from '../core/api.types';
 import { EMPTY_QUERY } from '../core/workspace.store';
 import { DEMO_START } from '../core/mock/mock-data';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 
 describe('AnalysisTargets', () => {
@@ -215,7 +216,7 @@ describe('AnalysisCommands', () => {
 
 describe('analysis plugin', () => {
   it('registers views and commands through the extension points', async () => {
-    TestBed.configureTestingModule({ providers: [provideAnalysis(), { provide: DebriefBackend, useFactory: () => new MockBackend({ latency: false }) }, { provide: Logger, useFactory: () => new MemoryLogger() }] });
+    TestBed.configureTestingModule({ providers: [provideAnalysis(), { provide: DebriefBackend, useFactory: () => new MockBackend({ latency: false }) }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend }, { provide: Logger, useFactory: () => new MemoryLogger() }] });
     await loadWorkspace();
     const views = TestBed.inject(ViewRegistry);
     expect(views.all.map((v) => v.id)).toEqual(ANALYSIS_VIEWS.map((v) => v.id));

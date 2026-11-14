@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { all, buttonByText, el, provideTinyBackend, settle, text, tinyBackend, tinyDataset, manualFrames } from '../../testing/helpers';
 import { MockBackend } from '../core/mock/mock-backend';
+import { withMockFailures } from '../core/mock/mock-failures';
 import { Lane } from '../core/api.types';
 import { WorkspaceStore } from '../core/workspace.store';
 import { mockJobs } from '../jobs/mock-jobs';
@@ -599,7 +600,7 @@ describe('TimelinePanel annotations', () => {
   });
 
   it('reports a failed request inline and retries', async () => {
-    const { fixture } = await render(new MockBackend({ latency: false, dataset: tinyDataset, pluginMarkerKinds: [], fail: { annotations: 1 } }));
+    const { fixture } = await render(withMockFailures(new MockBackend({ latency: false, dataset: tinyDataset, pluginMarkerKinds: [] }), { latency: false, fail: { annotations: 1 } }));
     expect(el(fixture, '.ann-err').textContent).toContain('Annotations unavailable');
     expect(all(fixture, '.lane .ann')).toHaveLength(0);
     buttonByText(fixture, 'Retry').click();

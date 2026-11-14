@@ -42,10 +42,8 @@ test.describe('panel error boundaries', () => {
     await expect(err.getByText('Simulated queryPage failure')).toBeVisible();
     await expect(err).toContainText('Simulated queryPage failure');
     await expectNoSeriousViolations(page, testInfo, 'resilience-grid-error', 'debrief-events-grid');
-    await expect(async () => {
-      if (await err.count()) await err.getByRole('button', { name: 'Retry' }).click();
-      await expect(err).toHaveCount(0, { timeout: 1500 });
-    }).toPass({ timeout: 15_000 });
+    await err.getByRole('button', { name: 'Retry' }).click();
+    await expect(err).toHaveCount(0);
     await expect(gridRows(page).first()).toBeVisible();
   });
 

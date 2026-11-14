@@ -23,6 +23,7 @@ import {
   VISUAL_COMMAND_STUBS,
 } from './share.contributions';
 import { provideShare } from './share.plugin';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 describe('share.contributions', () => {
   beforeEach(() => {
@@ -30,7 +31,7 @@ describe('share.contributions', () => {
     TestBed.configureTestingModule({
       providers: [
         { provide: Logger, useClass: MemoryLogger },
-        { provide: DebriefBackend, useValue: debrief },
+        { provide: DebriefBackend, useValue: debrief }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend },
         { provide: AnalysisBackend, useValue: new MockAnalysisBackend(recordsFrom(debrief)) },
         provideShare(),
       ],
