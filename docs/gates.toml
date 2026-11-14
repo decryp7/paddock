@@ -166,6 +166,14 @@ review_by = 2026-12-13
 approved = "user"
 
 [[report_only]]
+id = "C126"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here. Rule A (serial steps) is never gated; rules B and C are gated only after that green run (flip SEVERITY for them in C126-test-steps.mjs). 60 sites in 41 files on this branch (24 A, 0 B, 36 C); the rest are fixed when their test next fails (ADR 0103, D3 b, D4)"
+owner = "ADR 0103"
+since = 2026-11-14
+review_by = 2026-12-14
+approved = "coordinator"
+
+[[report_only]]
 id = "C118"
 reason = "ER-41: report-only until its first green run on main, then flip SEVERITY in C118-floating-tools.mjs and the mode to gate. 16 floating-tool warnings today (7 cargo install without a pinned version, 5 dtolnay/rust-toolchain at a channel ref, 2 taiki-e/install-action refs without a digest, 1 install-action tool without @x.y.z, 1 npx --yes of a package that is not in the lockfile); an npx of a binary of a top-level package-lock.json package is not a finding"
 owner = "ER-26 (2026-11-13)"

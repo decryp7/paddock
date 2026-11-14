@@ -11,6 +11,9 @@
 //! - [`wait_exit`]: waits for a program to end on its own.
 //! - [`warm_first_start`] / [`warm_first_starts`]: pay the OS's first-run check of a fresh binary once, before a step whose
 //!   bound the test cannot remove ([`paddock_proc::warm_up`], memoised per file identity). Never what makes a test correct.
+//! - [`Reaper`]: every process a test started ends with the test, also when it panics partway, and nothing else does: it acts
+//!   only on processes it can prove the test created (its children, what it saw below them, its groups, its token, orphans
+//!   naming a folder it made), through `paddock_proc` and by identity (ADR 0103).
 //! - [`PATIENCE`] and [`HANG_GUARD`]: the start judge's patience for a test, under which only the wall guard ends a wait. A
 //!   product driver that takes a [`Patience`] and a guard (Debrief's `chromium_driver::Answers::Judged`) gets these two from
 //!   here.
@@ -429,6 +432,9 @@ fn state_of<S: Started>(child: &mut S, id: Option<ProcessId>) -> &'static str {
         }
     }
 }
+
+pub mod reap;
+pub use reap::{Ended, Reaper};
 
 #[cfg(test)]
 mod tests;

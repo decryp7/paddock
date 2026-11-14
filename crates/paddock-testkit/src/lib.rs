@@ -20,6 +20,10 @@
 //! - [`wait`]: `wait_until` / `wait_for` / `poll_for` / `poll_until_within` / `retry_within`, a bounded poll on a condition instead of a sleep.
 //! - [`guarded`], [`Progress`], [`StallGuard`]: a slow job (a whole-repository scan) judged on progress, not total time: it fails
 //!   only when no unit is finished for the stall limit (ADR 0071).
+//! - [`wait_progressing`]: a wait for several steps in a row, judged on a level that moves, never on a total summed over the steps
+//!   (ADR 0103).
+//! - [`cases`]: [`both`] and [`run_cases`], independent cases of one test side by side, so it takes the slowest case, not the sum
+//!   (ADR 0103).
 //!
 //! - The wait for a program the test started (`wait_ready_or_exit`, ADR 0071) is in `paddock-testkit-start`: it drives
 //!   `paddock-proc`'s start judge, and `paddock-proc`'s own tests use this kit, so the kit cannot depend on it.
@@ -33,6 +37,7 @@
 
 pub mod boot_volume;
 pub mod cargo_layout;
+pub mod cases;
 pub mod env;
 pub mod golden;
 pub mod hostile;
@@ -44,6 +49,7 @@ pub mod runner;
 pub mod scratch;
 pub mod wait;
 
+pub use cases::{both, case, run_cases};
 pub use env::{EnvLock, env_lock};
 pub use golden::{Golden, GoldenError, GoldenMode, assert_golden, check_golden};
 pub use hostile::{assert_never_panics, corpus, never_panics};
@@ -55,6 +61,7 @@ pub use scratch::{
     CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,
 };
 pub use wait::{
-    HANG_GUARD, Progress, StallGuard, guarded, poll_for, poll_until_within, recv, recv_within,
-    retry_within, wait_for, wait_for_within, wait_until, wait_until_within,
+    HANG_GUARD, Look, Progress, StallGuard, guarded, poll_for, poll_until_within, recv,
+    recv_within, retry_within, wait_for, wait_for_within, wait_progressing, wait_until,
+    wait_until_within,
 };

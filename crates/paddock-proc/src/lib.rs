@@ -37,6 +37,9 @@
 //!
 //! - [`spawn_detached`]: a child that outlives its starter (own process group, no console); [`spawn_detached_clearing_handles`]
 //!   (single-threaded callers) also keeps every inheritable handle from it on Windows, fail closed, and [`close_inherited`] for the child's first line on Unix; the one place (rule 55).
+//! - [`own`]: what a process can prove it started (a test kit's reaper, ADR 0103): one look at the table with each process's
+//!   group, user, zombie state, an environment token and a command-line text; a group of its own; Linux's child subreaper; a
+//!   kill-on-close job on Windows.
 //! - [`console`]: a GUI-subsystem program (no console window at login) that still prints when run from a terminal.
 //! - [`self_test`]: the `--self-test` every sidecar answers, started from the built app by CI (rule 23).
 //!
@@ -59,6 +62,7 @@ mod instance;
 #[cfg(windows)]
 mod job;
 mod login;
+pub mod own;
 mod run;
 mod runstate;
 pub mod self_test;

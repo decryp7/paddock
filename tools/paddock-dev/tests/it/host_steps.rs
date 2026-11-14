@@ -13,6 +13,7 @@
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
@@ -256,7 +257,37 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
             cmd.env(k, fill(v, fx));
         }
     }
-    let out = cmd.output().unwrap();
+    // ADR 0103: every process the step starts ends with it. The step runs in a group of the reaper's with its token; the reaper ends
+    // anything of the step still running (a hung git shim's `sleep`, a holder a phase limit left), and the test fails on a leak
+    // (ER-14). The order matters: wait for the step itself, then reap, then read the pipes to their end, so a leaked process that
+    // still holds a pipe cannot keep the read (and the test) waiting.
+    let reaper = paddock_testkit_start::Reaper::new("a host step");
+    let mut child = reaper
+        .spawn(cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()))
+        .unwrap();
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = std::io::Read::read_to_end(&mut p, &mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+    let status = child.wait().unwrap();
+    let left = reaper.reap();
+    let out = std::process::Output {
+        status,
+        stdout: stdout.join().expect("the stdout reader panicked"),
+        stderr: stderr.join().expect("the stderr reader panicked"),
+    };
+    assert!(
+        left.is_empty(),
+        "the {} step left processes running after it ended: {left:?}",
+        if rust { "Rust" } else { "shell" }
+    );
     let read = |rel: &str| std::fs::read_to_string(fx.p(rel)).unwrap_or_default();
     // The shell passes the whole environment to the programs it runs, so its shims see the job's token; the Rust command never lets
     // it through (ToolCall). The shell's side is read without it so every other difference shows, and a Rust leak shows as one.
@@ -284,12 +315,20 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
 }
 
 /// Runs both on a fresh fixture each (made by `setup`) and demands they agree; returns what the Rust command left.
-fn same(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
-    let (a, b) = (fixture(), fixture());
-    setup(&a);
-    setup(&b);
-    let shell = run_one(&a, step, false);
-    let rust = run_one(&b, step, true);
+fn same(setup: &(dyn Fn(&Fx) + Sync), step: &Step) -> Seen {
+    // The two implementations share nothing, so they run side by side (ADR 0103): the test takes the slower one, not the sum.
+    let (shell, rust) = paddock_testkit::both(
+        || {
+            let a = fixture();
+            setup(&a);
+            run_one(&a, step, false)
+        },
+        || {
+            let b = fixture();
+            setup(&b);
+            run_one(&b, step, true)
+        },
+    );
     assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
     rust
 }
@@ -1036,29 +1075,21 @@ fn run_kept(fx: &Fx, step: &Step, rust: bool) -> Seen {
     seen
 }
 
-/// The shell on fixture `a` and the Rust command on fixture `b` at the same time: two folders and two processes that share nothing, so a
-/// parity check waits for the slower of the two, not for both one after the other (a kept-clone test runs up to 24 jobs; one after
-/// the other they reached nextest's 60 s bound on the loaded CI Mac, runs 8054 and 8099).
+/// The shell on fixture `a` and the Rust command on fixture `b` at the same time (ADR 0103, `paddock_testkit::both`): two folders and
+/// two processes that share nothing, so a parity check waits for the slower of the two, not for both one after the other (a
+/// kept-clone test runs up to 24 jobs; one after the other they reached nextest's 60 s bound on the loaded CI Mac, runs 8054 and 8099).
 fn run_kept_pair(a: &Fx, b: &Fx, shell: &Step, rust: &Step) -> (Seen, Seen) {
-    std::thread::scope(|s| {
-        let sh = s.spawn(|| run_kept(a, shell, false));
-        let r = run_kept(b, rust, true);
-        (sh.join().expect("the shell's run panicked"), r)
-    })
+    paddock_testkit::both(|| run_kept(a, shell, false), || run_kept(b, rust, true))
 }
 
 /// Two kept fixtures, made at the same time (each is a handful of git commands; see [`run_kept_pair`]).
 fn kept_fixtures() -> (Fx, Fx) {
-    std::thread::scope(|s| {
-        let a = s.spawn(|| {
-            let fx = fixture();
-            kept_fixture(&fx);
-            fx
-        });
-        let b = fixture();
-        kept_fixture(&b);
-        (a.join().expect("a kept fixture failed"), b)
-    })
+    let make = || {
+        let fx = fixture();
+        kept_fixture(&fx);
+        fx
+    };
+    paddock_testkit::both(make, make)
 }
 
 /// Both implementations on a fresh kept fixture each: a first job, then `between` (what a later job finds), then a second job.
@@ -1467,6 +1498,7 @@ fn kept_fixture_repos_start_no_background_git_maintenance() {
     // commit-then-clone, 8 loops in parallel: 104 of 1200 clones copied the lock, 0 of 1200 with `maintenance.auto=false`.
     let fx = fixture();
     kept_fixture(&fx);
+    // conformance: test-steps — eight `git config --get` reads in all: milliseconds, not a sum of jobs
     for (dir, path) in [
         ("work-repo", "/usr/bin:/bin"),
         ("origin.git", "/usr/bin:/bin"),

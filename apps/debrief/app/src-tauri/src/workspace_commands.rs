@@ -1412,45 +1412,54 @@ mod tests {
         assert!(st().project().is_none());
     }
 
-    /// The autosaved session names the store folder: reopening it reopens the store instead of importing again.
-    #[test]
-    fn a_session_reopens_its_store() {
+    /// An imported workspace's autosaved session, saved to a file: the app, the session, the file, the folder that holds it and
+    /// the workspace's event total.
+    fn a_saved_session() -> (tauri::App<MockRuntime>, debrief_core::project::ProjectFile, PathBuf, TempDir, usize) {
         let dir = TempDir::new("session-store");
         let app = opened(None, &[samples().join("log4net")]);
-        let st = || main_window(&app);
-        let total = block(workspace_summary(st())).unwrap().total;
-        let session = block(session_of(&st(), "Last session".into(), json!({"zoom": 1}))).unwrap();
+        let total = block(workspace_summary(main_window(&app))).unwrap().total;
+        let session = block(session_of(&main_window(&app), "Last session".into(), json!({"zoom": 1}))).unwrap();
         assert!(session.store.is_some() && !session.sources.is_empty());
         let file = dir.0.join("session.debriefproj");
         session.save(&file).unwrap();
-        let w2 = crate::windows::CurrentWindow::of(app.handle(), "w-2").unwrap();
-        let opened = open_project_file_in_job(
+        (app, session, file, dir, total)
+    }
+
+    /// Opens the session file in a new window `label`.
+    fn reopen(app: &tauri::App<MockRuntime>, label: &str, file: PathBuf) -> OpenedProject {
+        let w = crate::windows::CurrentWindow::of(app.handle(), label).unwrap();
+        open_project_file_in_job(
             app.handle(),
-            &w2,
-            &crate::jobs::JobCtx::detached(),
-            &std::sync::atomic::AtomicBool::new(false),
-            OpId::default(),
-            file.clone(),
-            String::new(),
-        )
-        .unwrap();
-        assert_eq!(opened.summary.total, total);
-        assert_eq!(opened.ui["zoom"], 1);
-        // Its store gone, the session imports its files again.
-        let mut gone = session.clone();
-        gone.store = Some(dir.0.join("no-store").to_string_lossy().into_owned());
-        gone.save(&file).unwrap();
-        let w3 = crate::windows::CurrentWindow::of(app.handle(), "w-3").unwrap();
-        let opened = open_project_file_in_job(
-            app.handle(),
-            &w3,
+            &w,
             &crate::jobs::JobCtx::detached(),
             &std::sync::atomic::AtomicBool::new(false),
             OpId::default(),
             file,
             String::new(),
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    // The two cases were one test of three imports in a row, stopped at 92.5 s on the loaded CI Mac (run 8061: the import 29.6 s,
+    // the reopen 12.4 s, the import again 20 s; 1.4-2.1 s in all on a quiet Mac). One test each (ADR 0103): an import and one step.
+
+    /// The autosaved session names the store folder: reopening it reopens the store instead of importing again.
+    #[test]
+    fn a_session_reopens_its_store() {
+        let (app, _, file, _dir, total) = a_saved_session();
+        let opened = reopen(&app, "w-2", file);
+        assert_eq!(opened.summary.total, total);
+        assert_eq!(opened.ui["zoom"], 1);
+    }
+
+    /// Its store gone, the session imports its files again.
+    #[test]
+    fn a_session_whose_store_is_gone_imports_its_files_again() {
+        let (app, session, file, dir, total) = a_saved_session();
+        let mut gone = session;
+        gone.store = Some(dir.0.join("no-store").to_string_lossy().into_owned());
+        gone.save(&file).unwrap();
+        let opened = reopen(&app, "w-3", file);
         assert_eq!(opened.summary.total, total);
     }
 

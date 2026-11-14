@@ -2047,3 +2047,27 @@ env overrides, and refuse with a `Blocked: ... Next step: ...` message when they
 (`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
 config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
 **Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
+
+the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
+
+## Tests summed their steps under one bound and failed on the loaded Mac (2026-11-14, ADR 0103)
+CI runs 8050, 8060, 8061, 8066, 8090 and 8099 failed tests that were never hung: the kept-clone parity tests ran 20-24 jobs one
+after the other under nextest's 60 s (25.6 s quiet), a Debrief test made 50 001 files to reach a product limit (4.8 s quiet, 90 s
+in CI), the crash model's CPU work slowed 9x under other jobs' load, and a VM lock test that failed partway left a detached
+`slot hold` that failed nine tests after it. Each fix on train 11 was right and by hand. **Rule:** a test's verdict depends on each
+step's progress, not on a sum of steps; independent cases run side by side (`paddock_testkit::both` / `run_cases`); a wait for
+several steps is `wait_progressing` (Rust) or `waitProgressing` (scripts/test-kit.mjs), which back off; every process a test
+starts goes through a `Reaper` (Rust `paddock_testkit_start`, Node `scripts/test-kit.mjs`), which ends detached grandchildren too;
+a limit is tested with a small limit; a CPU-bound test gets a measured size class, not a raised default. C126 (ADR
+0103) lists the shapes, report-only. **Class: tests time out on the loaded Mac (ADR 0102 is the machine side).**
+
+## A red test of the Reaper ended other processes on the machine (2026-11-15, ADR 0103)
+Writing the failing-first test for "a short marker is refused", the designer called `Reaper::marked("/tmp")` before the guard
+existed. The red run (three runs between 00:12:04 and 00:12:40 +08, from file times) did what the guard was for: its drop ended every process whose command line contained `/tmp`, by identity,
+three runs in a row; that included the agent's own shell and very likely other agents' running shell commands (their wrappers
+name `/tmp/claude-…` files). **Rule:** a failing-first test must be safe in its failing state: when the missing behaviour is a
+guard against a destructive action, the red test feeds an input that the action cannot harm (here a short marker that matches no
+process), never the real dangerous one. A tool that ends processes never acts on a pattern match alone: the rebuilt reaper
+(ADR 0103) acts only on its own children, what it saw below them, its groups, its token, and orphans naming a folder it made
+with a random name. **Class: acting on processes by a name or pattern
+(rule 53; the lefthook kill of 2026-11-14 above).**
