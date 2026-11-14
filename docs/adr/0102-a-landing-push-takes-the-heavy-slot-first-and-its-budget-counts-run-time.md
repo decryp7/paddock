@@ -77,35 +77,41 @@ never crowd out a release; nothing enforced it.
 - `tools/paddock-dev/src/pre_push`: `budget.rs` (pure), `exec.rs` (the flags, the credit), `mod.rs` (the ref decision, the table).
 - Train 10 changes `pre_push/mod.rs`'s base choice; the overlap is the `RealExec { .. }` literal (two new fields) and `render`.
 
-## Amendment 2026-11-15: one heavy step in flight, a queue allowance per push, and the base of a stacked branch
+## Amendment 2026-11-15: the commits the remote lacks, one heavy step in flight, a queue allowance per push
 
 Five pushes on 2026-11-14/15 were "not measured" by the 15-minute budget (logs in the agents' scratch folders: hooks-ci
 `prepush.out`/`rerun.out`, gen-check-build `push.txt`, vmtool-keptclone `push.log`, test-timing `prepush3.txt`). In each, the
-time queued was small next to the run time (for example 194 s queued against 815 s run): the budget ran out because the push
-was measured from too old a base (280 to 461 changed files, Clippy for every workspace a train touched, while the branch's own
-change touched one or two). The run of train 10 that counted queue time against the budget (837 s for one Clippy) predates
-points 3 and 4 above.
+time queued was small next to the run time (for example 194 s queued against 815 s run): the budget ran out on the amount of
+work. The run of train 10 that counted queue time against the budget (837 s for one Clippy) predates points 3 and 4 above.
 
-1. **Base.** The candidates are the remote ref's old commit, the tracking upstream, the `train/*` branches and main of the
-   push's remote (live; their remote-tracking refs when the remote cannot be read or no longer lists them), any other
-   remote-tracking branch the pushed commit contains (a branch stacked on a pushed branch, newest 20), and the local `train/*`
-   branches (newest 40; a train being built is often not pushed, or only partly). The fewest new commits wins; ties go in that
-   order. A candidate that already holds the pushed commit is skipped (nothing new would be measured, and nothing measured is no
-   evidence), so the next nearest is used; before, such a commit was measured from origin/main. A person's run (no push) measures HEAD the same way, its own
-   remote-tracking branch as the old commit. The header names the base, its distance, the next two candidates and how long the
-   count took (ER-27). A local base only shapes which lints this gate runs; the train's own push and its full CI check the train.
-   CI's plan is unchanged: a branch push plans everything, a pull request plans from its merge base, as this does from the
-   nearest shared base.
-2. **Pass records name their base.** A record stores `base_commit`; it counts for a push only when that commit is the push's
-   base or an ancestor of it, directly or through the records of the bases in between (at most 8). A record measured from a
-   nearer base checked less than a push from an older base needs. The record also stores the base the run really used (it
-   stored `origin/main` for every run before).
+1. **What a push checks: the commits the remote lacks.** One definition, as git's pre-push.sample has it: the commits a push
+   must check are `git rev-list <tip> --not --remotes=<remote>`, and the planned files are every file those commits touch (the
+   tree diff from the base, and each commit's own files, so a change made and undone inside the range is still planned). The base
+   is the nearest commit of the remote that the pushed commit contains: the remote ref's old commit (git's pre-push line), or a
+   remote-tracking ref of the push's remote the pushed commit contains, counted only when the live `git ls-remote` listing still
+   has that branch at that commit or a later one (a branch deleted or force-pushed since the last fetch is stale; when the remote
+   cannot be read the refs are used as they are, said so). Of the candidates only those no other candidate contains can be
+   nearest (`git merge-base --independent`, one process however many branches the remote has), so no caps are needed; the
+   fewest new commits wins, the old commit then the tracking upstream on a tie; origin/main when none is usable. A candidate at
+   the pushed commit itself is skipped (nothing measured is no evidence). A person's run measures HEAD the same way. The base is
+   resolved to a commit once and that commit is used by the diff, the known-commit lookup and the pass record. The header names
+   the base, its distance, the next two candidates and how long the choice took (ER-27).
+   A local base (a local `train/*`, tried first on this branch, c4e32e462) is not used: a push sends the train's unpushed commits
+   too, so measuring from the local train left them unchecked, and any local ref named `train/*` could shrink a check (review
+   P1-1). A branch stacked on an unpushed train therefore checks the train's commits as well; pushing the train first keeps
+   such checks small. CI's plan is unchanged: a branch push plans everything, a pull request plans from its merge base.
+2. **Pass records name their base.** A record stores `base_commit`; it counts for a push only when the push's base is a commit of
+   the remote (a remote-tracking ref holds it) and the record's base is that base or an ancestor of it, directly or through the
+   records of the bases in between (at most 8). The record also stores the base the run really used (it stored `origin/main` for
+   every run before).
 3. **One heavy step of a push in flight.** heavy has one slot (more only with `HEAVY_DIR`/`HEAVY_SLOTS`), so two heavy steps of
    one push only queue behind each other. The gate now starts the next heavy step after the previous one has ended and its queue
    time is on the clock, so every second a heavy step queues is waiting for others, and the run time a step starts with is exact.
+   Meanwhile a free worker runs the next light row (fmt, lockfile, conformance) instead of waiting.
 4. **A queue allowance per push.** `QUEUE_MAX` (30 min, `PADDOCK_QUEUE_MAX`) now bounds all heavy steps of a push together:
    each step gets what is left as its `--queue-max`; a step that would start after it is spent is "not measured" with
-   `queued N s in all, load L` and the next step (`heavy status`, re-run `--only <gate>`). A push waits at most 15 min of run plus
-   30 min of queue. Basis: heavy's activity log, 145 pre-push steps, queue p50 21 s, p90 386 s, p99 993 s, max 1,187 s
-   ([benchmarks](../benchmarks.md#2026-11-15-pre-push-heavy-queue-times-fixpre-push-base-and-budget)); the value is unchanged,
-   only its scope.
+   `queued N s in all, load L` and the next step (`heavy status`, re-run `--only <gate>`). It fails closed: a push waits at most
+   15 min of run plus 30 min of queue. The value is unchanged; its basis is measured **per step**, not per push: heavy's
+   activity log, 145 pre-push steps, queue p50 21 s, p90 386 s, p99 993 s, max 1,187 s
+   ([benchmarks](../benchmarks.md#2026-11-15-pre-push-heavy-queue-times-fixpre-push-base-and-budget)). Each run now appends its
+   whole queue and run time to `queue-times.log` beside the gate logs; the per-push value is revisited with that log.

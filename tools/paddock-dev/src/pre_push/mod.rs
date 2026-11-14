@@ -49,11 +49,10 @@ pub struct PrePushArgs {
     /// The repository root (default: the folder containing .git, found from the current folder).
     #[arg(long)]
     pub root: Option<PathBuf>,
-    /// The base every push is measured from. Default: the candidate that leaves the fewest new commits among the remote ref's old
-    /// commit, its tracking upstream, the `train/*` branches and main of the push's remote (read live with `git ls-remote`; their
-    /// remote-tracking refs when it cannot be read), any other remote-tracking branch the pushed commit contains, and the local
-    /// `train/*` branches (a train being built and not yet pushed); origin/main when none is usable. A person's run measures HEAD the
-    /// same way. Naming it also turns off the known-commit shortcut.
+    /// The base every push is measured from. Default: the nearest commit of the push's remote that the pushed commit contains (the
+    /// remote ref's old commit, or a remote-tracking ref the remote still has there or later, read live with `git ls-remote`), so
+    /// every commit the remote lacks is checked; origin/main when none is usable. A person's run measures HEAD the same way. Naming
+    /// it also turns off the known-commit shortcut.
     #[arg(long)]
     pub base: Option<String>,
     /// The remote being pushed to (git's first pre-push argument; the hook passes it): the only remote evidence and bases are read from.
@@ -479,6 +478,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
     );
     rows.extend(extra_ref_rows(&extra));
     accept_not_measured(&mut rows, &accept, &state);
+    log_queue_times(&state, checked.as_deref(), &base, &timings);
     let mut report = render_timed(head.trim_end(), &rows, &timings);
     if stop.load(Ordering::SeqCst) {
         report = report.with_exit(Exit::Interrupted);
@@ -508,6 +508,29 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         }
     }
     Ok(report)
+}
+
+/// One line per run in `queue-times.log` beside the gate logs: the whole push's heavy queue and run time, the measurement the
+/// per-push queue allowance ([`QUEUE_MAX`]) is to be revisited with (its basis so far is per step, ADR 0102 amendment).
+fn log_queue_times(state: &Path, sha: Option<&str>, base: &str, timings: &std::collections::BTreeMap<String, budget::Timing>) {
+    use std::io::Write;
+    let queued: f64 = timings.values().map(|t| t.queued).sum();
+    let ran: f64 = timings.values().map(|t| t.ran).sum();
+    let line = format!(
+        "{} sha={} base={} heavy_steps={} queued_s={queued:.1} ran_s={ran:.1}\n",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs()),
+        sha.unwrap_or("worktree"),
+        base,
+        timings.len()
+    );
+    let _ = std::fs::create_dir_all(state);
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(state.join("queue-times.log"))
+        .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
 /// The push's queue allowance (all its heavy steps' waits for the slot together): `PADDOCK_QUEUE_MAX` (seconds, at least 1) or
@@ -636,45 +659,49 @@ pub fn parse_push(input: &str) -> Vec<Pushed> {
     out
 }
 
-/// Where a push is measured from, and why (printed at the top of the run, ER-27). An existing remote ref with its old commit here:
-/// that commit is one candidate; the others are the shared bases [`nearest_base`] lists. The candidate that leaves the fewest of the
-/// pushed commit's commits new wins, as git's pre-push.sample does. `fallback` (origin/main) when no candidate is usable. An empty
-/// diff is never a pass on its own: a candidate that already holds every pushed commit is skipped, so the next nearest base (or
-/// `fallback`) measures the change.
+/// Where a push is measured from, and why (printed at the top of the run, ER-27): one definition, as git's pre-push.sample has it.
+/// The commits a push must check are the ones the remote lacks; every commit of the remote that the pushed commit contains bounds
+/// them, so the base is the nearest such commit ([`nearest_base`]): the remote ref's old commit (git's own pre-push line says the
+/// remote has it) or a remote-tracking ref of the push's remote that the pushed commit contains and the remote still has (read live
+/// with `git ls-remote`). `fallback` (origin/main) when none is. The base comes back as a commit id, resolved once, so the diff, the
+/// known-commit lookup and the pass record all use the same commit. An empty diff is never a pass on its own: a candidate at the
+/// pushed commit itself is skipped.
 pub fn choose_base(root: &Path, p: &Pushed, remote: Option<&str>, fallback: &str, look: &dyn known::Lookups) -> (String, String) {
     choose_base_with(root, p, remote, fallback, look, false)
 }
 
 /// The base of a person's run (no push to look at): HEAD measured as a push of the current branch to `remote` (default origin) would
-/// be, so the run ahead of a push plans what the push will. Its branch's own remote-tracking ref is the "old commit"; a candidate at
-/// HEAD itself is fine here (the run checks the working tree's uncommitted changes, and an empty diff is "nothing to check").
+/// be, so the run ahead of a push plans what the push will. A candidate at HEAD itself is fine here (the run checks the working
+/// tree's uncommitted changes, and an empty diff is "nothing to check").
 pub fn person_base(root: &Path, remote: Option<&str>, fallback: &str, look: &dyn known::Lookups) -> (String, String) {
     let remote = remote.filter(|r| !r.is_empty() && !r.starts_with('-')).unwrap_or("origin");
     let Some(head) = git_text(root, &["rev-parse", "--verify", "--quiet", "HEAD"]).map(|t| t.trim().to_string()) else {
-        return (
-            fallback.to_string(),
-            format!("a person's run with no HEAD commit; measuring from {fallback}"),
-        );
+        let (b, w) = resolved(root, fallback, "a person's run with no HEAD commit".into());
+        return (b, w);
     };
     let branch = git_text(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(|t| t.trim().to_string());
-    let old = branch
-        .as_deref()
-        .and_then(|b| {
-            git_text(
-                root,
-                &["rev-parse", "--verify", "--quiet", &format!("refs/remotes/{remote}/{b}^{{commit}}")],
-            )
-        })
-        .map(|t| t.trim().to_string());
+    let name = branch.as_deref().map_or_else(|| "HEAD".to_string(), |b| format!("refs/heads/{b}"));
     let p = Pushed {
-        local_ref: branch.as_deref().map_or_else(|| "HEAD".to_string(), |b| format!("refs/heads/{b}")),
+        local_ref: name.clone(),
         sha: head,
-        remote_ref: branch.as_deref().map_or_else(|| "HEAD".to_string(), |b| format!("refs/heads/{b}")),
-        remote_sha: old.unwrap_or_else(|| "0".repeat(40)),
+        remote_ref: name,
+        remote_sha: "0".repeat(40),
     };
     let (base, why) = choose_base_with(root, &p, Some(remote), fallback, look, true);
     let what = branch.map_or_else(|| "a detached HEAD".to_string(), |b| format!("branch {b}"));
     (base, format!("a person's run: HEAD of {what} measured as its push would be; {why}"))
+}
+
+/// `fallback` as a commit id when it names one here (else the name itself, and `discover` says it cannot be read), with `why`.
+fn resolved(root: &Path, fallback: &str, why: String) -> (String, String) {
+    let sha = git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{fallback}^{{commit}}")]).map(|t| t.trim().to_string());
+    match sha {
+        Some(s) => (s.clone(), format!("{why}; measuring from {fallback} ({})", &s[..s.len().min(12)])),
+        None => (
+            fallback.to_string(),
+            format!("{why}; measuring from {fallback}, which is not a commit here"),
+        ),
+    }
 }
 
 fn choose_base_with(
@@ -689,9 +716,7 @@ fn choose_base_with(
     let mut prefix = String::new();
     let mut old = None;
     if p.remote_sha.chars().any(|c| c != '0') {
-        if p.remote_sha == p.sha && !empty_ok {
-            prefix = format!("{} is already at the pushed commit on the remote; ", p.remote_ref);
-        } else if git_text(root, &["cat-file", "-e", &format!("{}^{{commit}}", p.remote_sha)]).is_some() {
+        if git_text(root, &["cat-file", "-e", &format!("{}^{{commit}}", p.remote_sha)]).is_some() {
             old = Some(p.remote_sha.clone());
         } else {
             prefix = format!(
@@ -705,16 +730,8 @@ fn choose_base_with(
     (b, format!("{prefix}{w}"))
 }
 
-/// The most `train/*` branches whose distance is counted per source (the newest by name): bounds the search on a remote with
-/// hundreds of branches.
-const MAX_TRAINS: usize = 40;
-
-/// The most other remote-tracking branches contained in the pushed commit whose distance is counted (the newest by commit date: the
-/// nearest ancestor is almost always among the newest). Counting every branch of a large remote spawned about 1,100 git processes.
-const MAX_CONTAINED: usize = 20;
-
-/// One base candidate: how many of the pushed commit's commits it leaves new, its tie-break rank, what it is (for the log) and its
-/// commit.
+/// One base candidate: how many of the pushed commit's commits it leaves new, its tie-break rank (0 the old commit, 1 the tracking
+/// upstream, 2 any other), what it is (for the log) and its commit.
 struct Candidate {
     dist: u32,
     rank: u8,
@@ -722,20 +739,13 @@ struct Candidate {
     sha: String,
 }
 
-/// The shared bases a pushed commit may be measured from, and the nearest of them. The candidates:
-///
-/// - rank 0, the remote ref's own old commit (when the ref exists and the commit is here);
-/// - rank 1 to 3, the push's tracking upstream, the `train/*` branches and main of `remote`, read live with `git ls-remote` (a tip
-///   this clone has no object for is skipped); their remote-tracking refs when the remote cannot be read or no longer has them;
-/// - rank 4, any other remote-tracking branch of `remote` the pushed commit contains (a branch stacked on a pushed branch);
-/// - rank 5, the local `train/*` branches: a train being built is often not pushed yet, or only partly, and a branch stacked on it
-///   would otherwise be measured from an older train or main and plan Clippy for every workspace the train touched. A local base is
-///   fine for planning the lints: the train's own push and its full CI check the train.
-///
-/// A sibling feature branch the pushed commit does not contain is no base. The fewest new commits wins (so a branch that merged its
-/// train in is measured from the train, not from its own old tip, which would count the whole train as new); on a tie the lower rank.
-/// A candidate that already holds the pushed commit (nothing new: the commit is on the remote or a local train but has no evidence)
-/// is skipped, so the next nearest base is used, or `fallback` when none is left; a person's run (`empty_ok`) keeps it.
+/// The nearest commit of the remote that the pushed commit contains. The candidates are the remote ref's old commit (when the
+/// pushed commit contains it: a force push does not) and the remote-tracking refs of `remote` the pushed commit contains (`git
+/// for-each-ref --merged`), each only when the live listing still has that branch at that commit or a later one (a ref the remote
+/// deleted or force-pushed since the last fetch is stale and its commits may be gone from the remote); when the remote cannot be
+/// read, the remote-tracking refs as they are, said so. Of the candidates only the ones no other candidate contains can be nearest
+/// (`git merge-base --independent`, one process however many branches the remote has); of those the fewest new commits wins, on a
+/// tie the lower rank. A candidate at the pushed commit itself is skipped unless `empty_ok` (a person's run).
 fn nearest_base(
     root: &Path,
     p: &Pushed,
@@ -747,196 +757,142 @@ fn nearest_base(
 ) -> (String, String) {
     let started = std::time::Instant::now();
     let git = |args: &[&str]| git_text(root, args);
-    let branch = p.remote_ref.strip_prefix("refs/heads/").unwrap_or(&p.remote_ref).to_string();
+    let short = |s: &str| s[..s.len().min(12)].to_string();
     let named = remote.filter(|r| !r.is_empty() && !r.starts_with('-'));
     let tracking_of = named.unwrap_or("origin");
     let mut notes: Vec<String> = Vec::new();
     let listing = match named {
         None => {
             notes.push(format!(
-                "no remote was named for this push, so no live branch list (remote-tracking refs of {tracking_of} only)"
+                "no remote was named for this push, so the remote-tracking refs of {tracking_of} are not checked live"
             ));
             None
         }
         Some(r) => {
             let l = look.ls_remote(r);
             if l.is_none() {
-                notes.push(format!("git ls-remote {r} could not be read (remote-tracking refs instead)"));
+                notes.push(format!(
+                    "git ls-remote {r} could not be read, so the remote-tracking refs are not checked live"
+                ));
             }
             l
         }
     };
+    let live: HashMap<String, String> = listing
+        .as_deref()
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .filter_map(|(sha, n)| {
+            n.trim()
+                .strip_prefix("refs/heads/")
+                .map(|n| (n.to_string(), sha.trim().to_string()))
+        })
+        .collect();
     let upstream = p
         .local_ref
         .strip_prefix("refs/heads/")
         .and_then(|b| git(&["rev-parse", "--symbolic-full-name", &format!("{b}@{{upstream}}")]))
         .and_then(|t| t.trim().strip_prefix(&format!("refs/remotes/{tracking_of}/")).map(str::to_string));
-    let mut dists: HashMap<String, Option<u32>> = HashMap::new();
-    let mut count = |sha: &str| -> Option<u32> {
-        *dists
-            .entry(sha.to_string())
-            .or_insert_with(|| git(&["rev-list", "--count", &format!("{sha}..{}", p.sha)]).and_then(|t| t.trim().parse::<u32>().ok()))
-    };
-    let mut cands: Vec<Candidate> = Vec::new();
-    if let Some(sha) = old
-        && let Some(d) = count(sha)
-    {
-        cands.push(Candidate {
-            dist: d,
-            rank: 0,
-            label: format!(
-                "{} exists on the remote: its old commit {}",
-                p.remote_ref,
-                &sha[..sha.len().min(12)]
-            ),
-            sha: sha.to_string(),
-        });
-    }
-    let shared_rank = |name: &str| {
-        if upstream.as_deref() == Some(name) {
-            Some(1)
-        } else if name == "main" {
-            Some(3)
-        } else if name.starts_with("train/") {
-            Some(2)
+    // (sha, rank, label) of every usable candidate.
+    let mut usable: Vec<(String, u8, String)> = Vec::new();
+    let mut stale: Vec<String> = Vec::new();
+    if let Some(sha) = old {
+        if git(&["merge-base", "--is-ancestor", sha, &p.sha]).is_some() {
+            usable.push((
+                sha.to_string(),
+                0,
+                format!("{} on the remote: its old commit {}", p.remote_ref, short(sha)),
+            ));
         } else {
-            None
-        }
-    };
-    let upstream_note = |rank: u8| if rank == 1 { " (its tracking upstream)" } else { "" };
-    // Live tips: the tracking upstream, the trains and main.
-    let mut live_names: Vec<String> = Vec::new();
-    if let Some(listing) = &listing {
-        let mut heads: Vec<(&str, &str)> = listing
-            .lines()
-            .filter_map(|l| l.split_once('\t'))
-            .filter_map(|(sha, n)| n.trim().strip_prefix("refs/heads/").map(|n| (n, sha.trim())))
-            .filter(|(n, _)| *n != branch)
-            .collect();
-        heads.sort_by(|a, b| b.0.cmp(a.0));
-        let mut trains = 0;
-        for (name, sha) in heads {
-            let Some(rank) = shared_rank(name) else { continue };
-            if rank == 2 {
-                if trains >= MAX_TRAINS {
-                    continue;
-                }
-                trains += 1;
-            }
-            live_names.push(name.to_string());
-            if git(&["cat-file", "-e", &format!("{sha}^{{commit}}")]).is_none() {
-                continue;
-            }
-            if let Some(d) = count(sha) {
-                cands.push(Candidate {
-                    dist: d,
-                    rank,
-                    label: format!("{tracking_of}'s {name} (read live with git ls-remote){}", upstream_note(rank)),
-                    sha: sha.to_string(),
-                });
-            }
-        }
-    }
-    // Remote-tracking refs: the shared ones the live list did not give, and the other branches the pushed commit contains.
-    let refs = |args: &[&str]| -> Vec<(String, String)> {
-        git(args)
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| l.split_once(' '))
-            .map(|(sha, n)| (n.trim().to_string(), sha.trim().to_string()))
-            .filter(|(n, _)| n != "HEAD" && *n != branch && !live_names.contains(n))
-            .collect()
-    };
-    let prefix = format!("refs/remotes/{tracking_of}/");
-    let mut tracking = refs(&[
-        "for-each-ref",
-        "--sort=-refname",
-        "--format=%(objectname) %(refname:strip=3)",
-        &prefix,
-    ]);
-    let mut trains = 0;
-    tracking.retain(|(n, _)| match shared_rank(n) {
-        Some(2) => {
-            trains += 1;
-            trains <= MAX_TRAINS
-        }
-        Some(_) => true,
-        None => false,
-    });
-    let gone = if listing.is_some() { ", not on the remote any more" } else { "" };
-    for (name, sha) in tracking {
-        let rank = shared_rank(&name).unwrap_or(4);
-        if let Some(d) = count(&sha) {
-            cands.push(Candidate {
-                dist: d,
-                rank,
-                label: format!("{tracking_of}/{name} (remote-tracking ref{gone}){}", upstream_note(rank)),
-                sha,
-            });
+            notes.push(format!(
+                "{} is on the remote at {}, which the pushed commit does not contain (a force push)",
+                p.remote_ref,
+                short(sha)
+            ));
         }
     }
     let merged = format!("--merged={}", p.sha);
-    let count_arg = format!("--count={MAX_CONTAINED}");
-    for (name, sha) in refs(&[
-        "for-each-ref",
-        &merged,
-        "--sort=-committerdate",
-        &count_arg,
-        "--format=%(objectname) %(refname:strip=3)",
-        &prefix,
-    ]) {
-        if shared_rank(&name).is_some() {
+    let prefix = format!("refs/remotes/{tracking_of}/");
+    for line in git(&["for-each-ref", &merged, "--format=%(objectname) %(refname:strip=3)", &prefix])
+        .unwrap_or_default()
+        .lines()
+    {
+        let Some((sha, name)) = line.split_once(' ') else { continue };
+        if name == "HEAD" {
             continue;
         }
-        if let Some(d) = count(&sha) {
-            cands.push(Candidate {
-                dist: d,
-                rank: 4,
-                label: format!("{tracking_of}/{name} (remote-tracking ref the pushed commit contains)"),
-                sha,
-            });
-        }
+        let verified = match (&listing, live.get(name)) {
+            (None, _) => Some("remote-tracking ref, not checked live"),
+            (Some(_), Some(now)) if now == sha => Some("remote-tracking ref, the remote has it there (live)"),
+            (Some(_), Some(now))
+                if git(&["cat-file", "-e", &format!("{now}^{{commit}}")]).is_some()
+                    && git(&["merge-base", "--is-ancestor", sha, now]).is_some() =>
+            {
+                Some("remote-tracking ref, the remote has moved on from it (live)")
+            }
+            _ => None,
+        };
+        let Some(how) = verified else {
+            stale.push(name.to_string());
+            continue;
+        };
+        let rank = if upstream.as_deref() == Some(name) { 1 } else { 2 };
+        let up = if rank == 1 { ", its tracking upstream" } else { "" };
+        usable.push((sha.to_string(), rank, format!("{tracking_of}/{name} ({how}{up})")));
     }
-    // Local trains, the pushed branch itself left out.
-    let local_count = format!("--count={MAX_TRAINS}");
-    for (name, sha) in git(&[
-        "for-each-ref",
-        "--sort=-refname",
-        &local_count,
-        "--format=%(objectname) %(refname)",
-        "refs/heads/train/",
-    ])
-    .unwrap_or_default()
-    .lines()
-    .filter_map(|l| l.split_once(' '))
-    .map(|(sha, n)| (n.trim().to_string(), sha.trim().to_string()))
-    .filter(|(n, _)| *n != p.local_ref)
-    {
-        if let Some(d) = count(&sha) {
+    if !stale.is_empty() {
+        stale.sort();
+        notes.push(format!(
+            "skipped {} remote-tracking ref(s) the remote no longer has at that commit or later (deleted or force-pushed since the last fetch): {}",
+            stale.len(),
+            stale.iter().take(5).cloned().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    if !empty_ok && usable.iter().any(|(sha, ..)| *sha == p.sha) {
+        let at: Vec<String> = usable.iter().filter(|(sha, ..)| *sha == p.sha).map(|(_, _, l)| l.clone()).collect();
+        usable.retain(|(sha, ..)| *sha != p.sha);
+        notes.push(format!(
+            "the pushed commit is already on {} but no evidence for it was found, so the nearest base that leaves something new is used",
+            at.join(", ")
+        ));
+    }
+    let mut shas: Vec<&str> = usable.iter().map(|(s, ..)| s.as_str()).collect();
+    shas.sort_unstable();
+    shas.dedup();
+    let independent: Vec<String> = if shas.len() > 1 {
+        let mut args = vec!["merge-base", "--independent"];
+        args.extend(shas.iter().copied());
+        git(&args).map_or_else(
+            || shas.iter().map(|s| s.to_string()).collect(),
+            |t| t.lines().map(|l| l.trim().to_string()).collect(),
+        )
+    } else {
+        shas.iter().map(|s| s.to_string()).collect()
+    };
+    let mut cands: Vec<Candidate> = Vec::new();
+    for sha in &independent {
+        let Some(dist) = git(&["rev-list", "--count", &format!("{sha}..{}", p.sha)]).and_then(|t| t.trim().parse::<u32>().ok()) else {
+            continue;
+        };
+        if let Some((_, rank, label)) = usable
+            .iter()
+            .filter(|(s, ..)| s == sha)
+            .min_by(|a, b| (a.1, &a.2).cmp(&(b.1, &b.2)))
+        {
             cands.push(Candidate {
-                dist: d,
-                rank: 5,
-                label: format!(
-                    "local {} (a local train, not checked against {tracking_of}: its own push and CI check the train)",
-                    name.trim_start_matches("refs/heads/")
-                ),
-                sha,
+                dist,
+                rank: *rank,
+                label: label.clone(),
+                sha: sha.clone(),
             });
         }
     }
     cands.sort_by_key(|c| (c.dist, c.rank));
-    // A base that already holds the pushed commit leaves nothing to measure, and nothing measured is no evidence: the next one.
-    if !empty_ok && cands.first().is_some_and(|c| c.dist == 0) {
-        let at: Vec<String> = cands.iter().filter(|c| c.dist == 0).map(|c| c.label.clone()).collect();
-        cands.retain(|c| c.dist > 0);
-        notes.push(format!(
-            "every pushed commit is already on {} but no evidence for it was found, so the nearest base that leaves something new is used",
-            at.join(", ")
-        ));
-    }
     let others: Vec<String> = cands.iter().skip(1).take(2).map(|c| format!("{} {}", c.label, c.dist)).collect();
     let took = format!(
-        "counted {} candidate(s): live tips of {tracking_of}, remote-tracking refs, local trains, in {} ms{}",
+        "{} candidate(s) of {tracking_of} the pushed commit contains, {} not contained by another, counted in {} ms{}",
+        usable.len(),
         cands.len(),
         started.elapsed().as_millis(),
         if others.is_empty() {
@@ -955,11 +911,10 @@ fn nearest_base(
             c.sha.clone(),
             format!("{notes}{} leaves the fewest new commits, {} ({took})", c.label, c.dist),
         ),
-        None => (
-            fallback.to_string(),
-            format!(
-                "{notes}no tracking upstream, train branch or main of {tracking_of} has a tip this clone has, and no other remote-tracking branch or local train is an ancestor ({took}); measuring from {fallback}"
-            ),
+        None => resolved(
+            root,
+            fallback,
+            format!("{notes}no commit of {tracking_of} that the pushed commit contains is usable ({took})"),
         ),
     }
 }
@@ -1170,6 +1125,13 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             .and_then(|t| t.trim().parse::<u32>().ok())
             .unwrap_or(0)
     };
+    // Every file a commit of the range touches, also one a later commit changes back: the tree diff alone would miss it, and the
+    // commit is still one the push sends.
+    let commit_files = |mb: &str, tip: &str| {
+        git_text(root, &["log", "--no-merges", "--name-only", "--format=", &format!("{mb}..{tip}")])
+            .map(|t| lines(Some(t)))
+            .ok_or_else(|| CliError::failure(format!("git log {mb}..{tip} failed.")).with_hint("Run it by hand to see why."))
+    };
     let mut notes = Vec::new();
     let mut changed: Vec<String> = Vec::new();
     let mut ranges = Vec::new();
@@ -1178,11 +1140,12 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
         extra.extend(rest.iter().cloned());
         let mb = merge_base(tip)?;
         notes.push(format!(
-            "measured from {base} (merge base {mb}): no remote branch holds every pushed commit"
+            "measured from {base} (merge base {mb}): every file the commits {mb}..{tip} change, one by one and in all"
         ));
         let diff = git_text(root, &["diff", "--name-only", &mb, tip])
             .ok_or_else(|| CliError::failure(format!("git diff {mb} {tip} failed.")).with_hint("Run it by hand to see why."))?;
         changed.extend(lines(Some(diff)));
+        changed.extend(commit_files(&mb, tip)?);
         if count(&mb, tip) > 0 {
             ranges.push(format!("{mb}..{tip}"));
         }
@@ -1199,6 +1162,7 @@ fn discover(root: &Path, base: &str, files: &[String], pushed: &[String]) -> Res
             let tracked = git_text(root, &["diff", "--name-only", &mb])
                 .ok_or_else(|| CliError::failure(format!("git diff against {mb} failed.")).with_hint("Run it by hand to see why."))?;
             changed.extend(lines(Some(tracked)));
+            changed.extend(commit_files(&mb, "HEAD")?);
             changed.extend(lines(git_text(root, &["ls-files", "--others", "--exclude-standard"])));
             let dirty = lines(git_text(root, &["status", "--porcelain"]));
             if !dirty.is_empty() {

@@ -1254,8 +1254,9 @@ mod known_commit {
         );
         let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[two.as_str()], &l);
         assert!(found.is_some(), "its own base");
-        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[three.as_str()], &l);
-        assert!(found.is_some(), "a newer base");
+        // A base no remote-tracking ref holds (a local commit) takes no record, even a newer one.
+        let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[three.as_str()], &l);
+        assert!(found.is_none() && trail[0].contains("on no remote-tracking ref"), "{trail:?}");
         // Through the record of the base in between: two was measured from one, so three's record covers a push from one.
         known::write_record(&r, &state(&r), &two, &one, &[], 5, &pass_for(&r, &two)).unwrap();
         let (found, trail) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[one.as_str()], &l);
@@ -1265,7 +1266,7 @@ mod known_commit {
         let mut v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rec).unwrap()).unwrap();
         v.as_object_mut().unwrap().remove("base_commit");
         std::fs::write(&rec, v.to_string()).unwrap();
-        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[three.as_str()], &l);
+        let (found, _) = known::find(&r, &state(&r), None, std::slice::from_ref(&three), &[two.as_str()], &l);
         assert!(found.is_none());
     }
 
@@ -1441,7 +1442,8 @@ mod base_choice {
         let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(None));
         assert_eq!(base, train, "{why}");
         assert!(
-            why.contains("could not be read (remote-tracking refs instead)") && why.contains("origin/train/t (remote-tracking ref)"),
+            why.contains("could not be read, so the remote-tracking refs are not checked live")
+                && why.contains("origin/train/t (remote-tracking ref, not checked live)"),
             "{why}"
         );
         let (base, why) = choose_base(&r, None, &tip, &live(&r));
@@ -1450,15 +1452,19 @@ mod base_choice {
             (train.as_str(), true),
             "{why}"
         );
-        // Tips this clone has no object for are skipped; a remote-tracking ref the live list no longer has still counts, said so.
+        // A remote-tracking ref the live list no longer has (deleted or force-pushed) is stale: skipped, said so; then origin/main.
         let (base, why) = choose_base(
             &r,
             Some("origin"),
             &tip,
             &Remote(Some(format!("{}\trefs/heads/x\n", "1".repeat(40)))),
         );
+        assert_eq!(base, sha(&r, "origin/main"), "{why}");
+        assert!(why.contains("skipped 2 remote-tracking ref(s) the remote no longer has"), "{why}");
+        // The remote moved a branch on to a commit this clone has: its older remote-tracking ref still counts.
+        let (base, why) = choose_base(&r, Some("origin"), &tip, &Remote(Some(format!("{tip}\trefs/heads/train/t\n"))));
         assert_eq!(base, train, "{why}");
-        assert!(why.contains("not on the remote any more"), "{why}");
+        assert!(why.contains("the remote has moved on from it (live)"), "{why}");
         // Nothing usable at all: origin/main, said so.
         git_text(&r, &["update-ref", "-d", "refs/remotes/origin/train/t"]).unwrap();
         git_text(&r, &["update-ref", "-d", "refs/remotes/origin/main"]).unwrap();
@@ -1473,7 +1479,7 @@ mod base_choice {
         let two = sha(&r, "origin/train/t");
         let (base, why) = choose_base(&r, Some("origin"), &two, &live(&r));
         assert_eq!(base, sha(&r, "origin/main"), "{why}");
-        assert!(why.contains("already on origin's train/t") && why.contains("no evidence"), "{why}");
+        assert!(why.contains("already on origin/train/t") && why.contains("no evidence"), "{why}");
         // A commit already pushed under another branch name keeps the base that branch was measured from (its pass record stays
         // valid), never main.
         commit(&r, "w1");
@@ -1593,7 +1599,7 @@ fn an_existing_remote_ref_is_measured_from_its_old_commit() {
     };
     let (base, why) = r.choose(&p);
     assert_eq!(base, f1);
-    assert!(why.contains("exists on the remote"), "{why}");
+    assert!(why.contains("on the remote: its old commit"), "{why}");
     // Its old commit is not here: say so and measure from the nearest live remote branch tip (main here).
     let gone = super::Pushed {
         remote_sha: "1".repeat(40),
@@ -1612,7 +1618,7 @@ fn with_no_usable_remote_branch_the_base_is_main_and_says_so() {
     let (base, why) = r.choose(&new_ref("main", &c1));
     assert_eq!(base, "origin/main");
     assert!(
-        why.contains("no tracking upstream, train branch or main") && why.contains("measuring from origin/main"),
+        why.contains("no commit of origin that the pushed commit contains is usable") && why.contains("measuring from origin/main"),
         "{why}"
     );
     // A sibling feature branch is no candidate either.
@@ -1625,7 +1631,7 @@ fn with_no_usable_remote_branch_the_base_is_main_and_says_so() {
 }
 
 #[test]
-fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
+fn a_tracking_upstream_wins_only_a_tie() {
     let r = Repo::new();
     let c1 = r.commit("a");
     r.remote("main", &c1);
@@ -1656,20 +1662,11 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
     assert_eq!(
         (
             base.as_str(),
-            why.contains("main (read live") && why.contains("its tracking upstream")
+            why.contains("origin/main (") && why.contains("its tracking upstream")
         ),
         (c3.as_str(), true),
         "{why}"
     );
-    // Same distance to main and to a train: the train.
-    let r2 = Repo::new();
-    let c = r2.commit("a");
-    r2.remote("main", &c);
-    r2.remote("train/y", &c);
-    r2.git(&["checkout", "-q", "-b", "fix"]);
-    let f = r2.commit("f");
-    let why = r2.choose(&new_ref("fix", &f)).1;
-    assert!(why.contains("train/y (read live"), "{why}");
 }
 
 #[test]
@@ -1982,11 +1979,11 @@ fn the_queue_allowance_bounds_the_whole_push_and_a_row_it_stops_says_queued_and_
     assert!(next.contains("heavy status") && next.contains("--only clippy"), "{next}");
 }
 
-/// The 2026-11-14/15 shape: train 10 is being built locally (partly pushed or not at all), a fix branch is stacked on it. Measured
-/// from origin's older train or main, the push planned Clippy for every workspace the train touched (280 and 461 files) and ran out
-/// of budget; measured from the local train it plans only its own diff.
+/// The 2026-11-14/15 shape: train 10 is being built locally (partly pushed or not at all), a fix branch is stacked on it. The push
+/// sends train 10's unpushed commits too, so the check covers them: the base is the nearest commit of the remote (origin's train 9,
+/// or train 10 as far as it is pushed), never the local train, whatever a local ref is called (review of c4e32e462, P1-1).
 #[test]
-fn a_branch_stacked_on_a_local_train_plans_only_its_own_diff() {
+fn a_branch_stacked_on_a_local_train_checks_the_trains_unpushed_commits_too() {
     let r = Repo::new();
     let c1 = r.commit("a");
     r.remote("main", &c1);
@@ -1995,30 +1992,27 @@ fn a_branch_stacked_on_a_local_train_plans_only_its_own_diff() {
     r.remote("train/2026-11-13-9", &t1);
     r.git(&["checkout", "-q", "-b", "train/2026-11-14-10"]);
     let t2 = r.commit("t2");
-    let t3 = r.commit("t3");
+    r.commit("t3");
     r.git(&["checkout", "-q", "-b", "fix"]);
     let f1 = r.commit("f1");
     let (base, why) = r.choose(&new_ref("fix", &f1));
-    assert_eq!(base, t3, "{why}");
+    assert_eq!(base, t1, "{why}");
     assert!(
-        why.contains("local train/2026-11-14-10") && why.contains("fewest new commits, 1") && why.contains("next nearest"),
+        why.contains("origin/train/2026-11-13-9") && why.contains("fewest new commits, 3"),
         "{why}"
     );
     let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&f1)).unwrap();
-    assert_eq!(change.files, vec!["f1".to_string()], "only the branch's own diff");
-    // Partly pushed (origin has train 10 at t2): the local tip is still nearer.
+    assert_eq!(
+        change.files,
+        ["f1", "t2", "t3"].map(String::from).to_vec(),
+        "the train's unpushed commits are checked"
+    );
+    // Partly pushed (origin has train 10 at t2): measured from there, t3 still checked.
     r.remote("train/2026-11-14-10", &t2);
-    assert_eq!(r.choose(&new_ref("fix", &f1)).0, t3);
-    // A local train at the pushed commit itself is no base (nothing would be measured), and the pushed branch is never its own.
-    let (base, why) = r.choose(&new_ref("other", &t3));
+    let (base, why) = r.choose(&new_ref("fix", &f1));
     assert_eq!(base, t2, "{why}");
-    let own = super::Pushed {
-        remote_sha: t2.clone(),
-        ..new_ref("train/2026-11-14-10", &t3)
-    };
-    let (base, why) = r.choose(&own);
-    assert_eq!(base, t2, "{why}");
-    assert!(why.contains("its old commit"), "{why}");
+    let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&f1)).unwrap();
+    assert_eq!(change.files, ["f1", "t3"].map(String::from).to_vec());
 }
 
 /// A branch stacked on another pushed branch is measured from that branch (a remote-tracking ref it contains), not from main.
@@ -2035,13 +2029,10 @@ fn a_branch_stacked_on_a_pushed_sibling_is_measured_from_the_sibling() {
     let b1 = r.commit("b1");
     let (base, why) = r.choose(&new_ref("feat/b", &b1));
     assert_eq!(base, a2, "{why}");
-    assert!(
-        why.contains("origin/feat/a (remote-tracking ref the pushed commit contains)"),
-        "{why}"
-    );
+    assert!(why.contains("origin/feat/a (remote-tracking ref"), "{why}");
 }
 
-/// A person's run ahead of a push plans what the push will: HEAD's nearest shared base, not origin/main.
+/// A person's run ahead of a push plans what the push will: HEAD's nearest commit of the remote, not always origin/main.
 #[test]
 fn a_persons_run_is_measured_from_the_nearest_base_like_its_push() {
     let r = Repo::new();
@@ -2049,16 +2040,134 @@ fn a_persons_run_is_measured_from_the_nearest_base_like_its_push() {
     r.remote("main", &c1);
     r.git(&["checkout", "-q", "-b", "train/2026-11-14-10"]);
     let t1 = r.commit("t1");
+    r.remote("train/2026-11-14-10", &t1);
     r.git(&["checkout", "-q", "-b", "fix"]);
     r.commit("f1");
     let (base, why) = super::person_base(&r.root, None, "origin/main", &r.live());
     assert_eq!(base, t1, "{why}");
     assert!(
-        why.starts_with("a person's run: HEAD of branch fix") && why.contains("local train/2026-11-14-10"),
+        why.starts_with("a person's run: HEAD of branch fix") && why.contains("origin/train/2026-11-14-10"),
         "{why}"
     );
     // Its own pushed copy at HEAD is the base (the uncommitted changes are what is checked), not a reason to measure from main.
     let f1 = r.git(&["rev-parse", "HEAD"]).trim().to_string();
     r.remote("fix", &f1);
     assert_eq!(super::person_base(&r.root, None, "origin/main", &r.live()).0, f1);
+}
+
+/// While a heavy step is in flight, a free worker runs the next light row instead of waiting on a heavy one (review P2-4).
+#[test]
+fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
+    let fake = Queued::new(Duration::from_millis(10));
+    let light = Planned::Run(Gate {
+        heavy: false,
+        ..match heavy_gate("fmt x", 2) {
+            Planned::Run(g) => g,
+            _ => unreachable!(),
+        }
+    });
+    let planned = vec![heavy_gate("clippy a", 1), heavy_gate("clippy b", 1), light];
+    let rows = run_all_with(
+        &planned,
+        &fake,
+        &RunOpts {
+            workers: 2,
+            budget: Duration::from_secs(60),
+            queue: Duration::from_secs(60),
+            stop: &AtomicBool::new(false),
+            subject: &test_subject(),
+        },
+    );
+    assert!(rows.iter().all(|(_, v)| v.kind() == Kind::Passed), "{rows:?}");
+    let order: Vec<String> = fake.limits.lock().unwrap().iter().map(|(id, _)| id.clone()).collect();
+    assert_eq!(order, ["clippy a", "fmt x", "clippy b"].map(String::from).to_vec());
+}
+
+/// A small deterministic generator for the property test (no new dependency).
+struct Lcg(u64);
+impl Lcg {
+    fn below(&mut self, n: u64) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 33) % n
+    }
+}
+
+/// Property (review of c4e32e462, P1-1): for any stack of a train (partly pushed or not) and a branch on it, with or without a
+/// pushed sibling and a change made and undone, every commit the remote lacks (`git rev-list <tip> --not --remotes=origin`) has
+/// its files in the planned diff, and an unpushed train commit in a workspace the branch never touches still plans that
+/// workspace's Clippy.
+#[test]
+fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
+    let mut rng = Lcg(0x5eed_2026_1115);
+    let mut with_unpushed_train = 0;
+    for case in 0..24 {
+        let r = Repo::new();
+        let add = |path: &str| {
+            let full = r.root.join(path);
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(&full, "x\n").unwrap();
+            r.git(&["add", path]);
+            r.git(&["commit", "-q", "-m", path]);
+            r.git(&["rev-parse", "HEAD"]).trim().to_string()
+        };
+        let c0 = add("README");
+        r.remote("main", &c0);
+        r.git(&["checkout", "-q", "-b", "train/x"]);
+        let train: Vec<String> = (0..rng.below(4)).map(|i| add(&format!("apps/dyno/src/t{i}.rs"))).collect();
+        let pushed = rng.below(train.len() as u64 + 1) as usize;
+        if pushed > 0 {
+            r.remote("train/x", &train[pushed - 1]);
+        }
+        if rng.below(2) == 1 && !train.is_empty() {
+            let at = train[rng.below(train.len() as u64) as usize].clone();
+            r.remote("feat/sibling", &at);
+        }
+        let train_tip = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+        r.git(&["checkout", "-q", "-b", "fix"]);
+        for i in 0..=rng.below(3) {
+            add(&format!("tools/x/f{i}.rs"));
+        }
+        if rng.below(2) == 1 {
+            add("apps/pitwall/src/undone.rs");
+            r.git(&["rm", "-q", "apps/pitwall/src/undone.rs"]);
+            r.git(&["commit", "-q", "-m", "undo"]);
+        }
+        let tip = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+        let (base, why) = r.choose(&new_ref("fix", &tip));
+        let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&tip)).unwrap();
+        let lacks = r.git(&["rev-list", &tip, "--not", "--remotes=origin"]);
+        for c in lacks.lines() {
+            for f in r
+                .git(&["show", "--no-merges", "--name-only", "--format=", c])
+                .lines()
+                .filter(|l| !l.is_empty())
+            {
+                assert!(
+                    change.files.iter().any(|x| x == f),
+                    "case {case}: {f} of {c} is not planned; base {base} ({why})"
+                );
+            }
+        }
+        if train.iter().any(|t| lacks.lines().any(|l| l == t)) {
+            with_unpushed_train += 1;
+            // The branch's own diff (from the train's local tip) does not reach apps/dyno; the push's check must.
+            let (own, _, _) = super::discover(&r.root, &train_tip, &[], std::slice::from_ref(&tip)).unwrap();
+            assert!(
+                !ids(&plan_gates(&plan(), &own, &facts())).contains(&"clippy apps/dyno".to_string()),
+                "case {case}"
+            );
+            let got = ids(&plan_gates(&plan(), &change, &facts()));
+            assert!(
+                got.contains(&"clippy apps/dyno".to_string()),
+                "case {case}: {got:?}; base {base} ({why})"
+            );
+        }
+    }
+    assert!(
+        with_unpushed_train >= 4,
+        "the cases must include unpushed train commits: {with_unpushed_train}"
+    );
 }

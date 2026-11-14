@@ -19,10 +19,10 @@ pub const BUDGET: Duration = Duration::from_secs(15 * 60);
 /// The push's queue allowance: the most time all its heavy steps together may wait for the machine-wide slot behind other agents'
 /// steps (`PADDOCK_QUEUE_MAX` seconds overrides). A step that would start after the allowance is spent, or whose wait reaches what
 /// is left of it, is "not measured" with its queue time and the load, never a pass (ADR 0102). Kept at 30 min, now for the whole
-/// push instead of per step (so a push waits at most 15 min of run plus 30 min of queue). Measured cause: heavy's activity log of
-/// 2026-11-14 13:02-19:09Z, 145 pre-push steps, queue time (lock wait plus load gate) p50 21 s, p90 386 s, p95 703 s, p99 993 s,
-/// max 1,187 s: one step's worst wait fits, a push whose steps wait 30 min in all is a busy machine's finding
-/// (docs/benchmarks.md, "Pre-push heavy queue times").
+/// push instead of per step (so a push waits at most 15 min of run plus 30 min of queue; it fails closed). The measurement is per
+/// step so far: heavy's activity log of 2026-11-14 13:02-19:09Z, 145 pre-push steps, queue time (lock wait plus load gate) p50
+/// 21 s, p90 386 s, p95 703 s, p99 993 s, max 1,187 s, so one step's worst wait fits (docs/benchmarks.md, "Pre-push heavy queue
+/// times"). Per-push queue time is logged from now on (`queue-times.log` beside the gate logs); revisit the value with it.
 pub const QUEUE_MAX: Duration = Duration::from_secs(2 * 15 * 60);
 
 /// What one step may spend: `run` of running (heavy's `--run-max`) and `queue` of waiting for the slot (heavy's `--queue-max`).
@@ -340,7 +340,7 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
     run_all_timed(planned, exec, opts).0
 }
 
-/// Whether a row may start, from [`Turns::begin`].
+/// Whether a row may start, from [`Turns::next`].
 enum Start {
     Go(Limits),
     Interrupted,
@@ -348,55 +348,70 @@ enum Start {
     QueueSpent,
 }
 
-/// Whether a heavy step of the push is in flight. One at a time: heavy has one machine-wide slot (more only with `HEAVY_DIR` and
-/// `HEAVY_SLOTS`), so a second heavy step of the same push would only queue behind the first, and that wait could not be told from
-/// waiting for other agents (ADR 0102). With one in flight, every second a heavy step queues is time spent waiting for others, and
-/// the next heavy step is decided only after the one before has ended and its queue time is on the clock.
-#[derive(Default)]
+/// The rows left and whether a heavy step of the push is in flight. One heavy step at a time: heavy has one machine-wide slot (more
+/// only with `HEAVY_DIR` and `HEAVY_SLOTS`), so a second heavy step of the same push would only queue behind the first, and that
+/// wait could not be told from waiting for other agents (ADR 0102). With one in flight, every second a heavy step queues is time
+/// spent waiting for others, and the next heavy step is decided only after the one before has ended and its queue time is on the
+/// clock. While a heavy step is in flight, a free worker takes the next light row instead of waiting.
 struct Turns {
-    heavy_busy: Mutex<bool>,
+    state: Mutex<(VecDeque<usize>, bool)>,
     changed: std::sync::Condvar,
 }
 
 impl Turns {
-    /// Waits for the row's turn (a heavy row: until no other heavy row of the push is in flight) and says whether it may start,
-    /// with the run and queue time it may spend.
-    fn begin(&self, heavy: bool, clock: &BudgetClock, opts: &RunOpts, now: &dyn Fn() -> Instant) -> Start {
-        let Ok(mut busy) = self.heavy_busy.lock() else {
-            return Start::Interrupted;
-        };
-        loop {
-            if opts.stop.load(Ordering::SeqCst) {
-                return Start::Interrupted;
-            }
-            if !(heavy && *busy) {
-                break;
-            }
-            // Woken when the heavy step ends; the timeout only re-reads the stop flag (a signal sets it without a notification).
-            busy = match self.changed.wait_timeout(busy, Duration::from_millis(500)) {
-                Ok((g, _)) => g,
-                Err(_) => return Start::Interrupted,
-            };
+    fn new(order: VecDeque<usize>) -> Turns {
+        Turns {
+            state: Mutex::new((order, false)),
+            changed: std::sync::Condvar::new(),
         }
-        let run = clock.left(now());
-        let queue = opts.queue.saturating_sub(clock.credit());
-        if run.is_zero() {
-            return Start::BudgetSpent;
-        }
-        if heavy && queue.is_zero() {
-            return Start::QueueSpent;
-        }
-        *busy |= heavy;
-        Start::Go(Limits { run, queue })
     }
 
-    /// A step that [`Turns::begin`] let start has ended (its queue time is already on the clock).
+    /// The next row a free worker takes, and for a gate that runs whether it may start, with the run and queue time it may spend.
+    /// `None`: nothing is left.
+    fn next(&self, planned: &[Planned], clock: &BudgetClock, opts: &RunOpts, now: &dyn Fn() -> Instant) -> Option<(usize, Option<Start>)> {
+        let heavy = |i: usize| matches!(&planned[i], Planned::Run(g) if g.heavy);
+        let mut st = self.state.lock().ok()?;
+        loop {
+            if st.0.is_empty() {
+                return None;
+            }
+            if opts.stop.load(Ordering::SeqCst) {
+                let i = st.0.pop_front()?;
+                return Some((i, matches!(planned[i], Planned::Run(_)).then_some(Start::Interrupted)));
+            }
+            let busy = st.1;
+            if let Some(pos) = st.0.iter().position(|&i| !(busy && heavy(i))) {
+                let i = st.0.remove(pos)?;
+                if !matches!(planned[i], Planned::Run(_)) {
+                    return Some((i, None));
+                }
+                let run = clock.left(now());
+                let queue = opts.queue.saturating_sub(clock.credit());
+                let start = if run.is_zero() {
+                    Start::BudgetSpent
+                } else if heavy(i) && queue.is_zero() {
+                    Start::QueueSpent
+                } else {
+                    st.1 |= heavy(i);
+                    Start::Go(Limits { run, queue })
+                };
+                return Some((i, Some(start)));
+            }
+            // Only heavy rows are left and one is in flight: woken when it ends; the timeout only re-reads the stop flag.
+            st = match self.changed.wait_timeout(st, Duration::from_millis(500)) {
+                Ok((g, _)) => g,
+                Err(_) => return None,
+            };
+        }
+    }
+
+    /// A step that [`Turns::next`] let start has ended (its queue time is already on the clock).
     fn end(&self, heavy: bool) {
         if !heavy {
             return;
         }
-        if let Ok(mut busy) = self.heavy_busy.lock() {
-            *busy = false;
+        if let Ok(mut st) = self.state.lock() {
+            st.1 = false;
         }
         self.changed.notify_all();
     }
@@ -417,18 +432,15 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
     });
     let now = || exec.now();
     let clock = BudgetClock::new(now(), opts.budget);
-    let turns = Turns::default();
+    let turns = Turns::new(order.into_iter().collect::<VecDeque<_>>());
     let timings = Mutex::new(BTreeMap::<String, Timing>::new());
-    let queue = Mutex::new(order.into_iter().collect::<VecDeque<_>>());
     let results: Vec<Mutex<Option<Row>>> = planned.iter().map(|_| Mutex::new(None)).collect();
     std::thread::scope(|s| {
         for _ in 0..opts.workers.max(1) {
             s.spawn(|| {
-                loop {
-                    let next = queue.lock().map(|mut q| q.pop_front()).unwrap_or(None);
-                    let Some(i) = next else { break };
+                while let Some((i, start)) = turns.next(planned, &clock, opts, &now) {
                     let v = match &planned[i] {
-                        Planned::Run(g) => match turns.begin(g.heavy, &clock, opts, &now) {
+                        Planned::Run(g) => match start.unwrap_or(Start::Interrupted) {
                             Start::Interrupted => Row::not_measured(
                                 "the push was interrupted before it started",
                                 format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),

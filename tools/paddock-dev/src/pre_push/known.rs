@@ -5,8 +5,9 @@
 //! - a pass record this tool wrote for the sha ([`write_record`]: on every complete passing run, under the git common dir so every
 //!   worktree sees it), valid while the sha's tree id is the recorded one and only for a push measured from the record's own base or
 //!   a newer one: the record's base commit is an ancestor of (or is) the push's base, directly or through the records of the bases
-//!   in between ([`MAX_CHAIN`]). A record measured from a nearer base (a local train, a branch's own old commit) checked less than a
-//!   push from an older base needs, so it does not stand in for it;
+//!   in between ([`MAX_CHAIN`]), and only when the push's base is a commit of the remote (a remote-tracking ref holds it). A record
+//!   measured from a nearer base (a branch's own old commit) checked less than a push from an older base needs, so it does not stand
+//!   in for it;
 //! - a complete green CI run on the sha, read through the one shared reader (`./dev ci verdict`), and only when the push's own
 //!   remote (`--remote`, git's `$1`) still has that sha as a branch tip, confirmed with `git ls-remote`.
 //!
@@ -189,7 +190,28 @@ pub fn find(
             trail.push(format!("{short}: no base to compare a pass record with"));
             return (None, trail);
         };
-        match read_record(root, state, sha, base) {
+        let tracking = remote.filter(|r| !r.is_empty() && !r.starts_with('-')).unwrap_or("origin");
+        let on_remote = git_text(
+            root,
+            &[
+                "for-each-ref",
+                "--count=1",
+                "--contains",
+                base,
+                "--format=%(refname)",
+                &format!("refs/remotes/{tracking}/"),
+            ],
+        )
+        .is_some_and(|t| !t.trim().is_empty());
+        let found = if on_remote {
+            read_record(root, state, sha, base)
+        } else {
+            Err(format!(
+                "the push's base {} is on no remote-tracking ref of {tracking}, so no pass record counts against it",
+                &base[..base.len().min(12)]
+            ))
+        };
+        match found {
             Ok(e) => {
                 trail.push(format!(
                     "{short}: pass record {} matches the commit and its tree and was measured from this push's base or older",
