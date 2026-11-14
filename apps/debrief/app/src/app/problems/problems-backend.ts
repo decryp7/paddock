@@ -6,6 +6,7 @@ import { reportBackendFailures } from '../core/failure-reporter';
 import { Logger, withFailureLogging } from '../core/logger';
 import { browserMocks } from '../core/mock-registry';
 import { isTauri } from '../core/platform';
+import { rawBackend } from '../core/raw-backend';
 
 /**
  * The import diagnostics commands (ADR 0014 §5): what went wrong while reading the window's sources, counted per
@@ -41,6 +42,6 @@ export class TauriProblemsBackend extends ProblemsBackend {
 }
 
 export function createProblemsBackend(): ProblemsBackend {
-  const backend: ProblemsBackend = isTauri() ? new TauriProblemsBackend() : new (browserMocks().MockProblemsBackend)(inject(DebriefBackend));
+  const backend: ProblemsBackend = isTauri() ? new TauriProblemsBackend() : new (browserMocks().MockProblemsBackend)(rawBackend(inject(DebriefBackend)));
   return withFailureLogging<ProblemsBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

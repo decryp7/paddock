@@ -22,6 +22,7 @@ import { browserMocks } from '../core/mock-registry';
 import { isTauri } from '../core/platform';
 import { ChannelFactory, tauriChannel } from '../core/tauri-channel';
 import { cancelJob } from '../jobs/job-cancel';
+import { rawBackend } from '../core/raw-backend';
 
 /**
  * The Store pane's commands (ADR 0030): read-only reports about the window's store, its maintenance as jobs, and the
@@ -120,6 +121,6 @@ export class TauriStorePaneBackend extends StorePaneBackend {
 }
 
 export function createStorePaneBackend(): StorePaneBackend {
-  const backend: StorePaneBackend = isTauri() ? new TauriStorePaneBackend() : new (browserMocks().MockStorePaneBackend)(inject(DebriefBackend));
+  const backend: StorePaneBackend = isTauri() ? new TauriStorePaneBackend() : new (browserMocks().MockStorePaneBackend)(rawBackend(inject(DebriefBackend)));
   return withFailureLogging<StorePaneBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

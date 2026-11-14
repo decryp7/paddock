@@ -31,6 +31,7 @@ import {
 } from './tools.types';
 import { hasSkew } from './skew-backend';
 import { browserMocks } from './mock-registry';
+import { rawBackend } from './raw-backend';
 
 /** Names of the events the shell emits. */
 export const OPEN_EVENT = 'debrief://open';
@@ -367,7 +368,8 @@ export class TauriToolsBackend extends ToolsBackend {
 /** The real backend inside Tauri, the in-memory mock in a plain browser (ng serve, e2e). */
 export function provideToolsBackend(): Provider[] {
   const factory = () => {
-    const debrief = inject(DebriefBackend);
+    // The mock reads the workspace raw: a `?mockFail=` failure is meant for the UI's own calls (`rawBackend`).
+    const debrief = rawBackend(inject(DebriefBackend));
     const real = isTauri()
       ? new TauriToolsBackend()
       : new (browserMocks().MockToolsBackend)(

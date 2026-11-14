@@ -5,11 +5,10 @@ import { CmdError } from '../../core/cmd-error';
 import type { Narrative } from '../../ai/ai.types';
 import { AiError } from '../../ai/ai-backend';
 import type { IncidentBackend, KnownIssuesBackend, PlaybookBackend } from '../investigate-backend';
-import { mockRecordsPage } from '../../core/mock/mock-records-page';
 
 /** Events of the mock workspace that contain `text` (a stand-in for a pattern or a query). */
 async function matching(debrief: DebriefBackend, text: string): Promise<{ count: number; ids: number[] }> {
-  const page = await mockRecordsPage(debrief, { query: { ...EMPTY_QUERY, text, regex: false }, offset: 0, limit: 5, descending: false });
+  const page = await debrief.queryPage({ query: { ...EMPTY_QUERY, text, regex: false }, offset: 0, limit: 5, descending: false });
   return { count: page.total, ids: page.rows.map((r) => r.id) };
 }
 

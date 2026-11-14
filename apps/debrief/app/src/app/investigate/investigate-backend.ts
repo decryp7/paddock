@@ -8,6 +8,7 @@ import { Logger, withFailureLogging } from '../core/logger';
 import { browserMocks } from '../core/mock-registry';
 import { isTauri } from '../core/platform';
 import type { Narrative } from '../ai/ai.types';
+import { rawBackend } from '../core/raw-backend';
 
 /**
  * Known issues (ADR 0039): the knowledge files' declared issues matched by the engine, and the AI's suggestions
@@ -110,16 +111,16 @@ function mockHasModel(): () => boolean {
 }
 
 export function createKnownIssuesBackend(): KnownIssuesBackend {
-  const backend: KnownIssuesBackend = isTauri() ? new TauriKnownIssuesBackend() : new (browserMocks().MockKnownIssuesBackend)(inject(DebriefBackend), mockHasModel());
+  const backend: KnownIssuesBackend = isTauri() ? new TauriKnownIssuesBackend() : new (browserMocks().MockKnownIssuesBackend)(rawBackend(inject(DebriefBackend)), mockHasModel());
   return withFailureLogging<KnownIssuesBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
 
 export function createIncidentBackend(): IncidentBackend {
-  const backend: IncidentBackend = isTauri() ? new TauriIncidentBackend() : new (browserMocks().MockIncidentBackend)(inject(DebriefBackend), mockHasModel());
+  const backend: IncidentBackend = isTauri() ? new TauriIncidentBackend() : new (browserMocks().MockIncidentBackend)(rawBackend(inject(DebriefBackend)), mockHasModel());
   return withFailureLogging<IncidentBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
 
 export function createPlaybookBackend(): PlaybookBackend {
-  const backend: PlaybookBackend = isTauri() ? new TauriPlaybookBackend() : new (browserMocks().MockPlaybookBackend)(inject(DebriefBackend));
+  const backend: PlaybookBackend = isTauri() ? new TauriPlaybookBackend() : new (browserMocks().MockPlaybookBackend)(rawBackend(inject(DebriefBackend)));
   return withFailureLogging<PlaybookBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

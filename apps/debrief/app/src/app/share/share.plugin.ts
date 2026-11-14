@@ -11,10 +11,11 @@ import { ShareBackend, TauriShareBackend } from './share-backend';
 import { SHARE_CONTRIBUTIONS } from './share.contributions';
 import { snapshotRedaction } from './snapshot-redaction';
 import { browserMocks } from '../core/mock-registry';
+import { rawBackend } from '../core/raw-backend';
 
 /** The engine-backed share backend inside Tauri, the mock (over the mock workspace) in a browser. */
 export function createShareBackend(): ShareBackend {
-  const backend: ShareBackend = isTauri() ? new TauriShareBackend() : new (browserMocks().MockShareBackend)(inject(DebriefBackend), inject(AnalysisBackend));
+  const backend: ShareBackend = isTauri() ? new TauriShareBackend() : new (browserMocks().MockShareBackend)(rawBackend(inject(DebriefBackend)), inject(AnalysisBackend));
   return withFailureLogging<ShareBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }
 

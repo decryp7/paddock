@@ -1,5 +1,6 @@
 import { query, tinyBackend, tinyDataset } from '../../../testing/helpers';
 import { MockBackend } from './mock-backend';
+import { withMockFailures } from './mock-failures';
 import { MOCK_PROFILE_TOML } from './mock-profile';
 
 import { at } from '../../../testing/must';
@@ -134,7 +135,7 @@ describe('MockBackend', () => {
     });
 
     it('reports synthetic facets, corrupt markers and simulated failures', async () => {
-      const b = new MockBackend({ latency: false, dataset: tinyDataset, syntheticFacetValues: 10_000, corruptMarkers: true, fail: { queryFacet: 1, workspaceSummary: 1, queryTimeline: 1 } });
+      const b = withMockFailures(new MockBackend({ latency: false, dataset: tinyDataset, syntheticFacetValues: 10_000, corruptMarkers: true }), { latency: false, fail: { queryFacet: 1, workspaceSummary: 1, queryTimeline: 1 } });
       await expect(b.queryFacet({ query: query(), field: 'x', limit: 10 })).rejects.toMatch(/Simulated queryFacet failure/);
       const f = await b.queryFacet({ query: query(), field: 'x', limit: 5000 });
       expect(f.distinct).toBe(10_000);
@@ -164,7 +165,7 @@ describe('MockBackend', () => {
     });
 
     it('reads the head of workspace files only', async () => {
-      const b = new MockBackend({ latency: false, dataset: tinyDataset, fail: { readFileHead: 1, previewParse: 1 } });
+      const b = withMockFailures(new MockBackend({ latency: false, dataset: tinyDataset }), { latency: false, fail: { readFileHead: 1, previewParse: 1 } });
       await expect(b.readFileHead('/logs/system/export.reg')).rejects.toMatch(/Simulated/);
       expect(await b.readFileHead('/logs/system/export.reg')).toContain('[INF]');
       expect(await b.readFileHead('/logs/web01/app.clef', 10)).toHaveLength(10);

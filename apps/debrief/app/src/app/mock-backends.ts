@@ -9,7 +9,8 @@ export { MOCK_DUMP_PATHS, MOCK_UMDH_PATHS, MockDumpsBackend } from './dumps/mock
 export { MOCK_FFMPEG_PATH, MOCK_LOCATED_PATH, MOCK_VIDEO_PATHS, MockVideoBackend, videoOptionsFromSearch } from './video/mock/mock-video-backend';
 export { MockBackend } from './core/mock/mock-backend';
 export { MockStartupBackend } from './core/startup/mock-startup-backend';
-export { mockOptionsFromSearch } from './core/mock/mock-options';
+export { mockFailuresFromSearch, mockOptionsFromSearch } from './core/mock/mock-options';
+export { withMockFailures } from './core/mock/mock-failures';
 export { MOCK_CAPTURE_PATHS } from './core/mock/mock-profiling-data';
 export { MockProfilingBackend } from './core/mock/mock-profiling';
 export { MockUxBackend } from './core/mock/mock-ux-backend';

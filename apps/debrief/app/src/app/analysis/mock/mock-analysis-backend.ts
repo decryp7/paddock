@@ -19,7 +19,6 @@ import {
 import { checkMockQl, MockQlError, mockCompletions, runMockQl } from '../../core/mock/mock-ql';
 import { mockUnknownField } from './mock-unknown-field';
 import { mockResolveWindow } from '../../core/mock/mock-live';
-import { mockRecordsPage } from '../../core/mock/mock-records-page';
 
 /** Timestamp of the newest record (the "now" of live windows, as the engine's default data clock). */
 function newestTs(records: readonly RecordView[]): number | null {
@@ -35,7 +34,7 @@ function analysed<T>(result: T, matched: number): Analyzed<T> {
 
 /** Loads every record of the (mock) workspace through the regular backend, so ids match the grid. */
 export function recordsFrom(backend: DebriefBackend): () => Promise<RecordView[]> {
-  return async () => (await mockRecordsPage(backend, { query: EMPTY_QUERY, offset: 0, limit: 1_000_000, descending: false })).rows;
+  return async () => (await backend.queryPage({ query: EMPTY_QUERY, offset: 0, limit: 1_000_000, descending: false })).rows;
 }
 
 /**

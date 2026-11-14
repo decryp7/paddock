@@ -1,5 +1,5 @@
 import { MockBackend } from './mock-backend';
-import { mockOptionsFromSearch } from './mock-options';
+import { mockFailuresFromSearch, mockOptionsFromSearch } from './mock-options';
 
 describe('mockOptionsFromSearch', () => {
   it('has no options by default', () => {
@@ -8,17 +8,21 @@ describe('mockOptionsFromSearch', () => {
   });
 
   it('reads the switches', () => {
-    expect(mockOptionsFromSearch('?mockTotal=50000000&mockFacet=10000&mockLiveMs=300&mockCorrupt=markers&mockFail=queryPage:2,queryFacet,nonsense:3')).toEqual({
+    expect(mockOptionsFromSearch('?mockTotal=50000000&mockFacet=10000&mockLiveMs=300&mockCorrupt=markers&mockFail=queryPage:2')).toEqual({
       syntheticTotal: 50_000_000,
       syntheticFacetValues: 10_000,
       liveMs: 300,
       corruptMarkers: true,
-      fail: { queryPage: 2, queryFacet: 1 },
     });
   });
 
+  it('reads the simulated failures apart from the mock options', () => {
+    expect(mockFailuresFromSearch('?mockFail=queryPage:2,queryFacet,nonsense:3,annotations:x')).toEqual({ queryPage: 2, queryFacet: 1, annotations: 1 });
+    expect(mockFailuresFromSearch('')).toEqual({});
+  });
+
   it('ignores malformed values', () => {
-    expect(mockOptionsFromSearch('?mockTotal=-5&mockFacet=abc&mockLiveMs=0&mockCorrupt=other&mockFail=queryPage:x')).toEqual({ fail: { queryPage: 1 } });
+    expect(mockOptionsFromSearch('?mockTotal=-5&mockFacet=abc&mockLiveMs=0&mockCorrupt=other&mockFail=queryPage:x')).toEqual({});
   });
 
   it('reads the live simulation switches', () => {

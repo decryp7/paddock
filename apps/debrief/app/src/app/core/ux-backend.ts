@@ -7,6 +7,7 @@ import { Logger, withFailureLogging } from './logger';
 import { isTauri } from './platform';
 import { browserMocks } from './mock-registry';
 import { cancelActiveJobs } from '../jobs/job-cancel';
+import { rawBackend } from './raw-backend';
 
 /**
  * The engine commands behind the ease-of-use features: import progress and cancel, profile history and
@@ -52,6 +53,6 @@ export class TauriUxBackend extends UxBackend {
 }
 
 export function createUxBackend(): UxBackend {
-  const backend: UxBackend = isTauri() ? new TauriUxBackend() : new (browserMocks().MockUxBackend)(inject(DebriefBackend));
+  const backend: UxBackend = isTauri() ? new TauriUxBackend() : new (browserMocks().MockUxBackend)(rawBackend(inject(DebriefBackend)));
   return withFailureLogging<UxBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

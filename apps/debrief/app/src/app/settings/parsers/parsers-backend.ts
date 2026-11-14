@@ -6,6 +6,7 @@ import { reportBackendFailures } from '../../core/failure-reporter';
 import { Logger, withFailureLogging } from '../../core/logger';
 import { browserMocks } from '../../core/mock-registry';
 import { isTauri } from '../../core/platform';
+import { rawBackend } from '../../core/raw-backend';
 
 /** How `save` treats an existing parser with the same id. */
 export interface ParserSaveOptions {
@@ -92,6 +93,6 @@ export class TauriParsersBackend extends ParsersBackend {
 }
 
 export function createParsersBackend(): ParsersBackend {
-  const backend: ParsersBackend = isTauri() ? new TauriParsersBackend() : new (browserMocks().MockParsersBackend)(inject(DebriefBackend));
+  const backend: ParsersBackend = isTauri() ? new TauriParsersBackend() : new (browserMocks().MockParsersBackend)(rawBackend(inject(DebriefBackend)));
   return withFailureLogging<ParsersBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

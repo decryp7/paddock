@@ -7,6 +7,7 @@ import { reportBackendFailures } from '../../core/failure-reporter';
 import { Logger, withFailureLogging } from '../../core/logger';
 import { browserMocks } from '../../core/mock-registry';
 import { isTauri } from '../../core/platform';
+import { rawBackend } from '../../core/raw-backend';
 
 /**
  * The "Paste as log" command: the engine saves pasted text as a source file in the project and opens it through the
@@ -33,6 +34,6 @@ export class TauriPasteBackend extends PasteBackend {
 }
 
 export function createPasteBackend(): PasteBackend {
-  const backend: PasteBackend = isTauri() ? new TauriPasteBackend() : new (browserMocks().MockPasteBackend)(inject(DebriefBackend));
+  const backend: PasteBackend = isTauri() ? new TauriPasteBackend() : new (browserMocks().MockPasteBackend)(rawBackend(inject(DebriefBackend)));
   return withFailureLogging<PasteBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

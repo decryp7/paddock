@@ -41,6 +41,7 @@ import { Logger, withFailureLogging } from './logger';
 import { isTauri } from './platform';
 import { listenHere } from '../windowing/window-events';
 import { browserMocks } from './mock-registry';
+import { registerRawBackend } from './raw-backend';
 import { jobValue } from '../jobs/job-value';
 
 /** Everything the UI can ask the backend. Injected as a class token. */
@@ -295,9 +296,19 @@ export function isLiveAlert(payload: unknown): payload is LiveAlert {
 export function provideBackend(): Provider {
   return {
     provide: DebriefBackend,
-    useFactory: () =>
-      withFailureLogging<DebriefBackend>(isTauri() ? new TauriBackend() : new (browserMocks().MockBackend)(browserMocks().mockOptionsFromSearch(window.location.search)), inject(Logger), {
-        onFailure: reportBackendFailures(),
-      }),
+    useFactory: () => {
+      const logger = inject(Logger);
+      const logging = { onFailure: reportBackendFailures() };
+      if (isTauri()) return withFailureLogging<DebriefBackend>(new TauriBackend(), logger, logging);
+      // The demo: the raw mock answers; `?mockFail=` failures are injected here, for the UI's calls only, inside the logging
+      // proxy so they are logged like real failures. The other mock backends read `rawBackend(...)` of this, never the wrapper.
+      const mocks = browserMocks();
+      const search = window.location.search;
+      const raw = new mocks.MockBackend(mocks.mockOptionsFromSearch(search));
+      const failing = mocks.withMockFailures(raw, { fail: mocks.mockFailuresFromSearch(search) });
+      const uiFacing = withFailureLogging<DebriefBackend>(failing, logger, logging);
+      registerRawBackend(uiFacing, raw);
+      return uiFacing;
+    },
   };
 }
