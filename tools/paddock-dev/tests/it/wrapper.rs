@@ -1532,3 +1532,139 @@ fn after_a_failed_install_earlier_in_the_job_no_second_install_is_tried() {
     assert!(err.contains("an earlier step of this job failed to"), "{err}");
     assert!(!log.exists(), "rustup was not run at all");
 }
+
+/// Seven cached tools of three days ago: past the keep count and past the day a tool is kept for.
+#[cfg(unix)]
+fn old_entries(home: &Path, names: &[String], file: &str) {
+    for (i, n) in names.iter().enumerate() {
+        write_script(&home.join("bin").join(n).join(file), "exit 0");
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 86_400 - i as u64 * 100);
+        std::fs::File::open(home.join("bin").join(n)).unwrap().set_modified(t).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cached_tool_that_a_run_holds_is_never_pruned() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let names: Vec<String> = (0..7).map(|i| format!("old-{i}")).collect();
+    old_entries(&home, &names, "paddock-dev-test-host");
+    // A run holds the oldest (a hard link under held/, as tool_cache::hold makes): it is still running it.
+    std::fs::create_dir_all(home.join("held")).unwrap();
+    std::fs::hard_link(home.join("bin/old-0/paddock-dev-test-host"), home.join("held/paddock-dev-1-1")).unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!(code, 0, "{err}");
+    assert!(home.join("bin/old-0").exists(), "a held tool is kept, whatever its age: {err}");
+    assert!(err.contains("a run holds it"), "the kept entry is said (ER-27): {err}");
+    assert_eq!(
+        std::fs::read_dir(home.join("bin")).unwrap().count(),
+        6,
+        "the five newest and the held one"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn other_tools_in_the_cache_are_not_counted_as_the_wrappers_own_and_keep_five_of_their_own() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let mine: Vec<String> = (0..3).map(|i| format!("old-{i}")).collect();
+    old_entries(&home, &mine, "paddock-dev-test-host");
+    let heavy: Vec<String> = (0..7).map(|i| format!("heavy-{i:040x}")).collect();
+    old_entries(&home, &heavy, "heavy");
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
+    // A legacy build folder named like a heavy entry is not the wrapper's to remove for it.
+    std::fs::create_dir_all(home.join(format!("target-{}", heavy[0]))).unwrap();
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc)]);
+    assert_eq!(code, 0, "{err}");
+    for n in &mine {
+        assert!(
+            home.join("bin").join(n).exists(),
+            "{n}: four of paddock-dev's own, all within its five"
+        );
+    }
+    assert!(home.join("bin").join(&hash).exists());
+    let heavy_left = heavy.iter().filter(|n| home.join("bin").join(n).exists()).count();
+    assert_eq!(heavy_left, 5, "heavy keeps its own five newest");
+    assert!(
+        !home.join("bin").join(&heavy[0]).exists() && !home.join("bin").join(&heavy[1]).exists(),
+        "its two oldest go"
+    );
+    assert!(home.join(format!("target-{}", heavy[0])).exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cached_tool_that_fails_its_probe_is_replaced_never_removed_first() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let env = [("RUSTC", rustc)];
+    let (hash, _) = f.both(&env);
+    let home = scratch.path().join("home");
+    let cached = home.join("bin").join(&hash).join("paddock-dev-test-host");
+    // A probe that fails (on a loaded machine a slow `--version` is enough) and a build that fails: another run pinned to this
+    // path (`--print-binary`) must still find it.
+    write_script(&cached, r#"if [ "$1" = "--version" ]; then exit 1; fi; echo pinned"#);
+    let (code, _, err) = run_wrapper_with_cargo(&f, &home, &env, "exit 1");
+    assert_ne!(code, 0, "{err}");
+    assert!(
+        cached.is_file(),
+        "the cached file is replaced by the rebuild's rename, never removed before it: {err}"
+    );
+}
+
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a test starts the program under test and waits for it; nothing here ends a process by pid"
+)]
+#[cfg(unix)]
+#[test]
+fn the_cached_tool_holds_itself_for_its_run_and_completes_when_its_cache_entry_is_pruned_meanwhile() {
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let entry = home.join("bin").join("0123456789abcdef0123456789abcdef01234567");
+    std::fs::create_dir_all(&entry).unwrap();
+    let cached = entry.join("paddock-dev-test-host");
+    std::fs::copy(env!("CARGO_BIN_EXE_paddock-dev"), &cached).unwrap();
+    let signal = scratch.path().join("signal.log");
+    std::fs::write(&signal, "").unwrap();
+    let mut run = Command::new(&cached)
+        .args(["wait", "--file"])
+        .arg(&signal)
+        .args(["--line", "^go$", "--include-past", "--max", "60s", "--interval", "100ms"])
+        .env("PADDOCK_DEV_HOME", &home)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The hold is made before the command runs, and `wait` says it is waiting once it runs: one line read is the event.
+    let held = |home: &Path| std::fs::read_dir(home.join("held")).map(|d| d.count()).unwrap_or(0);
+    let mut err = std::io::BufReader::new(run.stderr.take().unwrap());
+    let mut first = String::new();
+    std::io::BufRead::read_line(&mut err, &mut first).unwrap();
+    assert!(first.contains("waiting for a line"), "{first}");
+    assert_eq!(held(&home), 1, "the run holds its own binary");
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert!(
+            std::fs::metadata(&cached).unwrap().nlink() > 1,
+            "so `./dev`'s prune would keep the entry"
+        );
+    }
+    // Another run's prune (or a failed probe) removes the cache entry in the middle of the run; the run still completes.
+    std::fs::remove_dir_all(&entry).unwrap();
+    std::fs::write(&signal, "go\n").unwrap();
+    let out = run.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(held(&home), 0, "the hold ends with the run");
+    assert!(
+        !String::from_utf8_lossy(&out.stderr).contains("this run holds"),
+        "the self-hold is quiet"
+    );
+}

@@ -2009,3 +2009,15 @@ the same tools. **Class: acting on a reusable OS name without identity (rule 53)
 hook `.claude/hooks/kill-guard.sh` (with its `.test.sh`): an agent's `pkill`, `killall`, `xargs kill` and `kill <pid>` are refused
 unless the pid is a `%job`, `$!` from the same command, or a live descendant of this Claude session whose working folder is in
 the agent's own worktree.
+
+## A cached tool vanished under a long run, and a hard link's age is the file's age (2026-11-14)
+CI run 7773's job-isolation release found its pinned paddock-dev gone, and on train 10 six generators of one `gen check` found
+heavy gone: `./dev`'s prune of `~/.paddock-dev/bin` counted `heavy-*` folders as its own hashes and never knew a run still needed
+an entry, and both `./dev` and heavy's resolver removed a cached binary whose `--version` probe failed (a slow probe on a loaded
+machine is enough). The first fix held heavy only, and its sweep judged a hold's age by the file's modification time, which a
+hard link shares with the cached binary: a fresh hold of a heavy built a week ago was removed by the next run's sweep (a failing
+test showed it). Fix: one mechanism for every cached tool (`tools/paddock-dev/src/tool_cache.rs`): a run holds its own hard link
+under `held/` (paddock-dev holds itself whenever it runs from the cache, and starts its children from that hold), a hold's age
+comes from its name, a hit touches its entry, and `./dev`'s prune keeps five entries per tool and never removes one used within
+a day or with a file linked more than once; a binary that fails its probe is replaced by an atomic rename, never removed first.
+**Class: a shared cached tool binary is removed while a long run needs it (ER-21).**
