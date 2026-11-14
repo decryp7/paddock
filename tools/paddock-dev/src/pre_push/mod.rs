@@ -30,7 +30,7 @@ pub mod outcome;
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
 use clap::Args;
-use exec::{BUDGET, RealExec, RunOpts, Verdict, parse_load, run_all_with, workers};
+use exec::{BUDGET, Kind, RealExec, Row, RunOpts, parse_load, run_all_with, workers};
 use gates::{Change, Facts};
 use paddock_cli::{CliError, Exit, Report};
 use paddock_env::winpath;
@@ -426,6 +426,9 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         real.logs.display(),
         notes.iter().map(|n| format!("pre-push: {n}")).collect::<Vec<_>>().join("\n")
     );
+    // What the run is about (the commit and its tree) is the evidence of every pass, so it is known before the first gate runs.
+    let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
+    let subject = outcome::subject_of(&root, checked.as_deref());
     let mut rows = run_all_with(
         &planned,
         &real,
@@ -433,6 +436,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
             workers: n,
             budget: BUDGET,
             stop: &stop,
+            subject: &subject,
         },
     );
     rows.extend(extra_ref_rows(&extra));
@@ -442,11 +446,8 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
         report = report.with_exit(Exit::Interrupted);
     }
     // A complete passing run is the evidence a later push of the same commit may rest on (known::find).
-    let checked = pushed.first().cloned().or_else(|| if clean { head_sha.clone() } else { None });
     // The run's own outcome, with the commit and tree it is about: what a consumer reads (Outcome::from_wire), never the exit code.
-    let subject = outcome::subject_of(&root, checked.as_deref());
-    let who = std::env::var("USER").unwrap_or_else(|_| "a person".into());
-    let (shared, run_outcome) = outcome::fold(&rows, &subject, &who);
+    let (shared, run_outcome) = outcome::fold(&rows, &subject);
     debug_assert!(
         report.exit == Exit::Interrupted || report.exit == shared.exit(),
         "the table's exit and the shared verdict's exit disagree"
@@ -456,7 +457,7 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
     if let Some(sha) = checked.filter(|_| known::recordable(args, accept.len(), extra.len(), report.exit)) {
         let passed: Vec<String> = rows
             .iter()
-            .filter(|(_, v)| matches!(v, Verdict::Passed { .. }))
+            .filter(|(_, v)| v.kind() == Kind::Passed)
             .map(|(id, _)| id.clone())
             .collect();
         let now = std::time::SystemTime::now()
@@ -470,16 +471,16 @@ fn command_in(args: &PrePushArgs, root: &Path, stdin: &str, look: &dyn known::Lo
 }
 
 /// One not-measured row per pushed commit beyond the first: a run checks a single commit, so the others are never passed.
-fn extra_ref_rows(extra: &[String]) -> Vec<(String, Verdict)> {
+fn extra_ref_rows(extra: &[String]) -> Vec<(String, Row)> {
     extra
         .iter()
         .map(|sha| {
             (
                 format!("pushed commit {}", &sha[..sha.len().min(12)]),
-                Verdict::NotMeasured {
-                    reason: "a run checks one pushed commit and this push has more than one ref".into(),
-                    next: "push the refs one at a time (`git push origin <ref>`), so each is checked".into(),
-                },
+                Row::not_measured(
+                    "a run checks one pushed commit and this push has more than one ref",
+                    "push the refs one at a time (`git push origin <ref>`), so each is checked",
+                ),
             )
         })
         .collect()
@@ -733,9 +734,12 @@ pub fn parse_refs(input: &str) -> Vec<String> {
 }
 
 /// Turns the not-measured rows a person named (by full row id) into accepted ones and logs each use: when, who, which row and why.
-pub fn accept_not_measured(rows: &mut [(String, Verdict)], accept: &[String], state: &Path) {
+pub fn accept_not_measured(rows: &mut [(String, Row)], accept: &[String], state: &Path) {
     for (id, v) in rows.iter_mut() {
-        let Verdict::NotMeasured { reason, .. } = v else { continue };
+        if v.kind() != Kind::NotMeasured {
+            continue;
+        }
+        let reason = v.reason();
         if !accept.iter().any(|a| a == id) {
             continue;
         }
@@ -754,7 +758,7 @@ pub fn accept_not_measured(rows: &mut [(String, Verdict)], accept: &[String], st
         {
             let _ = std::io::Write::write_all(&mut f, line.as_bytes());
         }
-        *v = Verdict::Accepted { reason: reason.clone() };
+        v.excused_by = Some(std::env::var("USER").unwrap_or_else(|_| "a person".into()));
     }
 }
 
@@ -786,49 +790,53 @@ fn dry_run(planned: &[gates::Planned]) -> Report {
 
 /// The table, one line per row, then what CI runs that this gate does not, and the exit code (see the module doc). A failure's line
 /// carries its cause and next step.
-pub fn render(head: &str, rows: &[(String, Verdict)]) -> Report {
+pub fn render(head: &str, rows: &[(String, Row)]) -> Report {
     let mut text = format!("{head}\n");
     let (mut ok, mut fail, mut skip, mut unmeasured, mut broken, mut accepted) = (0, 0, 0, 0, 0, 0);
     let mut data = Vec::new();
     let (mut unmeasured_ids, mut failed_ids): (Vec<&str>, Vec<&str>) = (Vec::new(), Vec::new());
     for (id, v) in rows {
-        let (line, kind) = match v {
-            Verdict::Passed { secs } => {
+        let reason = v.reason();
+        let (line, kind) = match v.kind() {
+            Kind::Passed => {
                 ok += 1;
-                (format!("ok            {id:<34} {secs:.1} s"), "passed")
+                (format!("ok            {id:<34} {:.1} s", v.secs), "passed")
             }
-            Verdict::Skipped { reason } => {
+            Kind::Skipped => {
                 skip += 1;
                 (format!("skip          {id:<34} {reason}"), "skipped")
             }
-            Verdict::NotMeasured { reason, next } => {
+            Kind::NotMeasured => {
                 unmeasured += 1;
                 unmeasured_ids.push(id);
-                (format!("NOT MEASURED  {id:<34} {reason}. Next: {next}"), "not measured")
+                (format!("NOT MEASURED  {id:<34} {reason}. Next: {}", v.next), "not measured")
             }
-            Verdict::Accepted { reason } => {
+            Kind::Accepted => {
                 accepted += 1;
                 (
                     format!("ACCEPTED      {id:<34} not measured ({reason}); named by its full id in PADDOCK_ACCEPT_NOT_MEASURED, logged"),
                     "accepted",
                 )
             }
-            Verdict::Failed { cause, tail, next, secs } => {
+            Kind::Failed => {
                 fail += 1;
                 failed_ids.push(id);
-                let shown = if tail.is_empty() {
+                let shown = if v.tail.is_empty() {
                     String::new()
                 } else {
-                    format!("\n    {}", tail.replace('\n', "\n    "))
+                    format!("\n    {}", v.tail.replace('\n', "\n    "))
                 };
                 (
-                    format!("FAIL          {id:<34} {secs:.1} s\n  ::error::{id}: {cause} Next step: {next}{shown}"),
+                    format!(
+                        "FAIL          {id:<34} {:.1} s\n  ::error::{id}: {reason} Next step: {}{shown}",
+                        v.secs, v.next
+                    ),
                     "failed",
                 )
             }
-            Verdict::Broken { cause, next } => {
+            Kind::Broken => {
                 broken += 1;
-                (format!("CHECK BROKEN  {id:<34} {cause}. Next: {next}"), "broken")
+                (format!("CHECK BROKEN  {id:<34} {reason}. Next: {}", v.next), "broken")
             }
         };
         text.push_str(&line);

@@ -1,6 +1,6 @@
 //! The push gate with a plan, a list of files and a fake machine: no process starts (ER-14).
 
-use super::exec::{Done, Exec, RunOpts, Verdict, decide, run_all, run_all_with};
+use super::exec::{Done, Exec, Kind, Row, RunOpts, decide, run_all_with, test_subject};
 use super::gates::{Change, Facts, Gate, Need, Planned, plan_gates};
 use super::{accept_not_measured, parse_refs, render};
 use paddock_cli::Exit;
@@ -228,7 +228,20 @@ impl Exec for Fake {
     }
 }
 
-fn verdicts(rows: &[(String, Verdict)]) -> std::collections::BTreeMap<String, Verdict> {
+fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(String, Row)> {
+    super::exec::run_all(planned, exec, workers, &test_subject())
+}
+
+/// A row's reason and next step when it is a plain not-measured row.
+fn nm(row: &Row) -> Option<(String, String)> {
+    (row.kind() == Kind::NotMeasured).then(|| (row.reason(), row.next.clone()))
+}
+
+fn passed(row: &Row) -> bool {
+    row.kind() == Kind::Passed
+}
+
+fn verdicts(rows: &[(String, Row)]) -> std::collections::BTreeMap<String, Row> {
     rows.iter().cloned().collect()
 }
 
@@ -241,9 +254,7 @@ fn no_docker_means_not_measured_and_never_a_pass() {
     };
     let rows = run_all(&planned, &fake, 3);
     let v = verdicts(&rows);
-    assert!(
-        matches!(&v["clippy-linux crates"], Verdict::NotMeasured { reason, next } if reason.contains("Docker") && next.contains("never starts"))
-    );
+    assert!(matches!(nm(&v["clippy-linux crates"]), Some((reason, next)) if reason.contains("Docker") && next.contains("never starts")));
     assert!(
         !fake.ran.lock().unwrap().iter().any(|r| r.starts_with("clippy-linux")),
         "the container was never started"
@@ -268,9 +279,7 @@ fn a_missing_xwin_is_not_measured_with_the_install_line() {
         },
         2,
     );
-    assert!(
-        matches!(&verdicts(&rows)["clippy-windows crates"], Verdict::NotMeasured { next, .. } if next.contains("cargo install cargo-xwin"))
-    );
+    assert!(matches!(nm(&verdicts(&rows)["clippy-windows crates"]), Some((_, next)) if next.contains("cargo install cargo-xwin")));
 }
 
 #[test]
@@ -350,7 +359,10 @@ fn a_docker_failure_names_its_cause() {
     }
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
     let g = run_gates(&planned).into_iter().find(|g| g.id == "clippy-linux crates").unwrap();
-    assert!(matches!(decide(g, &Oom, Duration::from_secs(60)), Verdict::Failed { next, .. } if next.contains("PADDOCK_LINUX_MEMORY")));
+    assert!({
+        let r = decide(g, &Oom, Duration::from_secs(60), &test_subject());
+        r.kind() == Kind::Failed && r.next.contains("PADDOCK_LINUX_MEMORY")
+    });
 }
 
 #[test]
@@ -397,7 +409,7 @@ fn a_gate_that_cannot_start_is_not_measured_never_passed() {
         },
         2,
     );
-    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("not installed")));
+    assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("not installed")));
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
 }
 
@@ -409,11 +421,8 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
     };
     let rows = run_all(&crates_gates(), &fake, 2);
     let v = verdicts(&rows);
-    assert!(matches!(&v["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("crashed")));
-    assert!(
-        matches!(&v["lockfile apps/dyno"], Verdict::Passed { .. }),
-        "the other gates still ran"
-    );
+    assert!(matches!(nm(&v["fmt crates"]), Some((reason, _)) if reason.contains("crashed")));
+    assert!(passed(&v["lockfile apps/dyno"]), "the other gates still ran");
     // With a budget of nothing nothing starts: every gate that would run is not measured, none passes.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -423,13 +432,14 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
             workers: 2,
             budget: Duration::ZERO,
             stop: &AtomicBool::new(false),
+            subject: &test_subject(),
         },
     );
     assert!(fake.ran.lock().unwrap().is_empty());
     for (id, v) in &rows {
-        assert!(!matches!(v, Verdict::Passed { .. } | Verdict::Failed { .. }), "{id}: {v:?}");
+        assert!(!matches!(v.kind(), Kind::Passed | Kind::Failed), "{id}: {v:?}");
     }
-    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("budget")));
+    assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("budget")));
     // A signal stops the rest the same way.
     let fake = Fake::default();
     let rows = run_all_with(
@@ -439,10 +449,11 @@ fn a_crashed_runner_and_a_row_that_never_ran_are_not_measured() {
             workers: 1,
             budget: Duration::from_secs(60),
             stop: &AtomicBool::new(true),
+            subject: &test_subject(),
         },
     );
     assert!(fake.ran.lock().unwrap().is_empty());
-    assert!(matches!(&verdicts(&rows)["fmt crates"], Verdict::NotMeasured { reason, .. } if reason.contains("interrupted")));
+    assert!(matches!(nm(&verdicts(&rows)["fmt crates"]), Some((reason, _)) if reason.contains("interrupted")));
 }
 
 #[test]
@@ -455,7 +466,7 @@ fn a_timeout_is_not_measured_and_does_not_tell_you_to_fix_lints() {
         },
         2,
     );
-    let Verdict::NotMeasured { reason, next } = &verdicts(&rows)["clippy crates"] else {
+    let Some((reason, next)) = nm(&verdicts(&rows)["clippy crates"]) else {
         panic!("{rows:?}")
     };
     assert!(
@@ -470,26 +481,15 @@ fn a_timeout_is_not_measured_and_does_not_tell_you_to_fix_lints() {
 
 #[test]
 fn the_worst_finding_decides_the_exit_code_7_then_5_then_6() {
-    let nm = Verdict::NotMeasured {
-        reason: "r".into(),
-        next: "n".into(),
-    };
-    let failed = Verdict::Failed {
-        cause: "c".into(),
-        tail: String::new(),
-        next: "n".into(),
-        secs: 1.0,
-    };
-    let broken = Verdict::Broken {
-        cause: "c".into(),
-        next: "n".into(),
-    };
-    let row = |id: &str, v: &Verdict| (id.to_string(), v.clone());
+    let nm = Row::not_measured("r", "n");
+    let failed = Row::failed("g", &test_subject(), "c".into(), String::new(), "n".into(), 1.0);
+    let broken = Row::broken("c", "n");
+    let row = |id: &str, v: &Row| (id.to_string(), v.clone());
     let all = [row("a", &nm), row("b", &failed), row("c", &broken)];
     assert_eq!(render("h", &all).exit, Exit::CheckBroken);
     assert_eq!(render("h", &all[..2]).exit, Exit::Findings);
     assert_eq!(render("h", &all[..1]).exit, Exit::NotMeasured);
-    assert_eq!(render("h", &[row("x", &Verdict::Passed { secs: 0.1 })]).exit, Exit::Ok);
+    assert_eq!(render("h", &[row("x", &Row::passed("x", &test_subject(), 0.1))]).exit, Exit::Ok);
 }
 
 #[test]
@@ -517,7 +517,7 @@ fn pitwalls_deny_needs_cargo_deny_and_an_empty_script_list_is_a_broken_check() {
         },
         2,
     );
-    assert!(matches!(&verdicts(&rows)["pitwall-deny"], Verdict::NotMeasured { reason, .. } if reason.contains("cargo-deny")));
+    assert!(matches!(nm(&verdicts(&rows)["pitwall-deny"]), Some((reason, _)) if reason.contains("cargo-deny")));
     let mut f = facts();
     f.pitwall_tests.clear();
     let planned = plan_gates(&plan(), &change(&["apps/pitwall/a.rs"]), &f);
@@ -793,13 +793,12 @@ fn a_leftover_locked_worktree_of_an_ended_run_is_swept_and_a_live_ones_is_kept()
 
 #[test]
 fn extra_pushed_refs_are_not_measured_rows_and_never_passes() {
-    use super::exec::Verdict;
     let rows = super::extra_ref_rows(&["aaaaaaaaaaaaaaaa".to_string(), "bbb".to_string()]);
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].0, "pushed commit aaaaaaaaaaaa");
     assert!(
         rows.iter()
-            .all(|(_, v)| matches!(v, Verdict::NotMeasured { next, .. } if next.contains("one at a time")))
+            .all(|(_, v)| matches!(nm(v), Some((_, next)) if next.contains("one at a time")))
     );
     assert_eq!(render("h", &rows).exit, Exit::NotMeasured);
 }
@@ -937,7 +936,7 @@ mod known_commit {
         paddock_cli::measure(
             paddock_cli::CheckId::new("pre-push"),
             subject,
-            crate::pre_push::outcome::tool(),
+            crate::pre_push::exec::tool(),
             paddock_cli::outcome::UnixSeconds(1),
             || Ok(Vec::new()),
         )
@@ -1563,26 +1562,17 @@ fn a_tracking_upstream_wins_and_a_train_beats_main_on_a_tie() {
 
 #[test]
 fn git_pre_push_lines_become_pushed_refs_and_the_not_measured_ids_end_the_output() {
-    use super::exec::Verdict;
     let zero = "0".repeat(40);
     let input = format!("refs/heads/a aaa refs/heads/a {zero}\nrefs/heads/gone {zero} refs/heads/gone bbb\nbad line\n");
     let got = super::parse_push(&input);
     assert_eq!(got.len(), 1);
     assert_eq!((got[0].sha.as_str(), got[0].remote_ref.as_str()), ("aaa", "refs/heads/a"));
-    let nm = |id: &str| {
-        (
-            id.to_string(),
-            Verdict::NotMeasured {
-                reason: "r".into(),
-                next: "n".into(),
-            },
-        )
-    };
+    let nm = |id: &str| (id.to_string(), Row::not_measured("r", "n"));
     let report = render(
         "h",
         &[
             nm("clippy-windows apps/dyno"),
-            ("fmt crates".into(), Verdict::Passed { secs: 1.0 }),
+            ("fmt crates".into(), Row::passed("fmt crates", &test_subject(), 1.0)),
             nm("clippy crates"),
         ],
     );

@@ -3,6 +3,7 @@
 
 use super::gates::{Gate, Need, Planned};
 use crate::ci_tool::{Output, ToolCall, tail};
+use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, measure};
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -47,49 +48,105 @@ pub trait Exec: Sync {
     }
 }
 
-/// The outcome of one table row.
-#[derive(Debug, Clone, PartialEq)]
-pub enum Verdict {
+/// One table row: a shared [`Outcome`] (ADR 0089 amendment, WP-T3) plus what the table prints around it. A pass or a failure is
+/// built only through [`measure`] (with the commit and tree as evidence); there is no status a caller can set by hand.
+#[derive(Debug, Clone)]
+pub struct Row {
+    /// How the gate ended: `Clean` (ran and passed), `Findings` (ran and failed), `NotApplicable` (the change does not reach it),
+    /// `NotMeasured` (it could not look: nothing is proven, ER-33) or `CheckBroken` (the check itself cannot be trusted).
+    pub outcome: Outcome,
+    /// Seconds the gate ran (0 when it did not).
+    pub secs: f64,
+    /// The tail of its output, for a failure.
+    pub tail: String,
+    /// What to do and how to re-run (failure, not measured, broken).
+    pub next: String,
+    /// A not-measured row a person named in the override: who. Logged; the push may go, but the row is still not proven.
+    pub excused_by: Option<String>,
+}
+
+/// The kind of a row, for the table and its JSON.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
     /// It ran and passed.
-    Passed {
-        /// Seconds.
-        secs: f64,
-    },
+    Passed,
     /// It ran and failed.
-    Failed {
-        /// What failed, in one line.
-        cause: String,
-        /// The tail of its output.
-        tail: String,
-        /// What to do and how to re-run.
-        next: String,
-        /// Seconds.
-        secs: f64,
-    },
+    Failed,
     /// The change does not reach it.
-    Skipped {
-        /// Why.
-        reason: String,
-    },
-    /// It could not look: nothing is proven (ER-33). Blocks the push (exit 6) unless named in an override.
-    NotMeasured {
-        /// Why.
-        reason: String,
-        /// What to do.
-        next: String,
-    },
-    /// Not measured, and a person named this gate in the override: logged, and the push may go.
-    Accepted {
-        /// Why it was not measured.
-        reason: String,
-    },
+    Skipped,
+    /// It could not look.
+    NotMeasured,
+    /// Not measured, and a person named this gate in the override.
+    Accepted,
     /// The check itself cannot be trusted.
-    Broken {
-        /// What is wrong.
-        cause: String,
-        /// What to do.
-        next: String,
-    },
+    Broken,
+}
+
+fn check_id(id: &str) -> CheckId {
+    CheckId::new(format!("pre-push:{id}"))
+}
+
+impl Row {
+    fn plain(outcome: Outcome, secs: f64, tail: String, next: String) -> Row {
+        Row {
+            outcome,
+            secs,
+            tail,
+            next,
+            excused_by: None,
+        }
+    }
+
+    /// The gate `id` ran and passed.
+    pub fn passed(id: &str, subject: &Subject, secs: f64) -> Row {
+        let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || Ok(Vec::new()));
+        Row::plain(o, secs, String::new(), String::new())
+    }
+
+    /// The gate `id` ran and failed: `cause` in one line, the `tail` of its output, `next` what to do.
+    pub fn failed(id: &str, subject: &Subject, cause: String, tail: String, next: String, secs: f64) -> Row {
+        let o = measure(check_id(id), subject.clone(), tool(), UnixSeconds::now(), || {
+            Ok(vec![Finding::failing(cause)])
+        });
+        Row::plain(o, secs, tail, next)
+    }
+
+    /// The change does not reach it.
+    pub fn skipped(reason: impl Into<String>) -> Row {
+        Row::plain(Outcome::NotApplicable(Reason::new(reason)), 0.0, String::new(), String::new())
+    }
+
+    /// It could not look: nothing is proven.
+    pub fn not_measured(reason: impl Into<String>, next: impl Into<String>) -> Row {
+        Row::plain(Outcome::NotMeasured(Reason::new(reason)), 0.0, String::new(), next.into())
+    }
+
+    /// The check itself cannot be trusted.
+    pub fn broken(cause: impl Into<String>, next: impl Into<String>) -> Row {
+        Row::plain(Outcome::CheckBroken(Reason::new(cause)), 0.0, String::new(), next.into())
+    }
+
+    /// The row's kind.
+    pub fn kind(&self) -> Kind {
+        match (&self.outcome, &self.excused_by) {
+            (Outcome::NotMeasured(_), Some(_)) => Kind::Accepted,
+            (Outcome::Clean(_) | Outcome::KnownCommit(_), _) => Kind::Passed,
+            (Outcome::Findings(_), _) => Kind::Failed,
+            (Outcome::NotApplicable(_), _) => Kind::Skipped,
+            (Outcome::NotMeasured(_), None) => Kind::NotMeasured,
+            (Outcome::CheckBroken(_), _) => Kind::Broken,
+        }
+    }
+
+    /// Why (not measured, skipped, broken), or the failure's cause.
+    pub fn reason(&self) -> String {
+        self.outcome.detail()
+    }
+}
+
+/// The tool, with its version.
+pub fn tool() -> ToolVersion {
+    ToolVersion::new(concat!("paddock-dev pre-push ", env!("CARGO_PKG_VERSION")))
 }
 
 fn first_word(id: &str) -> &str {
@@ -97,55 +154,49 @@ fn first_word(id: &str) -> &str {
 }
 
 /// The verdict of one gate: its needs first, then the run.
-pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration) -> Verdict {
+pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject) -> Row {
     match &gate.need {
         Need::Tool(t) if !exec.has_tool(t) => {
-            return Verdict::NotMeasured {
-                reason: format!("{t} is not installed"),
-                next: format!(
+            return Row::not_measured(
+                format!("{t} is not installed"),
+                format!(
                     "install it (`cargo install {t} --locked`), then re-run `./dev check --pre-push`; an agent reports this instead (ER-33)"
                 ),
-            };
+            );
         }
         Need::Docker if !exec.docker_up() => {
-            return Verdict::NotMeasured {
-                reason: "Docker (OrbStack) is not running".into(),
-                next: "start it yourself and re-run; an agent reports this to the coordinator and never starts or restarts it (ER-14)"
-                    .into(),
-            };
+            return Row::not_measured(
+                "Docker (OrbStack) is not running",
+                "start it yourself and re-run; an agent reports this to the coordinator and never starts or restarts it (ER-14)",
+            );
         }
         _ => {}
     }
     if gate.heavy
         && let Some(why) = exec.heavy_unavailable()
     {
-        return Verdict::NotMeasured {
-            reason: format!("no heavy slot tool, so a compile would run beside every other push's: {why}"),
-            next: "fix the build error above and re-run `./dev check --pre-push`; an agent reports this (ER-24, ER-33)".into(),
-        };
+        return Row::not_measured(
+            format!("no heavy slot tool, so a compile would run beside every other push's: {why}"),
+            "fix the build error above and re-run `./dev check --pre-push`; an agent reports this (ER-24, ER-33)",
+        );
     }
     let started = Instant::now();
     match exec.run(gate, left) {
-        Err(e) => Verdict::NotMeasured {
-            reason: e,
-            next: "install the program, then re-run `./dev check --pre-push`".into(),
-        },
-        Ok(done) if done.success => Verdict::Passed {
-            secs: started.elapsed().as_secs_f64(),
-        },
-        Ok(done) if done.cut_short() => Verdict::NotMeasured {
-            reason: format!(
+        Err(e) => Row::not_measured(e, "install the program, then re-run `./dev check --pre-push`"),
+        Ok(done) if done.success => Row::passed(&gate.id, subject, started.elapsed().as_secs_f64()),
+        Ok(done) if done.cut_short() => Row::not_measured(
+            format!(
                 "{} ({}) before it finished{}",
                 gate.rerun(),
                 done.how,
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
-            next: format!(
+            format!(
                 "re-run it alone: {} (the whole gate has a budget of {} min)",
                 gate.rerun(),
                 BUDGET.as_secs() / 60
             ),
-        },
+        ),
         Ok(done) => {
             let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
                 (true, "exit 125") => {
@@ -158,12 +209,14 @@ pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration) -> Verdict {
                 _ => gate.next.clone(),
             };
             let full = done.log.as_ref().map_or(String::new(), |l| format!(" Full output: {l}."));
-            Verdict::Failed {
-                cause: format!("{} ({})", gate.rerun(), done.how),
-                tail: done.tail.trim_end().to_string(),
-                next: format!("{hint}. Re-run alone: {}.{full}", gate.rerun()),
-                secs: started.elapsed().as_secs_f64(),
-            }
+            Row::failed(
+                &gate.id,
+                subject,
+                format!("{} ({})", gate.rerun(), done.how),
+                done.tail.trim_end().to_string(),
+                format!("{hint}. Re-run alone: {}.{full}", gate.rerun()),
+                started.elapsed().as_secs_f64(),
+            )
         }
     }
 }
@@ -176,11 +229,13 @@ pub struct RunOpts<'a> {
     pub budget: Duration,
     /// Set by SIGINT or SIGTERM: nothing more starts.
     pub stop: &'a AtomicBool,
+    /// What the run is about (the commit and its tree): the evidence of every pass.
+    pub subject: &'a Subject,
 }
 
 /// Every planned row decided, `workers` at a time, lowest rank first; the result keeps the planned order. The default budget, never
 /// stopped.
-pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(String, Verdict)> {
+pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize, subject: &Subject) -> Vec<(String, Row)> {
     run_all_with(
         planned,
         exec,
@@ -188,6 +243,7 @@ pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize) -> Vec<(Str
             workers,
             budget: BUDGET,
             stop: &AtomicBool::new(false),
+            subject,
         },
     )
 }
@@ -201,7 +257,7 @@ fn row_id(p: &Planned) -> &str {
 
 /// [`run_all`] with its bounds. A gate that panics, one that never ran and one the budget or a signal cut off are "not measured",
 /// never a pass.
-pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec<(String, Verdict)> {
+pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec<(String, Row)> {
     let mut order: Vec<usize> = (0..planned.len()).collect();
     order.sort_by_key(|&i| match &planned[i] {
         Planned::Run(g) => g.rank,
@@ -209,7 +265,7 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
     });
     let deadline = Instant::now() + opts.budget;
     let queue = Mutex::new(order.into_iter().collect::<VecDeque<_>>());
-    let results: Vec<Mutex<Option<Verdict>>> = planned.iter().map(|_| Mutex::new(None)).collect();
+    let results: Vec<Mutex<Option<Row>>> = planned.iter().map(|_| Mutex::new(None)).collect();
     std::thread::scope(|s| {
         for _ in 0..opts.workers.max(1) {
             s.spawn(|| {
@@ -220,36 +276,31 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
                         Planned::Run(g) => {
                             let left = deadline.saturating_duration_since(Instant::now());
                             if opts.stop.load(Ordering::SeqCst) {
-                                Verdict::NotMeasured {
-                                    reason: "the push was interrupted before it started".into(),
-                                    next: format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                                }
+                                Row::not_measured(
+                                    "the push was interrupted before it started",
+                                    format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
+                                )
                             } else if left.is_zero() {
-                                Verdict::NotMeasured {
-                                    reason: format!(
+                                Row::not_measured(
+                                    format!(
                                         "the {} min budget of the push gate was spent before it started",
                                         opts.budget.as_secs() / 60
                                     ),
-                                    next: format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                                }
+                                    format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
+                                )
                             } else {
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decide(g, exec, left))).unwrap_or_else(|_| {
-                                    Verdict::NotMeasured {
-                                        reason: "the gate's runner crashed".into(),
-                                        next: "report this with the command that ran; re-run it alone".into(),
-                                    }
-                                })
+                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decide(g, exec, left, opts.subject)))
+                                    .unwrap_or_else(|_| {
+                                        Row::not_measured(
+                                            "the gate's runner crashed",
+                                            "report this with the command that ran; re-run it alone",
+                                        )
+                                    })
                             }
                         }
-                        Planned::Skip { reason, .. } => Verdict::Skipped { reason: reason.clone() },
-                        Planned::NotMeasured { reason, next, .. } => Verdict::NotMeasured {
-                            reason: reason.clone(),
-                            next: next.clone(),
-                        },
-                        Planned::Broken { cause, next, .. } => Verdict::Broken {
-                            cause: cause.clone(),
-                            next: next.clone(),
-                        },
+                        Planned::Skip { reason, .. } => Row::skipped(reason.clone()),
+                        Planned::NotMeasured { reason, next, .. } => Row::not_measured(reason.clone(), next.clone()),
+                        Planned::Broken { cause, next, .. } => Row::broken(cause.clone(), next.clone()),
                     };
                     if let Ok(mut slot) = results[i].lock() {
                         *slot = Some(v);
@@ -262,9 +313,11 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
         .iter()
         .zip(results)
         .map(|(p, r)| {
-            let v = r.into_inner().ok().flatten().unwrap_or_else(|| Verdict::NotMeasured {
-                reason: "the gate never ran".into(),
-                next: "re-run `./dev check --pre-push`; if it happens again, report it".into(),
+            let v = r.into_inner().ok().flatten().unwrap_or_else(|| {
+                Row::not_measured(
+                    "the gate never ran",
+                    "re-run `./dev check --pre-push`; if it happens again, report it",
+                )
             });
             (row_id(p).to_string(), v)
         })
@@ -561,6 +614,16 @@ fn docker_answers(env: &HashMap<String, String>) -> bool {
         .is_ok_and(|r| r.success)
 }
 
+/// A commit and tree for tests that need a [`Subject`].
+#[cfg(test)]
+pub(crate) fn test_subject() -> Subject {
+    use paddock_cli::outcome::{Sha, TreeId};
+    Subject::Commit {
+        sha: Sha::new("a1"),
+        tree: TreeId::new("t1"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,7 +732,7 @@ exit $rc
             std::thread::scope(|s| {
                 for n in ["a", "b"] {
                     let (ex, g) = (&ex, gate(&format!("clippy {n}"), &cmd(n)));
-                    s.spawn(move || assert!(matches!(decide(&g, ex, Duration::from_secs(60)), Verdict::Passed { .. })));
+                    s.spawn(move || assert!(decide(&g, ex, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed));
                 }
             });
             let lines: Vec<String> = std::fs::read_to_string(&trace).unwrap().lines().map(String::from).collect();
@@ -691,12 +754,13 @@ exit $rc
             std::fs::write(lock.join("owner"), "Bob").unwrap();
             let ex = real(d.path(), &lock);
             let g = gate("clippy a", "echo never runs");
-            match decide(&g, &ex, Duration::from_secs(2)) {
-                Verdict::NotMeasured { reason, .. } => {
-                    assert!(reason.contains("waiting for the heavy slot, held by Bob"), "{reason}");
-                }
-                v => panic!("a slot that was never taken is not a pass or a failure: {v:?}"),
-            }
+            let r = decide(&g, &ex, Duration::from_secs(2), &test_subject());
+            assert_eq!(
+                r.kind(),
+                Kind::NotMeasured,
+                "a slot that was never taken is not a pass or a failure: {r:?}"
+            );
+            assert!(r.reason().contains("waiting for the heavy slot, held by Bob"), "{}", r.reason());
         }
 
         /// A repository with the heavy tool's inputs committed, and a `cargo` that "builds" a fake heavy (a script that records
@@ -751,7 +815,7 @@ exit $rc
             let d = tempfile::tempdir().unwrap();
             let ex = repo_with_fake_cargo(d.path(), true);
             let g = gate("clippy a", "echo ran >> out.txt");
-            assert!(matches!(decide(&g, &ex, Duration::from_secs(60)), Verdict::Passed { .. }));
+            assert!(decide(&g, &ex, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
             let calls = std::fs::read_to_string(d.path().join("heavy-calls")).unwrap();
             assert!(calls.contains("run pre-push --"), "{calls}");
             assert!(d.path().join("out.txt").is_file(), "the gate's command ran under the built heavy");
@@ -776,23 +840,21 @@ exit $rc
                 logs: ex.logs.clone(),
                 stop: ex.stop.clone(),
             };
-            assert!(matches!(decide(&g, &ex2, Duration::from_secs(60)), Verdict::Passed { .. }));
+            assert!(decide(&g, &ex2, Duration::from_secs(60), &test_subject()).kind() == Kind::Passed);
         }
 
         #[test]
         fn a_heavy_that_will_not_build_is_not_measured_and_names_the_error() {
             let d = tempfile::tempdir().unwrap();
             let ex = repo_with_fake_cargo(d.path(), false);
-            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(60)) {
-                Verdict::NotMeasured { reason, next } => {
-                    assert!(
-                        reason.contains("unresolved import") && reason.contains("no heavy slot tool"),
-                        "{reason}"
-                    );
-                    assert!(next.contains("re-run"), "{next}");
-                }
-                v => panic!("{v:?}"),
-            }
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(60), &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            let reason = r.reason();
+            assert!(
+                reason.contains("unresolved import") && reason.contains("no heavy slot tool"),
+                "{reason}"
+            );
+            assert!(r.next.contains("re-run"), "{}", r.next);
         }
 
         #[test]
@@ -800,10 +862,9 @@ exit $rc
             let d = tempfile::tempdir().unwrap();
             let mut ex = real(d.path(), &d.path().join("l"));
             ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
-            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
-                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("OVERRIDE SET"), "{reason}"),
-                v => panic!("{v:?}"),
-            }
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5), &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(r.reason().contains("OVERRIDE SET"), "{}", r.reason());
         }
 
         #[test]
@@ -811,10 +872,9 @@ exit $rc
             let d = tempfile::tempdir().unwrap();
             let mut ex = repo_with_fake_cargo(d.path(), true);
             ex.budget_end = Instant::now();
-            match decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)) {
-                Verdict::NotMeasured { reason, .. } => assert!(reason.contains("budget was spent"), "{reason}"),
-                v => panic!("{v:?}"),
-            }
+            let r = decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5), &test_subject());
+            assert_eq!(r.kind(), Kind::NotMeasured, "{r:?}");
+            assert!(r.reason().contains("budget was spent"), "{}", r.reason());
         }
 
         #[test]
@@ -824,10 +884,10 @@ exit $rc
             ex.env.insert("PADDOCK_HEAVY".into(), "off".into());
             ex.env.insert(TEST_HEAVY_OFF.into(), "1".into());
             ex.env.insert("PATH".into(), "/usr/bin:/bin".into());
-            assert!(matches!(
-                decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5)),
-                Verdict::Passed { .. }
-            ));
+            assert_eq!(
+                decide(&gate("clippy a", "true"), &ex, Duration::from_secs(5), &test_subject()).kind(),
+                Kind::Passed
+            );
         }
     }
 

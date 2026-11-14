@@ -6,11 +6,11 @@
 //! The rows keep their own type in [`super::exec`] (they carry the tail and the next step the table prints); this is the boundary
 //! where they stop being a status a caller could have set by hand.
 
-use super::exec::Verdict as Row;
+use super::exec::{Kind, Row, tool};
 use crate::generators::run::working_tree;
 use crate::plan_repo::git_text;
 use paddock_cli::outcome::{LiveRepo, Sha, TreeId};
-use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, ToolVersion, UnixSeconds, Unmeasured, Verdict, measure};
+use paddock_cli::{CheckId, Finding, Outcome, Reason, Subject, UnixSeconds, Unmeasured, Verdict, measure};
 use std::path::Path;
 
 /// The repository as it is now, for `Evidence::adopt`.
@@ -30,37 +30,40 @@ pub fn subject_of(root: &Path, sha: Option<&str>) -> Subject {
     }
 }
 
-/// The tool, with its version.
-pub fn tool() -> ToolVersion {
-    ToolVersion::new(concat!("paddock-dev pre-push ", env!("CARGO_PKG_VERSION")))
-}
-
-/// One row as an outcome, and who excused it when a person's override did. The child's exit is the probe inside `measure`.
-fn row_outcome(id: &str, row: &Row, subject: &Subject, who: &str) -> (Outcome, Option<String>) {
-    let check = || CheckId::new(format!("pre-push:{id}"));
-    let made = |found: Vec<Finding>| measure(check(), subject.clone(), tool(), UnixSeconds::now(), || Ok(found));
-    match row {
-        Row::Passed { .. } => (made(Vec::new()), None),
-        Row::Failed { cause, next, .. } => (made(vec![Finding::failing(format!("{cause} Next step: {next}"))]), None),
-        Row::Skipped { reason } => (Outcome::NotApplicable(Reason::new(reason.clone())), None),
-        Row::NotMeasured { reason, next } => (Outcome::NotMeasured(Reason::new(format!("{reason}. Next: {next}"))), None),
-        Row::Accepted { reason } => (
-            Outcome::NotMeasured(Reason::new(format!(
-                "{reason} (excused by a person's --accept-not-measured, logged)"
-            ))),
-            Some(who.to_string()),
+/// One row as an outcome for the shared [`Verdict`], with its next step in the text, and who excused it when a person's override did.
+fn row_outcome(id: &str, row: &Row, subject: &Subject) -> (Outcome, Option<String>) {
+    let with_next = |r: String| Reason::new(format!("{r}. Next: {}", row.next));
+    let outcome = match &row.outcome {
+        Outcome::Findings(_) => measure(
+            CheckId::new(format!("pre-push:{id}")),
+            subject.clone(),
+            tool(),
+            UnixSeconds::now(),
+            || Ok(vec![Finding::failing(format!("{} Next step: {}", row.reason(), row.next))]),
         ),
-        Row::Broken { cause, next } => (Outcome::CheckBroken(Reason::new(format!("{cause}. Next: {next}"))), None),
-    }
+        Outcome::NotMeasured(_) if row.excused_by.is_some() => Outcome::NotMeasured(Reason::new(format!(
+            "{} (excused by a person's --accept-not-measured, logged)",
+            row.reason()
+        ))),
+        Outcome::NotMeasured(_) => Outcome::NotMeasured(with_next(row.reason())),
+        Outcome::CheckBroken(_) => Outcome::CheckBroken(with_next(row.reason())),
+        other => other.clone(),
+    };
+    let by = if row.kind() == Kind::Accepted {
+        row.excused_by.clone()
+    } else {
+        None
+    };
+    (outcome, by)
 }
 
 /// The rows folded by the shared [`Verdict`] (a scoped run: a gate the change does not reach has nothing to do), and the run's own
 /// outcome: findings when a row failed, broken or not measured with the rows named, else a pass for `subject`.
-pub fn fold(rows: &[(String, Row)], subject: &Subject, who: &str) -> (Verdict, Outcome) {
+pub fn fold(rows: &[(String, Row)], subject: &Subject) -> (Verdict, Outcome) {
     let items: Vec<(String, Outcome, Option<String>)> = rows
         .iter()
         .map(|(id, r)| {
-            let (o, by) = row_outcome(id, r, subject, who);
+            let (o, by) = row_outcome(id, r, subject);
             (id.clone(), o, by)
         })
         .collect();
@@ -73,15 +76,15 @@ pub fn fold(rows: &[(String, Row)], subject: &Subject, who: &str) -> (Verdict, O
             .join("; ")
     };
     let run = measure(CheckId::new("pre-push"), subject.clone(), tool(), UnixSeconds::now(), || {
-        let broken = named(|r| matches!(r, Row::Broken { .. }));
+        let broken = named(|r| r.kind() == Kind::Broken);
         if !broken.is_empty() {
             return Err(Unmeasured::Broken(Reason::new(format!("a check is broken: {broken}"))));
         }
-        let failed = named(|r| matches!(r, Row::Failed { .. }));
+        let failed = named(|r| r.kind() == Kind::Failed);
         if !failed.is_empty() {
             return Ok(vec![Finding::failing(format!("failed: {failed}"))]);
         }
-        let unmeasured = named(|r| matches!(r, Row::NotMeasured { .. }));
+        let unmeasured = named(|r| r.kind() == Kind::NotMeasured);
         if !unmeasured.is_empty() {
             return Err(Unmeasured::NotMeasured(Reason::new(format!("not measured: {unmeasured}"))));
         }
@@ -113,7 +116,7 @@ mod tests {
     }
 
     fn passed() -> Row {
-        Row::Passed { secs: 1.0 }
+        Row::passed("x", &subject(), 1.0)
     }
 
     fn rows(list: Vec<(&str, Row)>) -> Vec<(String, Row)> {
@@ -122,11 +125,7 @@ mod tests {
 
     #[test]
     fn all_passed_is_a_pass_with_the_commit_and_tree() {
-        let (v, run) = fold(
-            &rows(vec![("fmt", passed()), ("skip", Row::Skipped { reason: "no".into() })]),
-            &subject(),
-            "me",
-        );
+        let (v, run) = fold(&rows(vec![("fmt", passed()), ("skip", Row::skipped("no"))]), &subject());
         assert_eq!(v.exit(), Exit::Ok);
         let j = run.json();
         assert_eq!(j["status"], "clean");
@@ -136,21 +135,10 @@ mod tests {
 
     #[test]
     fn failing_beats_not_measured_and_broken_beats_both_as_in_the_table() {
-        let nm = || Row::NotMeasured {
-            reason: "r".into(),
-            next: "n".into(),
-        };
-        let failed = || Row::Failed {
-            cause: "c".into(),
-            tail: String::new(),
-            next: "n".into(),
-            secs: 1.0,
-        };
-        let broken = || Row::Broken {
-            cause: "c".into(),
-            next: "n".into(),
-        };
-        let all = |list: Vec<(&str, Row)>| fold(&rows(list), &subject(), "me");
+        let nm = || Row::not_measured("r", "n");
+        let failed = || Row::failed("g", &subject(), "c".into(), String::new(), "n".into(), 1.0);
+        let broken = || Row::broken("c", "n");
+        let all = |list: Vec<(&str, Row)>| fold(&rows(list), &subject());
         assert_eq!(all(vec![("a", nm())]).0.exit(), Exit::NotMeasured);
         assert_eq!(all(vec![("a", nm()), ("b", failed())]).0.exit(), Exit::Findings);
         assert_eq!(all(vec![("a", failed()), ("b", broken())]).0.exit(), Exit::CheckBroken);
@@ -161,10 +149,9 @@ mod tests {
 
     #[test]
     fn an_accepted_row_is_a_named_excuse_and_the_exit_matches_the_table() {
-        let acc = Row::Accepted {
-            reason: "no docker".into(),
-        };
-        let (v, _) = fold(&rows(vec![("clippy", acc), ("fmt", passed())]), &subject(), "alex");
+        let mut acc = Row::not_measured("no docker", "n");
+        acc.excused_by = Some("alex".into());
+        let (v, _) = fold(&rows(vec![("clippy", acc), ("fmt", passed())]), &subject());
         assert_eq!(v.exit(), Exit::Ok);
         assert_eq!(v.json()["outcomes"][0]["override"], "alex");
     }
@@ -172,7 +159,7 @@ mod tests {
     /// "Delete the check": a run with no row at all is not measured, never a pass.
     #[test]
     fn no_rows_is_not_measured() {
-        let (v, run) = fold(&[], &subject(), "me");
+        let (v, run) = fold(&[], &subject());
         assert_eq!(v.exit(), Exit::NotMeasured);
         assert_eq!(run.json()["status"], "not-measured");
     }
@@ -180,5 +167,13 @@ mod tests {
     #[test]
     fn nothing_to_check_is_not_applicable_never_a_pass() {
         assert_eq!(nothing_to_check("origin/main").json()["status"], "not-applicable");
+    }
+
+    /// "Delete the check": a run in which no gate was planned or ran is exit 6, never 0.
+    #[test]
+    fn a_run_with_no_gate_is_not_measured_never_a_pass() {
+        let (v, run) = fold(&[], &subject());
+        assert_eq!(v.exit(), Exit::NotMeasured);
+        assert_eq!(run.json()["status"], "not-measured");
     }
 }
