@@ -1,5 +1,5 @@
-// C125 (provisional number: "C1xx (to assign)" in ADR 0103 until the coordinator assigns it): tests that run steps one after the
-// other under one time bound, poll at a fixed pace, or start a process nothing ends (ER-21, ER-12, ER-14; ADR 0103; the class:
+// C126 (ADR 0103; the number assigned by the coordinator on 2026-11-15): tests that run steps one after the other
+// under one time bound, poll at a fixed pace, or start a process nothing ends (ER-21, ER-12, ER-14; ADR 0103; the class:
 // CI runs 8050, 8060, 8061, 8066, 8090 and 8099 timed out on the loaded Mac). In test code only, with comments and string insides
 // masked:
 // - rule A (serial steps): a loop (`for`, `while`, Rust `loop`) whose body runs a program to completion itself (Rust `.output()`,
@@ -135,7 +135,7 @@ const FIX = {
 };
 
 export default {
-  id: 'C125',
+  id: 'C126',
   scope: 'root',
   mode: 'report-only',
   title: 'Tests bound each step on progress and end every process they start',
@@ -147,7 +147,7 @@ export default {
       const text = ctx.read(f);
       if (!text || !/for|while|loop|spawn|detached/.test(text)) continue;
       for (const s of stepSites(text, f)) {
-        out.push(SEVERITY('C125', 40, f, s.line, `${s.what} (rule ${s.rule}, ADR 0103)`, `${FIX[s.rule]} A site that is fine carries \`// conformance: test-steps — <why>\`.`));
+        out.push(SEVERITY('C126', 40, f, s.line, `${s.what} (rule ${s.rule}, ADR 0103)`, `${FIX[s.rule]} A site that is fine carries \`// conformance: test-steps — <why>\`.`));
       }
     }
     return out;

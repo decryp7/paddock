@@ -166,8 +166,8 @@ review_by = 2026-12-13
 approved = "user"
 
 [[report_only]]
-id = "C125"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY and the mode in C125-test-steps.mjs to gate. Provisional number for ADR 0103's C1xx (to assign). 67 sites in 50 files on train 11's head (35 serial-step loops, 5 fixed Node polls, 27 unguarded spawns): the migration list of ADR 0103, section 3; 60 left after its own migrations"
+id = "C126"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then flip SEVERITY and the mode in C126-test-steps.mjs to gate. ADR 0103's check. 67 sites in 50 files on train 11's head (35 serial-step loops, 5 fixed Node polls, 27 unguarded spawns): the migration list of ADR 0103, section 3; 60 left after its own migrations"
 owner = "ADR 0103"
 since = 2026-11-14
 review_by = 2026-12-14

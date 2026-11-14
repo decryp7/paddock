@@ -2015,12 +2015,12 @@ in CI), the crash model's CPU work slowed 9x under other jobs' load, and a VM lo
 step's progress, not on a sum of steps; independent cases run side by side (`paddock_testkit::both` / `run_cases`); a wait for
 several steps is `wait_progressing` (Rust) or `waitProgressing` (scripts/test-kit.mjs), which back off; every process a test
 starts goes through a `Reaper` (Rust `paddock_testkit_start`, Node `scripts/test-kit.mjs`), which ends detached grandchildren too;
-a limit is tested with a small limit; a CPU-bound test gets a measured size class, not a raised default. C125 (provisional, ADR
-0103's C1xx) lists the shapes, report-only. **Class: tests time out on the loaded Mac (ADR 0102 is the machine side).**
+a limit is tested with a small limit; a CPU-bound test gets a measured size class, not a raised default. C126 (ADR
+0103) lists the shapes, report-only. **Class: tests time out on the loaded Mac (ADR 0102 is the machine side).**
 
 ## A red test of the Reaper ended other processes on the machine (2026-11-15, ADR 0103)
 Writing the failing-first test for "a short marker is refused", the designer called `Reaper::marked("/tmp")` before the guard
-existed. The red run did what the guard was for: its drop ended every process whose command line contained `/tmp`, by identity,
+existed. The red run (three runs between 00:12:04 and 00:12:40 +08, from file times) did what the guard was for: its drop ended every process whose command line contained `/tmp`, by identity,
 three runs in a row; that included the agent's own shell and very likely other agents' running shell commands (their wrappers
 name `/tmp/claude-…` files). **Rule:** a failing-first test must be safe in its failing state: when the missing behaviour is a
 guard against a destructive action, the red test feeds an input that the action cannot harm (here a short marker that matches no

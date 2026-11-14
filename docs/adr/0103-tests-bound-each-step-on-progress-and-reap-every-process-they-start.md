@@ -12,8 +12,7 @@
 - Number: 0103. On 2026-11-14 the highest ADR on `origin/main` was 0097 and on any local or `origin` branch 0102
   (`git ls-tree docs/adr/` over every branch: 0098 `docs/adr-combined-tree-before-approval`, 0099 `docs/adr-path-asserts`, 0100
   `feat/test-env-builder`, 0101 `feat/adr-0089-typed-outcomes`, 0102 `feat/heavy-priority-lane`).
-- Check id: **C1xx (to assign)** by the coordinator. The code uses the provisional id `C125` (no branch or commit names C125,
-  `git log --all -G 'C125\b'`, 2026-11-14), renamed when the number is assigned.
+- Check id: **C126**, assigned by the coordinator on 2026-11-15 (C126 is the disk-path check on `fix/c125-and-arm64-tests`).
 
 Evidence heads read (ADR 0091), re-read before the commit: `origin/main` 3a342cb42, `origin/train/2026-11-14-11` 1ecc53eee (=
 the local `train/2026-11-14-11`), `feat/heavy-priority-lane` 80cf9505d, `feat/test-env-builder` 73f41d468. Shipped code: none of
@@ -143,9 +142,9 @@ cites the measured quiet time, the measured loaded time and the run, at most the
 with a smaller limit through a private seam and checks once that the public entry passes the product's constant (ADR 0019's
 `limit_cases!` is the same idea for limit tables).
 
-### 2. The check: C1xx (to assign), provisional id C125
+### 2. The check: C126
 
-`conformance/src/checks/C125-test-steps.mjs` (JavaScript, like C114; the Rust host port follows the conformance port plan and is
+`conformance/src/checks/C126-test-steps.mjs` (JavaScript, like C114; the Rust host port follows the conformance port plan and is
 not part of this ADR). In test code only (Rust `tests/`, `tests.rs`, `*_tests.rs`, `#[cfg(test)] mod`; Node `*.test.mjs`,
 `*test-support.mjs`, `conformance/test/helpers.mjs` and `lib/`), with comments and strings masked:
 
@@ -162,7 +161,7 @@ after its first green run on the real tree, recorded there by run id. On train 1
 files** (35 A, 5 B, 27 C); it fires on the kept-clone loop that timed out (`host_steps.rs:1406` at e0fdd0286^) and on the old
 `endHolders` poll. It is a heuristic: rule A also lists fixture loops of two or three git commands, which are fine and take a
 waiver, and it cannot see a program run inside a helper the loop calls. After this change's migrations and two waivers, **60 sites**
-remain (`node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C125`). It is not baselined: the findings are
+remain (`node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C126`). It is not baselined: the findings are
 the migration list below, and the gate flips once they are migrated or waived.
 
 ### 3. The migration list
@@ -176,14 +175,14 @@ Done in this change (before and after, measured as recorded in docs/benchmarks.m
 | `paddock-dev::it host_steps::*` (runs 8054-8099), 37 tests | every step through a marked `Reaper` that fails the test on a leak; `same`, `run_kept_pair` and `kept_fixtures` on `paddock_testkit::both` | 15.3 s for the 37 at load 30-60 | 13.0-16.7 s at load 30-78 (noise of the shared machine; the kept-clone cases were already side by side since e0fdd0286), no leak found |
 | `scripts/vm-lock.test.mjs`, `scripts/vm-win.test.mjs` (run 8099) | `endHolders` and the four 100 ms polls wait with `waitProgressing`; each file's `after` reaps its scratch folder and fails on a survivor | 98 s, 71/71 (load 25) | 98 s on the committed tree (load 11-13), 71/71, nothing reaped |
 
-Open (each a small change through the helpers; in the order of the incidents, then by C125's count):
+Open (each a small change through the helpers; in the order of the incidents, then by C126's count):
 
 1. `debrief-app workspace_commands::tests::a_session_reopens_its_store` (run 8061, 92.5 s): three imports in a row; measure each
    import, then split into one test per case or wait on the import job's progress.
 2. `spotter-render::real_browser a_missing_element_times_out_as_failed` (run 8060): a browser command answered later than the
    driver's per-command budget under load; the test examines an expiry, so it belongs under ADR 0071's start judge.
 3. `paddock-dev::it golden::live_*` (SLOW 60-121 s in runs 8060, 8066, 8099): parity cases one after the other; `run_cases`.
-4. The 60 remaining C125 sites in 46 files, largest first: `apps/debrief/app/src-tauri/src/opener.rs` (4),
+4. The 60 remaining C126 sites in 46 files, largest first: `apps/debrief/app/src-tauri/src/opener.rs` (4),
    `crates/paddock-proc/src/detach.rs` (3), `crates/paddock-env/src/private/dir.rs` (3),
    `apps/pitcrew/crates/pitcrew-service/tests/supervision.rs` (3), `tools/paddock-dev/tests/it/golden.rs` (2),
    `tools/heavy/tests/it/procutil.rs` (2), then 40 files with one or two (the check's output is the list).
@@ -229,26 +228,28 @@ total to 2.0-2.5, which D3 asks about.
 
 - **D1. Scope.** (a) This ADR as built: helpers, report-only check, the four migrations; the open list as follow-ups. (b) The
   common-practice option instead: nextest `leak-timeout` with `result = "fail"`, size classes and one test per case by hand;
-  remove the Reaper, the Node kit and C125 (0.5 agent-day; leaks with redirected output stay unseen). Recommended: (a).
+  remove the Reaper, the Node kit and C126 (0.5 agent-day; leaks with redirected output stay unseen). Recommended: (a).
 - **D2. nextest leak detection on top** (`leak-timeout = { period = "500ms", result = "fail" }` in every workspace's ci profile):
   cheap, catches children that hold the test's output, a first green run needed (ER-41). Recommended: yes, as a separate small change.
 - **D3. The open migration list** (1.0-1.5 agent-days, past the approved 1-2): (a) now, in train 12; (b) as each test next fails;
-  (c) when C125 turns into a gate. Recommended: (c), items 1-3 first.
-- **D4. C125 to gate:** after its first green run on main and the open list migrated or waived (the `[[report_only]]` entry's
+  (c) when C126 turns into a gate. Recommended: (c), items 1-3 first.
+- **D4. C126 to gate:** after its first green run on main and the open list migrated or waived (the `[[report_only]]` entry's
   review date, 2026-12-14).
 
 ## Incident while building it
 
-On 2026-11-15 about 00:20-00:25 (+08), the red run of the marker-minimum test called `Reaper::marked("/tmp")` before the guard
+On 2026-11-15 between 00:12:04 and 00:12:40 (+08), the red run of the marker-minimum test called `Reaper::marked("/tmp")` before the guard
 existed (three runs). Its drop ended every process on the machine whose command line contained `/tmp`, by identity: the agent's
 own shell (the run's output stopped at "Starting 1 test") and, very likely, other agents' running shell commands, whose wrappers
-name `/tmp/claude-…` files. The CI runners, OrbStack and the agent sessions were still running afterwards. The test now uses a
+name `/tmp/claude-…` files. The window comes from file times: the log of the branch's first push, whose last line was
+written at 00:12:04 just before the red runs, and the third run's own output file, last written at 00:12:40 when the run was
+ended with the shell (the first two runs wrote no file). The CI runners, OrbStack and the agent sessions were still running afterwards. The test now uses a
 short marker that matches no process, so it is harmless while red too, and the guard refuses short markers in both kits. Lesson
 recorded (docs/lessons.md): a failing-first test must be safe in its failing state.
 
 ## Consequences
 
-- A new test that sums steps, polls at a fixed pace or starts a process nothing ends is listed by C125 (a warning now).
+- A new test that sums steps, polls at a fixed pace or starts a process nothing ends is listed by C126 (a warning now).
 - Tests that start programs take a few ms per step for the reaper; a leak fails the test that made it, with the pid and how it was
   found, instead of a later test on the runner.
 - `wait_progressing` and the Node kit make "a wait for several steps" one call; a total budget over the steps has no helper.
