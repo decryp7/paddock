@@ -227,6 +227,15 @@ fn no_reach(_: &Path, _: &str, _: &str) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({"all": false}))
 }
 
+/// The merge check of a scenario that is not about the merge check: every merge is clean. The real check runs about 25 git
+/// children per merge, a third of a scenario's git calls, and a git child cost 0.11 to 0.15 s on the Windows runner (runs 8054,
+/// 8110), which took scenarios to nextest's 60 s limit; its own tests (`merge_check`) cover it, and
+/// `one_green_pull_request_is_built_dispatched_and_landed`, the conflict test and every `GitTrain::open` scenario still run the
+/// real one through the queue (docs/benchmarks.md, "Queue scenario tests: git children per test").
+fn merges_clean(_: &crate::merge_check::Request) -> Result<paddock_cli::Report, paddock_cli::CliError> {
+    Ok(paddock_cli::Report::new(serde_json::json!({}), "clean"))
+}
+
 struct World {
     repos: Repos,
     gitea: FakeGitea,
@@ -234,7 +243,8 @@ struct World {
     reach: BTreeMap<String, BTreeSet<String>>,
     ci: FakeCi,
     workflows: Vec<String>,
-    merge_check: Option<MergeCheckFn>,
+    /// The train's merge check: [`merges_clean`] unless the test is about the merge check or sets the real one.
+    merge_check: MergeCheckFn,
     on_read: Option<fn(usize, &mut Vec<Pull>)>,
     /// Run the tick on a real `GitTrain::open` (its own clone under this folder) instead of the table-driven one.
     real_train: Option<PathBuf>,
@@ -256,7 +266,7 @@ impl World {
             reach: BTreeMap::new(),
             ci: FakeCi::new(),
             workflows: vec!["ci.yml".into()],
-            merge_check: None,
+            merge_check: merges_clean,
             on_read: None,
             real_train: None,
             planner: no_reach,
@@ -330,9 +340,7 @@ impl World {
             let mut table = TestTrain {
                 inner: {
                     let mut g = GitTrain::for_clone(self.repos.queue.clone(), self.repos.origin.to_str().unwrap());
-                    if let Some(f) = self.merge_check {
-                        g.merge_check = f;
-                    }
+                    g.merge_check = self.merge_check;
                     g
                 },
                 reach: self.reach.clone(),
@@ -385,6 +393,7 @@ fn set(items: &[&str]) -> BTreeSet<String> {
 #[test]
 fn one_green_pull_request_is_built_dispatched_and_landed() {
     let mut w = World::new();
+    w.merge_check = crate::merge_check::command;
     w.approved(1, "crates/x/new.rs", &["x"]);
     let Tick::Built { head, prs, .. } = w.tick() else {
         panic!("a train is built first")
@@ -531,7 +540,10 @@ fn several_suspects_are_all_dropped_and_a_failure_that_also_fails_on_main_blames
         "Q3: every suspect, no bisection; #3 reaches only the failure that is main's"
     );
     assert_eq!(w.labels_of(3), vec!["state/in-train"]);
-    // Only failures of main's own: the train stops, nobody is blamed.
+}
+
+#[test]
+fn only_failures_of_mains_own_stop_the_train_and_blame_nobody() {
     let mut w = World::new();
     w.approved(1, "crates/x/a.rs", &["x"]);
     let Tick::Built { head, .. } = w.tick() else { panic!() };
@@ -618,6 +630,7 @@ fn a_verdict_that_is_not_measured_never_lands() {
 #[test]
 fn a_conflict_drops_the_later_pull_request_at_once_and_the_train_goes_on() {
     let mut w = World::new();
+    w.merge_check = crate::merge_check::command;
     w.approved(1, "crates/x/same.rs", &["x"]);
     w.approved(2, "crates/x/same.rs", &["x"]);
     let Tick::Built { prs, dropped, .. } = w.tick() else { panic!() };
@@ -1039,7 +1052,10 @@ fn the_backup_window_holds_the_landing_too_and_an_unread_hour_is_not_measured() 
     assert!(matches!(t, Tick::Stuck { measured: false, .. }), "{t:?}");
     assert_eq!(w.repos.origin_ref("refs/heads/main"), before);
     assert!(matches!(w.tick_at(4), Tick::Landed { .. }));
-    // An unread hour never dispatches either.
+}
+
+#[test]
+fn an_unread_hour_never_dispatches_either() {
     let mut w = World::new();
     w.approved(1, "crates/x/a.rs", &["x"]);
     w.tick();
@@ -1068,7 +1084,7 @@ fn cannot_look(_: &crate::merge_check::Request) -> Result<paddock_cli::Report, p
 #[test]
 fn a_merge_the_merge_check_flags_is_dropped_and_left_out_of_the_train() {
     let mut w = World::new();
-    w.merge_check = Some(finds_bad_txt);
+    w.merge_check = finds_bad_txt;
     w.approved(1, "bad.txt", &["x"]);
     w.approved(2, "ui/b.ts", &["ui"]);
     let Tick::Built { head, prs, dropped } = w.tick() else { panic!() };
@@ -1087,7 +1103,7 @@ fn a_merge_the_merge_check_flags_is_dropped_and_left_out_of_the_train() {
 #[test]
 fn a_merge_check_that_could_not_look_stops_the_tick_with_an_error() {
     let mut w = World::new();
-    w.merge_check = Some(cannot_look);
+    w.merge_check = cannot_look;
     w.approved(1, "crates/x/a.rs", &["x"]);
     let e = w.try_tick_hour(Some(12)).unwrap_err();
     assert!(e.contains("did not look"), "{e}");
@@ -1239,7 +1255,10 @@ fn a_pull_request_whose_plan_runs_everything_is_not_a_suspect_for_everything() {
     let Tick::Dropped { dropped, .. } = w.tick() else { panic!() };
     assert_eq!(dropped, vec![2], "the precise suspect only");
     assert_eq!(w.labels_of(1), vec!["state/in-train"]);
-    // Only the wildcard pull request could explain it: the queue stops, it does not guess.
+}
+
+#[test]
+fn a_failure_only_the_pull_request_that_runs_everything_could_explain_stops_the_queue_without_guessing() {
     let mut w = World::new();
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["*"]), (2, "ui/b.ts", &["ui"])]);
     w.run(&head, 8001, RunState::Failed("failure".into()));
@@ -1462,6 +1481,66 @@ fn the_planner_child_and_the_merge_check_run_without_the_queue_token() {
 }
 
 #[test]
+fn a_raw_commit_reads_its_tree_its_parents_in_order_and_its_message_byte_for_byte() {
+    let t = "a".repeat(40);
+    let (p1, p2) = ("b".repeat(40), "c".repeat(40));
+    let raw = format!(
+        "tree {t}\nparent {p1}\nparent {p2}\nauthor q <q@x> 1 +0000\ncommitter q <q@x> 1 +0000\ngpgsig -----BEGIN-----\n parent {t}\n tree {p1}\n -----END-----\n\nMerge x into train\n\nbody\n"
+    );
+    let c = real::parse_raw_commit(&raw).unwrap();
+    assert_eq!(c.tree, t);
+    assert_eq!(c.parents, vec![p1.clone(), p2], "a signature's continuation lines are not parents");
+    assert_eq!(c.message, "Merge x into train\n\nbody\n");
+    let root = real::parse_raw_commit(&format!("tree {t}\nauthor q <q@x> 1 +0000\n\nm\n")).unwrap();
+    assert!(root.parents.is_empty());
+    let late = real::parse_raw_commit(&format!("tree {t}\nparent {p1}\nauthor q <q@x> 1 +0000\nparent {t}\n\nm\n")).unwrap();
+    assert_eq!(
+        late.parents,
+        vec![p1.clone()],
+        "as git reads it: the parents follow the tree, nothing after the author"
+    );
+    assert_eq!(
+        real::parse_raw_commit(&format!("parent {p1}\ntree {t}\n\nm")),
+        None,
+        "the tree header comes first"
+    );
+    assert_eq!(real::parse_raw_commit(""), None);
+}
+
+#[test]
+fn contains_is_false_for_a_missing_object_a_tree_and_a_commit_that_is_not_an_ancestor() {
+    let w = World::new();
+    let head = w.repos.branch("feat/c", "crates/x/c.rs");
+    let mut g = GitTrain::for_clone(w.repos.queue.clone(), w.repos.origin.to_str().unwrap());
+    g.fetch(&["main".into(), "feat/c".into()]).unwrap();
+    let main = g.main_head().unwrap();
+    assert!(g.contains(&main, &head).unwrap(), "main is an ancestor of the branch");
+    assert!(g.contains(&head, &head).unwrap(), "equal counts");
+    assert!(!g.contains(&head, &main).unwrap(), "the branch is not in main");
+    assert!(!g.contains(&"f".repeat(40), &head).unwrap(), "a missing object");
+    let tree = git(&w.repos.queue, &["rev-parse", &format!("{main}^{{tree}}")]);
+    assert!(!g.contains(&tree, &head).unwrap(), "a tree is no commit");
+    assert!(!g.contains("", &head).unwrap(), "an empty name");
+}
+
+#[test]
+fn a_fetch_of_a_branch_the_server_does_not_have_fails_and_an_absent_train_is_forgotten() {
+    let w = World::new();
+    w.repos.branch("feat/f", "crates/x/f.rs");
+    let mut g = GitTrain::for_clone(w.repos.queue.clone(), w.repos.origin.to_str().unwrap());
+    g.fetch(&["main".into(), super::ports::TRAIN_BRANCH.into(), "feat/f".into()])
+        .unwrap();
+    assert_eq!(
+        git(&w.repos.queue, &["rev-parse", "refs/remotes/origin/feat/f"]),
+        w.repos.origin_ref("refs/heads/feat/f"),
+        "every branch of one fetch arrives"
+    );
+    assert_eq!(g.train_head().unwrap(), None, "no train branch on the server");
+    let e = g.fetch(&["main".into(), "feat/gone".into(), "feat/f".into()]).unwrap_err();
+    assert!(e.contains("fetch") && e.contains("feat/gone"), "{e}");
+}
+
+#[test]
 fn open_makes_its_own_clone_of_the_given_url_and_resets_a_wrong_origin() {
     let w = World::new();
     let scratch = tempfile::tempdir().unwrap();
@@ -1650,7 +1729,7 @@ fn a_train_that_fails_only_on_mains_own_tests_is_blocked_not_triaged_again_and_a
 }
 
 #[test]
-fn a_blocked_train_is_rebuilt_when_main_moves_and_unhold_makes_it_triage_afresh() {
+fn unhold_makes_a_blocked_train_triage_afresh() {
     let mut w = World::new();
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
     w.run(&head, 9100, RunState::Failed("failure".into()));
@@ -1669,7 +1748,10 @@ fn a_blocked_train_is_rebuilt_when_main_moves_and_unhold_makes_it_triage_afresh(
     assert_eq!(w.labels_of(1), vec!["state/in-train"]);
     w.ci.failures.insert(9100, vec![failure("x t", &["x"], Blame::New)]);
     assert!(matches!(w.tick(), Tick::Dropped { .. }), "triaged afresh: now it is new");
-    // And a blocked train whose main moved is rebuilt.
+}
+
+#[test]
+fn a_blocked_train_is_rebuilt_when_main_moves() {
     let mut w = World::new();
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"])]);
     w.run(&head, 9100, RunState::Failed("failure".into()));
@@ -2419,20 +2501,28 @@ fn an_unread_hour_says_the_clock_not_a_tool() {
 
 // ---- gate jobs map to pull requests by the files they name -----------------------------------------------------------------------
 
-#[test]
-fn a_gate_job_failure_is_mapped_to_the_pull_requests_that_change_its_files_and_stops_when_none_does() {
-    let gate = |files: &[&str]| Failure {
+/// A failure of the train gates job that names `files`.
+fn gate(files: &[&str]) -> Failure {
+    Failure {
         what: "train gates (...): the job failed outside any test".into(),
         projects: set(&["traingate"]),
         files: files.iter().map(|s| s.to_string()).collect(),
         blame: Blame::New,
-    };
+    }
+}
+
+#[test]
+fn a_gate_job_failure_is_mapped_to_the_pull_requests_that_change_its_files() {
     let mut w = World::new();
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"]), (2, "ui/b.ts", &["ui"])]);
     w.run(&head, 9300, RunState::Failed("failure".into()));
     w.ci.failures.insert(9300, vec![gate(&["ui/b.ts"])]);
     let Tick::Dropped { dropped, .. } = w.tick() else { panic!() };
     assert_eq!(dropped, vec![2], "only the pull request that changes the named file");
+}
+
+#[test]
+fn a_gate_job_failure_stops_the_queue_when_no_pull_request_changes_its_files() {
     let mut w = World::new();
     let head = dispatched_train(&mut w, &[(1, "crates/x/a.rs", &["x"]), (2, "ui/b.ts", &["ui"])]);
     w.run(&head, 9301, RunState::Failed("failure".into()));

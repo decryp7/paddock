@@ -459,6 +459,31 @@ fn marker_text(m: &Marker) -> String {
     s
 }
 
+/// A commit as its raw object says: its tree, its parents in order and its message byte for byte.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawCommit {
+    /// The `tree` header.
+    pub tree: String,
+    /// The `parent` headers, in order.
+    pub parents: Vec<String>,
+    /// What follows the headers' blank line.
+    pub message: String,
+}
+
+/// Parses `git cat-file commit` output. Only the top-level headers count: a continuation line of a multi-line header (a
+/// signature, an embedded tag) starts with a space and is never read as a `tree` or `parent` header. `None` without a tree.
+pub fn parse_raw_commit(raw: &str) -> Option<RawCommit> {
+    let (headers, message) = raw.split_once("\n\n").unwrap_or((raw, ""));
+    let mut lines = headers.lines();
+    let tree = lines.next()?.strip_prefix("tree ")?.to_string();
+    let parents = lines.map_while(|l| l.strip_prefix("parent ")).map(str::to_string).collect();
+    Some(RawCommit {
+        tree,
+        parents,
+        message: message.to_string(),
+    })
+}
+
 /// Reads the trailers of a marker commit message.
 pub fn parse_marker(message: &str) -> Option<Marker> {
     let field = |k: &str| message.lines().find_map(|l| l.strip_prefix(k)).map(|v| v.trim().to_string());
@@ -479,17 +504,17 @@ pub fn parse_marker(message: &str) -> Option<Marker> {
 
 impl Train for GitTrain {
     fn fetch(&mut self, branches: &[String]) -> Result<(), String> {
-        for b in branches.iter().filter(|b| b.as_str() != TRAIN_BRANCH) {
-            self.ok_kind(
-                self.fetch_kind(),
-                &[
-                    "fetch",
-                    "--quiet",
-                    "--no-tags",
-                    "origin",
-                    &format!("+refs/heads/{b}:refs/remotes/origin/{b}"),
-                ],
-            )?;
+        // One fetch for every branch that must exist (one connection, one git child: a tick fetches on every call), then the train
+        // branch on its own, since it may be absent. A missing branch still fails the whole fetch, as one fetch per branch did.
+        let specs: Vec<String> = branches
+            .iter()
+            .filter(|b| b.as_str() != TRAIN_BRANCH)
+            .map(|b| format!("+refs/heads/{b}:refs/remotes/origin/{b}"))
+            .collect();
+        if !specs.is_empty() {
+            let mut args = vec!["fetch", "--quiet", "--no-tags", "origin"];
+            args.extend(specs.iter().map(String::as_str));
+            self.ok_kind(self.fetch_kind(), &args)?;
         }
         let spec = format!("+refs/heads/{TRAIN_BRANCH}:refs/remotes/origin/{TRAIN_BRANCH}");
         if !self
@@ -524,10 +549,8 @@ impl Train for GitTrain {
     }
 
     fn contains(&mut self, ancestor: &str, descendant: &str) -> Result<bool, String> {
-        let (exists, _) = self.git(&["cat-file", "-e", &format!("{ancestor}^{{commit}}")])?;
-        if !exists {
-            return Ok(false);
-        }
+        // `--is-ancestor` fails for an object that is missing or no commit as it does for one that is not an ancestor: both are
+        // "not contained", in one git child.
         Ok(self.git(&["merge-base", "--is-ancestor", ancestor, descendant])?.0)
     }
 
@@ -607,40 +630,39 @@ impl Train for GitTrain {
         if marker.round == 0 || (marker.round == 1 && (marker.since_run.is_some() || marker.since_workflow.is_some())) {
             return Ok(Some("its marker has a since-run on round 1, or round 0".into()));
         }
-        let parents = |g: &GitTrain, c: &str| -> Result<Vec<String>, String> {
-            Ok(g.ok(&["rev-list", "--parents", "-n", "1", c])?
-                .split_whitespace()
-                .skip(1)
-                .map(str::to_string)
-                .collect())
-        };
-        let tree =
-            |g: &GitTrain, c: &str| -> Result<String, String> { Ok(g.ok(&["rev-parse", &format!("{c}^{{tree}}")])?.trim().to_string()) };
-        // The message of a commit, byte for byte (what follows the headers' blank line).
-        let message = |g: &GitTrain, c: &str| -> Result<String, String> {
-            let raw = g.ok(&["cat-file", "commit", c])?;
-            Ok(raw.split_once("\n\n").map(|(_, m)| m.to_string()).unwrap_or_default())
+        // Each commit is read once, as its raw object: its tree, its parents and its message byte for byte (one git child per
+        // commit instead of three; a tick verifies the train once or twice).
+        let mut seen: BTreeMap<String, RawCommit> = BTreeMap::new();
+        let mut read = |g: &GitTrain, c: &str| -> Result<RawCommit, String> {
+            if let Some(r) = seen.get(c) {
+                return Ok(r.clone());
+            }
+            let r = parse_raw_commit(&g.ok(&["cat-file", "commit", c])?)
+                .ok_or_else(|| format!("git cat-file commit {c} gave no commit object"))?;
+            seen.insert(c.to_string(), r.clone());
+            Ok(r)
         };
         // The marker commit.
         let mut cur = head.to_string();
         let expected = format!("chore(queue): train round {}\n\n{}", marker.round, marker_text(marker));
-        if message(self, &cur)? != expected {
+        let top = read(self, &cur)?;
+        if top.message != expected {
             return Ok(Some(format!(
                 "the marker commit {} has a message the queue did not write",
                 short_id(&cur)
             )));
         }
-        let ps = parents(self, &cur)?;
-        if ps.len() != 1 || tree(self, &cur)? != tree(self, &ps[0])? {
+        if top.parents.len() != 1 || top.tree != read(self, &top.parents[0])?.tree {
             return Ok(Some(format!(
                 "the marker commit {} does not have exactly one parent and its parent's tree",
                 short_id(&cur)
             )));
         }
-        cur = ps[0].clone();
+        cur = top.parents[0].clone();
         // The merges, last first: every first-parent commit down to the base is one of them.
         for m in members.iter().rev() {
-            let ps = parents(self, &cur)?;
+            let c = read(self, &cur)?;
+            let ps = &c.parents;
             if ps.len() != 2 || ps[1] != m.head {
                 return Ok(Some(format!(
                     "commit {} is not a --no-ff merge of #{}'s approved head {}",
@@ -650,7 +672,7 @@ impl Train for GitTrain {
                 )));
             }
             let want = format!("Merge {} ({}) into train\n", m.branch, m.head.get(..9).unwrap_or(&m.head));
-            if message(self, &cur)? != want {
+            if c.message != want {
                 return Ok(Some(format!(
                     "the merge {} of #{} has a message the queue did not write",
                     short_id(&cur),
@@ -658,7 +680,7 @@ impl Train for GitTrain {
                 )));
             }
             let (ok, out) = self.git(&["merge-tree", "--write-tree", "--no-messages", &ps[0], &ps[1]])?;
-            if !ok || out.lines().next().map(str::trim) != Some(tree(self, &cur)?.as_str()) {
+            if !ok || out.lines().next().map(str::trim) != Some(c.tree.as_str()) {
                 return Ok(Some(format!(
                     "the tree of the merge of #{} ({}) is not what merging its parents gives",
                     m.number,

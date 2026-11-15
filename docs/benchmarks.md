@@ -1294,3 +1294,39 @@ folder was warm, so cold build plus run was more than 1800 s there.
 - **Bound chosen:** 3600 s for the build phase, about 4x the measured 866 s: the train 10 run under heavier load needed more than
   1800 s for build plus run, and the bound is a hang guard, not a budget. The check's own guard stays 1800 s and now covers only
   the run. Not measured: a cold build at load 150 or more, and the other entries' builds (all smaller workspaces or crates).
+
+## Queue scenario tests: git children per test (2026-11-15, fix/queue-tests-fast)
+
+Question: why do the merge-queue scenario tests (`tools/paddock-dev/src/queue/tests.rs`) take 20 to 55 s each on the Windows
+runner, and four of them cross nextest's 60 s limit when the job runs 42% slower (train 11 run 8115: job 577 s against 405 s in
+run 8110)?
+
+- **Machine:** Mac mini (arm64), 1-minute load 13 to 23 (train CI and other agents on it); Windows times from the CI logs of the
+  `paddock-dev (windows-latest)` job of runs 8054 (main), 8110 and 8115 (train 11)
+- **Command:** `cargo nextest run --locked --test-threads=1 queue::tests` in `tools/paddock-dev` (base 6fda267d3, then this branch);
+  git children counted by a `git` wrapper first on `PATH` that writes `$NEXTEST_TEST_NAME` per call (same run, default threads)
+- **Runs:** 1 counted run and 1 timed run each side; the module after the change 20 more times (all green, 6.3 to 6.4 s each)
+- **Numbers:**
+
+  | Test (after: the halves of a split test) | git children before | after | macOS before | after | Windows 8110 before |
+  |---|---|---|---|---|---|
+  | two_pull_requests_one_breaks... | 220 | 98 | 1.88 s | 1.11 s | 31.4 s |
+  | several_suspects... / only_failures_of_mains_own... | 309 | 82 / 46 | 2.86 s | 0.97 / 0.58 s | 43.1 s |
+  | the_backup_window_holds... / an_unread_hour_never... | 208 | 75 / 35 | 2.06 s | 0.85 / 0.48 s | 31.4 s |
+  | a_pull_request_whose_plan_runs_everything... / a_failure_only_the_pull_request... | 309 | 68 / 60 | 2.87 s | 0.81 / 0.75 s | 38.5 s |
+  | a_gate_job_failure... (split in two) | 313 | 70 / 62 | 3.02 s | 0.85 / 0.74 s | 34.9 s |
+  | a_blocked_train... (split in two) | 249 | 67 / 57 | 2.52 s | 0.94 / 0.66 s | 26.4 s |
+  | the whole module, 78 tests before, 90 after | 6953 | 3576 | 73.2 s | 48.9 s | |
+
+- **Where the time went:** in git children. The Windows time of a test divided by its git children is 0.11 to 0.15 s for every
+  slow test in run 8110 (0.19 s or more in 8115, where they hit 60 s), and on macOS the children were about two thirds of the
+  wall time. The fixture's two clones are 2 of about 220 children. Per tick the queue's adapter ran one fetch per branch, two
+  children per `contains` (`cat-file -e`, then `merge-base --is-ancestor`) and three per commit in `verify_train`; the real merge
+  check ran about 25 per merge.
+- **Change:** one fetch for all branches that must exist (the train branch stays its own fetch), `contains` as one
+  `merge-base --is-ancestor`, `verify_train` reads each commit once (`cat-file commit`: tree, parents and message), the scenario
+  tests use a clean merge check unless they are about it (the real one still runs in the one-green, conflict and `GitTrain::open`
+  scenarios), and the five tests that built two worlds are split in two.
+- **Windows estimate (not measured):** at 0.11 to 0.15 s per child the slowest test after (105 children) takes 12 to 16 s, the
+  four that timed out 4 to 15 s; at run 8115's 0.19 to 0.27 s about 28 s at most, half the 60 s limit.
+- **Memory measure:** not measured (no memory question)
