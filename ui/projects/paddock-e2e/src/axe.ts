@@ -29,18 +29,70 @@ export async function settleTransitions(page: Page): Promise<void> {
   });
 }
 
-/** The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`. */
+/** Properties whose change moves a colour axe reads (a width or transform transition does not). */
+const COLOUR_PROPERTY = /color|background|opacity|filter|fill|stroke|shadow|border|outline|visibility/;
+
+/** How often a scan is repeated when a colour moved during it; a page that keeps changing colours fails with its names. */
+const MAX_SCANS = 3;
+
+/**
+ * The colour transitions and animations that began on the page since the last call (by property or animation name), plus
+ * those still running: `transitionrun` and `animationstart` fire for every one that starts, however short, but only at the
+ * page's next rendering update, so one that began just now is found among the running animations instead.
+ */
+async function colourMotionSinceLastLook(page: Page): Promise<string[]> {
+  return page.evaluate((pattern) => {
+    const re = new RegExp(pattern);
+    const colourKeyframes = (a: Animation | undefined) =>
+      ((a?.effect as KeyframeEffect | null)?.getKeyframes().flatMap((k) => Object.keys(k)) ?? ['?']).some(
+        (k) => k === '?' || re.test(k.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)),
+      );
+    const w = window as unknown as { __pdAxeMotion?: string[] };
+    if (!w.__pdAxeMotion) {
+      const log: string[] = (w.__pdAxeMotion = []);
+      document.addEventListener('transitionrun', (e) => void (re.test(e.propertyName) && log.push(`transition ${e.propertyName}`)), true);
+      document.addEventListener(
+        'animationstart',
+        (e) => void (colourKeyframes(document.getAnimations().find((a) => (a as CSSAnimation).animationName === e.animationName)) && log.push(`animation ${e.animationName}`)),
+        true,
+      );
+    }
+    const running = document
+      .getAnimations()
+      .filter((a) => a.playState !== 'finished' && a.effect?.getComputedTiming().endTime !== Infinity)
+      .flatMap((a) =>
+        'transitionProperty' in a
+          ? re.test((a as CSSTransition).transitionProperty) ? [`transition ${(a as CSSTransition).transitionProperty}`] : []
+          : colourKeyframes(a) ? [`animation ${(a as CSSAnimation).animationName ?? '?'}`] : [],
+      );
+    return [...w.__pdAxeMotion.splice(0), ...running];
+  }, COLOUR_PROPERTY.source);
+}
+
+/**
+ * The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`.
+ *
+ * Colours read while they change are not a measurement: a transition or animation of a colour that starts during the scan
+ * (a theme switch the browser applied late, a toast fading in; Pitwall run 8134 read a row half-way to the dark theme)
+ * makes the scan count for nothing, and it is settled and run again, at most `MAX_SCANS` times.
+ */
 export async function axeViolations(page: Page, options: AxeOptions = {}): Promise<string[]> {
   // A click leaves the pointer on its target, and a hover tooltip (Material's opens after 500 ms and fades in) would appear
   // while axe scans, half transparent. Moving the pointer away cancels the pending tooltip and closes an open one; this runs
   // before settling so a tooltip that was already open finishes closing.
   await page.mouse.move(0, 0);
-  await settleTransitions(page);
   let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS]);
   for (const s of options.include ?? []) builder = builder.include(s);
   for (const s of options.exclude ?? []) builder = builder.exclude(s);
-  const results = await builder.analyze();
-  return results.violations.map((v) => (options.idsOnly ? v.id : `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`));
+  let moved: string[] = [];
+  for (let scan = 1; scan <= MAX_SCANS; scan++) {
+    await settleTransitions(page);
+    await colourMotionSinceLastLook(page);
+    const results = await builder.analyze();
+    moved = await colourMotionSinceLastLook(page);
+    if (!moved.length) return results.violations.map((v) => (options.idsOnly ? v.id : `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`));
+  }
+  throw new Error(`axe: colours kept changing during ${MAX_SCANS} scans (${[...new Set(moved)].join(', ')}), so no scan measured them. Next step: find what starts them on this page, or settle it before the scan.`);
 }
 
 /** `axeViolations` in each theme (the page is switched with `emulateMedia`), as `theme: rule: targets` lines. */

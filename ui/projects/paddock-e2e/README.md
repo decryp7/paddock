@@ -66,7 +66,7 @@ for (const colorScheme of THEMES) {
 | `e2ePort(name, fallback)` | The port from the environment; on CI a missing one is an error |
 | `ShellApp` and its parts | `frame` (heading, toggle, sidebar mode, regions, `focusBy`), `sidebar`, `statusBar` (items by id, chip, bell, jobs, "…"), `notifications` (toasts, centre, notices by cause, service details), `jobs`, `menus`, `dialogs` (window URLs, result, fit history, in-page dialogs), `settings` |
 | `dialogContracts(path)` | The dialogs of an app's contract file, to boot every dialog window by URL |
-| `axeViolations(page)`, `THEMES`, `WCAG_TAGS` | axe against WCAG 2.2 AA, as `rule: targets` lines |
+| `axeViolations(page)`, `THEMES`, `WCAG_TAGS` | axe against WCAG 2.2 AA, as `rule: targets` lines; a scan during which a colour transition or animation started is settled and run again (at most 3 scans, then an error naming them) |
 | `axeInThemes(page)`, `axeTargets(page, targets)` | axe in each theme (`theme: rule: targets`); or over a list of windows/screens (URL plus a ready check), returned by name so a failure names the window |
 | `axeEveryDialog(page, contractsPath, { inputs, skip })`, `dialogTargets`, `dialogWindowUrl` | axe over the window of every dialog in the app's `dialog-contracts.json`, both themes: `expect(await axeEveryDialog(page, path)).toEqual({})`. A new dialog is covered the moment it is in the file; one that cannot open alone is named in `skip` with a reason; an empty list is an error |
 | `tabWalk`, `expectTabOrder`, `expectReachableByKeyboard`, `expectEscapeReturnsFocus` | Keyboard-only flows (WCAG 2.1.1, 2.1.2, 2.4.3, 2.4.7): walk the Tab order (ends `left`, `cycled`, `trapped` or `limit`; `walkStep` is the pure rule), fail on a trap or a stop with no visible focus, prove named elements are reachable, prove Escape closes a popup and returns the focus to its trigger |
@@ -79,4 +79,5 @@ for (const colorScheme of THEMES) {
 | `@decryp7/paddock-e2e/retried-reporter` | Lists tests that passed only after a retry (console, `playwright-retried.md`, `$GITHUB_STEP_SUMMARY`); never changes the exit code |
 
 Build: `npm run build:e2e` in `ui/` (writes `ui/dist/paddock-e2e`). Its unit tests run with `npm run test:scripts`; the screenshot runner is
-also run for real on `data:` pages: `npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=screenshots`.
+also run for real on `data:` pages: `npx playwright test -c projects/paddock-e2e/selftest/playwright.config.ts --project=screenshots`, and the
+axe helpers in both engines with `--project=chromium --project=webkit`.
