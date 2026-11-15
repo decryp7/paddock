@@ -57,8 +57,6 @@ runs:
         GREEN: ${{ steps.green.outputs.cache-hit }}
         APP: ${{ inputs.app }}
         SCHEDULE_WORKFLOW: ${{ inputs.schedule-workflow }}
-        # A train waiting to dispatch counts as one in CI (./dev ci dispatch writes the variable; schedule-skip reads it).
-        PADDOCK_TRAIN_WAITING: ${{ vars.PADDOCK_TRAIN_WAITING }}
         PLAN_MODE_FULL: ${{ inputs.full }}
         TAG_PATTERN: ${{ inputs.tag-pattern }}
         PLAN_TOKEN: ${{ inputs.token }}

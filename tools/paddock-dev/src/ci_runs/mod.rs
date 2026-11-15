@@ -28,7 +28,6 @@ pub mod timings;
 pub mod triage;
 pub mod trial;
 pub mod verdict;
-pub mod waiting;
 
 use crate::wait::CurlHttp;
 use clap::Args;
@@ -200,11 +199,6 @@ pub struct ScheduleSkipArgs {
     /// workflow passes a week and a day). Whatever the limit, a workflow is never skipped twice in a row.
     #[arg(long, default_value_t = 36.0)]
     max_gap_hours: f64,
-    /// A train's waiting intent, `<train branch> <workflow> <expiry seconds>` (default: PADDOCK_TRAIN_WAITING, which the
-    /// schedule-skip and plan actions set from `vars.PADDOCK_TRAIN_WAITING`): while it is live the scheduled run skips as for a
-    /// queued train. `ci dispatch` writes it while a train waits for a busy runner.
-    #[arg(long, value_name = "VALUE")]
-    waiting: Option<String>,
 }
 
 /// `ci schedule-skip`: `skip=true|false` to `GITHUB_OUTPUT` (standard output without it), the annotation on standard output,
@@ -226,18 +220,7 @@ pub fn schedule_skip(a: &ScheduleSkipArgs) -> Result<Report, CliError> {
     let now_ms = time::now_secs() as f64 * 1000.0;
     let mut http = CurlHttp;
     let mut client = Client::new(&mut http, &server, &repo, &token);
-    let raw = a.waiting.clone().or_else(|| env(waiting::VAR)).unwrap_or_default();
-    // A value that cannot be read is ignored (the run proceeds as without it) and named, never a failure.
-    let intent = match waiting::Waiting::parse(&raw) {
-        Ok(w) => w,
-        Err(e) => {
-            println!(
-                "::warning::schedule skip: {e}; it is ignored. Next step: `ci dispatch` writes it; clear the repository variable if it is stale."
-            );
-            None
-        }
-    };
-    let d = schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, intent.as_ref(), now_ms, a.max_gap_hours);
+    let d = schedule_skip::decide_scheduled(&mut client, &event, &a.workflow, now_ms, a.max_gap_hours);
     let answer = format!("skip={}", d.skip());
     let mut text: Vec<String> = d.annotation().into_iter().collect();
     match env("GITHUB_OUTPUT") {
