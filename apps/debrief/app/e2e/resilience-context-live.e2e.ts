@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { gridRows, gridTotal, openApp, parseCount } from './app';
+import { gridRows, gridTotal, openApp, parseCount, pauseAhead } from './app';
 import { expectNoSeriousViolations } from './axe';
 import { openAppWith } from './mock-url';
 import { chooseMenu } from './menu-support';
@@ -64,7 +64,7 @@ test.describe('live tail', () => {
     await expect(live).toHaveAttribute('aria-pressed', 'false');
     // Freeze time a little ahead (time keeps running until the pause lands, so leave room), running what is due on
     // the way, then 2 s more: a refresh already under way lands...
-    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
+    await pauseAhead(page);
     await page.clock.runFor(2000);
     const stopped = await gridTotal(page).innerText();
     // ...and in 10 s more (over 30 live ticks) nothing else arrives.

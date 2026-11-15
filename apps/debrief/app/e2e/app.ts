@@ -26,17 +26,31 @@ export async function openApp(page: Page): Promise<void> {
 }
 
 /**
- * Clicks `target` with the page's clock paused, then lets time run again. Status-bar items appear on their own timers
- * (a job shows 2 s after it was queued, the problems badge after its scan) to the right of a right-anchored control and
- * move it; when one lands between mousedown and mouseup the two hit different elements and the browser fires no click
- * (debrief.yml run 8136, the AI browsing chip's Stop; lessons.md). Paused, no timer can move the layout during the click.
- * The page needs `page.clock.install()` before it loads.
+ * Pauses the page's clock (installed with `page.clock.install()` before the page loaded) 5 s ahead of the page's own time.
+ * Time keeps running until the pause lands, so the target must lie ahead; 5 s is a margin for a slow round trip on a loaded
+ * runner, not a wait: the clock jumps there at once, and the timers due on the way run once each (a toast's alert, a status
+ * item's tick), before anything is measured or clicked. From then on only `runFor` or `resume` moves time.
+ */
+export async function pauseAhead(page: Page): Promise<void> {
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
+}
+
+/**
+ * Clicks `target` with the page's clock paused (`pauseAhead`), then lets time run again, also when the click fails.
+ * Controls that move when a timer adds something next to them (a status item to the right of a right-anchored control: a
+ * job shows 2 s after it was queued, the problems badge after its scan; a toast stack that reorders on a new alert) can move
+ * between mousedown and mouseup, which then hit different elements, and the browser fires no click (debrief.yml run 8136, the
+ * AI browsing chip's Stop; runs 8004 and 7941, the toasts; lessons.md). Paused, no timer can move them during the click.
+ * This is the tests' guard only: the product fix that will replace it is ADR 0061 extended to the status bar and the toast
+ * stack (approved by the user, 2026-11-15), so that a control does not move when an item appears beside it.
  */
 export async function clickWithTimePaused(page: Page, target: Locator): Promise<void> {
-  // Pause a little ahead (time keeps running until the pause lands, so leave room); due timers run once on the way.
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
-  await target.click();
-  await page.clock.resume();
+  await pauseAhead(page);
+  try {
+    await target.click();
+  } finally {
+    await page.clock.resume();
+  }
 }
 
 /** Parses a count like "40,123" or "40.1k" shown in the UI into a number. */
