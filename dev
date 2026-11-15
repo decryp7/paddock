@@ -14,17 +14,26 @@ bin=$b
 stale=
 for f in "$l/Cargo.toml" "$l/Cargo.lock" "$l"/src/*.rs; do [ "$bin" -nt "$f" ] || { stale=1; break; }; done
 if [ -n "$stale" ]; then
-  # rustup 1.28 does not install a pinned toolchain by itself, so `cargo` may not run yet: build the launcher with any installed
-  # toolchain (the first of `rustup toolchain list`), and the launcher installs the pin.
+  # rustup 1.28 does not install a pinned toolchain by itself, so `cargo` may not run yet. Install the pin the way the old wrapper did
+  # (rustup reads rust-toolchain.toml in tools/paddock-dev: version, profile, components); the launcher then holds the install lock for
+  # every later install. If that fails, build the launcher with any installed toolchain (the first of `rustup toolchain list`).
   tc=
-  if ! cargo --version >/dev/null 2>&1 && command -v rustup >/dev/null 2>&1; then
-    tc=$(rustup toolchain list 2>/dev/null | { read -r t _ || :; printf '%s' "$t"; })
+  if ! cargo --version >/dev/null 2>&1; then
+    command -v rustup >/dev/null 2>&1 || { echo "::error::./dev: no Rust toolchain runs here and rustup is not installed. Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2; exit 2; }
+    echo "dev: cargo does not run here; installing the toolchain rust-toolchain.toml pins with rustup." >&2
+    (cd "$root/tools/paddock-dev" && rustup toolchain install >&2) || echo "dev: 'rustup toolchain install' failed; trying an installed toolchain." >&2
+    if ! cargo --version >/dev/null 2>&1; then
+      tc=$(rustup toolchain list 2>/dev/null | { read -r t _ || :; printf '%s' "$t"; })
+    fi
   fi
   # shellcheck disable=SC2086 # tc is one word or empty
   env -u CARGO_BUILD_TARGET ${tc:+RUSTUP_TOOLCHAIN=$tc} cargo build -q --release --locked --manifest-path "$l/Cargo.toml" --target-dir "$l/target" || {
     echo "::error::./dev could not build its launcher (tools/dev-launch, Rust 1.89 or newer). Install Rust with rustup (https://rustup.rs) and run ./dev again; to see why, run 'cargo build --release --locked' in tools/dev-launch." >&2
     exit 1
   }
+  # A build of another ./dev may be relinking the binary (cargo removes it, then links it again): wait for it, at most 5 s.
+  n=0
+  while [ ! -f "$b" ] && [ ! -f "$b.exe" ] && [ "$n" -lt 50 ]; do n=$((n + 1)); sleep 0.1; done
   bin=$b
   [ -f "$bin" ] || bin=$b.exe
 fi

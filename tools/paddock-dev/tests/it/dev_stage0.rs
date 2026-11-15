@@ -23,6 +23,7 @@ fn setup(cargo_runs: bool) -> Stage0 {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("repo");
     std::fs::create_dir_all(root.join("tools/dev-launch/src")).unwrap();
+    std::fs::create_dir_all(root.join("tools/paddock-dev")).unwrap();
     std::fs::copy(repo_root().join("dev"), root.join("dev")).unwrap();
     std::fs::write(root.join("tools/dev-launch/Cargo.toml"), "# placeholder\n").unwrap();
     std::fs::write(root.join("tools/dev-launch/Cargo.lock"), "# placeholder\n").unwrap();
@@ -212,6 +213,59 @@ fn a_failed_launcher_build_is_one_error_line_with_the_next_step() {
     assert_eq!(code, 1);
     assert!(
         err.contains("::error::./dev could not build its launcher") && err.contains("Rust 1.89 or newer") && err.contains("error: boom"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_machine_with_rustup_and_no_toolchain_installs_the_pin_before_building_the_launcher() {
+    let s = setup(false);
+    let shims = s.dir.path().join("shims");
+    let marker = s.dir.path().join("installed");
+    // cargo runs once the install has run; rustup lists no toolchain and records where it installs from.
+    let cargo = std::fs::read_to_string(shims.join("cargo")).unwrap().replace(
+        "echo 'error: no default toolchain' >&2; exit 1",
+        &format!("[ -e '{}' ] && {{ echo cargo 1.100.0; exit 0; }}; exit 1", marker.display()),
+    );
+    std::fs::write(shims.join("cargo"), cargo).unwrap();
+    write_script(
+        &shims.join("rustup"),
+        &format!(
+            "[ \"$1 $2\" = 'toolchain install' ] && {{ echo \"install in $PWD\" >> '{}.log'; touch '{}'; }}",
+            marker.display(),
+            marker.display()
+        ),
+    );
+    let (code, out, err) = s.dev(&s.root(), &["hello"], &[]);
+    assert_eq!(code, 0, "{err}");
+    let log = std::fs::read_to_string(format!("{}.log", marker.display())).unwrap();
+    assert!(
+        log.trim_end().ends_with("tools/paddock-dev"),
+        "rustup reads the pin from the tool's folder: {log}"
+    );
+    assert!(
+        std::fs::read_to_string(&s.log).unwrap().contains("rustup_toolchain=[]"),
+        "built with the pin, not a listed toolchain"
+    );
+    assert!(out.contains("launcher ran: hello"), "{out}");
+}
+
+#[test]
+fn without_rustup_and_without_cargo_it_is_one_error_line_with_the_next_step() {
+    let s = setup(false);
+    let shims = s.dir.path().join("shims");
+    std::fs::remove_file(shims.join("rustup")).unwrap();
+    let mut cmd = TestCommand::new("sh");
+    // Only the stand-in cargo, git's and the system folders: no rustup.
+    cmd.arg(s.root().join("dev"))
+        .current_dir(s.root())
+        .env("PATH", format!("{}:/usr/bin:/bin", shims.display()))
+        .env_remove("RUSTUP_TOOLCHAIN");
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("::error::./dev: no Rust toolchain runs here and rustup is not installed"),
         "{err}"
     );
 }
