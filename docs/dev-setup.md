@@ -4,11 +4,12 @@ One setup for every Paddock app (Debrief, Pitcrew, Pitwall, Spotter, Dyno, and l
 `docs/development.md` adds only what is specific to it (for example Debrief's libduckdb). The binding way of working is in
 [rules.md](rules.md); this page is how to get a machine ready for it.
 
-Check a machine, and install what is missing on macOS, with:
+Install Rust with rustup's official installer (<https://rustup.rs>, user-level); this repository has no script for that step. Then check
+a machine, and install what is missing on macOS, with:
 
 ```sh
-scripts/setup-dev.sh            # reports what is present and what is missing; changes nothing
-scripts/setup-dev.sh --install  # macOS: installs the missing tools, then reports again
+./dev setup            # reports what is present and what is missing; changes nothing (`--check` exits 5 when a tool is missing)
+./dev setup --install  # macOS: installs the missing tools, then reports again
 ```
 
 ## Tools
