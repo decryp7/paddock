@@ -3,9 +3,11 @@
 //!
 //! The Mac (and Windows) runner is one machine: two runs on it at once make each other's timing-sensitive tests time out (CI runs
 //! 7960 with 7961, and 7969-7971 with 7967, ER-36). So before it dispatches, the command lists the Gitea runs that are not
-//! finished, reads each one's workflow file to learn the runner classes its jobs use, and waits (like `dev wait --ci-run`,
-//! bounded by the required `--max`) while one of them shares a class with the workflow to start. Linux jobs run on container
-//! runners that may overlap, so a Linux-only workflow dispatches at once.
+//! finished, reads each one's job list (status and runner labels) and waits while one of them has an unfinished job on a class the
+//! workflow to start uses (user decision 2026-11-15, D-1: a run whose Mac jobs are done no longer holds the Mac runner while its
+//! Linux jobs run; a run without a job list is judged by the runner classes of its workflow file). The wait is like
+//! `dev wait --ci-run`, bounded by the required `--max`. Linux jobs run on container runners that may overlap, so a Linux-only
+//! workflow dispatches at once.
 //!
 //! A class is read from the jobs' `runs-on` labels (a matrix expression stands for the job's matrix values), following job-level
 //! `uses: ./.gitea/workflows/<file>` calls; other text of the file (steps, `runner.os` tests) does not count. The token is read
@@ -15,7 +17,8 @@
 //! `ci schedule-skip` did not see the train and each new scheduled run took the runner first (2026-11-14 11:0x, 2026-11-15 05:03
 //! to 07:07 behind runs 8112 to 8114). A `train/*` dispatch of a workflow whose first job runs the `runner-wait` action is sent at
 //! once: the queued run is what schedule-skip already yields to, and its first job ([`runner_wait`], on a Linux runner) waits
-//! until no OLDER unfinished run shares its single-machine class. Older only: two runs of one train never wait for each other
+//! until no OLDER run has an unfinished job (queued, waiting or running) on its single-machine class; an older run
+//! whose Mac and Windows jobs are done does not hold it, whatever Linux jobs it still runs. Older only: two runs of one train never wait for each other
 //! (the oldest goes first), so there is no deadlock. Any other dispatch waits here as before.
 
 use super::client::{Client, RunInfo};
@@ -133,17 +136,66 @@ struct BusyProbe<'a, 'b> {
     older_than: Option<u64>,
 }
 
+/// How many pages of 50 runs are read at most for the unfinished ones (the newest first).
+const BUSY_PAGES: u32 = 4;
+
 impl BusyProbe<'_, '_> {
+    /// The unfinished runs, newest first: pages until a short page, a page whose newest run is older than a day (a run the
+    /// server never finished is not taken as busy for longer, as in schedule-skip), or [`BUSY_PAGES`].
+    fn unfinished(&mut self) -> Result<Vec<RunInfo>, String> {
+        let now_ms = super::time::now_secs() as f64 * 1000.0;
+        let mut out = Vec::new();
+        for page in 1..=BUSY_PAGES {
+            let p = self.client.runs_page(page)?;
+            let n = p.runs.len();
+            let old = p
+                .runs
+                .first()
+                .and_then(|r| super::time::ts(&r.created_at))
+                .is_some_and(|c| now_ms - c > super::schedule_skip::STALE_MS);
+            out.extend(p.runs.into_iter().filter(|r| !r.finished()));
+            if n < 50 || old {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
     /// The unfinished runs that share a class, as text, or `None` when there are none.
     fn busy(&mut self) -> Result<Option<String>, String> {
-        let page = self.client.runs_page(1)?;
-        let older = |r: &&RunInfo| self.older_than.is_none_or(|own| r.id < own);
-        Ok(page
-            .runs
-            .iter()
-            .filter(|r| !r.finished())
-            .filter(older)
-            .find_map(|run| self.clash(run)))
+        let runs = self.unfinished()?;
+        let older_than = self.older_than;
+        for run in runs.iter().filter(|r| older_than.is_none_or(|own| r.id < own)) {
+            if let Some(why) = self.job_clash(run)? {
+                return Ok(Some(why));
+            }
+        }
+        Ok(None)
+    }
+
+    /// A run blocks only while one of its jobs on a shared class is not finished (queued, waiting or running), never for its
+    /// Linux jobs: for every dispatch (user decision 2026-11-15, D-1) and for a waiting train run. A run whose job list is
+    /// missing (404) is judged by its workflow file.
+    fn job_clash(&mut self, run: &RunInfo) -> Result<Option<String>, String> {
+        let Some(jobs) = self.client.timed_jobs(run.id)? else {
+            return Ok(self.clash(run));
+        };
+        for j in jobs.iter().filter(|j| j.status != "completed") {
+            let mut classes = BTreeSet::new();
+            classify_all(&j.labels, &mut classes);
+            let shared: Vec<&str> = classes.intersection(&self.wanted).map(|c| c.name()).collect();
+            if !shared.is_empty() {
+                return Ok(Some(format!(
+                    "run {} ({}) has job {} ({}) on {}",
+                    run.id,
+                    run.workflow(),
+                    j.name,
+                    if j.status.is_empty() { "unfinished" } else { &j.status },
+                    shared.join(" and ")
+                )));
+            }
+        }
+        Ok(None)
     }
 
     /// A workflow file that is not in this checkout cannot be classified and does not block.
@@ -365,20 +417,55 @@ pub enum RunnerWait {
     Unreadable(String),
 }
 
-/// `ci runner-wait`: the first job of a train run waits, on a Linux runner, until no older unfinished run shares one of its
-/// workflow's single-machine runner classes (at most `max`). `own` is this run's id, `workflow` its file.
+/// How many times `ci runner-wait` reads its own run before it gives up and goes on (each read already retries in the client).
+pub const OWN_RUN_READS: u32 = 5;
+
+/// `ci runner-wait`: the first job of a train run waits, on a Linux runner, until no older run has an unfinished job on one of
+/// its workflow's single-machine runner classes (at most `max`). `own` is this run's id; its workflow file is read from the run
+/// itself (`ci.yml@refs/heads/train/...`), retried [`OWN_RUN_READS`] times `interval` apart before it fails open. `backoff_ms`
+/// is the client's wait between its own retries (tests: 0).
 #[allow(clippy::too_many_arguments)]
 pub fn runner_wait(
     http: &mut dyn Http,
     target: &Target<'_>,
     own: u64,
-    workflow: &str,
     max: Duration,
     interval: Duration,
     read: ReadWorkflow<'_>,
     clock: &mut dyn Clock,
     log: &mut dyn Write,
+    backoff_ms: u64,
 ) -> Result<RunnerWait, String> {
+    let mut client = Client::new(http, target.server, target.repo, target.token);
+    client.backoff_ms = backoff_ms;
+    let mut workflow = None;
+    let mut last = String::new();
+    for attempt in 1..=OWN_RUN_READS {
+        match client.run(own) {
+            Ok(Some(r)) => {
+                workflow = Some(r.workflow().to_string());
+                break;
+            }
+            Ok(None) => {
+                last = format!("the server has no run {own}");
+                break;
+            }
+            Err(e) => {
+                last = e;
+                if attempt < OWN_RUN_READS {
+                    clock.sleep(interval);
+                }
+            }
+        }
+    }
+    let Some(workflow) = workflow.filter(|w| !w.is_empty()) else {
+        let _ = writeln!(
+            log,
+            "::warning::runner-wait: run {own} could not be read ({last}); it goes on without waiting (fail open). Check that the job token can read the repository's Actions runs."
+        );
+        return Ok(RunnerWait::Unreadable(last));
+    };
+    let workflow = workflow.as_str();
     let wanted = classes_of(workflow, read)?;
     if wanted.is_empty() {
         let _ = writeln!(
@@ -387,8 +474,6 @@ pub fn runner_wait(
         );
         return Ok(RunnerWait::Free { waited: Duration::ZERO });
     }
-    let mut client = Client::new(http, target.server, target.repo, target.token);
-    client.backoff_ms = 0;
     let mut probe = BusyProbe {
         client: &mut client,
         read,
@@ -441,6 +526,11 @@ mod tests {
         lists: VecDeque<Value>,
         posts: Vec<(String, Value)>,
         gets: usize,
+        /// `GET .../runs/<id>`: the run's workflow path; `own_errors` reads fail first.
+        own: Vec<(u64, String)>,
+        own_errors: usize,
+        /// `GET .../runs/<id>/jobs`: the job lists in order per run (the last one repeats).
+        jobs: Vec<(u64, VecDeque<Value>)>,
     }
 
     impl Script {
@@ -449,6 +539,9 @@ mod tests {
                 lists: lists.into(),
                 posts: Vec::new(),
                 gets: 0,
+                own: Vec::new(),
+                own_errors: 0,
+                jobs: Vec::new(),
             }
         }
     }
@@ -456,6 +549,25 @@ mod tests {
     impl Http for Script {
         fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
             assert!(!token.is_empty());
+            if let Some(rest) = url.split("/actions/runs/").nth(1) {
+                let id: u64 = rest.split(['/', '?']).next().unwrap().parse().unwrap();
+                if rest.contains("/jobs") {
+                    let Some((_, list)) = self.jobs.iter_mut().find(|(r, _)| *r == id) else {
+                        return Err("HTTP 404".into());
+                    };
+                    return Ok(if list.len() > 1 {
+                        list.pop_front().unwrap()
+                    } else {
+                        list[0].clone()
+                    });
+                }
+                if self.own_errors > 0 {
+                    self.own_errors -= 1;
+                    return Err("curl: (28) timed out".into());
+                }
+                let path = &self.own.iter().find(|(r, _)| *r == id).expect("the run").1;
+                return Ok(json!({"id": id, "path": path, "status": "in_progress", "event": "workflow_dispatch"}));
+            }
             assert!(url.contains("/actions/runs?"), "{url}");
             self.gets += 1;
             Ok(if self.lists.len() > 1 {
@@ -614,7 +726,7 @@ mod tests {
         }
     }
 
-    fn wait_here(http: &mut Script, own: u64, wf: &str, max: &str) -> (Result<RunnerWait, String>, String, Duration) {
+    fn wait_here(http: &mut Script, own: u64, max: &str) -> (Result<RunnerWait, String>, String, Duration) {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
         let r = runner_wait(
             http,
@@ -624,55 +736,160 @@ mod tests {
                 token: "job-token",
             },
             own,
-            wf,
             parse_duration(max).unwrap(),
             Duration::from_secs(15),
             &files,
             &mut clock,
             &mut log,
+            0,
         );
         (r, String::from_utf8(log).unwrap(), clock.0)
     }
 
+    fn jobs(list: &[(&str, &str, &str)]) -> Value {
+        json!({"jobs": list.iter().enumerate().map(|(i, (name, label, status))| json!({
+            "id": i + 1, "name": name, "labels": [label], "status": status, "conclusion": if *status == "completed" { "success" } else { "" }
+        })).collect::<Vec<_>>()})
+    }
+
+    /// A train run 8120 of waits.yml, an older run 8112 and a newer one 8121 (both unfinished).
+    fn train_world(older_jobs: Vec<Value>) -> Script {
+        let mut http = Script::new(vec![runs(&[
+            (8121, "mac.yml", "queued"),
+            (8120, "waits.yml", "in_progress"),
+            (8112, "mac.yml", "in_progress"),
+        ])]);
+        http.own = vec![(8120, "waits.yml@refs/heads/train/2026-11-15-12".into())];
+        http.jobs = vec![
+            (8112, older_jobs.into()),
+            (8121, vec![jobs(&[("t", "macos-latest", "queued")])].into()),
+            (
+                8120,
+                vec![jobs(&[("plan", "ubuntu-latest", "in_progress"), ("t", "macos-latest", "waiting")])].into(),
+            ),
+        ];
+        http
+    }
+
     #[test]
-    fn a_train_run_waits_only_for_older_runs_on_its_runner_then_goes_on() {
-        // An older scheduled run holds the Mac; this run (8120) and a newer one (8121) of the same train are queued.
-        let mut http = Script::new(vec![
-            runs(&[
-                (8121, "mac.yml", "queued"),
-                (8120, "waits.yml", "in_progress"),
-                (8112, "mac.yml", "in_progress"),
+    fn a_train_run_waits_only_while_an_older_run_has_an_unfinished_mac_job_not_for_its_later_linux_jobs() {
+        // Review 2026-11-15: waiting for the whole older run held a Linux slot through that run's later Linux jobs.
+        let mut http = train_world(vec![
+            jobs(&[
+                ("rust (macos)", "macos-latest", "in_progress"),
+                ("report", "ubuntu-latest", "waiting"),
             ]),
-            runs(&[
-                (8121, "mac.yml", "queued"),
-                (8120, "waits.yml", "in_progress"),
-                (8112, "mac.yml", "completed"),
+            jobs(&[
+                ("rust (macos)", "macos-latest", "completed"),
+                ("report", "ubuntu-latest", "in_progress"),
             ]),
         ]);
-        let (r, log, t) = wait_here(&mut http, 8120, "waits.yml", "1h");
+        let (r, log, t) = wait_here(&mut http, 8120, "1h");
         assert_eq!(
             r.unwrap(),
             RunnerWait::Free {
                 waited: Duration::from_secs(15)
-            }
+            },
+            "{log}"
         );
-        assert_eq!(t, Duration::from_secs(15), "neither itself nor the newer run 8121 held it up");
+        assert_eq!(
+            t,
+            Duration::from_secs(15),
+            "neither itself nor the newer run 8121 held it up: {log}"
+        );
         assert!(log.contains("waiting for the macOS runner to be free"), "{log}");
         assert!(log.contains("runner-wait: run 8120 (waits.yml) goes on after waiting 15s"), "{log}");
     }
 
     #[test]
-    fn a_train_run_still_blocked_at_max_fails_with_the_busy_run_and_a_linux_only_one_never_waits() {
-        let mut http = Script::new(vec![runs(&[(8112, "mac.yml", "in_progress")])]);
-        let (r, log, t) = wait_here(&mut http, 8120, "waits.yml", "1m");
-        assert!(matches!(r.unwrap(), RunnerWait::StillBusy { last } if last.contains("run 8112")));
-        assert_eq!(t, Duration::from_secs(60));
+    fn an_older_run_with_only_linux_jobs_left_does_not_hold_the_train_and_a_queued_mac_job_does() {
+        let mut http = train_world(vec![jobs(&[
+            ("rust (macos)", "macos-latest", "completed"),
+            ("e2e", "ubuntu-latest", "in_progress"),
+        ])]);
+        let (r, _log, t) = wait_here(&mut http, 8120, "1h");
+        assert_eq!(r.unwrap(), RunnerWait::Free { waited: Duration::ZERO });
+        assert_eq!(t, Duration::ZERO);
+        // A Mac job that has not started yet (queued behind the runner, or waiting for its needs) still claims the runner.
+        let mut http = train_world(vec![jobs(&[
+            ("plan", "ubuntu-latest", "in_progress"),
+            ("rust (macos)", "macos-latest", "waiting"),
+        ])]);
+        let (r, log, _) = wait_here(&mut http, 8120, "1m");
+        assert!(
+            matches!(r.unwrap(), RunnerWait::StillBusy { last } if last.contains("run 8112 (mac.yml) has job rust (macos) (waiting) on macOS")),
+            "{log}"
+        );
         assert!(
             log.contains("::error::runner-wait: run 8120 (waits.yml) still waits after 1m"),
             "{log}"
         );
+    }
+
+    #[test]
+    fn the_own_run_is_read_again_after_an_error_and_only_a_lasting_error_fails_open() {
+        let mut http = train_world(vec![jobs(&[("rust (macos)", "macos-latest", "completed")])]);
+        // The client retries each read 4 times itself; 5 failures outlast one read, so the second read comes 15 s later.
+        http.own_errors = 5;
+        let (r, log, t) = wait_here(&mut http, 8120, "1h");
+        assert_eq!(
+            r.unwrap(),
+            RunnerWait::Free {
+                waited: Duration::from_secs(15)
+            },
+            "the reading time counts as waited: {log}"
+        );
+        assert_eq!(
+            t,
+            Duration::from_secs(15),
+            "one read failed after its own retries, the next 15 s later worked"
+        );
+        assert!(!log.contains("fail open"), "{log}");
+        let mut http = train_world(vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])]);
+        http.own_errors = 99;
+        let (r, log, _) = wait_here(&mut http, 8120, "1h");
+        assert!(matches!(r.unwrap(), RunnerWait::Unreadable(e) if e.contains("timed out")));
+        assert!(
+            log.contains("::warning::runner-wait: run 8120 could not be read") && log.contains("fail open"),
+            "{log}"
+        );
+    }
+
+    #[test]
+    fn every_dispatch_waits_only_for_unfinished_mac_jobs_of_the_runs_before_it() {
+        // D-1 (user, 2026-11-15): a run whose Mac jobs are done does not hold the Mac runner while its Linux jobs run.
         let mut http = Script::new(vec![runs(&[(8112, "mac.yml", "in_progress")])]);
-        let (r, log, _) = wait_here(&mut http, 8120, "linux.yml", "1m");
+        http.jobs = vec![(
+            8112,
+            vec![
+                jobs(&[
+                    ("rust (macos)", "macos-latest", "in_progress"),
+                    ("report", "ubuntu-latest", "waiting"),
+                ]),
+                jobs(&[
+                    ("rust (macos)", "macos-latest", "completed"),
+                    ("report", "ubuntu-latest", "in_progress"),
+                ]),
+            ]
+            .into(),
+        )];
+        let (r, log, t) = go(&mut http, "mac.yml", "1h");
+        assert_eq!(
+            r.unwrap(),
+            Dispatched::Yes {
+                waited: Duration::from_secs(15)
+            },
+            "{log}"
+        );
+        assert_eq!(t, Duration::from_secs(15));
+        assert_eq!(http.posts.len(), 1, "dispatched while run 8112 still runs its Linux job");
+    }
+
+    #[test]
+    fn a_linux_only_train_run_never_waits() {
+        let mut http = train_world(vec![jobs(&[("rust (macos)", "macos-latest", "in_progress")])]);
+        http.own = vec![(8120, "linux.yml@refs/heads/train/t".into())];
+        let (r, log, _) = wait_here(&mut http, 8120, "1m");
         assert_eq!(r.unwrap(), RunnerWait::Free { waited: Duration::ZERO });
         assert_eq!(http.gets, 0, "{log}");
     }

@@ -2172,7 +2172,8 @@ scheduled run took the runner first: on 2026-11-14 around 11:00 and on 2026-11-1
 first fix recorded a "waiting" marker in a repository Actions variable; review found that it needs a repo-admin-scoped token,
 and the common-practice answer is a queued run, as CI systems do (a job waits on a free runner, not the client). It was
 reverted. Now `ci dispatch` sends a `train/*` run of a workflow whose first job runs the `runner-wait` action at once, and that
-Linux job waits (`./dev ci runner-wait`, at most 2h30m, logged) until no OLDER unfinished run shares its Mac or Windows runner.
+Linux job waits (`./dev ci runner-wait`, at most 2h30m, logged) until no OLDER run has an unfinished job on its Mac or Windows class (an older run's later Linux jobs do not hold it:
+review round 2 found that waiting for the whole run could fill the Linux slots with waiters).
 Older only: two runs of one train never wait for each other, so the oldest always goes. The queued run is what schedule-skip
 already yields to, with its bounds (never twice in a row, never past the gap). Conformance checks that every macOS or Windows
 job of such a workflow needs the runner-wait job. **Rule:** a wait for a shared resource lives in the queued job, not in the

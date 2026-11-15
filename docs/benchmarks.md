@@ -1407,3 +1407,31 @@ CI timeout reproduce under local load?
   agents' cap) does not reach that, so the split rests on the log's per-step times, not on a local reproduction. macOS 27 shows
   no other process's environment (`ps -E` and sysinfo's `environ()` both return none for a same-user `sleep` given a variable),
   so the reaper's token is read on Linux only. Raw output in the agent's scratch folder, not kept.
+
+## How long a run holds the Mac and Windows runners (2026-11-15, fix/small-foundation-2026-11-15)
+
+The limit of the `runner-wait` action (`.gitea/actions/runner-wait/action.yml`, `max`) must cover the time an older run keeps
+the single-machine runners busy.
+
+- **Machine:** the Gitea Actions API of decryp7/paddock (read-only), from the Mac mini
+- **Load:** not relevant (API reads)
+- **Command:** a scratch script (curl over `/actions/runs` and `/actions/runs/<id>/jobs`): per completed, not cancelled run,
+  the span from the first start to the last end of its jobs whose labels name macOS or Windows
+- **Window:** the newest 200 runs, 2026-11-10T02:46 to 2026-11-15T12:25 (146 runs had such jobs)
+- **Numbers:**
+
+  | Measure | Value |
+  |---|---|
+  | median span | 19.7 min |
+  | p90 | 84.3 min |
+  | p95 | 130.1 min |
+  | longest since 2026-11-13 | 94.6 min (debrief.yml, run 8047) |
+  | longest in the window | 327.9 min (debrief.yml, run 7925, 2026-11-11, runs overlapping on the Mac before `ci dispatch` waited) |
+  | runs over 150 min | 6 of 146, all from 2026-11-11 |
+  | longest single job | 151.8 min (VM tooling tests on macOS, run 7932, 2026-11-11) |
+
+- **Verdict:** 2h30m (150 min) covers every run since 2026-11-13 and 140 of 146 in the window; the six longer ones were overlap
+  runs of 2026-11-11, the shape the one-at-a-time rule removes. It stays under act_runner's default 3 h job timeout (the
+  runners' own configured timeout was not read).
+- **Notes:** the span counts jobs queued behind the runner too (start is when a runner took the job). Raw output in the agent's
+  scratch folder, not kept.

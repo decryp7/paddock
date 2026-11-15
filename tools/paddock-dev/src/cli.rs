@@ -318,7 +318,7 @@ enum CiCommand {
     /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once, and so does a train
     /// (`train/*`) whose workflow waits in its own first job (the runner-wait action), so scheduled runs see it queued.
     Dispatch(ci_runs::DispatchArgs),
-    /// The first job of a train run (the runner-wait action): wait, at most --max, until no older unfinished run is on this run's
+    /// The first job of a train run (the runner-wait action): wait, at most --max, until no older run has an unfinished job on this run's
     /// single-machine runner (macOS, Windows). Fails open when the runs cannot be read; ends with an `::error::` at --max.
     RunnerWait(ci_runs::RunnerWaitArgs),
     /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).

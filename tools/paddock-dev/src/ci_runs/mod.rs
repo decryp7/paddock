@@ -480,22 +480,6 @@ pub fn runner_wait(a: &RunnerWaitArgs) -> Result<Report, CliError> {
         .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
     let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
     let mut http = CurlHttp;
-    // This run's workflow file, from the run itself (`ci.yml@refs/heads/train/...`).
-    let workflow = {
-        let mut client = Client::new(&mut http, &server, &repo, &token);
-        match client.run(own) {
-            Ok(Some(r)) => r.workflow().to_string(),
-            Ok(None) => String::new(),
-            Err(e) => {
-                println!("::warning::runner-wait: run {own} could not be read ({e}); it goes on without waiting (fail open).");
-                return Ok(Report::new(serde_json::json!({"waited": false, "unreadable": e}), String::new()));
-            }
-        }
-    };
-    if workflow.is_empty() {
-        println!("::warning::runner-wait: the server has no run {own}; it goes on without waiting (fail open).");
-        return Ok(Report::new(serde_json::json!({"waited": false}), String::new()));
-    }
     let mut clock = dispatch::system_clock();
     let target = dispatch::Target {
         server: &server,
@@ -506,12 +490,12 @@ pub fn runner_wait(a: &RunnerWaitArgs) -> Result<Report, CliError> {
         &mut http,
         &target,
         own,
-        &workflow,
         max,
         interval,
         &read,
         &mut clock,
         &mut std::io::stdout(),
+        500,
     )
     .map_err(|e| CliError::failure(e).with_hint("Check the workflow file and the job token's read access to Actions runs."))?;
     match r {

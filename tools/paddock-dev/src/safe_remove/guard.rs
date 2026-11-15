@@ -269,6 +269,53 @@ mod tests {
         assert!(rows >= 15, "the table was read ({rows} rows)");
     }
 
+    /// The same table on Windows, in Windows spelling: `\\` separators, and every target once more as `\\?\\<path>`. The
+    /// rows that need a link are left out (a symlink needs Developer Mode or an elevated token on Windows; junctions are
+    /// covered by `a_link_is_removed_as_a_link_and_its_target_stays`), and so is the shell copy, which Windows CI does not run.
+    #[cfg(windows)]
+    #[test]
+    fn the_shared_parity_table_holds_in_windows_spelling() {
+        let table = include_str!("../../tests/fixtures/safe-remove-parity.tsv");
+        let mut rows = 0;
+        for line in table
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.starts_with("name\t") && !l.is_empty())
+        {
+            let f: Vec<&str> = line.split('\t').collect();
+            let [name, root, target, result, gone] = f[..] else {
+                panic!("bad row: {line}")
+            };
+            if line.contains("link") {
+                continue;
+            }
+            for verbatim in [false, true] {
+                let d = crate::ci_host::canonical_tempdir();
+                let b = d.path().to_string_lossy().trim_start_matches(r"\\?\").to_string();
+                std::fs::create_dir_all(d.path().join("root/a/b")).unwrap();
+                std::fs::write(d.path().join("root/a/b/f"), b"x").unwrap();
+                std::fs::create_dir_all(d.path().join("outside/keep")).unwrap();
+                std::fs::write(d.path().join("outside/keep/f"), b"x").unwrap();
+                let fill = |s: &str| s.replace("<B>", &b).replace('/', "\\");
+                let t = if verbatim { format!(r"\\?\{}", fill(target)) } else { fill(target) };
+                let got = remove_under(Path::new(&fill(root)), Path::new(&t), None);
+                let want_ok = matches!(result, "ok" | "ok-fold|refused-nofold");
+                assert_eq!(got.is_ok(), want_ok, "{name} ({t}): {got:?}");
+                if gone != "-" {
+                    assert!(
+                        std::fs::symlink_metadata(d.path().join(gone)).is_err(),
+                        "{name}: {gone} is still there"
+                    );
+                }
+                assert!(
+                    d.path().join("outside/keep/f").exists(),
+                    "{name}: the folder outside the root was touched"
+                );
+                rows += 1;
+            }
+        }
+        assert!(rows >= 14, "the table was read ({rows} runs)");
+    }
+
     #[test]
     fn a_folder_under_the_root_goes_with_its_content() {
         let (_d, root) = tree();

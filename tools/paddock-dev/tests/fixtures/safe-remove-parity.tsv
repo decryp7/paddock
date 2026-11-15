@@ -12,6 +12,9 @@
 #   gone: the path below <B> that is gone afterwards, or - when nothing is removed. Every row also checks that
 #   <B>/outside/keep/f is still there and, for a refused row, that <B>/root/a/b/f is too.
 #   A result `ok-fold|refused-nofold` is ok where names are compared without case (macOS, Windows) and refused elsewhere.
+# On Windows, guard.rs's `the_shared_parity_table_holds_in_windows_spelling` runs the rows without a link in Windows spelling
+# (`\` separators, and each target again as `\\?\<path>`). Not covered there: the link rows (a symlink needs Developer Mode or
+# an elevated token) and the shell copy (Windows CI does not run conformance/test/safe-rm.test.mjs).
 name	root	target	result	gone
 a folder strictly under the root	<B>/root	<B>/root/a	ok	root/a
 a file strictly under the root	<B>/root	<B>/root/a/b/f	ok	root/a/b/f
