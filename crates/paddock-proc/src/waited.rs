@@ -88,14 +88,23 @@ mod waited_tests {
     use super::*;
     use crate::command;
 
-    /// The identity of the process whose pid the script wrote to `pid_file`, read as soon as the file is complete.
-    fn grandchild_of(pid_file: &std::path::Path) -> ProcessId {
-        paddock_testkit::wait_for("the grandchild's identity", || {
+    /// The identity of the process whose pid the script wrote to `pid_file`, read as soon as the file holds a complete line,
+    /// or `None` when that process has ended (or its pid was handed on: a holder that started after the file was written).
+    /// `None` is final, never "not yet": the wait is for the file only. (`paddock_testkit_start::recorded` does this for every
+    /// other crate; this crate's tests cannot use it, it depends on this crate.)
+    fn grandchild_of(pid_file: &std::path::Path) -> Option<ProcessId> {
+        let pid = paddock_testkit::wait_for("the grandchild's pid file", || {
             std::fs::read_to_string(pid_file)
                 .ok()
-                .and_then(|t| t.trim().parse::<u32>().ok())
-                .and_then(ProcessId::of)
-        })
+                .and_then(|t| t.strip_suffix('\n')?.trim().parse::<u32>().ok())
+        });
+        let written = std::fs::metadata(pid_file)
+            .and_then(|m| m.modified())
+            .expect("the pid file's modification time");
+        let ms = written
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+        ProcessId::of_recorded(pid, ms)
     }
 
     #[test]
@@ -144,7 +153,8 @@ mod waited_tests {
                 },
             );
             // Held while it lives: the identity (pid and start time), never the bare pid (rule 53).
-            let grandchild = grandchild_of(&pid_file);
+            let grandchild =
+                grandchild_of(&pid_file).expect("the grandchild runs until the cancel");
             cancel.store(true, Ordering::SeqCst);
             let (outcome, cancelled) = run.join().unwrap();
             (outcome, cancelled, grandchild)
@@ -160,6 +170,17 @@ mod waited_tests {
 
     #[test]
     fn a_timeout_ends_the_whole_tree_grandchildren_included() {
+        timeout_ends_the_grandchild(false);
+    }
+
+    /// The same, with the test's look at the grandchild's pid file only after the run has returned (a test thread that a
+    /// loaded host kept off the CPU for the whole 3 s timeout): the grandchild is gone, and its complete pid file names it.
+    #[test]
+    fn a_grandchild_first_seen_after_the_timeout_counts_as_ended() {
+        timeout_ends_the_grandchild(true);
+    }
+
+    fn timeout_ends_the_grandchild(look_late: bool) {
         let dir = tempfile::tempdir().unwrap();
         let pid_file = dir.path().join("grandchild.pid");
         let mut cmd = command("sh");
@@ -170,15 +191,20 @@ mod waited_tests {
         // The timeout under test, long enough that the grandchild's identity is read while it lives.
         let (outcome, grandchild) = std::thread::scope(|s| {
             let run = s.spawn(|| run_waited(cmd, Duration::from_secs(3), Sink::Inherit).unwrap());
-            let grandchild = grandchild_of(&pid_file);
-            (run.join().unwrap(), grandchild)
+            if look_late {
+                let outcome = run.join().unwrap();
+                (outcome, grandchild_of(&pid_file))
+            } else {
+                let grandchild = grandchild_of(&pid_file);
+                (run.join().unwrap(), grandchild)
+            }
         });
         assert_eq!(outcome, Outcome::TimedOut);
         // Ended processes are reaped by init: wait for that condition, bounded.
         paddock_testkit::wait_until_within(
             "the grandchild to be gone after the timeout",
             Duration::from_secs(10),
-            || grandchild.has_ended(),
+            || grandchild.is_none_or(ProcessId::has_ended),
         );
     }
 }

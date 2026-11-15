@@ -24,7 +24,14 @@ zip.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+# The identity of a pid a stand-in wrote (launch.rs tests, rule 53) and the kit's bounded poll.
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+paddock-testkit-start = { path = "../../../../crates/paddock-testkit-start" }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
+
+# The stand-in's go FIFO is opened non-blocking (O_NONBLOCK, ENXIO) in the launch tests.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
 
 [lints]
 workspace = true

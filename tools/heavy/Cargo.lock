@@ -942,6 +942,7 @@ dependencies = [
  "paddock-env",
  "paddock-proc",
  "paddock-testkit",
+ "paddock-testkit-start",
  "proptest",
  "serde_json",
  "signal-hook",
@@ -996,6 +997,15 @@ dependencies = [
  "paddock-workspace-hack",
  "socket2",
  "tempfile",
+]
+
+[[package]]
+name = "paddock-testkit-start"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
 ]
 
 [[package]]

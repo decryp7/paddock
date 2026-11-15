@@ -514,36 +514,6 @@ fn connect(dir: &Path, process: &mut Supervised, limit: Duration) -> Result<Conn
 
 #[cfg(test)]
 mod tests {
-    /// The value `f` returns once it is `Some`, polled for at most ten seconds (a condition, not a delay).
-    #[cfg(unix)]
-    fn poll_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
-        poll_for_result(what, || f().ok_or_else(|| "not yet".to_string()))
-    }
-
-    /// The value `f` returns once it is `Ok`, polled for at most ten seconds; a timeout names what `f` saw last.
-    #[cfg(unix)]
-    fn poll_for_result<T>(what: &str, mut f: impl FnMut() -> std::result::Result<T, String>) -> T {
-        let end = Instant::now() + Duration::from_secs(10);
-        loop {
-            let last = match f() {
-                Ok(v) => return v,
-                Err(last) => last,
-            };
-            assert!(Instant::now() < end, "timed out waiting for {what}; last look: {last}");
-            std::thread::sleep(Duration::from_millis(20)); // conformance: hang-guard — polling for a condition, bound 10 s
-        }
-    }
-
-    /// The identity of the process whose pid a stand-in wrote to `file`, or what was found instead.
-    #[cfg(unix)]
-    fn identity_in(file: &Path) -> std::result::Result<paddock_proc::ProcessId, String> {
-        let text = std::fs::read_to_string(file).map_err(|e| format!("no pid file yet ({e})"))?;
-        let pid = text.trim().parse::<u32>().map_err(|_| format!("the pid file holds {text:?}"))?;
-        paddock_proc::ProcessId::of(pid).ok_or_else(|| {
-            format!("the pid file names pid {pid}, which had already ended: the tree was ended before the test took its identity")
-        })
-    }
-
     /// Whether `f` turns true within ten seconds.
     #[cfg(unix)]
     fn poll_for_ok(mut f: impl FnMut() -> bool) -> bool {
@@ -736,6 +706,21 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_browser_that_never_becomes_ready_fails_at_the_guard_and_is_ended() {
+        never_ready_is_ended(false);
+    }
+
+    /// The same, with the test's look at the stand-in's pid file only after the start has failed (a test thread that a loaded
+    /// host kept off the CPU for the whole guard): the stand-in is gone by then, and its complete pid file names an ended process.
+    #[cfg(unix)]
+    #[test]
+    fn a_never_ready_browser_first_seen_after_the_guard_counts_as_ended() {
+        never_ready_is_ended(true);
+    }
+
+    /// A stand-in browser that is alive but never writes `DevToolsActivePort`, started with a 3 s guard; the test reads its pid
+    /// file while the start runs, or only after it failed (`look_late`).
+    #[cfg(unix)]
+    fn never_ready_is_ended(look_late: bool) {
         use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("silent-chrome.sh");
@@ -754,19 +739,28 @@ mod tests {
         // `exec sleep` drops the profile folder from the command line, so the process is found by the pid the script wrote, and
         // its identity (pid and start time) is read the moment that file appears: after the failed start it is gone, and a bare
         // pid of an ended process reads the same as a failed look (rule 53).
+        // A pid that names an ended process is `Ended`, not "not yet"; a holder that started after the file was written is
+        // not the stand-in (rule 53).
+        let look = || paddock_testkit_start::recorded::read_pid_file(&base.path().join("pid"), "the stand-in");
         let (e, id) = std::thread::scope(|s| {
             let run = s.spawn(|| Chromium::launch(&exe, &o).err().unwrap().to_string());
-            let id = poll_for("the stand-in's pid file", || {
-                let pid = std::fs::read_to_string(base.path().join("pid")).ok()?.trim().parse::<u32>().ok()?;
-                paddock_proc::ProcessId::of(pid)
-            });
-            (run.join().unwrap(), id)
+            if look_late {
+                let e = run.join().unwrap();
+                (e, look())
+            } else {
+                let id = look();
+                (run.join().unwrap(), id)
+            }
         });
         assert!(
             e.contains("still running but not ready") && e.contains("pid ") && e.contains("still warming up"),
             "{e}"
         );
-        assert!(id.has_ended(), "the silent browser (pid {}) was left running", id.pid());
+        let gone = poll_for_ok(|| id.has_ended());
+        if let (false, Some(running)) = (gone, id.running()) {
+            paddock_proc::kill_tree(running);
+            panic!("the silent browser (pid {}) was left running", id.pid());
+        }
         assert_eq!(
             std::fs::read_dir(base.path())
                 .unwrap()
@@ -814,6 +808,15 @@ mod tests {
         exited_browser_leaves_no_helper("1");
     }
 
+    /// A stand-in that cannot make its `go` FIFO (a file is in the way) exits 4 before it starts its helper: the test reports
+    /// the launch's own error at once, not a wait for a pid file that will never come.
+    #[cfg(unix)]
+    #[test]
+    #[should_panic(expected = "exit status: 4")]
+    fn a_stand_in_that_cannot_make_its_fifo_reports_the_launch_error() {
+        exited_browser_leaves_no_helper_with("0", |dir| std::fs::write(dir.join("go"), "in the way").unwrap());
+    }
+
     /// A stand-in browser that starts a helper and exits 3; the helper writes its own pid (temp file plus rename)
     /// `helper_delay` seconds after it started, then runs on.
     ///
@@ -823,9 +826,16 @@ mod tests {
     /// waits out its ten seconds for a pid file whose process no longer exists.
     #[cfg(unix)]
     fn exited_browser_leaves_no_helper(helper_delay: &str) {
+        exited_browser_leaves_no_helper_with(helper_delay, |_| {});
+    }
+
+    /// [`exited_browser_leaves_no_helper`], with `prepare` run on the stand-in's folder before the launch.
+    #[cfg(unix)]
+    fn exited_browser_leaves_no_helper_with(helper_delay: &str, prepare: impl FnOnce(&Path)) {
         use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
+        prepare(base.path());
         let exe_path = base.path().join("leaving-chrome.sh");
         std::fs::write(
             &exe_path,
@@ -845,14 +855,38 @@ mod tests {
         // after the failed start it is gone, and a bare pid of an ended process reads the same as a failed look (rule 53).
         let (e, helper) = std::thread::scope(|s| {
             let run = s.spawn(|| Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string());
-            let helper = poll_for_result("the helper's pid file", || identity_in(&base.path().join("helper")));
-            // Opening the FIFO for writing waits for the stand-in's `read`; it is there, as the stand-in made the FIFO before
-            // the helper and waits until the start guard (START_LIMIT) ends it.
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(base.path().join("go"))
-                .and_then(|mut go| go.write_all(b"go\n"))
-                .expect("the stand-in's go FIFO");
+            // A launch that returns before the helper wrote its pid (the stand-in could not make its FIFO) is reported with the
+            // launch's own error, not as a wait for a pid file that will never come.
+            let file = base.path().join("helper");
+            let helper = match paddock_testkit_start::recorded::read_pid_file_or(&file, "the helper", || run.is_finished()) {
+                Ok(r) => r.expect_running("the helper of a stand-in that still waits on its FIFO"),
+                Err(last) => panic!(
+                    "the launch returned before the helper wrote its pid ({last}): {}",
+                    run.join().unwrap()
+                ),
+            };
+            // The stand-in waits in `read` on its FIFO until the start guard (START_LIMIT) ends it. A non-blocking open fails with
+            // ENXIO until a reader is there, so the wait is bounded and stops when the launch has returned.
+            let go = paddock_testkit::wait::poll_for(paddock_testkit::HANG_GUARD, || {
+                use std::os::unix::fs::OpenOptionsExt;
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .custom_flags(libc::O_NONBLOCK)
+                    .open(base.path().join("go"))
+                {
+                    Ok(go) => Some(Ok(go)),
+                    Err(e) if e.raw_os_error() == Some(libc::ENXIO) && !run.is_finished() => None,
+                    Err(e) => Some(Err(e)),
+                }
+            });
+            match go {
+                Some(Ok(mut go)) => go.write_all(b"go\n").expect("write to the stand-in's go FIFO"),
+                Some(Err(e)) => panic!(
+                    "the stand-in's go FIFO cannot be opened ({e}); the launch says: {}",
+                    run.join().unwrap()
+                ),
+                None => panic!("the stand-in never read its go FIFO within {:?}", paddock_testkit::HANG_GUARD),
+            }
             (run.join().unwrap(), helper)
         });
         assert!(e.contains("exit status: 3"), "{e}");

@@ -2131,3 +2131,16 @@ timeout says what it saw last. A second test makes the slow path certain (the he
 before (the tree is ended before the helper writes), green after; 200 of 200 green under the same burners. **Rule for tests:** a test that must observe a process
 the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
 observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**
+
+## A recorded pid is read once, as an identity or as "ended" (2026-11-15, the review of f224dd0b4)
+The review of Spotter's helper fix found the same shape in more tests: a test parses a pid from a file or a child's output and
+calls `ProcessId::of` on it later, after the code under test may have ended that process. `of` answers `None` for an ended
+process, which a poll reads as "not yet" (Spotter's never-ready test with a 3 s guard, paddock-proc's 3 s timeout test: a test
+thread kept off the CPU for the guard waits out its own bound) and an `unwrap` turns into a panic (paddock-chromium's
+launcher-gone test, whose fake ends on purpose); and once the pid is handed on, `of` gives the new holder, which a failure
+path then ends (tools/heavy's background-sleep tests, ER-14). **Fix:** `paddock_testkit_start::recorded` reads the record
+once it is complete (a pid and a newline) and takes the identity through `ProcessId::of_recorded` with the file's modification
+time, or, for a printed pid, a `Stamp` taken before the spawn; it answers `Recorded::Ended`, which is final. Each site got a
+test that forces the late look (the test looks only after the run returned, or the stand-in has ended before its pid is
+printed), red before. C128 (report-only) flags `ProcessId::of` on a pid parsed in the same function. **Class: an observation
+raced the action under test (rule 53, seen from the test side; run 8118 above).**

@@ -133,15 +133,13 @@ fn a_killed_holder_frees_its_slot_at_once() {
     let d = tempfile::tempdir().unwrap();
     let (root, job) = (d.path().join("ci"), d.path().join("job"));
     std::fs::create_dir(&job).unwrap();
+    let spawned = paddock_testkit_start::Stamp::now();
     let (_, v, _) = acquire(&root, &job, "1");
-    let pid = v["holder_pid"].as_u64().unwrap().to_string();
+    let pid = u32::try_from(v["holder_pid"].as_u64().unwrap()).unwrap();
+    // The holder's identity, taken from the printed pid: started after the stamp, so a pid handed on is never killed (rule 53).
+    let holder = paddock_testkit_start::recorded::printed(pid, spawned).expect_running("the slot holder");
     assert!(!is_free(&root, 1));
-    let killed = if cfg!(windows) {
-        Command::new("taskkill").args(["/F", "/PID", &pid]).status()
-    } else {
-        Command::new("kill").args(["-9", &pid]).status()
-    };
-    assert!(killed.unwrap().success());
+    assert_eq!(paddock_proc::end(holder), paddock_proc::Ending::Ended);
     wait_until_free(&root, 1);
     assert!(job.exists());
 }

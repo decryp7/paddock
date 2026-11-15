@@ -4,6 +4,7 @@ use crate::page::{MAX_HTML, Outcome};
 use crate::ready::{Readiness, Rule};
 use paddock_jobs::time::FakeClock;
 use paddock_testkit::wait::wait_until;
+use paddock_testkit_start::recorded::{Stamp, printed};
 
 const FAKE: &str = "launch::tests::fake_browser_process";
 
@@ -158,6 +159,7 @@ fn start_owner(
     entry_first: bool,
 ) -> (std::process::Child, ProcessId, PathBuf) {
     use std::io::BufRead;
+    let spawned = Stamp::now();
     let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
         .args([
             "launch::tests::browser_owner_process",
@@ -187,7 +189,7 @@ fn start_owner(
             .and_then(|r| r.split_once(' '))
         {
             let (pid, dir) = (
-                ProcessId::of(pid.parse().unwrap()).unwrap(),
+                printed(pid.parse().unwrap(), spawned).expect_running("the owner's browser"),
                 PathBuf::from(dir),
             );
             return (owner, pid, dir);
@@ -222,29 +224,55 @@ fn a_fake_browser_ends_when_its_owner_dies_even_without_a_guardian() {
 fn a_fake_browser_whose_launcher_is_already_gone_when_it_starts_ends() {
     let d = tempfile::tempdir().unwrap();
     let fake = FakeBrowser::install(d.path(), FAKE, Mode::Obey, 1).unwrap();
+    started_in_the_background_end(d.path(), &fake.exe, LAUNCH_AND_LEAVE);
+}
+
+/// The launcher of [`a_fake_browser_whose_launcher_is_already_gone_when_it_starts_ends`]: starts `$0` in the background and
+/// prints its pid at once.
+const LAUNCH_AND_LEAVE: &str = r#""$0" --user-data-dir="$1" >/dev/null 2>&1 </dev/null & echo $!"#;
+
+/// The race of that test made certain: the started program has ended before its pid is printed (as a fake that sees its launcher
+/// gone can end before a loaded host lets the test look). A pid that names an ended process counts as ended, never as a panic.
+#[test]
+fn a_background_start_that_ended_before_the_test_looked_counts_as_ended() {
+    let d = tempfile::tempdir().unwrap();
+    started_in_the_background_end(
+        d.path(),
+        Path::new("true"),
+        r#""$0" >/dev/null 2>&1 </dev/null & p=$!; wait $p; echo $p"#,
+    );
+}
+
+/// Starts `exe` five times through `sh -c <launcher>` (which prints the background pid) and asserts every start has ended
+/// within the hang guard.
+fn started_in_the_background_end(dir: &Path, exe: &Path, launcher: &str) {
     let mut started = Vec::new();
     for n in 0..5 {
-        let profile = d.path().join(format!("profile-{n}"));
+        let profile = dir.join(format!("profile-{n}"));
         std::fs::create_dir_all(&profile).unwrap();
+        let spawned = Stamp::now();
         let out = std::process::Command::new("sh")
             .arg("-c")
-            .arg(r#""$0" --user-data-dir="$1" >/dev/null 2>&1 </dev/null & echo $!"#)
-            .arg(&fake.exe)
+            .arg(launcher)
+            .arg(exe)
             .arg(&profile)
             .output()
             .unwrap();
         let pid: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
-        started.push(ProcessId::of(pid).unwrap());
+        // Started after the stamp and before this read, or `Ended`: a start that already ended is not a panic, and a pid that
+        // was handed on is not adopted (rule 53, ER-14).
+        started.push(printed(pid, spawned));
     }
     let gone = paddock_testkit::wait::poll_until_within(paddock_testkit::wait::HANG_GUARD, || {
-        started
-            .iter()
-            .all(|p| paddock_proc::run_state(*p) == paddock_proc::RunState::Exited)
+        started.iter().all(|p| {
+            p.running()
+                .is_none_or(|id| paddock_proc::run_state(id) == paddock_proc::RunState::Exited)
+        })
     });
     if !gone {
         // Ended by identity before the test fails, so a failure leaves none behind (ER-14).
-        for p in &started {
-            paddock_proc::kill_tree(*p);
+        for id in started.iter().filter_map(|p| p.running()) {
+            paddock_proc::kill_tree(id);
         }
         panic!("a fake browser whose launcher was gone when it started kept running");
     }
@@ -732,10 +760,9 @@ fn a_browser_stopped_at_start_is_paused_and_waited_for_not_called_idle() {
         assert!(clock.wait_for_waiters(2, Duration::from_secs(20)));
         // Time does not move until the browser is really stopped (the pid file is written just before).
         wait_until("the browser to stop", || {
-            std::fs::read_to_string(&pid_file)
+            paddock_testkit_start::recorded::look_pid_file(&pid_file)
                 .ok()
-                .and_then(|t| t.trim().parse::<u32>().ok())
-                .and_then(paddock_proc::ProcessId::of)
+                .and_then(paddock_testkit_start::Recorded::running)
                 .is_some_and(|id| paddock_proc::run_state(id) == paddock_proc::RunState::Stopped)
         });
         while !h.is_finished() {

@@ -616,6 +616,7 @@ fn owner_killed(act_as_user: bool) {
         let w: Vec<&str> = line.split_whitespace().collect();
         if let ["child", c, "grandchild", g] = w[..] {
             for p in [c, g] {
+                // conformance: recorded-pid — the owner blocks on stdin and holds both; paddock-proc's tests cannot use paddock-testkit-start (a cycle)
                 ids.push(ProcessId::of(p.parse().unwrap()).unwrap());
             }
         }
