@@ -1,9 +1,10 @@
 # Every shell script to Rust: inventory, exceptions and work packages
 
 - Status: plan, decided. The user decided on 2026-11-15: "move all shell now", before the app releases, and took D1 to D9 the
-  same day (section 8; D5 changed: the PowerShell logic is ported too). Running lanes: WP-0 (`feat/no-new-shell-check`), WP-1
-  (`feat/dev-launch-rust`), WP-2 (`feat/retire-ci-kit-shell`), WP-7 (`feat/port-dev-app-scripts`). WP-5 and WP-6 start after
-  train 12 lands.
+  same day (section 8; D5 changed: the PowerShell logic is ported too). The coordinator changed E2 and WP-1's stage 0 on
+  2026-11-16 (ER-37 common practice; section 2 and WP-1). State on 2026-11-16: WP-0 (`feat/no-new-shell-check`), WP-1
+  (`feat/dev-launch-rust`), WP-2 (`feat/retire-ci-kit-shell`) and WP-7 (`feat/port-dev-app-scripts`) are pushed and in review
+  or a focused check; WP-3 and WP-4 follow WP-2's landing; WP-5 and WP-6 start after train 12 lands.
 - Date: 2026-11-15.
 - Heads read (ADR 0091), re-read right before committing: `origin/main` at `23213a35e`, `origin/train/2026-11-15-12` at
   `285c8f47a`, `origin/train/2026-11-15-13` at `13881087a`, `origin/fix/c125-and-arm64-tests` at `f2e644a9f`,
@@ -57,7 +58,7 @@ only; other runs take the Rust port), **pre-push** is `tools/paddock-dev/src/pre
 | `dev.cmd` (not `.sh`) | 10 | people and programs on Windows | W | stays as stage-0, no longer needs Git Bash | WP-1, E1 |
 | `tools/githooks/claude-pre-tool-use` and its source `tools/paddock-dev/src/hook/claude-pre-tool-use.sh` | 7 + 7 | Claude Code (`tools/githooks/claude-settings.json`); `hook/install.rs` embeds the source | M | stays | E3 |
 | `tools/bootstrap.sh` | 112 | docs (Pitcrew, `tools/README.md`); `tools/test/bootstrap.test.mjs` | M L | `./dev app bootstrap <app>` | WP-7 |
-| `scripts/setup-dev.sh` | 64 | `docs/dev-setup.md` | M | the rustup install stays (E2, about 15 lines); the checks become `./dev setup --check` | WP-7 |
+| `scripts/setup-dev.sh` | 64 | `docs/dev-setup.md` | M | deleted (E2): `docs/dev-setup.md` links rustup's installer, then `./dev setup --install` or `--check` | WP-7 |
 | `ci-image/fetch-verified.sh` | 39 | `ci-image/Dockerfile` `RUN`; ci.yml:505 (draw.io in a job) | L | stays for the Dockerfile (E4); the ci.yml call becomes `./dev fetch` | WP-4 |
 
 ### 1.2 The CI kit (`conformance/ci`, `tools/`): Rust ports exist, the shell is the release-path fallback
@@ -200,11 +201,17 @@ each checkout's untracked `.claude/settings.json` by the coordinator (their head
 
 - **E1. Stage-0 launchers `dev` and `dev.cmd`.** Something must start before any Rust binary exists. Each is about 20 lines and
   uses only builtins plus `cargo` and `rustup`: find the root, run `$PADDOCK_DEV` when it is set, else run the launcher crate with
-  `cargo run -q --release --manifest-path tools/dev-launch/Cargo.toml -- "$@"`. When `cargo` cannot run and `rustup` exists, run
-  the launcher once with an installed toolchain (`RUSTUP_TOOLCHAIN` set to the first line of `rustup toolchain list`, read with
-  `read`) so the launcher can install the pin. No `grep`, `tr`, `sed`, `awk` or `ps`. `dev.cmd` no longer needs Git Bash.
-- **E2. Installing Rust.** `scripts/setup-dev.sh` keeps the rustup install (about 15 lines); nothing in Rust can install Rust.
-  Everything else in it becomes `./dev setup --check`.
+  `cargo run -q --release --manifest-path tools/dev-launch/Cargo.toml -- "$@"`. Stage 0 never installs a toolchain. When `cargo`
+  cannot run with the pin and `rustup` has some other toolchain, it runs the launcher once with that one (`RUSTUP_TOOLCHAIN` set to
+  the first line of `rustup toolchain list`, read with `read`), and the launcher does the locked install of the pin. With no
+  toolchain at all it prints the exact `rustup toolchain install <pin>` command and exits 2. Every toolchain probe (stage 0, the
+  launcher, setup-rust) runs with `RUSTUP_AUTO_INSTALL=0`: since rustup 1.28.1 "automatic install is enabled by default" and is
+  opted out with that variable (<https://github.com/rust-lang/rustup/blob/main/CHANGELOG.md>, read 2026-11-16), so a bare probe
+  would install the pin outside the lock. Stage 0 also carries `--job-setup` (WP-2's job-abort marker mode), which must work before
+  the tool exists. No `grep`, `tr`, `sed`, `awk` or `ps`. `dev.cmd` no longer needs Git Bash.
+- **E2. Installing Rust: no script.** Changed by the coordinator on 2026-11-16 (ER-37: rustup's own installer is the common
+  practice). `docs/dev-setup.md` links rustup's official installer (<https://rustup.rs>), then `./dev setup --install` or
+  `./dev setup --check` does the rest. `scripts/setup-dev.sh` is deleted in WP-7, so E2 is a document, not a file.
 - **E3. The Claude hook shim** (`tools/githooks/claude-pre-tool-use` and its source). Claude Code runs a command line per tool
   call. The shim finds the installed binary and `exec`s it, with builtins only (about 10 ms; the `./dev` wrapper costs 150 ms or
   more per call, `hook/mod.rs`). It already exists and stays as it is.
@@ -262,7 +269,7 @@ test VM under `scripts/vm-lock.sh` (later `./dev vm lock`) or the Windows CI leg
 | WP | Content | Files | Tests | Build | Review | Total (range) | Depends on |
 |---|---|---|---|---:|---:|---:|---|
 | **WP-0** | **The check that keeps new shell out** (section 6), report-only, with today's files as a shrink-only baseline | new check in `tools/paddock-dev/src/check/`, its baseline and exception list, `conformance/paddock.ci.json` line | a good and a bad fixture per file kind; the check shown red on a planted `.sh` (ER-33) | 0.75 | 0.25 | **1** (0.75-1.5) | – |
-| **WP-1** | **The launcher.** `tools/dev-launch` (std only): input hash (the code of `tools/paddock-dev/src/input_hash.rs` moves here and `paddock-dev` depends on it: one copy, rule 55), compiler and config discovery, the toolchain install under `File::lock` (std 1.89, `flock` / `LockFileEx`, released with the handle: no pid to verify, rule 53) with the `toolchain_broken` checks, download through `curl` with the token on stdin, build, the one restart when the compiler changes, `run_bounded`. Stage-0 `dev` and `dev.cmd` (E1). An ADR 0022 amendment for §3.2 and §3.3 | `dev`, `dev.cmd`, `tools/dev-launch/**`, `tools/paddock-dev/src/input_hash.rs`, `tools/paddock-dev/Cargo.toml` and lock, `.gitea/actions/setup-rust` (`--install-toolchain` call) | golden of the hash against today's wrapper on the same tree, env and configs (both run, same hash); a run with PATH holding only `cargo` (the run 8138 shape) on all three OS; the lock with two concurrent installs; a toolchain that changes mid-build; measured per-call time against docs/benchmarks.md's 0.16 s | 3.5 | 0.5 | **4** (3-6) | – |
+| **WP-1** | **The launcher.** `tools/dev-launch` (std only): input hash (the code of `tools/paddock-dev/src/input_hash.rs` moves here and `paddock-dev` depends on it: one copy, rule 55), compiler and config discovery, the toolchain install under `File::lock` (std 1.89, `flock` / `LockFileEx`, released with the handle: no pid to verify, rule 53) with the `toolchain_broken` checks, download through `curl` with the token on stdin, build, the one restart when the compiler changes, `run_bounded`. Stage-0 `dev` and `dev.cmd` (E1): they never install a toolchain; with no toolchain they print the exact `rustup toolchain install` command and exit 2; `RUSTUP_AUTO_INSTALL=0` on every toolchain probe (stage 0, launcher, setup-rust); `--job-setup` (WP-2's job-abort marker mode) in stage 0. An ADR 0022 amendment for §3.2 and §3.3 | `dev`, `dev.cmd`, `tools/dev-launch/**`, `tools/paddock-dev/src/input_hash.rs`, `tools/paddock-dev/Cargo.toml` and lock, `.gitea/actions/setup-rust` (`--install-toolchain` call) | golden of the hash against today's wrapper on the same tree, env and configs (both run, same hash); a run with PATH holding only `cargo` (the run 8138 shape) on all three OS; a machine with no toolchain gets the printed command and exit 2, and a probe never installs (rustup's toolchain folder unchanged); the lock with two concurrent installs; a toolchain that changes mid-build; measured per-call time against docs/benchmarks.md's 0.16 s | 3.5 | 0.5 | **4** (3-6) | – |
 | **WP-2** | **Retire the kit's shell** (the kit.sh and prune duplicate). Every action calls `./dev ci <step>`; release, tag and rule 54 runs build `./dev` from source (`PADDOCK_DEV_DOWNLOAD=0`, already supported) instead of taking the shell; `./dev ci job-tmpdir`; boot-volume's rule in one shared crate for `./dev` and `paddock-testkit`; delete `kit.sh` and the 17 scripts of §1.2; the parity tests become goldens of the Rust output; known-copies `ci-job-isolation`, `ci-kit-shell`, `ci-host-steps` removed. A rule 54 dispatch of each app's release and both demos with gates on and bundles built | `conformance/ci/**`, `tools/*.sh`, `.gitea/actions/*` (12), workflows that call `kit.sh` (15), `crates/paddock-testkit/src/boot_volume.rs`, Dyno `check-bundle.sh` (one line) | the existing `host_steps.rs`, `build_jobs.rs`, `job-isolation.test.mjs`, `kept-clone.test.mjs` cases kept as goldens; the prune case on a loop-mounted ext4 in the CI image (`ffe91b1ac`'s reproduction); rule 54 dry runs green | 2.5 | 0.5 | **3.5** (2.5-5) | WP-1 for Windows callers without Git tools; `fix/c125-and-arm64-tests` and `fix/stale-disk-paths` landed |
 | **WP-3** | **Release-path scripts** of §1.3: `./dev release bundle` (tauri-bundle, demo bundle, updater key passed only to the bundler), `release macos-verify` (Debrief's copy deleted), `release notes --first`, `release check-version`, `release check-bundle dyno`, `ci tag-node-caches`, `ci dev-tool-publish`, `./dev notices` (salvage `tools/dev-notices`). A rule 54 dry run per app and demo | §1.3 files, `app-release.yml`, `debrief.yml` release jobs, `dyno-release.yml`, `pitwall-release.yml`, demo releases, `dev-tool.yml`, `macos-verify`, `tauri-bundle`, `app-gates` actions | the `.test.mjs` suites pointed at the command (`*_CMD`, as `ISOLATION_CMD`) before their cases move to Rust; a test that the updater key reaches no child but the bundler; the bundles of the dry run inspected (rule 54) | 5 | 1 | **6** (4.5-8) | WP-2 |
 | **WP-4** | **Other CI scripts** of §1.4 and the ci.yml draw.io call: Debrief's four through its xtask, Pitwall's privacy check, `ci image-verify`, `demo build-linux`; `./dev fetch` (salvage `tools/dev-fetch-r3`) for draw.io | §1.4 files, `ci.yml`, `debrief.yml` (non-release jobs), `debrief-bench.yml`, `ci-image.yml`, `service-smoke.yml`, `lefthook.yml` (one line), `apps/pitwall/paddock.ci.json` | `libduckdb-env.test.mjs` and `macos-smoke.test.mjs` against the command; one CI run of each job that used a script | 2.5 | 0.5 | **3** (2.25-4.5) | WP-2 (same actions and workflows) |
@@ -376,3 +383,6 @@ check under `tools/paddock-dev/src/check` or `conformance/src/checks` counts too
 8. **D8:** all listed one-offs are deleted without a port: Dyno's `wp0/*`, Pitcrew's `windows-retire-legacy-runner.ps1`, the
    DuckDB research `bench.sh`, the link-time scripts and Debrief's `clean-build-dirs.ps1` (WP-7).
 9. **D9:** the ADR 0022 amendment for §3.2 and §3.3 is written in WP-1.
+10. **E2 and WP-1's stage 0 (coordinator, 2026-11-16, ER-37):** no script installs Rust (`setup-dev.sh` deleted in WP-7, the
+    setup guide links rustup's installer); stage 0 never installs a toolchain, prints the install command and exits 2 when there is
+    none, sets `RUSTUP_AUTO_INSTALL=0` on every probe, and carries `--job-setup`.
