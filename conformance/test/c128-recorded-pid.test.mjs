@@ -24,3 +24,10 @@ test('C128: a child the test holds, other functions, production code, comments, 
   assert.deepEqual(lines('fn p() {\n    let id = ProcessId::of(s.parse().unwrap());\n}\n#[cfg(test)]\nmod tests {\n    fn t() {\n        let id = ProcessId::of(s.parse().unwrap());\n    }\n}\n', 'crates/a/src/lib.rs'), [7], 'a test module from its start');
   assert.deepEqual(lines('fn t() {\n    let id = ProcessId::of(s.parse().unwrap());\n}\n', 'crates/paddock-testkit-start/src/recorded.rs'), [], 'the kit itself');
 });
+
+test('C128: a test module behind cfg(all(unix, test)) or cfg(any(test, ...)) is read too (review of fix/test-pid-reader)', () => {
+  const body = 'mod tests {\n    fn t() {\n        let id = ProcessId::of(s.parse().unwrap());\n    }\n}\n';
+  assert.deepEqual(lines(`fn p() {}\n#[cfg(all(unix, test))]\n${body}`, 'crates/a/src/lib.rs'), [5]);
+  assert.deepEqual(lines(`fn p() {}\n#[cfg(any(test, feature = "testing"))]\n${body}`, 'crates/a/src/lib.rs'), [5]);
+  assert.deepEqual(lines(`fn p() {}\n#[cfg(all(unix, not(windows)))]\n${body}`, 'crates/a/src/lib.rs'), [], 'a cfg without test is production code');
+});

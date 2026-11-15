@@ -893,9 +893,19 @@ fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
 /// is never signalled (rule 53, ER-14).
 #[cfg(unix)]
 fn end_leftover(pid: u32, started_at: Option<Timestamp>) {
-    let started = started_at.expect("a leftover is listed with its start time");
-    if let Some(id) = paddock_testkit_start::recorded::reported(pid, started.0, 1000).running() {
-        let _ = paddock_proc::end(id);
+    let Some(started) = started_at else {
+        eprintln!("leftover pid {pid} was listed without a start time: not ended (no identity to check)");
+        return;
+    };
+    match paddock_testkit_start::recorded::reported(pid, started.0, 1000).running() {
+        Some(id) => {
+            let _ = paddock_proc::end(id);
+        }
+        None if alive(pid) => eprintln!(
+            "leftover pid {pid} (listed as started at {} ms) now names another process: left alone",
+            started.0
+        ),
+        None => {}
     }
 }
 

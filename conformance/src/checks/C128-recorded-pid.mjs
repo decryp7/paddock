@@ -10,7 +10,8 @@
 // `ProcessId::of(` (or `ProcessId::of` passed as a function) whose statement parses text (`.parse`), or whose argument is a name bound
 // earlier in the same function by a `let` whose statement parses text. A pid from a `Child` the test holds (`child.id()`) is not
 // flagged: it cannot be handed on before the test reaps it.
-// Known gaps (not found): a pid parsed in another function and passed in, and a pid parsed with something other than `.parse`.
+// Known gaps (not found): a pid parsed in another function and passed in (a `-> u32` helper), a pid parsed with something other
+// than `.parse`, a pid read from a deserialized field (`row.pid`, `v["pid"].as_u64()`) and one bound by a `for` over `ps` text.
 // A site that is fine carries `// conformance: recorded-pid — <why>` on its line or the line above.
 // ER-41: report-only (warnings) until its first green run on the real tree, recorded in docs/gates.toml.
 import { warn } from '../finding.mjs';
@@ -19,7 +20,8 @@ import { maskRust } from './C39-freed-port.mjs';
 const WAIVER = /conformance:\s*recorded-pid\s*[—–-]+\s*\S.{2,}/;
 const SKIP_PATH = /(?:^|\/)(?:target|vendor)\/|(?:^|\/)fixtures?\/|^crates\/paddock-testkit-start\/src\/recorded\.rs$|^crates\/paddock-proc\/src\/identity\.rs$/;
 const RUST_TEST_FILE = /(?:^|\/)(?:tests|benches)\/.+\.rs$|(?:^|\/)tests\.rs$|_tests?\.rs$/;
-const CFG_TEST_MOD = /#\[cfg\((?:all\()?test[^\]]*\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{/;
+/** A test module: `#[cfg(test)]`, or `test` inside `all(...)` / `any(...)` (`#[cfg(all(unix, test))]`). */
+const CFG_TEST_MOD = /#\[cfg\((?:test|(?:all|any)\([^\]]*\btest\b[^\]]*)\)\]\s*(?:#\[[^\]]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{/;
 const SITE = /\bProcessId::of\b(?!_)/g;
 const PARSES = /\.parse\b/;
 const FIX = 'Read it with `paddock_testkit_start::recorded::read_pid_file` / `look_pid_file` (a pid file) or `printed` (a pid a child printed, with a `Stamp` taken before the spawn): they answer `Recorded::Ended` when the writer is gone, never "not yet" and never the process that got the pid next. A site that is fine carries `// conformance: recorded-pid — <why>`.';

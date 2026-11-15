@@ -300,9 +300,11 @@ fn running_the_guardian_entry_as_a_plain_test_does_not_start_a_guardian_of_the_w
             (ppid == owner.id().to_string() && command == me).then(|| pid.parse().ok())?
         })
         .collect();
-    // Ended by identity before the assertion, so a failure leaves nothing behind (ER-14).
+    // Ended by identity before the assertion, so a failure leaves nothing behind (ER-14): only a process still below the owner,
+    // never whoever got a listed pid after the `ps` snapshot (rule 53).
+    let owner_id = ProcessId::of(owner.id()).expect("the owner runs until it is killed below");
     for pid in &bare {
-        if let Some(id) = ProcessId::of(*pid) {
+        if let Some(id) = paddock_testkit_start::recorded::descendant_of(owner_id, *pid).running() {
             paddock_proc::kill_tree(id);
         }
     }

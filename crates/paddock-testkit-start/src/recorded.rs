@@ -13,8 +13,8 @@
 //! - [`reported`]: the identity of a pid another program listed together with the start time it saw (a service's process
 //!   list): the holder must have started within that time's resolution.
 //!
-//! - [`child_of_this_test`]: the identity of a pid that code inside the test process reported for a child it started (a
-//!   supervisor's worker): verified to be a child of this process that started after it.
+//! - [`child_of_this_test`] / [`descendant_of`]: the identity of a pid that code inside the test process reported for a child
+//!   it started (a supervisor's worker), or that a process list names: verified to be below this process (or `root`).
 //!
 //! All answer [`Recorded::Ended`] when no process that could have written the record holds the pid, and that is final: the
 //! record was complete, so `Ended` never means "not yet".
@@ -31,7 +31,8 @@ const START_SLACK_MS: i64 = 1_000;
 /// What a recorded pid names when the test looks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Recorded {
-    /// The process that wrote the record, still there: act on it by this identity.
+    /// The process that wrote the record, still there: act on it by this identity. (Windows still answers for an exited process
+    /// whose handle someone holds open: ask [`Recorded::has_ended`], never read `Running` as "it runs".)
     Running(ProcessId),
     /// No process that could have written the record holds the pid: it has ended (or the pid was handed on to another
     /// process), or its start time cannot be read. Never "not yet".
@@ -119,22 +120,26 @@ pub fn reported(pid: u32, started_ms: u64, resolution_ms: u64) -> Recorded {
 }
 
 /// The identity of `pid`, which code running inside this test process reported for a child it started (a supervisor's
-/// worker, read from its status): the holder must be a child of this process that started after this process did. A pid
-/// whose child was reaped and handed on to an unrelated process is `Ended`, so a test that ends "the worker" never ends a
-/// stranger (ER-14). (A pid handed on to another child of this process is that child, which the test started too.)
+/// worker, read from its status): the holder must be a descendant of this process ([`descendant_of`]). A pid whose child was
+/// reaped and handed on to an unrelated process is `Ended`, so a test that ends "the worker" never ends a stranger (ER-14). (A
+/// pid handed on to another descendant of this process is that descendant, which the test started too.)
 pub fn child_of_this_test(pid: u32) -> Recorded {
-    let me = ProcessId::of(std::process::id());
-    let verified = paddock_proc::own::look(None, &[])
+    match ProcessId::of(std::process::id()) {
+        Some(me) => descendant_of(me, pid),
+        None => Recorded::Ended { pid },
+    }
+}
+
+/// The identity of `pid`, read from a process list or a status (a `ps` row, a supervisor's report), verified to be a
+/// descendant of `root` in a fresh look at the process table: started after its parent, below `root` (`paddock_proc::
+/// descendants_of`, which reads the start times and parents once and is far cheaper than a full table read with command lines).
+pub fn descendant_of(root: ProcessId, pid: u32) -> Recorded {
+    match paddock_proc::descendants_of(root)
         .into_iter()
-        .find(|row| row.id.pid() == pid)
-        .filter(|row| {
-            row.parent == Some(std::process::id())
-                && !row.zombie
-                && me.is_some_and(|me| row.id.started() >= me.started())
-        });
-    match verified {
-        // The row's identity was read before its parent: confirm the pid still names it.
-        Some(row) if ProcessId::of(pid) == Some(row.id) => Recorded::Running(row.id),
+        .find(|id| id.pid() == pid)
+    {
+        // The table was read before this call returned: confirm the pid still names that process.
+        Some(id) if ProcessId::of(pid) == Some(id) => Recorded::Running(id),
         _ => Recorded::Ended { pid },
     }
 }
@@ -163,7 +168,8 @@ pub fn look_pid_file(file: &Path) -> Result<Recorded, String> {
     })
 }
 
-/// Waits until `file` holds a complete pid record ([`look_pid_file`]) and returns what it names. Panics after
+/// Waits until `file` holds a complete pid record ([`look_pid_file`]) and returns what it names. A pid handed on within the
+/// clock's slack after the write (about a second on Linux, under a millisecond elsewhere) cannot be told from the writer. Panics after
 /// [`HANG_GUARD`] with the last look (a writer that never writes is a hang, not slow).
 pub fn read_pid_file(file: &Path, what: &str) -> Recorded {
     match read_pid_file_or(file, what, || false) {
@@ -245,8 +251,14 @@ mod tests {
         child.wait().unwrap();
     }
 
-    /// The pid of a child that has ended and been collected.
-    fn ended_pid() -> u32 {
+    /// A child that has ended and been waited for. Its `Child` is kept until the test ends: on Windows the open handle keeps
+    /// the pid from being handed on (Windows reuses a freed pid at once), so an answer about the pid is about this child.
+    struct Exited {
+        _handle: std::process::Child,
+        pid: u32,
+    }
+
+    fn ended() -> Exited {
         let mut c = Command::new(std::env::current_exe().unwrap());
         c.args(["--exact", "recorded::tests::no_such_test"])
             .stdout(Stdio::null())
@@ -254,7 +266,21 @@ mod tests {
         let mut child = c.spawn().unwrap();
         let pid = child.id();
         child.wait().unwrap();
-        pid
+        Exited {
+            _handle: child,
+            pid,
+        }
+    }
+
+    /// `r` says the exited child is gone: `Ended` (Unix, where a collected child has no start time), or, where the OS still
+    /// answers for an exited process whose handle is open (Windows), its identity, which has ended.
+    #[track_caller]
+    fn assert_gone(r: Recorded, gone: &Exited) {
+        assert!(
+            r.pid() == gone.pid && r.has_ended(),
+            "{r:?} for the exited child {}",
+            gone.pid
+        );
     }
 
     #[test]
@@ -274,12 +300,11 @@ mod tests {
     fn a_record_whose_writer_has_ended_is_ended_at_once() {
         let d = tempfile::tempdir().unwrap();
         let file = d.path().join("pid");
-        let pid = ended_pid();
-        std::fs::write(&file, format!("{pid}\n")).unwrap();
+        let gone = ended();
+        std::fs::write(&file, format!("{}\n", gone.pid)).unwrap();
         let t = std::time::Instant::now();
         let r = read_pid_file(&file, "an ended writer");
-        assert_eq!(r, Recorded::Ended { pid });
-        assert!(r.has_ended());
+        assert_gone(r, &gone);
         assert!(t.elapsed() < HANG_GUARD / 2, "{:?}", t.elapsed());
     }
 
@@ -352,8 +377,8 @@ mod tests {
             Recorded::Ended { pid: child.id() }
         );
         end(child);
-        let pid = ended_pid();
-        assert_eq!(printed(pid, spawned), Recorded::Ended { pid });
+        let gone = ended();
+        assert_gone(printed(gone.pid, spawned), &gone);
     }
 
     /// A service's process list names the pid with the start time it saw; a holder that started at another time (the pid was
@@ -375,8 +400,8 @@ mod tests {
             Recorded::Ended { pid: child.id() }
         );
         end(child);
-        let pid = ended_pid();
-        assert_eq!(reported(pid, ms, 1000), Recorded::Ended { pid });
+        let gone = ended();
+        assert_gone(reported(gone.pid, ms, 1000), &gone);
     }
 
     #[test]
@@ -395,8 +420,8 @@ mod tests {
         assert_eq!(child_of_this_test(parent), Recorded::Ended { pid: parent });
         assert_eq!(child_of_this_test(1), Recorded::Ended { pid: 1 });
         end(child);
-        let pid = ended_pid();
-        assert_eq!(child_of_this_test(pid), Recorded::Ended { pid });
+        let gone = ended();
+        assert_gone(child_of_this_test(gone.pid), &gone);
     }
 
     /// Whatever a pid file holds (torn, binary, huge numbers, signs), one look answers or says "not yet"; it never panics.
