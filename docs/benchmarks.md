@@ -1329,4 +1329,8 @@ run 8110)?
   scenarios), and the five tests that built two worlds are split in two.
 - **Windows estimate (not measured):** at 0.11 to 0.15 s per child the slowest test after (105 children) takes 12 to 16 s, the
   four that timed out 4 to 15 s; at run 8115's 0.19 to 0.27 s about 28 s at most, half the 60 s limit.
+- **Windows measured after (train 11 run 8118, ci.yml on cac11aa00, job 38802 `paddock-dev (windows-latest)`):** the four tests
+  that had timed out in run 8115 took 15.0 s (a_pull_request_whose_plan_runs_everything...), 11.7 s (the_backup_window_holds...),
+  14.1 s (several_suspects...) and 16.6 s (two_pull_requests_one_breaks...): within the estimate above and a quarter of the 60 s
+  limit. The job ran 1354 tests, all passed, in 459 s (7 slow). One run; the estimate line above stays as the reasoning.
 - **Memory measure:** not measured (no memory question)
