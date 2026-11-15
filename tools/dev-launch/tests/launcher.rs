@@ -7,15 +7,24 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-/// A scratch folder inside the test target folder, removed on drop.
+/// The launcher program: `DEV_LAUNCH_BIN` when set (the Windows test VM has no toolchain: the program and this test are built on the
+/// Mac and the compiled-in Mac path means nothing there), else the one cargo built for this test.
+fn launcher_bin() -> PathBuf {
+    std::env::var_os("DEV_LAUNCH_BIN").map_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_dev-launch")), PathBuf::from)
+}
+
+/// A scratch folder in the machine's temp folder (found at run time, for the same reason), removed on drop.
 struct Scratch(PathBuf);
 
 impl Scratch {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "this crate has no scratch helper (it is std only); the folder is removed on drop"
+    )]
     fn new() -> Scratch {
         use std::sync::atomic::{AtomicU32, Ordering};
         static N: AtomicU32 = AtomicU32::new(0);
-        let p =
-            Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("launcher-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
+        let p = std::env::temp_dir().join(format!("launcher-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
         std::fs::create_dir_all(&p).unwrap();
         Scratch(p)
     }
@@ -95,7 +104,7 @@ fn repo(s: &Scratch) -> PathBuf {
 
 /// The launcher in `cwd` with an environment of its own (nothing of the test run's), the compiler `rustc` and an empty `CARGO_HOME`.
 fn launcher(s: &Scratch, cwd: &Path, rustc: &Path, args: &[&str]) -> Command {
-    let mut c = Command::new(env!("CARGO_BIN_EXE_dev-launch"));
+    let mut c = Command::new(launcher_bin());
     c.args(args)
         .current_dir(cwd)
         .env_clear()
@@ -245,6 +254,24 @@ fn it_needs_nothing_on_path_but_git() {
     std::fs::set_permissions(&only, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     let out = launcher(&s, &root, &rustc, &["--wrapper-hash"])
         .env("PATH", only.parent().unwrap())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", text(&out).1);
+    assert_eq!(text(&out).0, format!("{PLAIN}\nclean\n"));
+}
+
+/// Run 8138's shape on Windows: a `PATH` of only the folder of `git.exe`, with none of Git for Windows' `usr/bin` tools.
+#[cfg(windows)]
+#[test]
+fn it_needs_nothing_on_path_but_git() {
+    let s = Scratch::new();
+    let root = repo(&s);
+    let rustc = fake_rustc(&s);
+    let git_dir = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .find(|d| d.join("git.exe").is_file())
+        .expect("git.exe on PATH");
+    let out = launcher(&s, &root, &rustc, &["--wrapper-hash"])
+        .env("PATH", git_dir)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", text(&out).1);

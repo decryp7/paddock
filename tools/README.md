@@ -40,7 +40,8 @@ notification smoke on a desktop session is not written yet.
 ## paddock-dev (`./dev`)
 
 `tools/paddock-dev/` is the developer and CI tool of ADR 0022: a Rust binary with its own Cargo workspace and lockfile
-(ADR 0014's third kind), run through `./dev` (`dev.cmd` on Windows) at the repository root, from any subfolder. The wrapper
+(ADR 0014's third kind), run through `./dev` (`dev.cmd` on Windows) at the repository root, from any subfolder. `./dev` is a stage 0
+of about 30 lines that builds the launcher `tools/dev-launch` (Rust, std only; ADR 0022 amendment 2026-11-15) and runs it. The launcher
 names the binary by an input hash (git's hash over the tool's inputs in `tools/paddock-dev/inputs.txt` plus the compiler
 cargo will use), uses the per-user cache `~/.paddock-dev/bin/<hash>/` (`PADDOCK_DEV_HOME`), and builds into
 `tools/paddock-dev/target/` (`PADDOCK_DEV_TARGET_DIR`; agents put it outside `~`) on a miss or when an input has
