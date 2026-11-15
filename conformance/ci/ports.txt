@@ -1,4 +1,4 @@
-# The ports a host job binds, per job slot (job-isolation.sh port <name>): one block of <width> ports for each slot, the
+# The ports a host job binds, per job slot (`./dev ci isolation port <name>`): one block of <width> ports for each slot, the
 # block of slot s<n> starting at <base> + (n-1) * <stride>. conformance/test/job-isolation.test.mjs checks that no two
 # blocks overlap, for every slot up to PADDOCK_CI_SLOTS' default, nor with any app's or workflow's end-to-end port.
 #

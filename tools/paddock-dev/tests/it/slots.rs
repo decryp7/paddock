@@ -182,7 +182,7 @@ fn racing_acquirers_never_share_a_slot() {
     }
 }
 
-/// The CI kit's acquire (job-isolation.sh) with as many jobs as slots, all at once: every job gets a slot of its own.
+/// The CI kit's acquire (`ci isolation acquire`'s slot call) with as many jobs as slots, all at once: every job gets a slot of its own.
 #[test]
 fn eight_parallel_acquires_get_eight_distinct_slots() {
     const N: usize = 8;

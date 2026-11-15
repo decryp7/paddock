@@ -197,6 +197,12 @@ fn tree(fx: &Fx) -> Vec<String> {
                     let text = std::fs::read_to_string(&p)
                         .unwrap_or_default()
                         .replace(&root.display().to_string(), "<ROOT>");
+                    // `git init` on macOS writes two keys of its own into a repository's config; Linux's git does not. They say
+                    // nothing about what a step did, and the golden must read the same on every OS.
+                    let text = text
+                        .split_inclusive('\n')
+                        .filter(|l| !matches!(l.trim(), "ignorecase = true" | "precomposeunicode = true"))
+                        .collect::<String>();
                     written.replace_all(&text, "# Written by <the step>").to_string()
                 } else {
                     format!("{len} bytes")
@@ -335,6 +341,7 @@ fn same(setup: &(dyn Fn(&Fx) + Sync), step: &Step) -> Seen {
         },
     );
     assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
+    crate::parity_golden::case("host_steps", &format!("{:#?}", rust));
     rust
 }
 
@@ -703,6 +710,7 @@ fn prune_folder_with_an_unreadable_subfolder_keeps_a_folder_under_its_cap() {
     unlock(&a);
     unlock(&b);
     assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
+    crate::parity_golden::case("host_steps", &format!("{:#?}", rust));
     assert_eq!(rust.stdout, "", "12 KB is under a cap of 100000 KB: nothing is removed");
 }
 
@@ -1115,6 +1123,8 @@ fn kept_facts(fx: &Fx) -> Vec<String> {
     let mut keys: Vec<String> = q(&["config", "--local", "--list"])
         .lines()
         .map(|l| l.split('=').next().unwrap().to_string())
+        // The two keys macOS's git adds to every repository; Linux's does not (the golden reads the same on every OS).
+        .filter(|k| !matches!(k.as_str(), "core.ignorecase" | "core.precomposeunicode"))
         .collect();
     keys.sort();
     vec![
@@ -1161,12 +1171,14 @@ fn kept_twice(first: &Step, between: &dyn Fn(&Fx), second: &Step) -> Seen {
     let (a, b) = kept_fixtures();
     let (s1, r1) = run_kept_pair(&a, &b, first, first);
     assert_eq!(s1, r1, "the first job: the shell (left) and the Rust command (right) differ");
+    crate::parity_golden::case("host_steps", &format!("{:#?}", r1));
     for fx in [&a, &b] {
         between(fx);
         fresh_job(fx);
     }
     let (s2, r2) = run_kept_pair(&a, &b, second, second);
     assert_eq!(s2, r2, "the second job: the shell (left) and the Rust command (right) differ");
+    crate::parity_golden::case("host_steps", &format!("{:#?}", r2));
     r2
 }
 
@@ -1177,6 +1189,7 @@ fn kept_once(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
     }
     let (s, r) = run_kept_pair(&a, &b, step, step);
     assert_eq!(s, r, "the shell (left) and the Rust command (right) differ");
+    crate::parity_golden::case("host_steps", &format!("{:#?}", r));
     r
 }
 
@@ -1330,6 +1343,7 @@ fn kept_clone_makes_the_clone_again_on_a_tag_run() {
     rust_fresh.rust.push("--fresh");
     let (s, r) = run_kept_pair(&a, &b, &shell_fresh, &rust_fresh);
     assert_eq!(s, r, "FRESH: the shell (left) and the Rust command (right) differ");
+    crate::parity_golden::case("host_steps", &format!("{:#?}", r));
     assert!(
         r.stdout.contains("(created, profile lean") && !r.stdout.contains("kept-clone: clean"),
         "{}",

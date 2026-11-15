@@ -22,8 +22,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
 
 # Every step runs in the app's folder (ADR 0014: Debrief lives in apps/debrief) unless its job says otherwise.
@@ -101,7 +99,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       - uses: actions/cache@v4

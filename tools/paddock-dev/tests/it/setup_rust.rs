@@ -20,7 +20,7 @@ fn repo() -> PathBuf {
 /// The `run: |` body of a step of the action, unindented, with the action's path filled in.
 fn step_body(name: &str) -> String {
     let action = repo().join(".gitea/actions/setup-rust");
-    let text = std::fs::read_to_string(action.join("action.yml")).unwrap();
+    let text = std::fs::read_to_string(std::env::var("OLD_SETUP_RUST").unwrap_or_else(|_| action.join("action.yml").display().to_string())).unwrap();
     let at = text
         .find(&format!("- name: {name}\n"))
         .unwrap_or_else(|| panic!("step {name} is in the action"));
@@ -91,6 +91,9 @@ impl Runner {
             ("RUNNER_TOOL_CACHE", self.root.join("tools").display().to_string()),
             ("RUNNER_OS", "macOS".to_string()),
             ("PADDOCK_CI_SLOT", "s1".to_string()),
+            // No test depends on the machine's own `/sccache` mount (the CI image has one): a container job finds its mount where the
+            // case puts it, else none.
+            ("PADDOCK_SCCACHE_MOUNT", self.root.join("no-mount").display().to_string()),
             ("GITHUB_ENV", self.root.join("github-env").display().to_string()),
             ("GITHUB_PATH", self.root.join("github-path").display().to_string()),
             // A secret of the job that sccache, curl and apt-get have no use for: the Rust command never passes it on.
@@ -214,6 +217,12 @@ const LOCAL: Input = Input {
     tauri: false,
 };
 
+/// The Rust command's result as a golden case (the root of the scratch runner shown as `<ROOT>`).
+fn golden(runner: &Runner, rs: &Result) {
+    let seen = format!("code {}\n--- GITHUB_ENV\n{}--- GITHUB_PATH\n{}--- calls\n{}", rs.code, rs.env, rs.path, rs.calls);
+    crate::parity_golden::case("setup_rust", &seen.replace(&runner.root.display().to_string(), "<ROOT>"));
+}
+
 /// The two implementations agree on everything that reaches the job: exit code, `$GITHUB_ENV`, `$GITHUB_PATH`, sccache calls.
 fn same(runner: &Runner, input: &Input, extra: &[(&str, &str)], with_install: bool) -> (Result, Result) {
     let sh = runner.shell(input, extra, with_install);
@@ -225,6 +234,7 @@ fn same(runner: &Runner, input: &Input, extra: &[(&str, &str)], with_install: bo
         sh.out,
         rs.out
     );
+    golden(runner, &rs);
     (sh, rs)
 }
 
@@ -420,6 +430,7 @@ fn a_runner_without_a_pinned_release_is_the_same_warning_in_both() {
     let sh = r.shell(&LOCAL, &win, true);
     let rs = r.rust(&LOCAL, &win);
     assert_eq!((sh.code, &sh.path), (rs.code, &rs.path), "{}\n{}", sh.out, rs.out);
+    golden(&r, &rs);
     assert_eq!(rs.path, "", "nothing is put on PATH");
     for out in [&sh.out, &rs.out] {
         assert!(out.contains("::warning::no pinned sccache release for Windows"), "{out}");
@@ -437,6 +448,7 @@ fn a_pinned_copy_in_the_tool_cache_is_put_on_path_and_used() {
     let sh = r.shell(&LOCAL, &host, true);
     let rs = r.rust(&LOCAL, &host);
     assert_eq!((sh.code, &sh.env, &sh.path), (rs.code, &rs.env, &rs.path), "{}\n{}", sh.out, rs.out);
+    // No golden: the case pairs the OS this test runs on with its own pin, so its result is not one every OS shares.
     assert!(rs.env.contains("RUSTC_WRAPPER=sccache\n"), "{}", rs.env);
     if !has_pin {
         // No release for this host's architecture: both warn before the tool cache, and use the pinned copy all the same.
@@ -577,6 +589,7 @@ fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
     let sh = r.shell(&LOCAL, &linux, true);
     let rs = r.rust(&LOCAL, &linux);
     assert_eq!((sh.code, &sh.env, &sh.path), (rs.code, &rs.env, &rs.path), "{}\n{}", sh.out, rs.out);
+    golden(&r, &rs);
     assert_eq!(rs.path, format!("{}\n", pinned.display()));
     let (first, rest) = rs.calls.split_once('\n').unwrap();
     assert!(

@@ -1,0 +1,42 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d ci/build",
+        "d ci/build/debug",
+        "d ci/build/debug/incremental",
+        "d ci/build/dist",
+        "d ci/build/release",
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d ci/build",
+        "d ci/build/debug",
+        "d ci/build/debug/incremental",
+        "d ci/build/dist",
+        "d ci/build/release",
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

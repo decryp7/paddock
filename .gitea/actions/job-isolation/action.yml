@@ -1,5 +1,5 @@
 name: job-isolation
-description: "Job isolation on a host runner (README, Job isolation): `acquire` (the first bash step, before stable-workspace, build-folder and every kept folder) takes a free job slot of the host (an OS file lock held by `./dev ci slot`) and, through the job-tmpdir step of `./dev ci isolation` (conformance/ci/kit.sh runs it; a tag run keeps conformance/ci/job-isolation.sh), points TMPDIR (TMP and TEMP on Windows) and PADDOCK_JOB_TEMP at the runner's own per-job temp folder and makes the job's short socket folder PADDOCK_SOCKET_BASE (Unix), after sweeping those of killed jobs; `release` (the last step, if: always()) removes the socket folder, gives the slot back and fails when its holder died during the job. Sets PADDOCK_CI_SLOT, PADDOCK_CI_SLOT_TOKEN, PADDOCK_JOB_TEMP, TMPDIR and PADDOCK_SOCKET_BASE. Does nothing in a Linux container (one job per Linux host; ADR 0025)."
+description: "Job isolation on a host runner (README, Job isolation): `acquire` (the first bash step, before stable-workspace, build-folder and every kept folder) takes a free job slot of the host (an OS file lock held by `./dev ci slot`) and, through the job-tmpdir step of `./dev ci isolation`, points TMPDIR (TMP and TEMP on Windows) and PADDOCK_JOB_TEMP at the runner's own per-job temp folder and makes the job's short socket folder PADDOCK_SOCKET_BASE (Unix), after sweeping those of killed jobs; `release` (the last step, if: always()) removes the socket folder, gives the slot back and fails when its holder died during the job. Sets PADDOCK_CI_SLOT, PADDOCK_CI_SLOT_TOKEN, PADDOCK_JOB_TEMP, TMPDIR and PADDOCK_SOCKET_BASE. Does nothing in a Linux container (one job per Linux host; ADR 0025)."
 inputs:
   mode:
     description: "'acquire' or 'release'."
@@ -8,6 +8,17 @@ runs:
   using: composite
   steps:
     - shell: bash
+      # One job per Linux host (ADR 0025): nothing to do there, so no tool is fetched or built for it.
+      if: runner.os != 'Linux'
       env:
         MODE: ${{ inputs.mode }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" isolation "$MODE"
+      # A failed acquire marks the job (PADDOCK_JOB_ABORTED=1, conformance C117); the release runs the tool the acquire pinned (the
+      # wrapper takes PADDOCK_DEV as it is), so it never builds after the job's temp folder is gone.
+      run: |
+        bash "${{ github.action_path }}/../../../dev" ci isolation "$MODE" && exit 0
+        rc=$?
+        if [ "$MODE" = acquire ]; then
+          echo "::error::A job setup step failed (exit $rc: ./dev ci isolation acquire). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
+          if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || true; fi
+        fi
+        exit "$rc"

@@ -1,0 +1,28 @@
+=== case 1 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 10 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (3 jobs per host x 1536 MB per rustc); the macOS class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 2 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 12 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (3 jobs per host x 1536 MB per rustc); the macOS class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 3 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 7 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (3 jobs per host x 1536 MB per rustc); the macOS class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 4 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 6 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (3 jobs per host x 1536 MB per rustc); the macOS class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}

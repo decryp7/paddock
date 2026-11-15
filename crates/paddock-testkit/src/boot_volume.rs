@@ -8,11 +8,12 @@
 //! each run asks again each run (docs/lessons.md, 2026-11-04 and 2026-11-11). A test that starts such a program keeps it
 //! and its working folder under [`boot_volume_temp`], never under a `TMPDIR` that may sit on an external volume.
 //!
-//! The rule for "external" is the one in `conformance/ci/boot-volume.sh` (`diskutil info -plist` of the folder's mount, links
-//! resolved, says Internal=false), which CI's `job-tmpdir.sh` and Dyno's `check-bundle.sh` use too: this module runs that
-//! script rather than repeating it. Outside macOS nothing runs and the temp folder is kept.
+//! The rule for "external" is `paddock_env::boot_volume` (`diskutil info -plist` of the folder's mount, links resolved, says
+//! Internal=false), the one rule that `dev ci boot-volume` (CI's job-tmpdir step, Dyno's `check-bundle.sh`) uses too: this
+//! module only runs `df`, `diskutil` and `getconf` for it, each bounded. Outside macOS nothing runs and the temp folder is kept.
 
-use std::ffi::OsStr;
+use paddock_env::boot_volume::{Probe, boot_volume_temp as rule_temp, mount_from_df};
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -20,19 +21,12 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-/// How long the rule may run (`df`, `diskutil` and `getconf`, about 0.2 s on the CI Mac) before it is stopped and the temp
-/// folder is kept.
+/// How long each of `df`, `diskutil` and `getconf` may run (about 0.2 s on the CI Mac) before it is stopped and the folder is judged
+/// internal, so the temp folder is kept.
 pub const RULE_BOUND: Duration = Duration::from_secs(20);
 
 /// How many times this process decided [`boot_volume_temp`] (at most once; for the caching test).
 static DECISIONS: AtomicUsize = AtomicUsize::new(0);
-
-/// The shared rule, found from this crate's folder. It exists only when the crate is built inside the Paddock repository
-/// (every app depends on it by path); a copy of the crate built from the package registry has no `conformance/` next to
-/// it, so the rule cannot run and [`boot_volume_temp`] keeps the temp folder with a warning that macOS may prompt.
-pub fn rule_script() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/ci/boot-volume.sh")
-}
 
 /// The temp folder (`TMPDIR`) when it is not on an external volume, else the per-user temp folder of the boot volume
 /// (`getconf DARWIN_USER_TEMP_DIR`). Outside macOS: the temp folder, and nothing runs.
@@ -45,11 +39,7 @@ pub fn boot_volume_temp() -> PathBuf {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
         DECISIONS.fetch_add(1, Ordering::SeqCst);
-        let choice = boot_volume_choice(
-            cfg!(target_os = "macos"),
-            &rule_script(),
-            &std::env::temp_dir(),
-        );
+        let choice = boot_volume_choice(cfg!(target_os = "macos"), &std::env::temp_dir());
         if let Some(note) = &choice.note {
             eprintln!("{note}");
         }
@@ -63,16 +53,16 @@ pub fn boot_volume_decisions() -> usize {
     DECISIONS.load(Ordering::SeqCst)
 }
 
-/// The decision behind [`boot_volume_temp`] for a given system: on macOS the shared rule's answer for `temp` (bounded by
+/// The decision behind [`boot_volume_temp`] for a given system: on macOS the shared rule's answer for `temp` (each program bounded by
 /// [`RULE_BOUND`]), elsewhere `temp` without running anything.
-pub fn boot_volume_choice(on_macos: bool, script: &Path, temp: &Path) -> BootVolumeChoice {
+pub fn boot_volume_choice(on_macos: bool, temp: &Path) -> BootVolumeChoice {
     if !on_macos {
         return BootVolumeChoice {
             dir: temp.to_path_buf(),
             note: None,
         };
     }
-    boot_volume_temp_with(script, temp, None, RULE_BOUND)
+    boot_volume_temp_with(temp, None, RULE_BOUND)
 }
 
 /// What [`boot_volume_temp_with`] decided.
@@ -80,67 +70,93 @@ pub fn boot_volume_choice(on_macos: bool, script: &Path, temp: &Path) -> BootVol
 pub struct BootVolumeChoice {
     /// The folder to use.
     pub dir: PathBuf,
-    /// What the rule said on stderr: why the folder changed, or that macOS may prompt; `None` when it said nothing.
+    /// What the rule said: why the folder changed, or that macOS may prompt; `None` when it said nothing.
     pub note: Option<String>,
 }
 
-/// Runs `script temp <temp>` (the shared rule) and returns its folder. `path` replaces `PATH` for the script, so a test
-/// can put fake `df`, `diskutil` and `getconf` first. The script is stopped after `bound`. When it cannot run, is stopped,
-/// fails or prints no absolute folder, `temp` is kept and the note says that macOS may prompt. The rule prints a line or
-/// two, so its pipes never fill before it ends.
+/// The machine, asked through the programs the rule names, each stopped after its own bound.
+struct SystemProbe {
+    path: Option<OsString>,
+    bound: Duration,
+}
+
+impl SystemProbe {
+    /// The program's standard output when it ran in time and succeeded.
+    fn run(&self, program: &str, args: &[&OsStr]) -> Option<String> {
+        let mut cmd = Command::new(program);
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        if let Some(p) = &self.path {
+            cmd.env("PATH", p);
+        }
+        let mut child = cmd.spawn().ok()?;
+        // The rule's programs print a few lines, so the pipe never fills before they end.
+        let Some(status) = crate::wait::poll_for(self.bound, || child.try_wait().ok().flatten())
+        else {
+            // The held child, not a pid (ADR 0033).
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        };
+        let mut out = String::new();
+        child.stdout.take()?.read_to_string(&mut out).ok()?;
+        status.success().then_some(out)
+    }
+}
+
+impl Probe for SystemProbe {
+    fn is_dir(&self, p: &str) -> bool {
+        Path::new(p).is_dir()
+    }
+
+    fn physical(&self, p: &str) -> Option<String> {
+        std::fs::canonicalize(p).ok()?.to_str().map(str::to_string)
+    }
+
+    fn mount_of(&self, dir: &str) -> Option<String> {
+        mount_from_df(&self.run("df", &[OsStr::new("-P"), OsStr::new(dir)])?)
+    }
+
+    fn plist_of(&self, mount: &str) -> Option<String> {
+        self.run(
+            "diskutil",
+            &[OsStr::new("info"), OsStr::new("-plist"), OsStr::new(mount)],
+        )
+    }
+
+    fn user_temp(&self) -> Option<String> {
+        self.run("getconf", &[OsStr::new("DARWIN_USER_TEMP_DIR")])
+            .map(|t| t.trim_end_matches('\n').to_string())
+    }
+}
+
+/// Applies the shared rule to `temp`. `path` replaces `PATH` for the programs it runs (`df`, `diskutil`, `getconf`), so a test can
+/// put fakes first; each program is stopped after `bound`. When a program cannot run or is stopped the folder is judged internal,
+/// so `temp` is kept, and the note says why; when `temp` is on an external volume with no internal boot-volume folder to move to,
+/// `temp` is kept and the note says that macOS may prompt.
 pub fn boot_volume_temp_with(
-    script: &Path,
     temp: &Path,
     path: Option<&OsStr>,
     bound: Duration,
 ) -> BootVolumeChoice {
-    let keep = |why: String| BootVolumeChoice {
-        dir: temp.to_path_buf(),
-        note: Some(format!(
-            "::warning::paddock-testkit boot_volume: {why}; keeping {} (if it is on an external volume, macOS may prompt for removable-volume access)",
-            temp.display()
-        )),
+    let Some(given) = temp.to_str() else {
+        return BootVolumeChoice {
+            dir: temp.to_path_buf(),
+            note: Some(format!(
+                "::warning::paddock-testkit boot_volume: {} is not valid text, so it cannot be judged; keeping it (if it is on an external volume, macOS may prompt for removable-volume access)",
+                temp.display()
+            )),
+        };
     };
-    let mut cmd = Command::new("/bin/bash");
-    cmd.arg(script)
-        .arg("temp")
-        .arg(temp)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(p) = path {
-        cmd.env("PATH", p);
-    }
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(e) => return keep(format!("{} could not run: {e}", script.display())),
+    let probe = SystemProbe {
+        path: path.map(OsString::from),
+        bound,
     };
-    let Some(status) = crate::wait::poll_for(bound, || child.try_wait().ok().flatten()) else {
-        // The held child, not a pid (ADR 0033); its pipes are dropped unread.
-        let _ = child.kill();
-        let _ = child.wait();
-        return keep(format!(
-            "{} did not finish within {} ms and was stopped",
-            script.display(),
-            bound.as_millis()
-        ));
-    };
-    let (mut out, mut err) = (String::new(), String::new());
-    if let Some(mut s) = child.stdout.take() {
-        let _ = s.read_to_string(&mut out);
-    }
-    if let Some(mut s) = child.stderr.take() {
-        let _ = s.read_to_string(&mut err);
-    }
-    let (dir, stderr) = (out.trim().to_string(), err.trim().to_string());
-    if !status.success() || !dir.starts_with('/') {
-        return keep(format!(
-            "{} ended with {status} and printed {dir:?} ({stderr})",
-            script.display()
-        ));
-    }
+    let (dir, notes) = rule_temp(&probe, Some(given), None);
     BootVolumeChoice {
         dir: PathBuf::from(dir),
-        note: (!stderr.is_empty()).then_some(stderr),
+        note: (!notes.is_empty()).then(|| notes.join("\n")),
     }
 }

@@ -25,11 +25,11 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `host-tools` | the pinned cargo-nextest: kept in the CI home's shared `tools` folder on the host runners (checksum-verified, downloaded only when that version is missing), the image's on Linux; fails when the runner has another version | `taiki-e/install-action` in the crate job |
 | `gitleaks` | the secret scan of the checked-out tree with a pinned, checksum-verified gitleaks and the root `.gitleaks.toml` (an allow-list only for known test fixtures, each with a reason); one `::error::` per finding with file, line and rule, never the value | the conformance job of ci.yml |
 | `node-caches` | npm's download cache and the Angular build cache kept between runs (hosts: the slot's `npm-<slot>` and `angular/<name>-<slot>` kept folders; Linux containers: `npm/` and `angular/<job>` on the `/sccache` mount, shared by two runs of one job on a Linux host until containers get slots, ADR 0025) | nothing kept them before |
-| `job-tmpdir` | the job's own temp folder (the runner's `$RUNNER_TEMP`) as `TMPDIR` (`TMP`, `TEMP` on Windows) and `PADDOCK_JOB_TEMP`, and on Unix a short private socket folder `PADDOCK_SOCKET_BASE` (`/tmp/pd-XXXXXXXX` from mktemp); `mode: remove` (last step, `if: always()`) removes the socket folder. One implementation, `conformance/ci/job-tmpdir.sh`: job-isolation's `acquire`/`release` run it on the host runners, this action in jobs without job-isolation (Linux containers that check for temp leaks). Nothing else sets `TMPDIR`, `TMP` or `TEMP` (a conformance test) | jobs writing to the runner user's temp folder, which local runs on the same host use too (ER-14) |
+| `job-tmpdir` | the job's own temp folder (the runner's `$RUNNER_TEMP`) as `TMPDIR` (`TMP`, `TEMP` on Windows) and `PADDOCK_JOB_TEMP`, and on Unix a short private socket folder `PADDOCK_SOCKET_BASE` (`/tmp/pd-XXXXXXXX` from mktemp); `mode: remove` (last step, `if: always()`) removes the socket folder. One implementation, `./dev ci isolation tmpdir` (`tools/paddock-dev/src/ci_isolation/tmpdir.rs`): job-isolation's `acquire`/`release` run it on the host runners, this action in jobs without job-isolation (Linux containers that check for temp leaks). Nothing else sets `TMPDIR`, `TMP` or `TEMP` (a conformance test) | jobs writing to the runner user's temp folder, which local runs on the same host use too (ER-14) |
 | `sccache-stats` | `sccache --show-stats` in the job log (last step, `if: always()`; composite actions have no post step) | new |
 | `setup-node` | Node from `app/.nvmrc`, npm cache | `actions/setup-node` blocks |
 | `strip-signing-keys` | whitespace out of the Tauri keys for the following steps (rule 25, C06) | inline `tr -d` |
-| `build-jobs` | `CARGO_BUILD_JOBS` = the smaller of (the host's cores − the cores kept for other work) / the jobs the host runs at once and (its RAM − the RAM kept) / (jobs per host × 1.5 GB per rustc), divided by `split` (the builds the job runs at once: `cargo mutants --jobs N`). Runner `runner.envs`: `PADDOCK_CI_JOBS_PER_HOST`, `PADDOCK_CI_RESERVED_CORES`, `PADDOCK_CI_RESERVED_RAM_MB`, `PADDOCK_CI_RUSTC_MB`, or an exact `PADDOCK_CI_BUILD_JOBS`; else the class's layout: macOS 3 jobs (three runners on the developer Mac) with 2 cores kept for its agents and the system ((14 − 2) / 3 = 4); Windows 3 jobs (runner capacity 3, 16 vCPU and 32 GB, 0 cores kept: 16 / 3 = 5 build jobs and 8 test threads; the 3 must match the Windows runner's `capacity` until the ADR 0074 host inventory replaces it; the log says the class default was used); Linux (16 cores, 4 jobs at once) unset (cargo's default, every core, as before) until an A/B of job durations decides its share. With it, `NEXTEST_TEST_THREADS` = the runner's `PADDOCK_CI_TEST_THREADS`, else the class's measured number (macOS 8), else the job's core share (not capped by RAM), divided by `split`; it overrides the nextest profile's `num-cpus`, and is left unset where `CARGO_BUILD_JOBS` is. One implementation, `conformance/ci/build-jobs.sh` (logs the host's cores and RAM). An early step of every job that runs cargo (before `job-isolation`, which builds paddock-dev); `setup-rust` runs it when no step did. Nothing else sets `CARGO_BUILD_JOBS` or a fixed cargo `-j` (conformance tests) | `CARGO_BUILD_JOBS=4` (macOS) and `=8` (Windows) in each workflow; the agents' local cap of 2 (ER-24) never applies on CI |
+| `build-jobs` | `CARGO_BUILD_JOBS` = the smaller of (the host's cores − the cores kept for other work) / the jobs the host runs at once and (its RAM − the RAM kept) / (jobs per host × 1.5 GB per rustc), divided by `split` (the builds the job runs at once: `cargo mutants --jobs N`). Runner `runner.envs`: `PADDOCK_CI_JOBS_PER_HOST`, `PADDOCK_CI_RESERVED_CORES`, `PADDOCK_CI_RESERVED_RAM_MB`, `PADDOCK_CI_RUSTC_MB`, or an exact `PADDOCK_CI_BUILD_JOBS`; else the class's layout: macOS 3 jobs (three runners on the developer Mac) with 2 cores kept for its agents and the system ((14 − 2) / 3 = 4); Windows 3 jobs (runner capacity 3, 16 vCPU and 32 GB, 0 cores kept: 16 / 3 = 5 build jobs and 8 test threads; the 3 must match the Windows runner's `capacity` until the ADR 0074 host inventory replaces it; the log says the class default was used); Linux (16 cores, 4 jobs at once) unset (cargo's default, every core, as before) until an A/B of job durations decides its share. With it, `NEXTEST_TEST_THREADS` = the runner's `PADDOCK_CI_TEST_THREADS`, else the class's measured number (macOS 8), else the job's core share (not capped by RAM), divided by `split`; it overrides the nextest profile's `num-cpus`, and is left unset where `CARGO_BUILD_JOBS` is. One implementation, `./dev ci build-jobs` (`tools/paddock-dev/src/ci_build_jobs.rs`; logs the host's cores and RAM). An early step of every job that runs cargo (before `job-isolation`, which builds paddock-dev); `setup-rust` runs it when no step did. Nothing else sets `CARGO_BUILD_JOBS` or a fixed cargo `-j` (conformance tests) | `CARGO_BUILD_JOBS=4` (macOS) and `=8` (Windows) in each workflow; the agents' local cap of 2 (ER-24) never applies on CI |
 | `build-env` | `PADDOCK_BUILD_COMMIT` and `PADDOCK_BUILD_DATE` for the About page (`option_env!`) | nothing set them before |
 | `tauri-bundle` | `tauri build` with or without updater signing (hardened runtime on only with a real Apple identity), `npm ci` at `root`, installers in `dist/`, version check; for NSIS, no shipped .exe or .dll imports the VC++ runtime (ADR 0032) | Pitwall `scripts/ci/tauri-bundle.sh`, Pitcrew's bundle step |
 | `macos-verify` | `codesign --verify --deep --strict` on the .app and the DMG, sidecars with `--self-test` (rule 23) | `macos-verify-bundle.sh` copies |
@@ -100,9 +100,8 @@ An app on the kit has no gates workflow of its own and no copy of a kit script. 
 
 Any number of jobs may run on one host at once: Pitcrew's pool of capacity-1 runners (Pitcrew ADR 0021: `mac-1` ...
 `mac-N`, each its own runner folder and `.runner`), all running as one user and so sharing **one CI home**. No job may
-touch another's folders, processes or ports; the job's slot derives its folders and ports. `./dev ci isolation` (run through
-`conformance/ci/kit.sh isolation`, which keeps `conformance/ci/job-isolation.sh` for tag and release runs until the release-path lane)
-is the one way to them; a conformance test (`conformance/test/job-isolation.test.mjs`) fails when a workflow, action or CI
+touch another's folders, processes or ports; the job's slot derives its folders and ports. `./dev ci isolation` (the `dev` wrapper runs the tool the job pinned,
+and keeps the tool in the CI home's `tools` folder) is the one way to them; a conformance test (`conformance/test/job-isolation.test.mjs`) fails when a workflow, action or CI
 script spells a CI-home path itself, or when a host job does not take and release a slot. Do not raise a runner's
 `capacity` instead: add runners to the pool.
 
@@ -124,21 +123,21 @@ Windows runner's `runner.timeout` is not verified. Linux jobs run in a container
 
 | State | Where | Why |
 |---|---|---|
-| Test temp folders, the clean-up's temp sweep, `{tmp}` process patterns | the job's `$RUNNER_TEMP` (acquire sets `TMPDIR`, and `TMP`/`TEMP` on Windows, and `PADDOCK_JOB_TEMP` to it through `conformance/ci/job-tmpdir.sh`, and a short socket folder `PADDOCK_SOCKET_BASE` that release removes) | it need not outlive the job; the runner gives each job its own and deletes it after |
+| Test temp folders, the clean-up's temp sweep, `{tmp}` process patterns | the job's `$RUNNER_TEMP` (acquire sets `TMPDIR`, and `TMP`/`TEMP` on Windows, and `PADDOCK_JOB_TEMP` to it through `./dev ci isolation tmpdir`, and a short socket folder `PADDOCK_SOCKET_BASE` that release removes) | it need not outlive the job; the runner gives each job its own and deletes it after |
 | Build folder (`target`), stable checkout (`src`), Angular cache, npm's cache, test browser, libduckdb, Debrief's Windows `node_modules`, sccache's disk cache | kept folders of the job's **slot**: `<ci-home>/<layout>-s<n>` (process patterns name one as `[/\\]<kept folder name>-{slot}`, at the end of the pattern; `{slot}` becomes `s<n>([^0-9]\|$)`) | a stable absolute path keeps them warm (cargo fingerprints and sccache keys hold absolute paths); one slot per concurrent job means no two jobs write one. sccache's local storage takes one server at a time ([docs/Local.md](https://github.com/mozilla/sccache/blob/main/docs/Local.md): "Multiple concurrent servers will race and cause spurious build failures"), so each slot has its own, sized `PADDOCK_CI_SCCACHE_GB` (40) / `PADDOCK_CI_SLOTS` |
 | pinned tools, the paddock-dev binary | **shared** kept folders | safe for concurrent writers (renamed into place) |
-| sccache server port, the WebKit job's ports | `kit.sh isolation port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
+| sccache server port, the WebKit job's ports | `./dev ci isolation port <name>`, declared in `conformance/ci/ports.txt` (base, width, stride) | one block per slot; a test checks no two blocks overlap each other or any end-to-end port, for every slot up to `PADDOCK_CI_SLOTS` |
 | Tart VMs (service-smoke) | a host-wide VM slot under `TART_HOME` (`tools/macos-vm-smoke.sh`), VM names with the job's `PADDOCK_VM_PREFIX` | one VM at a time on the Mac (two at most, macOS's limit); the leftover check sees only the job's own VMs |
 
-**Host steps in Rust (WP-4).** `stable-workspace`, `node-caches`, `host-tools`, `sccache-stats`, `build-folder`, `prune-build-folder` and
-`host-cleanup` run `./dev ci <step>` (`tools/paddock-dev/src/ci_host`) through `bash conformance/ci/kit.sh host <step> <args>`, which keeps
-the shell they had (`conformance/ci/host/*.sh`, `build-folder.sh`, `tools/prune-*.sh`, `tools/host-cleanup.sh`) for tag, release and rule 54
-runs until the release-path lane deletes it; `tools/paddock-dev/tests/it/host_steps.rs` runs both on the same inputs. Every deletion in
+**Host steps in Rust (WP-4, WP-2 of docs/plans/shell-to-rust.md).** `stable-workspace`, `node-caches`, `host-tools`, `sccache-stats`, `build-folder`, `prune-build-folder`,
+`host-cleanup`, `kept-clone`, `guardian-as-user` and the isolation steps run `./dev ci <step>` (`tools/paddock-dev/src/ci_host`) straight from the actions
+and workflows, on every run including tag, release and rule 54 runs (a release job builds `./dev` from source: `PADDOCK_DEV_DOWNLOAD=0`). The
+shell they had is deleted; the goldens in `tools/paddock-dev/tests/golden/parity` hold what it printed and did. Every deletion in
 them goes through one guarded remove (`ci_host/safe_remove.rs`): under an explicit root, never a home folder or a drive root, a link
 removed as a link. A process is ended through `paddock_proc` after the identity check.
 
 The kept folders are declared once, in `conformance/ci/kept-folders.txt` (kind, layout, `slot` or `shared`). A new cache is
-one line there and `bash conformance/ci/kit.sh isolation path <kind> [<name>]` where it is used.
+one line there and `bash dev ci isolation path <kind> [<name>]` where it is used.
 
 **Slots.** The `job-isolation` action (`acquire`, the first bash step of a host job: after Git bash on Windows, before
 `stable-workspace`, `build-folder` and any kept folder) runs `./dev ci slot acquire` (ADR 0022's `paddock-dev`, built once
@@ -152,12 +151,12 @@ isolation was then not guaranteed). A full house waits about 2 minutes, then fai
 take no slot (one job per Linux host today): acquire and release do nothing there and everything uses `s1`. Without a slot
 a host job's `build-folder`, `setup-rust` and `node-caches` fail and `stable-workspace` builds in place with a warning.
 
-**Stalled holder.** `bash conformance/ci/job-isolation.sh status` (or `./dev ci slot status --max N --root <ci-home>`)
+**Stalled holder.** `./dev ci isolation status` (or `./dev ci slot status --max N --root <ci-home>`)
 lists each slot, the job folder its holder watches and the holder's pid. A holder whose job folder still exists after its
 job ended (the runner did not delete it) keeps its slot until its cap (`DEFAULT_MAX_HOLD_SECS`: the 3 h job timeout plus 30
 minutes): delete that job folder (the holder ends within a second) or end the holder's pid to free it sooner. Never delete `slots/*.lock` by hand while a holder runs.
 
-**The CI home** is `ci-home.sh`'s (`PADDOCK_CI_HOME`, else `~/.paddock-ci`); a relocated home that is missing stops the job.
+**The CI home** is `./dev ci isolation`'s (`PADDOCK_CI_HOME`, else `~/.paddock-ci`); a relocated home that is missing stops the job.
 Every runner of a host uses the same CI home (same user, or the same `PADDOCK_CI_HOME`).
 
 **Adding runners to a host:** merge the change that adds this; set `PADDOCK_CI_SLOTS` in every runner's `runner.envs` to

@@ -142,6 +142,7 @@ fn same(s: &Scratch, split: Option<&str>, vars: &[(&str, &str)], with_env_file: 
     let rs = s.rust(split, vars, with_env_file);
     let (a, b) = normalised(&sh, &rs);
     assert_eq!(a, b, "split {split:?}, vars {vars:?}\nshell: {sh:?}\nrust: {rs:?}");
+    crate::parity_golden::case("build_jobs", &format!("{rs:#?}"));
     if rs.code != 0 {
         assert!(rs.stdout.contains(" Next step: "), "a failure names its next step: {}", rs.stdout);
     }
@@ -295,7 +296,9 @@ fn the_probes_are_tried_in_the_shells_order() {
     s.shim("nproc", "exit 1");
     s.shim("sysctl", "case \"$2\" in hw.ncpu) echo 10 ;; hw.memsize) echo 34359738368 ;; esac");
     s.shim("getconf", "echo 6");
-    let vars = [("RUNNER_OS", "macOS")];
+    // The RAM is the variable's, so the golden reads the same where the machine's own RAM is read from a file (Linux); the probes under
+    // test are the cores'.
+    let vars = [("RUNNER_OS", "macOS"), ("PADDOCK_CI_RAM_MB", "32768")];
     let r = same(&s, None, &vars, true);
     assert!(r.stderr.contains("this host: 10 cores"), "{}", r.stderr);
     // nproc answering wins over everything.
@@ -305,7 +308,7 @@ fn the_probes_are_tried_in_the_shells_order() {
     // sysctl failing, the variable then getconf.
     s.shim("nproc", "exit 1");
     s.shim("sysctl", "exit 1");
-    let r = same(&s, None, &[("RUNNER_OS", "macOS"), ("NUMBER_OF_PROCESSORS", "7")], true);
+    let r = same(&s, None, &[("RUNNER_OS", "macOS"), ("NUMBER_OF_PROCESSORS", "7"), ("PADDOCK_CI_RAM_MB", "32768")], true);
     assert!(r.stderr.contains("this host: 7 cores"), "{}", r.stderr);
     let r = same(&s, None, &vars, true);
     assert!(r.stderr.contains("this host: 6 cores"), "{}", r.stderr);

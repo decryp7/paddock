@@ -15,4 +15,4 @@ runs:
       env:
         ANGULAR_DIR: ${{ inputs.angular-dir }}
         NAME: ${{ inputs.name }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host node-caches "$ANGULAR_DIR" "$NAME"
+      run: bash "${{ github.action_path }}/../../../dev" ci node-caches --angular-dir "$ANGULAR_DIR" --name "$NAME"

@@ -1486,7 +1486,7 @@ mod tests {
             (".gitea/actions/app-gates/action.yml", "runs: y"),
             (
                 ".gitea/actions/build-folder/action.yml",
-                "run: bash \"${{ github.action_path }}/../../../conformance/ci/build-folder.sh\"",
+                "run: bash \"${{ github.action_path }}/../../../conformance/ci/tag-node-caches.sh\"",
             ),
             (
                 ".gitea/actions/install-test-browser/action.yml",
@@ -1505,7 +1505,7 @@ mod tests {
             ("conformance/ci/runtime-catalogue.mjs", "export const entryFor = 1;"),
             ("conformance/src/util/is-main.mjs", "export const isMain = 1;"),
             ("conformance/ci/unrelated.mjs", "export const x = 1;"),
-            ("conformance/ci/build-folder.sh", "echo"),
+            ("conformance/ci/tag-node-caches.sh", "echo"),
             ("conformance/release/latest-json.mjs", "export const y = 1;"),
             (
                 ".gitea/actions/nested/action.yml",
@@ -1672,7 +1672,7 @@ mod tests {
     #[test]
     fn a_script_is_traced_through_its_importers_to_the_actions_that_run_it() {
         let g = fixed(&base_tree(), &[], None);
-        let r = gitea_plan(&["conformance/ci/build-folder.sh"], &g);
+        let r = gitea_plan(&["conformance/ci/tag-node-caches.sh"], &g);
         assert_eq!(
             (
                 r["all"].clone(),
@@ -1696,7 +1696,7 @@ mod tests {
             (other["all"].clone(), other["crates"].clone(), other["ui"].clone()),
             (json!(false), json!(false), json!(false))
         );
-        assert_eq!(plan(&["conformance/ci/build-folder.sh"])["all"], true, "no reader: everything");
+        assert_eq!(plan(&["conformance/ci/tag-node-caches.sh"])["all"], true, "no reader: everything");
         for f in [
             "conformance/ci/runtime-catalogue.mjs",
             "conformance/src/util/is-main.mjs",
@@ -1783,7 +1783,7 @@ mod tests {
             true
         );
         assert_eq!(
-            gitea_plan(&["conformance/ci/build-folder.sh"], &fixed(&t, &[], Some(&[])))["all"],
+            gitea_plan(&["conformance/ci/tag-node-caches.sh"], &fixed(&t, &[], Some(&[])))["all"],
             true
         );
     }

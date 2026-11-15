@@ -1,5 +1,5 @@
 name: setup-rust
-description: "The Rust toolchain with components and targets (here, before ./dev), CARGO_BUILD_JOBS for the runner (`./dev ci build-jobs`) when no earlier step set it, then `./dev ci setup-rust`: sccache (installed, checksum-verified, when the runner has none) on the local disk or the shared Redis backend, and the Tauri Linux libraries on request. A release, rule 54 or tag run keeps the shell steps until the release-path lane (docs/plans/ci-in-rust.md)."
+description: "The Rust toolchain with components and targets (here, before ./dev), CARGO_BUILD_JOBS for the runner (`./dev ci build-jobs`) when no earlier step set it, then `./dev ci setup-rust`: sccache (installed, checksum-verified, when the runner has none) on the local disk or the shared Redis backend, and the Tauri Linux libraries on request."
 inputs:
   toolchain:
     description: "Toolchain channel or version. Empty (the default) means the `channel` of the root rust-toolchain.toml, the family's one Rust version (stable when the checkout has no such file)."
@@ -83,167 +83,23 @@ runs:
         rustc --version
         cargo --version
     # Every Rust job gets its runner's share of the host's cores, also when no build-jobs step ran before this one. It comes after
-    # the toolchain: `./dev ci build-jobs` needs rustc (the shell script on the release path does not).
+    # the toolchain: `./dev ci build-jobs` needs rustc. A failed setup marks the job (PADDOCK_JOB_ABORTED=1, conformance C117).
     - name: Build jobs for this runner
       shell: bash
       run: |
-        if [ -z "${CARGO_BUILD_JOBS:-}" ]; then bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" build-jobs; else echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; fi
+        if [ -n "${CARGO_BUILD_JOBS:-}" ]; then echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; exit 0; fi
+        bash "${{ github.action_path }}/../../../dev" ci build-jobs && exit 0
+        rc=$?
+        echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
+        if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || true; fi
+        exit "$rc"
     # Everything after the toolchain is `./dev ci setup-rust` (tools/paddock-dev/src/ci_setup_rust.rs). The two steps above stay
     # here: ./dev needs rustc to hash and build itself, and the job's later ./dev calls must see the same compiler.
-    # Until the release-path lane (docs/plans/ci-in-rust.md, step 5), a run that never downloads ./dev (a release or rule 54
-    # dispatch, a tag) keeps the shell steps below unchanged; tests/it/setup_rust.rs proves both give the same result.
-    - name: Implementation
-      id: kit
-      shell: bash
-      run: |
-        # The rule lives once, in conformance/ci/kit.sh (it prints its reason on standard error).
-        kit="$(bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" which)"
-        echo "kit=$kit" >> "$GITHUB_OUTPUT"
-        echo "setup-rust: compile cache through the $kit implementation"
     - name: Compile cache and Tauri libraries
-      if: steps.kit.outputs.kit == 'dev'
       shell: bash
       env:
         BACKEND: ${{ inputs.sccache-backend }}
         PADDOCK_SCCACHE_REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
         REDIS_DB: ${{ inputs.sccache-redis-db }}
         TAURI_LINUX_DEPS: ${{ inputs.tauri-linux-deps }}
-      run: |
-        # Without the read credential ./dev builds itself from source and never takes a binary from the store (ADR 0022 section 3.3).
-        if [ -z "${PADDOCK_DEV_TOKEN-}${GITHUB_TOKEN-}" ]; then export PADDOCK_DEV_DOWNLOAD=0; fi
-        # The tool job-isolation pinned for this job, else the wrapper (one tool per job, never a second fetch).
-        if [ -n "${PADDOCK_DEV:-}" ]; then
-          "$PADDOCK_DEV" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
-        else
-          bash "${{ github.action_path }}/../../../dev" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
-        fi
-    - name: Install sccache
-      if: steps.kit.outputs.kit == 'shell'
-      shell: bash
-      run: |
-        set -euo pipefail
-        VERSION=0.19.0
-        # The pinned release on every OS (one version, one cache format). A runner that already has exactly it keeps it.
-        if command -v sccache >/dev/null 2>&1 && [ "$(sccache --version | awk '{print $2}')" = "$VERSION" ]; then exit 0; fi
-        case "$RUNNER_OS-$(uname -m)" in
-          Linux-x86_64)            T=x86_64-unknown-linux-musl;  EXT=tar.gz; SUM=aa73c7270c997894038c0d8f0d297865f57569e1687883322bc431713d4bb9dd ;;
-          Linux-aarch64|Linux-arm64) T=aarch64-unknown-linux-musl; EXT=tar.gz; SUM=3e47fc4a71b1ddd1b4294a0de9d34498922fdf41e3cd0bda5df3954e3d6deb9d ;;
-          macOS-arm64)             T=aarch64-apple-darwin;       EXT=tar.gz; SUM=a35a0b7d622618774bc1bb8102d72562dfb21e619f88b153b370d7f89bc286af ;;
-          Windows-x86_64)          T=x86_64-pc-windows-msvc;     EXT=zip;    SUM=28be8c61f6b2c89b9eb2869f6af7f78e6f992e78a8abae0ce855fcc129cbeac1 ;;
-          *) echo "::warning::no pinned sccache release for $RUNNER_OS $(uname -m); building without the shared compile cache."; exit 0 ;;
-        esac
-        DEST="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/$VERSION"
-        BIN=sccache; [ "$RUNNER_OS" = "Windows" ] && BIN=sccache.exe
-        if [ ! -x "$DEST/$BIN" ]; then
-          dl=$(mktemp -d)
-          NAME="sccache-v$VERSION-$T"
-          # A failed download must not fail the job: the build runs without the cache.
-          if ! curl -fsSL --retry 3 -o "$dl/$NAME.$EXT" "https://github.com/mozilla/sccache/releases/download/v$VERSION/$NAME.$EXT"; then
-            echo "::warning::could not download sccache $VERSION; building without the compile cache."; exit 0
-          fi
-          if command -v sha256sum >/dev/null 2>&1; then GOT=$(sha256sum "$dl/$NAME.$EXT" | cut -d' ' -f1); else GOT=$(shasum -a 256 "$dl/$NAME.$EXT" | cut -d' ' -f1); fi
-          [ "$GOT" = "$SUM" ] || { echo "::error::sccache $VERSION checksum mismatch for $T (got $GOT)"; exit 1; }
-          if [ "$EXT" = zip ]; then
-            if command -v unzip >/dev/null 2>&1; then unzip -q "$dl/$NAME.$EXT" -d "$dl"; else powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"; fi
-          else
-            tar -xzf "$dl/$NAME.$EXT" -C "$dl"
-          fi
-          mkdir -p "$DEST"
-          # Renamed into place whole: a runner with a shared tool cache may run two jobs that install it at once.
-          cp "$dl/$NAME/$BIN" "$DEST/$BIN.part.$$"
-          chmod +x "$DEST/$BIN.part.$$"
-          mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-          rm -rf "$dl"
-        fi
-        echo "$DEST" >> "$GITHUB_PATH"
-    - name: sccache
-      if: steps.kit.outputs.kit == 'shell'
-      shell: bash
-      env:
-        BACKEND: ${{ inputs.sccache-backend }}
-        REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
-        REDIS_DB: ${{ inputs.sccache-redis-db }}
-      run: |
-        set -euo pipefail
-        # The Install step added the pinned copy to PATH for later steps only; this step finds it by its folder.
-        PINNED="${RUNNER_TOOL_CACHE:-$HOME/.cache}/sccache/0.19.0"
-        if [ -d "$PINNED" ]; then PATH="$PINNED:$PATH"; fi
-        if ! command -v sccache >/dev/null 2>&1; then
-          echo "::warning::sccache is not available on this runner; building without the compile cache."
-          exit 0
-        fi
-        case "$BACKEND" in auto|redis|local) ;; *) echo "::error::sccache-backend must be auto, redis or local (got '$BACKEND')"; exit 1 ;; esac
-        if [ "$BACKEND" = redis ] && [ -z "$REDIS_ENDPOINT" ]; then
-          echo "::error::sccache-backend is redis but sccache-redis-endpoint is empty (set the Gitea variable SCCACHE_REDIS_ENDPOINT)"; exit 1
-        fi
-        # CI's own server: a host runner may run a developer's sccache on the default port 4226 with its own backend, which
-        # would silently ignore the settings below. sccache-stats stops this port's server, never the default one. On a host
-        # each job slot has its own port (job-isolation's ports.txt: 4227 for s1, 4228 for s2, ...), so a concurrent job's start (which
-        # stops the server first) or its sccache-stats (which stops it last) never takes this job's server away.
-        iso="${{ github.action_path }}/../../../conformance/ci/job-isolation.sh"
-        PORT=4227
-        if [ "$RUNNER_OS" != Linux ]; then PORT="$(bash "$iso" port sccache)"; fi
-        export SCCACHE_SERVER_PORT="$PORT" SCCACHE_IGNORE_SERVER_IO_ERROR=1
-        SETTINGS=()
-        if [ "$BACKEND" = redis ] || { [ "$BACKEND" = auto ] && [ -n "$REDIS_ENDPOINT" ]; }; then
-          export SCCACHE_REDIS_ENDPOINT="$REDIS_ENDPOINT" SCCACHE_REDIS_DB="${REDIS_DB:-5}"
-          SETTINGS+=("SCCACHE_REDIS_ENDPOINT=$REDIS_ENDPOINT" "SCCACHE_REDIS_DB=${REDIS_DB:-5}")
-          echo "sccache: shared backend $REDIS_ENDPOINT db ${REDIS_DB:-5}"
-        else
-          # Local disk. A host runner keeps it in the job slot's kept folder, so it outlives the job; a container uses the /sccache
-          # mount the runner provides, or a folder that dies with the container (with a notice: every job then starts cold).
-          SIZE=20G
-          if [ "$RUNNER_OS" = Linux ]; then
-            MOUNT="${PADDOCK_SCCACHE_MOUNT:-/sccache}"  # overridable so the step's test does not depend on the runner's real mount
-            if [ -d "$MOUNT" ] && [ -w "$MOUNT" ]; then DIR="$MOUNT"
-            else DIR="${RUNNER_TEMP:-/tmp}/sccache"; echo "::notice::no /sccache mount in this container; the compile cache lives and dies with the job."; fi
-          else
-            # The job slot's own cache: sccache's local storage "only supports a single sccache server at a time" (docs/Local.md),
-            # so each slot's server has its own folder, and the host's budget PADDOCK_CI_SCCACHE_GB (default 40) is divided
-            # between the slots (PADDOCK_CI_SLOTS), at least 2 GB each.
-            DIR="$(bash "$iso" path sccache)"
-            SLOTS="$(bash "$iso" slots)"
-            TOTAL="${PADDOCK_CI_SCCACHE_GB:-40}"
-            case "$TOTAL" in '' | *[!0-9]*) TOTAL=40 ;; esac
-            PER=$((TOTAL / SLOTS)); if [ "$PER" -lt 2 ]; then PER=2; fi
-            SIZE="${PER}G"
-          fi
-          mkdir -p "$DIR"
-          if [ "$RUNNER_OS" = Windows ]; then DIR="$(cygpath -w "$DIR")"; fi
-          export SCCACHE_DIR="$DIR" SCCACHE_CACHE_SIZE="$SIZE"
-          SETTINGS+=("SCCACHE_DIR=$DIR" "SCCACHE_CACHE_SIZE=$SIZE")
-          echo "sccache: local disk $DIR"
-        fi
-        sccache --version
-        # A server left on this port by an earlier job would keep that job's backend: start it fresh with this job's settings.
-        sccache --stop-server >/dev/null 2>&1 || true
-        # The cache must slow a build down, never fail it: when the server cannot start or answer (a broken or full backend),
-        # RUSTC_WRAPPER stays unset and the job builds without sccache.
-        if ! sccache --start-server || ! sccache --show-stats >/dev/null 2>&1; then
-          sccache --stop-server >/dev/null 2>&1 || true
-          echo "::warning::the sccache server did not start; the build runs without the compile cache."
-          exit 0
-        fi
-        # sccache itself is the wrapper, never a script around it: Windows starts a .cmd through cmd.exe, whose 8191-character
-        # command line limit rustc's arguments for a large crate exceed (windows-sys). sccache puts every CARGO_* variable into its
-        # cache key, CARGO_TARGET_DIR included, so a job that needs a build folder outside its checkout sets it with cargo's
-        # `--config build.target-dir=...` (configuration is not hashed), not with the environment variable.
-        {
-          echo "RUSTC_WRAPPER=sccache"
-          # Cached builds are not incremental.
-          echo "CARGO_INCREMENTAL=0"
-          echo "SCCACHE_IGNORE_SERVER_IO_ERROR=1"
-          echo "SCCACHE_SERVER_PORT=$PORT"
-          # Windows: cargo's legacy build-dir layout. Cargo 1.100 passes one -L per indirect dependency and falls back to an @argfile
-          # past CreateProcessW's 32,767 characters; sccache 0.19 expands that file and cannot start rustc (os error 206, run 8027,
-          # mozilla/sccache#2787). The same line as LEGACY_BUILD_DIR_LAYOUT in tools/paddock-dev/src/ci_setup_rust.rs.
-          if [ "$RUNNER_OS" = Windows ]; then echo "__CARGO_TEMPORARY_BUILD_DIR_NEW_LAYOUT_OPT_OUT=1"; fi
-          for kv in "${SETTINGS[@]}"; do echo "$kv"; done
-        } >> "$GITHUB_ENV"
-    - name: Linux dependencies for Tauri
-      if: steps.kit.outputs.kit == 'shell' && runner.os == 'Linux' && inputs.tauri-linux-deps == 'true'
-      shell: bash
-      run: |
-        SUDO=$(command -v sudo || true)
-        $SUDO apt-get update
-        $SUDO apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf cmake
+      run: bash "${{ github.action_path }}/../../../dev" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"

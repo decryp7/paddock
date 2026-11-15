@@ -1,0 +1,12 @@
+=== case 1 ===
+code 1
+--- GITHUB_ENV
+--- GITHUB_PATH
+--- calls
+--version port= io= dir= size= redis= db=
+=== case 2 ===
+code 1
+--- GITHUB_ENV
+--- GITHUB_PATH
+--- calls
+--version port= io= dir= size= redis= db=

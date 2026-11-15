@@ -1,0 +1,60 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "Compile requests 10",
+    github_env: "",
+    github_path: "",
+    calls: "sccache --show-stats token=\nsccache --stop-server token=",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "Compile requests 10",
+    github_env: "",
+    github_path: "",
+    calls: "sccache --show-stats token=",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 3 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 4 ===
+Seen {
+    code: 0,
+    stdout: "::notice::sccache statistics are unavailable (the cache server was not reachable).",
+    github_env: "",
+    github_path: "",
+    calls: "sccache --show-stats token=",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

@@ -1,5 +1,5 @@
 name: prune-build-folder
-description: "Keeps this job's kept build folder (the build-folder action's $PADDOCK_BUILD_FOLDER on a host runner) within a size cap, so nothing piles up on the owner's machines (`./dev ci prune-build-folder`, through conformance/ci/kit.sh: incremental caches first, then the folder). It touches only that one folder, after the job's builds and uploads are done: run it last, with if: always(), on host runners only. Never fails the job."
+description: "Keeps this job's kept build folder (the build-folder action's $PADDOCK_BUILD_FOLDER on a host runner) within a size cap, so nothing piles up on the owner's machines (`./dev ci prune-build-folder`: incremental caches first, then the folder). It touches only that one folder, after the job's builds and uploads are done: run it last, with if: always(), on host runners only. Never fails the job."
 inputs:
   max-gb:
     description: The cap in whole gigabytes.
@@ -14,4 +14,7 @@ runs:
       env:
         MAX_GB: ${{ inputs.max-gb }}
         DROP_BUNDLES: ${{ inputs.drop-bundles }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host prune-build-folder "$MAX_GB" "$DROP_BUNDLES" || echo "::warning::prune-build-folder did not run (exit $?); it never fails a job."
+      run: |
+        args=(--max-gb "$MAX_GB")
+        if [ "$DROP_BUNDLES" = true ]; then args+=(--drop-bundles); fi
+        bash "${{ github.action_path }}/../../../dev" ci prune-build-folder "${args[@]}" || echo "::warning::prune-build-folder did not run (exit $?); it never fails a job."

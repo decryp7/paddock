@@ -1,0 +1,41 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "::warning::host-cleanup: skipped the process pattern 'fake[-_]engine': it is not anchored on a folder of this job ({tmp}, {build} or {slot})\n::warning::host-cleanup: skipped the process pattern 'chrome-{slot}': it is not anchored on a folder of this job ({tmp}, {build} or {slot})",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d tmp",
+        "d tmp/other-job",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d work/app",
+        "d work/app/dist",
+        "d work/dist",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f work/app/dist/y \"2\"",
+        "f work/dist/x \"1\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d tmp",
+        "d tmp/other-job",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d work/app",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

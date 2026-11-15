@@ -1,0 +1,43 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "::notice::no /sccache mount in this container; the npm and Angular caches live and die with the job.",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/ui",
+        "d ws/ui/.angular",
+        "d ws/ui/.angular/cache",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/ui/.angular/cache/stale \"\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "node-caches: npm <ROOT>/no-mount/npm\nnode-caches: Angular <ROOT>/ws/ui/.angular/cache -> <ROOT>/no-mount/angular/e2e-1",
+    github_env: "npm_config_cache=<ROOT>/no-mount/npm",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d no-mount",
+        "d no-mount/angular",
+        "d no-mount/angular/e2e-1",
+        "d no-mount/npm",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/ui",
+        "d ws/ui/.angular",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "l ws/ui/.angular/cache -> <ROOT>/no-mount/angular/e2e-1",
+    ],
+}

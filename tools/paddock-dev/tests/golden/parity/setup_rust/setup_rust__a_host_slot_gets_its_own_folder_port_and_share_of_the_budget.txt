@@ -1,0 +1,48 @@
+=== case 1 ===
+code 0
+--- GITHUB_ENV
+RUSTC_WRAPPER=sccache
+CARGO_INCREMENTAL=0
+SCCACHE_IGNORE_SERVER_IO_ERROR=1
+SCCACHE_SERVER_PORT=4227
+SCCACHE_DIR=<ROOT>/home/.paddock-ci/sccache-s1
+SCCACHE_CACHE_SIZE=10G
+--- GITHUB_PATH
+--- calls
+--version port= io= dir= size= redis= db=
+--version port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--stop-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--start-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--show-stats port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+=== case 2 ===
+code 0
+--- GITHUB_ENV
+RUSTC_WRAPPER=sccache
+CARGO_INCREMENTAL=0
+SCCACHE_IGNORE_SERVER_IO_ERROR=1
+SCCACHE_SERVER_PORT=4228
+SCCACHE_DIR=<ROOT>/home/.paddock-ci/sccache-s2
+SCCACHE_CACHE_SIZE=20G
+--- GITHUB_PATH
+--- calls
+--version port= io= dir= size= redis= db=
+--version port=4228 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s2 size=20G redis= db=
+--stop-server port=4228 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s2 size=20G redis= db=
+--start-server port=4228 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s2 size=20G redis= db=
+--show-stats port=4228 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s2 size=20G redis= db=
+=== case 3 ===
+code 0
+--- GITHUB_ENV
+RUSTC_WRAPPER=sccache
+CARGO_INCREMENTAL=0
+SCCACHE_IGNORE_SERVER_IO_ERROR=1
+SCCACHE_SERVER_PORT=4227
+SCCACHE_DIR=<ROOT>/home/.paddock-ci/sccache-s1
+SCCACHE_CACHE_SIZE=2G
+--- GITHUB_PATH
+--- calls
+--version port= io= dir= size= redis= db=
+--version port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=2G redis= db=
+--stop-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=2G redis= db=
+--start-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=2G redis= db=
+--show-stats port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=2G redis= db=

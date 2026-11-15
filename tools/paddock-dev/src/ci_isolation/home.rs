@@ -250,6 +250,38 @@ mod tests {
         assert!(!valid_slot("s0") && !valid_slot("s") && !valid_slot("s01") && !valid_slot("1") && !valid_slot("s1x"));
     }
 
+    /// The cases of the retired `ci-home.sh` test: the default home is made on first use; a relocated home must exist (an unmounted disk
+    /// stops the job and is not made again on the internal disk), be absolute, is canonical and has no trailing slash; a link is resolved.
+    #[cfg(unix)]
+    #[test]
+    fn the_ci_home_follows_the_relocation_variable_and_an_unmounted_one_stops_the_job() {
+        let d = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(d.path()).unwrap();
+        let (home, disk) = (root.join("home"), root.join("disk"));
+        let home_s = home.to_str().unwrap();
+        let ask = |relocated: Option<&str>| {
+            let mut env = vec![("HOME", home_s)];
+            if let Some(r) = relocated {
+                env.push(("PADDOCK_CI_HOME", r));
+            }
+            ci_home(&ctx(&env))
+        };
+        std::fs::create_dir_all(&home).unwrap();
+        let default = ask(None).ok().unwrap();
+        assert_eq!(default, format!("{home_s}/.paddock-ci"));
+        assert!(home.join(".paddock-ci").is_dir(), "the default home is made on first use");
+        let gone = ask(Some(disk.to_str().unwrap())).err().unwrap();
+        assert_eq!(gone.code, 1);
+        assert!(gone.text.contains("does not exist: is its disk mounted"), "{}", gone.text);
+        assert!(!disk.exists(), "a relocated home is never made again");
+        std::fs::create_dir(&disk).unwrap();
+        let disk_s = disk.to_str().unwrap();
+        assert_eq!(ask(Some(&format!("{disk_s}/"))).ok().unwrap(), disk_s, "a trailing slash is normalised");
+        assert!(ask(Some("disk")).err().unwrap().text.contains("is not an absolute path"));
+        std::os::unix::fs::symlink(&disk, root.join("link")).unwrap();
+        assert_eq!(ask(Some(root.join("link").to_str().unwrap())).ok().unwrap(), disk_s, "a link is resolved");
+    }
+
     #[test]
     fn the_source_key_is_ten_hex_digits_of_the_sha256_of_the_root_text() {
         // sha256("abc") = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad

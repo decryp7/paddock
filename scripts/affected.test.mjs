@@ -11,13 +11,24 @@ import { C100_INPUTS, guardSet, adoptsPerMachine, affected, appOfWorkflow, cargo
 
 /**
  * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
- * conformance/ci/job-isolation.sh for a sample job (its own runner folder 0123456789abcdef, slot s1, build folder
- * target-<app>-app-s1), as a RegExp; null when the script refuses it (not anchored on a folder of the job).
+ * `./dev ci isolation pattern` for a sample job (its own runner folder 0123456789abcdef, slot s1, build folder
+ * target-<app>-app-s1), as a RegExp; null when the tool refuses it (not anchored on a folder of the job).
  */
+let tool;
+/** The paddock-dev binary `./dev` builds for this checkout (PADDOCK_DEV_BIN names another). */
+function devTool() {
+  if (!tool && process.env.PADDOCK_DEV_BIN) tool = process.env.PADDOCK_DEV_BIN;
+  if (!tool) {
+    const r = spawnSync('sh', [join(ROOT, 'dev'), '--print-binary'], { cwd: ROOT, encoding: 'utf8', env: process.env });
+    assert.equal(r.status, 0, `./dev --print-binary: ${r.stderr}`);
+    tool = r.stdout.trim().split('\n').pop();
+  }
+  return tool;
+}
 const JOB = { tmp: '/Users/x/gitea-runner/work/0123456789abcdef/tmp', ci: '/Users/x/.paddock-ci', slot: 's1' };
 function scoped(pat, app, os = 'macOS') {
   const win = os === 'Windows';
-  const r = spawnSync('bash', [join(ROOT, 'conformance', 'ci', 'job-isolation.sh'), 'pattern', pat], {
+  const r = spawnSync(devTool(), ['ci', 'isolation', 'pattern', pat], {
     env: { PATH: '/usr/bin:/bin', RUNNER_OS: os, PADDOCK_CI_SLOT: JOB.slot, PADDOCK_JOB_TEMP: (win ? 'C:' : '') + JOB.tmp, PADDOCK_BUILD_FOLDER: `${win ? 'C:' : ''}${JOB.ci}/target-${app}-app-${JOB.slot}` },
     encoding: 'utf8',
   });
@@ -367,7 +378,7 @@ const ACTIONS = {
   '.gitea/actions/plan-only/action.yml': 'runs: x',
   '.gitea/actions/node-caches/action.yml': 'runs: x',
   '.gitea/actions/app-gates/action.yml': 'runs: y',
-  '.gitea/actions/build-folder/action.yml': 'run: bash "${{ github.action_path }}/../../../conformance/ci/build-folder.sh"',
+  '.gitea/actions/build-folder/action.yml': 'run: bash "${{ github.action_path }}/../../../conformance/ci/tag-node-caches.sh"',
   '.gitea/actions/install-test-browser/action.yml': 'run: node "${{ github.action_path }}/../../../conformance/ci/install-test-browser.mjs"',
   '.gitea/actions/README.md': '- uses: decryp7/paddock/.gitea/actions/node-caches@v0.3.0 and .gitea/actions/unused',
   '.gitea/actions/unused/action.yml': 'runs: u',
@@ -458,13 +469,13 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
 
   test('a script of conformance/ci or conformance/release also marks the jobs of the actions that run it', () => {
     const g = giteaOf(BASE_TREE, {});
-    const r = runGitea(['conformance/ci/build-folder.sh'], g);
+    const r = runGitea(['conformance/ci/tag-node-caches.sh'], g);
     assert.deepEqual([r.all, r.crates, because(r), r.ui, r.eslint, r.apps], [false, true, true, false, false, APPS]);
     const other = runGitea(['conformance/release/latest-json.mjs'], g);
     assert.deepEqual([other.all, other.crates, other.ui], [false, false, false]);
     assert.deepEqual(other.apps, APPS);
     // Without a reader for the .gitea files the script cannot be traced: everything.
-    assert.ok(affected(['conformance/ci/build-folder.sh'], graph).all);
+    assert.ok(affected(['conformance/ci/tag-node-caches.sh'], graph).all);
   });
 
   test('a script is traced through the scripts that import it, transitively (helpers in conformance/src/util too)', () => {
@@ -515,7 +526,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     assert.equal(r.all, false);
     assert.ok(runGitea([CI_FILE], giteaOf(BASE_TREE, { [CI_FILE]: CI('node a --only C06') }, () => false)).all);
     assert.ok(runGitea(['.gitea/actions/node-caches/action.yml'], giteaOf(BASE_TREE, {}, () => false)).all);
-    assert.ok(runGitea(['conformance/ci/build-folder.sh'], giteaOf(BASE_TREE, {}, () => false)).all);
+    assert.ok(runGitea(['conformance/ci/tag-node-caches.sh'], giteaOf(BASE_TREE, {}, () => false)).all);
   });
 
   test('the toolchain marks everything; the shared Rust inputs (.cargo, lint) only the Rust builds, lint also conformance', () => {
@@ -894,10 +905,10 @@ describe('matrix legs', () => {
     assert.ok(checked >= 2);
   });
 
-  test('job-isolation refuses a process pattern that names no folder of the job, or one the job does not have', () => {
+  test('ci isolation refuses a process pattern that names no folder of the job, or one the job does not have', () => {
     assert.equal(scoped('[/\\\\]pitcrew-it-[^/]+[/\\\\]gitea-runner', 'pitcrew'), null, 'a temp prefix alone matches every job');
     assert.equal(scoped('fake_runner', 'pitcrew'), null, 'an exact name matches every job');
-    const r = spawnSync('bash', [join(ROOT, 'conformance', 'ci', 'job-isolation.sh'), 'pattern', '{tmp}/x'], { env: { PATH: '/usr/bin:/bin', RUNNER_OS: 'macOS' }, encoding: 'utf8' });
+    const r = spawnSync(devTool(), ['ci', 'isolation', 'pattern', '{tmp}/x'], { env: { PATH: '/usr/bin:/bin', RUNNER_OS: 'macOS' }, encoding: 'utf8' });
     assert.notEqual(r.status, 0, 'no job temp folder: nothing to anchor on');
   });
 

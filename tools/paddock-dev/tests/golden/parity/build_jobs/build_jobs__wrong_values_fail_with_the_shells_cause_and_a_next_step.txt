@@ -1,0 +1,105 @@
+=== case 1 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_BUILD_JOBS must be a whole number >= 1, not '0' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 2 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_BUILD_JOBS must be a whole number >= 1, not '08' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 3 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_BUILD_JOBS must be a whole number >= 1, not 'x' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 4 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_TEST_THREADS must be a whole number >= 1, not '010' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "",
+}
+=== case 5 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_JOBS_PER_HOST must be a whole number >= 1, not '0' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 6 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_JOBS_PER_HOST must be a whole number >= 1, not 'two' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 7 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_RESERVED_CORES must be a whole number >= 0 without leading zeros, not '01' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 8 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_RESERVED_CORES must be a whole number >= 0 without leading zeros, not '-1' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 9 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_RESERVED_RAM_MB must be a whole number >= 0 without leading zeros, not '1G' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 10 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::PADDOCK_CI_RUSTC_MB must be a whole number >= 1, not '0' Next step: fix the variable in the runner's runner.envs.\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\n",
+}
+=== case 11 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::the split (builds at once in this job) must be a whole number >= 1, not '0' Next step: fix the split input of the build-jobs action.\n",
+    stderr: "",
+}
+=== case 12 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::the split (builds at once in this job) must be a whole number >= 1, not 'x' Next step: fix the split input of the build-jobs action.\n",
+    stderr: "",
+}
+=== case 13 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::the split (builds at once in this job) must be a whole number >= 1, not '01' Next step: fix the split input of the build-jobs action.\n",
+    stderr: "",
+}
+=== case 14 ===
+Result {
+    code: 1,
+    env_file: "",
+    stdout: "::error::the split (builds at once in this job) must be a whole number >= 1, not '-2' Next step: fix the split input of the build-jobs action.\n",
+    stderr: "",
+}
+=== case 15 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=4 ((14 cores - 2 kept) / 3 jobs per host; the macOS class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}

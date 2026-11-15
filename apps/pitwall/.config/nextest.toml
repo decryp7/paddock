@@ -19,8 +19,8 @@ fail-fast = false
 retries = 1
 flaky-result = "fail"
 failure-output = "immediate-final"
-# Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) build-jobs.sh
-# sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).
+# Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) `./dev ci build-jobs`
+# sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (tools/paddock-dev/src/ci_build_jobs.rs).
 test-threads = "num-cpus"
 # The time budget of one test (rule 40): reported SLOW after 30 s and stopped, failing the run, after 60 s. A test that
 # needs longer is a waiver below: an override with a `# waiver:` line saying why (conformance/test/ci-actions.test.mjs).

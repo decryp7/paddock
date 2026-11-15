@@ -1,0 +1,45 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "stable-workspace: already linked",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d elsewhere",
+        "d home",
+        "d work",
+        "d work/abc",
+        "l work/abc/hostexecutor -> <ROOT>/elsewhere",
+    ],
+}
+=== case 3 ===
+Seen {
+    code: 0,
+    stdout: "stable-workspace: resolve the job slot's kept folder ...\nstable-workspace: resolve the job slot's kept folder: failed (exit 1) in N s\n::error::job-isolation: this job holds no slot: run the job-isolation action before any step that uses a kept folder\n::warning::stable-workspace: no kept folder of this job's slot (see the message above); building from the work folder.",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

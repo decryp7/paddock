@@ -1,0 +1,66 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "Building the paddock-proc and paddock-chromium unit tests\nRunning as uid 65534: setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs -- env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::\nproc tests: guardian::\nRunning as uid 65534: setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs -- env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_chromium-9f8e7d launch::tests::a_browser_whose_owner_is_killed\nchromium tests: launch::tests::a_browser_whose_owner_is_killed\nThe guardian's acting tests passed as uid 65534",
+    github_env: "",
+    github_path: "### Orphan guardian as a user\n\n| Tests | As | Result | Time |\n|---|---|---|---|\n| `guardian::` | uid 65534 | passed | N s |\n| `launch::tests::a_browser_whose_owner_is_killed` | uid 65534 | passed | N s |",
+    calls: "cargo test --no-run --all-features -p paddock-proc -p paddock-chromium token=",
+    tree: [
+        "d crates",
+        "d crates/target",
+        "d crates/target/debug",
+        "d crates/target/debug/deps",
+        "d home",
+        "d tmp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f crates/target/debug/deps/paddock_chromium-9f8e7d \"#!/bin/sh\\necho \\\"chromium tests: $*\\\"\\n\"",
+        "f crates/target/debug/deps/paddock_proc-0123abcd \"#!/bin/sh\\necho \\\"proc tests: $*\\\"\\n[ 0 = 0 ] || { echo 'guardian said no' > \\\"$PADDOCK_PROC_GUARDIAN_LOG\\\"; exit 0; }\\n\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 1,
+    stdout: "Building the paddock-proc and paddock-chromium unit tests\nRunning as uid 65534: setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs -- env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::\nproc tests: guardian::\nThe guardian's log:\nguardian said no\n::error::guardian-as-user: `guardian::` failed as uid 65534 (exit 3, 0 s): setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs -- env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::.",
+    github_env: "",
+    github_path: "### Orphan guardian as a user\n\n| Tests | As | Result | Time |\n|---|---|---|---|\n| `guardian::` | uid 65534 | failed (exit 3) | N s |",
+    calls: "cargo test --no-run --all-features -p paddock-proc -p paddock-chromium token=",
+    tree: [
+        "d crates",
+        "d crates/target",
+        "d crates/target/debug",
+        "d crates/target/debug/deps",
+        "d home",
+        "d tmp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f crates/target/debug/deps/paddock_chromium-9f8e7d \"#!/bin/sh\\necho \\\"chromium tests: $*\\\"\\n\"",
+        "f crates/target/debug/deps/paddock_proc-0123abcd \"#!/bin/sh\\necho \\\"proc tests: $*\\\"\\n[ 3 = 0 ] || { echo 'guardian said no' > \\\"$PADDOCK_PROC_GUARDIAN_LOG\\\"; exit 3; }\\n\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 3 ===
+Seen {
+    code: 1,
+    stdout: "Building the paddock-proc and paddock-chromium unit tests\nerror[E0425]: nothing here\n::error::guardian-as-user: cargo test --no-run failed (output above); fix the build first",
+    github_env: "",
+    github_path: "",
+    calls: "cargo test --no-run --all-features -p paddock-proc -p paddock-chromium token=",
+    tree: [
+        "d crates",
+        "d crates/target",
+        "d crates/target/debug",
+        "d crates/target/debug/deps",
+        "d home",
+        "d tmp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f crates/target/debug/deps/paddock_chromium-9f8e7d \"#!/bin/sh\\necho \\\"chromium tests: $*\\\"\\n\"",
+        "f crates/target/debug/deps/paddock_proc-0123abcd \"#!/bin/sh\\necho \\\"proc tests: $*\\\"\\n[ 0 = 0 ] || { echo 'guardian said no' > \\\"$PADDOCK_PROC_GUARDIAN_LOG\\\"; exit 0; }\\n\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

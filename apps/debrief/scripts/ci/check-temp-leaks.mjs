@@ -4,7 +4,7 @@
 //   node scripts/ci/check-temp-leaks.mjs --check leaks.json      (after the tests: exits 1 naming the new ones)
 //   node scripts/ci/check-temp-leaks.mjs                         (no baseline: every matching folder counts)
 // `--dir <path>` scans that folder instead of os.tmpdir(); `--socket-dir <path>` also scans that folder for endpoint-shaped
-// names (CI: the job's own temp folder and socket base, conformance/ci/job-tmpdir.sh); `--shared` scans the shared socket
+// names (CI: the job's own temp folder and socket base, `./dev ci isolation tmpdir`); `--shared` scans the shared socket
 // folders too, as without `--dir` (only where /tmp is the job's own: a Linux container).
 
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -105,7 +105,7 @@ export function main(argv, log = console, shared = sharedDirs, platform = proces
   // CI passes "$PADDOCK_SOCKET_BASE": empty means the job's socket folder was never made, and the leak check would look in
   // one folder fewer than the tests use. Windows has no socket folder (named pipes).
   if (argv.includes('--socket-dir') && !socketDir && platform !== 'win32') {
-    log.error('--socket-dir is empty: the job has no socket folder (PADDOCK_SOCKET_BASE, conformance/ci/job-tmpdir.sh)');
+    log.error('--socket-dir is empty: the job has no socket folder (PADDOCK_SOCKET_BASE, `./dev ci isolation tmpdir`)');
     return 2;
   }
   const extra = [

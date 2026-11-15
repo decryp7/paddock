@@ -1,5 +1,5 @@
 //! paddock-dev's integration tests, one binary (C37): the command line, the planner against `scripts/affected.mjs`, the
-//! `inputs.txt` list, the slot commands with the real binary, the CI kit's job-isolation.sh over it and the `./dev` wrapper.
+//! `inputs.txt` list, the slot commands with the real binary, `ci isolation` as a real process and the `./dev` wrapper.
 mod build_env;
 mod build_jobs;
 mod build_jobs_golden;
@@ -28,9 +28,9 @@ mod host_steps_golden;
 mod hostile;
 mod inputs;
 mod ipc_endpoints;
-mod isolation;
 mod locks;
 mod merge_check;
+mod parity_golden;
 mod pr;
 mod pre_push;
 mod release_isolation;
@@ -41,6 +41,7 @@ mod sparse;
 mod tree;
 mod worktree;
 mod wrapper;
+mod wrapper_ci;
 mod wrapper_download;
 
 /// The repository root, after checking that the tree around it is whole: the tests that read the repository fail with one

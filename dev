@@ -156,6 +156,14 @@ if [ "${1:-}" = "--install-toolchain" ]; then
   exit 0
 fi
 
+# One tool per job: when the job's first step pinned the tool (`ci isolation acquire` writes PADDOCK_DEV to the job's environment), a
+# `ci` command in CI runs that binary as it is, with no hash and no build. The hash covers files the job itself writes, so at the job's
+# end (the release steps, after the job's temp folder is gone) ./dev would want another build (runs 7773 to 7775). The tool never is
+# this wrapper (a test may name it as PADDOCK_DEV): that case falls through.
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${1:-}" = ci ] && [ -n "${PADDOCK_DEV:-}" ] && [ -f "$PADDOCK_DEV" ] && [ -x "$PADDOCK_DEV" ] && ! [ "$PADDOCK_DEV" -ef "$0" ]; then
+  if _pv=$("$PADDOCK_DEV" --version 2>/dev/null) && [ -n "$_pv" ]; then exec "$PADDOCK_DEV" "$@"; fi
+fi
+
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
 tool="$root/tools/paddock-dev"
 [ -f "$tool/inputs.txt" ] || {
@@ -179,6 +187,45 @@ if [ "${GITHUB_ACTIONS:-}" = true ] && [ -d "$ci_mount" ] && [ -w "$ci_mount" ];
     # One build folder per hash (below): jobs of other hashes on the same mount never replace the binary this job just built.
     [ -n "${PADDOCK_DEV_TARGET_DIR:-}" ] || kept_target=1
   fi
+fi
+# On a host runner (macOS, Windows) a CI job keeps the tool and its build folder in the CI home's `tools` folder, never in the runner's
+# own home: a Windows job folder must stay deletable while the slot's holder runs, and the release steps of the job must find the tool
+# after the job's temp folder is gone (runs 7773 to 7775). The CI home is the one `ci isolation` uses (PADDOCK_CI_HOME, which must
+# exist and be absolute, else ~/.paddock-ci; tools/paddock-dev/src/ci_isolation/home.rs, `ci_home`): it is read here because the tool
+# that knows the rule is not built yet. WP-1's launcher carries this block over. An explicit PADDOCK_DEV_HOME wins.
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_OS:-}" != Linux ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+  if [ -n "${PADDOCK_CI_HOME:-}" ]; then
+    case "$PADDOCK_CI_HOME" in
+      /* | [A-Za-z]:[\\/]*) ;;
+      *)
+        echo "::error::PADDOCK_CI_HOME ($PADDOCK_CI_HOME) is not an absolute path. Set it to the runner's CI home, for example /Volumes/ci/paddock-ci." >&2
+        exit 1
+        ;;
+    esac
+    [ -d "$PADDOCK_CI_HOME" ] || {
+      echo "::error::PADDOCK_CI_HOME ($PADDOCK_CI_HOME) does not exist: is its disk mounted? Mount it (or create the folder once by hand); the job stops here rather than fill the internal disk." >&2
+      exit 1
+    }
+    _cihome=$PADDOCK_CI_HOME
+  else
+    _cihome=${HOME:-/nonexistent}/.paddock-ci
+    mkdir -p "$_cihome" || {
+      echo "::error::./dev cannot make the CI home $_cihome. Make it writable or set PADDOCK_CI_HOME, then run ./dev again." >&2
+      exit 1
+    }
+  fi
+  _cihome=$(cd "$_cihome" && pwd -P)
+  # Git bash on Windows: the mixed form (C:/ci/...) that bash and the native tool both read, as `ci isolation path` prints it.
+  if command -v cygpath >/dev/null 2>&1; then _cihome=$(cygpath -m "$_cihome"); fi
+  PADDOCK_DEV_HOME="$_cihome/tools/paddock-dev"
+  [ -n "${PADDOCK_DEV_TARGET_DIR:-}" ] || PADDOCK_DEV_TARGET_DIR="$_cihome/tools/paddock-dev-target"
+  export PADDOCK_DEV_HOME PADDOCK_DEV_TARGET_DIR
+fi
+# Without a read credential a CI job builds the tool from source and never takes a binary from the store (ADR 0022 section 3.3): the
+# download could only fail, and a source build keeps its own cache folder (bin-source) below.
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${PADDOCK_DEV_DOWNLOAD:-}" ] && [ -z "${PADDOCK_DEV_TOKEN:-}${GITHUB_TOKEN:-}" ]; then
+  PADDOCK_DEV_DOWNLOAD=0
+  export PADDOCK_DEV_DOWNLOAD
 fi
 home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
 # A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) keeps its tools in its own folder, bin-source, which the
@@ -289,7 +336,7 @@ ensure_toolchain() {
 }
 
 if [ "${1:-}" = "--ensure-toolchain" ]; then
-  # For conformance/ci/kit.sh and setup steps: succeeds when the compiler runs (installed if need be).
+  # For setup steps: succeeds when the compiler runs (installed if need be).
   rustc_cmd=${RUSTC:-${CARGO_BUILD_RUSTC:-}}
   (cd "$tool" && "${rustc_cmd:-rustc}" -vV >/dev/null 2>&1) && exit 0
   ensure_toolchain && (cd "$tool" && "${rustc_cmd:-rustc}" -vV >/dev/null 2>&1) && exit 0
@@ -388,7 +435,13 @@ refuse_build_target() {
 # compiler changed during the build: the caller starts over once, see restart_or_fail).
 build() {
   refuse_build_target
-  (cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet) || {
+  # Never through the job's compiler wrapper: at release the job's sccache server is stopped and its temp folder removed, and a wrapper
+  # that cannot start fails the build of the tool itself (runs 7773 to 7775). The tool is a content-addressed binary, not cached by sccache.
+  # The tool's own first build needs a core limit before the job's CARGO_BUILD_JOBS exists (`ci build-jobs` writes it): 4, the share of
+  # a runner on the shared Mac (docs/benchmarks.md, "Kit shim default"). Only for this build, never in the tool's environment.
+  (unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER CARGO_BUILD_RUSTC_WRAPPER CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER
+    if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${CARGO_BUILD_JOBS:-}" ]; then CARGO_BUILD_JOBS=4; export CARGO_BUILD_JOBS; fi
+    cd "$tool" && CARGO_TARGET_DIR="$1" PADDOCK_DEV_HASH="${2:-dirty}" cargo build --release --locked --quiet) || {
     code=$?
     toolchain_changed "$code" || return $?
     echo "::error::./dev could not build paddock-dev (hash ${2:-dirty}, cargo exit $code, build folder $1). Run 'cargo build --release --locked' in tools/paddock-dev to see why; a stale tools/paddock-dev/Cargo.lock is the usual cause." >&2

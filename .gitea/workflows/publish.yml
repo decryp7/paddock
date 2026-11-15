@@ -17,10 +17,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
-
 jobs:
   gates:
     name: gates (crates and ui)
@@ -31,12 +27,12 @@ jobs:
       # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
       # RUSTUP_TOOLCHAIN outranks the file and covers every step, `./dev` building itself included.
       RUSTUP_TOOLCHAIN: stable
-      # A release job (v* tag): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
+      # A release job (v* tag): ./dev ci steps never download a stored tool binary here.
       PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       - uses: actions/setup-node@v4
@@ -73,12 +69,12 @@ jobs:
       # The garage image has only `stable`; rust-toolchain.toml names the pinned version, which rustup would download on every run.
       # RUSTUP_TOOLCHAIN outranks the file and covers every step, `./dev` building itself included.
       RUSTUP_TOOLCHAIN: stable
-      # A release job (v* tag): ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
+      # A release job (v* tag): ./dev ci steps never download a stored tool binary here.
       PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       - uses: actions/setup-node@v4

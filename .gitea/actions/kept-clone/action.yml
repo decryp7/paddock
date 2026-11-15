@@ -14,9 +14,14 @@ runs:
   using: composite
   steps:
     - name: Update the slot's kept clone
+      # Host runners only: a Linux container is left alone, and no tool is fetched or built for it.
+      if: runner.os != 'Linux'
       shell: bash
       env:
         NAME: ${{ inputs.name }}
         PROFILE: ${{ inputs.profile }}
         FRESH: ${{ inputs.fresh }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host kept-clone "$NAME" "$PROFILE" "$FRESH"
+      run: |
+        args=(--name "$NAME" --profile "$PROFILE")
+        if [ "$FRESH" = true ]; then args+=(--fresh); fi
+        bash "${{ github.action_path }}/../../../dev" ci kept-clone "${args[@]}"

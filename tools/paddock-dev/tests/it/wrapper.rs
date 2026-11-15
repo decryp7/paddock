@@ -379,7 +379,7 @@ fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, 
 
 /// [`run_wrapper`] with a `cargo` of the test's own.
 #[cfg(unix)]
-fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)], cargo: &str) -> (i32, String, String) {
+pub(crate) fn run_wrapper_with_cargo(f: &Fixture, home: &Path, extra_env: &[(&str, String)], cargo: &str) -> (i32, String, String) {
     let shims = f.cargo_home.path().join("shims");
     write_script(&shims.join("cargo"), cargo);
     let shims_dir = shims.to_path_buf();

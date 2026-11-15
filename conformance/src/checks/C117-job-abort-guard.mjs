@@ -1,6 +1,6 @@
 // C117 (rule 3: fix everything locally first; ER-9, ER-33): a step that still runs after an earlier step failed (`if: ... !cancelled()`,
 // so one run reports every failed check) in a job that sets up with build-jobs or job-isolation must also test
-// `env.PADDOCK_JOB_ABORTED != '1'`. When that setup fails (./dev could not be built, no slot) conformance/ci/kit.sh writes the variable
+// `env.PADDOCK_JOB_ABORTED != '1'`. When that setup fails (./dev could not be built, no slot) the build-jobs, job-isolation and setup-rust actions write the variable
 // to GITHUB_ENV; without the test the job goes on and runs its checks without the slot, temp folders and core share (run 8027: crate on
 // Windows ran its tests after ./dev failed). The second sighting of "a job that went on after its setup failed" (runs 7773 to 7775, 8027).
 //
@@ -18,7 +18,7 @@ const SETUP_USES = /^\.\/\.gitea\/actions\/(?:build-jobs|job-isolation)\/?$/;
 const LOCAL_USES = /^\.\/\.gitea\/actions\/(.+?)\/?$/;
 const GUARD = 'PADDOCK_JOB_ABORTED';
 
-const NEXT = "Add `&& env.PADDOCK_JOB_ABORTED != '1'` after `!cancelled()` in this step's `if:` (conformance/ci/kit.sh job_setup sets it when the job's setup failed).";
+const NEXT = "Add `&& env.PADDOCK_JOB_ABORTED != '1'` after `!cancelled()` in this step's `if:` (the build-jobs, job-isolation and setup-rust actions set it when the job's setup failed).";
 
 const plain = (node) => (node && typeof node.toJSON === 'function' ? node.toJSON() : node);
 

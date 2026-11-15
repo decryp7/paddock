@@ -232,7 +232,7 @@ function ciTermColors() {
  * test below, so a CI change that drops or changes it turns the test red.
  */
 const PARITY = {
-  CARGO_BUILD_JOBS: { owner: 'conformance/ci/build-jobs.sh', why: 'the one place CI sets it, written to $GITHUB_ENV (the build-jobs action and setup-rust run it)' },
+  CARGO_BUILD_JOBS: { owner: 'tools/paddock-dev/src/ci_build_jobs.rs', why: 'the one place CI sets it, written to $GITHUB_ENV (the build-jobs action and setup-rust run it)' },
   CARGO_TERM_COLOR: { local: 'never', ci: 'always', why: "CI's log viewer renders colour; local output goes to files and greps, where colour codes split the words" },
   CARGO_TARGET_DIR: { local: ['/target', '/tmp/target'], ci: null, why: '/tmp/target in PADDOCK_LINUX_USER mode. CI names the build folder in .cargo/ci.toml (the build-folder action), which the read-only /work cannot take; never set in CI, because sccache hashes it' },
   HOME: { userMode: true, why: 'PADDOCK_LINUX_USER runs as a user without a home; the runner user has one' },

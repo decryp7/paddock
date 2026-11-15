@@ -1,4 +1,4 @@
-// The kept clone of a host job (conformance/ci/kept-clone.sh, .gitea/actions/kept-clone; ADR 0025, "Kept clones"): one git clone
+// The kept clone of a host job (`./dev ci kept-clone`, .gitea/actions/kept-clone; ADR 0025, "Kept clones"): one git clone
 // per job slot, brought to the job's exact commit by a fetch, cleaned, left without the paths its profile excludes. And the
 // profile file's contract: nothing a lean job reads is excluded.
 import assert from 'node:assert/strict';
@@ -8,10 +8,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { PADDOCK } from './helpers.mjs';
+import { PADDOCK, devBinary } from './helpers.mjs';
 
 const read = (p) => readFileSync(p, 'utf8');
-const SCRIPT = join(PADDOCK, 'conformance', 'ci', 'kept-clone.sh');
 const PROFILES = join(PADDOCK, 'conformance', 'ci', 'checkout-profiles.txt');
 
 /** The declared lines of the profile file: [{ kind, args: [...], rest }]. */
@@ -73,12 +72,11 @@ function job(fx, sha, { os = 'macOS', slot = 's1', env = {}, hash = Math.random(
   const ghEnv = join(fx.root, `github-env-${hash}`);
   writeFileSync(ghEnv, '');
   const jobEnv = { ...ENV(fx.root), RUNNER_OS: os, PADDOCK_CI_SLOT: slot, GITHUB_WORKSPACE: ws, GITHUB_ENV: ghEnv, GITHUB_ACTION_PATH: join(PADDOCK, '.gitea', 'actions', 'kept-clone'), NAME: 'decryp7/paddock-crate', PROFILE: profile, KEPT_CLONE_PROFILES: join(fx.root, 'profiles.txt'), ...env };
-  // KEPT_CLONE_CMD: the Rust command (a paddock-dev binary) is the unit under test instead of the script (the plan's oracle rule,
-  // docs/plans/ci-in-rust.md section 7, WP-5): the same cases hold both. The script's inputs NAME, PROFILE and FRESH become its flags.
-  const rust = process.env.KEPT_CLONE_CMD;
-  const r = rust
-    ? spawnSync(rust, ['ci', 'kept-clone', '--name', jobEnv.NAME, '--profile', jobEnv.PROFILE, ...(jobEnv.FRESH === 'true' ? ['--fresh'] : [])], { cwd: ws, encoding: 'utf8', env: { ...jobEnv, PADDOCK_CI_TABLES: join(PADDOCK, 'conformance', 'ci') } })
-    : spawnSync('bash', [SCRIPT], { cwd: ws, encoding: 'utf8', env: jobEnv });
+  // The command under test is the paddock-dev binary `./dev` builds for this checkout (KEPT_CLONE_CMD names another). Until WP-2 of
+  // docs/plans/shell-to-rust.md the same cases held conformance/ci/kept-clone.sh as well; its inputs NAME, PROFILE and FRESH are the
+  // command's flags.
+  const tool = process.env.KEPT_CLONE_CMD || devBinary();
+  const r = spawnSync(tool, ['ci', 'kept-clone', '--name', jobEnv.NAME, '--profile', jobEnv.PROFILE, ...(jobEnv.FRESH === 'true' ? ['--fresh'] : [])], { cwd: ws, encoding: 'utf8', env: { ...jobEnv, PADDOCK_CI_TABLES: join(PADDOCK, 'conformance', 'ci') } });
   if (process.env.KC_DEBUG) console.log(r.stdout + r.stderr);
   return { ...r, ws, ghEnv, out: r.stdout + r.stderr, stable: (s = slot) => join(fx.root, 'home', '.paddock-ci', 'src', `decryp7_paddock-crate-${s}`) };
 }
@@ -650,10 +648,4 @@ test('the bundle job check rejects a full actions/checkout of the hosts, a .padd
 test('app-release.yml: the kit of the bundle job is this very commit (paddock-ref is checked, not trusted)', () => {
   const job = jobBlock(read(RELEASE), 'bundle');
   assert.match(job, /name: The kit is this commit\n(?:.*\n)*?\s+PADDOCK_REF: \$\{\{ inputs\.paddock-ref \}\}\n(?:.*\n)*?\s+SHA: \$\{\{ github\.sha \}\}\n[\s\S]*?::error::/, 'a step that fails with an ::error:: when paddock-ref is not github.sha');
-});
-
-test('node-caches links the Angular cache inside the kept clone, not the Windows bootstrap folder', () => {
-  const action = read(join(PADDOCK, 'conformance', 'ci', 'host', 'node-caches.sh'));
-  assert.match(action, /\$\{PADDOCK_WORKSPACE:-\$GITHUB_WORKSPACE\}/, 'the workspace is PADDOCK_WORKSPACE when set');
-  assert.doesNotMatch(action.split('\n').filter((l) => !l.trim().startsWith('#')).join('\n'), /"\$GITHUB_WORKSPACE\/\$ANGULAR_DIR/, 'no path built on GITHUB_WORKSPACE alone');
 });

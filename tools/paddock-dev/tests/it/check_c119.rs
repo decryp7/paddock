@@ -59,7 +59,7 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
     let d = tree(&[
         (
             ".gitea/actions/kept/action.yml",
-            "runs:\n  steps:\n    - run: bash conformance/ci/kit.sh host x\n",
+            "runs:\n  steps:\n    - run: bash \"${{ github.action_path }}/../../../dev\" ci host-tools\n",
         ),
         (".gitea/actions/plain/action.yml", "runs:\n  steps:\n    - run: echo\n"),
         (

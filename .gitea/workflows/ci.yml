@@ -58,9 +58,6 @@ permissions:
 
 # The conformance checks Paddock runs on itself are the `conformance` field of conformance/paddock.ci.json (ADR 0038 §1): one list,
 # run by the conformance job and the train-gates job as `./dev ci run conformance paddock`, and read by `./dev check --pre-push`.
-env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
@@ -363,7 +360,7 @@ jobs:
           PADDOCK_WEBKIT: "1"
         run: |
           # The job slot's own block of three ports (conformance/ci/ports.txt `webkit`: 4320-4322 for s1).
-          port=$(bash ../conformance/ci/kit.sh isolation port webkit)
+          port=$(bash ../dev ci isolation port webkit)
           export PW_PORT=$port SHELL_DEMO_PORT=$((port + 1)) WORKBENCH_DEMO_PORT=$((port + 2))
           npx playwright test --project=gallery-webkit --project=shell-demo-webkit --project=workbench-demo-webkit
 
@@ -870,11 +867,11 @@ jobs:
           path: crates/lcov.info
           if-no-files-found: ignore
       # The container runs as root and the orphan guardian is off for root: run its acting tests as an unprivileged user
-      # (ADR 0076 amendment 2026-11-09; ./dev ci guardian-as-user prints one ::error:: per failure; the shell stays behind conformance/ci/kit.sh for tag runs).
+      # (ADR 0076 amendment 2026-11-09; ./dev ci guardian-as-user prints one ::error:: per failure).
       - name: Orphan guardian as a user (Linux)
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' }}
         working-directory: crates
-        run: bash ../conformance/ci/kit.sh host guardian-as-user
+        run: bash ../dev ci guardian-as-user
       - run: ./dev ci run crates deny
       - uses: ./.gitea/actions/sccache-stats
         if: always()
@@ -950,7 +947,7 @@ jobs:
         if: runner.os != 'Linux'
         working-directory: .
         run: |
-          dir="$(bash conformance/ci/kit.sh isolation path browser paddock)"
+          dir="$(bash dev ci isolation path browser paddock)"
           if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
           echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
@@ -1260,7 +1257,7 @@ jobs:
         env:
           APP: ${{ matrix.app }}
         run: |
-          dir="$(bash conformance/ci/kit.sh isolation path browser "$APP")"
+          dir="$(bash dev ci isolation path browser "$APP")"
           if command -v cygpath >/dev/null; then dir="$(cygpath -w "$dir")"; fi
           echo "PADDOCK_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 

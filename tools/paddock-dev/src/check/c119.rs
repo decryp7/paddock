@@ -1,10 +1,10 @@
 //! C119: no workflow job runs `./dev` before its toolchain is set up (ER-9, ER-26). `./dev` hashes its own sources with `rustc -vV` and
 //! builds itself with that compiler, so a step that runs it before `.gitea/actions/setup-rust` (or any action that goes through
-//! `conformance/ci/kit.sh`, whose first act is `./dev --ensure-toolchain`) can hash and build with another compiler than the job's later
+//! `bash .../dev" ci ...`, which installs the pinned toolchain itself when none runs) can hash and build with another compiler than the job's later
 //! steps, or find none (run 8034; the CI-in-Rust WP-3 review: five root jobs called `./dev ci run` with no setup-rust). Judged per job of
 //! `.gitea/workflows/*.yml`: the first step whose `run:` script runs `./dev` is a finding unless an earlier step of the job `uses:` a
-//! local action that sets the toolchain up (an action whose text names `kit.sh`, `--ensure-toolchain` or `actions/setup-rust`) or runs
-//! `kit.sh` / `--ensure-toolchain` itself. A justified case carries `conformance: dev-before-toolchain — <why>` on the line or above.
+//! local action that sets the toolchain up (an action whose text runs the wrapper as `dev" ci`, names `--ensure-toolchain` or `actions/setup-rust`) or runs
+//! `--ensure-toolchain` itself. A justified case carries `conformance: dev-before-toolchain — <why>` on the line or above.
 //! Report-only for now (ER-41).
 //!
 //! The port of `conformance/src/checks/C119-dev-before-toolchain.mjs`, finding for finding (`tests/it/check_c119.rs` compares them).
@@ -18,9 +18,9 @@ use regex::Regex;
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-static SETS_UP: LazyLock<Regex> = LazyLock::new(|| rx("kit\\.sh|--ensure-toolchain|actions/setup-rust"));
+static SETS_UP: LazyLock<Regex> = LazyLock::new(|| rx("--ensure-toolchain|actions/setup-rust|/dev\"\\s+ci\\s"));
 static RUNS_DEV: LazyLock<Regex> = LazyLock::new(|| rx("(?:^|[\\s;&|(])\\./dev(?:\\s|$)"));
-static KIT_LINE: LazyLock<Regex> = LazyLock::new(|| rx("kit\\.sh|--ensure-toolchain"));
+static KIT_LINE: LazyLock<Regex> = LazyLock::new(|| rx("--ensure-toolchain"));
 static JOBS_KEY: LazyLock<Regex> = LazyLock::new(|| rx("^jobs:\\s*(?:#.*)?$"));
 static JOB_LINE: LazyLock<Regex> = LazyLock::new(|| rx("^ {2}[A-Za-z0-9_-]+:\\s*(?:#.*)?$"));
 static STEPS_LINE: LazyLock<Regex> = LazyLock::new(|| rx("^ {4}steps:\\s*(?:#.*)?$"));
@@ -32,7 +32,7 @@ static DASH_LEAD: LazyLock<Regex> = LazyLock::new(|| rx("^\\s*-\\s+"));
 
 const FIX: &str = "Add `- uses: ./.gitea/actions/setup-rust` before the first step that runs `./dev` (the job then hashes and builds the tool with the pinned compiler). A justified case carries `# conformance: dev-before-toolchain — <why>`.";
 
-/// The local actions that set the toolchain up: those whose text goes through kit.sh or names setup-rust.
+/// The local actions that set the toolchain up: those whose text runs the `dev` wrapper's `ci` command (its first act installs the pinned toolchain when none runs) or names setup-rust.
 pub fn toolchain_actions(actions: &[(String, String)]) -> BTreeSet<String> {
     let mut names: BTreeSet<String> = BTreeSet::from(["setup-rust".to_string()]);
     for (name, text) in actions {
@@ -249,7 +249,7 @@ mod tests {
 
     fn setup() -> BTreeSet<String> {
         toolchain_actions(&[
-            ("kept".into(), "run: bash conformance/ci/kit.sh host x".into()),
+            ("kept".into(), "run: bash \"${{ github.action_path }}/../../../dev\" ci host-tools".into()),
             ("plain".into(), "run: echo".into()),
         ])
     }

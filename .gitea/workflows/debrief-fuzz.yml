@@ -14,8 +14,6 @@ on:
         default: "300"
 
 env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
   FUZZ_SECONDS: ${{ github.event.inputs.seconds || '300' }}
 
@@ -86,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       # A dated nightly (RUSTUP_TOOLCHAIN) instead of the moving one: the build, and the cache keyed on it, change
