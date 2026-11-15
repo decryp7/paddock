@@ -1,7 +1,10 @@
-# The commands CI ran before the gate executor (the `gates model` of ci.yml and app-gates at 11c365fc4, before CI-in-Rust WP-3):
-# `job` rows are every command of a root job, `app` rows the commands an app contract adds to its legs. The executor's contracts must
-# produce exactly these (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_ci_ran_before_the_executor`).
-# Two deliberate changes since then (WP-3 review): C119 joined the conformance list, and the setup-rust and sccache-stats actions' own lines are rows of the five jobs that now run it first (ui, e2e, tools, icons, eslint-preset). Since train 9: the setup-rust action settles the image's pinned toolchain and stable (Rust 1.100, chore/rust-1-100) and prints the cargo build-dir layout opt-out on Windows (fix/spotter-win-cmdline-1-100). The install itself became `./dev --install-toolchain` (locked, checked and repaired, after CI run 8060). Train 11: C122 (ADR 0099) joined the conformance list beside C121 and C124, and train 12 C125.
+# Generated from the CI model by the regenerate command below; do not edit (ER-40). The commands CI runs: `job` rows are every command
+# of a root job of ci.yml, `app` rows the commands an app contract adds to its legs, as the CI model reads them from the contracts
+# (the paddock.ci.json files) and the workflows (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_in_the_golden`). The
+# conformance line's `--only` value is `$ONLY` (that list is generated from the check modules; the rest of the line is literal). It began as the commands
+# CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract or a job shows
+# here as added and removed rows in the same commit. Regenerate:
+#   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
 # kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
 app	dyno	macos-latest	apps/dyno	cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper
 app	dyno	ubuntu-latest		node conformance/bin/paddock-conformance.mjs --app dyno --root apps/dyno --only C13 --paddock .
@@ -172,7 +175,7 @@ job	conformance			missing=1
 job	conformance			mkdir -p "$DEST"
 job	conformance			mkdir -p "$DIR"
 job	conformance			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-job	conformance			node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C06,C14,C15,C16,C23,C24,C29,C30,C31,C34,C35,C36,C37,C39,C43,C45,C48,C53,C54,C56,C57,C59,C71,C79,C98,C104,C110,C111,C112,C113,C114,C115,C116,C117,C118,C119,C120,C121,C122,C123,C124,C125,C126 --strict C36
+job	conformance			node conformance/bin/paddock-conformance.mjs --app paddock --root . --only $ONLY --strict C36
 job	conformance			npm ci --ignore-scripts -w conformance
 job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	conformance			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"
