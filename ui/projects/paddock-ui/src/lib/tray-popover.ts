@@ -100,7 +100,8 @@ function tidy<Id extends string>(entries: readonly SuTrayMenuEntry<Id>[]): reado
             <pd-glyph name="more" [size]="18" />
           </button>
           <mat-menu #moreMenu="matMenu" class="pd-tray-menu" yPosition="above" xPosition="before">
-            @for (e of items(); track $index) {
+            <!-- Keyed by action, not position: a row keeps its action when a row above goes away while the menu is open. -->
+            @for (e of items(); track e.kind === 'item' ? 'item:' + e.id : 'separator:' + $index) {
               @if (e.kind === 'item') {
                 <button mat-menu-item type="button" [disabled]="!!e.disabled" (click)="menuAction.emit(e.id)">
                   @if (e.icon) {

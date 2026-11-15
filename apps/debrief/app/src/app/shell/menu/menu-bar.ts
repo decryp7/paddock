@@ -21,10 +21,12 @@ import { MenuNode, TopMenu } from './menu-model';
       }
     </div>
 
-    <!-- Menus are looked up by path on every render: CDK keeps the data a menu was first opened with. -->
+    <!-- Menus are looked up by path on every render: CDK keeps the data a menu was first opened with. Items are keyed by
+         what they run, never by position: when an item above goes away while the menu is open (a lazy command set loads
+         and hides an unavailable command), a button keeps its command instead of taking over its neighbour's. -->
     <ng-template #list let-path let-label="label">
       <div cdkMenu class="menu" [attr.aria-label]="label" [attr.data-menu]="label">
-        @for (node of itemsAt(path); track $index) {
+        @for (node of itemsAt(path); track key(node, $index)) {
           @switch (node.kind) {
             @case ('separator') {
               <div role="separator" class="sep"></div>
@@ -126,6 +128,19 @@ export class MenuBar {
       items = sub?.kind === 'submenu' ? sub.items : [];
     }
     return items as MenuNode[];
+  }
+
+  /** The identity of a node in an open menu: its command or submenu id, a group's label; separators by position (they run nothing). */
+  protected key(node: MenuNode, index: number): string {
+    switch (node.kind) {
+      case 'item':
+      case 'submenu':
+        return `${node.kind}:${node.id}`;
+      case 'group':
+        return `group:${node.label}`;
+      case 'separator':
+        return `separator:${index}`;
+    }
   }
 
   protected hint(binding: string | undefined): string {

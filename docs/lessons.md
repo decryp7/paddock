@@ -2057,3 +2057,14 @@ check that means "has it ended" treats a zombie as ended (`running()` in scripts
 not `Z`); a bare `kill(pid, 0)` is only "the pid exists". Tests that start detached processes run once in a container whose PID 1
 is a plain `sleep` before a train push, as CI's is. **Class: a Linux CI container differs from the dev host (ER-9; run 7485's
 root user and software rasteriser, above).**
+
+## An open menu ran its neighbour's command after a lazy load hid a row (Debrief, 2026-11-15, CI run 8116)
+`ux-demo-tour.e2e.ts:58` flaked (2 of 156): after a reload, File ▸ Close workspace ran Close window. The lazy share commands
+loaded while the menu was open, `report.export` hid itself, and the rows below moved up; the list was rendered with
+`track $index`, so the button Playwright had resolved kept its place and took over the next row's label and command (its
+hit-target check passed, as it was the same element). First hypotheses (async tour state, shared storage, an overlay, a fixed
+wait) were refuted by the trace: the Activity log named the command that ran. 14 of 100 failed in the CI image before, 0 of
+100 after. **Rule:** `track $index` on interactive rows that can change while shown reuses a row for its neighbour; key by
+identity (command id; position only for rows that run nothing), and keep ids unique per level. Fixed in Debrief's menu bar,
+paddock-ui's `pd-menu-bar`/`pd-context-menu` and `pd-tray-popover`. **Class: stale element identity after a list changes
+under an action** (earlier: the toast whose Show missed its click when the next alert moved the stack, above).
