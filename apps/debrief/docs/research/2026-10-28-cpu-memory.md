@@ -38,11 +38,11 @@ the unchanged P0-P4, J1, B1 and A1, plus P5 (plugin idle wake-ups, from the revi
   `scripts/perf/perfsum.py` summarises per process and per phase.
 - **Harnesses** (committed on this branch; the Rust ones are `#[ignore]` and run with `--ignored`; the scripts read
   `DEBRIEF_PERF_BIN` (release target folder), `DEBRIEF_LIB_DIR` (libduckdb) and `DEBRIEF_PERF_OUT` (results folder)):
-  - Import: `scripts/perf/perf-import.sh LABEL CORPUS STORE` runs the release `debrief import ... --json` (the headless
+  - Import: `cargo xtask perf-import LABEL CORPUS STORE` runs the release `debrief import ... --json` (the headless
     CLI, ADR 0044) with the release `debrief-store-worker`, exactly the process split of the app.
   - After the import: `crates/debrief-store-duck/tests/perf_idle.rs` (`DEBRIEF_PERF_STORE=<store>`) reopens the store and
     runs, one after the other, the catalogue build (the full-text index builds concurrently), 60 s idle, 60 s of the name
-    watcher's calls, and the name-table rebuild step by step; `scripts/perf/perf-post.sh` samples it.
+    watcher's calls, and the name-table rebuild step by step; `cargo xtask perf-post` samples it.
   - Names: `crates/debrief-core/tests/it/names_perf.rs` `merge_scaling` (ignored; `--ignored --nocapture`).
   - Plugins: `crates/debrief-plugins/tests/it/perf_plugins.rs` (`--ignored`) warms the 12 built-ins up as
     the app does and idles 60 s; this process stands in for the app (it runs the host's memory watchers); `sample(1)`
@@ -55,10 +55,10 @@ Commands, in order (raw results in `/Volumes/d7sst7/dev-targets/research-data/re
 ```sh
 python3 -I scripts/perf/gen_large.py <data>/mid550 0.072          # 18 s, 581 MB
 cargo build --release -p debrief-cli -p debrief-store-worker       # through heavy.sh
-scripts/perf/perf-import.sh mid550 <data>/mid550 <data>/stores/mid550
-scripts/perf/perf-import.sh large  <data>/large  <data>/stores/large
-scripts/perf/perf-post.sh   mid550 <data>/stores/mid550 60
-scripts/perf/perf-post.sh   large  <data>/stores/large  60         # then large2 with 30 s (see 1.3)
+cargo xtask perf-import mid550 <data>/mid550 <data>/stores/mid550
+cargo xtask perf-import large  <data>/large  <data>/stores/large
+cargo xtask perf-post   mid550 <data>/stores/mid550 60
+cargo xtask perf-post   large  <data>/stores/large  60         # then large2 with 30 s (see 1.3)
 <release it binary of debrief-core> names_perf:: --ignored --nocapture --test-threads 1
 <release it binary of debrief-plugins> perf_plugins:: --ignored --nocapture   # + sample <pid> 5
 ```

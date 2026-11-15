@@ -4,10 +4,16 @@
 //!   profiler captures and the crash dump, which Rust tests write when `DEBRIEF_REGENERATE_SAMPLES=1`.
 //! - `build-plugins [--release|--debug] [--target <triple>]`: builds the plugins binary and puts it where Tauri bundles it as a
 //!   sidecar (`app/src-tauri/binaries/debrief-plugins-<triple>`); release builds do it through `app/scripts/build-sidecars.mjs`.
+//! - `dev-sign [--remove]` and `build-app [tauri args]`: the local code-signing identity and a local release build signed with it.
+//! - `perf-import`, `perf-post`: the macOS performance runs (`scripts/perf/`).
+//! - `fonts <sans> <sans-italic> <mono>`: rebuilds the PDF report fonts (`crates/debrief-pdf/fonts`).
 //! - `libduckdb`: fetches the pinned prebuilt libduckdb the store worker links and points Cargo at it
 //!   (see [`libduckdb`]).
 
+mod dev_sign;
+mod fonts;
 mod libduckdb;
+mod perf;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -190,13 +196,18 @@ fn gen_samples() -> Result<(), String> {
     Ok(())
 }
 
-const USAGE: &str = "usage: cargo xtask <task>\n\ntasks:\n  gen-samples   regenerate every committed sample (samples/generate.py and the Rust sample generators)\n  build-plugins build the plugins sidecar into app/src-tauri/binaries ([--release|--debug] [--target <triple>])\n  libduckdb     fetch the pinned prebuilt libduckdb and point Cargo at it (.cargo/libduckdb.toml)\n  help         show this message";
+const USAGE: &str = "usage: cargo xtask <task>\n\ntasks:\n  gen-samples   regenerate every committed sample (samples/generate.py and the Rust sample generators)\n  build-plugins build the plugins sidecar into app/src-tauri/binaries ([--release|--debug] [--target <triple>])\n  dev-sign [--remove]   create (or remove) the local code-signing identity \"Debrief Local Dev\" in the login keychain\n  build-app [args]      local release build, signed with that identity when present (args go to `tauri build`)\n  perf-import LABEL CORPUS STORE   import a corpus under the sampler (macOS; DEBRIEF_PERF_BIN, DEBRIEF_LIB_DIR, DEBRIEF_PERF_OUT)\n  perf-post LABEL STORE [IDLE_S]   reopen a store with the perf_idle harness under the sampler\n  fonts SANS SANS_ITALIC MONO      rebuild the PDF report fonts (needs python3 with fonttools)\n  libduckdb     fetch the pinned prebuilt libduckdb and point Cargo at it (.cargo/libduckdb.toml)\n  help         show this message";
 
 fn main() -> ExitCode {
     let task = std::env::args().nth(1);
     let result = match task.as_deref() {
         Some("gen-samples") => gen_samples(),
         Some("build-plugins") => build_plugins(&std::env::args().skip(2).collect::<Vec<_>>()),
+        Some("dev-sign") => dev_sign::dev_sign(&std::env::args().skip(2).collect::<Vec<_>>(), &repo_root()),
+        Some("build-app") => dev_sign::build_app(&std::env::args().skip(2).collect::<Vec<_>>(), &repo_root()),
+        Some("perf-import") => perf::import(&std::env::args().skip(2).collect::<Vec<_>>(), &repo_root()),
+        Some("perf-post") => perf::post(&std::env::args().skip(2).collect::<Vec<_>>(), &repo_root()),
+        Some("fonts") => fonts::run_task(&std::env::args().skip(2).collect::<Vec<_>>(), &repo_root()),
         Some("libduckdb") => libduckdb::run(&repo_root()),
         Some("help" | "-h" | "--help") | None => {
             println!("{USAGE}");

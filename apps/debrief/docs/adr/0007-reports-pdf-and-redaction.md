@@ -41,7 +41,7 @@ PDF options considered:
     so text is selectable, searchable and extracts correctly. The fonts cover Latin, Greek and
     Cyrillic; other characters (CJK, emoji) print and extract as U+FFFD, one per character, and
     invisible format characters are dropped (the HTML export keeps every character). Subsetting
-    uses `subsetter` and `skrifa` (MIT/Apache-2.0); `crates/debrief-pdf/fonts/build-fonts.sh`
+    uses `subsetter` and `skrifa` (MIT/Apache-2.0); `cargo xtask fonts` (was `crates/debrief-pdf/fonts/build-fonts.sh`)
     rebuilds the font files (about 250 KB in the binary);
   - chart and timeline snapshots (already sanitised SVG) become vector XObjects, their labels
     set in the system fonts (usvg/fontdb), so they stay selectable too.

@@ -39,7 +39,7 @@ const DENY_LINE = [/"integrity":\s*"sha\d+-/, /^checksum = "/];
 /**
  * Tokens that contain "imt" but are protected from the rewrite. The report fonts embed their family name in the font
  * file itself (`name` table), and the PDF tests assert it; renaming the strings without rebuilding the fonts would
- * break them. Rebuild them (crates/imt-pdf/fonts/build-fonts.sh) in a separate change if the family should be renamed.
+ * break them. Rebuild them (`cargo xtask fonts`) in a separate change if the family should be renamed.
  */
 const PROTECTED_TOKEN = /^IMT_?Report_?(?:Sans|Mono)/i;
 

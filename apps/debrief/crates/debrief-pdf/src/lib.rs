@@ -3,7 +3,7 @@
 //!
 //! Text is set in fonts embedded in the document: reduced builds of the UI's
 //! IBM Plex Sans and JetBrains Mono (SIL OFL 1.1, vendored with their
-//! licences in `fonts/`, rebuilt by `fonts/build-fonts.sh`). Each PDF embeds
+//! licences in `fonts/`, rebuilt by `cargo xtask fonts`). Each PDF embeds
 //! only the glyphs it uses, as `CIDFontType2` fonts with `Identity-H`
 //! encoding and a `ToUnicode` CMap, so Latin, Greek and Cyrillic text is
 //! selectable, searchable and copyable. The bundled fonts add about 250 KB

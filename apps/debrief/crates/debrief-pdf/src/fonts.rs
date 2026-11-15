@@ -3,7 +3,7 @@
 //!
 //! The fonts are reduced builds of the UI's IBM Plex Sans (regular, bold,
 //! italic) and JetBrains Mono, both SIL OFL 1.1, vendored in `fonts/` with
-//! their licences and the script that makes them (`fonts/build-fonts.sh`).
+//! their licences and the script that makes them (`cargo xtask fonts`).
 //! They cover Latin (incl. Extended-A/B and Vietnamese), Greek, Cyrillic,
 //! punctuation, currency, arrows, maths, box drawing and geometric shapes.
 //!

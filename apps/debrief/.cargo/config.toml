@@ -4,5 +4,5 @@
 include = [{ path = "libduckdb.toml", optional = true }, { path = "ci.toml", optional = true }]
 
 [alias]
-# Repository chores (xtask/): `cargo xtask gen-samples`, `cargo xtask libduckdb`, `cargo xtask help`.
+# Repository chores (xtask/): `cargo xtask gen-samples`, `libduckdb`, `build-plugins`, `dev-sign`, `build-app`, `perf-import`, `perf-post`, `fonts`, `help`.
 xtask = "run -p xtask --"

@@ -17,11 +17,6 @@
    "hash": "d2bcbb7c4667b303"
   },
   {
-   "file": "apps/debrief/scripts/perf/perf-import.sh",
-   "line": 16,
-   "hash": "77b9eed00fd77360"
-  },
-  {
    "file": "conformance/ci/job-isolation.sh",
    "line": 178,
    "hash": "3a4eb424992eaddb"
