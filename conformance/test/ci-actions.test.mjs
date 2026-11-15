@@ -2421,3 +2421,35 @@ test('no workflow or composite action step runs ./dev disk scan or ./dev disk re
   assert.ok(names.length > 10, 'the composite actions are read');
   assert.deepEqual(found, [], 'remove these steps: run `./dev disk report` locally instead');
 });
+
+// 2026-11-15 review (P1-3): a train run is dispatched at once and its first job waits for the single-machine runner
+// (./dev ci runner-wait). That holds only if the wait runs before every macOS or Windows job of the run.
+test('a workflow that runs runner-wait runs it in a first job that every macOS or Windows job needs', () => {
+  const single = (j, seen = new Set()) => {
+    if (typeof j.uses === 'string') {
+      const m = /^\.\/\.gitea\/workflows\/([\w.-]+)$/.exec(j.uses.trim());
+      if (!m || seen.has(m[1])) return false;
+      seen.add(m[1]);
+      return Object.values(loadWorkflow(m[1]).jobs ?? {}).some((x) => single(x, seen));
+    }
+    return /macos|windows/i.test(JSON.stringify([j['runs-on'] ?? '', j.strategy?.matrix ?? null]));
+  };
+  const users = [];
+  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    const jobs = loadWorkflow(f).jobs ?? {};
+    const waiters = Object.entries(jobs).filter(([, j]) => stepsOf(j).some((s) => s.uses === './.gitea/actions/runner-wait')).map(([id]) => id);
+    if (!waiters.length) continue;
+    users.push(f);
+    for (const w of waiters) assert.deepEqual(needsOf(jobs[w]), [], `${f}: ${w} runs runner-wait, so it must be a first job (no needs): ./dev ci dispatch reads it that way`);
+    const upstream = (id, acc = new Set()) => {
+      for (const n of needsOf(jobs[id])) if (!acc.has(n)) { acc.add(n); upstream(n, acc); }
+      return acc;
+    };
+    for (const [id, j] of Object.entries(jobs)) {
+      if (waiters.includes(id) || !single(j)) continue;
+      const up = upstream(id);
+      assert.ok(waiters.some((w) => up.has(w)), `${f}: job ${id} runs on macOS or Windows but does not need ${waiters.join(' or ')} (the runner-wait job)`);
+    }
+  }
+  assert.ok(users.includes('ci.yml') && users.includes('debrief.yml') && users.includes('dyno-release.yml'), `the train workflows wait in their first job: ${users}`);
+});

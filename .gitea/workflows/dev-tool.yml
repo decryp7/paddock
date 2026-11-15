@@ -59,6 +59,11 @@ jobs:
       run: ${{ steps.decide.outputs.run }}
     steps:
       - uses: actions/checkout@v4
+      # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
+      # needs (./dev ci runner-wait); the queued run is what scheduled runs yield to. Other events: nothing.
+      - uses: ./.gitea/actions/runner-wait
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
       - id: train
         uses: ./.gitea/actions/schedule-skip
         with:

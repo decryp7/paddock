@@ -99,6 +99,11 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # A train run is dispatched at once and waits here, on Linux, until no older run holds the Mac or Windows runner it
+      # needs (./dev ci runner-wait); the queued run is what scheduled runs yield to. Other events: nothing.
+      - uses: ./.gitea/actions/runner-wait
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
       # ADR 0060: C100 cannot be the only guard of its own wiring (a change that deletes the line deletes the check too), so a plain
       # grep on every event checks that the conformance job and the nightly still run it.

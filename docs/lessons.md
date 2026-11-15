@@ -2164,3 +2164,16 @@ mktemp folder of its own, or a site that cannot name a root two folders deep (a 
 the delete emptied a folder outside the root; the Rust guard had the same hole. Both now remove the path rebuilt from its checked
 names, and one table (`tools/paddock-dev/tests/fixtures/safe-remove-parity.tsv`) is answered by both copies' tests. **Class:
 computed deletes beyond their folder (C115's third sighting, ER-21); check and act on the same normalised value.**
+
+## A train waiting to dispatch was starved by scheduled runs (2026-11-15)
+`./dev ci dispatch` waited while another run held the single Mac or Windows runner, and `ci schedule-skip` ends a scheduled run
+early only while a train's run is queued or running. A train whose dispatcher was still waiting had nothing queued, so each new
+scheduled run took the runner first: on 2026-11-14 around 11:00 and on 2026-11-15 from 05:03 to 07:07 (runs 8112 to 8114). A
+first fix recorded a "waiting" marker in a repository Actions variable; review found that it needs a repo-admin-scoped token,
+and the common-practice answer is a queued run, as CI systems do (a job waits on a free runner, not the client). It was
+reverted. Now `ci dispatch` sends a `train/*` run of a workflow whose first job runs the `runner-wait` action at once, and that
+Linux job waits (`./dev ci runner-wait`, at most 2h30m, logged) until no OLDER unfinished run shares its Mac or Windows runner.
+Older only: two runs of one train never wait for each other, so the oldest always goes. The queued run is what schedule-skip
+already yields to, with its bounds (never twice in a row, never past the gap). Conformance checks that every macOS or Windows
+job of such a workflow needs the runner-wait job. **Rule:** a wait for a shared resource lives in the queued job, not in the
+client that has not queued yet. **Class: a scheduler that cannot see work that has not been queued.**

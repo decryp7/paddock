@@ -1,0 +1,24 @@
+name: runner-wait
+description: "A train run waits in its own first job: on a workflow_dispatch run of a train/* branch, wait (on this Linux job, at most max) until no older unfinished run holds the Mac or Windows runner this workflow needs (./dev ci runner-wait). `./dev ci dispatch` sends such a train at once, so the queued run is what scheduled runs yield to (ci schedule-skip). Any other event or ref: nothing. Fails open (a warning) when the runs cannot be read; fails the job, naming the busy run, at max. Put it in a job with no needs, after the checkout, and make every macOS or Windows job need that job (conformance checks it)."
+inputs:
+  max:
+    description: "The longest to wait (under the runner's job timeout of 3 h)."
+    default: "2h30m"
+  token:
+    description: Token that reads the repository's Actions runs (the job token can).
+    default: ${{ github.token }}
+  dev-token:
+    description: "Read token of the private package store for ./dev's prebuilt download (ADR 0022 R0b); empty: ./dev builds the tool. Pass BUILD_INPUTS_TOKEN."
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      if: github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/train/')
+      env:
+        PLAN_TOKEN: ${{ inputs.token }}
+        PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
+        PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
+        RUN_ID: ${{ github.run_id }}
+        MAX: ${{ inputs.max }}
+      run: bash "${{ github.action_path }}/../../../dev" ci runner-wait --run-id "$RUN_ID" --max "$MAX"
