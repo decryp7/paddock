@@ -144,6 +144,12 @@ toolchain_failed() {
   if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_TOOLCHAIN_FAILED=1" >> "$GITHUB_ENV" || true; fi
 }
 
+# `./dev --require-rustup`: the check setup-rust's toolchain step starts with (through `--job-setup`, so a runner without rustup marks the job).
+if [ "${1:-}" = "--require-rustup" ]; then
+  command -v rustup >/dev/null 2>&1 || { echo "::error::rustup is not installed on this runner. Next step: install it (https://rustup.rs) on the runner, then rerun the job." >&2; exit 1; }
+  exit 0
+fi
+
 # --install-toolchain <toolchain> [<components>] [<targets>] (space-separated lists): the setup-rust action's install, before anything
 # else of the job (no repository or compiler needed). One install of a toolchain at a time per rustup home (toolchain_lock, shared with
 # ensure_toolchain below), checked by toolchain_install_checked and never uninstalled, bounded by PADDOCK_DEV_TOOLCHAIN_TIMEOUT (default 900 s).

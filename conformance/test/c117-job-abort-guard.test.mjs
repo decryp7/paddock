@@ -77,5 +77,6 @@ test('C117: a job that sets up with setup-rust alone (it runs build-jobs through
   });
   const f = await findingsOf('C117', root);
   assert.equal(f.length, 1, JSON.stringify(f));
-  assert.match(f[0].message ?? f[0].text ?? JSON.stringify(f[0]), /a|setup/);
+  assert.match(f[0].message, /job a\b/, 'the finding names the setup-rust job');
+  assert.doesNotMatch(f.map((x) => x.message).join('\n'), /job b\b/, 'the guarded job raises none');
 });

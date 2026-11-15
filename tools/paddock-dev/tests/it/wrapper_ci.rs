@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: it runs the ./dev shell wrapper, which Windows runs through Git bash on every job
 #![cfg(unix)]
-use super::wrapper::{Fixture, fake_rustc, run_wrapper, rustup_without_toolchain, write_script};
+use super::wrapper::{Fixture, fake_rustc, install_toolchain, run_wrapper, rustup_without_toolchain, write_script};
 use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 
@@ -367,4 +367,71 @@ fn the_wrappers_ci_home_is_the_one_ci_isolation_gives() {
         // Each case starts from its own home folder, so a default home made by one is not found by the next.
         let _ = std::fs::remove_dir_all(r.path("home/.paddock-ci"));
     }
+}
+
+/// P2-2 of the WP-2 review: the setup-rust action's own install (`--install-toolchain`) remembers a failure for the job too, in a CI job
+/// only, and `--job-setup --require-rustup` marks the job when the runner has no rustup (the first thing that step checks).
+#[test]
+fn a_failed_install_toolchain_marks_the_job_and_a_missing_rustup_marks_it_through_job_setup() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (shims, _) = rustup_without_toolchain(&f, "exit 1");
+    let env_file = scratch.path().join("github-env");
+    let outside = tempfile::tempdir().unwrap();
+    let run = |ci: bool| {
+        let mut cmd = paddock_testkit::TestCommand::new("sh");
+        cmd.arg(f.root().join("dev"))
+            .arg("--install-toolchain")
+            .args(["1.90.0", "clippy", ""])
+            .current_dir(outside.path())
+            .path_first(&shims)
+            .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
+            .env("GITHUB_ENV", &env_file)
+            .env_remove("RUSTUP_TOOLCHAIN");
+        if ci {
+            cmd.env("GITHUB_ACTIONS", "true");
+        }
+        cmd.output().unwrap()
+    };
+    let out = run(false);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!env_file.exists(), "a person's run writes nothing");
+    let out = run(true);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&env_file).unwrap_or_default(),
+        "PADDOCK_TOOLCHAIN_FAILED=1\n"
+    );
+    // The plain helper the older tests use still works without the variable.
+    let _ = install_toolchain;
+    // No rustup on PATH: `--job-setup --require-rustup` fails, says so once and marks the job; with one it passes.
+    std::fs::remove_file(&env_file).unwrap();
+    let empty = scratch.path().join("empty-bin");
+    std::fs::create_dir_all(&empty).unwrap();
+    // Only `sh` (what the wrapper starts itself with): no rustup, no cargo.
+    std::os::unix::fs::symlink("/bin/sh", empty.join("sh")).unwrap();
+    let no_rustup = paddock_testkit::TestCommand::new("sh")
+        .arg(f.root().join("dev"))
+        .args(["--job-setup", "--require-rustup"])
+        .current_dir(outside.path())
+        .env("PATH", &empty)
+        .env("GITHUB_ENV", &env_file)
+        .output()
+        .unwrap();
+    assert_eq!(no_rustup.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&no_rustup.stderr);
+    assert!(err.contains("rustup is not installed"), "{err}");
+    assert_eq!(err.matches("A job setup step failed").count(), 1, "{err}");
+    assert_eq!(std::fs::read_to_string(&env_file).unwrap_or_default(), "PADDOCK_JOB_ABORTED=1\n");
+    std::fs::remove_file(&env_file).unwrap();
+    let with = paddock_testkit::TestCommand::new("sh")
+        .arg(f.root().join("dev"))
+        .args(["--job-setup", "--require-rustup"])
+        .current_dir(outside.path())
+        .path_first(&shims)
+        .env("GITHUB_ENV", &env_file)
+        .output()
+        .unwrap();
+    assert!(with.status.success(), "{}", String::from_utf8_lossy(&with.stderr));
+    assert!(!env_file.exists());
 }

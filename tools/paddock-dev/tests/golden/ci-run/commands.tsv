@@ -81,12 +81,11 @@ job	conformance			./dev gates check
 job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	conformance			TOOLCHAIN=${TOOLCHAIN:-stable
 job	conformance			bash "dev" --job-setup ci build-jobs
+job	conformance			bash "dev" --job-setup ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	conformance			bash "dev" ci sccache-stats
-job	conformance			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	conformance			cargo --version
 job	conformance			continue
 job	conformance			do
-job	conformance			echo "::error::rustup is not installed on this runner"
 job	conformance			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	conformance			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	conformance			echo "Rust toolchain  (from rust-toolchain.toml)"
@@ -108,18 +107,18 @@ job	conformance			rustup default ""
 job	conformance			rustup toolchain list 2>/dev/null
 job	conformance			settle ""
 job	conformance			settle "$name"
-job	conformance			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
+job	conformance			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --install-toolchain "" "" ""
+job	conformance			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --require-rustup
 job	conformance			then
 job	conformance		conformance	npm test
 job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	crates			TOOLCHAIN=${TOOLCHAIN:-stable
 job	crates			bash "dev" --job-setup ci build-jobs
+job	crates			bash "dev" --job-setup ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	crates			bash "dev" ci sccache-stats
-job	crates			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	crates			cargo --version
 job	crates			continue
 job	crates			do
-job	crates			echo "::error::rustup is not installed on this runner"
 job	crates			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	crates			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	crates			echo "Rust toolchain  (from rust-toolchain.toml)"
@@ -139,7 +138,8 @@ job	crates			rustup default ""
 job	crates			rustup toolchain list 2>/dev/null
 job	crates			settle ""
 job	crates			settle "$name"
-job	crates			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
+job	crates			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --install-toolchain "" "" ""
+job	crates			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --require-rustup
 job	crates			then
 job	crates		crates	bash ../dev ci guardian-as-user
 job	crates		crates	cargo deny check
@@ -153,14 +153,13 @@ job	crates		crates	node ../scripts/coverage-gate.mjs lcov.info 90
 job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	e2e			TOOLCHAIN=${TOOLCHAIN:-stable
 job	e2e			bash "dev" --job-setup ci build-jobs
+job	e2e			bash "dev" --job-setup ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	e2e			bash "dev" ci node-caches --angular-dir "ui" --name "e2e-1"
 job	e2e			bash "dev" ci node-caches --angular-dir "ui" --name "e2e-2"
 job	e2e			bash "dev" ci sccache-stats
-job	e2e			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	e2e			cargo --version
 job	e2e			continue
 job	e2e			do
-job	e2e			echo "::error::rustup is not installed on this runner"
 job	e2e			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	e2e			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	e2e			echo "Rust toolchain  (from rust-toolchain.toml)"
@@ -181,20 +180,20 @@ job	e2e			rustup default ""
 job	e2e			rustup toolchain list 2>/dev/null
 job	e2e			settle ""
 job	e2e			settle "$name"
-job	e2e			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
+job	e2e			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --install-toolchain "" "" ""
+job	e2e			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --require-rustup
 job	e2e			then
 job	e2e		ui	npx playwright test --shard=1/2
 job	e2e		ui	npx playwright test --shard=2/2
 job	eslint-preset			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	eslint-preset			TOOLCHAIN=${TOOLCHAIN:-stable
 job	eslint-preset			bash "dev" --job-setup ci build-jobs
+job	eslint-preset			bash "dev" --job-setup ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	eslint-preset			bash "dev" ci node-caches --angular-dir "" --name "${{ github.job }}"
 job	eslint-preset			bash "dev" ci sccache-stats
-job	eslint-preset			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	eslint-preset			cargo --version
 job	eslint-preset			continue
 job	eslint-preset			do
-job	eslint-preset			echo "::error::rustup is not installed on this runner"
 job	eslint-preset			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	eslint-preset			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	eslint-preset			echo "Rust toolchain  (from rust-toolchain.toml)"
@@ -215,19 +214,19 @@ job	eslint-preset			rustup default ""
 job	eslint-preset			rustup toolchain list 2>/dev/null
 job	eslint-preset			settle ""
 job	eslint-preset			settle "$name"
-job	eslint-preset			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
+job	eslint-preset			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --install-toolchain "" "" ""
+job	eslint-preset			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --require-rustup
 job	eslint-preset			then
 job	eslint-preset		eslint	npm test
 job	icons			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	icons			TOOLCHAIN=${TOOLCHAIN:-stable
 job	icons			bash "dev" --job-setup ci build-jobs
+job	icons			bash "dev" --job-setup ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	icons			bash "dev" ci node-caches --angular-dir "ui" --name "${{ github.job }}"
 job	icons			bash "dev" ci sccache-stats
-job	icons			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	icons			cargo --version
 job	icons			continue
 job	icons			do
-job	icons			echo "::error::rustup is not installed on this runner"
 job	icons			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	icons			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	icons			echo "Rust toolchain  (from rust-toolchain.toml)"
@@ -249,14 +248,15 @@ job	icons			rustup default ""
 job	icons			rustup toolchain list 2>/dev/null
 job	icons			settle ""
 job	icons			settle "$name"
-job	icons			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
+job	icons			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --install-toolchain "" "" ""
+job	icons			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --require-rustup
 job	icons			then
 job	icons		icons	npm test
 job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	tools			TOOLCHAIN=${TOOLCHAIN:-stable
 job	tools			bash "dev" --job-setup ci build-jobs
+job	tools			bash "dev" --job-setup ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	tools			bash "dev" ci sccache-stats
-job	tools			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	tools			bash .claude/hooks/run-tests.sh
 job	tools			bash ci-image/fetch-verified.sh "https://github.com/jgraph/drawio-desktop/releases/download/v${v}/drawio-amd64-${v}.deb" "$sum" "$RUNNER_TEMP/drawio.deb"
 job	tools			cargo --version
@@ -264,7 +264,6 @@ job	tools			continue
 job	tools			do
 job	tools			dpkg-deb -x "$RUNNER_TEMP/drawio.deb" "$RUNNER_TEMP/drawio"
 job	tools			echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."
-job	tools			echo "::error::rustup is not installed on this runner"
 job	tools			echo "::error::unpacking draw.io $v failed. Fix: run dpkg-deb -x on the same file in the paddock-ci image to see why."
 job	tools			echo "::notice::the CI image has no draw.io yet (it comes with the next image rebuild, ci-image/README.md); unpacking the pinned $v"
 job	tools			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
@@ -292,20 +291,20 @@ job	tools			rustup default ""
 job	tools			rustup toolchain list 2>/dev/null
 job	tools			settle ""
 job	tools			settle "$name"
-job	tools			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
+job	tools			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --install-toolchain "" "" ""
+job	tools			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --require-rustup
 job	tools			sum=$(sed -n 's/^ARG DRAWIO_SHA256_AMD64=//p' ci-image/Dockerfile | head -n 1
 job	tools			then
 job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1
 job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	ui			TOOLCHAIN=${TOOLCHAIN:-stable
 job	ui			bash "dev" --job-setup ci build-jobs
+job	ui			bash "dev" --job-setup ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	ui			bash "dev" ci node-caches --angular-dir "ui" --name "${{ github.job }}"
 job	ui			bash "dev" ci sccache-stats
-job	ui			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	ui			cargo --version
 job	ui			continue
 job	ui			do
-job	ui			echo "::error::rustup is not installed on this runner"
 job	ui			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	ui			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	ui			echo "Rust toolchain  (from rust-toolchain.toml)"
@@ -326,7 +325,8 @@ job	ui			rustup default ""
 job	ui			rustup toolchain list 2>/dev/null
 job	ui			settle ""
 job	ui			settle "$name"
-job	ui			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --install-toolchain "" "" ""
+job	ui			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --install-toolchain "" "" ""
+job	ui			sh "<ws>/.gitea/actions/setup-rust/../../../dev" --job-setup --require-rustup
 job	ui			then
 job	ui		ui	node ../scripts/publish.mjs --skip-build
 job	ui		ui	npm run build

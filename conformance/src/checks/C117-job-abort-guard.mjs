@@ -100,7 +100,7 @@ export default {
       }
     }
     if (isolatedJobs === 0) {
-      return [unwaivable(error('C117', 3, '.gitea/workflows', 1, 'check broken: no job that uses build-jobs or job-isolation was found, so the check saw nothing it was built for', 'Fix the check (a renamed action?) or retire it.'))];
+      return [unwaivable(error('C117', 3, '.gitea/workflows', 1, 'check broken: no job that uses build-jobs, job-isolation or setup-rust was found, so the check saw nothing it was built for', 'Fix the check (a renamed action?) or retire it.'))];
     }
     for (const file of files) {
       const name = ACTION.exec(file)?.[1];
