@@ -8,4 +8,6 @@
 #  - a `./dev wait` for a target a running `dev wait` already waits on (read from `ps`). The hook cannot tell which agent
 #    started that process, so the warning says so; it is quiet when the table cannot be read.
 # Never fails closed: a parse problem allows the command and warns on stderr. NO_PGREP_WAIT_PS_FILE replaces `ps` (tests).
+# Needs python3 on PATH (as every guard on lib/shellscan.py does); without it the exec fails, the hook exits non-zero and Claude
+# Code runs the command with the hook's error shown, so the pgrep refusal is then not enforced.
 exec python3 -I -B "$(dirname "$0")/no-pgrep-wait.py"

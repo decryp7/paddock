@@ -25,6 +25,8 @@ expect "multi-line grep poll warns" warn $'while ! grep -q ok /x/log\ndo\n  slee
 out=$(jq -nc '{tool_name:"Bash",tool_input:{command:"while pgrep -f x; do sleep 1; done"}}' | "$H"); case "$out" in *"dev wait"*) echo "ok: message names the next step" ;; *) echo "FAIL: message"; fail=1 ;; esac
 out=$(jq -nc '{tool_name:"Bash",tool_input:{command:"while ! grep -q ok /x/log; do sleep 1; done"}}' | "$H")
 case "$out" in *'./dev wait --file /x/log --line'*) echo "ok: the grep warning names the dev wait that replaces it" ;; *) echo "FAIL: grep warning text: $out"; fail=1 ;; esac
+out=$(jq -nc '{tool_name:"Bash",tool_input:{command:"while ! curl -s localhost:8080 | grep -q ok; do sleep 1; done"}}' | "$H")
+case "$out" in *'--file localhost'*|*'--file -s'*) echo "FAIL: a curl pipe is no file: $out"; fail=1 ;; *'bounded wait'*) echo "ok: a grep on a curl pipe suggests a bounded wait, not --file" ;; *) echo "FAIL: curl warning text: $out"; fail=1 ;; esac
 # A `dev wait` already running for the same target (from `ps`) warns; one for another target does not.
 printf '%s\n' '  4100 /d/paddock-dev wait --ci-run 8112 --max 1h' '  4101 /d/paddock-dev wait --file /x/other --line y --max 5m' >"$TMP/ps-one"
 NO_PGREP_WAIT_PS_FILE="$TMP/ps-one" expect "a second wait for a ci run already waited on warns" warn './dev wait --ci-run 8112 --max 1h'

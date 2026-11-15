@@ -24,17 +24,28 @@ def chain(cmds, first):
     return out
 
 
-def body_sleeps(cmds, cond_end):
-    """Whether the loop body after the condition (up to its `done`) runs `sleep`."""
-    depth = cond_end.depth
+def body(cmds, cond_end):
+    """The commands of the loop body after the condition, up to its own `done` (nested loops counted), in scan order."""
+    out, level = [], 0
     for c in cmds[cond_end.idx + 1:]:
-        if c.depth < depth:
-            return False
-        if c.depth == depth and c.words[:1] == ["done"]:
-            return False
-        if c.argv[:1] == ["sleep"]:
-            return True
-    return False
+        if c.words[:1] == ["done"]:
+            if level == 0:
+                break
+            level -= 1
+        elif c.loop or c.argv[:1] in (["for"], ["select"]):
+            level += 1
+        out.append(c)
+    return out
+
+
+def with_subs(cs):
+    """The commands and, at any depth, the commands inside their `$( )` and backticks."""
+    out, todo = [], list(cs)
+    while todo:
+        c = todo.pop()
+        out.append(c)
+        todo.extend(c.subs)
+    return out
 
 
 def pgrep_f(c):
@@ -44,12 +55,19 @@ def pgrep_f(c):
     return any(x.startswith("-") and not x.startswith("--") and "f" in x[1:] for x in a[1:]) or "--full" in a[1:]
 
 
+FILE_READERS = {"cat", "tail", "head"}
+
+
 def grep_file(cond):
-    """The file a grep in the condition reads (for the suggested `dev wait`), '' when it reads a pipe, None when no grep."""
+    """The file a grep in the condition reads (for the suggested `dev wait --file`): its operand, or the file of a `cat`, `tail` or
+    `head` piped into it; '' when it reads anything else (a curl, a pipe of a program); None when the condition has no grep."""
     for k, c in enumerate(cond):
         if c.argv and os.path.basename(c.argv[0]) in GREPS:
             if k > 0 and cond[k - 1].term == "|":
-                src = [x for x in cond[k - 1].argv[1:] if not x.startswith("-") and not x.isdigit()]
+                prev = cond[k - 1].argv
+                if not prev or os.path.basename(prev[0]) not in FILE_READERS:
+                    return ""
+                src = [x for x in prev[1:] if not x.startswith("-") and not x.isdigit()]
                 return src[-1] if src else ""
             ops = [x for x in c.argv[1:] if not x.startswith("-")]
             return ops[1] if len(ops) > 1 else ""
@@ -57,17 +75,23 @@ def grep_file(cond):
 
 
 def wait_target(argv):
-    """(flag, value) of a `./dev wait` command line, None for anything else."""
+    """The event a `./dev wait` command line waits for: (flag, value), and for --file also the --line regex (one file, two
+    lines are two events); None for anything else."""
     k = next((i for i, w in enumerate(argv) if w == "wait"), None)
     if k is None or k == 0 or not (argv[k - 1] == "dev" or argv[k - 1].endswith("/dev") or argv[k - 1].endswith("paddock-dev")):
         return None
     rest = argv[k + 1:]
+    opts = {}
     for i, w in enumerate(rest):
         flag, eq, val = w.partition("=")
-        if flag in TARGETS:
-            if not eq:
-                val = rest[i + 1] if i + 1 < len(rest) else ""
-            return (flag, os.path.normpath(val) if flag == "--file" and val else val)
+        if flag in TARGETS or flag == "--line":
+            opts.setdefault(flag, val if eq else (rest[i + 1] if i + 1 < len(rest) else ""))
+    for flag in TARGETS:
+        if flag in opts:
+            val = opts[flag]
+            if flag == "--file":
+                return (flag, "%s --line %s" % (os.path.normpath(val) if val else val, opts.get("--line", "")))
+            return (flag, val)
     return None
 
 
@@ -108,15 +132,19 @@ def decide(cmd):
     for c in cmds:
         if c.loop:
             cond = chain(cmds, c)
-            if any(pgrep_f(x) for x in cond):
+            inside = body(cmds, cond[-1])
+            # pgrep -f anywhere in the loop (its condition, its body, a `$( )` of either) waits on a pattern that matches itself.
+            if any(pgrep_f(x) for x in with_subs(cond + inside)):
                 return DENY, []
             f = grep_file(cond)
-            if f is not None and body_sleeps(cmds, cond[-1]):
-                target = f or "<the log file>"
+            if f is not None and any(x.argv[:1] == ["sleep"] for x in inside):
+                nxt = ("`./dev wait --file %s --line '<regex>' --max <duration>`" % f) if f else \
+                    "a bounded wait: `./dev wait --file <log> --line '<regex>' --max <duration>` for a log, or a loop with a fixed " \
+                    "number of tries for a probe"
                 warns.append(
-                    "Warning: this command polls with a `%s grep ...; do sleep` loop. Such a loop has no maximum duration and "
-                    "stacks up when started twice (ER-32). Next step: wait with `./dev wait --file %s --line '<regex>' --max "
-                    "<duration>`, which ends at --max with an ::error:: line." % (c.loop, target))
+                    "Warning: this command polls with a `%s ... grep ...; do sleep` loop. Such a loop has no maximum duration and "
+                    "stacks up when started twice (ER-32). Next step: %s, which ends at its bound with an ::error:: line."
+                    % (c.loop, nxt))
         t = wait_target(c.argv)
         if t:
             if t in seen:

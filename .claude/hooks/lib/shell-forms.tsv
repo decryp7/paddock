@@ -74,8 +74,18 @@ until grep, sleep	-	until grep -q ok /x/log; do sleep 1; done	-	-	-	-	warn
 while not tail piped to grep, sleep	-	while ! tail -n 5 /x/log | grep -q ok; do sleep 2; done	-	-	-	-	warn
 grep loop that does not sleep	-	while grep -q x f; do sed -i 1d f; done	-	-	-	-	allow
 if not grep, then sleep	-	if ! grep -q ok /x/log; then sleep 1; fi	-	-	-	-	allow
-two dev waits for one file	-	./dev wait --file /x/log --line a --max 5m & ./dev wait --file /x/log --line b --max 5m	-	-	-	-	warn
+two dev waits for one file, different lines	-	./dev wait --file /x/log --line a --max 5m & ./dev wait --file /x/log --line b --max 5m	-	-	-	-	allow
 two dev waits for one ci run	-	./dev wait --ci-run 8112 --max 1h; ./dev wait --ci-run 8112 --max 1h	-	-	-	-	warn
 two dev waits for one pid, = form	-	./dev wait --pid=4242 --max 5m & ./dev wait --pid 4242 --max 5m	-	-	-	-	warn
 dev waits for two targets	-	./dev wait --ci-run 8112 --max 1h && ./dev wait --ci-run 8113 --max 1h	-	-	-	-	allow
 one dev wait	-	./dev wait --file /x/log --line done --max 30m	-	-	-	-	allow
+pgrep -f in a substitution of a while condition	-	while [ -n "$(pgrep -f cargo)" ]; do sleep 2; done	-	-	-	-	deny
+pgrep -f in a substitution of an until condition	-	until [ -z "$(pgrep -f "cargo build")" ]; do sleep 2; done	-	-	-	-	deny
+kill -0 of a pgrep -f substitution in a while condition	-	while kill -0 $(pgrep -f foo); do sleep 1; done	-	-	-	-	deny
+pgrep -f in a while body that breaks	-	while true; do pgrep -f x >/dev/null || break; sleep 1; done	-	-	-	-	deny
+pgrep -f in a nested loop's condition	-	for i in 1 2; do while pgrep -f x; do sleep 1; done; done	-	-	-	-	deny
+pgrep -f feeding a while read loop is no wait	-	pgrep -f x | while read p; do echo $p; done	-	-	-	-	allow
+pgrep -f in a for list is no wait	-	for p in $(pgrep -f x); do echo $p; done	-	-	-	-	allow
+two dev waits for one file and one line	-	./dev wait --file /x/log --line a --max 5m & ./dev wait --file /x/log --line a --max 5m	-	-	-	-	warn
+dev waits for one file, other lines	-	./dev wait --file /x/a/./b --line x --max 1m; ./dev wait --file /x/a/b --line y --max 1m	-	-	-	-	allow
+grep poll on a curl pipe warns without --file	-	while ! curl -s localhost:8080 | grep -q ok; do sleep 1; done	-	-	-	-	warn
