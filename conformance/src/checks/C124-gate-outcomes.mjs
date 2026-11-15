@@ -19,7 +19,7 @@
 // Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line, so an edit
 // that moves the line keeps the entry) and a reason, read and counted by the shared allow list (`util/allow-list.mjs`, also C121's): a
 // whole file or folder is never allowed, an entry that matches no site is stale (a warning) and a site beyond an entry's
-// `count` is reported at its own line, as PHPStan's reportUnmatchedIgnoredErrors and baseline `count` do. A shrink-only seed, expected to empty
+// `count` is reported at its own line, as PHPStan's reportUnmatchedIgnoredErrors and baseline `count` do. A seed that only shrinks by hand (no check holds it to that; it grows only when the pattern widens, with the date), expected to empty
 // out as each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
@@ -115,11 +115,11 @@ export default {
   id: 'C124',
   scope: 'root',
   mode: 'report-only',
-  allowList: ALLOW,
+  allowList: SPEC,
   title: "A gate's result is built through the shared outcome, never by hand",
   rule: 21,
   run(ctx) {
-    const { list: allow, broken } = readAllowList(ctx, SPEC);
+    const { list: allow, broken } = readAllowList(ctx, this.allowList);
     if (broken) return broken;
     const out = [];
     for (const f of ctx.files()) {

@@ -168,8 +168,8 @@ impl Check for C125 {
         Mode::ReportOnly
     }
 
-    fn allow_list(&self) -> Option<&'static str> {
-        Some(ALLOW)
+    fn allow_list(&self) -> Option<&'static allow_list::Spec> {
+        Some(&SPEC)
     }
 
     fn control(&self) -> Control {
@@ -194,6 +194,10 @@ impl Check for C125 {
         };
         let mut findings = Vec::new();
         let mut history_hits = vec![0usize; history.len()];
+        // Whether the run read a file of each history entry, or could not read one: an entry is stale only when it read one (and
+        // skipped nothing) or the tree has none, never for files the run did not look at or could not read.
+        let mut history_read = vec![false; history.len()];
+        let mut history_unread = vec![false; history.len()];
         for f in ctx.files().iter() {
             if IMPLEMENTATION.contains(&f.as_str()) || CHECKOUT.contains(&f.as_str()) || BINARY.is_match(f) {
                 continue;
@@ -206,11 +210,18 @@ impl Check for C125 {
             let text = match allow.read(ctx, f) {
                 Ok(text) => text,
                 Err(unread) => {
+                    if let Some(h) = h {
+                        history_unread[h] = true;
+                    }
                     findings.push(*unread);
                     continue;
                 }
             };
+            if let Some(h) = h {
+                history_read[h] = true;
+            }
             if text.contains('\0') {
+                allow.skip(f);
                 continue;
             }
             for (line, literal) in machine_paths(&text) {
@@ -240,8 +251,10 @@ impl Check for C125 {
                 findings.push(finding);
             }
         }
-        for (e, n) in history.iter().zip(&history_hits) {
-            if *n == 0 {
+        let tree = ctx.tree_files();
+        let in_tree = |e: &History| tree.iter().any(|f| f.ends_with(".md") && e.re.is_match(f));
+        for (i, (e, n)) in history.iter().zip(&history_hits).enumerate() {
+            if *n == 0 && !history_unread[i] && (history_read[i] || !in_tree(e)) {
                 findings.push(Finding::warn(
                     "C125",
                     40,

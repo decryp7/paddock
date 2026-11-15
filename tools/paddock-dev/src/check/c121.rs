@@ -21,10 +21,10 @@
 //! The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else),
 //! and a file the check cannot read is not measured (an error finding at that file).
 //!
-//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
+//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself; since 2026-11-15 its own files are not read ([`IMPLEMENTATION`]), so they need no entry.
 //!
-//! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and the `c121` tests of `tests/it/check.rs`
-//! compares them finding for finding.
+//! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and `tests/it/check_c121.rs` compares
+//! them finding for finding.
 
 use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
@@ -131,8 +131,8 @@ impl Check for C121 {
         super::Mode::ReportOnly
     }
 
-    fn allow_list(&self) -> Option<&'static str> {
-        Some(ALLOW)
+    fn allow_list(&self) -> Option<&'static allow_list::Spec> {
+        Some(&SPEC)
     }
 
     fn control(&self) -> Control {

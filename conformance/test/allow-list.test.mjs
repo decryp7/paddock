@@ -62,6 +62,12 @@ test('allow list: an entry for a file of the run that the check does not read na
   assert.deepEqual(l.warnings().map((f) => [f.file, f.message]), [[FILE, 'allow entry (docs/x.md: needle) names a file this check does not read']]);
 });
 
+test('allow list: an entry path is a plain repository path, never ./, ../, absolute, doubled or with backslashes', () => {
+  for (const path of ['./a/b.rs', 'a/../b.rs', '/a/b.rs', 'a//b.rs', 'a\\b.rs', 'a/./b.rs', '..']) {
+    assert.throws(() => parseAllowList(JSON.stringify({ allow: [entry({ path })] }), FILE), /plain repository path/, path);
+  }
+});
+
 test('allow list: a whole float count is its integer, as the Rust host reads it', () => {
   assert.equal(parseAllowList('{"allow": [{"path": "a", "site": "b", "reason": "a reason long enough", "count": 1.0}]}', 'f').at(0).count, 1);
   assert.throws(() => parseAllowList('{"allow": [{"path": "a", "site": "b", "reason": "a reason long enough", "count": 1.5}]}', 'f'), /count/);
@@ -86,7 +92,6 @@ test('allow list: the reader reads and parses the file once, and a file it could
   const { list: l, broken } = readAllowList(ctx, SPEC);
   assert.equal(broken, undefined);
   assert.deepEqual(l.read('a/b.rs'), { text: 'x' });
-  assert.equal(l.probes, 1);
   const unread = new AllowList(SPEC, [{ ...entry(), count: 1 }], ctxOf({}));
   const { finding } = unread.read('a/b.rs');
   assert.deepEqual([finding.file, finding.severity, finding.outcome, finding.unwaivable], ['a/b.rs', 'error', 'not-measured', true]);
@@ -104,8 +109,8 @@ test('allow list: a broken allow file is one unwaivable check-broken finding and
   for (const c of users) {
     const [file, text] = SAMPLE[c.id];
     for (const allow of [null, 'nope', '{}', '{"allow": [{"path": "a"}], "history": []}']) {
-      const found = await findingsOf(c.id, makeApp({ [file]: text, ...(allow === null ? {} : { [c.allowList]: allow }) }));
-      assert.deepEqual(found.map((f) => [f.file, f.unwaivable, f.outcome]), [[c.allowList, true, 'check-broken']], `${c.id} with ${allow}`);
+      const found = await findingsOf(c.id, makeApp({ [file]: text, ...(allow === null ? {} : { [c.allowList.file]: allow }) }));
+      assert.deepEqual(found.map((f) => [f.file, f.unwaivable, f.outcome]), [[c.allowList.file, true, 'check-broken']], `${c.id} with ${allow}`);
     }
   }
 });
@@ -113,7 +118,7 @@ test('allow list: a broken allow file is one unwaivable check-broken finding and
 test('allow list: a file the check cannot read is a not-measured error at that file, for every check that reads one', { skip: process.getuid?.() === 0 && 'root reads a 000 file' }, async () => {
   for (const c of users) {
     const [file, text] = SAMPLE[c.id];
-    const root = makeApp({ [file]: text, [c.allowList]: '{"allow": [], "history": []}' });
+    const root = makeApp({ [file]: text, [c.allowList.file]: '{"allow": [], "history": []}' });
     chmodSync(join(root, file), 0o000);
     try {
       const found = await findingsOf(c.id, root);

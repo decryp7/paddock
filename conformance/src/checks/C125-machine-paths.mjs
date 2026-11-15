@@ -106,23 +106,32 @@ export default {
   id: 'C125',
   scope: 'root',
   mode: 'report-only',
-  allowList: ALLOW,
+  allowList: SPEC,
   title: 'No hard-coded machine disk paths',
   rule: 40,
   run(ctx) {
-    const { list: allow, data: history, broken } = readAllowList(ctx, SPEC);
+    const { list: allow, data: history, broken } = readAllowList(ctx, this.allowList);
     if (broken) return broken;
     const historyHits = history.map(() => 0);
+    // Whether the run read a file of each history entry, or could not read one: an entry is stale only when it read one (and skipped
+    // nothing) or the tree has none, never for files the run did not look at or could not read.
+    const historyRead = history.map(() => false);
+    const historyUnread = history.map(() => false);
     const out = [];
     for (const f of ctx.files()) {
       if (IMPLEMENTATION.has(f) || CHECKOUT.has(f) || BINARY.test(f)) continue;
       const h = f.endsWith('.md') ? history.findIndex((e) => e.re.test(f)) : -1;
       const { text, finding } = allow.read(f);
       if (finding) {
+        if (h >= 0) historyUnread[h] = true;
         out.push(finding);
         continue;
       }
-      if (text.includes('\0')) continue;
+      if (h >= 0) historyRead[h] = true;
+      if (text.includes('\0')) {
+        allow.skip(f);
+        continue;
+      }
       for (const { line, literal } of machinePaths(text)) {
         if (h >= 0) {
           historyHits[h]++;
@@ -137,8 +146,9 @@ export default {
         );
       }
     }
+    const inTree = (e) => ctx.files().some((f) => f.endsWith('.md') && e.re.test(f));
     history.forEach((e, i) => {
-      if (historyHits[i] === 0) out.push(warn('C125', 40, ALLOW, 1, `stale history entry (${e.path}) skipped no disk path`, `Remove it from ${ALLOW}.`));
+      if (historyHits[i] === 0 && !historyUnread[i] && (historyRead[i] || !inTree(e))) out.push(warn('C125', 40, ALLOW, 1, `stale history entry (${e.path}) skipped no disk path`, `Remove it from ${ALLOW}.`));
     });
     return [...out, ...allow.warnings()];
   },

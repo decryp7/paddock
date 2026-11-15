@@ -15,9 +15,9 @@
 // The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else), and a
 // file the check cannot read is not measured (an error finding at that file).
 // Not read: the check's own files (`IMPLEMENTATION`, as C120's): their invented lines are test data, not reads.
-// Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
+// Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself; since 2026-11-15 its own files are not read (`IMPLEMENTATION`), so they need no entry.
 // The Rust host (`tools/paddock-dev/src/check/c121.rs`) is the rule's own implementation; this is its port, and
-// `tools/paddock-dev/tests/it/check.rs` (the `c121` tests) compares the two finding for finding.
+// `tools/paddock-dev/tests/it/check_c121.rs` compares the two finding for finding.
 import { warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
@@ -70,11 +70,11 @@ export default {
   id: 'C121',
   scope: 'root',
   mode: 'report-only',
-  allowList: ALLOW,
+  allowList: SPEC,
   title: 'Declared data is read through its accessor, not by searching a workflow\'s text',
   rule: 79,
   run(ctx) {
-    const { list: allow, broken } = readAllowList(ctx, SPEC);
+    const { list: allow, broken } = readAllowList(ctx, this.allowList);
     if (broken) return broken;
     const out = [];
     for (const f of ctx.files()) {

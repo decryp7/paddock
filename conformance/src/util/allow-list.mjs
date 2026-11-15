@@ -8,11 +8,14 @@
 // diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or with
 // a malformed entry is one unwaivable check-broken finding and nothing else (`readAllowList`), and a file the check cannot read is a
 // not-measured error at that file (`AllowList.read`).
-// Used by C121, C124 and C125, each naming its file as `allowList`. Rust host: tools/paddock-dev/src/check/allow_list.rs (same
+// Used by C121, C124 and C125, each declaring the spec it reads with as `allowList` (Rust: `Check::allow_list`). Rust host: tools/paddock-dev/src/check/allow_list.rs (same
 // entries, same findings; tools/paddock-dev/tests/it/check_allow_list.rs compares the error paths of every user on both hosts).
 import { error, unwaivable, warn } from '../finding.mjs';
 
 const UNREAD_FIX = 'Make the file readable (permissions) and run the check again.';
+
+/** Whether `path` is a plain repository path (`a/b.rs`): an entry spelled otherwise names no file the run lists, so it would never be judged. */
+const plainPath = (path) => !path.startsWith('/') && !path.includes('\\') && path.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
 
 /** The entries of the allow list `file` (its JSON `text`): [{ path, site, reason, count }], or throws why it cannot be read. */
 export function parseAllowList(text, file) {
@@ -31,6 +34,7 @@ export function parseAllowList(text, file) {
     if (!path || !site || [...reason].length < 8) {
       throw new Error(`${file}: every entry needs a path, a site (a piece of the flagged line) and a reason of at least 8 characters`);
     }
+    if (!plainPath(path)) throw new Error(`${file}: \`path\` (${path}) is a plain repository path: no ./ or ../, no leading or doubled /, no backslash`);
     if (!Number.isInteger(count) || count < 1) throw new Error(`${file}: \`count\` (${path}: ${site}) is a whole number of at least 1`);
     return { path, site, reason, count };
   });
@@ -67,9 +71,9 @@ export class AllowList {
     return { text };
   }
 
-  /** How many files the run read. */
-  get probes() {
-    return this.scanned.size;
+  /** Passes over `path` after reading it (C125: a file with a NUL byte is not text): it is not scanned, so an entry for it names a file the check does not read. */
+  skip(path) {
+    this.scanned.delete(path);
   }
 
   /**

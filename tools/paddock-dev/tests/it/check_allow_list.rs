@@ -11,7 +11,7 @@ use std::path::Path;
 
 /// The checks that name an allow list: `(check, its allow file)`.
 fn users() -> Vec<(Box<dyn Check>, &'static str)> {
-    registry().into_iter().filter_map(|c| c.allow_list().map(|f| (c, f))).collect()
+    registry().into_iter().filter_map(|c| c.allow_list().map(|s| (c, s.file))).collect()
 }
 
 fn options(root: &Path, id: &str) -> RunOptions {
@@ -38,7 +38,7 @@ const JS_USERS: &str = r#"
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';
 const { checks } = await import(pathToFileURL(join(process.cwd(), 'conformance/src/checks/index.mjs')).href);
-process.stdout.write(JSON.stringify(checks.filter((c) => c.allowList).map((c) => [c.id, c.allowList])));
+process.stdout.write(JSON.stringify(checks.filter((c) => c.allowList).map((c) => [c.id, c.allowList.file])));
 "#;
 
 /// The check's control tree, with its allow file replaced by `allow` (left out when `None`).

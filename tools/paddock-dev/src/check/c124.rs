@@ -19,7 +19,7 @@
 //! and a file the check cannot read is not measured (an error finding at that file).
 //!
 //! Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line) and a
-//! reason (shrink only), read and counted by the shared [`super::allow_list`] (also C121's): an entry that matches no site is stale
+//! reason (it shrinks by hand, no check holds it to that, and grows only when the pattern widens), read and counted by the shared [`super::allow_list`] (also C121's): an entry that matches no site is stale
 //! (a warning) and a site beyond an entry's `count` is reported at its own line. **Report-only (warnings)
 //! until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
@@ -231,8 +231,8 @@ impl Check for C124 {
         Mode::ReportOnly
     }
 
-    fn allow_list(&self) -> Option<&'static str> {
-        Some(ALLOW)
+    fn allow_list(&self) -> Option<&'static allow_list::Spec> {
+        Some(&SPEC)
     }
 
     fn control(&self) -> Control {

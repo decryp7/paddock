@@ -7,7 +7,7 @@
 //! The reader also owns the error paths, so every check that uses it has the same ones on both hosts (ER-21 class "the two hosts
 //! diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or
 //! with a malformed entry is one unwaivable check-broken finding and nothing else ([`read`]), and a file the check cannot read is a
-//! not-measured error at that file ([`AllowList::read`]). Used by C121, C124 and C125, each naming its file in
+//! not-measured error at that file ([`AllowList::read`]). Used by C121, C124 and C125, each declaring the [`Spec`] it reads with in
 //! [`super::Check::allow_list`]. The port of `conformance/src/util/allow-list.mjs`; `tests/it/check_allow_list.rs` compares the error
 //! paths of every user on both hosts.
 
@@ -106,6 +106,11 @@ pub fn parse(text: &str, file: &str) -> Result<Vec<Entry>, String> {
                 "{file}: every entry needs a path, a site (a piece of the flagged line) and a reason of at least 8 characters"
             ));
         }
+        if !plain_path(path) {
+            return Err(format!(
+                "{file}: `path` ({path}) is a plain repository path: no ./ or ../, no leading or doubled /, no backslash"
+            ));
+        }
         let count = match e.get("count") {
             None => 1,
             // `1.0` is the number 1 to JavaScript's JSON.parse, which the other host uses: a whole float counts as its integer.
@@ -128,6 +133,12 @@ pub fn parse(text: &str, file: &str) -> Result<Vec<Entry>, String> {
         });
     }
     Ok(out)
+}
+
+/// Whether `path` is a plain repository path (`a/b.rs`): an entry spelled otherwise names no file the run lists, so it would never be
+/// judged.
+fn plain_path(path: &str) -> bool {
+    !path.starts_with('/') && !path.contains('\\') && path.split('/').all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
 /// A whole, positive float below 2^53 as its integer (the caller checked both).
@@ -196,6 +207,12 @@ impl AllowList {
             .unwaivable()
             .with_outcome(Outcome::NotMeasured),
         ))
+    }
+
+    /// Passes over `path` after reading it (C125: a file with a NUL byte is not text): it is not scanned, so an entry for it names a
+    /// file the check does not read, and it is no probe.
+    pub fn skip(&mut self, path: &str) {
+        self.scanned.remove(path);
     }
 
     /// The check's output: its `findings`, then the warnings of the entries; every file the run read is a probe.
@@ -344,6 +361,19 @@ mod tests {
     }
 
     #[test]
+    fn an_entry_path_is_a_plain_repository_path() {
+        for path in ["./a/b.rs", "a/../b.rs", "/a/b.rs", "a//b.rs", "a\\\\b.rs", "a/./b.rs", ".."] {
+            let e = entry("").replace("a/b.rs", path);
+            assert!(
+                parse(&format!("{{\"allow\": [{e}]}}"), FILE)
+                    .unwrap_err()
+                    .contains("plain repository path"),
+                "{path}"
+            );
+        }
+    }
+
+    #[test]
     fn a_site_is_allowed_only_in_its_own_file_and_only_when_the_entry_names_it() {
         let mut l = list(&entry(""));
         let holds = |line: &'static str| move |site: &str| line.contains(site);
@@ -364,10 +394,7 @@ mod tests {
             messages(l).is_empty(),
             "a site beyond the count is the caller's finding at the site, not a warning on the entry"
         );
-        assert_eq!(
-            messages(list(&entry(""))),
-            ["stale allow entry (a/b.rs: needle) matches no site"]
-        );
+        assert_eq!(messages(list(&entry(""))), ["stale allow entry (a/b.rs: needle) matches no site"]);
         let mut short = list(&entry(", \"count\": 3"));
         short.admit("a/b.rs", exact);
         assert_eq!(
