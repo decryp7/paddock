@@ -463,3 +463,18 @@ fn a_missing_rustup_marks_the_job_through_job_setup_and_one_with_rustup_passes()
     assert_eq!(code, 0, "{err}");
     assert!(!env_file.exists());
 }
+
+/// setup-rust's install step runs `sh <repo>/dev --job-setup --install-toolchain ...` from the job's workspace, which a test may leave:
+/// stage 0 finds the launcher next to the script when the caller's folder is no repository, and passes every argument on.
+#[test]
+fn job_setup_install_toolchain_works_from_a_folder_outside_any_repository() {
+    let s = setup(true, GOOD);
+    let outside = tempfile::tempdir().unwrap();
+    let (code, out, err) = s.dev(
+        outside.path(),
+        &["--job-setup", "--install-toolchain", "1.90.0", "clippy", ""],
+        &[("GIT_CEILING_DIRECTORIES", outside.path().parent().unwrap().display().to_string())],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("launcher ran: --install-toolchain 1.90.0 clippy"), "{out}");
+}

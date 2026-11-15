@@ -487,7 +487,7 @@ pub fn run(args: Vec<String>) -> i32 {
         // Without a compiler the hash cannot be computed, and no cached binary is run in its place: it may be older than this
         // commit's tool and lack the subcommand asked for (run 8034: it exited 2 on `ci build-jobs`). Fail closed (ER-33).
         eprintln!(
-            "::error::./dev: no Rust compiler runs here ({rustc}), so the tool's hash cannot be computed and no cached paddock-dev is run in its place (it may lack this command). Install Rust with rustup (https://rustup.rs) or the toolchain rust-toolchain.toml pins (rustup toolchain install, in tools/paddock-dev), then run ./dev again; rustc was not found."
+            "::error::./dev: no Rust compiler runs here ({rustc}), so the tool's hash cannot be computed and no cached paddock-dev is run in its place (it may lack this command). Install Rust with rustup (https://rustup.rs) or the toolchain rust-toolchain.toml pins (rustup toolchain install, in tools/paddock-dev), then run ./dev again. (The toolchain rust-toolchain.toml pins is not installed, or its compiler does not run.)"
         );
         return 2;
     };

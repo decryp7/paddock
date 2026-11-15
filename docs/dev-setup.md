@@ -16,6 +16,7 @@ scripts/setup-dev.sh --install  # macOS: installs the missing tools, then report
 | Tool | Why | macOS | Linux (Debian/Ubuntu) | Windows |
 | --- | --- | --- | --- | --- |
 | Rust stable + `rustfmt`, `clippy` | every app | [rustup](https://rustup.rs) | rustup | rustup |
+| The toolchain `rust-toolchain.toml` pins | `./dev` builds its launcher with an installed toolchain of 1.89 or later and installs none itself (ADR 0022 amendment 2026-11-15); a runner or machine is provisioned with `rustup toolchain install <channel> --profile minimal --component rustfmt --component clippy` (the channel and components are in `rust-toolchain.toml`) | same | same | same |
 | `x86_64-pc-windows-msvc` target | type-check Windows code from a Mac or Linux | `rustup target add x86_64-pc-windows-msvc` | same | n/a |
 | Node.js (each app's `app/.nvmrc`) + npm | Angular UI, scripts | nvm | nvm | nvm-windows |
 | Tauri 2 platform dependencies | desktop shell | Xcode Command Line Tools | `libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf` | MSVC Build Tools, WebView2 |

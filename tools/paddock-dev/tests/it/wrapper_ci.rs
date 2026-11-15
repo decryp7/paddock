@@ -324,15 +324,19 @@ fn the_launchers_probes_never_start_an_install_of_a_missing_pin() {
     let scratch = tempfile::tempdir().unwrap();
     let (shims, _) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
     let dist = scratch.path().join("dist.log");
-    let body = std::fs::read_to_string(shims.join("rustc")).unwrap();
-    let body = body.strip_prefix("#!/bin/sh\n").unwrap_or(&body);
-    write_script(
-        &shims.join("rustc"),
-        &format!(
-            "[ \"${{RUSTUP_AUTO_INSTALL:-}}\" != 0 ] && echo \"dist: rustc $*\" >> '{}'\n{body}",
-            dist.display()
-        ),
-    );
+    // rustc, cargo and rustup are the proxies that start an install of a missing pin (rustup's own `toolchain install` is the install
+    // asked for): each stand-in contacts the "dist server" when it runs without RUSTUP_AUTO_INSTALL=0.
+    for tool in ["rustc", "cargo", "rustup"] {
+        let body = std::fs::read_to_string(shims.join(tool)).unwrap();
+        let body = body.strip_prefix("#!/bin/sh\n").unwrap_or(&body);
+        write_script(
+            &shims.join(tool),
+            &format!(
+                "[ \"${{RUSTUP_AUTO_INSTALL:-}}\" != 0 ] && [ \"$1 $2\" != 'toolchain install' ] && echo \"dist: {tool} $*\" >> '{}'\n{body}",
+                dist.display()
+            ),
+        );
+    }
     let (code, _, err) = run_wrapper(
         &f,
         &scratch.path().join("home"),

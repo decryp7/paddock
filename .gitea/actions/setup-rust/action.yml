@@ -60,7 +60,7 @@ runs:
         if [ -f "${PADDOCK_CI_RELEASE_FILE:-/etc/paddock-ci-release}" ] && [ -z "$TARGETS" ]; then
           for name in "$TOOLCHAIN" stable; do
             if [ "$name" != stable ] && ! RUSTUP_AUTO_INSTALL=0 rustup toolchain list 2>/dev/null | grep -q "^${name}-"; then continue; fi
-            have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}')
+            have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true)
             if [ "$TOOLCHAIN" = stable ] || [ "$have" = "$TOOLCHAIN" ]; then
               installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true)
               missing=0

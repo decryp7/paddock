@@ -183,7 +183,7 @@ function runToolchainStep(env, { toolchains = '', components = '', targets = '',
       '',
     ].join('\n'),
   );
-  for (const tool of ['rustc', 'cargo', 'rustfmt']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\necho ${tool} "\${FAKE_RUSTC:-0.1.0}"\n`);
+  for (const tool of ['rustc', 'cargo', 'rustfmt']) writeFileSync(join(dir, 'bin', tool), `#!/bin/sh\n${tool === 'rustc' ? '[ -z "${FAKE_RUSTC_FAIL:-}" ] || exit 1\n' : ''}echo ${tool} "\${FAKE_RUSTC:-0.1.0}"\n`);
   for (const f of ['rustup', 'rustc', 'cargo', 'rustfmt']) chmodSync(join(dir, 'bin', f), 0o755);
   writeFileSync(join(dir, 'step.sh'), body);
   const r = spawnSync('bash', ['-e', '-o', 'pipefail', join(dir, 'step.sh')], {
@@ -268,6 +268,23 @@ test('setup-rust settles the toolchain every later step runs through RUSTUP_TOOL
   );
   assert.match(o.calls, new RegExp(`toolchain install ${channel.replace(/\./g, '\\.')} `));
   assert.match(envOf(other), new RegExp(`^RUSTUP_TOOLCHAIN=${channel.replace(/\./g, '\\.')}$`, 'm'));
+});
+
+// A CI image whose `stable` is not installed and whose pin is missing: the probe of `stable` fails, which under `set -euo pipefail` used to
+// end the step silently with exit 1 (measured with 1.99.1 installed and the pin missing). The step goes on to install the pin.
+test('setup-rust on an image without `stable` and without the pin goes on to install the pin, and says so', () => {
+  const pin = read(join(PADDOCK, 'rust-toolchain.toml'));
+  const channel = /^channel\s*=\s*"(\d+\.\d+\.\d+)"/m.exec(pin)[1];
+  const ws = mkdtempSync(join(tmpdir(), 'paddock-nostable-'));
+  writeFileSync(join(ws, 'rust-toolchain.toml'), pin);
+  const image = join(ws, 'release');
+  writeFileSync(image, 'paddock-ci image\n');
+  const r = runToolchainStep(
+    { TOOLCHAIN: '', GITHUB_WORKSPACE: ws, GITHUB_ENV: join(ws, 'env'), PADDOCK_CI_RELEASE_FILE: image, FAKE_RUSTC_FAIL: '1', RUNNER_OS: 'Linux' },
+    { components: 'clippy-x rustfmt-x', toolchains: '' },
+  );
+  // The stand-in rustc never runs here, so the install is reported as failed: the point is that the step reached it, and said why.
+  assert.match(r.calls, new RegExp(`toolchain install ${channel.replace(/\./g, '\\.')} `), `the pin is installed: ${r.out}`);
 });
 
 test('the dated-nightly fuzz workflow names its toolchain in the fuzz job only; no workflow sets RUSTUP_TOOLCHAIN for every job', () => {

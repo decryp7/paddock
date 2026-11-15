@@ -520,7 +520,10 @@ fn without_a_compiler_no_cached_binary_is_run_and_the_error_names_the_next_step(
     let missing = [("RUSTC", scratch.path().join("no-such-rustc").display().to_string())];
     let (code, _, err) = run_wrapper(&f, &home, &missing);
     assert_eq!(code, 2);
-    assert!(err.contains("rustup") && err.contains("rustc was not found"), "{err}");
+    assert!(
+        err.contains("rustup") && err.contains("toolchain rust-toolchain.toml pins is not installed"),
+        "{err}"
+    );
     for root in ["bin", "bin-source"] {
         cached_tool(&home.join(root).join("some-hash/paddock-dev-test-host"));
     }

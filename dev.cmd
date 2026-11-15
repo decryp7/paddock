@@ -83,10 +83,11 @@ endlocal & exit /b 0
 
 :prune
 set "AT="
+set "AGE=0"
 if exist "%~1.at" set /p AT=<"%~1.at"
 if not defined AT set "AT=0"
 for /f %%N in ('powershell -NoProfile -Command "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()"') do set /a AGE=%%N-%AT% 2>nul
-if %AGE% GEQ 60 del /q "%~1" "%~1.at" >nul 2>&1
+if defined AGE if %AGE% GEQ 60 del /q "%~1" "%~1.at" >nul 2>&1
 exit /b 0
 
 :failed
