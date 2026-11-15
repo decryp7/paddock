@@ -192,7 +192,7 @@ The complete, real examples are `crates/debrief-plugin-syslog` (text) and `crate
    Arc::new(debrief_plugin_acme::AcmePlugin),
    ```
 
-   Build the binary for the app with `scripts/build-plugins.sh` (release builds do it through
+   Build the binary for the app with `cargo xtask build-plugins [--release|--debug] [--target <triple>]` (release builds do it through
    `app/scripts/build-sidecars.mjs`); Debrief finds it next to its executable, `DEBRIEF_PLUGINS` overrides the path
    in a debug build only (a release build ignores it).
 

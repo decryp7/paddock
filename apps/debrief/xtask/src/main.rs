@@ -2,6 +2,8 @@
 //!
 //! - `gen-samples`: regenerates every committed sample: the logs from `samples/generate.py`, then the
 //!   profiler captures and the crash dump, which Rust tests write when `DEBRIEF_REGENERATE_SAMPLES=1`.
+//! - `build-plugins [--release|--debug] [--target <triple>]`: builds the plugins binary and puts it where Tauri bundles it as a
+//!   sidecar (`app/src-tauri/binaries/debrief-plugins-<triple>`); release builds do it through `app/scripts/build-sidecars.mjs`.
 //! - `libduckdb`: fetches the pinned prebuilt libduckdb the store worker links and points Cargo at it
 //!   (see [`libduckdb`]).
 
@@ -109,6 +111,74 @@ fn run(step: &Step, root: &Path) -> Result<(), String> {
     }
 }
 
+/// Where `build-plugins` builds and what it copies: the cargo step, the built file and the sidecar path.
+#[derive(Debug, PartialEq, Eq)]
+struct PluginsBuild {
+    step: Step,
+    built: PathBuf,
+    sidecar: PathBuf,
+}
+
+/// The `build-plugins` plan for a profile (`release` or `debug`) and a target triple, with the host triple standing in for none.
+fn build_plugins_plan(release: bool, target: Option<&str>, host: &str, target_dir: &Path, root: &Path) -> PluginsBuild {
+    let target = target.unwrap_or(host);
+    let profile = if release { "release" } else { "debug" };
+    let mut args = vec!["build", "-p", "debrief-plugins", "--bin", "debrief-plugins", "--target", target];
+    if release {
+        args.push("--release");
+    }
+    let ext = if target.contains("-windows-") { ".exe" } else { "" };
+    PluginsBuild {
+        step: Step::new("cargo", &args),
+        built: target_dir.join(target).join(profile).join(format!("debrief-plugins{ext}")),
+        sidecar: root.join("app/src-tauri/binaries").join(format!("debrief-plugins-{target}{ext}")),
+    }
+}
+
+/// The arguments of `build-plugins`: (release, target).
+fn parse_build_plugins(args: &[String]) -> Result<(bool, Option<String>), String> {
+    let (mut release, mut target) = (true, None);
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--release" => release = true,
+            "--debug" => release = false,
+            "--target" => target = Some(it.next().ok_or("--target needs a triple")?.clone()),
+            other => return Err(format!("unknown argument `{other}`\n\n{USAGE}")),
+        }
+    }
+    Ok((release, target))
+}
+
+fn build_plugins(args: &[String]) -> Result<(), String> {
+    let (release, target) = parse_build_plugins(args)?;
+    let root = repo_root();
+    let rustc = command("rustc")
+        .arg("-vV")
+        .output()
+        .map_err(|e| format!("could not start `rustc`: {e}"))?;
+    let host = String::from_utf8_lossy(&rustc.stdout)
+        .lines()
+        .find_map(|l| l.strip_prefix("host: "))
+        .map(str::to_owned)
+        .ok_or("`rustc -vV` printed no host line")?;
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
+    let plan = build_plugins_plan(release, target.as_deref(), &host, &target_dir, &root);
+    run(&plan.step, &root)?;
+    if let Some(dir) = plan.sidecar.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    }
+    std::fs::copy(&plan.built, &plan.sidecar).map_err(|e| {
+        format!(
+            "could not copy {} to {}: {e}; check the build output above",
+            plan.built.display(),
+            plan.sidecar.display()
+        )
+    })?;
+    eprintln!("plugins: {}", plan.sidecar.display());
+    Ok(())
+}
+
 fn gen_samples() -> Result<(), String> {
     let root = repo_root();
     let python = pick_python(PYTHONS, python_works)
@@ -120,12 +190,13 @@ fn gen_samples() -> Result<(), String> {
     Ok(())
 }
 
-const USAGE: &str = "usage: cargo xtask <task>\n\ntasks:\n  gen-samples   regenerate every committed sample (samples/generate.py and the Rust sample generators)\n  libduckdb     fetch the pinned prebuilt libduckdb and point Cargo at it (.cargo/libduckdb.toml)\n  help         show this message";
+const USAGE: &str = "usage: cargo xtask <task>\n\ntasks:\n  gen-samples   regenerate every committed sample (samples/generate.py and the Rust sample generators)\n  build-plugins build the plugins sidecar into app/src-tauri/binaries ([--release|--debug] [--target <triple>])\n  libduckdb     fetch the pinned prebuilt libduckdb and point Cargo at it (.cargo/libduckdb.toml)\n  help         show this message";
 
 fn main() -> ExitCode {
     let task = std::env::args().nth(1);
     let result = match task.as_deref() {
         Some("gen-samples") => gen_samples(),
+        Some("build-plugins") => build_plugins(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("libduckdb") => libduckdb::run(&repo_root()),
         Some("help" | "-h" | "--help") | None => {
             println!("{USAGE}");
@@ -177,6 +248,45 @@ mod tests {
             .display()
             .starts_with("DEBRIEF_REGENERATE_SAMPLES=1 cargo test -p debrief-plugin-profiling --no-default-features"));
         assert_eq!(plan.last().map(|s| s.args[2].as_str()), Some("debrief-plugin-dumps"));
+    }
+
+    #[test]
+    fn build_plugins_builds_the_bin_for_the_target_and_names_the_sidecar_like_the_script() {
+        let p = build_plugins_plan(true, None, "aarch64-apple-darwin", Path::new("/t"), Path::new("/r"));
+        assert_eq!(
+            p.step.display(),
+            "cargo build -p debrief-plugins --bin debrief-plugins --target aarch64-apple-darwin --release"
+        );
+        assert_eq!(p.built, Path::new("/t/aarch64-apple-darwin/release/debrief-plugins"));
+        assert_eq!(
+            p.sidecar,
+            Path::new("/r/app/src-tauri/binaries/debrief-plugins-aarch64-apple-darwin")
+        );
+        let w = build_plugins_plan(
+            false,
+            Some("x86_64-pc-windows-msvc"),
+            "aarch64-apple-darwin",
+            Path::new("/t"),
+            Path::new("/r"),
+        );
+        assert!(!w.step.args.contains(&"--release".to_owned()));
+        assert_eq!(w.built, Path::new("/t/x86_64-pc-windows-msvc/debug/debrief-plugins.exe"));
+        assert_eq!(
+            w.sidecar,
+            Path::new("/r/app/src-tauri/binaries/debrief-plugins-x86_64-pc-windows-msvc.exe")
+        );
+    }
+
+    #[test]
+    fn build_plugins_arguments_are_the_scripts() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(parse_build_plugins(&a(&[])).unwrap(), (true, None));
+        assert_eq!(
+            parse_build_plugins(&a(&["--debug", "--target", "t"])).unwrap(),
+            (false, Some("t".to_owned()))
+        );
+        assert!(parse_build_plugins(&a(&["--target"])).is_err());
+        assert!(parse_build_plugins(&a(&["--wat"])).is_err());
     }
 
     #[test]
