@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { CONTRACT_PATH, INDEX_PATH, REGENERATE, contractText, generate, lineDiff, modules } from '../src/check-lists.mjs';
+import { CONTRACT_PATH, INDEX_PATH, REGENERATE, contractText, generate, lineDiff, modules } from '../src/derived-lists.mjs';
 import { makeApp } from './helpers.mjs';
 
 const ROOT = resolve(import.meta.dirname, '..', '..');

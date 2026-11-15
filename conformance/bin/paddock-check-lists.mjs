@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Rewrites the lists that name every conformance check from the check modules (src/check-lists.mjs says which and how).
+// Rewrites the lists that name every conformance check from the check modules (src/derived-lists.mjs says which and how).
 //
 //   node conformance/bin/paddock-check-lists.mjs [--root <repo>]           rewrite index.mjs and paddock.ci.json's `only`
 //   node conformance/bin/paddock-check-lists.mjs --check [--root <repo>]   exit 1 and print the difference when either is stale
@@ -8,7 +8,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { REGENERATE, generate, lineDiff, modules } from '../src/check-lists.mjs';
+import { REGENERATE, generate, lineDiff, modules } from '../src/derived-lists.mjs';
 
 const args = process.argv.slice(2);
 const check = args.includes('--check');
