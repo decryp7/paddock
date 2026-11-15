@@ -1330,3 +1330,26 @@ run 8110)?
 - **Windows estimate (not measured):** at 0.11 to 0.15 s per child the slowest test after (105 children) takes 12 to 16 s, the
   four that timed out 4 to 15 s; at run 8115's 0.19 to 0.27 s about 28 s at most, half the 60 s limit.
 - **Memory measure:** not measured (no memory question)
+
+## The `./dev` wrapper's own cost against a cargo no-op (2026-11-15, docs/shell-to-rust-plan)
+
+Question: what does the shell wrapper `./dev` cost per call before it starts the tool, and what would a launcher that cargo keeps
+fresh cost instead (docs/plans/shell-to-rust.md, WP-1)?
+
+- **Machine:** Mac mini (arm64), 1-minute load about 7, 5-minute about 12 (other agents and CI on it)
+- **Commands:** `./dev --wrapper-hash` in the main checkout (origin/main 23213a35e; the wrapper computes the input hash and stops,
+  no build, no tool start); `cargo run -q --release` of a one-file, std-only crate with a warm build folder (Rust 1.100.0), and
+  the same binary started directly
+- **Runs:** 5 for the wrapper, 10 for cargo, 5 for the binary; `/usr/bin/time -p`, under `nice -n 10`
+- **Numbers:**
+
+  | What | Time per call |
+  |---|---|
+  | `./dev --wrapper-hash` (bash, git, grep, tr, sed, awk) | 0.16 to 0.17 s |
+  | `cargo run -q --release`, one-file std-only crate, fresh | 0.03 to 0.04 s (one outlier 0.28 s) |
+  | the built binary started directly | under 0.01 s |
+
+- **Memory measure:** not measured
+- **Not measured:** the same on Windows and Linux,
+  cargo's freshness check for the real `paddock-dev` workspace (hundreds of units, more than the one-crate probe), and a launcher
+  that computes the hash in Rust (WP-1 measures it before it lands).
