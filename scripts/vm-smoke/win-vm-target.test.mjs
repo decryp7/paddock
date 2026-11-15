@@ -30,7 +30,7 @@ test('the target is the one test VM under the derived vm-data folder, and its .v
 test('the folder comes from the repository\'s own ./dev places --pinned, and its refusal is passed on', () => {
   const calls = [];
   const run = (prog, args, opts) => { calls.push([prog, args, opts]); return '/srv/disk-b/vm-data\n'; };
-  // The test sets the variables it judges: CI's jobs set CARGO_BUILD_JOBS, which devEnv() passes on, so they are cleared here.
+  // The test sets the variables it judges; the toolchain's own (CI sets CARGO_BUILD_JOBS) pass through devEnv(), so they are cleared here to compare exactly.
   const withEnv = (vars, fn) => {
     const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
     for (const [k, v] of Object.entries(vars)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
@@ -46,11 +46,13 @@ test('the folder comes from the repository\'s own ./dev places --pinned, and its
   // (PADDOCK_DEV_DOWNLOAD=0: a release job never downloads, ADR 0022; PADDOCK_TOOLCHAIN_FAILED=1; PADDOCK_DEV_FRESH=1).
   const set = { PATH: '/opt/ci/cargo/bin:/usr/bin', CARGO_HOME: '/srv/x/cargo', RUSTUP_HOME: '/srv/x/rustup', FOO_TOOLCHAIN: 'kept',
     PADDOCK_DEV_HOME: '/planted', PADDOCK_DEV: '/planted/dev', PADDOCK_CI_MOUNT: '/planted', PADDOCK_DEV_TARGET_DIR: '/planted',
-    GIT_WORK_TREE: '/planted', GIT_DIR: '/planted/.git', PADDOCK_DEV_DOWNLOAD: '0', PADDOCK_TOOLCHAIN_FAILED: '1', PADDOCK_DEV_FRESH: '1' };
+    GIT_WORK_TREE: '/planted', GIT_DIR: '/planted/.git', PADDOCK_DEV_DOWNLOAD: '0', PADDOCK_TOOLCHAIN_FAILED: '1', PADDOCK_DEV_FRESH: '1',
+    PADDOCK_DEV_TOKEN: 'tok', PADDOCK_VM_DATA: '/srv/o/vm', PADDOCK_DEV_TARGETS: '/srv/o', PADDOCK_WORKTREE_ROOT: '/srv/o/wt' };
   const old = Object.fromEntries(Object.keys(set).map((k) => [k, process.env[k]]));
   Object.assign(process.env, set);
   try {
     devPlace('vm-data', { pinned: true, run });
+    devPlace('vm-data', { run }); // calls[2]: not pinned, so the documented overrides (docs/dev-setup.md) stay
     process.env.PADDOCK_DEV_DOWNLOAD = '1'; // only 0 is kept: a caller cannot switch a download on
     process.env.PADDOCK_TOOLCHAIN_FAILED = '0';
     process.env.PADDOCK_DEV_FRESH = '0';
@@ -61,9 +63,13 @@ test('the folder comes from the repository\'s own ./dev places --pinned, and its
   const env = calls[1][2].env;
   assert.equal(env.PATH, '/opt/ci/cargo/bin:/usr/bin');
   assert.deepEqual([env.CARGO_HOME, env.RUSTUP_HOME, env.FOO_TOOLCHAIN], ['/srv/x/cargo', '/srv/x/rustup', 'kept']);
-  assert.deepEqual(Object.keys(env).filter((k) => /^(PADDOCK_|GIT_)/.test(k)).sort(), ['PADDOCK_DEV_DOWNLOAD', 'PADDOCK_DEV_FRESH', 'PADDOCK_TOOLCHAIN_FAILED']);
+  // The read token stays (it cannot choose the program; without it CI's downloads miss and builds are slow).
+  assert.deepEqual(Object.keys(env).filter((k) => /^(PADDOCK_|GIT_)/.test(k)).sort(), ['PADDOCK_DEV_DOWNLOAD', 'PADDOCK_DEV_FRESH', 'PADDOCK_DEV_TOKEN', 'PADDOCK_TOOLCHAIN_FAILED']);
+  // Not pinned (run-linux.mjs, win-vnc.mjs): the documented folder overrides stay too; pinned ignores them anyway.
+  assert.deepEqual(Object.keys(calls[2][2].env).filter((k) => /^(PADDOCK_|GIT_)/.test(k)).sort(),
+    ['PADDOCK_DEV_DOWNLOAD', 'PADDOCK_DEV_FRESH', 'PADDOCK_DEV_TARGETS', 'PADDOCK_DEV_TOKEN', 'PADDOCK_TOOLCHAIN_FAILED', 'PADDOCK_VM_DATA', 'PADDOCK_WORKTREE_ROOT']);
   assert.deepEqual([env.PADDOCK_DEV_DOWNLOAD, env.PADDOCK_TOOLCHAIN_FAILED, env.PADDOCK_DEV_FRESH], ['0', '1', '1']);
-  assert.deepEqual(Object.keys(calls[2][2].env).filter((k) => /^(PADDOCK_|GIT_)/.test(k)), [], 'a caller cannot switch a download on');
+  assert.deepEqual(Object.keys(calls[3][2].env).filter((k) => /^(PADDOCK_|GIT_)/.test(k)).sort(), ['PADDOCK_DEV_TOKEN'], 'a caller cannot switch a download on, and the overrides do not reach a pinned call');
   // It runs from the repository, so the caller's working folder cannot pick the checkout either.
   assert.equal(calls[1][2].cwd, join(here, '..', '..'));
   const refuse = () => { const e = new Error('exit 2'); e.stderr = 'error: The dev-targets folder cannot be derived: no worktree root is set.\n'; throw e; };
@@ -118,7 +124,7 @@ test('target.sh runs ./dev from the repository with the caller\'s PATH and toolc
     writeFileSync(join(dir, 'dev'), `#!/bin/bash
 eval "$(awk '/^download_enabled\\(\\) \\{/,/^\\}/' "${join(here, '..', '..', 'dev')}")"
 if download_enabled; then curl -sS fake; fi
-echo "/srv/x/\${PADDOCK_DEV_HOME:-none}-\${PADDOCK_DEV:-none}-\${PADDOCK_CI_MOUNT:-none}-\${GIT_WORK_TREE:-none}-\${GIT_DIR:-none}-\${CARGO_HOME:-none}-$PWD-$(printenv PATH)"
+echo "/srv/x/\${PADDOCK_DEV_HOME:-none}-\${PADDOCK_DEV:-none}-\${PADDOCK_CI_MOUNT:-none}-\${GIT_WORK_TREE:-none}-\${GIT_DIR:-none}-\${CARGO_HOME:-none}-D\${PADDOCK_DEV_DOWNLOAD:-none}F\${PADDOCK_DEV_FRESH:-none}T\${PADDOCK_TOOLCHAIN_FAILED:-none}K\${PADDOCK_DEV_TOKEN:-none}-$PWD-$(printenv PATH)"
 `, { mode: 0o755 });
     const path = `${join(dir, 'fakebin')}:/opt/ci/cargo/bin:/usr/bin:/bin`;
     const source = (env) => {
@@ -126,17 +132,34 @@ echo "/srv/x/\${PADDOCK_DEV_HOME:-none}-\${PADDOCK_DEV:-none}-\${PADDOCK_CI_MOUN
       const out = execFileSync('bash', ['-c', 'source "$1"; printf %s "$WIN_VM_DIR"', 'x', join(dir, 'scripts', 'vm-win', 'target.sh')], {
         encoding: 'utf8', cwd: join(dir, 'elsewhere'), stdio: ['ignore', 'pipe', 'pipe'], // not a socket: bash reads ~/.bashrc on one and would extend PATH
         env: { PATH: path, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR ?? '/tmp', GIT_WORK_TREE: '/planted', GIT_DIR: '/planted/.git', CARGO_HOME: 'c',
-          PADDOCK_DEV_HOME: '/planted', PADDOCK_DEV: '/planted/dev', PADDOCK_CI_MOUNT: '/planted', ...env },
+          PADDOCK_DEV_HOME: '/planted', PADDOCK_DEV: '/planted/dev', PADDOCK_CI_MOUNT: '/planted', PADDOCK_DEV_TOKEN: 'tok', ...env },
       });
       return [out, existsSync(join(dir, 'curl.log'))];
     };
     // A release job (GITHUB_ACTIONS=true, PADDOCK_DEV_DOWNLOAD=0) never downloads (ADR 0022 amendment); nothing planted gets through;
     // the PATH is exactly the caller's; ./dev runs from the repository, not from the caller's folder.
-    const [out, downloaded] = source({ GITHUB_ACTIONS: 'true', PADDOCK_DEV_DOWNLOAD: '0' });
-    assert.equal(out, `/srv/x/none-none-none-none-none-c-${dir}-${path}/paddock-win11-test`);
+    const [out, downloaded] = source({ GITHUB_ACTIONS: 'true', PADDOCK_DEV_DOWNLOAD: '0', PADDOCK_DEV_FRESH: '1', PADDOCK_TOOLCHAIN_FAILED: '1' });
+    assert.equal(out, `/srv/x/none-none-none-none-none-c-D0F1T1Ktok-${dir}-${path}/paddock-win11-test`);
     assert.equal(downloaded, false, 'a release job must not download ./dev');
     // The fake curl is live: a plain CI job (no PADDOCK_DEV_DOWNLOAD) is allowed to download, and a caller cannot switch it on elsewhere.
     assert.equal(source({ GITHUB_ACTIONS: 'true' })[1], true);
     assert.equal(source({ PADDOCK_DEV_DOWNLOAD: '1' })[1], false);
+    // Only the restricting values stay: `=0` of the other two, and `=1` of the download switch, are dropped.
+    const [zero] = source({ PADDOCK_DEV_DOWNLOAD: '1', PADDOCK_DEV_FRESH: '0', PADDOCK_TOOLCHAIN_FAILED: '0' });
+    assert.equal(zero, `/srv/x/none-none-none-none-none-c-DnoneFnoneTnoneKtok-${dir}-${path}/paddock-win11-test`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('target.sh survives a ./dev that refuses (no paddock.worktreeRoot, as in every CI checkout) under set -euo pipefail, and keeps the reason', () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'win-target-')));
+  try {
+    mkdirSync(join(dir, 'scripts', 'vm-win'), { recursive: true });
+    copyFileSync(join(here, '..', 'vm-win', 'target.sh'), join(dir, 'scripts', 'vm-win', 'target.sh'));
+    // A stand-in ./dev that refuses the way paddock-dev does without a worktree root: an `error:` line on stderr and exit 2.
+    writeFileSync(join(dir, 'dev'), '#!/bin/sh\necho "error: The dev-targets folder cannot be derived: no worktree root is set." >&2\nexit 2\n', { mode: 0o755 });
+    // The callers (vm-win.sh, prepare.sh) run under `set -euo pipefail`: sourcing must not end the script.
+    const out = execFileSync('bash', ['-c', 'set -euo pipefail; source "$1"; printf "%s|%s" "$WIN_VM_DIR" "$WIN_VM_DIR_UNKNOWN"', 'x', join(dir, 'scripts', 'vm-win', 'target.sh')],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.equal(out, '|error: The dev-targets folder cannot be derived: no worktree root is set.');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

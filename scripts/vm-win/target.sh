@@ -13,7 +13,7 @@ _win_vm_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 # ./dev runs from the repository with the caller's environment minus what picks or places the binary or the checkout it is built from:
 # every PADDOCK_* variable (PADDOCK_DEV, PADDOCK_DEV_HOME, PADDOCK_CI_MOUNT, PADDOCK_DEV_TARGET_DIR ...) and every GIT_* one (GIT_DIR,
 # GIT_WORK_TREE). Three PADDOCK_* values only restrict the build and stay: PADDOCK_DEV_DOWNLOAD=0 (a release job never downloads, ADR
-# 0022 amendment), PADDOCK_TOOLCHAIN_FAILED=1 and PADDOCK_DEV_FRESH=1; a caller cannot switch a download on. PATH and the toolchain's
+# 0022 amendment), PADDOCK_TOOLCHAIN_FAILED=1 and PADDOCK_DEV_FRESH=1; a caller cannot switch a download on; the read token PADDOCK_DEV_TOKEN stays too (it cannot choose the program). PATH and the toolchain's
 # variables stay, because ./dev finds its compiler the way it does for the caller (CI's cargo is not under $HOME/.cargo/bin; a fixed
 # PATH made it stop with "no Rust compiler runs here", run 8138). This keeps the environment from choosing the program; it is not a
 # sandbox. The first run after the tool's inputs change builds paddock-dev once into the default cache.
@@ -24,6 +24,7 @@ _win_vm_dev() {
       PADDOCK_DEV_DOWNLOAD) [ "${!v}" = 0 ] && continue ;;
       PADDOCK_TOOLCHAIN_FAILED) [ "${!v}" = 1 ] && continue ;;
       PADDOCK_DEV_FRESH) [ "${!v}" = 1 ] && continue ;;
+      PADDOCK_DEV_TOKEN) continue ;; # the read token cannot choose the program; without it CI's downloads miss and the build is slow
     esac
     unset+=(-u "$v")
   done < <(compgen -e | grep -E '^(PADDOCK_|GIT_)')
@@ -35,7 +36,9 @@ if _win_vm_data="$(_win_vm_dev places --pinned --get vm-data --repo "$_win_vm_re
   WIN_VM_DIR="$_win_vm_data/$WIN_VM_NAME"
 else
   WIN_VM_DIR=""
-  WIN_VM_DIR_UNKNOWN="$(_win_vm_dev places --pinned --get vm-data --repo "$_win_vm_repo" 2>&1 >/dev/null | tail -1)"
+  # `|| true`: the callers run under `set -euo pipefail`, and ./dev's refusal (exit 2, as in a checkout without paddock.worktreeRoot,
+  # every CI checkout) must not end them: the reason is what this line is for.
+  WIN_VM_DIR_UNKNOWN="$(_win_vm_dev places --pinned --get vm-data --repo "$_win_vm_repo" 2>&1 >/dev/null | tail -1 || true)"
 fi
 
 # A path with links resolved; a missing last part is resolved through its parent (prepare.sh creates the folder).

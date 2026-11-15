@@ -15,12 +15,18 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
  * The environment ./dev runs under: the caller's own, minus what picks or places the binary or the checkout it is built from: every
  * `PADDOCK_*` variable (PADDOCK_DEV, PADDOCK_DEV_HOME, PADDOCK_CI_MOUNT, PADDOCK_DEV_TARGET_DIR ...) and every `GIT_*` one (GIT_DIR,
  * GIT_WORK_TREE). Three `PADDOCK_*` values only restrict the build and stay: PADDOCK_DEV_DOWNLOAD=0 (a release job never downloads,
- * ADR 0022 amendment), PADDOCK_TOOLCHAIN_FAILED=1 and PADDOCK_DEV_FRESH=1; a caller cannot switch a download on. ./dev finds its
+ * ADR 0022 amendment), PADDOCK_TOOLCHAIN_FAILED=1 and PADDOCK_DEV_FRESH=1; a caller cannot switch a download on. The read token
+ * (PADDOCK_DEV_TOKEN) stays, and a call that is not pinned keeps the documented folder overrides (OVERRIDES). ./dev finds its
  * toolchain the way it does for the caller: CI's cargo is not under $HOME/.cargo/bin, so a fixed PATH made it stop with "no Rust compiler
  * runs here" (run 8138). This keeps the environment from choosing the program; it is not a sandbox.
  */
 const RESTRICTING = { PADDOCK_DEV_DOWNLOAD: '0', PADDOCK_TOOLCHAIN_FAILED: '1', PADDOCK_DEV_FRESH: '1' };
-const devEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => !/^(PADDOCK_|GIT_)/.test(k) || RESTRICTING[k] === v));
+/** Kept whatever the value: the read token cannot choose the program (the package URL is dropped), and without it CI's downloads miss. */
+const HARMLESS = ['PADDOCK_DEV_TOKEN'];
+/** Kept for a call that is not pinned (docs/dev-setup.md "Where things live"): the documented folder overrides; `--pinned` ignores them. */
+const OVERRIDES = ['PADDOCK_VM_DATA', 'PADDOCK_DEV_TARGETS', 'PADDOCK_WORKTREE_ROOT'];
+const devEnv = (pinned) => Object.fromEntries(Object.entries(process.env).filter(([k, v]) =>
+  !/^(PADDOCK_|GIT_)/.test(k) || RESTRICTING[k] === v || HARMLESS.includes(k) || (!pinned && OVERRIDES.includes(k))));
 
 /**
  * One folder from `./dev places` (dev-targets, dev-disk, vm-data, lock-root, main-checkout; docs/dev-setup.md), run through the
@@ -33,7 +39,7 @@ const devEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, 
 export function devPlace(name, { pinned = false, run = execFileSync } = {}) {
   const args = ['places', '--get', name, '--repo', REPO, ...(pinned ? ['--pinned'] : [])];
   try {
-    const out = String(run(join(REPO, 'dev'), args, { encoding: 'utf8', cwd: REPO, env: devEnv(), stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 })).trim();
+    const out = String(run(join(REPO, 'dev'), args, { encoding: 'utf8', cwd: REPO, env: devEnv(pinned), stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 })).trim();
     if (!out) throw new Error('it printed nothing');
     return out;
   } catch (e) {
