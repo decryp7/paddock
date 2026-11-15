@@ -6,6 +6,9 @@ inputs:
     # runners", 2026-11-15): over the newest 200 runs (2026-11-10 to 11-15) the macOS/Windows jobs of one run spanned at most
     # 94.6 min since 2026-11-13 (run 8047), p95 130.1 min; the six spans over 150 min (up to 327.9 min, run 7925) were the
     # overlapping runs of 2026-11-11 that one Mac-heavy run at a time removes. Under act_runner's default 3 h job timeout.
+    # Linux slots: this job holds one of the three (docs/ci-schedules.md) while it waits. `./dev ci dispatch` lets at most two
+    # train runs wait at once (MAX_TRAIN_WAITERS = LINUX_SLOTS - 1 in tools/paddock-dev/src/ci_runs/dispatch.rs), so one slot
+    # stays free for the older runs' own Linux jobs; a train dispatches up to eight workflows that use this action.
     description: "The longest to wait: 2h30m covers every measured run since 2026-11-13 (longest 94.6 min) and stays under act_runner's default 3 h job timeout."
     default: "2h30m"
   token:

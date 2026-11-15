@@ -131,7 +131,10 @@ changes here, every app's copy is updated in the same change.
     use the shared build cache (`sccache`) and copy-on-write target folders, and never let tests crowd out a release.
     Only one train's CI runs at a time on each shared runner class: `./dev ci dispatch` sends a train run at once and its first
     job waits (`runner-wait`, on Linux) while an older run holds the Mac or Windows runner it needs; other dispatches wait in
-    the dispatcher (ER-24; 2026-11-12, mechanism 2026-11-15; first live run: pending).
+    the dispatcher. A run holds a class while it has an unfinished job on it; in a busy check, unknown counts as busy (a job
+    whose label is unresolved, empty or of no known class counts its run by its workflow file); only an unreadable API fails
+    open. At most two train runs wait at once, so one of the three Linux slots stays free (ER-24; 2026-11-12, mechanism
+    2026-11-15; first live run: pending).
 
 ## Sharing (user, 2026-10-24)
 42. **Share first.** Before building anything in an app, check Paddock's shared crates and packages (crates/README.md,
