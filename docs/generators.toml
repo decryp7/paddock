@@ -53,9 +53,20 @@ what = "tools/paddock-dev/Cargo.lock resolves with --locked (a manifest change, 
 check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
 regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
 cwd = "tools/paddock-dev"
-paths = ["tools/paddock-dev/Cargo.toml", "tools/paddock-dev/Cargo.lock", "crates/*/Cargo.toml"]
+paths = ["tools/paddock-dev/Cargo.toml", "tools/paddock-dev/Cargo.lock", "tools/dev-launch/Cargo.toml", "crates/*/Cargo.toml"]
 outputs = ["tools/paddock-dev/Cargo.lock"]
 cost = "heavy"
+drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
+
+[[generator]]
+id = "cargo-lock-tools-dev-launch"
+what = "tools/dev-launch/Cargo.lock resolves with --locked (the launcher has no dependencies, so only a manifest change leaves it stale)"
+check = ["sh", "-c", "cargo metadata --locked --format-version 1 >/dev/null"]
+regenerate = "cargo metadata --format-version 1 >/dev/null   # without --locked cargo rewrites Cargo.lock; commit it"
+cwd = "tools/dev-launch"
+paths = ["tools/dev-launch/Cargo.toml", "tools/dev-launch/Cargo.lock"]
+outputs = ["tools/dev-launch/Cargo.lock"]
+cost = "fast"
 drift_marker = ["needs to be updated", "duplicate key", "cannot update the lock file"]
 
 [[generator]]
