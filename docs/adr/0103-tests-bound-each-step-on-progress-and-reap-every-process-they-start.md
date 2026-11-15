@@ -1,9 +1,11 @@
 # 0103. Tests bound each step on progress and reap every process they start
 
-- Status: Proposed 2026-11-14, revised 2026-11-15 after the first independent review (verdict NOT YET; its P1s and P2s are
-  answered below) and again after the second (one P1: the reaper's children escaped nextest's group kill; fixed below). The user approved building the test-side redesign (about 1-2 agent-days) for the class "tests time out on the
-  loaded Mac" on the night of 2026-11-14 (relayed in the designer's brief). The coordinator decided D1-D4 within that approval on
-  2026-11-15 (recorded under "Decisions"). Second review round next. Built on `feat/test-timing-redesign` (train 12).
+- Status: Accepted 2026-11-15 (user), with D1-D4 as taken (recorded under "Decisions"). Before that: proposed 2026-11-14,
+  revised 2026-11-15 after the first independent review (verdict NOT YET; its P1s and P2s are answered below) and again after the
+  second (one P1: the reaper's children escaped nextest's group kill; fixed below). The user approved building the test-side
+  redesign (about 1-2 agent-days) for the class "tests time out on the loaded Mac" on the night of 2026-11-14 (relayed in the
+  designer's brief), and the coordinator decided D1-D4 within that approval on 2026-11-15. Built on
+  `feat/test-timing-redesign`, merged in train 12.
 - Date: 2026-11-14 (revised 2026-11-15)
 - Related: ER-12 (no limit raised without a measured cause), ER-14 (no process outlives its test), ER-20, ER-21 / rule 40 (a
   recurring class gets a redesign), ER-22 (share first), ER-27, ER-28, ER-37 / rule 76, ER-41 (new checks start report-only);
