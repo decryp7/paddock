@@ -89,6 +89,8 @@ runs:
         echo "train-skip=$train_skip" >> "$GITHUB_OUTPUT"
         # The line `./dev ci verdict` trusts (plan_since::COMPLETE_LINE), printed after every decision above: the plan ran its jobs,
         # the caller says the mode is full.
+        # First real run that printed it from a release workflow (ER-33, ER-41): spotter-release.yml run 8122 on train 11 at
+        # 381e4758a, `plan verdict: complete=true`, 2026-11-15.
         complete=false
         if [ "$run" = true ] && [ "$PLAN_MODE_FULL" = true ]; then complete=true; fi
         echo "plan verdict: complete=$complete"
