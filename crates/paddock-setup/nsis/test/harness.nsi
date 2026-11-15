@@ -1,6 +1,6 @@
 ; A minimal installer with the hook points of Tauri's NSIS template (Section Install: SetOutPath, PREINSTALL, File,
 ; POSTINSTALL; Section Uninstall: PREUNINSTALL, Delete, RMDir; /P, /UPDATE and /R read from $CMDLINE; $UpdateMode read
-; after the hook). It runs the real include against the stub paddock-setup.exe (build.sh). Not the real template: the
+; after the hook). It runs the real include against the stub paddock-setup.exe (`./dev setup-harness build`). Not the real template: the
 ; real one is checked on the VM by the per-machine suite (ADR 0053 section 9).
 Unicode true
 RequestExecutionLevel admin

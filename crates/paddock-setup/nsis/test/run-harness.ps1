@@ -1,4 +1,4 @@
-﻿# Runs the harness installer (build.sh) against the stub paddock-setup.exe on a Windows machine, as an administrator, and
+﻿# Runs the harness installer (`./dev setup-harness build`) against the stub paddock-setup.exe on a Windows machine, as an administrator, and
 # checks the order of the calls, the exit codes and what is left behind. ER-14: run it in the test VM only; it writes only
 # below -Root. Usage: powershell -File run-harness.ps1 -Root C:\paddock-test\s1s4 (harness-installer.exe is in -Root)
 param([string]$Root = 'C:\paddock-test\s1s4', [switch]$Cold, [int]$ColdRounds = 1, [switch]$NoSetup)

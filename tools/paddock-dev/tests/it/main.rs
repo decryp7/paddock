@@ -36,6 +36,7 @@ mod pr;
 mod pre_push;
 mod release_isolation;
 mod safe_remove_lint;
+mod setup_harness;
 mod setup_rust;
 mod slots;
 mod sparse;

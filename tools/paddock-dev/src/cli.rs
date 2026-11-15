@@ -1,7 +1,7 @@
 use crate::{
     brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, diagrams, disk, gates,
     generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue,
-    release_isolation, slots, wait, worktree,
+    release_isolation, setup_harness, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
@@ -80,6 +80,11 @@ enum Command {
     Diagrams {
         #[command(subcommand)]
         command: diagrams::DiagramsCommand,
+    },
+    /// The NSIS per-machine installer harness (crates/paddock-setup/nsis/test): `build` makes the stub setup and the harness installer.
+    SetupHarness {
+        #[command(subcommand)]
+        command: setup_harness::SetupHarnessCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -725,6 +730,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
         Command::Diagrams { command } => diagrams::command(command),
+        Command::SetupHarness { command } => setup_harness::command(command),
         Command::Disk { command } => disk::command(command),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),
