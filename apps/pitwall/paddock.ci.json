@@ -7,7 +7,9 @@
     "name": "Pitwall",
     "service": "pitwall-server",
     "label": "net.decryptology.pitwall.service",
-    "unit": "pitwall.service"
+    "unit": "pitwall.service",
+    "dataEnv": "PITWALL_HOME",
+    "discovery": { "file": "discovery.json", "key": "admin.key", "rpc": "/mgmt/v1/rpc/overview" }
   },
   "notices": {
     "name": "Pitwall",

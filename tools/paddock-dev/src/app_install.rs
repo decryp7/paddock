@@ -82,6 +82,21 @@ pub struct Install {
     pub log: Option<String>,
     /// Runner logs: `{ "dir": "runners", "log": "logs/runner.log", "accepted": "declare successfully" }`.
     pub runners: Option<Runners>,
+    /// An environment variable that moves the data folder (Pitwall's `PITWALL_HOME`).
+    pub data_env: Option<String>,
+    /// The server's discovery file and a call to prove it answers: `{ "file": "discovery.json", "key": "admin.key", "rpc": "/mgmt/v1/rpc/overview" }`.
+    pub discovery: Option<Discovery>,
+}
+
+/// A server that writes its port to a discovery file and answers a bearer-keyed call.
+#[derive(Debug, Clone)]
+pub struct Discovery {
+    /// The discovery file in the data folder (JSON with a `"port"` number).
+    pub file: String,
+    /// The file holding the admin key, in the data folder.
+    pub key: String,
+    /// The path of the POST the server must answer with 200.
+    pub rpc: String,
 }
 
 /// Per-runner logs under the data folder.
@@ -122,10 +137,10 @@ pub fn load_install(root: &Path, app: &str) -> Result<Install, CliError> {
 
 /// Reads the section by hand (no serde derive here): known keys only, each a string.
 fn parse_install(v: &serde_json::Value) -> Result<Install, String> {
-    const KEYS: [&str; 6] = ["name", "service", "label", "unit", "socket", "log"];
+    const KEYS: [&str; 7] = ["name", "service", "label", "unit", "socket", "log", "dataEnv"];
     let o = v.as_object().ok_or("it is not an object")?;
     for k in o.keys() {
-        if !KEYS.contains(&k.as_str()) && k != "runners" {
+        if !KEYS.contains(&k.as_str()) && k != "runners" && k != "discovery" {
             return Err(format!("unknown field `{k}`"));
         }
     }
@@ -156,6 +171,27 @@ fn parse_install(v: &serde_json::Value) -> Result<Install, String> {
             })
         }
     };
+    let discovery = match o.get("discovery") {
+        None => None,
+        Some(r) => {
+            let m = r.as_object().ok_or("`discovery` is not an object")?;
+            for k in m.keys() {
+                if !["file", "key", "rpc"].contains(&k.as_str()) {
+                    return Err(format!("unknown field `discovery.{k}`"));
+                }
+            }
+            let need = |k: &str| text(m, k)?.ok_or(format!("`discovery.{k}` is missing"));
+            let rpc = need("rpc")?;
+            if !rpc.starts_with('/') {
+                return Err("`discovery.rpc` is a path starting with /".to_string());
+            }
+            Some(Discovery {
+                file: need("file")?,
+                key: need("key")?,
+                rpc,
+            })
+        }
+    };
     Ok(Install {
         name: text(o, "name")?.ok_or("`name` is missing")?,
         service: text(o, "service")?,
@@ -164,6 +200,8 @@ fn parse_install(v: &serde_json::Value) -> Result<Install, String> {
         socket: text(o, "socket")?,
         log: text(o, "log")?,
         runners,
+        data_env: text(o, "dataEnv")?,
+        discovery,
     })
 }
 
@@ -422,6 +460,35 @@ pub fn parse_launchctl(text: &str) -> (Option<String>, Option<String>) {
     (field("state"), field("pid"))
 }
 
+/// The `"port": N` of a discovery file's text.
+pub fn parse_port(text: &str) -> Option<u16> {
+    let at = text.find("\"port\"")? + "\"port\"".len();
+    let rest = text[at..].trim_start().strip_prefix(':')?.trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// The status code of a bearer-keyed `POST <path>` to `127.0.0.1:<port>` (HTTP/1.1, one request, five seconds).
+pub fn post_status(port: u16, path: &str, key: &str) -> Result<u16, String> {
+    use std::io::{Read, Write};
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let t = Duration::from_secs(5);
+    let mut c = std::net::TcpStream::connect_timeout(&addr, t).map_err(|e| e.to_string())?;
+    c.set_read_timeout(Some(t)).map_err(|e| e.to_string())?;
+    c.set_write_timeout(Some(t)).map_err(|e| e.to_string())?;
+    let req = format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nAuthorization: Bearer {key}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    c.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    let mut head = [0u8; 64];
+    let n = c.read(&mut head).map_err(|e| e.to_string())?;
+    String::from_utf8_lossy(&head[..n])
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse().ok())
+        .ok_or_else(|| "no HTTP status line".to_string())
+}
+
 /// `./dev app verify-installed`.
 pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
     let root = crate::gates::command::repo_root(a.root.as_deref())?;
@@ -433,6 +500,13 @@ pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
     let mut l = Lines::new();
     let _ = writeln!(l.text, "{name} on this machine");
     let mut svc: Option<PathBuf> = None;
+    let data_override = a.data.clone().or_else(|| {
+        i.data_env
+            .as_ref()
+            .and_then(|k| env.get(k))
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    });
     let data;
     match os {
         "macos" => {
@@ -440,8 +514,7 @@ pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
                 .bundle
                 .clone()
                 .unwrap_or_else(|| PathBuf::from(format!("/Applications/{name}.app")));
-            data = a
-                .data
+            data = data_override
                 .clone()
                 .unwrap_or_else(|| Path::new(&home).join("Library/Application Support").join(name));
             if bundle.is_dir() {
@@ -488,7 +561,7 @@ pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
             }
         }
         "linux" => {
-            data = a.data.clone().unwrap_or_else(|| {
+            data = data_override.clone().unwrap_or_else(|| {
                 env.get("XDG_DATA_HOME")
                     .filter(|v| !v.is_empty())
                     .map_or_else(|| Path::new(&home).join(".local/share"), PathBuf::from)
@@ -568,6 +641,23 @@ pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
             );
         }
     }
+    if let Some(d) = &i.discovery {
+        let file = data.join(&d.file);
+        match std::fs::read_to_string(&file) {
+            Err(_) => l.fail("discovery file", "missing: the server is not running"),
+            Ok(text) => {
+                l.ok(&format!("discovery file {}", file.display()));
+                let key = std::fs::read_to_string(data.join(&d.key)).unwrap_or_default();
+                if let Some(port) = parse_port(&text) {
+                    match post_status(port, &d.rpc, key.trim()) {
+                        Ok(200) => l.ok(&format!("the server answers on 127.0.0.1:{port}")),
+                        Ok(code) => l.fail("server answer", &format!("{} answered {code}", d.rpc)),
+                        Err(e) => l.fail("server answer", &format!("127.0.0.1:{port} did not answer: {e}")),
+                    }
+                }
+            }
+        }
+    }
     let log = data.join(i.log.as_deref().unwrap_or("logs/service.log"));
     if let Some(s) = &svc {
         let _ = writeln!(l.text);
@@ -643,6 +733,14 @@ pub fn command(c: AppCommand) -> Result<Report, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_port_is_read_from_the_discovery_text() {
+        assert_eq!(parse_port("{\"pid\": 1, \"port\": 8123, \"x\": 2}"), Some(8123));
+        assert_eq!(parse_port("{\"port\":42}"), Some(42));
+        assert_eq!(parse_port("{\"port\": \"x\"}"), None);
+        assert_eq!(parse_port("{}"), None);
+    }
 
     #[test]
     fn launchctl_state_and_pid_are_read_from_tab_indented_lines() {

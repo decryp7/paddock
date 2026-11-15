@@ -2,3 +2,7 @@
 # (build.target-dir: the job's build folder outside the checkout, as configuration because sccache hashes CARGO_TARGET_DIR).
 # The repo root's .cargo/config.toml (linker, registry) applies as well.
 include = [{ path = "ci.toml", optional = true }]
+
+[alias]
+# Repository chores (xtask/): `cargo xtask verify-bundle`, `cargo xtask help`.
+xtask = "run -p xtask --"

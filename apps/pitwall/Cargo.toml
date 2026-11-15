@@ -6,6 +6,7 @@ members = [
   "crates/pitwall-server",
   "crates/pitwall-service",
   "app/src-tauri",
+  "xtask",
 ]
 resolver = "2"
 

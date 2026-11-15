@@ -92,6 +92,7 @@ Extra checks that CI runs:
   [suite-lessons.md](suite-lessons.md)).
 - `conformance/release/macos-verify-bundle.sh` (shared, the `macos-verify` action): the `.app` and the DMG are ad-hoc sealed, resolve
   their bundled libraries and `pitwall-server --version` starts from the built app.
+- `cargo xtask verify-bundle [Pitwall.app] [--smoke]` (local, macOS): the bundle's binaries, launch agent plist, code signature, rpath and minimum macOS version; `--smoke` also runs the bundled server and the app hidden in a throw-away data folder. An installed app and its service: `./dev app verify-installed pitwall`.
 - Coverage: `cargo llvm-cov -p pitwall-core --summary-only` (target 99 % lines).
 - Cross-target type checks: `cargo clippy -p pitwall-core -p pitwall-server --target x86_64-pc-windows-msvc` and
   `--target x86_64-apple-darwin`.

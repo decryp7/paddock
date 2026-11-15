@@ -296,3 +296,66 @@ fn a_runner_log_row_says_whether_the_server_accepted_the_runner() {
         "{text}"
     );
 }
+
+/// A one-request stand-in server on 127.0.0.1: answers `status` to whatever it is sent and reports the request it got.
+fn serve_once(status: u16) -> (u16, std::thread::JoinHandle<String>) {
+    use std::io::{Read, Write};
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = l.local_addr().unwrap().port();
+    let h = std::thread::spawn(move || {
+        let (mut c, _) = l.accept().unwrap();
+        let mut buf = [0u8; 1024];
+        let n = c.read(&mut buf).unwrap();
+        c.write_all(format!("HTTP/1.1 {status} X\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes())
+            .unwrap();
+        String::from_utf8_lossy(&buf[..n]).into_owned()
+    });
+    (port, h)
+}
+
+const DISCOVERY: &str =
+    r#"{"name":"Demo","dataEnv":"DEMO_HOME","discovery":{"file":"discovery.json","key":"admin.key","rpc":"/mgmt/v1/rpc/overview"}}"#;
+
+#[test]
+fn a_server_that_answers_the_keyed_call_passes_and_one_that_does_not_is_one_problem() {
+    let d = tempfile::tempdir().unwrap();
+    let root = repo(d.path(), DISCOVERY);
+    let (bin, home) = (d.path().join("bin"), d.path().join("home"));
+    let data = d.path().join("data");
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(data.join("admin.key"), "k3y\n").unwrap();
+    for (status, want_ok) in [(200u16, true), (401, false)] {
+        let (port, server) = serve_once(status);
+        std::fs::write(data.join("discovery.json"), format!("{{\"pid\": 1, \"port\": {port}}}")).unwrap();
+        let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        cmd.env("PATH", &bin).env("HOME", &home).env("DEMO_HOME", &data);
+        cmd.args(["app", "verify-installed", "demo", "--os", "linux", "--root", root.to_str().unwrap()]);
+        let o = cmd.output().unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        let request = server.join().unwrap();
+        assert!(
+            request.starts_with("POST /mgmt/v1/rpc/overview HTTP/1.1") && request.contains("Authorization: Bearer k3y\r\n"),
+            "{request}"
+        );
+        if want_ok {
+            assert_eq!(o.status.code(), Some(0), "{text}");
+            assert!(text.contains(&format!("ok    the server answers on 127.0.0.1:{port}")), "{text}");
+        } else {
+            assert_eq!(o.status.code(), Some(1), "{text}");
+            assert!(
+                text.contains("fail  server answer\n        /mgmt/v1/rpc/overview answered 401") && text.contains("1 problem(s) found."),
+                "{text}"
+            );
+        }
+    }
+    std::fs::remove_file(data.join("discovery.json")).unwrap();
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.env("PATH", &bin).env("HOME", &home).env("DEMO_HOME", &data);
+    cmd.args(["app", "verify-installed", "demo", "--os", "linux", "--root", root.to_str().unwrap()]);
+    let o = cmd.output().unwrap();
+    assert!(
+        String::from_utf8_lossy(&o.stdout).contains("fail  discovery file\n        missing: the server is not running")
+            || String::from_utf8_lossy(&o.stderr).contains("fail  discovery file")
+    );
+}
