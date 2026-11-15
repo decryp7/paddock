@@ -117,7 +117,7 @@ exit /b 0
 
 :try
 set "VER="
-for /f "usebackq tokens=2" %%V in (`cmd /c "set RUSTUP_TOOLCHAIN=%~1&& rustc --version 2>nul"`) do set "VER=%%V"
+for /f "usebackq tokens=2" %%V in (`cmd /c "set RUSTUP_TOOLCHAIN=%~1&& rustc --version 2>nul"`) do if not defined VER set "VER=%%V"
 if not defined VER exit /b 0
 set "MAJ="
 set "MIN=0"
