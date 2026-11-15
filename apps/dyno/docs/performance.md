@@ -248,7 +248,7 @@ linker was 39 %). It agrees with the 2026-10-29 block below: keep Apple's linker
 - **Memory measure:** not measured
 - **Notes:** the failing test (`native_feel::tests::debug_windows_keep_reload_and_devtools_but_never_zoom`) asserts a
   debug build and fails in any release profile. Analysis: [`scripts/perf/link-time/classify.py`](../../../scripts/perf/link-time/classify.py) and
-  [`disfn.sh`](../../../scripts/perf/link-time/disfn.sh); their outputs are machine-local in `/Volumes/d7sst7/dev-targets/target/link-time-tools/`.
+  `disfn.sh` (deleted in D8 of the shell-to-Rust plan; `git show 13881087a:scripts/perf/link-time/disfn.sh`); their outputs are machine-local in `/Volumes/d7sst7/dev-targets/target/link-time-tools/`.
 
 ### 2026-10-29, incremental rebuild and link time (docs/link-time)
 
@@ -486,7 +486,7 @@ the pipe). The period is a constant, not yet a Setting with an "Auto" default (t
 
 ## WP-0: Windows task walk and disk query (Dyno ADR 0033, 2026-11-09)
 
-- **Commit:** `fix/dyno-no-fakes-in-release` (the commit that adds this block); script `apps/dyno/scripts/wp0/wp0-collect.ps1`, steps `tasks-walk` and `physdisk`.
+- **Commit:** `fix/dyno-no-fakes-in-release` (the commit that adds this block); script `apps/dyno/scripts/wp0/wp0-collect.ps1` (deleted with the rest of `wp0/` once WP-0 was done; `git show 13881087a:apps/dyno/scripts/wp0/wp0-collect.ps1`), steps `tasks-walk` and `physdisk`.
 - **Machine:** the local test VM `paddock-win11-test` (VMware Fusion on a Mac mini M4 Pro, Windows 11 Pro Arm64, build 26300.9711, `DisplayVersion` 26H2, stable
   channel), reverted to its `gui-session-tools` snapshot before the run, started headless; the Mac's 1-minute load was not recorded during the run (7 to 51 at times around it, from other agents), so treat the numbers as indications.
   A **fresh image**: 176 tasks visible to the standard user, 252 to the administrator.

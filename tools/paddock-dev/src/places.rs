@@ -8,7 +8,7 @@
 //!   machines' lock (`PADDOCK_VM_LOCK_ROOT`, else `<dev disk>/ci/locks/test-machines`) are below it.
 //! - The main checkout: the folder that holds the git common directory ([`Repo::discover`]).
 //!
-//! `./dev places` prints them for the scripts (vm-lock, vm-win, the vm-smoke harness, wp0-run); `--pinned` reads only the
+//! `./dev places` prints them for the scripts (vm-lock, vm-win, the vm-smoke harness); `--pinned` reads only the
 //! repository's own git config, with an empty environment for git, so no variable can move a guarded folder (the Windows test VM).
 //! Each fails closed with the next step when it cannot be derived. The one other copy of the rule is the hooks'
 //! `.claude/hooks/lib/paddockpaths.py` (hooks run before any binary is built; docs/known-copies.toml, `dev-places`;

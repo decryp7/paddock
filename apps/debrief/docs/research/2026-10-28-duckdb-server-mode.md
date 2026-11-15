@@ -51,7 +51,7 @@ Every statement in this section is from the sources in §8, read on 2026-10-28; 
   segments to an Arrow IPC file (3.3 GB, 8,192-row batches, the batch size of the parse threads), so every write variant
   is fed the same parsed batches (reading them alone: 0.48 s, 6.2M events/s, 83 MB).
 - **Harness**: `docs/research/2026-10-28-duckdb-server-mode/harness/` (Rust, duckdb-rs `=1.20000.0` on the pinned
-  prebuilt libduckdb 2.0.0; `bench.sh` runs the rounds). One process per variant, so each process reports its own peak
+  prebuilt libduckdb 2.0.0; `bench.sh` ran the rounds; deleted in D8 of the shell-to-Rust plan, `git show 13881087a:apps/debrief/docs/research/2026-10-28-duckdb-server-mode/harness/bench.sh`). One process per variant, so each process reports its own peak
   RSS (`getrusage`), peak physical footprint (`proc_pid_rusage` `ri_lifetime_max_phys_footprint`, the number that
   matters on macOS) and CPU time. DuckDB everywhere with the worker's limits: `memory_limit` 192 MB, `threads` 4
   (Quack clients: 256 MB, 2 threads). Servers bound `127.0.0.1` on a random port and were stopped by pid.

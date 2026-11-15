@@ -654,7 +654,7 @@ WP-6 before the "needs administrator rights" answers and the task-visibility sen
 a used machine has more) and every timing is one sample; the timed code was PowerShell calling the Task Scheduler COM service and WMI, which run natively
 on Windows 11 Arm64, so no emulated x64 binary is on the timed path and the numbers are neither an upper nor a lower bound. (c) The logon trigger of item 7 was created with `Triggers.Create(9)` and **no `UserId`**, i.e. the "any user" form
 (a trigger for the caller's own account was not tried); registration was denied either way for the standard user as far as measured with that form.
-The scripts that took these readings are `apps/dyno/scripts/wp0/` (`PLAN.md` says how to repeat them).
+The scripts that took these readings were `apps/dyno/scripts/wp0/` (`PLAN.md` said how to repeat them). WP-0 is done, so they are deleted; they stay in the history (`git show 13881087a:apps/dyno/scripts/wp0/wp0-collect.ps1`).
 
 Also seen: the registry `ProductName` says `Windows 10 Pro` on this build-26300 Windows 11, and `Win32_OperatingSystem.Caption` says `Microsoft Windows 11
 Pro`, as §4.2 expects of `win_os_name()`. What `sysinfo::long_os_version()` (the interim `NotReadHere` facts) prints here was **not measured**.

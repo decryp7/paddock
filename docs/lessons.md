@@ -739,7 +739,7 @@ changes release output, though not its behaviour (verified function by function 
 mode into `-C metadata`, so the dependencies are compiled bitcode-only under new hashes (other `TypeId` values, folding
 and inlining). Also: cargo fingerprints the linker, so a timing wrapper set as the linker after a build recompiles
 everything. **Guidance:** app crates build an rlib only; measure link time with a linker wrapper
-([`scripts/perf/link-time/cc-timed.sh`](../scripts/perf/link-time/cc-timed.sh)) set before the first build, and compare
+(`scripts/perf/link-time/cc-timed.sh`, a `cc` wrapper that logs each link's duration; deleted in D8 of the shell-to-Rust plan, `git show 13881087a:scripts/perf/link-time/cc-timed.sh`) set before the first build, and compare
 release binaries function by function ([`classify.py`](../scripts/perf/link-time/classify.py)), not by checksum.
 Results: [Debrief](../apps/debrief/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
 [Dyno](../apps/dyno/docs/performance.md#2026-10-29-incremental-rebuild-and-link-time-docslink-time),
