@@ -19,7 +19,7 @@ class TooBig(Exception):
 
 class Cmd:
     __slots__ = ("words", "argv", "redirs", "term", "cwd", "depth", "cond", "is_cd", "cd_target", "after_cd_chain",
-                 "opens", "set_e", "idx", "env", "xargs", "subs", "tainted", "heredocs", "nested")
+                 "opens", "set_e", "idx", "env", "xargs", "subs", "tainted", "heredocs", "nested", "loop", "negated")
 
     def __init__(self):
         self.words = []
@@ -29,6 +29,8 @@ class Cmd:
         self.cwd = None       # directory it runs in; None when unknown
         self.depth = 0        # subshell nesting
         self.cond = False     # the condition of if/while/until
+        self.loop = ""        # "while" or "until" when it starts the condition of that loop
+        self.negated = False  # a leading `!`
         self.is_cd = False
         self.cd_target = ""
         self.after_cd_chain = False   # runs after a `cd X && ...;` chain: in the wrong place if the cd failed
@@ -473,6 +475,9 @@ def _finish(st, words, redirs, term, depth, heredoc_refs=()):
     while w and w[0] in _LEAD:
         if w[0] in ("if", "while", "until", "elif"):
             cmd.cond = True
+            cmd.loop = w[0] if w[0] in ("while", "until") else ""
+        if w[0] == "!":
+            cmd.negated = True
         if w[0] == "{":
             cmd.opens += 1
         w = w[1:]

@@ -2136,3 +2136,13 @@ The user asked whether it was needed; it was removed (with its README line). `./
 `--summary` option stays for use there. `conformance/test/ci-actions.test.mjs` fails on any workflow step that runs
 `./dev disk scan` or `./dev disk report`. **Rule:** a CI job reads only what a runner has; a check of the development machine
 runs on the machine.
+
+## Waiters stacked and polled without a bound although the pgrep guard existed (2026-11-15)
+The `no-pgrep-wait` hook only refused a `pgrep -f` loop, by a regex over the whole command text (it also refused such a loop
+written into a heredoc or a commit message). Agents still started a second `./dev wait` for a run another one already waited
+on, and polled logs with `while ! grep ...; do sleep ...; done`, which has no maximum duration. The hook now runs on
+`lib/shellscan.py` (the loop's condition, not any text), keeps the `pgrep -f` refusal, and warns (never blocks: ER-36, a hook
+that judges text only warns) on a grep polling loop, on two waits for one target in one command, and on a wait for a target a
+running `dev wait` already has (read from `ps`; it cannot tell which agent started it, so the warning says so). Rows are in
+`lib/shell-forms.tsv`, whose runner now knows a `warn` verdict. **Class: unbounded or stacked waiters (ER-32; earlier: the 36
+stuck waiters of 2026-11-03/04).**

@@ -1,64 +1,81 @@
 # The shell forms every guard on lib/shellscan.py is checked against (lib/shell-forms.sh). Tab separated; - is empty or not judged.
 # Add a row for every bypass or false refusal found, with the verdict of every guard, so a scanner change meets them all.
-name	env	command	kill-guard	docker-guard	worktree-guard	scratch-root-guard
-pkill by pattern	-	pkill -f lefthook	deny	allow	allow	allow
-killall	-	killall node	deny	allow	allow	allow
-killall5	-	killall5 -9	deny	allow	allow	allow
-fuser -k	-	fuser -k 8080/tcp	deny	allow	allow	allow
-fuser -km	-	fuser -km /Volumes/x	deny	allow	allow	allow
-pgrep through xargs kill	-	pgrep -f lefthook | xargs kill	deny	allow	allow	allow
-kill of a pgrep substitution	-	kill $(pgrep -f lefthook)	deny	allow	allow	allow
-kill of a loop variable over pgrep	-	for p in $(pgrep x); do kill $p; done	deny	allow	allow	allow
-kill inside bash -c	-	bash -c 'kill 34522'	deny	allow	allow	allow
-kill of a pid that is not provably the agent's	-	kill -9 34522	deny	allow	allow	allow
-ANSI-C quoted kill (hex)	-	$'\x6bill' -9 34522	deny	allow	allow	allow
-ANSI-C quoted kill (octal)	-	$'k\151ll' 34522	deny	allow	allow	allow
-ANSI-C quoted pkill	-	$'pkill' -f lefthook	deny	allow	allow	allow
-alias k=kill, then k PID	-	alias k=kill; k 34522	deny	allow	allow	allow
-alias kk='kill -9', then kk PID	-	alias kk='kill -9'; kk 34522	deny	allow	allow	allow
-script (BSD form) runs kill	-	script -q /dev/null kill 34522	deny	allow	allow	allow
-script -c runs kill	-	script -q -c 'kill -9 34522' /dev/null	deny	allow	allow	allow
-env wrapper	-	env FOO=1 kill 34522	deny	allow	allow	allow
-timeout wrapper	-	timeout 5 kill 34522	deny	allow	allow	allow
-command builtin	-	command kill 34522	deny	allow	allow	allow
-eval	-	eval kill 34522	deny	allow	allow	allow
-program from a substitution with a pid	-	$(echo kill) 34522	deny	allow	allow	allow
-program from backticks with a signal	-	`which kill` -9 34522	deny	allow	allow	allow
-program from an unknown variable with a pid	-	${K} 34522	deny	allow	allow	allow
-run-time program fed pids by a substitution	-	"$KILLER" $(pgrep -f lefthook)	deny	allow	allow	allow
-run-time program fed pids by backticks	-	$KILLER `pgrep x`	deny	allow	allow	allow
-pgrep through xargs into a run-time program	-	pgrep x | xargs "$KILLER"	deny	allow	allow	allow
-a list through xargs into a run-time program	-	cat pids | xargs "$K"	deny	allow	allow	allow
-program built by printf, fed by pgrep	-	"$(printf 'k%sll' i)" $(pgrep x)	deny	allow	allow	allow
-run-time program, signal then pid	-	"$K" -9 34522	deny	allow	allow	allow
-run-time program, -- then a group	-	"$K" -- -34522	deny	allow	allow	allow
-run-time program, pid then a word	-	"$K" 34522 x	deny	allow	allow	allow
-run-time program, signal, pid, word	-	"$K" -9 34522 x	deny	allow	allow	allow
-run-time program, pid then an empty word	-	"$K" 34522 ""	deny	allow	allow	allow
-run-time program, substitution then a word	-	"$K" $(pgrep x) x	deny	allow	allow	allow
-default from the environment names kill	K=kill	${K:-echo} 34522	deny	allow	allow	allow
-$HOME cargo with a thread count	-	"$HOME/.cargo/bin/cargo" test -- --test-threads 1	allow	allow	allow	allow
-$CARGO with a job count	-	"$CARGO" build -j 2	allow	allow	allow	allow
-$NODE with a port	-	"$NODE" server.mjs --port 8080	allow	allow	allow	allow
-${PYTHON:-python3} with a count	-	"${PYTHON:-python3}" bench.py 100	allow	allow	allow	allow
-${PYTHON:-python3} with an option	-	"${PYTHON:-python3}" -I x.py	allow	allow	allow	allow
-$EDITOR with a file and a line	-	$EDITOR file 3	allow	allow	allow	allow
-a default that is not kill	-	${K:-echo} 34522	allow	allow	allow	allow
-program from a substitution building	-	$(command -v cargo) build --release	allow	allow	allow	allow
-fuser without -k lists	-	fuser -v 8080/tcp	allow	allow	allow	allow
-ANSI-C text in an echo	-	echo $'kill 1\n'	allow	allow	allow	allow
-an alias of something else	-	alias ll="ls -l"; ll /tmp	allow	allow	allow	allow
-script that records a build	-	script -q /dev/null cargo build	allow	allow	allow	allow
-kill in a commit message	-	git commit -m "fix: kill 34522 safely"	allow	allow	allow	allow
-kill -0 is a probe	-	kill -0 34522	allow	allow	allow	allow
-kill %job	-	kill %1	allow	allow	allow	allow
-kill $! of the command's own job	-	sleep 100 & kill $!	allow	allow	allow	allow
-docker stop via ANSI-C quoting	-	$'docker' stop $(docker ps -q)	allow	deny	allow	allow
-docker prune via an alias	-	alias d=docker; d system prune -f	allow	deny	allow	allow
-git config --fixed-value paddock.* write	-	git config --fixed-value paddock.worktreeRoot /x /old	allow	allow	deny	allow
-git config --replace-all --fixed-value paddock.* write	-	git config --replace-all --fixed-value paddock.worktreeRoot /x /old	allow	allow	deny	allow
-git config -z paddock.* write	-	git config -z paddock.worktreeRoot /z	allow	allow	deny	allow
-git config --null paddock.* write	-	git config --null paddock.worktreeRoot /z	allow	allow	deny	allow
-git config --includes paddock.* write	-	git config --includes paddock.worktreeRoot /z	allow	allow	deny	allow
-git config --no-includes paddock.* write	-	git config --no-includes paddock.worktreeRoot /z	allow	allow	deny	allow
-git config --show-scope paddock.* write	-	git config --show-scope paddock.worktreeRoot x	allow	allow	deny	allow
+name	env	command	kill-guard	docker-guard	worktree-guard	scratch-root-guard	no-pgrep-wait
+pkill by pattern	-	pkill -f lefthook	deny	allow	allow	allow	allow
+killall	-	killall node	deny	allow	allow	allow	allow
+killall5	-	killall5 -9	deny	allow	allow	allow	allow
+fuser -k	-	fuser -k 8080/tcp	deny	allow	allow	allow	allow
+fuser -km	-	fuser -km /Volumes/x	deny	allow	allow	allow	allow
+pgrep through xargs kill	-	pgrep -f lefthook | xargs kill	deny	allow	allow	allow	allow
+kill of a pgrep substitution	-	kill $(pgrep -f lefthook)	deny	allow	allow	allow	allow
+kill of a loop variable over pgrep	-	for p in $(pgrep x); do kill $p; done	deny	allow	allow	allow	allow
+kill inside bash -c	-	bash -c 'kill 34522'	deny	allow	allow	allow	allow
+kill of a pid that is not provably the agent's	-	kill -9 34522	deny	allow	allow	allow	allow
+ANSI-C quoted kill (hex)	-	$'\x6bill' -9 34522	deny	allow	allow	allow	allow
+ANSI-C quoted kill (octal)	-	$'k\151ll' 34522	deny	allow	allow	allow	allow
+ANSI-C quoted pkill	-	$'pkill' -f lefthook	deny	allow	allow	allow	allow
+alias k=kill, then k PID	-	alias k=kill; k 34522	deny	allow	allow	allow	allow
+alias kk='kill -9', then kk PID	-	alias kk='kill -9'; kk 34522	deny	allow	allow	allow	allow
+script (BSD form) runs kill	-	script -q /dev/null kill 34522	deny	allow	allow	allow	allow
+script -c runs kill	-	script -q -c 'kill -9 34522' /dev/null	deny	allow	allow	allow	allow
+env wrapper	-	env FOO=1 kill 34522	deny	allow	allow	allow	allow
+timeout wrapper	-	timeout 5 kill 34522	deny	allow	allow	allow	allow
+command builtin	-	command kill 34522	deny	allow	allow	allow	allow
+eval	-	eval kill 34522	deny	allow	allow	allow	allow
+program from a substitution with a pid	-	$(echo kill) 34522	deny	allow	allow	allow	allow
+program from backticks with a signal	-	`which kill` -9 34522	deny	allow	allow	allow	allow
+program from an unknown variable with a pid	-	${K} 34522	deny	allow	allow	allow	allow
+run-time program fed pids by a substitution	-	"$KILLER" $(pgrep -f lefthook)	deny	allow	allow	allow	allow
+run-time program fed pids by backticks	-	$KILLER `pgrep x`	deny	allow	allow	allow	allow
+pgrep through xargs into a run-time program	-	pgrep x | xargs "$KILLER"	deny	allow	allow	allow	allow
+a list through xargs into a run-time program	-	cat pids | xargs "$K"	deny	allow	allow	allow	allow
+program built by printf, fed by pgrep	-	"$(printf 'k%sll' i)" $(pgrep x)	deny	allow	allow	allow	allow
+run-time program, signal then pid	-	"$K" -9 34522	deny	allow	allow	allow	allow
+run-time program, -- then a group	-	"$K" -- -34522	deny	allow	allow	allow	allow
+run-time program, pid then a word	-	"$K" 34522 x	deny	allow	allow	allow	allow
+run-time program, signal, pid, word	-	"$K" -9 34522 x	deny	allow	allow	allow	allow
+run-time program, pid then an empty word	-	"$K" 34522 ""	deny	allow	allow	allow	allow
+run-time program, substitution then a word	-	"$K" $(pgrep x) x	deny	allow	allow	allow	allow
+default from the environment names kill	K=kill	${K:-echo} 34522	deny	allow	allow	allow	allow
+$HOME cargo with a thread count	-	"$HOME/.cargo/bin/cargo" test -- --test-threads 1	allow	allow	allow	allow	allow
+$CARGO with a job count	-	"$CARGO" build -j 2	allow	allow	allow	allow	allow
+$NODE with a port	-	"$NODE" server.mjs --port 8080	allow	allow	allow	allow	allow
+${PYTHON:-python3} with a count	-	"${PYTHON:-python3}" bench.py 100	allow	allow	allow	allow	allow
+${PYTHON:-python3} with an option	-	"${PYTHON:-python3}" -I x.py	allow	allow	allow	allow	allow
+$EDITOR with a file and a line	-	$EDITOR file 3	allow	allow	allow	allow	allow
+a default that is not kill	-	${K:-echo} 34522	allow	allow	allow	allow	allow
+program from a substitution building	-	$(command -v cargo) build --release	allow	allow	allow	allow	allow
+fuser without -k lists	-	fuser -v 8080/tcp	allow	allow	allow	allow	allow
+ANSI-C text in an echo	-	echo $'kill 1\n'	allow	allow	allow	allow	allow
+an alias of something else	-	alias ll="ls -l"; ll /tmp	allow	allow	allow	allow	allow
+script that records a build	-	script -q /dev/null cargo build	allow	allow	allow	allow	allow
+kill in a commit message	-	git commit -m "fix: kill 34522 safely"	allow	allow	allow	allow	allow
+kill -0 is a probe	-	kill -0 34522	allow	allow	allow	allow	allow
+kill %job	-	kill %1	allow	allow	allow	allow	allow
+kill $! of the command's own job	-	sleep 100 & kill $!	allow	allow	allow	allow	allow
+docker stop via ANSI-C quoting	-	$'docker' stop $(docker ps -q)	allow	deny	allow	allow	allow
+docker prune via an alias	-	alias d=docker; d system prune -f	allow	deny	allow	allow	allow
+git config --fixed-value paddock.* write	-	git config --fixed-value paddock.worktreeRoot /x /old	allow	allow	deny	allow	allow
+git config --replace-all --fixed-value paddock.* write	-	git config --replace-all --fixed-value paddock.worktreeRoot /x /old	allow	allow	deny	allow	allow
+git config -z paddock.* write	-	git config -z paddock.worktreeRoot /z	allow	allow	deny	allow	allow
+git config --null paddock.* write	-	git config --null paddock.worktreeRoot /z	allow	allow	deny	allow	allow
+git config --includes paddock.* write	-	git config --includes paddock.worktreeRoot /z	allow	allow	deny	allow	allow
+git config --no-includes paddock.* write	-	git config --no-includes paddock.worktreeRoot /z	allow	allow	deny	allow	allow
+git config --show-scope paddock.* write	-	git config --show-scope paddock.worktreeRoot x	allow	allow	deny	allow	allow
+while loop on pgrep -f	-	while pgrep -f 'cargo build'; do sleep 5; done	-	-	-	-	deny
+until loop on negated pgrep -f	-	until ! pgrep -fl x; do sleep 2; done	-	-	-	-	deny
+pgrep -f later in a while condition chain	-	while true && pgrep -f x >/dev/null; do sleep 1; done	-	-	-	-	deny
+while loop on pgrep -f inside bash -c	-	bash -c 'while pgrep -f x; do sleep 1; done'	-	-	-	-	deny
+one-shot pgrep -f	-	pgrep -f 'cargo build'	-	-	-	-	allow
+if on pgrep -f is one-shot	-	if pgrep -f x; then echo up; fi	-	-	-	-	allow
+pgrep -f loop text in a commit message	-	git commit -m 'docs: never use while pgrep -f x; do sleep 1; done'	-	-	-	-	allow
+while not grep, sleep	-	while ! grep -q 'done' /x/log; do sleep 5; done	-	-	-	-	warn
+until grep, sleep	-	until grep -q ok /x/log; do sleep 1; done	-	-	-	-	warn
+while not tail piped to grep, sleep	-	while ! tail -n 5 /x/log | grep -q ok; do sleep 2; done	-	-	-	-	warn
+grep loop that does not sleep	-	while grep -q x f; do sed -i 1d f; done	-	-	-	-	allow
+if not grep, then sleep	-	if ! grep -q ok /x/log; then sleep 1; fi	-	-	-	-	allow
+two dev waits for one file	-	./dev wait --file /x/log --line a --max 5m & ./dev wait --file /x/log --line b --max 5m	-	-	-	-	warn
+two dev waits for one ci run	-	./dev wait --ci-run 8112 --max 1h; ./dev wait --ci-run 8112 --max 1h	-	-	-	-	warn
+two dev waits for one pid, = form	-	./dev wait --pid=4242 --max 5m & ./dev wait --pid 4242 --max 5m	-	-	-	-	warn
+dev waits for two targets	-	./dev wait --ci-run 8112 --max 1h && ./dev wait --ci-run 8113 --max 1h	-	-	-	-	allow
+one dev wait	-	./dev wait --file /x/log --line done --max 30m	-	-	-	-	allow
