@@ -362,13 +362,44 @@ fn a_new_check_gets_inline_waivers_from_the_engine_without_any_waiver_code() {
     assert!(check::report::format_text(&r).contains("waived CX1 a.txt:3  a TODO (until inline: tracked in the backlog)"));
 }
 
+/// The Rust check modules on disk (`src/check/c<n>.rs`; helpers such as `c53_liveness.rs` are not checks), as `c<n>`.
+fn rust_check_modules() -> Vec<String> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/check");
+    let mut out: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter_map(|f| f.strip_suffix(".rs").map(str::to_string))
+        .filter(|m| {
+            m.strip_prefix('c')
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// The `register_checks!` lines for these ids, in the JavaScript host's order, as a mismatch prints them.
+fn macro_lines(ids: &[String]) -> String {
+    ids.iter()
+        .map(|id| format!("    {}::{id},", id.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// What `register_checks!` must hold: every `src/check/c<n>.rs` module, in the order of the JavaScript registry (`list --json`,
+/// generated from the check modules). An id the JavaScript host lacks is put last, so the message still names it.
+fn expected_registry(modules: &[String], js_ids: &[String]) -> Vec<String> {
+    let mine: Vec<String> = modules.iter().map(|m| m.to_uppercase()).collect();
+    let mut out: Vec<String> = js_ids.iter().filter(|id| mine.contains(id)).cloned().collect();
+    out.extend(mine.into_iter().filter(|id| !js_ids.contains(id)));
+    out
+}
+
 #[test]
 fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
     let reg = check::registry();
-    let ids: Vec<&str> = reg.iter().map(|c| c.id()).collect();
-    assert_eq!(ids, ["C39", "C53", "C119", "C120", "C121", "C122", "C123", "C124", "C125"]);
-    assert_eq!(check::sources().iter().map(|(id, _)| *id).collect::<Vec<_>>(), ids);
-    let rust = check::conformance::list_checks(&reg);
+    let ids: Vec<String> = reg.iter().map(|c| c.id().to_string()).collect();
+    assert_eq!(check::sources().iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(), ids);
     let js = paddock_testkit::TestCommand::new("node")
         .args(["conformance/bin/paddock-conformance.mjs", "list", "--json"])
         .current_dir(repo())
@@ -376,6 +407,24 @@ fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
         .expect("node must be installed: the oracle cannot be skipped");
     assert!(js.status.success(), "{}", String::from_utf8_lossy(&js.stderr));
     let js: Vec<Value> = serde_json::from_slice(&js.stdout).unwrap();
+    let js_ids: Vec<String> = js.iter().filter_map(|j| j["id"].as_str().map(str::to_string)).collect();
+    // The macro stays hand-written (Rust has no glob of modules): it is checked against the module files and the JavaScript
+    // registry, and a mismatch prints the whole block to paste (ER-42).
+    let want = expected_registry(&rust_check_modules(), &js_ids);
+    assert!(
+        ids == want,
+        "register_checks! in tools/paddock-dev/src/check/mod.rs must name every src/check/c<n>.rs in the order of \
+         conformance/src/checks/index.mjs; replace its lines with\n{}",
+        macro_lines(&want)
+    );
+    for id in &ids {
+        assert!(
+            js_ids.contains(id),
+            "{id} is a Rust check without a JavaScript module: write conformance/src/checks/{id}-<slug>.mjs, then run \
+             `node conformance/bin/paddock-check-lists.mjs`"
+        );
+    }
+    let rust = check::conformance::list_checks(&reg);
     for entry in rust.as_array().unwrap() {
         let theirs = js
             .iter()
@@ -385,5 +434,48 @@ fn the_registry_is_one_list_and_list_json_agrees_with_the_javascript_host() {
             assert_eq!(entry[k], theirs[k], "{} {k}", entry["id"]);
         }
         assert!(entry["file"].as_str().unwrap().ends_with(".rs"));
+    }
+}
+
+#[test]
+fn a_new_rust_check_file_is_named_in_the_registry_message() {
+    let js: Vec<String> = ["C39", "C53", "C119", "C999"].map(String::from).to_vec();
+    let modules: Vec<String> = ["c119", "c39", "c53", "c999", "c1000"].map(String::from).to_vec();
+    let want = expected_registry(&modules, &js);
+    assert_eq!(want, ["C39", "C53", "C119", "C999", "C1000"]);
+    assert_eq!(
+        macro_lines(&want[3..]),
+        "    c999::C999,\n    c1000::C1000,",
+        "the message gives the exact lines"
+    );
+}
+
+/// Checks whose parity with the JavaScript host is tested outside [`PORTED`] and outside a `tests/it/check_c<n>.rs` of their own:
+/// the id and the file that runs the JavaScript check on the same tree.
+const PARITY_ELSEWHERE: [(&str, &str); 2] = [("C121", "tests/it/check.rs"), ("C124", "tests/it/check.rs")];
+
+#[test]
+fn every_rust_check_has_a_parity_test_with_the_javascript_host() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ported: Vec<&str> = PORTED.split(',').collect();
+    for c in check::registry() {
+        let id = c.id();
+        let own = dir.join(format!("tests/it/check_{}.rs", id.to_lowercase()));
+        let elsewhere = PARITY_ELSEWHERE.iter().find(|(i, _)| *i == id).map(|(_, f)| dir.join(f));
+        let ok = ported.contains(&id)
+            || own.is_file()
+            || elsewhere.is_some_and(|f| std::fs::read_to_string(f).is_ok_and(|t| t.contains(&format!("only: ['{id}']"))));
+        assert!(
+            ok,
+            "{id} is a Rust check with no parity test: add it to PORTED, write tests/it/check_{}.rs (it runs both hosts on one \
+             tree), or name the file that does in PARITY_ELSEWHERE",
+            id.to_lowercase()
+        );
+    }
+    for (id, _) in PARITY_ELSEWHERE {
+        assert!(
+            check::registry().iter().any(|c| c.id() == id),
+            "PARITY_ELSEWHERE names {id}, which is not a Rust check: remove it"
+        );
     }
 }

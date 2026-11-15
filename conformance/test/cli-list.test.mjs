@@ -27,12 +27,8 @@ test('list --json bad: a check without scope or mode is listed as undefined, whi
   assert.equal(list[0].mode, undefined);
 });
 
-test('the report-only checks are the ones that only warn', () => {
-  assert.deepEqual(
-    listChecks().filter((c) => c.mode === 'report-only').map((c) => c.id),
-    ['C14', 'C29', 'C36', 'C51', 'C61', 'C62', 'C85', 'C117', 'C118', 'C119', 'C120', 'C121', 'C122', 'C123', 'C124', 'C125', 'C126'],
-  );
-});
+// Which checks are report-only is each module's `mode`, read by `./dev gates check` (docs/gates.toml registers each one); no
+// copy of that list here (ER-42).
 
 test('main: list --json and commands --json print JSON', async () => {
   const out = [];

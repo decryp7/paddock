@@ -243,9 +243,23 @@ const JOBS: [&str; 7] = ["ui", "e2e", "conformance", "tools", "icons", "eslint-p
 /// The commands of the root jobs of ci.yml and of the app legs' contract lists, as the CI model reads them from the real tree.
 fn modelled_commands() -> std::collections::BTreeSet<String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let src = crate::gates::edge::load_sources(&root).unwrap();
-    let model = crate::gates::ci::build(&src);
+    rows_of(&crate::gates::edge::load_sources(&root).unwrap())
+}
+
+/// The golden rows of a CI model's sources. Only the value of the conformance line's `--only` (every check Paddock runs, from
+/// conformance/paddock.ci.json) is written as `$ONLY`: that list has its own generator (`conformance-check-lists`), so adding a
+/// check changes no row here, while the rest of the line (`--app`, `--root`, `--strict`) stays literal and a change to it does.
+fn rows_of(src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String> {
+    let model = crate::gates::ci::build(src);
     assert!(model.problems.is_empty(), "{:?}", model.problems);
+    let contract: serde_json::Value = serde_json::from_str(src.root_contracts.get("conformance").expect("a conformance contract")).unwrap();
+    let args = contract::conformance_args(&contract).unwrap();
+    let only = args
+        .iter()
+        .position(|a| a == "--only")
+        .and_then(|i| args.get(i + 1))
+        .expect("the conformance line has --only");
+    let only = format!("--only {only}");
     let jobs = [
         "ui",
         "e2e",
@@ -258,12 +272,17 @@ fn modelled_commands() -> std::collections::BTreeSet<String> {
     ];
     let mut out = std::collections::BTreeSet::new();
     for l in model.lines.iter().filter(|l| l.root == ".gitea/workflows/ci.yml") {
+        let text = match l.text.find(&only) {
+            Some(i) if l.text[i + only.len()..].is_empty() || l.text[i + only.len()..].starts_with(' ') => {
+                format!("{}--only $ONLY{}", &l.text[..i], &l.text[i + only.len()..])
+            }
+            _ => l.text.clone(),
+        };
         let row = |kind: &str, who: &str| {
             format!(
-                "{kind}\t{who}\t{}\t{}\t{}",
+                "{kind}\t{who}\t{}\t{}\t{text}",
                 l.os.clone().unwrap_or_default(),
                 l.cwd.clone().unwrap_or_default(),
-                l.text
             )
         };
         if jobs.contains(&l.job.as_str()) {
@@ -275,33 +294,194 @@ fn modelled_commands() -> std::collections::BTreeSet<String> {
     out
 }
 
+/// Where the golden lives, under the package.
+const GOLDEN: &str = "tests/golden/ci-run/commands.tsv";
+
+/// The command that rewrites the golden from the model (paddock-testkit's golden mechanism), as the failure prints it
+/// (`docs/generators.toml`, `ci-run-golden`). `--nocapture` shows the rows it adds and removes.
+const REGENERATE_GOLDEN: &str = "PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev";
+
+/// The golden's header: written by the regenerate, so the file holds no hand-written part.
+const GOLDEN_HEADER: &str = "\
+# Generated from the CI model by the regenerate command below; do not edit (ER-40). The commands CI runs: `job` rows are every command
+# of a root job of ci.yml, `app` rows the commands an app contract adds to its legs, as the CI model reads them from the contracts
+# (the paddock.ci.json files) and the workflows (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_in_the_golden`). The
+# conformance line's `--only` value is `$ONLY` (that list is generated from the check modules; the rest of the line is literal). It began as the commands
+# CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract or a job shows
+# here as added and removed rows in the same commit. Regenerate:
+#   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
+# kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
+";
+
+/// The golden's text for these rows.
+fn golden_text(rows: &std::collections::BTreeSet<String>) -> String {
+    let mut out = GOLDEN_HEADER.to_string();
+    for r in rows {
+        out.push_str(r);
+        out.push('\n');
+    }
+    out
+}
+
+/// The first four fields of a row (kind, job or app, os, folder): two rows with one key are the same command changed.
+fn row_key(row: &str) -> &str {
+    row.match_indices('\t').nth(3).map_or(row, |(i, _)| &row[..i])
+}
+
+/// The first word that differs between two commands, as `word <n>: "<old>" -> "<new>"` (a long row is unreadable whole).
+fn first_token_difference(old: &str, new: &str) -> String {
+    let (a, b): (Vec<&str>, Vec<&str>) = (old.split_whitespace().collect(), new.split_whitespace().collect());
+    let i = (0..a.len().max(b.len())).find(|&i| a.get(i) != b.get(i)).unwrap_or(a.len());
+    let word = |w: Option<&&str>| w.map_or("(end)".to_string(), |w| format!("{w:?}"));
+    format!("word {}: {} -> {}", i + 1, word(a.get(i)), word(b.get(i)))
+}
+
+/// What the golden misses (`+`, to add) and holds that the model does not (`-`, to remove), one row a line; then, for each row
+/// that changed (a removed and an added row with one key), its first differing word.
+fn golden_drift(want: &std::collections::BTreeSet<String>, got: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let added: Vec<&String> = got.difference(want).collect();
+    let removed: Vec<&String> = want.difference(got).collect();
+    let mut out: Vec<String> = added.iter().map(|r| format!("+ {r}")).collect();
+    out.extend(removed.iter().map(|r| format!("- {r}")));
+    for new in &added {
+        if let Some(old) = removed.iter().find(|o| row_key(o) == row_key(new)) {
+            let cmd = |r: &str| r[row_key(r).len()..].trim_start_matches('\t').to_string();
+            out.push(format!(
+                "~ {}: {}",
+                row_key(new).replace('\t', " | "),
+                first_token_difference(&cmd(old), &cmd(new))
+            ));
+        }
+    }
+    out
+}
+
+/// Whether the golden is checked or rewritten: paddock-testkit's mode from `PADDOCK_UPDATE_GOLDEN`, refused under `CI=true` (CI
+/// checks the golden, it never rewrites it).
+fn golden_mode(ci: Option<&str>, update: Option<&str>) -> Result<paddock_testkit::golden::GoldenMode, String> {
+    let mode = paddock_testkit::golden::GoldenMode::from_var(update);
+    if mode == paddock_testkit::golden::GoldenMode::Update && ci == Some("true") {
+        return Err(format!(
+            "{GOLDEN}: {} is set under CI=true; CI checks the golden and never rewrites it: run `{REGENERATE_GOLDEN}` on your machine",
+            paddock_testkit::golden::UPDATE_VAR
+        ));
+    }
+    Ok(mode)
+}
+
 #[test]
-fn the_contracts_run_exactly_the_commands_ci_ran_before_the_executor() {
-    let golden = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/ci-run/commands.tsv")).unwrap();
-    let want: std::collections::BTreeSet<String> = golden.lines().filter(|l| !l.starts_with('#')).map(str::to_string).collect();
+fn the_contracts_run_exactly_the_commands_in_the_golden() {
+    use paddock_testkit::golden::{GoldenMode, UPDATE_VAR, check_golden};
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(GOLDEN);
     let got = modelled_commands();
     for job in JOBS {
-        let rows = |set: &std::collections::BTreeSet<String>| set.iter().filter(|r| r.starts_with(&format!("job\t{job}\t"))).count();
-        assert!(
-            rows(&want) > 0 && rows(&got) > 0,
-            "job {job} has no row in the golden or in the model: the comparison would prove nothing"
-        );
+        let rows = got.iter().filter(|r| r.starts_with(&format!("job\t{job}\t"))).count();
+        assert!(rows > 0, "job {job} has no row in the model: the comparison would prove nothing");
     }
-    // The Windows runner checks out with core.autocrlf true: the job headers end in \r\n there.
-    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
-    let train = ci.split("\n  train-gates:\n").nth(1).unwrap().split("\n  app:\n").next().unwrap();
+    // train-gates is not modelled: its executor call is read through the workflow accessor, not out of the YAML text (ER-42).
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+    let wf = crate::check::util::workflows::read(".gitea/workflows/ci.yml", &ci.replace("\r\n", "\n"));
+    let train = wf
+        .jobs
+        .iter()
+        .find(|j| j.id == "train-gates")
+        .expect("ci.yml has a train-gates job");
     assert!(
-        train.contains("run: ./dev ci run conformance paddock"),
+        crate::check::util::workflows::parse_steps(&train.text)
+            .iter()
+            .any(|s| s.run.as_deref().map(str::trim) == Some("./dev ci run conformance paddock")),
         "train-gates runs the conformance contract"
     );
-    let missing: Vec<&String> = want.difference(&got).collect();
-    let extra: Vec<&String> = got.difference(&want).collect();
-    assert!(
-        missing.is_empty() && extra.is_empty(),
-        "CI no longer runs {missing:#?}\nand now also runs {extra:#?}"
+    let mode =
+        golden_mode(std::env::var("CI").ok().as_deref(), std::env::var(UPDATE_VAR).ok().as_deref()).unwrap_or_else(|e| panic!("{e}"));
+    // The Windows runner checks out with core.autocrlf true.
+    let golden = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
+    let want: std::collections::BTreeSet<String> = golden.lines().filter(|l| !l.starts_with('#')).map(str::to_string).collect();
+    let drift = golden_drift(&want, &got);
+    if mode == GoldenMode::Update {
+        eprintln!("{GOLDEN}: rewritten ({} lines below)\n{}", drift.len(), drift.join("\n"));
+    } else {
+        assert!(
+            drift.is_empty(),
+            "{GOLDEN} is stale ({} lines below): if the change to CI is meant, run `{REGENERATE_GOLDEN}` and commit the file\n{}",
+            drift.len(),
+            drift.join("\n")
+        );
+    }
+    if let Err(e) = check_golden(&path, &golden_text(&got), mode) {
+        panic!("{e}\n(same rows, other text: the header or the order) run `{REGENERATE_GOLDEN}`");
+    }
+}
+
+#[test]
+fn the_golden_drift_names_each_row_to_add_and_to_remove_and_the_first_word_a_changed_row_differs_in() {
+    let set = |rows: &[&str]| rows.iter().map(|r| r.to_string()).collect::<std::collections::BTreeSet<String>>();
+    let want = set(&[
+        "job\tui\t\t\tnpm ci",
+        "job\tui\t\t\tnpm test",
+        "job\te2e\tlinux\tui\tnpx playwright test --shard=1/2 --x",
+    ]);
+    let got = set(&[
+        "job\tui\t\t\tnpm ci",
+        "job\tui\t\t\tnpm run lint",
+        "job\te2e\tlinux\tui\tnpx playwright test --shard=1/3 --x",
+    ]);
+    assert_eq!(
+        golden_drift(&want, &got),
+        [
+            "+ job\te2e\tlinux\tui\tnpx playwright test --shard=1/3 --x",
+            "+ job\tui\t\t\tnpm run lint",
+            "- job\te2e\tlinux\tui\tnpx playwright test --shard=1/2 --x",
+            "- job\tui\t\t\tnpm test",
+            "~ job | e2e | linux | ui: word 4: \"--shard=1/2\" -> \"--shard=1/3\"",
+            "~ job | ui |  | : word 2: \"test\" -> \"run\"",
+        ]
     );
+    assert!(golden_drift(&want, &want).is_empty());
+    assert_eq!(first_token_difference("a b", "a b c"), "word 3: (end) -> \"c\"");
+    assert!(golden_text(&got).starts_with("# Generated from the CI model"));
+    assert!(golden_text(&got).ends_with("job\tui\t\t\tnpm run lint\n"));
+}
+
+#[test]
+fn the_golden_is_rewritten_only_on_request_and_never_under_ci() {
+    use paddock_testkit::golden::GoldenMode;
+    assert_eq!(golden_mode(None, None).unwrap(), GoldenMode::Check);
+    assert_eq!(golden_mode(Some("true"), None).unwrap(), GoldenMode::Check);
+    assert_eq!(golden_mode(None, Some("1")).unwrap(), GoldenMode::Update);
+    assert_eq!(golden_mode(Some("false"), Some("1")).unwrap(), GoldenMode::Update);
+    assert!(golden_mode(Some("true"), Some("1")).unwrap_err().contains("never rewrites it"));
+}
+
+#[test]
+fn adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let src = crate::gates::edge::load_sources(&root).unwrap();
+    let rows = rows_of(&src);
+    let line = |rows: &std::collections::BTreeSet<String>| {
+        rows.iter()
+            .find(|r| r.starts_with("job\tconformance\t") && r.contains("node conformance/bin/paddock-conformance.mjs --app "))
+            .cloned()
+            .expect("the conformance line is a row")
+    };
+    let conf = line(&rows);
+    assert!(conf.contains("--root . --only $ONLY --strict C36"), "{conf}");
+    let changed = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut s = src.clone();
+        let c = s.root_contracts.get_mut("conformance").unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(c).unwrap();
+        edit(&mut v);
+        *c = v.to_string();
+        line(&rows_of(&s))
+    };
+    // A new check (one more id in `only`) changes no row.
+    assert_eq!(
+        changed(&|v| v["conformance"]["only"].as_array_mut().unwrap().push("C99999".into())),
+        conf
+    );
+    // Dropping `strict` (the review's probe) or changing the app does.
+    assert_ne!(changed(&|v| v["conformance"]["strict"] = serde_json::json!([])), conf);
+    assert_ne!(changed(&|v| v["conformance"]["app"] = "other".into()), conf);
 }
 
 /// The probe can see a difference (ER-33): a contract line that was changed shows up as a missing and an extra command.
