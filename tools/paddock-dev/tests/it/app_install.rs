@@ -370,11 +370,7 @@ fn a_build_inherits_the_environment_and_json_output_stays_one_object() {
     let root = repo(d.path(), r#"{"name":"Demo"}"#);
     std::fs::create_dir_all(root.join("apps/demo/app")).unwrap();
     mac_machine(&bin, "14.2");
-    shim(
-        &bin,
-        "npm",
-        r#"echo "npm sees HTTPS_PROXY=$HTTPS_PROXY" >> "${0%/*}/env.log""#,
-    );
+    shim(&bin, "npm", r#"echo "npm sees HTTPS_PROXY=$HTTPS_PROXY" >> "${0%/*}/env.log""#);
     shim(
         &bin,
         "npx",
