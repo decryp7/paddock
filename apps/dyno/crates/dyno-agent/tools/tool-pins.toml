@@ -3,7 +3,7 @@
 # table again, and the agent's table is never trusted by root). Dyno never bundles or mirrors the tool: smartmontools is
 # GPL-2.0-or-later and runs as a separate program.
 #
-# A pin is added or changed only by `apps/dyno/scripts/verify-tool-pin.sh`, which checks the publisher's OpenPGP signature of the
+# A pin is added or changed only by `cargo xtask verify-tool-pin` (apps/dyno/xtask), which checks the publisher's OpenPGP signature of the
 # downloaded file against `key_fingerprint` with the system's gpg and prints the lines below; the app itself carries no OpenPGP
 # code. `verified` is the date that was done.
 

@@ -12,6 +12,7 @@ members = [
     "crates/dyno-bench-gpu",
     "plugins/dyno-plugin-example",
     "app/src-tauri",
+    "xtask",
 ]
 resolver = "2"
 # vendor/: patched copies of third-party crates (vendor/PATCHES.md), not members.

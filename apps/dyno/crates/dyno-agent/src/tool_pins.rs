@@ -1,6 +1,6 @@
 //! The pinned downloads of tools Dyno can fetch on a click (ADR 0027 section 7): read once from `tools/tool-pins.toml`, parsed into
 //! typed pins at the edge, and checked against the helper's own table by a test so the two cannot drift. The OpenPGP signature of a
-//! file is checked by `scripts/verify-tool-pin.sh` when a pin is added or changed, never by the app.
+//! file is checked by `cargo xtask verify-tool-pin` when a pin is added or changed, never by the app.
 
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_requests::ToolKind;

@@ -833,8 +833,8 @@ approved = "coordinator"
 [[ignored]]
 path = "apps/dyno/crates/dyno-agent/tests/bench_units.rs"
 tests = ["a_unit_run_waits_for_go_runs_at_nice_0_without_a_memory_limit_and_leaves_nothing", "cancel_stops_an_all_core_burner_within_two_seconds_and_nothing_is_left", "a_restart_stops_a_recorded_leftover_unit_and_leaves_a_foreign_one"]
-gate = "tool:apps/dyno/scripts/linux-units-check.sh"
-reason = "systemd unit benchmarks that a CI container cannot run; apps/dyno/scripts/linux-units-check.sh runs them on a Linux host"
+gate = "tool:apps/dyno/xtask/src/linux_units.rs"
+reason = "systemd unit benchmarks that a CI container cannot run; `cargo xtask linux-units` (apps/dyno/xtask) runs them on a Linux host"
 owner = "Dyno 1.1.1"
 since = 2026-11-08
 review_by = 2026-12-20

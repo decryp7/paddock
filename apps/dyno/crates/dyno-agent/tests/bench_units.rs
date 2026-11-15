@@ -1,6 +1,6 @@
 //! Linux: the benchmark child as a named systemd user unit, with a scripted runner (ADR 0030 D5, the B2 spike as a test).
 //! Needs a systemd user manager, so the tests are `#[ignore]`d in a plain `cargo test` (a CI container usually has none) and FAIL,
-//! never pass silently, when run without one. Run them where a manager exists: `scripts/linux-units-check.sh` (release checklist,
+//! never pass silently, when run without one. Run them where a manager exists: `cargo xtask linux-units` (release checklist,
 //! `docs/releasing.md`). Nothing here touches anything it did not start: unit names carry this test process's id.
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]

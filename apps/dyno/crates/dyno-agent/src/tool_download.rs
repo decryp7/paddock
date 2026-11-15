@@ -2,7 +2,7 @@
 //! pinned file with `paddock-download` over `paddock-net`'s `Egress` (https, the pin's hosts only, public addresses, the pinned
 //! size as a cap), checks the pinned **size and SHA-256** (while writing, and again on the bytes it hands over), and only then
 //! streams the bytes to the helper's `InstallTool`, which checks them against its own pinned table again. The OpenPGP signature
-//! of the publisher is checked when a pin is added (`scripts/verify-tool-pin.sh`), not here: the app carries no OpenPGP code.
+//! of the publisher is checked when a pin is added (`cargo xtask verify-tool-pin`), not here: the app carries no OpenPGP code.
 //! Dyno never bundles or mirrors the tool (GPL-2.0-or-later) and the staging file is deleted whatever happens. Logs carry phases,
 //! byte counts, durations and failure kinds; never an address.
 

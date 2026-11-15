@@ -113,7 +113,7 @@ agent side was run at nice 10 to show the unit does not inherit it):
 | Restart cleanup | A recorded leftover unit was stopped; a unit with the same prefix and a foreign InvocationID stayed running; the records were forgotten |
 
 These are `crates/dyno-agent/tests/bench_units.rs` (a scripted runner, no benchmark work). They are `#[ignore]`d in a plain
-`cargo test` and FAIL without a user manager (never a silent pass). Run them with `scripts/linux-units-check.sh` (a release
+`cargo test` and FAIL without a user manager (never a silent pass). Run them with `cargo xtask linux-units` (a release
 checklist step, `docs/releasing.md`), which is `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1` on
 `paddock-gate-arm`. On a headless machine start the manager first
 (`sudo loginctl enable-linger $USER`, then `XDG_RUNTIME_DIR=/run/user/$(id -u)`). Unit tests of the pure parts (command
