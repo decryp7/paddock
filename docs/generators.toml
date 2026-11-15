@@ -403,20 +403,20 @@ drift_marker = ["test result: FAILED"]
 
 [[generator]]
 id = "conformance-check-lists"
-what = "conformance/src/checks/index.mjs and `conformance.only` of conformance/paddock.ci.json, from the check modules (C<n>-<slug>.mjs) less `conformance.skip`; a new or removed module leaves both stale"
+what = "conformance/src/checks/index.mjs, `conformance.only` of conformance/paddock.ci.json (every module less `conformance.skip`) and the check index of conformance/README.md (between its `checks:` markers), from the check modules (C<n>-<slug>.mjs); a new, removed or retitled module leaves them stale, a misnamed file in conformance/src/checks is an error"
 check = ["node", "conformance/bin/paddock-check-lists.mjs", "--check"]
-regenerate = "node conformance/bin/paddock-check-lists.mjs   # then commit both files"
-paths = ["conformance/src/checks/*.mjs", "conformance/paddock.ci.json", "conformance/src/derived-lists.mjs", "conformance/bin/paddock-check-lists.mjs"]
-outputs = ["conformance/src/checks/index.mjs"]
+regenerate = "node conformance/bin/paddock-check-lists.mjs   # then commit what it rewrites (it prints each changed line)"
+paths = ["conformance/src/checks/*", "conformance/paddock.ci.json", "conformance/README.md", "conformance/src/derived-lists.mjs", "conformance/bin/paddock-check-lists.mjs"]
+outputs = ["conformance/src/checks/index.mjs", "conformance/paddock.ci.json", "conformance/README.md"]   # the last two in part: `conformance.only` and the README's check index
 cost = "fast"
 requires = ["node_modules/.package-lock.json"]   # the modules are imported to check their ids (they import yaml)
 
 [[generator]]
 id = "ci-run-golden"
-what = "tools/paddock-dev/tests/golden/ci-run/commands.tsv, every command CI's root jobs and app legs run, from the CI model over the contracts and workflows; a contract or job that gains or loses a command leaves it stale"
+what = "tools/paddock-dev/tests/golden/ci-run/commands.tsv, every command CI's root jobs and app legs run, from the CI model over the contracts and workflows (the conformance arguments stay `$PADDOCK_CONFORMANCE_ARGS`, so a new check changes no row); a contract or job that gains or loses a command leaves it stale"
 check = ["cargo", "test", "--lib", "ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden"]
 build = ["cargo", "test", "--no-run", "--lib"]
-regenerate = "PADDOCK_WRITE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden   # in tools/paddock-dev; review the rows it adds and removes"
+regenerate = "PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev; it prints the rows it adds and removes (refused under CI=true)"
 cwd = "tools/paddock-dev"
 paths = ["**/paddock.ci.json", ".gitea/workflows/ci.yml", ".gitea/actions/**", "tools/paddock-dev/src/gates/**", "tools/paddock-dev/src/ci_run/**", "tools/paddock-dev/tests/golden/ci-run/**"]
 outputs = ["tools/paddock-dev/tests/golden/ci-run/commands.tsv"]

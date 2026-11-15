@@ -449,3 +449,33 @@ fn a_new_rust_check_file_is_named_in_the_registry_message() {
         "the message gives the exact lines"
     );
 }
+
+/// Checks whose parity with the JavaScript host is tested outside [`PORTED`] and outside a `tests/it/check_c<n>.rs` of their own:
+/// the id and the file that runs the JavaScript check on the same tree.
+const PARITY_ELSEWHERE: [(&str, &str); 2] = [("C121", "tests/it/check.rs"), ("C124", "tests/it/check.rs")];
+
+#[test]
+fn every_rust_check_has_a_parity_test_with_the_javascript_host() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let ported: Vec<&str> = PORTED.split(',').collect();
+    for c in check::registry() {
+        let id = c.id();
+        let own = dir.join(format!("tests/it/check_{}.rs", id.to_lowercase()));
+        let elsewhere = PARITY_ELSEWHERE.iter().find(|(i, _)| *i == id).map(|(_, f)| dir.join(f));
+        let ok = ported.contains(&id)
+            || own.is_file()
+            || elsewhere.is_some_and(|f| std::fs::read_to_string(f).is_ok_and(|t| t.contains(&format!("only: ['{id}']"))));
+        assert!(
+            ok,
+            "{id} is a Rust check with no parity test: add it to PORTED, write tests/it/check_{}.rs (it runs both hosts on one \
+             tree), or name the file that does in PARITY_ELSEWHERE",
+            id.to_lowercase()
+        );
+    }
+    for (id, _) in PARITY_ELSEWHERE {
+        assert!(
+            check::registry().iter().any(|c| c.id() == id),
+            "PARITY_ELSEWHERE names {id}, which is not a Rust check: remove it"
+        );
+    }
+}
