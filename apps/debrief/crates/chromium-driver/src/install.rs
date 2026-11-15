@@ -147,7 +147,7 @@ pub fn locate_executable(root: &Path, os: Os) -> Option<Browser> {
 /// Runs `<exe> --version` with a timeout and returns its output; the self-test of an installed browser.
 #[expect(
     clippy::disallowed_methods,
-    reason = "the browser's self-test: this crate cannot use Debrief's process helper"
+    reason = "the browser's self-test: this crate cannot use Debrief's process helper; and a try_wait poll on a child it started (the try_wait class): to move to an event wait (paddock_proc::run_bounded) in the class fix"
 )]
 pub fn self_test(exe: &Path) -> Result<String> {
     let mut child = std::process::Command::new(exe)

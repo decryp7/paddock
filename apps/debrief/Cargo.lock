@@ -2049,6 +2049,7 @@ dependencies = [
  "debrief-profile",
  "log",
  "paddock-env",
+ "paddock-proc",
  "paddock-testkit",
  "serde",
  "serde_json",
