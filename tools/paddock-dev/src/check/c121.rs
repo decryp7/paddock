@@ -13,24 +13,37 @@
 //! Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (`11c365fc4`,
 //! `0308201b4`) have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows
 //! may read them: each such site goes in `conformance/c121-allow.json` with its path, a `site` (a piece of the flagged line), a reason
-//! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale or ambiguous entry and
-//! never allows a whole file or folder.
+//! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale entry, reports a site
+//! beyond an entry's count at its own line and never allows a whole file or folder.
 //!
-//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
+//! Not read: the check's own files ([`IMPLEMENTATION`], as C120's): their invented lines are test data, not reads.
 //!
-//! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and the `c121` tests of `tests/it/check.rs`
-//! compares them finding for finding.
+//! The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else),
+//! and a file the check cannot read is not measured (an error finding at that file).
+//!
+//! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself; since 2026-11-15 its own files are not read ([`IMPLEMENTATION`]), so they need no entry.
+//!
+//! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and `tests/it/check_c121.rs` compares
+//! them finding for finding.
 
-use super::allow_list::{self, AllowList, Entry};
+use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
 use super::jsre::rx;
-use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
 
 /// The allow list both hosts read.
 pub const ALLOW: &str = "conformance/c121-allow.json";
+
+/// The check's own files, as C120's: its sources and tests name the patterns (their invented lines are test data), and its allow list.
+pub const IMPLEMENTATION: [&str; 5] = [
+    "conformance/src/checks/C121-declared-data.mjs",
+    "conformance/test/c121-declared-data.test.mjs",
+    "tools/paddock-dev/src/check/c121.rs",
+    "tools/paddock-dev/tests/it/check_c121.rs",
+    ALLOW,
+];
 
 static TOOL: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:grep|egrep|fgrep|sed|awk|rg|perl)\b"));
 static WORKFLOW: LazyLock<Regex> = LazyLock::new(|| rx(r#"\.gitea/workflows/|(?:^|[\s"'`/])workflows/[\w.-]+\.ya?ml"#));
@@ -84,6 +97,14 @@ pub fn parse_allow(text: &str) -> Result<Vec<Entry>, String> {
     allow_list::parse(text, ALLOW)
 }
 
+static SPEC: Spec = Spec {
+    id: "C121",
+    rule: 79,
+    file: ALLOW,
+    unseen: "a read of a workflow's text",
+    restore: "Restore conformance/c121-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\"}]}.",
+};
+
 const FIX: &str = "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json.";
 
 /// The check.
@@ -108,6 +129,10 @@ impl Check for C121 {
 
     fn mode(&self) -> super::Mode {
         super::Mode::ReportOnly
+    }
+
+    fn allow_list(&self) -> Option<&'static allow_list::Spec> {
+        Some(&SPEC)
     }
 
     fn control(&self) -> Control {
@@ -147,50 +172,46 @@ impl Check for C121 {
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
-        let allow = ctx
-            .read(ALLOW)
-            .map(|t| parse_allow(&t))
-            .unwrap_or_else(|| Err(format!("{ALLOW} cannot be read")));
-        let (allow, why) = match allow {
-            Ok(a) => (a, None),
-            Err(e) => (Vec::new(), Some(e)),
+        let mut allow = match allow_list::read(ctx, &SPEC, allow_list::entries_only(ALLOW)) {
+            Ok((allow, ())) => allow,
+            Err(broken) => return *broken,
         };
-        let mut allow = AllowList::new(ALLOW, allow);
         let mut findings = Vec::new();
-        let mut probes = 0;
-        let mut completed = true;
-        let mut scanned = std::collections::HashSet::new();
         for f in ctx.files().iter() {
-            let Some(kind) = kind_of(f) else { continue };
-            let Some(text) = ctx.read(f) else {
-                completed = false;
+            if IMPLEMENTATION.contains(&f.as_str()) {
                 continue;
-            };
-            probes += 1;
-            scanned.insert(f.to_string());
-            for (line, what, at) in flagged(kind, &text) {
-                if allow.allows(f, &at) {
+            }
+            let Some(kind) = kind_of(f) else { continue };
+            let text = match allow.read(ctx, f) {
+                Ok(text) => text,
+                Err(unread) => {
+                    findings.push(*unread);
                     continue;
                 }
-                findings.push(Finding::warn(
-                    "C121",
-                    79,
-                    f,
-                    line,
-                    format!("reads a workflow file's text with {what}: the data it needs has one accessor"),
-                    FIX,
-                ));
+            };
+            for (line, what, at) in flagged(kind, &text) {
+                let finding = match allow.admit(f, |site| at.contains(site)) {
+                    Admit::Allowed => continue,
+                    Admit::Beyond => Finding::warn(
+                        "C121",
+                        79,
+                        f,
+                        line,
+                        format!("reads a workflow file's text with {what} beyond the count of its allow entry"),
+                        format!("Read it through its accessor, or raise the entry's `count` in {ALLOW} if this site is meant too."),
+                    ),
+                    Admit::Unlisted => Finding::warn(
+                        "C121",
+                        79,
+                        f,
+                        line,
+                        format!("reads a workflow file's text with {what}: the data it needs has one accessor"),
+                        FIX,
+                    ),
+                };
+                findings.push(finding);
             }
         }
-        findings.extend(allow.warnings("C121", 79, |p| scanned.contains(p) || ctx.read(p).is_none()));
-        CheckOutput {
-            findings,
-            probes,
-            completed,
-            precondition: Precondition {
-                met: why.is_none(),
-                detail: why.unwrap_or_else(|| format!("{ALLOW} is read")),
-            },
-        }
+        allow.output(ctx, findings)
     }
 }

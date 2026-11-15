@@ -2153,3 +2153,24 @@ timeout says what it saw last. A second test makes the slow path certain (the he
 before (the tree is ended before the helper writes), green after; 200 of 200 green under the same burners. **Rule for tests:** a test that must observe a process
 the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
 observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**
+
+## The two hosts of a check gave different answers on error paths; a shared helper now owns them (ER-21, 2026-11-15)
+C121, C124 and C125 read their allow lists through one shared helper, but each check still handled the helper's error paths
+itself, and the Rust and JavaScript hosts handled them differently. The parity tests compared findings only on trees where
+everything could be read, so the differences went unseen. C125 was fixed first (865498235). On train 12 the same bug showed in
+C121 and C124. For a broken allow file, the Rust host reported an unmet precondition and went on scanning, while the JavaScript
+host gave one check-broken finding. For an unreadable file, the Rust host marked the run incomplete, while the JavaScript host
+skipped the file without a word. The fix (`fix/allow-list-shared-reader`) moves both outcomes into the helper, in both hosts
+(`conformance/src/util/allow-list.mjs` and `tools/paddock-dev/src/check/allow_list.rs`):
+- a broken allow file gives one unwaivable check-broken finding and nothing else;
+- a file the check cannot read gives a not-measured error at that file.
+Each check declares the reader's `Spec` as its allow list (`Check::allow_list`, `allowList`).
+`tools/paddock-dev/tests/it/check_allow_list.rs` runs the error-path parity tests for every check that declares one. It
+uses each check's own control tree and compares both hosts.
+**Rule:** a helper that several checks share owns its error paths. Its parity test runs over every user the helper declares, not
+over a hand-picked check, and it covers the error paths as well as the clean run.
+Two limits remain, both opt-in:
+- A check that calls the reader without declaring its `Spec` skips the parity tests, and nothing notices.
+- The JavaScript error-path test uses a hand-made table of samples (`SAMPLE` in `conformance/test/allow-list.test.mjs`). The
+  test fails when a declared check has no sample, but the table is still a hand list.
+**Class: the two hosts diverge on an error path; earlier: C125 (865498235), then C121 and C124 (train 12).**

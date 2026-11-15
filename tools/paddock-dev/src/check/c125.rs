@@ -16,11 +16,9 @@
 //! The JavaScript check `conformance/src/checks/C125-machine-paths.mjs` is the original; `tests/it/check_c125.rs` compares the two
 //! finding for finding.
 
-use super::allow_list::{self, Admit, AllowList};
+use super::allow_list::{self, Admit};
 use super::finding::Finding;
 use super::jsre::rx;
-use super::outcome::Outcome;
-use super::record::Precondition;
 use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -46,7 +44,6 @@ static BINARY: LazyLock<Regex> = LazyLock::new(|| {
 /// A `/` may be escaped (`\/`, a regular expression literal); the finding names the path unescaped.
 static LITERAL: LazyLock<Regex> = LazyLock::new(|| rx(r"\\?/Volumes\\?/[A-Za-z0-9][A-Za-z0-9_.+@-]*(?:\\?/[A-Za-z0-9_.+@-]*)*"));
 const BROKEN_FIX: &str = "Restore conformance/c125-allow.json: {\"history\": [{\"path\": \"...\", \"reason\": \"...\"}], \"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\", \"count\": 1}]}.";
-const UNREAD_FIX: &str = "Make the file readable (permissions) and run the check again.";
 const FIX: &str = "Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason.";
 
 /// Every machine disk path in `text`: `(line, literal)`.
@@ -134,6 +131,19 @@ pub fn parse_allow(text: &str) -> Result<(Vec<History>, Vec<allow_list::Entry>),
     Ok((hist, allow))
 }
 
+/// [`parse_allow`] as [`allow_list::read`] takes it: the shared entries first.
+fn parse_allow_split(text: &str) -> Result<(Vec<allow_list::Entry>, Vec<History>), String> {
+    parse_allow(text).map(|(history, entries)| (entries, history))
+}
+
+static SPEC: allow_list::Spec = allow_list::Spec {
+    id: "C125",
+    rule: 40,
+    file: ALLOW,
+    unseen: "a disk path",
+    restore: BROKEN_FIX,
+};
+
 /// The check.
 pub struct C125;
 
@@ -158,6 +168,10 @@ impl Check for C125 {
         Mode::ReportOnly
     }
 
+    fn allow_list(&self) -> Option<&'static allow_list::Spec> {
+        Some(&SPEC)
+    }
+
     fn control(&self) -> Control {
         Control {
             files: vec![
@@ -174,34 +188,16 @@ impl Check for C125 {
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
-        let lists = ctx
-            .read(ALLOW)
-            .map(|t| parse_allow(&t))
-            .unwrap_or_else(|| Err(format!("{ALLOW} cannot be read")));
-        let (history, entries) = match lists {
-            Ok(l) => l,
-            // As the JavaScript host: one check-broken finding and nothing else (the allow file was the one thing looked at).
-            Err(why) => {
-                return CheckOutput {
-                    findings: vec![
-                        Finding::warn("C125", 40, ALLOW, 1, format!("the check cannot look: {why}"), BROKEN_FIX)
-                            .unwaivable()
-                            .with_outcome(Outcome::CheckBroken),
-                    ],
-                    probes: 1,
-                    completed: true,
-                    precondition: Precondition {
-                        met: true,
-                        detail: format!("{ALLOW} is read"),
-                    },
-                };
-            }
+        let (mut allow, history) = match allow_list::read(ctx, &SPEC, parse_allow_split) {
+            Ok(read) => read,
+            Err(broken) => return *broken,
         };
-        let mut allow = AllowList::new(ALLOW, entries);
         let mut findings = Vec::new();
-        let mut probes = 0;
         let mut history_hits = vec![0usize; history.len()];
-        let mut scanned = std::collections::HashSet::new();
+        // Whether the run read a file of each history entry, or could not read one: an entry is stale only when it read one (and
+        // skipped nothing) or the tree has none, never for files the run did not look at or could not read.
+        let mut history_read = vec![false; history.len()];
+        let mut history_unread = vec![false; history.len()];
         for f in ctx.files().iter() {
             if IMPLEMENTATION.contains(&f.as_str()) || CHECKOUT.contains(&f.as_str()) || BINARY.is_match(f) {
                 continue;
@@ -211,27 +207,23 @@ impl Check for C125 {
             } else {
                 None
             };
-            // A file that cannot be read is a not-measured finding at that file, as in the JavaScript host.
-            let Some(text) = ctx.read(f) else {
-                findings.push(
-                    Finding::error(
-                        "C125",
-                        40,
-                        f,
-                        1,
-                        format!("not measured: {f} could not be read, so a disk path in it cannot be seen"),
-                        UNREAD_FIX,
-                    )
-                    .unwaivable()
-                    .with_outcome(Outcome::NotMeasured),
-                );
-                continue;
+            let text = match allow.read(ctx, f) {
+                Ok(text) => text,
+                Err(unread) => {
+                    if let Some(h) = h {
+                        history_unread[h] = true;
+                    }
+                    findings.push(*unread);
+                    continue;
+                }
             };
+            if let Some(h) = h {
+                history_read[h] = true;
+            }
             if text.contains('\0') {
+                allow.skip(f);
                 continue;
             }
-            probes += 1;
-            scanned.insert(f.to_string());
             for (line, literal) in machine_paths(&text) {
                 if let Some(h) = h {
                     history_hits[h] += 1;
@@ -259,8 +251,10 @@ impl Check for C125 {
                 findings.push(finding);
             }
         }
-        for (e, n) in history.iter().zip(&history_hits) {
-            if *n == 0 {
+        let tree = ctx.tree_files();
+        let in_tree = |e: &History| tree.iter().any(|f| f.ends_with(".md") && e.re.is_match(f));
+        for (i, (e, n)) in history.iter().zip(&history_hits).enumerate() {
+            if *n == 0 && !history_unread[i] && (history_read[i] || !in_tree(e)) {
                 findings.push(Finding::warn(
                     "C125",
                     40,
@@ -271,16 +265,7 @@ impl Check for C125 {
                 ));
             }
         }
-        findings.extend(allow.warnings("C125", 40, |p| scanned.contains(p) || ctx.read(p).is_none()));
-        CheckOutput {
-            findings,
-            probes,
-            completed: true,
-            precondition: Precondition {
-                met: true,
-                detail: format!("{ALLOW} is read"),
-            },
-        }
+        allow.output(ctx, findings)
     }
 }
 
