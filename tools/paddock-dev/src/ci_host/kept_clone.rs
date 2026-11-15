@@ -126,6 +126,10 @@ struct PhaseOut {
     log: Mutex<Vec<u8>>,
     /// A git command ended at its limit (the phase is then reported as one that did not finish, as the shell's `bounded` did).
     timed_out: AtomicBool,
+    /// The phase was abandoned at its bound: its thread may still run, but it starts no git command, removes nothing and writes no
+    /// file any more ([`Kc::live`]), because the next phase may already be removing or making the same folder. The shell's `bounded`
+    /// ends the whole function's process tree instead.
+    abandoned: AtomicBool,
 }
 
 thread_local! {
@@ -172,6 +176,15 @@ impl Kc {
         self.own.err.lock().map(|e| e.clone()).unwrap_or_default()
     }
 
+    /// `Err` once this thread's phase was abandoned: every git command, removal and file write of a phase asks first.
+    fn live(&self) -> Result<(), String> {
+        if self.out().abandoned.load(Ordering::SeqCst) {
+            Err("the phase was abandoned".into())
+        } else {
+            Ok(())
+        }
+    }
+
     fn note(&self, text: impl AsRef<str>) {
         // A command that wrote nothing (a git ended at its limit) adds nothing, as the shell's `$scratch/err` (no blank line).
         if text.as_ref().is_empty() {
@@ -197,6 +210,7 @@ impl Kc {
     /// `noisy`: the command is logged and a failure names it in the phase's error output (the shell's `g`; `gq` is the quiet probe).
     /// `Ok` is standard output without the trailing newlines; `Err` is how it ended.
     fn git(&self, noisy: bool, args: &[&str]) -> Result<String, String> {
+        self.live()?;
         let mut call = ToolCall::new("git")
             .args(["-c".to_string(), format!("core.hooksPath={}", self.hooks.display())])
             .args(args.iter().map(|a| a.to_string()))
@@ -248,6 +262,7 @@ impl Kc {
 
     /// `rm -rf target`, guarded: only strictly under `root`, a link as a link ([`safe_remove`]).
     fn remove(&self, root: &Path, target: &Path) -> Result<(), String> {
+        self.live()?;
         safe_remove::remove_under(root, target, self.home.as_deref())
             .map(|_| ())
             .map_err(|e| e.to_string())
@@ -699,6 +714,7 @@ fn run_inner(
 fn link_work_folder(kc: &Kc, ws: &Path, stable: &Path) -> Result<(), String> {
     let parent = ws.parent().ok_or("the work folder has no parent")?;
     let old = PathBuf::from(format!("{}.old-{}", ws.display(), std::process::id()));
+    kc.live()?;
     std::fs::rename(ws, &old).map_err(|e| {
         kc.note(format!("cannot move {} aside: {e}", ws.display()));
         e.to_string()
@@ -707,7 +723,7 @@ fn link_work_folder(kc: &Kc, ws: &Path, stable: &Path) -> Result<(), String> {
         env: &kc.env,
         windows: kc.windows,
     };
-    if let Err(e) = super::links::Links::link_dir(&linked, stable, ws) {
+    if let Err(e) = kc.live().and_then(|()| super::links::Links::link_dir(&linked, stable, ws)) {
         let _ = std::fs::rename(&old, ws);
         kc.note(format!("cannot link {} to {}: {e}", ws.display(), stable.display()));
         return Err(e);
@@ -784,13 +800,17 @@ impl Flow {
         let mark_file = self.kc.env.get(CLOCK_MARK).filter(|v| !v.is_empty()).map(PathBuf::from);
         let mark = mark_file.as_deref().map(|file| ClockMark { file, wait: self.limit });
         let bound = limit + Duration::from_secs(1);
-        let (r, applied) = bounded_marked(step, label, bound, Some(&out.timed_out), mark, move || {
+        let (r, before_mark) = bounded_marked(step, label, bound, Some(&out.timed_out), mark, move || {
             IN_PHASE.with(|p| p.set(Some(limit)));
             PHASE_OUT.with(|p| *p.borrow_mut() = Some(mine));
             f(&kc)
         });
         // The line names the phase's limit, or the general one when the phase ended before its clock mark.
-        let shown = if applied == bound { limit } else { applied };
+        let shown = if before_mark { self.limit } else { limit };
+        if matches!(r, Err(Phase::Timeout)) {
+            // Its thread may still be running: from now on it changes nothing (`Kc::live`), and writes only to `out`.
+            out.abandoned.store(true, Ordering::SeqCst);
+        }
         self.kc.adopt(&out);
         self.flush(step);
         match r {
@@ -818,11 +838,13 @@ impl Flow {
             .git(true, &["-C", &t, "config", "core.sparseCheckoutCone", "false"])
             .map_err(|e| e.to_string())?;
         let info = tree.join(".git").join("info");
+        self.kc.live()?;
         std::fs::create_dir_all(&info).map_err(|e| e.to_string())?;
         let mut text = String::from("/*\n");
         for p in &self.excludes {
             text.push_str(&format!("!/{p}/\n"));
         }
+        self.kc.live()?;
         std::fs::write(info.join("sparse-checkout"), text).map_err(|e| e.to_string())
     }
 
@@ -851,6 +873,7 @@ impl Flow {
     fn sanitize(&self) -> Result<(), String> {
         let dotgit = self.stable.join(".git");
         self.kc.remove(&dotgit, &dotgit.join("hooks"))?;
+        self.kc.live()?;
         std::fs::create_dir_all(dotgit.join("hooks")).map_err(|e| e.to_string())?;
         self.kc.remove(&dotgit, &dotgit.join("info").join("attributes"))?;
         self.kc.remove(&dotgit, &dotgit.join("info").join("exclude"))?;
@@ -860,6 +883,9 @@ impl Flow {
     /// A job's `.angular/cache` is a link to a kept folder outside the clone; each link is removed by itself before a clean.
     fn unlink_caches(&self) {
         for l in angular_cache_links(&self.stable) {
+            if self.kc.live().is_err() {
+                return;
+            }
             // `remove_file` on a symlink, `remove_dir` on a junction (removes only the junction).
             if std::fs::remove_file(&l).or_else(|_| std::fs::remove_dir(&l)).is_err() {
                 self.kc.note(format!("{NAME}: could not remove the link {}", l.display()));
@@ -885,6 +911,7 @@ impl Flow {
             flow.unlink_caches();
             let parent = stable.parent().ok_or("the kept folder has no parent")?.to_path_buf();
             kc.remove(&parent, &stable)?;
+            kc.live()?;
             std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
             let s = stable.display().to_string();
             kc.git(
@@ -901,6 +928,7 @@ impl Flow {
                 ],
             )
             .map_err(|e| e.to_string())?;
+            kc.live()?;
             std::fs::write(stable.join(".git").join("paddock-kept-clone"), "1\n").map_err(|e| e.to_string())
         });
         if r.is_err() {
@@ -1113,14 +1141,16 @@ mod tests {
     fn a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase() {
         use std::os::unix::fs::PermissionsExt;
         use std::sync::mpsc;
-        // The fetch phase (own limit 1 s, bound 2 s) is held until it is abandoned; while the next phase runs, the held phase goes on and
-        // its git ends at its limit (a git that sleeps), so it notes the failure and sets its timed-out flag. The next phase must not
-        // be reported as hung, and its error output must not carry the abandoned phase's line.
+        // The fetch phase (own limit 1 s, bound 2 s) runs one git, which ends at its limit (a git that logs its call and sleeps), and is
+        // then held until it is abandoned. While the next phase runs, the held phase goes on: its second git must not start (the next
+        // phase may be removing or making the same folder), the next phase must not be reported as hung, and its error output must not
+        // carry the abandoned phase's lines.
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         let git = bin.join("git");
-        std::fs::write(&git, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        let calls = dir.path().join("calls");
+        std::fs::write(&git, format!("#!/bin/sh\necho \"$*\" >> '{}'\nexec sleep 30\n", calls.display())).unwrap();
         std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
         let kc = kc_with_git(&bin, &[(PhaseId::Fetch.var(), "1")]);
         let flow = flow_of(kc);
@@ -1134,6 +1164,7 @@ mod tests {
         let (go_tx, go_rx) = mpsc::channel::<()>();
         let (done_tx, done_rx) = mpsc::channel::<()>();
         let first = flow.phase(&mut step, PhaseId::Fetch, "fetch", move |kc| {
+            let _ = kc.git(true, &["fetch", "first"]); // ends at its 1 s limit
             go_rx.recv().ok(); // held past the phase's bound (limit + 1 s)
             let r = kc.git(true, &["fetch", "late"]);
             done_tx.send(()).ok();
@@ -1153,6 +1184,12 @@ mod tests {
             flow.kc.last_lines()
         );
         assert!(!text.contains("'check out' did not finish"), "{text}");
+        let ran = std::fs::read_to_string(&calls).unwrap_or_default();
+        assert_eq!(
+            ran.lines().filter(|l| l.contains("fetch")).collect::<Vec<_>>(),
+            vec!["-c core.hooksPath=".to_string() + &bin.join("no-hooks").display().to_string() + " fetch first"],
+            "the abandoned phase started no git after it was abandoned"
+        );
     }
 
     #[test]

@@ -1432,6 +1432,37 @@ const KEPT_PHASES: [(&str, &str, &str); 7] = [
     ("PADDOCK_KEPT_CLONE_TIMEOUT_LINK", "", "link "),
 ];
 
+/// The environment of a hung-phase test: the hanging phase's own limit (1 s), the clock mark its git writes, and a bounded general
+/// limit, which bounds every other phase and the hanging one until its mark. 20 s because the slowest whole hung-phase test took
+/// 17.4 s (300 runs of the six, 6 burners, 1-minute load 18 to 68, 2026-11-15; `fix/kept-clone-phase-state`'s 50-run stress) and
+/// no phase of a test outlasts the test; a git that misses its mark then ends at 20 s with "did not finish within 20 s", not at
+/// nextest's 60 s.
+fn kept_hang_env(id: &'static str) -> Vec<(&'static str, String)> {
+    vec![
+        (id, "1".into()),
+        ("PADDOCK_KEPT_CLONE_CLOCK_MARK", "<ROOT>/hang-mark".into()),
+        ("PADDOCK_KEPT_CLONE_TIMEOUT", "20".into()),
+    ]
+}
+
+#[test]
+fn kept_clone_no_workflow_or_action_sets_the_clock_mark() {
+    // The clock mark is for tests: a job that set it would bound each phase by the general limit until a mark that never comes.
+    let mut seen = Vec::new();
+    let mut stack = vec![repo().join(".gitea")];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if std::fs::read_to_string(&p).is_ok_and(|t| t.contains("PADDOCK_KEPT_CLONE_CLOCK_MARK")) {
+                seen.push(p.display().to_string());
+            }
+        }
+    }
+    assert!(seen.is_empty(), "a workflow or action sets the tests' clock mark: {seen:?}");
+}
+
 /// One phase hangs (a git that sleeps on that phase's command) and only that phase has a short limit (1 s): it ends in a warning naming
 /// it, the job never fails, and no other phase can meet a limit (they keep the default, 900 s). The hanging git writes the clock mark
 /// as it starts (`PADDOCK_KEPT_CLONE_CLOCK_MARK`, ADR 0103 "Hang-point signal") and the 1 s counts from it on both sides, so the
@@ -1454,11 +1485,7 @@ fn kept_phase_is_bounded_by_its_own_limit(id: &str) {
             ),
         )
     };
-    let step = kept_step(
-        "macOS",
-        "lean",
-        vec![(*id, "1".into()), ("PADDOCK_KEPT_CLONE_CLOCK_MARK", "<ROOT>/hang-mark".into())],
-    );
+    let step = kept_step("macOS", "lean", kept_hang_env(id));
     // The clean phase runs only on a reused clone: a first job makes it, then the second job's clean hangs.
     let seen = if *id == "PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN" {
         kept_twice(&kept_step("macOS", "lean", vec![]), &shim, &step)
@@ -1536,14 +1563,7 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
     };
     let seen = kept_once(
         &setup,
-        &kept_step(
-            "macOS",
-            "lean",
-            vec![
-                ("PADDOCK_KEPT_CLONE_TIMEOUT_FETCH", "1".into()),
-                ("PADDOCK_KEPT_CLONE_CLOCK_MARK", "<ROOT>/hang-mark".into()),
-            ],
-        ),
+        &kept_step("macOS", "lean", kept_hang_env("PADDOCK_KEPT_CLONE_TIMEOUT_FETCH")),
     );
     assert_eq!(seen.code, 0, "{seen:?}");
     assert!(seen.stdout.contains("did not finish within 1 s"), "{}", seen.stdout);

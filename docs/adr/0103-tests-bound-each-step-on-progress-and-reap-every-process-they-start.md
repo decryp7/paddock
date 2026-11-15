@@ -283,22 +283,37 @@ runs at load up to 38): a phase abandoned at its bound set the next phase's time
   from the same variable. The variable is for tests only; unset, nothing changes, and set, every phase is still bounded (by the
   general limit before its mark, by its own limit after). A git command's own limit in Rust needs no mark: it counts from that
   command's start, and the stand-in writes the mark as it starts. What stays load-sensitive is a single command before the hang
-  taking longer than the phase's own limit by itself (a `git config` over 1 s), not the sum of a phase's work.
+  taking longer than the phase's own limit by itself (a `git config` over 1 s), not the sum of a phase's work. Its measured rate is
+  the one instance of that shape: a `git rev-parse` over 1 s in 4 of 204 runs (fe1bd861d, outside the phases, since moved to the
+  900 s bound). Giving such a command the general limit in mark mode, as the shell's commands have, would need the phase to end its
+  running git when it is abandoned; `ToolCall`'s captured runs have no cancel, so that is not done here.
+- **The parity tests' general limit** is 20 s (`kept_hang_env` in `host_steps.rs`, with its measurement: the slowest whole hung-phase
+  test took 17.4 s in 300 runs at load 18 to 68), so a git that misses its mark ends at 20 s with "did not finish within 20 s"
+  (checked by hand: 42.4 s for the whole test, under nextest's 60 s) instead of at nextest's bound. A test checks that no workflow
+  or action sets the mark.
 - **Per-phase state.** Each Rust phase writes its error output, its `run:` lines and its timed-out flag to its own `PhaseOut`, set
   on the phase's thread; when the phase ends or is abandoned, what it wrote by then becomes the step's, and what it writes later goes
-  nowhere. A noisy git no longer holds the log while it runs.
+  nowhere. A noisy git no longer holds the log while it runs. An abandoned phase also stops acting: its flag `abandoned` is set when
+  the phase is abandoned, and from then on its git commands, removals and file writes return "the phase was abandoned" (`Kc::live`),
+  because the next phase may already be removing or making the same folder; the shell's `bounded` ends the whole function's tree.
 - **Tests.** `bounded_sh_counts_the_limit_from_the_clock_mark` (the fake clock races ahead during real work before the mark; red
   without the mark: the phase ended with the stale mark still there), `a_marked_phase_counts_its_limit_from_the_mark` and
-  `a_marked_phase_that_finishes_before_its_mark_is_done` (Rust; red with the mark ignored), and
+  `a_marked_phase_that_finishes_before_its_mark_is_done` (Rust; red with the mark ignored),
+  `a_marked_phase_whose_mark_never_appears_ends_at_the_wait`, `kept_clone_no_workflow_or_action_sets_the_clock_mark`, and
   `a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase` (red on the shared state: "the next phase did not hang; it
-  was reported as hung"). The hung-phase parity tests (`kept_clone_the_<phase>_phase_is_bounded_by_its_own_limit`,
+  was reported as hung"; and, with the guard taken out, its logging git recorded the abandoned phase's second call). The hung-phase parity tests (`kept_clone_the_<phase>_phase_is_bounded_by_its_own_limit`,
   `kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job`) use the mark.
 
-**Common practice (ER-37).** Tests of timeouts usually take time out of the test: an injected or virtual clock (Go's
-`testing/synctest`, whose fake clock advances only when every goroutine of the bubble is blocked; .NET's `TimeProvider` with
-`FakeTimeProvider`; Tokio's `time::pause`), or a signal from the stand-in that the test waits on (a channel or an event) before it
-starts timing. Sources: the Go, .NET and Tokio documentation as known to the author, not re-read on 2026-11-15. A virtual clock does
-not fit here: the phases run real programs (git, a shell) whose time no fake clock moves, and `bounded.sh`'s fake clock already
+**Common practice (ER-37).** Tests of timeouts usually take time out of the test: an injected or virtual clock, or a signal from
+the stand-in that the test waits on (a channel or an event) before it starts timing. Sources, read 2026-11-15:
+
+| Tool | What it does | Source |
+|---|---|---|
+| Go `testing/synctest` (Go 1.25) | "Time in a bubble only advances when every goroutine in the bubble is durably blocked." | pkg.go.dev/testing/synctest |
+| .NET `FakeTimeProvider` | "A synthetic time provider that can be used to enable deterministic behavior in tests"; time moves by `Advance` or `SetUtcNow`. | learn.microsoft.com/dotnet/api/microsoft.extensions.time.testing.faketimeprovider |
+| Tokio `time::pause` | Freezes Tokio's `Instant::now()`; when the runtime is idle "the clock is auto-advanced to the next pending timer". The standard library's `Instant` is not affected. | docs.rs/tokio/latest/tokio/time/fn.pause.html |
+
+A virtual clock does not fit here: the phases run real programs (git, a shell) whose time no fake clock moves, and `bounded.sh`'s fake clock already
 serves its unit tests. The signal is the cheaper common form, and it is what this amendment does; the one addition is that the
 product's phase code reads it, behind a test-only variable, because the bound under test is inside the product.
 
@@ -307,7 +322,7 @@ product's phase code reads it, behind a test-only variable, because the bound un
 | Option | Agent-days |
 |---|---|
 | Raise the hung-phase tests' limits (rejected: ER-12, no measured cause per limit) | 0.1 |
-| This amendment: the mark in both implementations, per-phase state, four tests, the parity tests moved to the mark | about 0.5 |
+| This amendment: the mark in both implementations, per-phase state and its abandoned guard, the tests, the parity tests moved to the mark | about 0.75 |
 | A virtual clock through `bounded.sh`, the Rust phase and `ToolCall`'s per-command timeout | about 2 (not chosen) |
 
 ## Incident while building it
