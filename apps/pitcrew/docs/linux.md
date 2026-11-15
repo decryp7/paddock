@@ -9,7 +9,7 @@ AppIndicator extension; KDE, XFCE and others work out of the box).
 
 ```sh
 git clone https://dev.decryptology.net/decryp7/Pitcrew.git && cd Pitcrew
-bash scripts/linux-bootstrap.sh
+./dev app bootstrap pitcrew
 ```
 
 It checks Rust, Node 24 (`app/.nvmrc`) and the development packages (it prints the `apt` command for what is missing),
@@ -72,7 +72,7 @@ A `runner.envs: PATH` stopgap in the runner's `config.yaml` is no longer needed.
 ## 4. Verify
 
 ```sh
-bash scripts/linux-verify.sh
+./dev app verify-installed pitcrew
 ```
 
 It checks the service program, the user unit and its state, lingering, the socket (`$XDG_RUNTIME_DIR/pitcrew/pitcrew.sock`),
@@ -112,4 +112,4 @@ remove the package or the AppImage. The runner folders stay.
 See the README status table. The Linux unit text, the XDG paths, the service against the fake runner (start, graceful
 SIGTERM stop of the runner's process group, the environment passed) and the Rust test suite run in a Linux container
 (Debian, arm64) during development and on the `ubuntu-latest` CI jobs; the `systemctl` calls and the tray need a real
-desktop session and are checked with `scripts/linux-verify.sh` on the target machine.
+desktop session and are checked with `./dev app verify-installed pitcrew` on the target machine.

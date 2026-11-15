@@ -3,6 +3,14 @@
   "cargo": ".",
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
+  "install": {
+    "name": "Pitcrew",
+    "service": "pitcrew-service",
+    "label": "net.decryptology.pitcrew.service",
+    "unit": "pitcrew.service",
+    "socket": "pitcrew.sock",
+    "runners": { "dir": "runners", "log": "logs/runner.log", "accepted": "declare successfully" }
+  },
   "checks": [
     "node conformance/bin/paddock-conformance.mjs --app pitcrew --root apps/pitcrew --only C13 --paddock ."
   ],

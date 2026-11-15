@@ -10,7 +10,7 @@ The steps below take about 15 minutes on a Mac with Xcode, Rust and Node install
 
 ```sh
 git clone https://dev.decryptology.net/decryp7/Pitcrew.git && cd Pitcrew
-bash scripts/macos-bootstrap.sh
+./dev app bootstrap pitcrew
 ```
 
 It checks macOS 13+, the Xcode command line tools, Rust and Node 24, runs `npm ci` and `npx tauri build --bundles
@@ -127,7 +127,7 @@ The agent runs while you are logged in. For a Mac that only builds:
 ## 5. Verify
 
 ```sh
-bash scripts/macos-verify.sh
+./dev app verify-installed pitcrew
 ```
 
 It checks the bundle, the launch agent in launchd, the service's socket and answer (`pitcrew-service status`), and

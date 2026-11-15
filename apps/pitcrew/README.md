@@ -216,8 +216,8 @@ cargo test --workspace                 # core, service and app tests
 cargo run -p pitcrew-service -- check-config
 ```
 
-On a Mac, `bash scripts/macos-bootstrap.sh` checks the prerequisites and builds the `.app` and `.dmg`
-([docs/macos.md](docs/macos.md)); on Linux, `bash scripts/linux-bootstrap.sh` builds the `.deb` and the AppImage
+On a Mac, `./dev app bootstrap pitcrew` checks the prerequisites and builds the `.app` and `.dmg`
+([docs/macos.md](docs/macos.md)); on Linux, the same command builds the `.deb` and the AppImage
 ([docs/linux.md](docs/linux.md)). More in [docs/development.md](docs/development.md).
 
 ## Contributing

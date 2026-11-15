@@ -43,6 +43,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
+pub mod app_install;
 pub mod brief_check;
 pub mod check;
 pub mod check_ids;

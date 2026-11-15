@@ -9,7 +9,7 @@ crates/pitcrew-core      pure logic: rules, state machines, config, protocol (no
 crates/pitcrew-service   the background service: supervision, OS service integration, IPC server
 app/src-tauri            the Tauri 2 shell: tray, window, commands, updater
 app/src                  the Angular UI (standalone components, signals, SignalStores)
-scripts/                 sidecar.mjs, macos-bootstrap.sh, macos-verify.sh (commit lint, latest.json, publish, bundle verify and check-index are the shared kit in conformance/)
+scripts/                 sidecar.mjs (commit lint, latest.json, publish, bundle verify and check-index are the shared kit in conformance/)
 docs/adr/                architecture decisions (0001-0012)
 docs/diagrams/           draw.io sources (.drawio) and exported SVGs; see design.md
 .gitea/workflows/        CI
@@ -56,13 +56,13 @@ fits completely (`coverCutBlocks` in `e2e/screenshots.spec.ts`), and a shot of a
 
 ### On a Mac
 
-`bash scripts/macos-bootstrap.sh [--check]` checks the prerequisites and builds the `.app` and `.dmg` (nothing is
-installed system-wide); `bash scripts/macos-verify.sh` checks an installed Pitcrew (read-only). See [macos.md](macos.md).
+`./dev app bootstrap pitcrew [--check]` checks the prerequisites and builds the `.app` and `.dmg` (nothing is
+installed system-wide); `./dev app verify-installed pitcrew` checks an installed Pitcrew (read-only). See [macos.md](macos.md).
 
 ### On Linux
 
-`bash scripts/linux-bootstrap.sh [--check]` checks the prerequisites and builds the `.deb` and the AppImage;
-`bash scripts/linux-verify.sh` checks an installed Pitcrew (read-only). See [linux.md](linux.md).
+`./dev app bootstrap pitcrew [--check]` checks the prerequisites and builds the `.deb` and the AppImage;
+`./dev app verify-installed pitcrew` checks an installed Pitcrew (read-only). See [linux.md](linux.md).
 
 The data folder is `%ProgramData%\Pitcrew` on Windows, `~/Library/Application Support/Pitcrew` on macOS and
 `~/.local/share/Pitcrew` on Linux (`$XDG_DATA_HOME/Pitcrew`).

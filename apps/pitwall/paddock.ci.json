@@ -3,6 +3,12 @@
   "cargo": ".",
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
+  "install": {
+    "name": "Pitwall",
+    "service": "pitwall-server",
+    "label": "net.decryptology.pitwall.service",
+    "unit": "pitwall.service"
+  },
   "notices": {
     "name": "Pitwall",
     "manifests": ["app/src-tauri/Cargo.toml", "crates/pitwall-server/Cargo.toml"],

@@ -6,8 +6,7 @@ notifications, runner sessions, a real registration and a real update. Run this 
 macOS, Linux) before a release, against a release build (`cd app && npx tauri build`) and a Gitea or Forgejo test server
 with a repository that has a workflow such as `runs-on: <your label>` with a step that sleeps for a minute.
 
-Write down the platform, build and anything that differs from the expected result. The scripts `scripts/macos-verify.sh`
-and `scripts/linux-verify.sh` cover the read-only checks of an installed Pitcrew.
+Write down the platform, build and anything that differs from the expected result. `./dev app verify-installed pitcrew` covers the read-only checks of an installed Pitcrew.
 
 ## Service
 

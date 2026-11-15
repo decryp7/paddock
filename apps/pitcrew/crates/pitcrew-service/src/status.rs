@@ -1,5 +1,5 @@
 //! `pitcrew-service status`: asks the running service for its status over the app's transport and prints it — for
-//! scripts (`scripts/macos-verify.sh`) and support, without the app.
+//! scripts (`./dev app verify-installed pitcrew`) and support, without the app.
 
 use crate::error::Error;
 use pitcrew_core::protocol::{read_frame, write_frame, Request, Response, RunnerSnapshot, PROTOCOL_VERSION};
