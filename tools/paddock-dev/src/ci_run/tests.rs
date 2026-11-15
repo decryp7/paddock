@@ -275,33 +275,96 @@ fn modelled_commands() -> std::collections::BTreeSet<String> {
     out
 }
 
+/// Where the golden lives, under the package.
+const GOLDEN: &str = "tests/golden/ci-run/commands.tsv";
+
+/// The command that rewrites the golden from the model, as the failure prints it (`docs/generators.toml`, `ci-run-golden`).
+const REGENERATE_GOLDEN: &str =
+    "PADDOCK_WRITE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden   # in tools/paddock-dev";
+
+/// The golden's header: written by the regenerate, so the file holds no hand-written part.
+const GOLDEN_HEADER: &str = "\
+# Generated from the CI model by the regenerate command below; do not edit (ER-40). The commands CI runs: `job` rows are every command
+# of a root job of ci.yml, `app` rows the commands an app contract adds to its legs, as the CI model reads them from the contracts
+# (the paddock.ci.json files) and the workflows (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_in_the_golden`). It began
+# as the commands CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract
+# or a job shows here as added and removed rows in the same commit. Regenerate:
+#   PADDOCK_WRITE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden   # in tools/paddock-dev
+# kind<TAB>job or app<TAB>os<TAB>folder<TAB>command
+";
+
+/// The golden's text for these rows.
+fn golden_text(rows: &std::collections::BTreeSet<String>) -> String {
+    let mut out = GOLDEN_HEADER.to_string();
+    for r in rows {
+        out.push_str(r);
+        out.push('\n');
+    }
+    out
+}
+
+/// What the golden misses (`+`, to add) and holds that the model does not (`-`, to remove), one row a line.
+fn golden_drift(want: &std::collections::BTreeSet<String>, got: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let add = got.difference(want).map(|r| format!("+ {r}"));
+    let remove = want.difference(got).map(|r| format!("- {r}"));
+    add.chain(remove).collect()
+}
+
 #[test]
-fn the_contracts_run_exactly_the_commands_ci_ran_before_the_executor() {
-    let golden = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/ci-run/commands.tsv")).unwrap();
-    let want: std::collections::BTreeSet<String> = golden.lines().filter(|l| !l.starts_with('#')).map(str::to_string).collect();
+fn the_contracts_run_exactly_the_commands_in_the_golden() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(GOLDEN);
     let got = modelled_commands();
     for job in JOBS {
-        let rows = |set: &std::collections::BTreeSet<String>| set.iter().filter(|r| r.starts_with(&format!("job\t{job}\t"))).count();
-        assert!(
-            rows(&want) > 0 && rows(&got) > 0,
-            "job {job} has no row in the golden or in the model: the comparison would prove nothing"
-        );
+        let rows = got.iter().filter(|r| r.starts_with(&format!("job\t{job}\t"))).count();
+        assert!(rows > 0, "job {job} has no row in the model: the comparison would prove nothing");
     }
-    // The Windows runner checks out with core.autocrlf true: the job headers end in \r\n there.
-    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml"))
-        .unwrap()
-        .replace("\r\n", "\n");
-    let train = ci.split("\n  train-gates:\n").nth(1).unwrap().split("\n  app:\n").next().unwrap();
+    // train-gates is not modelled: its executor call is read through the workflow accessor, not out of the YAML text (ER-42).
+    let ci = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitea/workflows/ci.yml")).unwrap();
+    let wf = crate::check::util::workflows::read(".gitea/workflows/ci.yml", &ci.replace("\r\n", "\n"));
+    let train = wf
+        .jobs
+        .iter()
+        .find(|j| j.id == "train-gates")
+        .expect("ci.yml has a train-gates job");
     assert!(
-        train.contains("run: ./dev ci run conformance paddock"),
+        crate::check::util::workflows::parse_steps(&train.text)
+            .iter()
+            .any(|s| s.run.as_deref().map(str::trim) == Some("./dev ci run conformance paddock")),
         "train-gates runs the conformance contract"
     );
-    let missing: Vec<&String> = want.difference(&got).collect();
-    let extra: Vec<&String> = got.difference(&want).collect();
+    if std::env::var_os("PADDOCK_WRITE_GOLDEN").is_some_and(|v| v == "1") {
+        std::fs::write(&path, golden_text(&got)).unwrap();
+        return;
+    }
+    // The Windows runner checks out with core.autocrlf true.
+    let golden = std::fs::read_to_string(&path).unwrap().replace("\r\n", "\n");
+    let want: std::collections::BTreeSet<String> = golden.lines().filter(|l| !l.starts_with('#')).map(str::to_string).collect();
+    let drift = golden_drift(&want, &got);
     assert!(
-        missing.is_empty() && extra.is_empty(),
-        "CI no longer runs {missing:#?}\nand now also runs {extra:#?}"
+        drift.is_empty(),
+        "{GOLDEN} is stale ({} rows differ): if the change to CI is meant, run `{REGENERATE_GOLDEN}` and commit the file\n{}",
+        drift.len(),
+        drift.join("\n")
     );
+    assert_eq!(
+        golden,
+        golden_text(&got),
+        "{GOLDEN}: same rows, other text (header or order): run `{REGENERATE_GOLDEN}`"
+    );
+}
+
+#[test]
+fn the_golden_drift_names_each_row_to_add_and_to_remove() {
+    let set = |rows: &[&str]| rows.iter().map(|r| r.to_string()).collect::<std::collections::BTreeSet<String>>();
+    let want = set(&["job\tui\t\t\tnpm ci", "job\tui\t\t\tnpm test"]);
+    let got = set(&["job\tui\t\t\tnpm ci", "job\tui\t\t\tnpm run lint"]);
+    assert_eq!(
+        golden_drift(&want, &got),
+        ["+ job\tui\t\t\tnpm run lint", "- job\tui\t\t\tnpm test"]
+    );
+    assert!(golden_drift(&want, &want).is_empty());
+    assert!(golden_text(&got).starts_with("# Generated from the CI model"));
+    assert!(golden_text(&got).ends_with("job\tui\t\t\tnpm run lint\n"));
 }
 
 /// The probe can see a difference (ER-33): a contract line that was changed shows up as a missing and an extra command.
