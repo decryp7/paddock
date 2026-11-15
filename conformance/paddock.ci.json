@@ -1,8 +1,26 @@
 {
-  "$comment": "The CI contract of the conformance package and of Paddock's own conformance run (ADR 0038 §1). `conformance` is the one copy of the checks Paddock runs on itself (plan X9): ci.yml's conformance job, the merge queue's train-gates job (`./dev ci run conformance paddock`) and `./dev check --pre-push` all read it. Only the checks that apply to a library repository run; the rest are skipped on purpose, each for a reason: C03 icons, C04 macOS signing, C13 Rust lint preset (needs a root Cargo.toml; the crates workspace is crates/), C28 repo baseline (Paddock is the source of templates/repo), C29 window weight (the demo's budgets are not set) are app-only or Paddock owns the source of what they compare; C07 release preflight and C08 release artifacts: Paddock releases through publish.yml, not an app release job; C23 commit lint and doc blocks: Paddock's AGENTS.md is the source of the blocks, and its history predates the 100-character subject rule. C24 needs every committed image reviewed (the REVIEWED.md list beside the images). C37 needs one test binary per crate and every crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 and C30 (wall clock) report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated waiver (paddock.waivers.toml). C71 (tests do not settle on real time) compares its baseline with the merge base's with origin/main, so the job's checkout has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).",
+  "$comment": "The CI contract of the conformance package and of Paddock's own conformance run (ADR 0038 §1). `conformance` is the one copy of the checks Paddock runs on itself (plan X9): ci.yml's conformance job, the merge queue's train-gates job (`./dev ci run conformance paddock`) and `./dev check --pre-push` all read it. `conformance.only` is generated (ER-40): every check module in conformance/src/checks less the ones `conformance.skip` names, each with the reason it does not run here; after adding a check module or changing `skip`, run `node conformance/bin/paddock-check-lists.mjs` (it also rewrites conformance/src/checks/index.mjs; `./dev gen check` runs its --check). C23 checks commit messages and doc blocks; Paddock's AGENTS.md is the source of the blocks. C24 needs every committed image reviewed (the REVIEWED.md list beside the images). C37 needs one test binary per crate and every crate tested here and on the workspace hack (paddock.conformance.json). C14 (hermetic wrapper), C29 (window weight) and C30 (wall clock) report warnings; C36 (parser hardening) is strict here (a new parser needs its never-panics test); C15 has a dated waiver (paddock.waivers.toml). C71 (tests do not settle on real time) compares its baseline with the merge base's with origin/main, so the job's checkout has the full history (a one-commit clone has no merge base and C71 would only warn that it did not measure).",
   "conformance": {
     "app": "paddock",
     "root": ".",
+    "skip": {
+      "C03": "icons: app-only: the monorepo runs conformance for the repository itself, and no app leg has a conformance line yet (docs/gates.toml not_gated)",
+      "C04": "macOS signing: app-only: the monorepo runs conformance for the repository itself, and no app leg has a conformance line yet (docs/gates.toml not_gated)",
+      "C07": "release preflight: Paddock releases through publish.yml, not an app release job",
+      "C08": "release artifacts: Paddock releases through publish.yml, not an app release job",
+      "C13": "Rust lint preset: needs a root Cargo.toml (the crates workspace is crates/); the demos lack the lint tables (docs/gates.toml)",
+      "C28": "repo baseline: Paddock is the source of templates/repo",
+      "C32": "translation catalogs: app-only: the monorepo runs conformance for the repository itself, and no app leg has a conformance line yet (docs/gates.toml not_gated)",
+      "C33": "axe coverage: app-only: the monorepo runs conformance for the repository itself, and no app leg has a conformance line yet (docs/gates.toml not_gated)",
+      "C50": "fails on the current tree: Dyno opens its own main window (ADR 0029); fix Dyno, then remove this entry",
+      "C51": "report-only by design (ADR 0031 section 8), warnings only; not run in CI",
+      "C61": "report-only by design (warnings only); not run in CI",
+      "C62": "warnings only until the Debrief limit list is reasoned (ADR 0019)",
+      "C78": "fails on the current tree (dialog sizing outside the dialog frame, ADR 0043); fix them, then remove this entry",
+      "C85": "features register: report-only first (ADR 0052 WP-A4); Pitwall's own contract runs it",
+      "C91": "per-machine installers: app-only: the monorepo runs conformance for the repository itself, and no app leg has a conformance line yet (docs/gates.toml not_gated)",
+      "C99": "runs as its own job (ci.yml c99, the keychain action) and on every release path (ADR 0057)"
+    },
     "only": [
       "C06",
       "C14",

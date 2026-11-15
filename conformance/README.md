@@ -18,6 +18,23 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 
 **A new check gets its id from `./dev check new-id --reserve <branch>`** (ER-21): it prints the next id free across the working tree, every local branch, every branch of origin as the remote has it now (read live with `git ls-remote`; a remote it cannot read is an error) and `conformance/reserved/`, and adds one file `conformance/reserved/C<n>-<branch>` (one file per reservation, so branches never conflict); commit that file with the branch's first commit. Without `--reserve` it only prints. Never pick a number by hand: C110, C113 and C119 were each taken by two parallel branches.
 
+**Adding a check is two steps: write the module, run the regenerate.**
+
+1. Write `conformance/src/checks/C<n>-<slug>.mjs` (the id from `./dev check new-id --reserve <branch>`), exporting
+   `{ id, title, rule, scope, mode, needs, run }`, with its test `conformance/test/c<n>-<slug>.test.mjs`, a row in the table
+   below and, while it is report-only, its `[[report_only]]` entry in `docs/gates.toml` (ER-41).
+2. Run `node conformance/bin/paddock-check-lists.mjs` and commit what it rewrites: `conformance/src/checks/index.mjs` (the
+   imports and the `checks` list) and `conformance.only` of `conformance/paddock.ci.json` (the checks Paddock runs on itself:
+   every module less `conformance.skip`, whose entries say why one does not run here). If Paddock must not run the new check,
+   add it to `conformance.skip` with the reason, then run the command again. When CI gains a command (a contract line, a job
+   step), regenerate the CI golden too: `PADDOCK_WRITE_GOLDEN=1 cargo test --lib
+   ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden` in `tools/paddock-dev`.
+
+Never edit those files by hand (ER-40): `./dev gen check` runs both checks (`conformance-check-lists`, `ci-run-golden` in
+`docs/generators.toml`) and prints the command when one is stale. A Rust port of a check (`tools/paddock-dev/src/check/c<n>.rs`)
+adds its line to `register_checks!` in `tools/paddock-dev/src/check/mod.rs`; the registry test prints the block to paste when the
+macro and the module files or the JavaScript order disagree, and `tests/it/main.rs` prints the `mod` line a new test file needs.
+
 | Id | What | Needs |
 |---|---|---|
 | C03 | icons equal `icons/<app>/tauri` of Paddock and fill the canvas; CI runs an icon check | `--paddock` for the hash part |
