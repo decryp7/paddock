@@ -399,6 +399,24 @@ mod tests {
         assert_eq!(child_of_this_test(pid), Recorded::Ended { pid });
     }
 
+    /// Whatever a pid file holds (torn, binary, huge numbers, signs), one look answers or says "not yet"; it never panics.
+    #[test]
+    fn a_pid_file_with_any_bytes_never_panics_a_look() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("pid");
+        let seeds: [&[u8]; 5] = [
+            b"4242\n",
+            b"-1\n",
+            b"99999999999999999999\n",
+            b" 7 \r\n",
+            b"\xff\xfe0\n",
+        ];
+        paddock_testkit::assert_never_panics(&seeds, |bytes| {
+            std::fs::write(&file, bytes).unwrap();
+            let _ = look_pid_file(&file);
+        });
+    }
+
     #[test]
     #[should_panic(
         expected = "has no identity: it ended (or its pid was handed on), or its start time is unreadable"
