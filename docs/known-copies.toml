@@ -1308,3 +1308,33 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The shell scripts' copy (safe_rm): the dev scripts (scripts/vm-win/prepare.sh) run without the paddock-dev binary. Same root and path rules, read lexically; Windows paths are spelled by cygpath -m first. conformance/test/safe-rm.test.mjs tests it in bash and sh; there is no parity table with the Rust guard yet. The CI kit's shell that used it is gone (WP-2 of docs/plans/shell-to-rust.md); it goes with the last dev script that sources it (WP-6 and WP-7 of that plan)."
+
+# =====================================================================================================================
+# The ./dev launcher (shell-to-rust WP-1, ADR 0022 amendment 2026-11-15): std only, because it runs before any Paddock binary exists
+# =====================================================================================================================
+
+[[mechanism]]
+id = "bounded-program-run"
+title = "Starting a program with a time limit, its output captured and its tree ended through a handle this process holds"
+canonical = "paddock-proc"
+paths = ["crates/paddock-proc/src/command.rs", "crates/paddock-proc/src/run.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["tools/dev-launch/src/proc.rs"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The launcher cannot depend on paddock-proc (the launcher builds the tool and `paddock-proc` is one of the tool's inputs: a dependency would put it before the launcher's own hash and need its registry and lockfile at stage 0). It ends a child only through its own `Child` handle, never by a pid or a name (rule 53), and only the direct child (no process group: its children are rustup's and cargo's own). Goes if the launcher may depend on paddock-proc after the first release of WP-1."
+
+[[mechanism]]
+id = "sha256-hex"
+title = "The SHA-256 of a file as lower-case hex, for a downloaded tool's checksum"
+canonical = "paddock-dev"
+paths = ["tools/paddock-dev/src/ci_setup_rust.rs"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["tools/dev-launch/src/sha256.rs"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "FIPS 180-4 in 70 lines of std, held equal to Python's hashlib by the published vectors and the padding boundaries in its tests. The launcher has no dependency (a crate would need a registry at stage 0); the tool uses the `sha2` crate."

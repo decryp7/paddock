@@ -267,9 +267,9 @@ fn it_needs_nothing_on_path_but_git() {
     let s = Scratch::new();
     let root = repo(&s);
     let rustc = fake_rustc(&s);
-    let git_dir = std::env::split_paths(&std::env::var_os("PATH").unwrap())
-        .find(|d| d.join("git.exe").is_file())
-        .expect("git.exe on PATH");
+    let Some(git_dir) = std::env::split_paths(&std::env::var_os("PATH").unwrap()).find(|d| d.join("git.exe").is_file()) else {
+        panic!("git.exe is not on PATH");
+    };
     let out = launcher(&s, &root, &rustc, &["--wrapper-hash"])
         .env("PATH", git_dir)
         .output()
@@ -295,4 +295,50 @@ fn a_reader_that_closed_standard_output_does_not_make_it_panic() {
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "{} {:?}", String::from_utf8_lossy(&out.stderr), out.status);
     assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+}
+
+// Goldens made by the shell `./dev` this launcher replaced, on this repository, this compiler and these configs (the old script was run
+// on the same files): the order in which cargo's config files are read, the files a config includes, and a carriage return.
+const ABOVE_NET_HOME_TERM: &str = "fe9c7b358311081fe364d9d8b24468b2e71099d4";
+const ABOVE_TERM_HOME_NET: &str = "2aa9198321e0102101396e0860dd7885ea2952b3";
+const INCLUDE_NET: &str = "5dd55db1d433b1e0a05a92bea51c52ca54d2e05e";
+const INCLUDE_BUILD_FOLDER_AND_TERM: &str = "c5574d728de2b70a24140709d1fd43bc63d5bcda";
+
+fn hash_line(s: &Scratch, root: &Path, rustc: &Path) -> String {
+    let out = launcher(s, root, rustc, &["--wrapper-hash"]).output().unwrap();
+    assert!(out.status.success(), "{}", text(&out).1);
+    text(&out).0.lines().next().unwrap().to_string()
+}
+
+#[test]
+fn config_files_count_closest_first_and_a_carriage_return_does_not_matter() {
+    let s = Scratch::new();
+    let root = repo(&s);
+    let rustc = fake_rustc(&s);
+    // One config in a folder above the repository (read first) and one in CARGO_HOME (read last).
+    s.write(".cargo/config.toml", "[net]\nretry = 3\n");
+    s.write("ch/config.toml", "[term]\nquiet = true\n");
+    assert_eq!(hash_line(&s, &root, &rustc), ABOVE_NET_HOME_TERM);
+    s.write(".cargo/config.toml", "[term]\nquiet = true\n");
+    s.write("ch/config.toml", "[net]\nretry = 3\n");
+    assert_eq!(hash_line(&s, &root, &rustc), ABOVE_TERM_HOME_NET, "swapping them changes the hash");
+    s.write(".cargo/config.toml", "[net]\r\nretry = 3\r\n");
+    s.write("ch/config.toml", "[term]\r\nquiet = true\r\n");
+    assert_eq!(
+        hash_line(&s, &root, &rustc),
+        ABOVE_NET_HOME_TERM,
+        "carriage returns are dropped before the digest"
+    );
+}
+
+#[test]
+fn the_toml_files_next_to_the_tools_config_are_read_in_name_order_and_a_build_folder_only_one_is_not_hashed() {
+    let s = Scratch::new();
+    let root = repo(&s);
+    let rustc = fake_rustc(&s);
+    s.write("repo/tools/paddock-dev/.cargo/ci.toml", "[net]\nretry = 3\n");
+    assert_eq!(hash_line(&s, &root, &rustc), INCLUDE_NET);
+    s.write("repo/tools/paddock-dev/.cargo/ci.toml", "[build]\ntarget-dir = \"/x\"\n");
+    s.write("repo/tools/paddock-dev/.cargo/zz.toml", "[term]\nquiet = true\n");
+    assert_eq!(hash_line(&s, &root, &rustc), INCLUDE_BUILD_FOLDER_AND_TERM);
 }

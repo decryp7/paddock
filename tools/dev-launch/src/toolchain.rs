@@ -78,7 +78,7 @@ pub fn lock(pin: &str) -> Result<File, String> {
             Err(TryLockError::WouldBlock) => {}
             Err(TryLockError::Error(e)) => {
                 return Err(format!(
-                    "::error::./dev: cannot lock {}: {e}. Run ./dev again; if it repeats, report it with this log.",
+                    "::error::./dev: cannot lock {}: {e}. A file lock needs a local disk: set RUSTUP_HOME to a folder on one (not a network share), then run ./dev again.",
                     path.display()
                 ));
             }

@@ -1472,7 +1472,7 @@ jobs:
             echo "::error::tools/dev-launch/Cargo.lock is stale, run cargo update -w in tools/dev-launch and commit it"; exit 1; }
           cargo fmt --check
           cargo clippy --all-targets --locked -- -D warnings
-          cargo test --locked
+          cargo nextest run --profile ci --locked --no-fail-fast
 
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
       - name: Deny
