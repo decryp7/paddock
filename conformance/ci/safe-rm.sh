@@ -22,7 +22,7 @@
 # Variables are prefixed `_safe_rm_` (POSIX sh has no `local`); the function changes no option and no IFS.
 # Cost: callers run it inside bounded phases (kept-clone.sh's checkout phase has a 1 s limit in its test), so a call starts no
 # program but `rm` on macOS and Linux: the OS is asked once, when this file is sourced, and case is folded by the shell itself (`tr`
-# only for a path with characters beyond plain ASCII). Before, each call started about a dozen `uname` and `tr` processes, and under
+# only for a path with characters beyond plain ASCII). Before, each call started 16 `uname` and `tr` processes, and under
 # load (1-minute load 40 to 60) that pushed the checkout phase past its limit before it reached its git in 4 of 40 runs.
 _safe_rm_os=$(uname -s 2>/dev/null || true)
 
@@ -81,15 +81,19 @@ _safe_rm_folds() {
   case "$_safe_rm_os" in Darwin | MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac
 }
 
-# _safe_rm_lower <text>: <text> in lower case, in _safe_rm_lo. A path of plain ASCII characters (the usual case) is folded by the
-# shell itself, character by character (no program, so no fork per call); any other text by `tr`, whose classes follow the locale.
+# Whether <text> is plain ASCII path characters only (folded by the shell; anything else is left to `tr`).
+_safe_rm_plain() {
+  case "$1" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._\ +@~,=:-]*) return 1 ;; *) return 0 ;; esac
+}
+
+# _safe_rm_lower <text> [tr]: <text> in lower case, in _safe_rm_lo. Plain ASCII (the usual case) is folded by the shell itself,
+# character by character (no program, so no fork per call); any other text, or any text with `tr` given, by `tr`, whose classes
+# follow the locale.
 _safe_rm_lower() {
-  case "$1" in
-    *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._\ +@~,=:-]*)
-      _safe_rm_lo=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
-      return 0
-      ;;
-  esac
+  if [ "${2:-}" = tr ] || ! _safe_rm_plain "$1"; then
+    _safe_rm_lo=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    return 0
+  fi
   _safe_rm_s=$1
   _safe_rm_lo=
   while [ -n "$_safe_rm_s" ]; do
@@ -112,9 +116,12 @@ _safe_rm_lower() {
 _safe_rm_within() {
   case "$1/" in "$2"/*) return 0 ;; esac
   _safe_rm_folds || return 1
-  _safe_rm_lower "$1/"
+  # Both sides are folded the same way: by `tr` when either needs it, so the two never differ only in who folded them.
+  _safe_rm_how=shell
+  if ! _safe_rm_plain "$1" || ! _safe_rm_plain "$2"; then _safe_rm_how='tr'; fi
+  _safe_rm_lower "$1/" "$_safe_rm_how"
   _safe_rm_lp=$_safe_rm_lo
-  _safe_rm_lower "$2"
+  _safe_rm_lower "$2" "$_safe_rm_how"
   case "$_safe_rm_lp" in "$_safe_rm_lo"/*) return 0 ;; *) return 1 ;; esac
 }
 

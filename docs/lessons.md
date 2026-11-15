@@ -2185,10 +2185,15 @@ onto `safe_rm` (997ab3a4e): the shell and Rust kept clones differed in their con
 so the shell's 1 s checkout limit had ended the phase in `sanitize`, before `apply_profile` and before the git the test hangs. First
 hypotheses and what refuted them: bounded.sh's polling missing the last output, buffering of the last line, and a comparison of
 differently buffered outputs: the two stdouts were equal in every failing run; only where the shell's phase was killed differed. The
-cause: each `safe_rm` call started about a dozen `uname` and `tr` processes (plus subshells): `sanitize` (two calls) took 236 to
-268 ms on average, at most 675 ms, at 1-minute load 25 to 40, and about 35 ms with the fix (30 calls each, timer included). With 6
-burners: 4 of 40 runs failed with safe_rm at load 40 to 60, 0 of 40 with the plain `rm -rf` before it (load 30 to 46), 0 of 60 with
-the fix (load 17 to 30), and an interleaved run of both at load 18 to 39 passed 32 of 32 each (too little load to tell them apart). The fix: the OS is asked once when the helper is sourced, and plain ASCII case is folded by the shell, so a call
-starts no program but `rm` (`tr` only for names beyond ASCII); the limit is unchanged. **Rule:** a helper that runs inside a bounded
-phase costs no program per call that it can compute once or in the shell itself. **Class: work before the hang point of a 1 s
-hung-phase test meeting its limit under load (earlier: fe1bd861d, a `git rev-parse` over 1 s in 4 of 204 runs; e0fdd0286, run 8099).**
+cause: each `safe_rm` call started 16 programs (three same-case calls on the parent: 12 `tr` and 36 `uname`, plus subshells):
+`sanitize` (two calls) took 236 to 268 ms on average, at most 675 ms, at 1-minute load 25 to 40, and about 35 ms with the fix (30
+calls each, timer included). With 6 burners: 4 of 40 runs failed with safe_rm at load 40 to 60, 0 of 40 with the plain `rm -rf`
+before it (load 30 to 46), 0 of 60 with the fix (load 17 to 30), and an interleaved run of both at load 18 to 39 passed 32 of 32
+each (too little load to tell them apart). With 6 burners and ten loops of the test at once (load up to 38): 79 of 80 passed; the
+one failure was another cause, on the Rust side: a checkout phase abandoned at its bound (limit + 1 s) finished its git after the
+next phase had started and set that phase's shared `timed_out` flag, so `create the clone` reported "did not finish within 900 s" at
+once (the phases share one `Kc` state). The fix: the OS is asked once when the helper is sourced, and plain ASCII case is folded by
+the shell, so a call starts no program but `rm` (`tr` only for names beyond ASCII); the limit is unchanged. **Rule:** a helper that
+runs inside a bounded phase costs no program per call that it can compute once or in the shell itself. **Class: work before the hang
+point of a 1 s hung-phase test meeting its limit under load (earlier: fe1bd861d, a `git rev-parse` over 1 s in 4 of 204 runs;
+e0fdd0286, run 8099).**

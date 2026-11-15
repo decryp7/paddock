@@ -196,6 +196,12 @@ for (const shell of SHELLS) {
       r = run(`safe_rm '${root}' '${join(root, 'A')}' && safe_rm '${root}' '${join(home.toUpperCase(), 'x')}'`);
       assert.equal(r.status, 1, 'the home folder is not under the root, in any case');
       assert.match(r.stderr, /not strictly under/);
+      // The home check folds case too: the home folder spelled in upper case is still the home folder, refused as a root, and plain
+      // ASCII needs no program for that either.
+      r = run(`safe_rm '${home.toUpperCase()}' '${join(home, 'x')}'`);
+      assert.equal(r.status, 1, 'the home folder in another case is still the home folder');
+      assert.match(r.stderr, /home folder or above it/);
+      assert.deepEqual(calls(), [], 'the case-folded home check of plain ASCII starts no program');
       // A name beyond plain ASCII is left to `tr`, as before (whether it folds `Ä` depends on the host's tr and locale: GNU tr works
       // on bytes).
       run(`safe_rm '${join(root, 'Ä')}' '${join(root, 'ä', 'x')}'`);
