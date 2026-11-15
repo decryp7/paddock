@@ -43,6 +43,7 @@ pub(crate) mod git;
 mod hakari;
 mod hunks;
 mod lost_tests;
+mod other_os;
 mod testnames;
 mod trailers;
 mod whole_file;
@@ -447,6 +448,26 @@ fn check(req: &Request) -> Result<Checked, CliError> {
                         gates::not_run("a branch is checked before it is merged, so there is no checkout of the result; run `./dev merge check --gates <merge-commit>` after merging")
                     } else {
                         gates::run(&root, &git, &merge, &gates::Real, gates::ENFORCED)
+                    }),
+                );
+                steps.push(
+                    "other_os",
+                    Some(if req.commit.is_none() {
+                        other_os::not_run("a branch is checked before it is merged, so there is no checkout of the result")
+                    } else if let Some((why, next)) = generator_step::checkout_problem(&git, &merge) {
+                        other_os::unmeasured(
+                            other_os::ENFORCED,
+                            &format!("the checkout is not the merge result: {why}. Next step: {next}"),
+                        )
+                    } else {
+                        other_os::run(
+                            &root,
+                            &git,
+                            &merge,
+                            &other_os::DiskTree(root.clone()),
+                            &other_os::Scripts,
+                            other_os::ENFORCED,
+                        )
                     }),
                 );
             }

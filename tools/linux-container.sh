@@ -8,6 +8,7 @@
 #   bash paddock/tools/linux-container.sh --id dyno [--root <repo>] [--packages dyno-platform] -- [command...]
 #   bash paddock/tools/linux-container.sh --id paddock --image <ref> [--platform linux/amd64] -- command...   # a ready image, run as it is
 #   bash paddock/tools/linux-container.sh --id paddock --ci-image [--platform linux/amd64] -- command...   # the CI image, native by default
+#   bash paddock/tools/linux-container.sh --id paddock --ci-image --loop-mount -- command...   # root may mount an ext4 loop image (the member gate's TMPDIR)
 #   bash paddock/tools/linux-container.sh --id dyno --clean              # stop labelled containers, delete its volumes and local CI images
 #
 # With no command: `cargo test -p <packages> && cargo clippy -p <packages> --all-targets -- -D warnings`.
@@ -33,7 +34,7 @@
 # PADDOCK_LINUX_RUN_LABEL (an extra label, `key=value`, on the container: `dev check --pre-push` finds and stops its own container by it), PADDOCK_LINUX_MEMORY (12g; ER-14 wants every test container capped), PADDOCK_LINUX_USER (e.g. 1000:1000 to exercise the "other users' processes" paths; builds into the container's /tmp).
 set -euo pipefail
 
-id=""; root="$PWD"; packages=""; clean=0; ready_image=""; platform=""; ci_image=0
+id=""; root="$PWD"; packages=""; clean=0; ready_image=""; platform=""; ci_image=0; loop_mount=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --id) id="${2:?--id needs a value}"; shift ;;
@@ -42,6 +43,7 @@ while [ $# -gt 0 ]; do
     --image) ready_image="${2:?--image needs a value}"; shift ;;
     --platform) platform="${2:?--platform needs a value}"; shift ;;
     --ci-image) ci_image=1 ;;
+    --loop-mount) loop_mount=1 ;;
     --clean) clean=1 ;;
     --) shift; break ;;
     *) echo "linux-container: unknown option $1 (a command goes after --)" >&2; exit 2 ;;
@@ -176,10 +178,16 @@ if [ -n "$state" ]; then
   mkdir -p "$state" 2>/dev/null && git_args+=(--mount "type=tmpfs,target=$state_in")
 fi
 
+# --loop-mount: CAP_SYS_ADMIN (and the loop-control device) so root in the container can `mount -o loop` an ext4 image, the way CI's
+# runners have an ext4 /tmp (macOS-hosted Docker's /tmp is overlay or virtiofs, whose folder blocks differ). Nothing else is added:
+# no --privileged, the host's paths are not mounted.
+loop_args=()
+[ "$loop_mount" = 0 ] || loop_args=(--cap-add SYS_ADMIN --security-opt apparmor=unconfined --device /dev/loop-control --device-cgroup-rule='b 7:* rwm')
+
 exec "$docker" run --rm --label "$label" ${PADDOCK_LINUX_RUN_LABEL:+--label "$PADDOCK_LINUX_RUN_LABEL"} --cpus "$cpus" --memory "$memory" \
   ${platform:+--platform "$platform"} \
   --mount "type=bind,source=$root,target=/work,readonly" ${git_args[@]+"${git_args[@]}"} \
   --mount "type=volume,source=$registry_volume,target=/usr/local/cargo/registry" \
   --mount "type=volume,source=$target_volume,target=/target" \
   -e CARGO_TARGET_DIR=/target -e CARGO_BUILD_JOBS="$jobs" -e CARGO_TERM_COLOR=never \
-  ${user_args[@]+"${user_args[@]}"} -w /work "$image" "$@"
+  ${user_args[@]+"${user_args[@]}"} ${loop_args[@]+"${loop_args[@]}"} -w /work "$image" "$@"
