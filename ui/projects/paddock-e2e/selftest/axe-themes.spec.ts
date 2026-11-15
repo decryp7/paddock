@@ -63,6 +63,21 @@ test('a fill-opacity transition started in the scan is at its end state while ax
   expect(await page.evaluate(() => (window as unknown as { seen: string }).seen)).toBe('1');
 });
 
+test('an overlay that fades in with fill-mode forwards (Material tooltip) is scanned open, not invisible', async ({ page }) => {
+  // Material's tooltip panel starts at opacity 0 and scale 0.8 and keeps its keyframes' end with fill-mode forwards
+  // (mat-mdc-tooltip-show, 150 ms); its select panel and snack bar do the same. The tooltip text here fails contrast.
+  await open(
+    page,
+    `<style>
+      @keyframes tip-show { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
+      .tip { opacity: 0; transform: scale(0.8); background: rgb(255, 255, 255); color: rgb(190, 190, 190); }
+      .tip.shown { animation: tip-show 150ms cubic-bezier(0, 0, 0.2, 1) forwards; }
+    </style><p>host</p><div id="tip" class="tip" role="tooltip">tooltip text</div>`,
+  );
+  await page.evaluate(() => document.querySelector('.tip')?.classList.add('shown'));
+  expect(await axeViolations(page)).toEqual(['color-contrast: #tip']);
+});
+
 test('axeViolations still reports a real contrast failure', async ({ page }) => {
   await open(page, `<style>td { background: rgb(255, 255, 255); color: rgb(200, 200, 200); }</style><table><tbody><tr><td>faint text</td></tr></tbody></table>`);
   expect(await axeViolations(page, { idsOnly: true })).toEqual(['color-contrast']);
@@ -72,7 +87,8 @@ test('axeInThemes reads each theme at its end state, not the switch into it', as
   await page.emulateMedia({ colorScheme: 'light' });
   await open(
     page,
-    `<style>td { background: rgb(255, 255, 255); color: rgb(85, 85, 85); transition: background 3s linear, color 3s linear; }
+    // Only the background moves (3 s): the text turns light at once, so mid-way it is light text on a pale background.
+    `<style>td { background: rgb(255, 255, 255); color: rgb(85, 85, 85); transition: background 3s linear; }
       @media (prefers-color-scheme: dark) { td { background: rgb(17, 17, 17); color: rgb(160, 160, 160); } }</style>
     <table><tbody><tr><td>muted text</td></tr></tbody></table>`,
   );
@@ -80,5 +96,5 @@ test('axeInThemes reads each theme at its end state, not the switch into it', as
   // Motion is back after the scan: the page's transitions and its reduced-motion preference are as they were.
   expect(
     await page.evaluate(() => [getComputedStyle(document.querySelector('td') as HTMLElement).transitionDuration, matchMedia('(prefers-reduced-motion: reduce)').matches]),
-  ).toEqual(['3s, 3s', false]);
+  ).toEqual(['3s', false]);
 });

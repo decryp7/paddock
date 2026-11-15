@@ -44,49 +44,50 @@ async function nextFrames(page: Page): Promise<void> {
 }
 
 /**
- * The style that holds the page still while axe reads it: no transition and no animation on any element or pseudo-element,
- * so every colour is its end state at once. Adopted by the document (a constructed stylesheet, which a CSP without
- * 'unsafe-inline' still allows) and removed again after the scan.
+ * The style that holds the page still while axe reads it, on every element and pseudo-element: no transitions, and every
+ * finite animation jumped to its end (zero duration, started a moment ago), its fill kept. So an overlay that fades in with
+ * `fill-mode: forwards` from opacity 0 (Material's tooltip, select panel and snack bar) is read open, not invisible. An
+ * endless animation (a spinner) ends too, at its base style. Adopted by the document (a constructed stylesheet, which a CSP
+ * without 'unsafe-inline' still allows) and removed again after the scan.
  */
-const MOTION_OFF = '*, *::before, *::after { transition: none !important; animation: none !important; }';
+const MOTION_OFF = '*, *::before, *::after { transition: none !important; animation-duration: 0s !important; animation-delay: -1ms !important; }';
 
-/** Turns motion off for a scan (the style above plus `prefers-reduced-motion: reduce`); returns how to turn it on again. */
-async function motionOff(page: Page): Promise<() => Promise<void>> {
-  const reducedAlready = await page.evaluate((css) => {
+/** Adopts the still style; returns whether the page already prefers reduced motion. */
+async function addStillStyle(page: Page): Promise<boolean> {
+  return page.evaluate((css) => {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(css);
     (window as unknown as { __pdAxeStill?: CSSStyleSheet }).__pdAxeStill = sheet;
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     return matchMedia('(prefers-reduced-motion: reduce)').matches;
   }, MOTION_OFF);
-  // WebKit applies an emulated media feature at its next rendering update: wait until the page sees it, both ways.
-  const reduced = (want: boolean) => page.waitForFunction((w) => matchMedia('(prefers-reduced-motion: reduce)').matches === w, want);
-  if (!reducedAlready) {
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await reduced(true);
-  }
-  await nextFrames(page);
-  return async () => {
-    await page.evaluate(() => {
-      const w = window as unknown as { __pdAxeStill?: CSSStyleSheet };
-      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== w.__pdAxeStill);
-      delete w.__pdAxeStill;
-    });
-    if (!reducedAlready) {
-      // 'no-preference', not null: Linux WebKit (CI image) kept 'reduce' after a reset to null, every time (macOS WebKit did not).
-      await page.emulateMedia({ reducedMotion: 'no-preference' });
-      await reduced(false);
-    }
-  };
+}
+
+async function removeStillStyle(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __pdAxeStill?: CSSStyleSheet };
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== w.__pdAxeStill);
+    delete w.__pdAxeStill;
+  });
+}
+
+/**
+ * Emulates `prefers-reduced-motion` and waits until the page sees it (WebKit applies an emulated media feature at its next
+ * rendering update). Off is 'no-preference', not null: Linux WebKit (CI image) kept 'reduce' after a reset to null, every
+ * time (macOS WebKit did not).
+ */
+async function reducedMotion(page: Page, on: boolean): Promise<void> {
+  await page.emulateMedia({ reducedMotion: on ? 'reduce' : 'no-preference' });
+  await page.waitForFunction((w) => matchMedia('(prefers-reduced-motion: reduce)').matches === w, on);
 }
 
 /**
  * The page's axe violations as `rule: target, target` lines (empty: none), against `WCAG_TAGS`.
  *
  * Colours read while they change are not a measurement (Pitwall run 8134 read a row half-way to the dark theme; earlier a
- * tooltip fading in). Common practice is to hold the page still for the scan: transitions and animations are switched off
- * on every element and pseudo-element and `prefers-reduced-motion` is emulated, two animation frames pass, axe scans once,
- * and both are undone. An animation's end state is not applied by this: what axe reads is the element's own style.
+ * tooltip fading in). Common practice is to hold the page still for the scan: the style above (no transitions, finite
+ * animations at their end) and `prefers-reduced-motion: reduce`, two animation frames, one scan, and both undone, the media
+ * setting first. An error of the undoing never replaces axe's own; without one, it is thrown.
  */
 export async function axeViolations(page: Page, options: AxeOptions = {}): Promise<string[]> {
   // A click leaves the pointer on its target, and a hover tooltip (Material's opens after 500 ms) would appear while axe
@@ -95,12 +96,23 @@ export async function axeViolations(page: Page, options: AxeOptions = {}): Promi
   let builder = new AxeBuilder({ page }).withTags([...WCAG_TAGS]);
   for (const s of options.include ?? []) builder = builder.include(s);
   for (const s of options.exclude ?? []) builder = builder.exclude(s);
-  const motionOn = await motionOff(page);
+  let reducedBefore: boolean | undefined;
+  let scanFailed = false;
   try {
+    reducedBefore = await addStillStyle(page);
+    if (!reducedBefore) await reducedMotion(page, true);
+    await nextFrames(page);
     const results = await builder.analyze();
     return results.violations.map((v) => (options.idsOnly ? v.id : `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`));
+  } catch (e) {
+    scanFailed = true;
+    throw e;
   } finally {
-    await motionOn();
+    const undoErrors: unknown[] = [];
+    if (reducedBefore === false) await reducedMotion(page, false).catch((e: unknown) => undoErrors.push(e));
+    await removeStillStyle(page).catch((e: unknown) => undoErrors.push(e));
+    // eslint-disable-next-line no-unsafe-finally -- a failed undo must not pass silently when the scan itself succeeded.
+    if (!scanFailed && undoErrors.length) throw undoErrors[0];
   }
 }
 

@@ -2122,9 +2122,10 @@ loaded runner delays past settling. **Fix (helper), after three rounds:** first 
 and animations that start during a scan, scan again); its review found partial name matches (`stroke-dashoffset` read as
 `stroke`) and unreadable keyframes counted as colour, and the next check found short animations (30 to 90 ms) and `::before`
 ones that its lookup after `animationstart` never saw, so false contrast failures came back in both engines. The user then
-chose common practice: `axeViolations` turns motion off for the scan (a constructed stylesheet with `transition: none
-!important; animation: none !important` on `*, *::before, *::after`, plus `prefers-reduced-motion: reduce`), waits two frames,
-scans once and undoes both; `axeInThemes` and `axeTargets` also wait until the switched scheme is live (`matchMedia`, two
+chose common practice: `axeViolations` holds the page still for the scan (a constructed stylesheet with `transition: none`
+and finite animations jumped to their end, `animation-duration: 0s; animation-delay: -1ms`, on `*, *::before, *::after`, so a
+tooltip that fades in with `forwards` is read open where `animation: none` left it invisible; plus `prefers-reduced-motion:
+reduce`), waits two frames, scans once and undoes both; `axeInThemes` and `axeTargets` also wait until the switched scheme is live (`matchMedia`, two
 frames; ER-33). Selftest `selftest/axe-themes.spec.ts`, run in CI (ui's e2e job, Chromium; e2e-webkit, WebKit), starts motion
 from inside axe's scan: a 90 ms colour animation, the same on `::before`, and a `fill-opacity` transition were red against the
 rescan version in both engines and are green now. **Rule:** a check that reads a moving page stops the motion; it does not try
