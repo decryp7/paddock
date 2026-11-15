@@ -2278,3 +2278,16 @@ limit three times through work before the hang (a `git rev-parse` outside the ph
 hang, in the shell and in Rust (ADR 0103, "Amendment"). **Rule:** a test of a time limit times the thing that hangs, from a
 signal it gives, not the setup before it; state that an abandoned worker can still write is that worker's own. **Class: work before
 the hang point of a hung-phase test meeting its limit under load (third sighting; ADR 0103 amendment).**
+## Porting `./dev` to Rust: the old wrapper's tests were the parity suite, and four things the port missed were real (2026-11-15)
+The tests of the shell wrapper (`wrapper.rs`, `wrapper_download.rs`) ran against the Rust launcher after one change (the program
+they start): 64 tests, 60 passed at once and 4 failed. The failures were real differences: (1) the shell's first lines unset `GIT_DIR` and `GIT_WORK_TREE`, and a first read
+that began at line 18 had missed them (a git hook's variables moved the launcher to another repository; found by
+`an_inherited_git_dir_or_work_tree_does_not_move_the_wrapper_to_another_repository`); (2) a refused `CARGO_BUILD_TARGET` is exit 2 in
+the shell (`exit` inside the function) and the port returned 1; (3) and (4) the two lock tests measured pids and start times, which
+an OS file lock never records, so they became "a lock nobody holds never stops an install" and "two concurrent installs never
+overlap" (red with the lock taken out). A fifth came from the tests themselves: cargo relinks `target/debug/<bin>` on every build,
+so a test process that starts the program while a sibling process builds it meets `NotFound` (seen in repeated runs of the 65
+tests at load 20 to 40); the build and a copy named by size and time now happen under a file lock. A sixth was found by use: `./dev --print-binary | head -1` panicked in
+`println!` where the shell's `echo` ended on SIGPIPE (failing first: `a_reader_that_closed_standard_output_does_not_make_it_panic`).
+**Rule:** read the whole script before porting it, from line 1; carry its tests over first and make each one red on a planted
+difference; a test that starts a program a sibling test process builds copies it under a lock. Recurring: none known.
