@@ -374,7 +374,7 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
         }
     }
     // The growth check needs only git, so it runs in every whole run and whenever the baseline itself is in scope.
-    if (whole_run || baseline_in_scope) && !entries.is_empty() {
+    if (whole_run || baseline_in_scope) && !entries.is_empty() && !ctx.is_in_memory() {
         match growth(root, &ctx.base_ref(), &entries) {
             Growth::Reason(reason) => out.push(Finding::warn(
                 "C53",

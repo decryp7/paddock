@@ -5,9 +5,8 @@
 // - a file named `*.sh`, `*.bash`, `*.zsh`, `*.ps1`, `*.psm1`, `*.py`, `*.cmd` or `*.bat`, or an extensionless file whose first line is a
 //   `#!` naming `sh`, `bash`, `zsh`, `python` or `pwsh` (also through `env`),
 // unless it is
-// - an exception: an exact path (a pattern still parses) in `conformance/shell-exceptions.json` with its plan id (E1 to E7), a reason and
-//   an owner. The list may only shrink: an exception the merge base's list lacks is a finding (it needs the user's approval). A
-//   pattern is a path where `**/` is any number of folders, `*` one name and a trailing `/` the folder and all below it; or
+// - an exception: an exact path (a pattern or folder is refused) in `conformance/shell-exceptions.json` with its plan id (E1 to E7), a reason and
+//   an owner. The list may only shrink: an exception the merge base's list lacks is a finding (it needs the user's approval); or
 // - in the baseline `conformance/baselines/C129-shell.json`, which lists today's files with their line counts, one per line, sorted by path.
 //   A file with more lines than its entry has grown (a finding); fewer is a warning to lower the entry. The baseline may only shrink: an entry whose file is gone
 //   is stale (a warning), and an entry the merge base's baseline lacks, or one with more lines than there, is a finding. Regenerate it
@@ -40,19 +39,8 @@ const RUN_LINE = /^([ \t]*)(-[ \t]+)?run:[ \t]*(.*)$/;
 const RUN_BLOCK = /^[|>][+-]?[0-9]*[ \t]*(?:#.*)?$/;
 const FIX_NEW = `Port it to Rust (\`./dev\`, an xtask or a check), or name it in ${EXCEPTIONS} with the plan's exception id and a reason (docs/plans/shell-to-rust.md §2).`;
 
-/** A path pattern as a regular expression: `**` is any number of folders, `*` one name, a trailing `/` the folder and all below it. */
-export function globRegExp(pattern) {
-  let src = '';
-  for (let i = 0; i < pattern.length; i++) {
-    const c = pattern[i];
-    if (c === '*' && pattern[i + 1] === '*' && pattern[i + 2] === '/') {
-      src += '(?:[^/]+/)*';
-      i += 2;
-    } else if (c === '*') src += '[^/]*';
-    else src += c.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  }
-  return new RegExp(`^${src}${pattern.endsWith('/') ? '.*' : ''}$`);
-}
+/** An exact path as a regular expression: the exceptions name files, never folders or patterns. */
+export const exactRegExp = (path) => new RegExp(`^${path.replace(/[.+?^${}()|[\]\\*]/g, '\\$&')}$`);
 
 const parseJson = (text, file) => {
   try {
@@ -81,10 +69,11 @@ export function parseExceptions(text) {
     const path = typeof e?.path === 'string' ? e.path : '';
     const reason = typeof e?.reason === 'string' ? e.reason.trim() : '';
     const owner = typeof e?.owner === 'string' ? e.owner.trim() : '';
+    if (path.includes('*') || path.endsWith('/')) throw new Error(`${EXCEPTIONS}: \`${path}\` is a pattern or a folder; an exception names one file by its exact path`);
     if (!path || !EXCEPTION_IDS.includes(e?.id) || [...reason].length < 8 || !owner) {
       throw new Error(`${EXCEPTIONS}: every exception needs a path, an id from E1 to E7, a reason of at least 8 characters and an owner`);
     }
-    return { path, id: e.id, reason, owner, re: globRegExp(path) };
+    return { path, id: e.id, reason, owner, re: exactRegExp(path) };
   });
 }
 

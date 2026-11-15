@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { globRegExp, inlineRun, isShell, lineCount, parseBaseline, parseExceptions } from '../src/checks/C129-no-new-shell.mjs';
+import { exactRegExp, inlineRun, isShell, lineCount, parseBaseline, parseExceptions } from '../src/checks/C129-no-new-shell.mjs';
 import { findingsOf as run, makeApp } from './helpers.mjs';
 
 /** The findings of C129 over a fixture, without the note that a fixture has no merge base to compare the baseline with. */
@@ -48,7 +48,7 @@ test('C129 the baseline: a listed file passes, a grown one is a finding, a shrun
 
 test('C129 exceptions: a path and a pattern are skipped, an exception that names no file is stale', async () => {
   const files = { dev: '#!/bin/sh\n', 'fixtures/x/a.sh': 'x\n', 'scripts/vm-win/one.ps1': 'x\n', 'scripts/vm-win/sub/two.ps1': 'x\n' };
-  const exc = [['dev'], ['fixtures/', 'E6'], ['scripts/vm-win/*.ps1', 'E5'], ['gone/*.sh', 'E5']];
+  const exc = [['dev'], ['fixtures/x/a.sh', 'E6'], ['scripts/vm-win/one.ps1', 'E5'], ['gone/x.sh', 'E5']];
   const found = await findingsOf('C129', tree(files, { exc }));
   assert.deepEqual(where(found), [['scripts/vm-win/sub/two.ps1', 'new shell file'], [EXCEPTIONS, 'stale exception']]);
 });
@@ -110,9 +110,10 @@ test('C129 helpers: line counts, shebang kinds, patterns, list parsers', () => {
   assert.equal(isShell('x/run', () => '# !/bin/sh\n'), false);
   assert.equal(isShell('x/run.txt', () => '#!/bin/sh\n'), false);
   assert.equal(isShell('x/.gitignore', () => '#!/bin/sh\n'), true, 'a dotfile has no extension');
-  assert.equal(globRegExp('scripts/vm-win/*.ps1').test('scripts/vm-win/a.ps1'), true);
-  assert.equal(globRegExp('scripts/vm-win/*.ps1').test('scripts/vm-win/x/a.ps1'), false);
-  assert.equal(globRegExp('tools/golden/').test('tools/golden/a/b.sh'), true);
+  assert.equal(exactRegExp('scripts/a.ps1').test('scripts/a.ps1'), true);
+  assert.equal(exactRegExp('scripts/a.ps1').test('scripts/a.ps1x'), false);
+  assert.equal(exactRegExp('scripts/a.ps1').test('scripts/aXps1'), false, 'a dot is a dot');
+  for (const bad of ['scripts/*.ps1', 'scripts/', '**/a.sh']) assert.throws(() => parseExceptions(exceptions([[bad]])), /exact path/, bad);
   assert.deepEqual(parseBaseline(baseline([['a.sh', 2]])), [{ path: 'a.sh', lines: 2 }]);
   assert.equal(parseExceptions(exceptions([['dev', 'E1']]))[0].re.test('dev'), true);
   assert.throws(() => parseBaseline('{"files": [{"path": "a", "lines": -1}]}'), /whole number/);
@@ -147,14 +148,14 @@ test('C129 the exceptions only shrink: an added or widened exception is a findin
   git(root, 'commit', '-q', '-m', 'base');
   git(root, 'checkout', '-q', '-b', 'work');
   // scripts/b.sh is dropped; scripts/ is added (a widening); dev changes its id
-  writeFileSync(join(root, EXCEPTIONS), exceptions([['scripts/', 'E5'], ['dev', 'E3']]));
+  writeFileSync(join(root, EXCEPTIONS), exceptions([['scripts/a.sh', 'E5'], ['dev', 'E3']]));
   git(root, 'commit', '-q', '-am', 'widen');
   process.env.PADDOCK_BASE_REF = 'main';
   try {
     const found = (await run('C129', root)).filter((f) => /exceptions grew/.test(f.message));
     assert.equal(found.length, 1);
     assert.equal(found[0].file, EXCEPTIONS);
-    assert.match(found[0].message, /2 entries are \(scripts\/ E5; dev E3\).*needs the user's approval/);
+    assert.match(found[0].message, /2 entries are \(scripts\/a\.sh E5; dev E3\).*needs the user's approval/);
   } finally {
     delete process.env.PADDOCK_BASE_REF;
   }

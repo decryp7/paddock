@@ -44,6 +44,7 @@ if (args.includes('--init')) {
   const old = parseBaseline(readFileSync(file, 'utf8'));
   const kept = old.filter((e) => current.has(e.path)).map((e) => ({ path: e.path, lines: Math.min(e.lines, current.get(e.path)) }));
   const fresh = shell.filter((s) => !old.some((e) => e.path === s.file)).length;
+  for (const e of old.filter((x) => !current.has(x.path))) console.log(`removed: ${e.path}`);
   write(kept.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)));
   console.log(`${old.length - kept.length} removed; ${fresh} shell files are not in the baseline and were not added`);
 } else {

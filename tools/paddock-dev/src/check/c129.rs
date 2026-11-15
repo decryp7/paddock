@@ -4,7 +4,7 @@
 //!
 //! Flagged, one finding per file at line 1: a file named `*.sh`, `*.bash`, `*.zsh`, `*.ps1`, `*.psm1`, `*.py`, `*.cmd` or `*.bat`, or an
 //! extensionless file whose first line is a `#!` naming `sh`, `bash`, `zsh`, `python` or `pwsh` (also through `env`), unless it is an
-//! exception (a path or pattern in `conformance/shell-exceptions.json` with its plan id E1 to E7, a reason and an owner) or is in the
+//! exception (an exact path in `conformance/shell-exceptions.json` with its plan id E1 to E7, a reason and an owner) or is in the
 //! baseline `conformance/baselines/C129-shell.json`: today's files with their line counts, one per line, sorted by path. A file with more lines
 //! than its entry has grown (a finding); fewer is fine. The baseline may only shrink: an entry whose file is gone is stale (a warning), and
 //! an entry the merge base's baseline lacks, or one with more lines than there, is a finding; a file under its count is a warning to lower the entry. The exceptions list may only shrink too: an exception the merge base's list lacks is a finding (it needs the user's approval). Known gaps: shell inside strings (`execSync`, `Command::new("sh")`, heredocs in workflows) and kinds not listed (`.fish`, `.ksh`, `.command`). Differences from plan §6: JSON lists in conformance/, the JavaScript host is the CI host with this twin, shebangs only on extensionless files, and the caller check reads `.gitea` YAML, `paddock.ci.json` and `lefthook.yml` only. `node conformance/bin/paddock-shell-baseline.mjs
@@ -45,28 +45,14 @@ static NOT_A_WORD: LazyLock<Regex> = LazyLock::new(|| rx(r"[^A-Za-z0-9_.@/$*{}-]
 static RUN_LINE: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"^([ \t]*)(-[ \t]+)?run:[ \t]*({DOT}*)$")));
 static RUN_BLOCK: LazyLock<Regex> = LazyLock::new(|| rx(&format!(r"^[|>][+-]?[0-9]*[ \t]*(?:#{DOT}*)?$")));
 
-/// A path pattern as a regular expression: `**/` is any number of folders, `*` one name, a trailing `/` the folder and all below it.
-pub fn glob_regex(pattern: &str) -> Regex {
-    let mut src = String::from("^");
-    let mut rest = pattern;
-    while let Some(c) = rest.chars().next() {
-        if let Some(r) = rest.strip_prefix("**/") {
-            src.push_str("(?:[^/]+/)*");
-            rest = r;
-            continue;
-        }
-        if c == '*' {
-            src.push_str("[^/]*");
-        } else {
-            src.push_str(&regex::escape(&c.to_string()));
-        }
-        rest = &rest[c.len_utf8()..];
-    }
-    if pattern.ends_with('/') {
-        src.push_str(".*");
-    }
-    src.push('$');
-    rx(&src)
+/// An exact path as a regular expression (the exceptions name files, never folders or patterns).
+pub fn exact_regex(path: &str) -> Regex {
+    rx(&format!("^{}$", regex::escape(path)))
+}
+
+/// Whether a path is a pattern or a folder: `*` or a trailing `/`.
+fn is_pattern(path: &str) -> bool {
+    path.contains('*') || path.ends_with('/')
 }
 
 /// One baseline entry.
@@ -131,6 +117,11 @@ pub fn parse_exceptions(text: &str) -> Result<Vec<Exception>, String> {
             let id = e["id"].as_str().unwrap_or("");
             let reason = trim(e["reason"].as_str().unwrap_or(""));
             let owner = trim(e["owner"].as_str().unwrap_or(""));
+            if is_pattern(path) {
+                return Err(format!(
+                    "{EXCEPTIONS}: `{path}` is a pattern or a folder; an exception names one file by its exact path"
+                ));
+            }
             if path.is_empty() || !EXCEPTION_IDS.contains(&id) || reason.chars().count() < 8 || owner.is_empty() {
                 return Err(format!(
                     "{EXCEPTIONS}: every exception needs a path, an id from E1 to E7, a reason of at least 8 characters and an owner"
@@ -139,7 +130,7 @@ pub fn parse_exceptions(text: &str) -> Result<Vec<Exception>, String> {
             Ok(Exception {
                 path: path.into(),
                 id: id.into(),
-                re: glob_regex(path),
+                re: exact_regex(path),
             })
         })
         .collect()
@@ -477,7 +468,7 @@ impl Check for C129 {
                 ));
             }
         }
-        if !baseline.is_empty() {
+        if !baseline.is_empty() && !ctx.is_in_memory() {
             let entries_of = |text: &str| parse_baseline(text).ok();
             let exact = |e: &Entry| format!("{}\t{}", e.path, e.lines);
             let loose = |e: &Entry| e.path.clone();
@@ -524,7 +515,7 @@ impl Check for C129 {
                 }
             }
         }
-        if !exceptions.is_empty() {
+        if !exceptions.is_empty() && !ctx.is_in_memory() {
             let current: Vec<ExcKey> = exceptions
                 .iter()
                 .map(|e| ExcKey {
@@ -673,7 +664,10 @@ mod tests {
         assert!(parse_baseline("{}").unwrap_err().contains("files"));
         assert!(parse_exceptions("{\"exceptions\":[{\"path\":\"a\",\"id\":\"E9\",\"reason\":\"long enough\",\"owner\":\"x\"}]}").is_err());
         assert!(parse_exceptions("{\"exceptions\":[{\"path\":\"a\",\"id\":\"E1\",\"reason\":\"long enough\",\"owner\":\"x\"}]}").is_ok());
-        assert!(glob_regex("scripts/vm-win/*.ps1").is_match("scripts/vm-win/a.ps1"));
-        assert!(!glob_regex("scripts/vm-win/*.ps1").is_match("scripts/vm-win/x/a.ps1"));
+        for bad in ["scripts/*.ps1", "scripts/", "**/a.sh"] {
+            let text = format!("{{\"exceptions\":[{{\"path\":\"{bad}\",\"id\":\"E1\",\"reason\":\"long enough\",\"owner\":\"x\"}}]}}");
+            assert!(parse_exceptions(&text).unwrap_err().contains("exact path"), "{bad}");
+        }
+        assert!(exact_regex("a/b.sh").is_match("a/b.sh") && !exact_regex("a/b.sh").is_match("a/b.shx"));
     }
 }

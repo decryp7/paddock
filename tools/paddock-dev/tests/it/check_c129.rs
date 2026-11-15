@@ -20,7 +20,7 @@ fn cases() -> Vec<(&'static str, String)> {
         ),
         (
             EXCEPTIONS,
-            "{\"exceptions\":[{\"path\":\"dev\",\"id\":\"E1\",\"reason\":\"it must start first\",\"owner\":\"plan\"},{\"path\":\"vm/*.ps1\",\"id\":\"E5\",\"reason\":\"runs in the guest\",\"owner\":\"plan\"},{\"path\":\"gone/\",\"id\":\"E6\",\"reason\":\"names no file\",\"owner\":\"plan\"}]}".into(),
+            "{\"exceptions\":[{\"path\":\"dev\",\"id\":\"E1\",\"reason\":\"it must start first\",\"owner\":\"plan\"},{\"path\":\"vm/a.ps1\",\"id\":\"E5\",\"reason\":\"runs in the guest\",\"owner\":\"plan\"},{\"path\":\"gone/x.sh\",\"id\":\"E6\",\"reason\":\"names no file\",\"owner\":\"plan\"}]}".into(),
         ),
         ("dev", "#!/bin/sh\necho\n".into()),
         ("vm/a.ps1", "x\n".into()),
@@ -146,6 +146,10 @@ fn c129_with_a_broken_list_is_one_check_broken_finding_on_both_hosts() {
         (EXCEPTIONS, Some("nope")),
         (
             EXCEPTIONS,
+            Some("{\"exceptions\":[{\"path\":\"scripts/\",\"id\":\"E5\",\"reason\":\"long enough\",\"owner\":\"x\"}]}"),
+        ),
+        (
+            EXCEPTIONS,
             Some("{\"exceptions\":[{\"path\":\"a\",\"id\":\"E9\",\"reason\":\"long enough\",\"owner\":\"x\"}]}"),
         ),
         (
@@ -223,7 +227,7 @@ fn c129_a_files_run_judges_only_the_files_it_looked_at() {
         (BASELINE, "{\"files\":[{\"path\":\"old.sh\",\"lines\":1}]}".to_string()),
         (
             EXCEPTIONS,
-            "{\"exceptions\":[{\"path\":\"fx/\",\"id\":\"E6\",\"reason\":\"fixtures\",\"owner\":\"plan\"}]}".to_string(),
+            "{\"exceptions\":[{\"path\":\"fx/a.sh\",\"id\":\"E6\",\"reason\":\"fixtures\",\"owner\":\"plan\"}]}".to_string(),
         ),
         ("old.sh", "x\n".to_string()),
         ("fx/a.sh", "x\n".to_string()),
@@ -316,7 +320,7 @@ fn c129_an_added_or_widened_exception_is_a_finding_against_the_merge_base() {
     git(d, &["add", "-A"]);
     git(d, &["commit", "-q", "-m", "base"]);
     git(d, &["checkout", "-q", "-b", "work"]);
-    std::fs::write(d.join(EXCEPTIONS), list(&[("scripts/", "E5"), ("dev", "E3")])).unwrap();
+    std::fs::write(d.join(EXCEPTIONS), list(&[("scripts/a.sh", "E5"), ("dev", "E3")])).unwrap();
     git(d, &["commit", "-q", "-am", "widen"]);
     let o = RunOptions {
         base_ref: Some("main".into()),
@@ -331,7 +335,49 @@ fn c129_an_added_or_widened_exception_is_a_finding_against_the_merge_base() {
         .collect();
     assert_eq!(grew.len(), 1, "{:?}", r.findings);
     assert!(
-        grew[0].contains("2 entries are (scripts/ E5; dev E3)") && grew[0].contains("needs the user's approval"),
+        grew[0].contains("2 entries are (scripts/a.sh E5; dev E3)") && grew[0].contains("needs the user's approval"),
         "{grew:?}"
     );
+}
+
+/// A control is hermetic (ER-21 class: a check's own control read the real repository): an in-memory tree has no git history, so the
+/// control must hold whatever base ref the process has and whatever repository it is in. Here the process stands in a repository
+/// whose lists differ from the control's; reaching for git would report the control's entries as added and fail the control.
+#[test]
+fn a_control_holds_in_a_repository_whose_lists_differ_from_its_own() {
+    let repo = tree_of(&[
+        (BASELINE, "{\"files\":[{\"path\":\"other.sh\",\"lines\":1}]}".to_string()),
+        (
+            EXCEPTIONS,
+            "{\"exceptions\":[{\"path\":\"other\",\"id\":\"E1\",\"reason\":\"it must start first\",\"owner\":\"plan\"}]}".to_string(),
+        ),
+        ("other.sh", "x\n".to_string()),
+    ]);
+    git(repo.path(), &["init", "-q", "-b", "main"]);
+    git(repo.path(), &["add", "-A"]);
+    git(repo.path(), &["commit", "-q", "-m", "base"]);
+    git(repo.path(), &["checkout", "-q", "-b", "work"]);
+    std::fs::write(repo.path().join("other.sh"), "x\ny\n").unwrap();
+    git(repo.path(), &["commit", "-q", "-am", "edit"]);
+    std::env::set_current_dir(repo.path()).unwrap();
+    // the ref a control would compare with by default (origin/main) exists here, with lists that differ from the control's
+    git(repo.path(), &["update-ref", "refs/remotes/origin/main", "main"]);
+    let elsewhere = tree_of(&[
+        (BASELINE, "{\"files\":[]}".to_string()),
+        (EXCEPTIONS, "{\"exceptions\":[]}".to_string()),
+        ("a.txt", "x\n".to_string()),
+    ]);
+    for id in ["C129", "C53"] {
+        let o = RunOptions {
+            only: Some(vec![id.into()]),
+            base_ref: None,
+            ..options(elsewhere.path(), "fixture")
+        };
+        let r = run_checks(&o, &registry()).unwrap();
+        assert_eq!(
+            r.json()["runs"][0]["control"],
+            json!(true),
+            "{id}'s control read the repository the process stands in"
+        );
+    }
 }
