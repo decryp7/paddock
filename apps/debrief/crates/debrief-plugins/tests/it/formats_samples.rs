@@ -19,6 +19,10 @@ fn samples() -> PathBuf {
 const START: i64 = 1_791_968_400_000;
 const END: i64 = 1_791_979_200_000;
 
+/// The Docker sample's log file. `source` matches whole path components (`Path::ends_with`), so it names the file, not the
+/// `-json.log` ending a text comparison could use (CI run 8116: that ending matched no component after ADR 0099 WP-3b).
+const DOCKER_LOG: &str = "f4a5f340c2fdab20873c795900a5e37f5f324094d80e94c0e337ae2c8ee98edf-json.log";
+
 fn workspace() -> Workspace {
     let registry = common::registry(&[common::FORMATS, common::WEB, common::SYSLOG, common::OTEL]);
     let mut ws = Workspace::with_registry(Profile::default_profile(), registry).unwrap();
@@ -53,7 +57,7 @@ fn every_new_sample_is_read_by_its_importer_and_nothing_else_is() {
         ("real-libraries/log4net-log4j.xml", "log4j-xml"),
         ("sqlserver/SQL01/ERRORLOG", "sql-errorlog"),
         ("sqlserver/sqlrpt01/errorlog", "sql-errorlog"),
-        ("-json.log", "docker-json"),
+        (DOCKER_LOG, "docker-json"),
         ("consumer/0.log", "cri"),
         ("consumer/1.log", "cri"),
     ];
@@ -138,7 +142,7 @@ fn sql_errorlogs_fold_errors_and_use_the_utc_adjustment() {
 fn container_logs_join_partials_and_carry_metadata() {
     let ws = workspace();
     let s = ws.summary();
-    let docker = records(&ws, source(&s.sources, "-json.log"));
+    let docker = records(&ws, source(&s.sources, DOCKER_LOG));
     let id = docker[0].fields["ContainerId"].as_str().unwrap();
     assert_eq!(id.len(), 64);
     assert_eq!(docker[0].fields["tag"], "payments-adapter");
