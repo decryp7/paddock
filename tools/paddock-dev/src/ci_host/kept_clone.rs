@@ -24,7 +24,7 @@
 //! `refs/replace` are removed, and a local config key outside an allow-list makes the clone be made again.
 //! The checkout's credentials (its http extra header) reach git through the environment, never a command line, never kept.
 
-use super::phase::{Phase, bounded_hung};
+use super::phase::{ClockMark, Phase, bounded_marked};
 use super::{Step, folder_name, isolation_full};
 use crate::ci_isolation::home;
 use crate::ci_tool::{NETWORK_ENV, ToolCall};
@@ -63,6 +63,9 @@ const NAME: &str = "kept-clone";
 /// settings this step sets. A key such as `core.autocrlf`, `core.fsmonitor`, `core.sshCommand`, `credential.helper` or an include changes
 /// what a git command does, so the clone that carries one is not reused.
 const ALLOWED_KEYS: &str = r"^(core\.(repositoryformatversion|filemode|bare|logallrefupdates|ignorecase|precomposeunicode|symlinks|sparsecheckout|sparsecheckoutcone)|extensions\.(partialclone|objectformat)|remote\.origin\.(url|fetch|tagopt|promisor|partialclonefilter)|branch\.[^.=]+\.(remote|merge))$";
+
+/// Tests only: a file the test's hanging git writes; each phase's limit counts from it (ADR 0103, "Hang-point signal").
+const CLOCK_MARK: &str = "PADDOCK_KEPT_CLONE_CLOCK_MARK";
 
 /// The bound of a git command outside a phase (reading the work folder, the health probe, the fallback's expansion): the default phase
 /// limit. `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase; the shell runs these reads unbounded, so a short phase limit must not end
@@ -775,11 +778,19 @@ impl Flow {
         // A git command ends itself at the limit (and its whole process tree with it); the phase waits one second longer so that it is
         // the git command's end that is seen first, and a phase that hangs elsewhere (a file call) is abandoned after that. The phase's
         // thread writes only to `out`: what it wrote by now becomes the step's, anything it writes after that goes nowhere.
-        let r = bounded_hung(step, label, limit + Duration::from_secs(1), Some(&out.timed_out), move || {
+        // With a clock mark (tests only, `PADDOCK_KEPT_CLONE_CLOCK_MARK`, the shell's `clock_mark`) that bound counts from the mark the
+        // test's hanging git writes, and until then the general limit bounds the phase. A git command's own limit needs no mark: it
+        // counts from that command's start, and the hanging git writes the mark as it starts.
+        let mark_file = self.kc.env.get(CLOCK_MARK).filter(|v| !v.is_empty()).map(PathBuf::from);
+        let mark = mark_file.as_deref().map(|file| ClockMark { file, wait: self.limit });
+        let bound = limit + Duration::from_secs(1);
+        let (r, applied) = bounded_marked(step, label, bound, Some(&out.timed_out), mark, move || {
             IN_PHASE.with(|p| p.set(Some(limit)));
             PHASE_OUT.with(|p| *p.borrow_mut() = Some(mine));
             f(&kc)
         });
+        // The line names the phase's limit, or the general one when the phase ended before its clock mark.
+        let shown = if applied == bound { limit } else { applied };
         self.kc.adopt(&out);
         self.flush(step);
         match r {
@@ -788,7 +799,7 @@ impl Flow {
             Err(Phase::Timeout) => {
                 step.warn(format!(
                     "'{label}' did not finish within {} s. Last output: {}. Next step: {}",
-                    limit.as_secs(),
+                    shown.as_secs(),
                     self.kc.last_lines(),
                     self.hint
                 ));
@@ -1067,6 +1078,7 @@ mod tests {
     ];
 
     /// The step's shared context with a `git` of the test's own (a script in `bin`) first on PATH.
+    #[cfg(unix)]
     fn kc_with_git(bin: &Path, env: &[(&str, &str)]) -> Arc<Kc> {
         let mut env: HashMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         env.insert("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()));
@@ -1081,6 +1093,7 @@ mod tests {
         })
     }
 
+    #[cfg(unix)]
     fn flow_of(kc: Arc<Kc>) -> Flow {
         Flow {
             kc,
