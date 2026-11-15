@@ -2153,3 +2153,15 @@ timeout says what it saw last. A second test makes the slow path certain (the he
 before (the tree is ended before the helper writes), green after; 200 of 200 green under the same burners. **Rule for tests:** a test that must observe a process
 the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
 observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**
+
+## A git-fixture property test timed out on Windows: count a fixture's processes (2026-11-15)
+The pre-push property test built 24 random git stacks in one test: 1,651 git processes, 17 s on the Mac, and past nextest's
+60 s limit on the Windows runner (run 8138, job 39335), where a process spawn costs about 100 ms. Enumerating the shapes (each
+train state once, each flag on and off in at least one) cut it to 267 processes and 2.9 s; each shape is now its own test, so
+nextest runs them in parallel and a failure names its shape. The test files are planned through the shared `-z --no-renames`
+reader, which the review found the production code had not used (a `git mv` out of a workspace and a non-ASCII path were missed;
+fixed with failing shapes first).
+**Rule:** before adding cases to a test that builds git repositories or many files, count the processes (or files) one case
+costs and multiply by Windows' spawn and file cost; split cases into separate tests so they run in parallel.
+**Class: tests that pass on the Mac and time out on Windows because of per-process or per-file cost; earlier: 50,000 files
+timed out on NTFS + Defender (Platforms, "Tests that pass on the Mac fail on Windows").**
