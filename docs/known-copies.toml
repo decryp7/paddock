@@ -886,7 +886,7 @@ status = "built"
   symbols = ["text:EXPORT_ARGS"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "The drift check re-exports with the same draw.io flags as `./dev diagrams export` (SVG_ARGS in tools/paddock-dev/src/diagrams.rs); the five shell copies of the export script are gone (shell-to-Rust WP-7). The drift check joins the Rust command when scripts/svg-drift.mjs is ported (ci-in-rust.md WP-12)."
+  note = "The drift check re-exports with the same draw.io flags as `./dev diagrams export` (SVG_ARGS in tools/paddock-dev/src/diagrams.rs) and the same ER-14 recipe (a private --user-data-dir per run, removed afterwards; a bounded run, killed at the limit); the five shell copies of the export script are gone (shell-to-Rust WP-7). The drift check joins the Rust command when scripts/svg-drift.mjs is ported (ci-in-rust.md WP-12)."
 
 [[mechanism]]
 id = "drawio-install"
@@ -1372,3 +1372,18 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The shell scripts' copy (safe_rm): the CI kit's shell fallback and the dev scripts run without the paddock-dev binary. Same root and path rules, read lexically; Windows paths are spelled by cygpath -m first. conformance/test/safe-rm.test.mjs tests it in bash and sh; there is no parity table with the Rust guard yet. Goes with the shell kit (docs/plans/ci-in-rust.md, WP-11) for the CI scripts; the dev scripts move to `./dev` or keep it."
+
+[[mechanism]]
+id = "keyed-local-http-status"
+title = "The status code of a bearer-keyed POST to a local server (the installed-app and bundle checks)"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/app_install.rs"]
+symbols = ["item:post_status"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/xtask/src/smoke.rs"]
+  symbols = ["item:post_status"]
+  owner = "pitwall"
+  delete_by = "pitwall-v1.2.0"
+  note = "An xtask cannot depend on paddock-dev, so `verify-bundle --smoke` keeps its own copy (it also sends no key for the 401 check). It goes when the HTTP check moves into a shared crate (a third user would make it one)."

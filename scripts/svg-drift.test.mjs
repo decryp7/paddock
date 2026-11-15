@@ -3,7 +3,7 @@
 // this runs anywhere; the real draw.io is exercised by the CI job itself, whose ER-33 probe fails when the tool is missing or off pin.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, describe, test } from 'node:test';
@@ -18,7 +18,9 @@ const PIN = '1.2.3';
 const SHIM = `#!/usr/bin/env node
 const fs = require('node:fs'), path = require('node:path');
 const a = process.argv.slice(2);
+if (process.env.FAKE_ARGS_LOG) fs.appendFileSync(process.env.FAKE_ARGS_LOG, a.join(' ') + '\\n');
 if (a.includes('--version')) { console.log('[1:0:ERROR:dbus] noise'); console.log(process.env.FAKE_VERSION || '${PIN}'); process.exit(0); }
+if (process.env.FAKE_HANG) setInterval(() => {}, 1000);
 const out = a[a.indexOf('--output') + 1];
 const src = a.filter((x) => !x.startsWith('--') && x !== 'false' && x !== 'svg' && x !== '16' && x !== out).pop();
 const shift = Number(process.env.FAKE_SHIFT || 0);
@@ -101,6 +103,36 @@ describe('the check on a repository', () => {
     assert.match(out, /::error file=apps\/x\/docs\/diagrams\/svg\/a\.svg::/);
     assert.match(out, /\.\/dev diagrams export --app x --src docs\/diagrams a/);
     assert.match(out, /ER-40/);
+  });
+
+  // ER-14: draw.io (Electron) never opens the user's own profile; each run has a private one that is gone afterwards.
+  test('every draw.io run has a private --user-data-dir in the temp folder, removed afterwards', () => {
+    const r = repo('profile');
+    const tmp = join(scratch, 'profile-tmp');
+    mkdirSync(tmp);
+    const log = join(scratch, 'profile-args.log');
+    const { code, out } = check(r, { FAKE_ARGS_LOG: log, SVG_DRIFT_TMP: tmp });
+    assert.equal(code, 0, out);
+    const lines = readFileSync(log, 'utf8').trim().split('\n');
+    assert.ok(lines.length >= 2, 'the version call and an export');
+    for (const line of lines) {
+      const dir = line.split(' ').find((t) => t.startsWith('--user-data-dir='))?.slice('--user-data-dir='.length);
+      assert.ok(dir && dir.startsWith(tmp) && /drawio-profile-/.test(dir), `a private profile in the temp folder: ${line}`);
+      assert.ok(!/Application Support|\.config/.test(dir), 'never the user\'s profile');
+      assert.equal(existsSync(dir), false, 'removed after the run');
+    }
+  });
+
+  test('a draw.io that hangs is killed at the limit, the profile is removed and the check fails', () => {
+    const r = repo('hang');
+    const tmp = join(scratch, 'hang-tmp');
+    mkdirSync(tmp);
+    const t0 = Date.now();
+    const { code, out } = check(r, { FAKE_HANG: '1', SVG_DRIFT_TMP: tmp, SVG_DRIFT_TIMEOUT_MS: '1500' });
+    assert.equal(code, 1, out);
+    assert.match(out, /timed out and was killed/);
+    assert.ok(Date.now() - t0 < 30_000, 'the limit ended it');
+    assert.deepEqual(readdirSync(tmp).filter((n) => n.startsWith('drawio-profile-')), []);
   });
 
   test('a hand-patched colour in the committed SVG is drift', () => {

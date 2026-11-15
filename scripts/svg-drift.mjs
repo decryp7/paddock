@@ -164,12 +164,30 @@ function git(root, ...args) {
 
 const err = (file, msg) => console.log(`::error${file ? ` file=${file}` : ''}::${msg}`);
 
-/** Run draw.io headless; `viaXvfb` when there is no display. */
+/** The longest one draw.io run may take (ms); `SVG_DRIFT_TIMEOUT_MS` overrides it (tests). */
+const RUN_TIMEOUT_MS = 600_000;
+
+/**
+ * Run draw.io headless; `viaXvfb` when there is no display. ER-14: draw.io (Electron) never opens the user's own profile (its
+ * keychain and windows): every run gets a private `--user-data-dir` in a fresh folder, removed afterwards, and no run is unbounded.
+ * The same recipe as `./dev diagrams export` (tools/paddock-dev/src/diagrams.rs; docs/known-copies.toml).
+ */
 function run(drawio, args, viaXvfb) {
-  const cmd = viaXvfb ? ['xvfb-run', '-a', drawio, ...args] : [drawio, ...args];
+  const profile = mkdtempSync(join(process.env.SVG_DRIFT_TMP || tmpdir(), 'drawio-profile-'));
+  const all = [...args, `--user-data-dir=${profile}`];
+  const cmd = viaXvfb ? ['xvfb-run', '-a', drawio, ...all] : [drawio, ...all];
   const started = Date.now();
-  const r = spawnSync(cmd[0], cmd.slice(1), { encoding: 'utf8', maxBuffer: 1 << 28 });
-  return { ...r, ms: Date.now() - started, cmd: cmd.join(' ') };
+  try {
+    const r = spawnSync(cmd[0], cmd.slice(1), {
+      encoding: 'utf8',
+      maxBuffer: 1 << 28,
+      timeout: Number(process.env.SVG_DRIFT_TIMEOUT_MS) || RUN_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+    });
+    return { ...r, ms: Date.now() - started, cmd: cmd.join(' '), timedOut: r.error?.code === 'ETIMEDOUT' };
+  } finally {
+    rmSync(profile, { recursive: true, force: true });
+  }
 }
 
 export function main(argv = process.argv.slice(2), env = process.env) {
@@ -231,7 +249,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
       const r = run(drawio, [...EXPORT_ARGS, '--output', out, join(root, dir), '--no-sandbox'], viaXvfb);
       console.log(`svg-drift: exported ${dir} in ${r.ms} ms (exit ${r.status})`);
       if (r.status !== 0) {
-        err(dir, `svg-drift: draw.io failed on ${dir} (exit ${r.status}). Command: ${r.cmd}. Tail of stderr: ${(r.stderr ?? '').trim().split('\n').slice(-3).join(' | ')}. Fix: open the diagram in draw.io and export it by hand to see the error.`);
+        err(dir, `svg-drift: draw.io ${r.timedOut ? 'timed out and was killed' : 'failed'} on ${dir} (exit ${r.status}). Command: ${r.cmd}. Tail of stderr: ${(r.stderr ?? '').trim().split('\n').slice(-3).join(' | ')}. Fix: open the diagram in draw.io and export it by hand to see the error.`);
         return 1;
       }
       const made = new Set(readdirSync(out));
