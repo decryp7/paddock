@@ -7,9 +7,9 @@
   mean a missing design rule), rules 42/43 (share first); ADR 0014 §1 (build folders per app), ADR 0022 (all tooling in
   Rust: `paddock-dev`, `./dev`); Pitcrew ADR 0021 (a pool of capacity-1 runners per host); the branch `ci/job-isolation`
   (`fix/ci-home-relocatable`, `ci/concurrent-jobs` and `tools/paddock-dev-r0` merged, then the review's fixes)
-- Code: `conformance/ci/job-isolation.sh`, `conformance/ci/kept-folders.txt`, `conformance/ci/ports.txt`,
+- Code: `tools/paddock-dev/src/ci_isolation` (`./dev ci isolation`; it replaced `conformance/ci/job-isolation.sh`, WP-2 of docs/plans/shell-to-rust.md), `conformance/ci/kept-folders.txt`, `conformance/ci/ports.txt`,
   `.gitea/actions/job-isolation`, `crates/paddock-slots`, `tools/paddock-dev/src/slots.rs` (`./dev ci slot`),
-  `tools/host-cleanup.sh`, `tools/macos-vm-smoke.sh`; tests in `conformance/test/job-isolation.test.mjs`,
+  `tools/paddock-dev/src/ci_host` (`./dev ci host-cleanup`), `tools/macos-vm-smoke.sh`; tests in `conformance/test/job-isolation.test.mjs`,
   `crates/paddock-slots/tests/it/races.rs`, `tools/paddock-dev/tests/it/slots.rs`, `tools/test/*.test.mjs`
 
 ## Context
@@ -90,7 +90,7 @@ Two kinds of per-host state, one mechanism, declared lists:
    a job folder, which Windows could then not delete). `release` fails the job when the holder died before the job ended.
 4. **Declared lists.** `conformance/ci/kept-folders.txt` declares every kept folder (kind, layout, `slot` or `shared`;
    `shared` only for stores safe for concurrent writers: tool installs renamed into place). `conformance/ci/ports.txt` declares every port block a host job binds (sccache, WebKit), one block per slot.
-   Every action, workflow and CI script asks `job-isolation.sh path <kind> [<name>]` or `port <name>`; a new cache or
+   Every action, workflow and CI script asks `./dev ci isolation path <kind> [<name>]` or `port <name>`; a new cache or
    port is one line.
 5. **Clean-up and prune are scoped through the same script.** `host-cleanup` patterns must name `{tmp}`, `{build}` or
    `{slot}`; `{slot}` must end the pattern right after a kept folder's name and is filled in as `s<n>([^0-9]|$)`, so `s1`
@@ -101,7 +101,7 @@ Two kinds of per-host state, one mechanism, declared lists:
    starts one stops it, on ports chosen for the run (Debrief's `wdio.conf.ts`), and a pattern can find it through an
    argument naming the job's folder. A pattern that would match the slot's own holder (`ci slot hold --owner <job
    temp> --root <ci-home>`, e.g. a bare `{tmp}`) is refused, so the clean-up can never free the slot mid-job.
-   `prune-build-folder` prunes only a folder `job-isolation.sh owns` (this slot's
+   `prune-build-folder` prunes only a folder `./dev ci isolation owns` (this slot's
    `target-*`).
 6. **Disk is bounded, and a slot's folders are deleted only under its lock.** `./dev ci slot idle-run --slot s<n> --
    <command>` runs the command only while `s<n>` is idle and holds its lock until the command ends, so no job can take the
@@ -166,7 +166,7 @@ Two kinds of per-host state, one mechanism, declared lists:
 2. Per host, after "Still open" is cleared for it: set `PADDOCK_CI_SLOTS` to the pool maximum in every runner's
    `runner.envs` (only when above 4), then add runners to the pool with Pitcrew (capacity 1 each, all as the same user,
    so one CI home). Never raise a runner's `capacity`.
-3. Watch the first concurrent runs: `bash conformance/ci/job-isolation.sh status` lists the holders; a stalled one
+3. Watch the first concurrent runs: `./dev ci isolation status` lists the holders; a stalled one
    (its job folder kept) is cleared by deleting that job folder or ending its pid, never by deleting `slots/*.lock`.
 
 ## Kept clones (2026-11-09, ci/kept-clone-sparse-checkout)
@@ -218,6 +218,6 @@ and the Linux jobs keep a plain checkout. Measurements: [benchmarks](../benchmar
 ## Still open (blocks adding runners)
 
 - Concurrency itself: every run so far had one runner per host. The first runs with two or three runners on a host
-  (Pitcrew pool) are the real test; watch `job-isolation.sh status` and the release step.
+  (Pitcrew pool) are the real test; watch `./dev ci isolation status` and the release step.
 - The Windows runner's `runner.timeout` (a job longer than it is killed; the holder then ends with the job folder).
 - Linux stays one job per host until containers take slots (decision 8).

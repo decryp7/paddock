@@ -1068,6 +1068,23 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   delete_by = "v0.5.0"
   note = "CI-in-Rust WP-3 (docs/plans/ci-in-rust.md): every caller runs `./dev ci build-env` (WP-2 of docs/plans/shell-to-rust.md deleted conformance/ci/kit.sh, which chose between the two); the script stays only for conformance check C56, which reads the two names from its `buildEnv` function (conformance/src/checks/C56-build-env-names.mjs), until the conformance engine (WP-10 of ci-in-rust.md) is ported; tools/paddock-dev/tests/it/build_env.rs runs both on the same inputs."
 
+
+[[mechanism]]
+id = "ci-home-rule"
+title = "The CI home of a host runner (PADDOCK_CI_HOME, else ~/.paddock-ci) in two implementations: `ci isolation` in Rust, and the block of the `dev` wrapper that keeps the tool in its `tools` folder before the tool exists"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/ci_isolation/home.rs"]
+symbols = ["item:ci_home"]
+status = "built"
+adr = "docs/adr/0025-ci-job-isolation.md"
+
+  [[mechanism.copy]]
+  paths = ["dev"]
+  symbols = ["text:_cihome"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "WP-2 of docs/plans/shell-to-rust.md moved this out of conformance/ci/kit.sh (tools_home): the wrapper cannot ask the tool where the tool goes, because the tool is not built yet. It reads PADDOCK_CI_HOME (absolute, must exist), else creates ~/.paddock-ci, resolves links and uses the mixed path on Git bash, as `ci isolation path tools` does. tools/paddock-dev/tests/it/wrapper_ci.rs, `the_wrappers_ci_home_is_the_one_ci_isolation_gives`, holds the two equal. WP-1 (the launcher crate) carries the block over; the entry leaves with the shell copy."
+
 # =====================================================================================================================
 # CI run readers (RT-8)
 # =====================================================================================================================

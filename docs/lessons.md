@@ -2286,7 +2286,7 @@ docs/plans/shell-to-rust.md deleted the shell: every action and workflow runs `.
 before the tool existed (the tool in the CI home's `tools` folder, no download without a token, no job compiler wrapper and four build
 jobs for the tool's own first build, the pinned tool for a job's later `ci` steps) moved into the `dev` wrapper, tested in
 `tests/it/wrapper_ci.rs`. Each parity case ran the script and the command on the same fixture one last time, and the agreed result
-is a golden file (`tests/golden/parity`, `parity_golden.rs`); a golden captured on the Mac then failed on Linux for three reasons
+is a golden file (`tests/golden/parity`, `parity_golden.rs`); the goldens were first checked on the Mac and in the CI image as an ordinary user, not as root as CI's containers run: the guardian step's golden pinned the Mac's uid 501 in two places the normalisation missed, and the independent review found it (the Linux leg would have gone red); a golden captured on the Mac also failed on Linux for three reasons
 that were never the step's (a `git init` config key only macOS writes, the CI image's own `/sccache` mount, the machine's RAM read from
 a file on Linux but from `sysctl` on macOS), so each is now an input the test sets or a line it drops. **Rule:** when a script is
 retired, run the golden on every OS it will run on before deleting the script, and make each case name every input it reads from the
