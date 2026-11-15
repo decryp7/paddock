@@ -2127,3 +2127,12 @@ edits or deletes lines in place (a reworded lesson, a corrected benchmark row) m
 lines keeps both versions, silently. Rewording an earlier entry goes in its own change, merged alone, and the integrator reads
 the merged hunk of these files like any other. Registers, tables whose rows must be unique and generated files (`gates.toml`,
 `known-copies.toml`, lockfiles) are never `merge=union`: a duplicated row there is a bug, not a merge.
+
+## The nightly disk summary measured a folder CI runners do not have (2026-11-15)
+The nightly's `disk-summary` job ran `./dev disk scan` and `./dev disk report --summary` on the Mac runner. Those read the
+dev-targets folder (worktrees, build folders, agent scratch), which lives on the development machine, not in a runner's
+environment, so it summarised folders a runner does not have (or wrote "not measured") while it held the single Mac runner.
+The user asked whether it was needed; it was removed (with its README line). `./dev disk report` gives the same picture on the machine, and the
+`--summary` option stays for use there. `conformance/test/ci-actions.test.mjs` fails on any workflow step that runs
+`./dev disk scan` or `./dev disk report`. **Rule:** a CI job reads only what a runner has; a check of the development machine
+runs on the machine.

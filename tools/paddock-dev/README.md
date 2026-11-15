@@ -103,7 +103,6 @@ start, and cargo tracks the last use of its caches in SQLite (`cargo clean gc`, 
   orphan and live folders, CI slots (the CI kit sweeps those), and anything without a record (runners, sccache, VMs, Docker, user folders).
 - `./dev disk adopt` writes records for existing worktrees (`git worktree list`) and for build folders named after one (the
   longest matching worktree name); everything else stays an orphan.
-- The nightly (`nightly.yml`, job `disk-summary`) writes `./dev disk report --summary` to the job summary; it follows the night's skip.
 ## `pr`: the branch ledger (user decision 2026-11-12)
 
 Every branch is a draft pull request against main; its labels (`.gitea/labels.toml`) say where it is. Design and the merge

@@ -2397,3 +2397,17 @@ test('the bash-before-Git-bash check flags the 7880 shape and passes the fixed o
   assert.deepEqual(bashBeforeGitBash(wf(check.replace('        run', "        if: runner.os == 'Linux'\n        run") + gitBash)), []);
   assert.deepEqual(bashBeforeGitBash(wf(check, 'ubuntu-latest')), []);
 });
+
+// 2026-11-15 (user): the nightly's disk summary scanned the dev-targets folder, which a CI runner does not have, so it measured
+// nothing; `./dev disk report` gives the same on the machine. No workflow step scans or reports the dev folders.
+test('no workflow step runs ./dev disk scan or ./dev disk report (a runner has no dev-targets folder)', () => {
+  const found = [];
+  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    for (const [id, j] of Object.entries(loadWorkflow(f).jobs ?? {})) {
+      for (const s of stepsOf(j)) {
+        if (/\.\/dev disk (scan|report)\b/.test(String(s.run ?? ''))) found.push(`${f}: ${id}`);
+      }
+    }
+  }
+  assert.deepEqual(found, [], 'remove these steps: run `./dev disk report` locally instead');
+});
