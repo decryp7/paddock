@@ -74,7 +74,7 @@ pub fn sizes(dir: &Path) -> (u64, u64) {
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         let Ok(meta) = std::fs::symlink_metadata(&d) else { continue };
-        count(&meta, &mut seen, &mut allocated, &mut apparent);
+        count(Entry::of(&meta), &mut seen, &mut allocated, &mut apparent);
         if meta.is_dir() && !meta.file_type().is_symlink() {
             let Ok(entries) = std::fs::read_dir(&d) else { continue };
             for e in entries.flatten() {
@@ -85,26 +85,60 @@ pub fn sizes(dir: &Path) -> (u64, u64) {
     (allocated, apparent)
 }
 
-fn count(meta: &std::fs::Metadata, seen: &mut HashSet<(u64, u64)>, allocated: &mut u64, apparent: &mut u64) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        if meta.nlink() > 1 && !meta.is_dir() && !seen.insert((meta.dev(), meta.ino())) {
-            return;
+/// What [`sizes`] reads of one entry: a plain value, so a test can give a folder the 8 blocks ext4 gives it on any file system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Entry {
+    /// A regular file (not a folder, a link or anything else).
+    is_file: bool,
+    /// A folder.
+    is_dir: bool,
+    /// The allocated bytes: 512-byte blocks times 512 on Unix; the length on Windows, which reports no block count.
+    allocated: u64,
+    /// The length.
+    len: u64,
+    /// The number of names of the file (1 where the platform does not say).
+    nlink: u64,
+    /// The device and inode (`(0, 0)` where the platform does not say).
+    id: (u64, u64),
+}
+
+impl Entry {
+    fn of(meta: &std::fs::Metadata) -> Entry {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Entry {
+                is_file: meta.is_file(),
+                is_dir: meta.is_dir(),
+                allocated: meta.blocks() * 512,
+                len: meta.len(),
+                nlink: meta.nlink(),
+                id: (meta.dev(), meta.ino()),
+            }
         }
-        if meta.is_file() {
-            *allocated += meta.blocks() * 512;
+        #[cfg(not(unix))]
+        {
+            Entry {
+                is_file: meta.is_file(),
+                is_dir: meta.is_dir(),
+                allocated: meta.len(),
+                len: meta.len(),
+                nlink: 1,
+                id: (0, 0),
+            }
         }
     }
-    #[cfg(not(unix))]
-    {
-        let _ = seen;
-        if meta.is_file() {
-            *allocated += meta.len();
-        }
+}
+
+/// Adds one entry: only a regular file counts, once however many names it has. A folder's blocks and length are not content
+/// (ext4 gives each folder 4 KiB, CI run 8138).
+fn count(e: Entry, seen: &mut HashSet<(u64, u64)>, allocated: &mut u64, apparent: &mut u64) {
+    if e.nlink > 1 && !e.is_dir && !seen.insert(e.id) {
+        return;
     }
-    if meta.is_file() {
-        *apparent += meta.len();
+    if e.is_file {
+        *allocated += e.allocated;
+        *apparent += e.len;
     }
 }
 
@@ -373,6 +407,33 @@ pub fn free_gb(_: &Path) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder with ext4's 8 blocks and 4 KiB of length adds nothing; a file adds its blocks and length; a second name of a hard
+    /// link adds nothing (CI run 8138: the folders' blocks made a folder of empty folders 20 KiB).
+    #[test]
+    fn a_folder_adds_nothing_a_file_its_own_blocks_and_a_hard_link_once() {
+        let folder = Entry {
+            is_file: false,
+            is_dir: true,
+            allocated: 8 * 512,
+            len: 4096,
+            nlink: 2,
+            id: (1, 10),
+        };
+        let file = Entry {
+            is_file: true,
+            is_dir: false,
+            allocated: 8 * 512,
+            len: 3000,
+            nlink: 2,
+            id: (1, 11),
+        };
+        let (mut seen, mut allocated, mut apparent) = (HashSet::new(), 0, 0);
+        for e in [folder, folder, file, file] {
+            count(e, &mut seen, &mut allocated, &mut apparent);
+        }
+        assert_eq!((allocated, apparent), (4096, 3000));
+    }
 
     fn big(root: &Path, path: &str, kb: usize) {
         let dir = root.join(path);

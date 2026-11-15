@@ -434,14 +434,17 @@ if (flag === (gnu ? '-f' : '-c')) {
 }
 for (const f of files) {
   const s = statSync(f);
-  console.log(fmt.replace('%d', s.dev).replace('%i', s.ino).replace(gnu ? '%s' : '%z', s.size).replace('%s', s.size).replace('%b', s.blocks));
+  // A folder answers as on ext4, 4 KiB and 8 blocks, whatever this machine's file system gives it: a lister that lets folders
+  // through (no -type f) is then wrong everywhere, not only on ext4 (CI run 8138).
+  const [size, blocks] = s.isDirectory() ? [4096, 8] : [s.size, s.blocks];
+  console.log(fmt.replace('%d', s.dev).replace('%i', s.ino).replace(gnu ? '%s' : '%z', size).replace('%s', size).replace('%b', blocks).replace('%B', 512));
 }`,
     );
     exe(join(bin, 'stat'), `exec '${process.execPath}' '${statJs}' "$@"`);
     // Folders allocate blocks too (4 KiB each on ext4): only the readable files' own blocks count, the hard link once.
     const allocated = ['x/a', 'x/incremental/b'].reduce((n, f) => n + statSync(join(tree, f)).blocks * 512, 0);
     for (const flavour of ['gnu', 'bsd']) {
-      for (const [what, want] of [['file-bytes', 8000], ['file-allocated', allocated]]) {
+      for (const [what, want] of [['file-bytes', 8000], ['file-allocated', allocated], ['file-sizes', `8000 ${allocated}`]]) {
         const r = spawnSync('sh', [join(PADDOCK, 'conformance', 'ci', 'kit.sh'), 'portable', what, tree], {
           env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, FAKE_STAT: flavour },
           encoding: 'utf8',
