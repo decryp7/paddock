@@ -500,3 +500,51 @@ fn a_child_cargos_build_script_does_not_reach_the_tools_of_cargo_home() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// Every command of a test process shares one toolchain link folder, made once (ci.yml run 8152: made per command, the Windows
+/// tests that start many children ran about 6 times slower), and it is never inside a command's or a `new_in` folder.
+#[test]
+fn many_commands_share_one_toolchain_link_folder_made_once_outside_their_own_folders() {
+    let d = tempfile::tempdir().unwrap();
+    let tc = d.path().join("toolchain");
+    std::fs::create_dir(&tc).unwrap();
+    let rustc = tc.join(if cfg!(windows) { "rustc.exe" } else { "rustc" });
+    std::fs::write(&rustc, "").unwrap();
+    let mut env = env_lock();
+    let mut dirs = vec![tc.clone()];
+    dirs.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    env.set("PATH", std::env::join_paths(dirs).unwrap());
+    let before = paddock_testkit::process::toolchain_folders_made();
+    let given = d.path().join("given");
+    let mut cmds: Vec<TestCommand> = (0..5).map(|_| TestCommand::new("git")).collect();
+    cmds.push(TestCommand::new_in("git", &given));
+    assert_eq!(
+        paddock_testkit::process::toolchain_folders_made(),
+        before + 1,
+        "one folder for six commands"
+    );
+    let folders: std::collections::BTreeSet<std::path::PathBuf> = cmds
+        .iter()
+        .map(|c| {
+            let report = c.path_report();
+            let link = report
+                .toolchain
+                .iter()
+                .find(|l| l.file_name() == rustc.file_name())
+                .cloned();
+            link.unwrap_or_else(|| panic!("no rustc link: {report}"))
+                .parent()
+                .unwrap()
+                .to_path_buf()
+        })
+        .collect();
+    assert_eq!(folders.len(), 1, "{folders:?}");
+    let folder = folders.into_iter().next().unwrap();
+    assert!(
+        !folder.starts_with(&given) && cmds.iter().all(|c| !folder.starts_with(c.private_dir())),
+        "{}",
+        folder.display()
+    );
+}

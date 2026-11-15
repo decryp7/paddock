@@ -1363,3 +1363,38 @@ CI timeout reproduce under local load?
   agents' cap) does not reach that, so the split rests on the log's per-step times, not on a local reproduction. macOS 27 shows
   no other process's environment (`ps -E` and sysinfo's `environ()` both return none for a same-user `sleep` given a variable),
   so the reaper's token is read on Linux only. Raw output in the agent's scratch folder, not kept.
+
+## TestCommand construction: per command against once per process (2026-11-16, feat/test-env-builder, ADR 0100)
+
+Question: why did the paddock-dev tests that start many children through `TestCommand` run about 6 times slower on the
+Windows CI runner (ci.yml run 8152, job 39497: merge_check median 5.8 to 44 s, golden 24.5 to 160.5 s, the other 302 tests
+1.06x), and which part of `TestCommand::new` costs it: the toolchain links, the `PATH` resolution or `git --exec-path`?
+
+- **Machine:** the Windows 11 Arm test VM (x64 binary under emulation), through `scripts/vm-win.sh run --ci-like` (the runner's
+  temp folder, Git's bin first on PATH) under the test machines lock; the Mac mini for the Mac row. 1-minute Mac load 16.9.
+- **Command:** `crates/paddock-testkit/examples/measure_test_command.rs` built with `cargo xwin` (debug), run as
+  `measure_test_command --runs 20` (no toolchain on PATH), `--fake-toolchain <dir>` (a 15 MB `rustup` with six proxies as hard
+  links of it and a separate `cargo`, first on PATH and in `CARGO`) and `--fake-toolchain <dir> --saturate` (the `rustup` file
+  given 1017 more hard links first: NTFS refuses the next one with os error 1142, as when many commands hold links to it).
+  "before" is 88d0d9fb3 (links made per command in the command's own folder, PATH worked out per command); "after" is this
+  change (one link folder per toolchain, made once; PATH worked out once per machine PATH and `CARGO`). One run each, same VM
+  session.
+- **Numbers (milliseconds per `TestCommand::new`; first call, then the median and max of the next 19):**
+
+  | Case | before: first / median / max | after: first / median / max |
+  |---|---|---|
+  | no toolchain on PATH | 67.2 / 13.4 / 16.3 | 79.5 / 1.1 / 2.6 |
+  | toolchain, hard links work | 60.3 / 6.8 / 11.0 | 83.1 / 1.0 / 17.5 |
+  | toolchain, hard links refused (copies) | 522.4 / 72.6 / 3481.6 | 162.5 / 0.9 / 12.8 |
+  | Mac, no toolchain on PATH (before) | 1.6 / 0.8 / 1.0 | |
+
+  Parts, measured separately in the same runs: seven hard links 0.6 to 15 ms; seven 15 MB copies 33 to 43 ms (plus the
+  scan of each new program file; a max of 3.5 s per command before); `git --exec-path` 40 to 71 ms, already asked once per
+  process before this change; the seven-name `path_report` resolve 4 to 6 ms.
+- **Cause:** work done per command. Where hard links work it is mainly the `PATH` resolution (13.4 ms median with nothing
+  found early on PATH); where they are refused (another volume, or the 1024-link limit of one rustup file that every command
+  linked again) it is the copy, 72.6 ms median and up to 3.5 s. Which of the two the CI runner hit is not recorded in its log
+  (the runner's volumes are not printed; the copy fallback now says so on stderr); both are now paid once per test process,
+  and the copy once per toolchain and machine. `git --exec-path` was not the cause.
+- **Not measured:** the CI runner itself (the integrator's rerun of the failed jobs is the check), a release build, a cold
+  Defender cache.
