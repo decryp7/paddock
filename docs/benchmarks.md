@@ -119,7 +119,7 @@ that quotes a result links to the block instead of carrying the only copy.
 
 - **Notes:** on the Mac most of the time is `rustc -vV` through the rustup proxy, which both versions run once; the shell also ran
   `git`, `tr`, `sed`, `awk` and `grep` about 35 times. On Linux there is no proxy, so the launcher's extra process starts (the
-  stage 0's two git calls and the launcher's own start) show. A first Mac round taken at 0 % idle CPU (254 and 160 ms) is not used.
+  stage 0's two git calls and the launcher's own start) show. A first Mac round taken at 0 % idle CPU (254 and 160 ms) is not used, nor is a Linux re-run of 2026-11-16 at 0.3 % idle CPU (old 20 to 40 ms, new 26 to 31 ms: noise). The stage 0 of that day added `--no-optional-locks` and, when something is uncommitted, a third git call; the cached-tool path still makes two.
   Not measured: Windows, a cache miss, and the cold build of the tool itself.
 
 ### 2026-11-15, pre-push heavy queue times (fix/pre-push-base-and-budget)
