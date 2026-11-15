@@ -2116,3 +2116,14 @@ steps of one push run one at a time while light rows go on.
 what the push sends, never by local names. Pushing a train before stacking work on it keeps the checks small.
 **Class: the pre-push gate's scope differs from what the push sends (an old base measured more; a local base would have
 measured less); earlier: the 2026-11-12 base choice from origin/main for train-based branches.**
+
+## Two branches that each added a lesson conflicted at the end of the file (2026-11-15)
+Every train that merged two branches with a new lesson (or a new benchmark block) stopped on a conflict in `docs/lessons.md`:
+both sides added lines after the same last line, so git saw one hunk changed twice, and the integrator resolved it by hand each
+time. The append-only logs now merge with git's union driver (`.gitattributes`: `docs/lessons.md`, `docs/benchmarks.md` and
+each app's `docs/performance.md`, `merge=union`), which keeps both sides' added lines; `conformance/test/union-merge.test.mjs`
+merges two such branches in a scratch repository. **When union is not safe:** it never reports a conflict, so a change that
+edits or deletes lines in place (a reworded lesson, a corrected benchmark row) merged with another branch's edit of the same
+lines keeps both versions, silently. Rewording an earlier entry goes in its own change, merged alone, and the integrator reads
+the merged hunk of these files like any other. Registers, tables whose rows must be unique and generated files (`gates.toml`,
+`known-copies.toml`, lockfiles) are never `merge=union`: a duplicated row there is a bug, not a merge.
