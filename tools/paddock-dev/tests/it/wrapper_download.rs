@@ -1,7 +1,7 @@
 //! The `./dev` wrapper's prebuilt download (ADR 0022 R0b): a hit, a 404, a bad checksum, a binary for another hash and a server that
 //! never answers, against a small HTTP server in the test. The wrapper never trusts what it fetched and always falls back to a build.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-// windows-twin: none: it runs the ./dev shell wrapper, which Windows runs through Git bash on every job
+// windows-twin: none: the cargo stand-in is an sh script; the launcher it runs is built and tested on Windows too (ci.yml, "Launcher")
 #![cfg(unix)]
 use super::wrapper::{Fixture, fake_rustc, launcher, shim_cargo, write_script};
 use paddock_testkit::TestCommand;

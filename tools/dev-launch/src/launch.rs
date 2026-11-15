@@ -22,6 +22,13 @@ fn env_var(k: &str) -> Option<String> {
     std::env::var_os(k).map(|v| v.to_string_lossy().into_owned())
 }
 
+/// A line on standard output. A reader that went away (`./dev --print-binary | head -1`) is no error: the shell's `echo` ended
+/// quietly on SIGPIPE, and `println!` would panic.
+fn say(line: &str) {
+    use std::io::Write;
+    let _ = writeln!(std::io::stdout(), "{line}");
+}
+
 fn env_non_empty(k: &str) -> Option<String> {
     env_var(k).filter(|v| !v.is_empty())
 }
@@ -448,11 +455,19 @@ pub fn run(args: Vec<String>) -> i32 {
 
     if ctx.args.first().map(String::as_str) == Some("--wrapper-hash") {
         explain(&found);
-        println!("{}", found.hash);
-        println!("{}", if found.dirty { "dirty" } else { "clean" });
+        say(&format!("{}\n{}", found.hash, if found.dirty { "dirty" } else { "clean" }));
         return 0;
     }
     launch(&ctx, &found)
+}
+
+/// A folder of its own for a fresh build, in the job's temp folder (`mktemp -d`): a release job's build leaves nothing in the checkout.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "no Paddock scratch helper exists before the launcher has run; the folder is removed after the build"
+)]
+fn fresh_dir() -> PathBuf {
+    std::env::temp_dir().join(download::unique("paddock-dev-fresh-"))
 }
 
 /// Whether `dir` is a folder this process can write to (`[ -d ] && [ -w ]`).
@@ -478,7 +493,7 @@ fn launch(ctx: &Ctx, f: &Found) -> i32 {
         if let Err(code) = refuse_build_target() {
             return code;
         }
-        let fresh = target_base.join(download::unique(".fresh-"));
+        let fresh = fresh_dir();
         let _ = std::fs::create_dir_all(&fresh);
         let mut c = proc::command("cargo");
         c.args(["build", "--release", "--locked", "--quiet"])
@@ -544,7 +559,7 @@ fn launch(ctx: &Ctx, f: &Found) -> i32 {
     // `--print-binary`: where the tool is (built if need be), without running it. job-isolation pins it for the whole job: the hash
     // covers files the job itself writes (tools/paddock-dev/.cargo/ci.toml), so at the job's end ./dev would want another build.
     if first == Some("--print-binary") {
-        println!("{}", cached.display());
+        say(&cached.display().to_string());
         return 0;
     }
     ctx.start(&cached, &f.hash)

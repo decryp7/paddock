@@ -2,7 +2,7 @@
 //! runs it. A stand-in `cargo` "builds" a script, so these tests need no compiler; the launcher itself is tested in
 //! `tools/dev-launch/tests` and `wrapper.rs`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-// windows-twin: dev.cmd is the stage 0 of Windows and the VM run of this change starts it; these cases use sh stand-ins.
+// windows-twin: none: the cargo and rustup stand-ins are sh scripts; Windows runs dev-launch's own tests (tools/dev-launch/tests/launcher.rs) on every run, and dev.cmd in the test VM
 #![cfg(unix)]
 use super::wrapper::write_script;
 use paddock_testkit::TestCommand;

@@ -277,3 +277,22 @@ fn it_needs_nothing_on_path_but_git() {
     assert!(out.status.success(), "{}", text(&out).1);
     assert_eq!(text(&out).0, format!("{PLAIN}\nclean\n"));
 }
+
+/// `./dev --wrapper-hash | head -1`: a reader that went away is no error. The shell's `echo` ended quietly on SIGPIPE; `println!` would
+/// panic and exit 101 with a message on standard error.
+#[test]
+fn a_reader_that_closed_standard_output_does_not_make_it_panic() {
+    let s = Scratch::new();
+    let root = repo(&s);
+    let rustc = fake_rustc(&s);
+    let mut child = launcher(&s, &root, &rustc, &["--wrapper-hash"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    // The launcher runs git and the compiler before it prints: the pipe is closed by then.
+    drop(child.stdout.take());
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{} {:?}", String::from_utf8_lossy(&out.stderr), out.status);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("panicked"));
+}
