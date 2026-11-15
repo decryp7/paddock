@@ -12,9 +12,9 @@ const SPEC = { id: 'CX', rule: 21, file: FILE, unseen: 'a site' };
 /** A run's view of a tree of `files` ({ path: text }). */
 const ctxOf = (files) => ({ read: (p) => (Object.hasOwn(files, p) ? files[p] : null), files: () => Object.keys(files) });
 const list = (...entries) => new AllowList(SPEC, parseAllowList(JSON.stringify({ allow: entries }), FILE), ctxOf({ 'a/b.rs': 'needle' }));
-/** The warnings' messages; `looked`: the run read `a/b.rs` (else it never looked at it). */
-const messages = (l, looked = true) => {
-  if (looked) l.read('a/b.rs');
+/** The warnings' messages after a run that read `a/b.rs`. */
+const messages = (l) => {
+  l.read('a/b.rs');
   return l.warnings().map((f) => f.message);
 };
 
@@ -50,7 +50,16 @@ test('allow list: admit counts up to the count and calls the rest beyond; fewer 
 });
 
 test('allow list: an entry for a file the run did not look at is neither stale nor counted', () => {
-  assert.deepEqual(messages(list(entry()), false), []);
+  // `a/b.rs` exists but is not among the run's files (a run over other files): nothing is said about its entry.
+  const outside = new AllowList(SPEC, parseAllowList(JSON.stringify({ allow: [entry()] }), FILE), { read: () => 'needle', files: () => [] });
+  assert.deepEqual(outside.warnings(), []);
+});
+
+test('allow list: an entry for a file of the run that the check does not read names a file it does not read', () => {
+  const l = new AllowList(SPEC, parseAllowList(JSON.stringify({ allow: [entry(), entry({ path: 'docs/x.md' })] }), FILE), ctxOf({ 'a/b.rs': 'needle', 'docs/x.md': 'needle' }));
+  l.read('a/b.rs');
+  l.admit('a/b.rs', () => true);
+  assert.deepEqual(l.warnings().map((f) => [f.file, f.message]), [[FILE, 'allow entry (docs/x.md: needle) names a file this check does not read']]);
 });
 
 test('allow list: a whole float count is its integer, as the Rust host reads it', () => {

@@ -152,7 +152,8 @@ pub enum Admit {
 }
 
 /// The allow list of one run: [`AllowList::read`] reads a file the check looks at, [`AllowList::admit`]
-/// answers per flagged site and counts, [`AllowList::warnings`] names the stale entries.
+/// answers per flagged site and counts, [`AllowList::warnings`] names the stale entries and those
+/// for a file the check does not read.
 pub struct AllowList {
     spec: &'static Spec,
     entries: Vec<Entry>,
@@ -233,13 +234,25 @@ impl AllowList {
 
     /// The warnings for the entries that matched fewer sites than their count ([`AllowList::admit`] never counts more). An entry is stale only for a file the
     /// run read, or one that does not exist: an entry for a file the run never looked at, or could not read, is neither stale nor
-    /// matched.
+    /// matched. An entry for a file of the run's files that the check passed over (not its kind of file, or one of its own) names a
+    /// file this check does not read: it can never match, so it is a warning too.
     pub fn warnings(&self, ctx: &Ctx) -> Vec<Finding> {
         let Spec { id, rule, file, .. } = *self.spec;
         let looked = |p: &str| self.scanned.contains(p) || (!self.unread.contains(p) && ctx.read(p).is_none());
+        let files = ctx.files();
+        let run: HashSet<&str> = files.iter().map(String::as_str).collect();
         let mut out = Vec::new();
         for (a, &hits) in self.entries.iter().zip(&self.hits) {
-            if hits < a.count && looked(&a.path) {
+            if run.contains(a.path.as_str()) && !self.scanned.contains(&a.path) && !self.unread.contains(&a.path) {
+                out.push(Finding::warn(
+                    id,
+                    rule,
+                    file,
+                    1,
+                    format!("allow entry ({}: {}) names a file this check does not read", a.path, a.site),
+                    format!("Remove it from {file}: no site in that file can need it."),
+                ));
+            } else if hits < a.count && looked(&a.path) {
                 let (what, fix) = if hits == 0 {
                     ("matches no site".to_string(), format!("Remove it from {file}."))
                 } else {
@@ -293,12 +306,10 @@ mod tests {
         f(&ctx)
     }
 
-    /// The warnings' messages; `looked`: the run read `a/b.rs` (else it never looked at it).
-    fn messages(mut l: AllowList, looked: bool) -> Vec<String> {
+    /// The warnings' messages after a run that read `a/b.rs`.
+    fn messages(mut l: AllowList) -> Vec<String> {
         with_ctx(&[("a/b.rs", "needle")], |ctx| {
-            if looked {
-                l.read(ctx, "a/b.rs").unwrap();
-            }
+            l.read(ctx, "a/b.rs").unwrap();
             l.warnings(ctx).into_iter().map(|f| f.message).collect()
         })
     }
@@ -339,7 +350,7 @@ mod tests {
         assert_eq!(l.admit("a/c.rs", holds("let x = needle;")), Admit::Unlisted);
         assert_eq!(l.admit("a/b.rs", holds("let x = other;")), Admit::Unlisted);
         assert_eq!(l.admit("a/b.rs", holds("let x = needle;")), Admit::Allowed);
-        assert!(messages(l, true).is_empty());
+        assert!(messages(l).is_empty());
     }
 
     #[test]
@@ -350,24 +361,45 @@ mod tests {
         assert_eq!(l.admit("a/b.rs", exact), Admit::Allowed);
         assert_eq!(l.admit("a/b.rs", exact), Admit::Beyond);
         assert!(
-            messages(l, true).is_empty(),
+            messages(l).is_empty(),
             "a site beyond the count is the caller's finding at the site, not a warning on the entry"
         );
         assert_eq!(
-            messages(list(&entry("")), true),
+            messages(list(&entry(""))),
             ["stale allow entry (a/b.rs: needle) matches no site"]
         );
         let mut short = list(&entry(", \"count\": 3"));
         short.admit("a/b.rs", exact);
         assert_eq!(
-            messages(short, true),
+            messages(short),
             ["stale allow entry (a/b.rs: needle) matches only 1 of its 3 sites"]
         );
     }
 
     #[test]
     fn an_entry_for_a_file_the_run_did_not_look_at_is_not_stale() {
-        assert!(messages(list(&entry("")), false).is_empty());
+        // `a/b.rs` exists but is not among the run's files (a `--files` run over other files): nothing is said about its entry.
+        let tree = Tree::in_memory(&[("a/b.rs", "needle")]);
+        let config = Config::bare("fixture");
+        let ctx = Ctx::new(&tree, Rc::new(Vec::new()), None, &config, None, "2026-11-15".into());
+        assert!(list(&entry("")).warnings(&ctx).is_empty());
+    }
+
+    #[test]
+    fn an_entry_for_a_file_of_the_run_that_the_check_does_not_read_is_named() {
+        let mut l = list(&format!("{}, {}", entry(""), entry("").replace("a/b.rs", "docs/x.md")));
+        with_ctx(&[("a/b.rs", "needle"), ("docs/x.md", "needle")], |ctx| {
+            l.read(ctx, "a/b.rs").unwrap();
+            assert_eq!(l.admit("a/b.rs", |_| true), Admit::Allowed);
+            let said: Vec<(String, String)> = l.warnings(ctx).into_iter().map(|f| (f.file, f.message)).collect();
+            assert_eq!(
+                said,
+                [(
+                    FILE.to_string(),
+                    "allow entry (docs/x.md: needle) names a file this check does not read".to_string()
+                )]
+            );
+        });
     }
 
     #[test]

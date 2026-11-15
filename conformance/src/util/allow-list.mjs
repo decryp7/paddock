@@ -38,7 +38,8 @@ export function parseAllowList(text, file) {
 
 /**
  * The allow list of one run of check `spec` ({ id, rule, file, unseen }) over `ctx`: `read` reads a file the check looks at, `admit`
- * answers per flagged site and counts, `warnings` names the stale entries.
+ * answers per flagged site and counts, `warnings` names the stale entries and those for a
+ * file the check does not read.
  */
 export class AllowList {
   constructor(spec, entries, ctx) {
@@ -89,14 +90,19 @@ export class AllowList {
   /**
    * The warnings for the entries that matched fewer sites than their count (`admit` never counts more). An entry is stale only for a file the run
    * read, or one that does not exist: an entry for a file the run never looked at, or could not read, is neither stale nor matched.
+   * An entry for a file of the run's files that the check passed over (not its kind of file, or one of its own) names a file this
+   * check does not read: it can never match, so it is a warning too.
    */
   warnings() {
     const { id, rule } = this.spec;
     const looked = (path) => this.scanned.has(path) || (!this.unread.has(path) && (this.ctx.read(path) === null || this.ctx.read(path) === undefined));
+    const run = new Set(this.ctx.files());
     const out = [];
     this.entries.forEach((a, i) => {
       const hits = this.hits[i];
-      if (hits < a.count && looked(a.path)) {
+      if (run.has(a.path) && !this.scanned.has(a.path) && !this.unread.has(a.path)) {
+        out.push(warn(id, rule, this.file, 1, `allow entry (${a.path}: ${a.site}) names a file this check does not read`, `Remove it from ${this.file}: no site in that file can need it.`));
+      } else if (hits < a.count && looked(a.path)) {
         const what = hits === 0 ? 'matches no site' : `matches only ${hits} of its ${a.count} sites`;
         out.push(warn(id, rule, this.file, 1, `stale allow entry (${a.path}: ${a.site}) ${what}`, hits === 0 ? `Remove it from ${this.file}.` : `Lower its \`count\` to ${hits}.`));
       }

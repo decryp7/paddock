@@ -106,3 +106,9 @@ test('C124 flags the variants of a result enum, not one result word among a phas
   const nm = flaggedRust(DEV, 'enum Probe {\n    Ok,\n    NotMeasured,\n}\nfn f() { json!({"status": 1}); }\n');
   assert.deepEqual(nm.map((f) => f.line), [3, 5]);
 });
+
+test('C124 allow list: an entry for a file C124 does not read is a warning', async () => {
+  const allow = JSON.stringify({ allow: [{ path: 'docs/notes.md', site: 'NotMeasured', reason: 'a reason long enough' }] });
+  const found = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow, 'docs/notes.md': 'NotMeasured\n', [DEV]: 'fn f() {}\n' }));
+  assert.deepEqual(found.map((x) => [x.file, x.message]), [['conformance/c124-allow.json', 'allow entry (docs/notes.md: NotMeasured) names a file this check does not read']]);
+});
