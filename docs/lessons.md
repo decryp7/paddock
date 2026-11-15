@@ -2083,3 +2083,33 @@ timeout says what it saw last. A second test makes the slow path certain (the he
 before (the tree is ended before the helper writes), green after; 200 of 200 green under the same burners. **Rule for tests:** a test that must observe a process
 the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
 observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**
+
+## The AI browsing chip's Stop moved when the jobs pill appeared, and the click was lost (Debrief, 2026-11-15, CI run 8136)
+WebKit `browser.e2e.ts:71` flaked on main (2 of 147 runs): after "Stop the AI's browser" the chip was still there. The trace
+had no "Stop pressed on the AI browsing chip" log, so `stop()` never ran: the click did not reach the button. Its DOM
+snapshots show the jobs pill (`status-jobs`, "1 job running or waiting") inserted between the click's resolve and its end;
+the pill sits to the right of the chip in the right-anchored status bar and appears 2 s after the question is queued (the
+engine's and the mock's `visibleMs`, emitted on a 400 ms tick), as does the problems badge after its scan. Hypotheses: the
+chip re-created by the status bar (refuted: items are tracked by id), Stop disabled while `stopping` (refuted: no log at
+all), the mock dropping Stop (refuted: nothing called it). Measured in the CI image (WebKit): pressing Stop, letting the
+pill appear and releasing lost the click 10 of 10 times, Stop moved from x 1140.5 to 1092.9 (the failing trace's box is at
+1140.5). **Fix (spec):** `clickWithTimePaused` (`e2e/app.ts`) clicks with the page clock paused, as `live-tail.e2e.ts` does for
+toasts, so no timer can move the bar during the click; 60 of 60 green in the CI image afterwards (`--repeat-each=30`, both
+Stop tests). The product still moves Stop when a status item to its right appears (ADR 0061's rule, not yet applied to the
+status bar): left as a decision. Why the logs did not show it: the app logs Stop, so its absence named the lost click; the
+click's target is not logged. **Class: a control that moves under the pointer during a click (third instance after the
+timeline header, run 7697, and the toast stack, run 8004).**
+
+## axe read a table row half-way into the dark theme although the transitions had been settled (Pitwall, 2026-11-15, CI run 8134)
+WebKit `a11y.e2e.ts` "benchmarks" failed on main with `dark: color-contrast` on every row's muted cells: #a0a7b2 on #5c5d60,
+a background 70 % of the way from white to the dark surface; the cells' `transition: background 100ms` was running while axe
+read them. Train 11 changed nothing in Pitwall's styles or the tokens (refuted by the diff). The trace: the DOM did not change
+from the theme switch until after the dark scan, the screencast still showed the light theme 80 ms after `emulateMedia` and
+the grey rows 375 ms after it, during the scan, so the transition began after `settleTransitions` had looked. Not reproduced:
+0 of 20 runs in the CI image, and probes of emulate plus settle (40 switches, with the page kept busy 0 to 450 ms) always
+found the transition and finished it; with six CPU burners the runs timed out instead. So why the transition started late
+on the runner is open. **Fix (helper):** `axeViolations` records colour transitions and animations that begin during a scan
+(`transitionrun`, `animationstart`, and those still running at its end) and then settles and scans again, at most 3 times,
+then fails naming them. Selftest `selftest/axe-themes.spec.ts` flips the theme as axe starts: red before in Chromium and
+WebKit (the CI symptom), green after. **Class: axe read colours that were still changing (earlier: the theme switch
+transition that `settleTransitions` was made for, and the hover tooltip fading in, run 7872).**
