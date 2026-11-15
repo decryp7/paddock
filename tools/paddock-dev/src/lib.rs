@@ -83,6 +83,7 @@ pub mod pre_push;
 pub mod queue;
 pub mod release_isolation;
 pub mod safe_remove;
+pub mod setup;
 pub mod setup_harness;
 pub mod slots;
 // Unix only: it starts the helper through a POSIX shell, and every test that uses it is `#[cfg(unix)]`.
