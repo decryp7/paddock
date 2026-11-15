@@ -5,6 +5,8 @@
 //! One file per test, `golden/parity/<group>/<test>.txt`, holding the test's cases in the order it makes them, each after a line
 //! `=== case <n> ===`. A case that is not in the file, or differs from it, fails the test with the first differing line.
 //! `PADDOCK_UPDATE_GOLDEN=1` rewrites the file after a deliberate change of the output; read the diff before committing it.
+// windows-twin: none: the helper of the Unix-only parity tests; it holds nothing on Windows, whose jobs run the real thing
+#![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_testkit::golden::{GoldenMode, UPDATE_VAR};
