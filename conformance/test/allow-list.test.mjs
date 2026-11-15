@@ -29,45 +29,28 @@ test('allow list: an entry needs a path, a site and a reason; count is a whole n
   assert.throws(() => parseAllowList('nope', FILE), /not JSON/);
 });
 
-test('allow list: a site is allowed only in its own file and only when the line holds the site text', () => {
+test('allow list: a site is allowed only in its own file and only when the entry names it', () => {
   const l = list(entry());
-  assert.equal(l.allows('a/b.rs', 'let x = needle;'), true);
-  assert.equal(l.allows('a/c.rs', 'let x = needle;'), false);
-  assert.equal(l.allows('a/b.rs', 'let x = other;'), false);
+  const holds = (line) => (site) => line.includes(site);
+  assert.equal(l.admit('a/c.rs', holds('let x = needle;')), 'unlisted');
+  assert.equal(l.admit('a/b.rs', holds('let x = other;')), 'unlisted');
+  assert.equal(l.admit('a/b.rs', holds('let x = needle;')), 'allowed');
   assert.deepEqual(messages(l), []);
 });
 
-test('allow list: no match is stale, a match beyond the count is ambiguous, fewer than the count is stale (PHPStan count)', () => {
+test('allow list: admit counts up to the count and calls the rest beyond; fewer than the count is stale (PHPStan count)', () => {
+  const l = list(entry({ count: 2 }));
+  const exact = (site) => site === 'needle';
+  assert.deepEqual([l.admit('a/b.rs', exact), l.admit('a/b.rs', exact), l.admit('a/b.rs', exact)], ['allowed', 'allowed', 'beyond']);
+  assert.deepEqual(messages(l), [], "a site beyond the count is the caller's finding at the site, not a warning on the entry");
   assert.deepEqual(messages(list(entry())), ['stale allow entry (a/b.rs: needle) matches no site']);
-  const two = list(entry());
-  two.allows('a/b.rs', 'needle 1');
-  two.allows('a/b.rs', 'needle 2');
-  assert.deepEqual(messages(two), ['ambiguous allow entry (a/b.rs: needle) matches 2 sites']);
-  const counted = list(entry({ count: 2 }));
-  counted.allows('a/b.rs', 'needle 1');
-  counted.allows('a/b.rs', 'needle 2');
-  assert.deepEqual(messages(counted), []);
   const short = list(entry({ count: 3 }));
-  short.allows('a/b.rs', 'needle 1');
+  short.admit('a/b.rs', exact);
   assert.deepEqual(messages(short), ['stale allow entry (a/b.rs: needle) matches only 1 of its 3 sites']);
 });
 
 test('allow list: an entry for a file the run did not look at is neither stale nor counted', () => {
   assert.deepEqual(messages(list(entry()), false), []);
-  // Ambiguity is a fact of the sites seen, whatever else was read.
-  const l = list(entry());
-  l.allows('a/b.rs', 'needle');
-  l.allows('a/b.rs', 'needle');
-  assert.equal(messages(l, false).length, 1);
-});
-
-test('allow list: admit counts up to the count and calls the rest beyond, never ambiguous', () => {
-  const l = list(entry({ count: 2 }));
-  const exact = (site) => site === 'needle';
-  assert.deepEqual([l.admit('a/b.rs', exact), l.admit('a/b.rs', exact), l.admit('a/b.rs', exact)], ['allowed', 'allowed', 'beyond']);
-  assert.equal(l.admit('a/c.rs', exact), 'unlisted');
-  assert.equal(l.admit('a/b.rs', () => false), 'unlisted');
-  assert.deepEqual(messages(l), [], "a site beyond the count is the caller's finding, not an ambiguous entry");
 });
 
 test('allow list: a whole float count is its integer, as the Rust host reads it', () => {

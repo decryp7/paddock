@@ -1,8 +1,9 @@
 // One allow list per check, one site per entry (ER-21; PHPStan's `reportUnmatchedIgnoredErrors` and the `count` of its baseline).
 // An entry names a file (`path`), a piece of the flagged line (`site`), a `reason` of at least 8 characters and, when the same line
 // appears more than once in the file, how many sites it covers (`count`, default 1). A whole file or folder is never allowed.
-// After a run, an entry that matched fewer sites than its count is stale (remove it, or lower its count) and one that matched more is
-// ambiguous (lengthen its `site`): both are warnings, so the list only ever names the sites that still exist.
+// An entry allows at most `count` sites: a site beyond it is reported at its own file and line, as an unlisted one is. After a run, an
+// entry that matched fewer sites than its count is stale (remove it, or lower its count), a warning, so the list only ever names the
+// sites that still exist.
 // The reader also owns the error paths, so every check that uses it has the same ones on both hosts (ER-21 class "the two hosts
 // diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or with
 // a malformed entry is one unwaivable check-broken finding and nothing else (`readAllowList`), and a file the check cannot read is a
@@ -36,8 +37,8 @@ export function parseAllowList(text, file) {
 }
 
 /**
- * The allow list of one run of check `spec` ({ id, rule, file, unseen }) over `ctx`: `read` reads a file the check looks at, `allows`
- * and `admit` answer per flagged site and count, `warnings` names the stale and ambiguous entries.
+ * The allow list of one run of check `spec` ({ id, rule, file, unseen }) over `ctx`: `read` reads a file the check looks at, `admit`
+ * answers per flagged site and counts, `warnings` names the stale entries.
  */
 export class AllowList {
   constructor(spec, entries, ctx) {
@@ -70,23 +71,11 @@ export class AllowList {
     return this.scanned.size;
   }
 
-  /** Whether an entry names the site at `path` whose line is `text`; every entry that does counts the site. */
-  allows(path, text) {
-    let named = false;
-    this.entries.forEach((a, i) => {
-      if (a.path === path && String(text ?? '').includes(a.site)) {
-        this.hits[i]++;
-        named = true;
-      }
-    });
-    return named;
-  }
-
   /**
-   * Like `allows`, for a check that decides the match itself and reports a site beyond the count at the site: `matches(site)` says
-   * whether an entry's `site` names it. 'allowed' counts the site on the first matching entry with room left; 'beyond' means
-   * entries name it but every one is at its count (the caller reports it at its own file and line, so `warnings` never calls such
-   * an entry ambiguous); 'unlisted' means no entry names it.
+   * What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C124: the
+   * flagged line holds the site's text; C125: the literal starts with the site's whole path components). 'allowed' counts the site on
+   * the first matching entry with room left; 'beyond' means entries name it but every one is at its count, and the caller reports it at
+   * its own file and line; 'unlisted' means no entry names it.
    */
   admit(path, matches) {
     const named = this.entries.flatMap((a, i) => (a.path === path && matches(a.site) ? [i] : []));
@@ -98,7 +87,7 @@ export class AllowList {
   }
 
   /**
-   * The warnings for the entries that matched another number of sites than their count. An entry is stale only for a file the run
+   * The warnings for the entries that matched fewer sites than their count (`admit` never counts more). An entry is stale only for a file the run
    * read, or one that does not exist: an entry for a file the run never looked at, or could not read, is neither stale nor matched.
    */
   warnings() {
@@ -107,9 +96,7 @@ export class AllowList {
     const out = [];
     this.entries.forEach((a, i) => {
       const hits = this.hits[i];
-      if (hits > a.count) {
-        out.push(warn(id, rule, this.file, 1, `ambiguous allow entry (${a.path}: ${a.site}) matches ${hits} sites`, a.count > 1 ? `Lengthen its \`site\`, or raise its \`count\` to ${hits} if every one is meant.` : 'Lengthen its `site` so it names one line.'));
-      } else if (hits < a.count && looked(a.path)) {
+      if (hits < a.count && looked(a.path)) {
         const what = hits === 0 ? 'matches no site' : `matches only ${hits} of its ${a.count} sites`;
         out.push(warn(id, rule, this.file, 1, `stale allow entry (${a.path}: ${a.site}) ${what}`, hits === 0 ? `Remove it from ${this.file}.` : `Lower its \`count\` to ${hits}.`));
       }

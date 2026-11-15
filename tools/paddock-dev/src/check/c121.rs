@@ -13,8 +13,8 @@
 //! Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (`11c365fc4`,
 //! `0308201b4`) have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows
 //! may read them: each such site goes in `conformance/c121-allow.json` with its path, a `site` (a piece of the flagged line), a reason
-//! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale or ambiguous entry and
-//! never allows a whole file or folder.
+//! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale entry, reports a site
+//! beyond an entry's count at its own line and never allows a whole file or folder.
 //!
 //! The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else),
 //! and a file the check cannot read is not measured (an error finding at that file).
@@ -24,7 +24,7 @@
 //! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and the `c121` tests of `tests/it/check.rs`
 //! compares them finding for finding.
 
-use super::allow_list::{self, Entry, Spec};
+use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
 use super::jsre::rx;
 use super::{Check, CheckOutput, Control, Ctx};
@@ -176,17 +176,26 @@ impl Check for C121 {
                 }
             };
             for (line, what, at) in flagged(kind, &text) {
-                if allow.allows(f, &at) {
-                    continue;
-                }
-                findings.push(Finding::warn(
-                    "C121",
-                    79,
-                    f,
-                    line,
-                    format!("reads a workflow file's text with {what}: the data it needs has one accessor"),
-                    FIX,
-                ));
+                let finding = match allow.admit(f, |site| at.contains(site)) {
+                    Admit::Allowed => continue,
+                    Admit::Beyond => Finding::warn(
+                        "C121",
+                        79,
+                        f,
+                        line,
+                        format!("reads a workflow file's text with {what} beyond the count of its allow entry"),
+                        format!("Read it through its accessor, or raise the entry's `count` in {ALLOW} if this site is meant too."),
+                    ),
+                    Admit::Unlisted => Finding::warn(
+                        "C121",
+                        79,
+                        f,
+                        line,
+                        format!("reads a workflow file's text with {what}: the data it needs has one accessor"),
+                        FIX,
+                    ),
+                };
+                findings.push(finding);
             }
         }
         allow.output(ctx, findings)

@@ -73,3 +73,9 @@ test('C121 allow list: another site in an allowed file is still reported, and a 
   const stale = await findingsOf('C121', makeApp({ 'conformance/c121-allow.json': ALLOW, 'conformance/test/x.test.mjs': 'const t = 1;\n' }));
   assert.deepEqual(stale.map((f) => [f.file, /stale allow entry/.test(f.message)]), [['conformance/c121-allow.json', true]]);
 });
+
+test('C121 allow list: a site beyond the count of the entry that names it is reported at its own line', async () => {
+  const line = 'const t = text.match(/x/); // .gitea/workflows/ci.yml\n';
+  const found = await findingsOf('C121', makeApp({ 'conformance/c121-allow.json': ALLOW, 'conformance/test/x.test.mjs': `${line}${line}` }));
+  assert.deepEqual(found.map((x) => [x.file, x.line, /beyond the count of its allow entry/.test(x.message)]), [['conformance/test/x.test.mjs', 2, true]]);
+});

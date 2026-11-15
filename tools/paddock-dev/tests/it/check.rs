@@ -1296,9 +1296,9 @@ fn c124_tree() -> tempfile::TempDir {
     let files: &[(&str, &str)] = &[
         (
             "conformance/c124-allow.json",
-            "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"site\":\"NotMeasured\",\"reason\":\"the seed, shrink only\"},{\"path\":\"tools/paddock-dev/src/gone.rs\",\"site\":\"x\",\"reason\":\"a stale entry\"},{\"path\":\"tools/paddock-dev/src/two.rs\",\"site\":\"Clean,\",\"reason\":\"an ambiguous entry\"}]}",
+            "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"site\":\"NotMeasured\",\"reason\":\"the seed, shrink only\"},{\"path\":\"tools/paddock-dev/src/gone.rs\",\"site\":\"x\",\"reason\":\"a stale entry\"},{\"path\":\"tools/paddock-dev/src/two.rs\",\"site\":\"Clean,\",\"reason\":\"one site of two\"}]}",
         ),
-        // two result enums with the same `Clean,` line (an ambiguous entry), and a phase enum whose `Clean` is no result
+        // two result enums with the same `Clean,` line (the second is beyond its count-1 entry), and a phase enum whose `Clean` is no result
         (
             "tools/paddock-dev/src/two.rs",
             "enum A {\n    Clean,\n    Failed,\n}\nenum B {\n    Clean,\n    Stale,\n}\nenum PhaseId {\n    Resolve,\n    Clean,\n}\n",
@@ -1371,18 +1371,16 @@ fn c124_flags_the_shapes_it_names_and_only_as_warnings() {
             ("tools/paddock-dev/src/c.rs".to_string(), 4),
             // a listed file does not hide a different, unlisted site in it
             ("tools/paddock-dev/src/ok.rs".to_string(), 4),
-            // an entry that matches nothing is stale, one that matches two sites is ambiguous
-            ("conformance/c124-allow.json".to_string(), 1),
+            // a second site of a count-1 entry is reported at its own line
+            ("tools/paddock-dev/src/two.rs".to_string(), 6),
+            // an entry that matches nothing is stale
             ("conformance/c124-allow.json".to_string(), 1),
         ]
     );
     let said = |needle: &str| r.findings.iter().any(|f| f.message.contains(needle));
     assert!(said("always returns an empty list"), "the empty measurement is named");
     assert!(said("stale allow entry (tools/paddock-dev/src/gone.rs"), "the stale entry is named");
-    assert!(
-        said("ambiguous allow entry (tools/paddock-dev/src/two.rs: Clean,) matches 2 sites"),
-        "the ambiguous entry is named"
-    );
+    assert!(said("beyond the count of its allow entry"), "the site beyond the count is named");
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
 }
 

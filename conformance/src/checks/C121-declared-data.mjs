@@ -10,8 +10,8 @@
 // Partly checked, said out loud: slicing another file's text by anchors and hard-coded paths into another crate (11c365fc4, 0308201b4)
 // have no cheap low-noise lint; the rule, review and the train's test run cover them. A test of a check of workflows may read them:
 // each such site goes in `conformance/c121-allow.json` with its path, a `site` (a piece of the flagged line), a reason and, for a
-// line the file repeats, a `count`; the shared allow list (`util/allow-list.mjs`, also C124's) warns on a stale or ambiguous entry,
-// and never allows a whole file or folder.
+// line the file repeats, a `count`; the shared allow list (`util/allow-list.mjs`, also C124's) warns on a stale entry, reports a
+// site beyond an entry's count at its own line, and never allows a whole file or folder.
 // The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else), and a
 // file the check cannot read is not measured (an error finding at that file).
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
@@ -30,6 +30,8 @@ const TEST_EXT = /\.(?:rs|mjs|js|cjs|ts|sh)$/;
 const NOT_TEST = /(?:^|\/)(?:fixtures|node_modules)\//;
 const FIX =
   "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json.";
+
+const BEYOND_FIX = `Read it through its accessor, or raise the entry's \`count\` in ${ALLOW} if this site is meant too.`;
 
 /** 'registry', 'test' or null: how the check reads `path`. */
 export function kindOf(path) {
@@ -75,8 +77,13 @@ export default {
         continue;
       }
       for (const { line, what, text: at } of flagged(kind, text)) {
-        if (allow.allows(f, at)) continue;
-        out.push(warn('C121', 79, f, line, `reads a workflow file's text with ${what}: the data it needs has one accessor`, FIX));
+        const said = allow.admit(f, (site) => at.includes(site));
+        if (said === 'allowed') continue;
+        out.push(
+          said === 'beyond'
+            ? warn('C121', 79, f, line, `reads a workflow file's text with ${what} beyond the count of its allow entry`, BEYOND_FIX)
+            : warn('C121', 79, f, line, `reads a workflow file's text with ${what}: the data it needs has one accessor`, FIX),
+        );
       }
     }
     return [...out, ...allow.warnings()];

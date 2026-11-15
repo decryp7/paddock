@@ -1,8 +1,8 @@
 //! One allow list per check, one site per entry (ER-21; PHPStan's `reportUnmatchedIgnoredErrors` and the `count` of its baseline).
 //! An entry names a file (`path`), a piece of the flagged line (`site`), a `reason` of at least 8 characters and, when the same line
-//! appears more than once in the file, how many sites it covers (`count`, default 1). A whole file or folder is never allowed. After
-//! a run, an entry that matched fewer sites than its count is stale and one that matched more is ambiguous: both are warnings, so the
-//! list only ever names the sites that still exist.
+//! appears more than once in the file, how many sites it covers (`count`, default 1). A whole file or folder is never allowed. An
+//! entry allows at most `count` sites: a site beyond it is reported at its own file and line, as an unlisted one is. After a run, an
+//! entry that matched fewer sites than its count is stale, a warning, so the list only ever names the sites that still exist.
 //!
 //! The reader also owns the error paths, so every check that uses it has the same ones on both hosts (ER-21 class "the two hosts
 //! diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or
@@ -151,8 +151,8 @@ pub enum Admit {
     Unlisted,
 }
 
-/// The allow list of one run: [`AllowList::read`] reads a file the check looks at, [`AllowList::allows`] and [`AllowList::admit`]
-/// answer per flagged site and count, [`AllowList::warnings`] names the stale and ambiguous entries.
+/// The allow list of one run: [`AllowList::read`] reads a file the check looks at, [`AllowList::admit`]
+/// answers per flagged site and counts, [`AllowList::warnings`] names the stale entries.
 pub struct AllowList {
     spec: &'static Spec,
     entries: Vec<Entry>,
@@ -211,21 +211,10 @@ impl AllowList {
         }
     }
 
-    /// Whether an entry names the site at `path` whose line is `text`; every entry that does counts the site.
-    pub fn allows(&mut self, path: &str, text: &str) -> bool {
-        let mut named = false;
-        for (i, a) in self.entries.iter().enumerate() {
-            if a.path == path && text.contains(a.site.as_str()) {
-                self.hits[i] += 1;
-                named = true;
-            }
-        }
-        named
-    }
-
-    /// Like [`AllowList::allows`], for a check that decides the match itself and reports a site beyond the count at the site:
-    /// `matches(site)` says whether an entry's `site` names it. The site counts on the first matching entry with room left; when
-    /// every matching entry is at its count it is [`Admit::Beyond`], and [`AllowList::warnings`] never calls such an entry ambiguous.
+    /// What the list says about one flagged site at `path`: `matches(site)` says whether an entry's `site` names it (C121 and C124:
+    /// the flagged line holds the site's text; C125: the literal starts with the site's whole path components). The site counts on the
+    /// first matching entry with room left; when every matching entry is at its count it is [`Admit::Beyond`], and the caller reports
+    /// it at its own file and line.
     pub fn admit(&mut self, path: &str, matches: impl Fn(&str) -> bool) -> Admit {
         let named: Vec<usize> = (0..self.entries.len())
             .filter(|&i| self.entries[i].path == path && matches(&self.entries[i].site))
@@ -242,7 +231,7 @@ impl AllowList {
         }
     }
 
-    /// The warnings for the entries that matched another number of sites than their count. An entry is stale only for a file the
+    /// The warnings for the entries that matched fewer sites than their count ([`AllowList::admit`] never counts more). An entry is stale only for a file the
     /// run read, or one that does not exist: an entry for a file the run never looked at, or could not read, is neither stale nor
     /// matched.
     pub fn warnings(&self, ctx: &Ctx) -> Vec<Finding> {
@@ -250,21 +239,7 @@ impl AllowList {
         let looked = |p: &str| self.scanned.contains(p) || (!self.unread.contains(p) && ctx.read(p).is_none());
         let mut out = Vec::new();
         for (a, &hits) in self.entries.iter().zip(&self.hits) {
-            if hits > a.count {
-                let fix = if a.count > 1 {
-                    format!("Lengthen its `site`, or raise its `count` to {hits} if every one is meant.")
-                } else {
-                    "Lengthen its `site` so it names one line.".to_string()
-                };
-                out.push(Finding::warn(
-                    id,
-                    rule,
-                    file,
-                    1,
-                    format!("ambiguous allow entry ({}: {}) matches {hits} sites", a.path, a.site),
-                    fix,
-                ));
-            } else if hits < a.count && looked(&a.path) {
+            if hits < a.count && looked(&a.path) {
                 let (what, fix) = if hits == 0 {
                     ("matches no site".to_string(), format!("Remove it from {file}."))
                 } else {
@@ -358,30 +333,32 @@ mod tests {
     }
 
     #[test]
-    fn a_site_is_allowed_only_in_its_own_file_and_only_when_the_line_holds_the_site_text() {
+    fn a_site_is_allowed_only_in_its_own_file_and_only_when_the_entry_names_it() {
         let mut l = list(&entry(""));
-        assert!(l.allows("a/b.rs", "let x = needle;"));
-        assert!(!l.allows("a/c.rs", "let x = needle;"));
-        assert!(!l.allows("a/b.rs", "let x = other;"));
+        let holds = |line: &'static str| move |site: &str| line.contains(site);
+        assert_eq!(l.admit("a/c.rs", holds("let x = needle;")), Admit::Unlisted);
+        assert_eq!(l.admit("a/b.rs", holds("let x = other;")), Admit::Unlisted);
+        assert_eq!(l.admit("a/b.rs", holds("let x = needle;")), Admit::Allowed);
         assert!(messages(l, true).is_empty());
     }
 
     #[test]
-    fn no_match_is_stale_more_than_the_count_is_ambiguous_fewer_is_stale() {
+    fn admit_counts_up_to_the_count_and_calls_the_rest_beyond_fewer_is_stale() {
+        let mut l = list(&entry(", \"count\": 2"));
+        let exact = |site: &str| site == "needle";
+        assert_eq!(l.admit("a/b.rs", exact), Admit::Allowed);
+        assert_eq!(l.admit("a/b.rs", exact), Admit::Allowed);
+        assert_eq!(l.admit("a/b.rs", exact), Admit::Beyond);
+        assert!(
+            messages(l, true).is_empty(),
+            "a site beyond the count is the caller's finding at the site, not a warning on the entry"
+        );
         assert_eq!(
             messages(list(&entry("")), true),
             ["stale allow entry (a/b.rs: needle) matches no site"]
         );
-        let mut two = list(&entry(""));
-        two.allows("a/b.rs", "needle 1");
-        two.allows("a/b.rs", "needle 2");
-        assert_eq!(messages(two, true), ["ambiguous allow entry (a/b.rs: needle) matches 2 sites"]);
-        let mut counted = list(&entry(", \"count\": 2"));
-        counted.allows("a/b.rs", "needle 1");
-        counted.allows("a/b.rs", "needle 2");
-        assert!(messages(counted, true).is_empty());
         let mut short = list(&entry(", \"count\": 3"));
-        short.allows("a/b.rs", "needle 1");
+        short.admit("a/b.rs", exact);
         assert_eq!(
             messages(short, true),
             ["stale allow entry (a/b.rs: needle) matches only 1 of its 3 sites"]
@@ -389,27 +366,8 @@ mod tests {
     }
 
     #[test]
-    fn admit_counts_up_to_the_count_and_calls_the_rest_beyond_never_ambiguous() {
-        let mut l = list(&entry(", \"count\": 2"));
-        let exact = |site: &str| site == "needle";
-        assert_eq!(l.admit("a/b.rs", exact), Admit::Allowed);
-        assert_eq!(l.admit("a/b.rs", exact), Admit::Allowed);
-        assert_eq!(l.admit("a/b.rs", exact), Admit::Beyond);
-        assert_eq!(l.admit("a/c.rs", exact), Admit::Unlisted);
-        assert_eq!(l.admit("a/b.rs", |_| false), Admit::Unlisted);
-        assert!(
-            messages(l, true).is_empty(),
-            "a site beyond the count is the caller's finding, not an ambiguous entry"
-        );
-    }
-
-    #[test]
     fn an_entry_for_a_file_the_run_did_not_look_at_is_not_stale() {
         assert!(messages(list(&entry("")), false).is_empty());
-        let mut l = list(&entry(""));
-        l.allows("a/b.rs", "needle");
-        l.allows("a/b.rs", "needle");
-        assert_eq!(messages(l, false).len(), 1);
     }
 
     #[test]

@@ -50,10 +50,11 @@ test('C124 bad: a measurement that always returns an empty list', () => {
 test('C124 allow list: per site, never a whole file', () => {
   const allow = parseAllow('{"allow": [{"path": "a/b.rs", "site": "|| Ok(Vec::new())", "reason": "a reason that is long enough"}]}');
   assert.deepEqual(allow, [{ path: 'a/b.rs', site: '|| Ok(Vec::new())', reason: 'a reason that is long enough', count: 1 }]);
-  const list = () => new AllowList(ALLOW, allow);
-  assert.equal(list().allows('a/b.rs', 'x(|| Ok(Vec::new()))'), true);
-  assert.equal(list().allows('a/b.rs', 'enum Verdict { NotMeasured }'), false);
-  assert.equal(list().allows('a/c.rs', 'x(|| Ok(Vec::new()))'), false);
+  const list = () => new AllowList({ id: 'C124', rule: 21, file: ALLOW, unseen: 'a site' }, allow, { read: () => null, files: () => [] });
+  const holds = (line) => (site) => line.includes(site);
+  assert.equal(list().admit('a/b.rs', holds('x(|| Ok(Vec::new()))')), 'allowed');
+  assert.equal(list().admit('a/b.rs', holds('enum Verdict { NotMeasured }')), 'unlisted');
+  assert.equal(list().admit('a/c.rs', holds('x(|| Ok(Vec::new()))')), 'unlisted');
   assert.throws(() => parseAllow('{"allow": [{"path": "a/b.rs", "reason": "a reason that is long enough"}]}'), /site/);
   assert.throws(() => parseAllow('{"allow": [{"path": "a", "site": "x"}]}'), /reason/);
   assert.throws(() => parseAllow('nope'), /not JSON/);
@@ -75,7 +76,15 @@ test('C124 through the runner: warnings only, the allow list spares a file, a mi
   assert.equal(broken.some((f) => f.outcome === 'check-broken'), true);
 });
 
-test('C124 allow list: a stale entry and an ambiguous entry are warnings', async () => {
+test('C124 allow list: a site beyond the count of the entry that names it is reported at its own line', async () => {
+  const two = 'enum A {\n    NotMeasured,\n}\nenum B {\n    NotMeasured,\n}\n';
+  const f = 'tools/paddock-dev/src/two.rs';
+  const allow = JSON.stringify({ allow: [{ path: f, site: 'NotMeasured,', reason: 'a reason long enough' }] });
+  const found = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow, [f]: two }));
+  assert.deepEqual(found.map((x) => [x.file, x.line, /beyond the count of its allow entry/.test(x.message)]), [[f, 5, true]]);
+});
+
+test('C124 allow list: a stale entry is a warning', async () => {
   const two = 'enum A {\n    NotMeasured,\n}\nenum B {\n    NotMeasured,\n}\n';
   const f = 'tools/paddock-dev/src/two.rs';
   const allow = (site, path = f) => JSON.stringify({ allow: [{ path, site, reason: 'a reason long enough' }] });
@@ -83,8 +92,6 @@ test('C124 allow list: a stale entry and an ambiguous entry are warnings', async
   assert.equal(stale.some((x) => x.file === 'conformance/c124-allow.json' && /stale/.test(x.message)), true);
   const gone = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('x', 'tools/paddock-dev/src/gone.rs') }));
   assert.equal(gone.some((x) => /stale/.test(x.message)), true);
-  const amb = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('NotMeasured,'), [f]: two }));
-  assert.equal(amb.some((x) => /ambiguous/.test(x.message)), true);
   const ok = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow('NotMeasured,'), [f]: 'enum A {\n    NotMeasured,\n}\n' }));
   assert.deepEqual(ok, []);
 });

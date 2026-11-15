@@ -20,13 +20,13 @@
 //!
 //! Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line) and a
 //! reason (shrink only), read and counted by the shared [`super::allow_list`] (also C121's): an entry that matches no site is stale
-//! and one that matches more than its `count` is ambiguous, both warnings. **Report-only (warnings)
+//! (a warning) and a site beyond an entry's `count` is reported at its own line. **Report-only (warnings)
 //! until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet.
 //!
 //! The JavaScript check `conformance/src/checks/C124-gate-outcomes.mjs` is the original; the `c124` tests of `tests/it/check.rs`
 //! compare the two finding for finding.
 
-use super::allow_list::{self, Entry, Spec};
+use super::allow_list::{self, Admit, Entry, Spec};
 use super::finding::Finding;
 use super::jsre::rx;
 use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
@@ -267,17 +267,19 @@ impl Check for C124 {
             };
             let sites = if rust { flagged_rust(f, &text) } else { flagged_js(f, &text) };
             for (line, at, what) in sites {
-                if allow.allows(f, &at) {
-                    continue;
-                }
-                findings.push(Finding::warn(
-                    "C124",
-                    21,
-                    f,
-                    line,
-                    format!("builds a gate result by hand: {what}"),
-                    FIX,
-                ));
+                let finding = match allow.admit(f, |site| at.contains(site)) {
+                    Admit::Allowed => continue,
+                    Admit::Beyond => Finding::warn(
+                        "C124",
+                        21,
+                        f,
+                        line,
+                        format!("builds a gate result by hand beyond the count of its allow entry: {what}"),
+                        format!("Migrate it, or raise the entry's `count` in {ALLOW} if this site is meant too."),
+                    ),
+                    Admit::Unlisted => Finding::warn("C124", 21, f, line, format!("builds a gate result by hand: {what}"), FIX),
+                };
+                findings.push(finding);
             }
         }
         allow.output(ctx, findings)

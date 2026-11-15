@@ -17,8 +17,8 @@
 // file the check cannot read is not measured (an error finding at that file).
 // Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line, so an edit
 // that moves the line keeps the entry) and a reason, read and counted by the shared allow list (`util/allow-list.mjs`, also C121's): a
-// whole file or folder is never allowed, an entry that matches no site is stale and one that matches more than its `count` is
-// ambiguous, as PHPStan's reportUnmatchedIgnoredErrors does. A shrink-only seed, expected to empty
+// whole file or folder is never allowed, an entry that matches no site is stale (a warning) and a site beyond an entry's
+// `count` is reported at its own line, as PHPStan's reportUnmatchedIgnoredErrors and baseline `count` do. A shrink-only seed, expected to empty
 // out as each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 import { warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
@@ -130,8 +130,13 @@ export default {
         continue;
       }
       for (const { line, what, text: at } of rust ? flaggedRust(f, text) : flaggedJs(f, text)) {
-        if (allow.allows(f, at)) continue;
-        out.push(warn('C124', 21, f, line, `builds a gate result by hand: ${what}`, FIX));
+        const said = allow.admit(f, (site) => at.includes(site));
+        if (said === 'allowed') continue;
+        out.push(
+          said === 'beyond'
+            ? warn('C124', 21, f, line, `builds a gate result by hand beyond the count of its allow entry: ${what}`, `Migrate it, or raise the entry's \`count\` in ${ALLOW} if this site is meant too.`)
+            : warn('C124', 21, f, line, `builds a gate result by hand: ${what}`, FIX),
+        );
       }
     }
     return [...out, ...allow.warnings()];
