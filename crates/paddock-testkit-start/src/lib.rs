@@ -14,6 +14,8 @@
 //! - [`Reaper`]: every process a test started ends with the test, also when it panics partway, and nothing else does: it acts
 //!   only on processes it can prove the test created (its children, what it saw below them, its groups, its token, orphans
 //!   naming a folder it made), through `paddock_proc` and by identity (ADR 0103).
+//! - [`recorded`]: a pid a process wrote about itself (a pid file, a printed line) turned into its identity, or
+//!   [`Recorded::Ended`] when the code under test has already ended it: never "not yet", never whoever got the pid next.
 //! - [`PATIENCE`] and [`HANG_GUARD`]: the start judge's patience for a test, under which only the wall guard ends a wait. A
 //!   product driver that takes a [`Patience`] and a guard (Debrief's `chromium_driver::Answers::Judged`) gets these two from
 //!   here.
@@ -435,6 +437,8 @@ fn state_of<S: Started>(child: &mut S, id: Option<ProcessId>) -> &'static str {
 
 pub mod reap;
 pub use reap::{Ended, Reaper};
+pub mod recorded;
+pub use recorded::{Recorded, Stamp};
 
 #[cfg(test)]
 mod tests;

@@ -533,6 +533,7 @@ mod tests {
         BufReader::new(child.stdout.as_mut().unwrap())
             .read_line(&mut line)
             .unwrap();
+        // conformance: recorded-pid — the parent shell is blocked on `read` or `exec sleep` and holds the grandchild when the line is read
         ProcessId::of(line.trim().parse().unwrap()).expect("the grandchild runs")
     }
 
@@ -790,6 +791,7 @@ mod tests {
             let line = line.unwrap();
             // libtest prints the test's name and "... " on the same line before the test's own output.
             if let Some((_, pid)) = line.rsplit_once("pid ") {
+                // conformance: recorded-pid — the writer blocks on stdin, which this test holds
                 sleep = ProcessId::of(pid.trim().parse().unwrap());
                 break;
             }

@@ -230,6 +230,14 @@ review_by = 2026-12-14
 approved = "coordinator"
 
 [[report_only]]
+id = "C128"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C128-recorded-pid.mjs. It flags a test that takes the identity of a pid it parsed from a file or a child's output with ProcessId::of (rule 53; Spotter's run 8118 and the review of f224dd0b4): the fix is paddock_testkit_start::recorded. First count 2026-11-15 on fix/test-pid-reader: 12 sites before the branch, 0 after (5 migrated, 6 waived with a reason, 1 rewritten in paddock-proc, whose tests cannot use the kit). Known gap: a pid parsed in another function is not followed"
+owner = "ER-21 class: a test observes a recorded pid after the code under test may have ended it (fix/test-pid-reader)"
+since = 2026-11-15
+review_by = 2026-12-15
+approved = "coordinator"
+
+[[report_only]]
 id = "step:tools/hooks"
 reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then remove continue-on-error from ci.yml's `Hooks tests (report-only)` step (the tools job, `./dev ci run tools hooks`) and this entry; C100 fails when review_by passes or when the step already blocks. It runs every .claude/hooks/*.test.sh (python3, jq and git are in paddock-ci:v3, checked 2026-11-15) with PADDOCK_DEV set to the built tool, so the rule-55 parity test of places.rs against lib/paddockpaths.py runs in CI. First green run id: none yet"
 owner = "fix/hooks-ci-and-config-guard"

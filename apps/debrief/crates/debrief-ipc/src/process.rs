@@ -739,43 +739,30 @@ mod tests {
         assert_eq!(super::unix_nice(&s), 19);
     }
 
-    /// Whether `pid` is a process that still runs (a zombie, which only waits for its parent to collect its exit status,
-    /// is not one: a killed child's orphan is never collected in a container whose PID 1 reaps nothing).
+    /// Starts the fake worker `body` (a shell script) and takes the identity of the grandchild whose pid it wrote, as soon as
+    /// the record is complete (`Ended` when the grandchild was already gone, never the process that got its pid next).
     #[cfg(unix)]
-    fn running(pid: u32) -> bool {
-        // Unknown (the process table could not be read) counts as running, so a blind probe fails the leak check.
-        paddock_proc::presence(pid) != paddock_proc::Presence::Gone
-    }
-
-    /// Starts the fake worker `body` (a shell script) and waits for the pid of the grandchild it wrote.
-    #[cfg(unix)]
-    fn start_fake_worker(d: &std::path::Path, body: &str) -> (super::ChildProcess, u32) {
+    fn start_fake_worker(d: &std::path::Path, body: &str) -> (super::ChildProcess, paddock_testkit_start::Recorded) {
         let pid_file = d.join("grandchild.pid");
         let script = d.join("worker.sh");
         std::fs::write(&script, body.replace("PIDFILE", &pid_file.display().to_string())).unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let child = super::ChildProcess::spawn(&super::SpawnSpec::new(&script, "fake worker")).unwrap();
-        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let grandchild: u32 = loop {
-            if let Some(p) = std::fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse().ok()) {
-                break p;
-            }
-            assert!(std::time::Instant::now() < end, "the fake worker started its child");
-            std::thread::yield_now();
-        };
+        let grandchild = paddock_testkit_start::recorded::read_pid_file(&pid_file, "the fake worker's child");
         (child, grandchild)
     }
 
-    /// Fails unless `grandchild` is gone within a few seconds (a blind probe fails too), ending it by identity first.
+    /// Fails unless `grandchild` is gone within a few seconds (a blind probe fails too: `has_ended` is false while the process
+    /// table cannot be read), ending it by identity first, so a pid handed on is never signalled (rule 53, ER-14).
     #[cfg(unix)]
-    fn assert_grandchild_ends(grandchild: u32) {
+    fn assert_grandchild_ends(grandchild: paddock_testkit_start::Recorded) {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while running(grandchild) {
+        while !grandchild.has_ended() {
             if std::time::Instant::now() >= end {
-                if let Some(id) = paddock_proc::ProcessId::of(grandchild) {
+                if let Some(id) = grandchild.running() {
                     let _ = paddock_proc::end(id);
                 }
-                panic!("the grandchild was left behind");
+                panic!("the grandchild (pid {}) was left behind", grandchild.pid());
             }
             std::thread::yield_now();
         }

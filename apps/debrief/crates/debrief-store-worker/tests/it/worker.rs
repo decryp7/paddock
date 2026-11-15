@@ -465,10 +465,10 @@ fn a_project_exported_through_the_worker_opens_without_its_logs() {
     w.shutdown();
 }
 
-/// Ends the worker `pid` as a crash would: by identity (pid plus start time, read while the supervisor still holds the child
-/// unreaped), so a pid handed on to another process is never signalled.
+/// Ends the worker `pid` as a crash would: by identity (pid plus start time), verified to be a child of this test process, so
+/// a pid handed on to another process is never signalled (rule 53, ER-14).
 fn end_by_identity(pid: u32) {
-    let id = paddock_proc::ProcessId::of(pid).expect("the worker runs");
+    let id = paddock_testkit_start::recorded::child_of_this_test(pid).expect_running("the worker");
     assert_eq!(paddock_proc::end(id), paddock_proc::Ending::Ended);
 }
 

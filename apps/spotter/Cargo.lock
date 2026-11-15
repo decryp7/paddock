@@ -3238,6 +3238,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-jobs"
+version = "0.2.0"
+dependencies = [
+ "croner",
+ "jiff",
+ "log",
+ "paddock-env",
+ "paddock-limits",
+ "paddock-workspace-hack",
+ "serde",
+ "sha2 0.10.9",
+]
+
+[[package]]
+name = "paddock-limits"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
+]
+
+[[package]]
 name = "paddock-proc"
 version = "0.2.0"
 dependencies = [
@@ -3262,6 +3285,28 @@ dependencies = [
  "paddock-workspace-hack",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "paddock-env",
+ "paddock-jobs",
+ "paddock-limits",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
+]
+
+[[package]]
+name = "paddock-testkit-start"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
 ]
 
 [[package]]
@@ -4694,7 +4739,10 @@ dependencies = [
 name = "spotter-render"
 version = "1.0.0"
 dependencies = [
+ "libc",
  "paddock-proc",
+ "paddock-testkit",
+ "paddock-testkit-start",
  "reqwest",
  "serde",
  "serde_json",

@@ -28,5 +28,6 @@ libc = "0.2"
 
 [dev-dependencies]
 paddock-testkit = { workspace = true }
+paddock-testkit-start = { workspace = true }
 tempfile = "3"
 zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }

@@ -2117,7 +2117,6 @@ what the push sends, never by local names. Pushing a train before stacking work 
 **Class: the pre-push gate's scope differs from what the push sends (an old base measured more; a local base would have
 measured less); earlier: the 2026-11-12 base choice from origin/main for train-based branches.**
 
-
 ## A zombie answers kill(pid, 0): CI's job container never collects orphans (2026-11-15, CI run 8110)
 The VM lock test "a holder killed by its test leaves no `slot hold` process" passed on the Mac and failed in ci.yml's ui job:
 the detached holder had exited, but in the job container PID 1 is `sleep 21600` (the runner's entrypoint), which never collects
@@ -2174,3 +2173,17 @@ Two limits remain, both opt-in:
 - The JavaScript error-path test uses a hand-made table of samples (`SAMPLE` in `conformance/test/allow-list.test.mjs`). The
   test fails when a declared check has no sample, but the table is still a hand list.
 **Class: the two hosts diverge on an error path; earlier: C125 (865498235), then C121 and C124 (train 12).**
+
+## A recorded pid is read once, as an identity or as "ended" (2026-11-15, the review of f224dd0b4)
+The review of Spotter's helper fix found the same shape in more tests: a test parses a pid from a file or a child's output and
+calls `ProcessId::of` on it later, after the code under test may have ended that process. `of` answers `None` for an ended
+process, which a poll reads as "not yet" (Spotter's never-ready test with a 3 s guard, paddock-proc's 3 s timeout test: a test
+thread kept off the CPU for the guard waits out its own bound) and an `unwrap` turns into a panic (paddock-chromium's
+launcher-gone test, whose fake ends on purpose); and once the pid is handed on, `of` gives the new holder, which a failure
+path then ends (tools/heavy's background-sleep tests, ER-14). **Fix:** `paddock_testkit_start::recorded` reads the record
+once it is complete (a pid and a newline) and takes the identity through `ProcessId::of_recorded` with the file's modification
+time, or, for a printed pid, a `Stamp` taken before the spawn; it answers `Recorded::Ended`, which is final. Each site got a
+test that forces the late look (the test looks only after the run returned, or the stand-in has ended before its pid is
+printed), red before. C128 (report-only) flags `ProcessId::of` on a pid parsed in the same function. **Class: an observation
+raced the action under test (rule 53, seen from the test side; run 8118 above).**
+

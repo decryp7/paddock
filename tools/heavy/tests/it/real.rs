@@ -3,6 +3,7 @@
 
 use crate::procutil::*;
 use paddock_proc::{ProcessId, ask};
+use paddock_testkit_start::Recorded;
 use std::fs;
 
 #[test]
@@ -368,6 +369,7 @@ fn sigterm_ends_the_command_and_everything_it_started_and_releases() {
     let mut g = heavy(&w, &["run", "--no-gate", "T", "--", "sh", "-c", &script]);
     wait_until("grandchild started", || w.read(&pidfile).trim().parse::<u32>().is_ok());
     let grandchild: u32 = w.read(&pidfile).trim().parse().unwrap();
+    // conformance: recorded-pid — the shell waits on the sleep and heavy holds the shell until the SIGTERM below
     let gc = ProcessId::of(grandchild).expect("grandchild runs");
     assert!(ask(ProcessId::of(g.pid()).expect("heavy runs")));
     assert_eq!(g.finish().code(), Some(143));
@@ -423,16 +425,17 @@ fn waits_are_logged_with_the_holder_and_the_evidence() {
 
 // ---- review fixes -------------------------------------------------------------------------------------------------------
 
-/// Ends a process this test started by identity (rule 53), if it still runs.
-fn end_by_identity(pid: u32) {
-    if let Some(id) = ProcessId::of(pid) {
+/// Ends a process this test started by identity (rule 53), if it still runs. Its identity was taken from its pid file
+/// (`paddock_testkit_start::recorded`), so a pid handed on after it ended is never ended here (ER-14).
+fn end_by_identity(bg: Recorded) {
+    if let Some(id) = bg.running() {
         let _ = paddock_proc::end(id);
     }
 }
 
-fn pid_from(w: &World, f: &std::path::Path) -> u32 {
-    wait_until("a pid file", || w.read(f).trim().parse::<u32>().is_ok());
-    w.read(f).trim().parse().expect("pid")
+/// What the pid file `f` names, read as soon as it is complete: `Ended` once the background process has ended.
+fn pid_from(f: &std::path::Path) -> Recorded {
+    paddock_testkit_start::recorded::read_pid_file(f, "the background process")
 }
 
 #[test]
@@ -443,7 +446,7 @@ fn a_background_process_holding_stderr_does_not_hold_heavy_or_the_lock() {
     let t0 = std::time::Instant::now();
     let (code, _, e) = heavy_out(&w, &["run", "--no-gate", "B", "--", "sh", "-c", &script], &[]);
     let took = t0.elapsed();
-    let bg = pid_from(&w, &pidfile);
+    let bg = pid_from(&pidfile);
     assert_eq!(code, 0, "{e}");
     assert!(took.as_secs() < 8, "heavy waited {took:?} for a background process's stderr");
     assert!(!w.lock_dir().exists(), "the lock is released when the command ends");
@@ -470,7 +473,7 @@ fn sigterm_during_the_stderr_drain_still_stops_heavy_at_once() {
     ];
     // a long drain bound: only the stop request can end the wait
     let mut g = heavy_env(&w, &args, &[("HEAVY_DRAIN_MS", "25000")]);
-    let bg = pid_from(&w, &pidfile);
+    let bg = pid_from(&pidfile);
     wait_until("the drain to start", || w.read(&log).contains("draining its stderr"));
     let t0 = std::time::Instant::now();
     assert!(ask(ProcessId::of(g.pid()).expect("heavy runs")));
@@ -630,6 +633,7 @@ fn the_owner_record_names_the_command_while_it_runs() {
     let parts: Vec<&str> = line.split(' ').collect();
     let child: u32 = parts[1].parse().expect("child pid");
     assert_ne!(child, a.pid());
+    // conformance: recorded-pid — holder `a` runs until `w.release()`, and the start time is compared with the record
     assert!(ProcessId::of(child).is_some_and(|p| p.started().as_micros().to_string() == parts[2]));
     assert_eq!(w.owner_line(0), a.pid().to_string(), "line 1 stays heavy's own pid for the shell");
     w.release();

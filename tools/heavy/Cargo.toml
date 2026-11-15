@@ -41,6 +41,7 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage
 
 [dev-dependencies]
 paddock-testkit = { path = "../../crates/paddock-testkit" }
+paddock-testkit-start = { path = "../../crates/paddock-testkit-start" }
 tempfile = "3"
 proptest = { version = "1", default-features = false, features = ["std"] }
 

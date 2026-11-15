@@ -174,6 +174,11 @@ fn helper_main() {
 
 /// Whether `pid` ends within a few seconds. A shared pipe reaches EOF when the last holder closes its files, which happens a
 /// moment before the process shows as a zombie, so a check made right after EOF has to wait for that state (a deadline, not a sleep).
+///
+/// A bare pid on purpose (rule 53, C128's class, reviewed on fix/test-pid-reader): it only observes, never acts, and the callers
+/// read the pid after the code under test ended the process, when no identity can be taken any more. A pid handed on within the
+/// bound reads as "not gone", a false failure and never an action on another process; macOS and Linux hand out pids in sequence,
+/// so that needs the whole pid space to wrap within ten seconds.
 pub(crate) fn is_gone(pid: u32) -> bool {
     let end_at = std::time::Instant::now() + std::time::Duration::from_secs(10);
     // conformance: pid-liveness — a test of the raw-pid answer itself or of a child this test owns

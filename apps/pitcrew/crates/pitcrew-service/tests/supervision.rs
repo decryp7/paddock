@@ -885,12 +885,28 @@ fn keep_longer_postpones_the_stop_and_cleanup_can_be_turned_off() {
     let _ = ErrorCode::Busy;
     h.ask(Request::Stop { runner: h.name.clone() });
     h.finish();
-    unsafe_kill(row.pid);
+    end_leftover(row.pid, row.started_at);
 }
 
+/// Ends a leftover the service listed, by identity: the pid must still name the process that started when the service saw it
+/// start (its `started_at`, in whole seconds), so a leftover the service already stopped, whose pid went to another process,
+/// is never signalled (rule 53, ER-14).
 #[cfg(unix)]
-fn unsafe_kill(pid: u32) {
-    let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+fn end_leftover(pid: u32, started_at: Option<Timestamp>) {
+    let Some(started) = started_at else {
+        eprintln!("leftover pid {pid} was listed without a start time: not ended (no identity to check)");
+        return;
+    };
+    match paddock_testkit_start::recorded::reported(pid, started.0, 1000).running() {
+        Some(id) => {
+            let _ = paddock_proc::end(id);
+        }
+        None if alive(pid) => eprintln!(
+            "leftover pid {pid} (listed as started at {} ms) now names another process: left alone",
+            started.0
+        ),
+        None => {}
+    }
 }
 
 #[cfg(unix)]
@@ -965,7 +981,7 @@ fn a_stop_outside_the_runners_tree_is_refused() {
     let _ = stranger.kill();
     let _ = stranger.wait();
     h.finish();
-    unsafe_kill(row.pid);
+    end_leftover(row.pid, row.started_at);
 }
 
 fn write_config(h: &Harness, text: &str) {
