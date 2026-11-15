@@ -14,6 +14,8 @@
 //! - [`golden`]: expected-output files; a difference fails with the first differing line, `PADDOCK_UPDATE_GOLDEN=1`
 //!   rewrites them.
 //! - [`FakeRunner`]: a scripted stand-in for "run an OS command" seams (launchctl, systemctl, reg, ...), recording every call.
+//! - [`StandIn`]: one stand-in program for any program a test plants (`cargo`, `git`, `npm`, ...), the same on Windows, that
+//!   prints what it is told, records its calls, sleeps, starts a grandchild and exits with a code; replaces `#!/bin/sh` fixtures.
 //! - [`never_panics`] and [`corpus`]: run a parser over deterministic hostile inputs and fail on any panic.
 //! - [`net::HeldPort`]: a loopback port held for the test where every connection is closed or reset, instead of a
 //!   port read off a listener that was then dropped (ADR 0023).
@@ -55,6 +57,8 @@ pub mod private_temp;
 pub mod process;
 pub mod runner;
 pub mod scratch;
+pub mod stand_in;
+mod stand_in_json;
 pub mod wait;
 
 pub use ambient::{Ambient, ambient, tempdir};
@@ -70,6 +74,7 @@ pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{
     CanonicalTempDir, Leftovers, Scratch, ScratchError, canonical_tempdir, try_canonical_tempdir,
 };
+pub use stand_in::{Actions, Installed, Invocation, Spawn, StandIn};
 pub use wait::{
     HANG_GUARD, Look, Progress, StallGuard, guarded, poll_for, poll_until_within, recv,
     recv_within, retry_within, wait_for, wait_for_within, wait_progressing, wait_until,
