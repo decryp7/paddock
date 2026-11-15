@@ -5,7 +5,6 @@ use paddock_slots::{FsLocks, SlotId, SlotLocks};
 use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 const POLL: &str = "20";
