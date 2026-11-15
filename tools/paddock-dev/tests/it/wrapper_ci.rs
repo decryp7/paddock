@@ -344,38 +344,38 @@ fn the_launchers_probes_never_start_an_install_of_a_missing_pin() {
         "the launcher's own install ran: {err}"
     );
     assert_eq!(std::fs::read_to_string(&dist).unwrap_or_default(), "", "a probe started an install");
+}
 
-    /// P2-2 of the WP-2 review: the setup-rust action's own install (`--install-toolchain`) remembers a failure for the job too, in a CI job
-    /// only. (`--job-setup --require-rustup` is tested through stage 0, in dev_stage0.rs.)
-    #[test]
-    fn a_failed_install_toolchain_marks_the_job() {
-        let f = Fixture::new();
-        let scratch = tempfile::tempdir().unwrap();
-        let (shims, _) = rustup_without_toolchain(&f, "exit 1");
-        let env_file = scratch.path().join("github-env");
-        let outside = tempfile::tempdir().unwrap();
-        let run = |ci: bool| {
-            let mut cmd = paddock_testkit::TestCommand::new(launcher());
-            cmd.arg("--install-toolchain")
-                .args(["1.90.0", "clippy", ""])
-                .current_dir(outside.path())
-                .path_first(&shims)
-                .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
-                .env("GITHUB_ENV", &env_file)
-                .env_remove("RUSTUP_TOOLCHAIN");
-            if ci {
-                cmd.env("GITHUB_ACTIONS", "true");
-            }
-            cmd.output().unwrap()
-        };
-        let out = run(false);
-        assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
-        assert!(!env_file.exists(), "a person's run writes nothing");
-        let out = run(true);
-        assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
-        assert_eq!(
-            std::fs::read_to_string(&env_file).unwrap_or_default(),
-            "PADDOCK_TOOLCHAIN_FAILED=1\n"
-        );
-    }
+/// P2-2 of the WP-2 review: the setup-rust action's own install (`--install-toolchain`) remembers a failure for the job too, in a CI job
+/// only. (`--job-setup --require-rustup` is tested through stage 0, in dev_stage0.rs.)
+#[test]
+fn a_failed_install_toolchain_marks_the_job() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (shims, _) = rustup_without_toolchain(&f, "exit 1");
+    let env_file = scratch.path().join("github-env");
+    let outside = tempfile::tempdir().unwrap();
+    let run = |ci: bool| {
+        let mut cmd = paddock_testkit::TestCommand::new(launcher());
+        cmd.arg("--install-toolchain")
+            .args(["1.90.0", "clippy", ""])
+            .current_dir(outside.path())
+            .path_first(&shims)
+            .env("RUSTUP_HOME", f.cargo_home.path().join("rustup"))
+            .env("GITHUB_ENV", &env_file)
+            .env_remove("RUSTUP_TOOLCHAIN");
+        if ci {
+            cmd.env("GITHUB_ACTIONS", "true");
+        }
+        cmd.output().unwrap()
+    };
+    let out = run(false);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!env_file.exists(), "a person's run writes nothing");
+    let out = run(true);
+    assert_eq!(out.status.code(), Some(1), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(
+        std::fs::read_to_string(&env_file).unwrap_or_default(),
+        "PADDOCK_TOOLCHAIN_FAILED=1\n"
+    );
 }
