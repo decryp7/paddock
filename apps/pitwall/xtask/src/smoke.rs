@@ -231,12 +231,12 @@ mod tests {
         let script = d.path().join("stay");
         let pids = d.path().join("pids");
         let body = format!(
-            "#!/bin/bash\necho $$ > '{p}'\nsleep 300 &\necho $! >> '{p}'\necho ok > /dev/tcp/127.0.0.1/{port}\nwait\n",
+            "#!/bin/bash\necho $$ > '{p}'\nsleep 300 &\necho $! >> '{p}'\necho ok > /dev/tcp/127.0.0.1/$1\nwait\n",
             p = pids.display()
         );
         std::fs::write(&script, body).unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-        let mut s = Started::spawn(&script, &[], d.path(), &d.path().join("log")).unwrap();
+        let mut s = Started::spawn(&script, &[&port.to_string()], d.path(), &d.path().join("log")).unwrap();
         let (mut c, _) = ready.accept().unwrap();
         let mut buf = [0u8; 8];
         let _ = c.read(&mut buf).unwrap();

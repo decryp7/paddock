@@ -11,6 +11,10 @@ use std::path::{Path, PathBuf};
 const ALLOWED: &[(&str, &str)] = &[
     ("tools/paddock-dev/src/safe_remove.rs", "the shared check itself"),
     (
+        "tools/paddock-dev/src/diagrams.rs",
+        "draw.io's private profile folder this run made itself in TMPDIR (fresh name, mode 0700), not a dev-targets root",
+    ),
+    (
         "tools/paddock-dev/src/ci_isolation/tmpdir.rs",
         "a job's own temp and socket folders, not a dev-targets root",
     ),

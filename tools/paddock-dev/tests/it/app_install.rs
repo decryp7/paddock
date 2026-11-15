@@ -14,7 +14,7 @@ fn shim(bin: &Path, name: &str, body: &str) {
     let p = bin.join(name);
     std::fs::write(
         &p,
-        format!("#!/bin/sh\necho \"{name} $*\" >> '{}/calls.log'\n{body}\n", bin.display()),
+        format!("#!/bin/sh\necho \"{name} $*\" >> '{}'\n{body}\n", bin.join("calls.log").display()),
     )
     .unwrap();
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
