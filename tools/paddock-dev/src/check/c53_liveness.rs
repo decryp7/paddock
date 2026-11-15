@@ -259,7 +259,7 @@ pub struct LivenessRun {
 }
 
 /// The liveness findings of the whole tree (appended after the kill findings, as the JavaScript does).
-pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
+pub fn liveness_findings(ctx: &Ctx) -> LivenessRun {
     let fix = "Ask a `paddock_proc::ProcessId` (pid plus start time): `id.presence()` (or `id.has_ended()` to wait for an end, `id.may_be_alive()` before deleting or taking over). A justified case carries `// conformance: pid-liveness — <reason>`.";
     let mut out = Vec::new();
     let mut sites: Vec<Site> = Vec::new();
@@ -330,9 +330,7 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
         })
         .collect();
     // A moved site passes without a baseline edit only when its entry's file is gone from the tree (as the JavaScript `sourceGone`).
-    let matched = reconcile(&now, &entries, &exact_key, Some(&loose_key), &|_, i| {
-        !root.join(&entries[i].file).exists()
-    });
+    let matched = reconcile(&now, &entries, &exact_key, Some(&loose_key), &|_, i| !ctx.exists(&entries[i].file));
     for &(n, i) in &matched.moved {
         let s = &sites[n];
         out.push(Finding::warn(
@@ -375,7 +373,7 @@ pub fn liveness_findings(ctx: &Ctx, root: &Path) -> LivenessRun {
     }
     // The growth check needs only git, so it runs in every whole run and whenever the baseline itself is in scope.
     if (whole_run || baseline_in_scope) && !entries.is_empty() && !ctx.is_in_memory() {
-        match growth(root, &ctx.base_ref(), &entries) {
+        match growth(ctx.root(), &ctx.base_ref(), &entries) {
             Growth::Reason(reason) => out.push(Finding::warn(
                 "C53",
                 53,

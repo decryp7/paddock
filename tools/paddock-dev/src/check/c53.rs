@@ -231,11 +231,7 @@ impl Check for C53 {
                 }));
             }
         }
-        let live = super::c53_liveness::liveness_findings(
-            ctx,
-            // an in-memory tree (the control) has no folder; the liveness half runs no git there
-            if ctx.is_in_memory() { std::path::Path::new("") } else { ctx.root() },
-        );
+        let live = super::c53_liveness::liveness_findings(ctx);
         findings.extend(live.findings);
         let has_rs = ctx.tree_files().iter().any(|f| f.ends_with(".rs"));
         let (met, detail) = if live.stale_unmeasured {

@@ -359,6 +359,7 @@ fn a_control_holds_in_a_repository_whose_lists_differ_from_its_own() {
     git(repo.path(), &["checkout", "-q", "-b", "work"]);
     std::fs::write(repo.path().join("other.sh"), "x\ny\n").unwrap();
     git(repo.path(), &["commit", "-q", "-am", "edit"]);
+    // The process's working folder is changed and not restored: nextest runs every test in its own process, so no other test sees it.
     std::env::set_current_dir(repo.path()).unwrap();
     // the ref a control would compare with by default (origin/main) exists here, with lists that differ from the control's
     git(repo.path(), &["update-ref", "refs/remotes/origin/main", "main"]);
