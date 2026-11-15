@@ -1330,3 +1330,30 @@ run 8110)?
 - **Windows estimate (not measured):** at 0.11 to 0.15 s per child the slowest test after (105 children) takes 12 to 16 s, the
   four that timed out 4 to 15 s; at run 8115's 0.19 to 0.27 s about 28 s at most, half the 60 s limit.
 - **Memory measure:** not measured (no memory question)
+
+## axe scans per screen (2026-11-15, fix/main-webkit-e2e)
+
+Question: how many scans does `axeViolations` need per screen once a scan during which a colour transition or animation
+started is discarded (`MAX_SCANS` in `ui/projects/paddock-e2e/src/axe.ts`)?
+
+- **Machine:** Mac mini (arm64), 1-minute load 19 to 42 (other agents building); Pitwall in the CI image
+  (`paddock-ci:v3`, amd64 under Rosetta, `--cpus 4 --memory 12g`)
+- **Commands:** in `ui`, `npx playwright test --project=shell-demo --project=workbench-demo --project=gallery data.spec.ts
+  shell-demo workbench-demo`; in `apps/dyno/app`, `npx playwright test e2e/axe.spec.ts e2e/dashboard-grid.spec.ts
+  e2e/tray-widgets.spec.ts e2e/screenshots-helper.spec.ts e2e/screenshots-network.spec.ts --project=chromium`; in
+  `apps/pitwall/app` (container), `PW_E2E_PREBUILT=1 npx playwright test e2e/a11y.e2e.ts e2e/chat-composer.e2e.ts
+  --project=webkit --workers=1`; scans counted from the `axe: scan n of 4 counted for nothing` lines
+- **Runs:** 1 each (359, 31 and 19 tests, all green)
+- **Numbers:**
+
+  | Suite | Screens that needed 2 scans | 3 scans | What moved |
+  |---|---|---|---|
+  | ui shell-demo, workbench-demo, gallery (Chromium) | 2 | 1 | `_mat-form-field-subscript-animation`, `_mat-select-exit`; `mat-mdc-tooltip-hide` then a `background-color` transition (workbench assistant pane) |
+  | Dyno (Chromium) | 1 | 0 | `_mat-form-field-subscript-animation`, 691 ms after the dark switch |
+  | Pitwall (WebKit) | 0 | 0 | |
+
+- **Before the whole-name match** (the review's runs of the first version): Pitwall `pd.settings` 2 scans, Dyno `dy.alert-rule`,
+  `dy.lockers` and `dy.web-search` up to 5, from `stroke-dashoffset` (matched as `stroke`) and empty `cdk-text-field-autofill-*`
+  keyframes (counted as colour when unreadable).
+- **Result:** at most 3 scans; `MAX_SCANS` is 4.
+- **Memory measure:** not measured (no memory question)
