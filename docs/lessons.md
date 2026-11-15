@@ -2187,3 +2187,64 @@ test that forces the late look (the test looks only after the run returned, or t
 printed), red before. C128 (report-only) flags `ProcessId::of` on a pid parsed in the same function. **Class: an observation
 raced the action under test (rule 53, seen from the test side; run 8118 above).**
 
+## Two branches that each added a lesson conflicted at the end of the file (2026-11-15)
+Every train that merged two branches with a new lesson (or a new benchmark block) stopped on a conflict in `docs/lessons.md`:
+both sides added lines after the same last line, so git saw one hunk changed twice, and the integrator resolved it by hand each
+time. The lessons log now merges with git's union driver (`.gitattributes`: `docs/lessons.md merge=union`), which keeps both
+sides' added lines; `conformance/test/union-merge.test.mjs` merges two such branches in a scratch repository.
+`docs/benchmarks.md` and the apps' `docs/performance.md` stay on the normal merge: their results blocks are corrected in place
+(review of 2026-11-15), and the test checks that they are not union. **When union is not safe:** it never reports a conflict, so a change that
+edits or deletes lines in place (a reworded lesson, a corrected benchmark row) merged with another branch's edit of the same
+lines keeps both versions, silently. Rewording an earlier entry goes in its own change, merged alone, and the integrator reads
+the merged hunk of these files like any other. Registers, tables whose rows must be unique and generated files (`gates.toml`,
+`known-copies.toml`, lockfiles) are never `merge=union`: a duplicated row there is a bug, not a merge.
+
+## The nightly disk summary measured a folder CI runners do not have (2026-11-15)
+The nightly's `disk-summary` job ran `./dev disk scan` and `./dev disk report --summary` on the Mac runner. Those read the
+dev-targets folder (worktrees, build folders, agent scratch), which lives on the development machine, not in a runner's
+environment, so it summarised folders a runner does not have (or wrote "not measured") while it held the single Mac runner.
+The user asked whether it was needed; it was removed (with its README line). `./dev disk report` gives the same picture on the machine, and the
+`--summary` option stays for use there. `conformance/test/ci-actions.test.mjs` fails on any workflow step that runs
+`./dev disk scan` or `./dev disk report`. **Rule:** a CI job reads only what a runner has; a check of the development machine
+runs on the machine.
+
+## Waiters stacked and polled without a bound although the pgrep guard existed (2026-11-15)
+The `no-pgrep-wait` hook only refused a `pgrep -f` loop, by a regex over the whole command text (it also refused such a loop
+written into a heredoc or a commit message). Agents still started a second `./dev wait` for a run another one already waited
+on, and polled logs with `while ! grep ...; do sleep ...; done`, which has no maximum duration. The hook now runs on
+`lib/shellscan.py` (the loop's condition, not any text), keeps the `pgrep -f` refusal, and warns (never blocks: ER-36, a hook
+that judges text only warns) on a grep polling loop, on two waits for one target in one command, and on a wait for a target a
+running `dev wait` already has (read from `ps`; it cannot tell which agent started it, so the warning says so). Rows are in
+`lib/shell-forms.tsv`, whose runner now knows a `warn` verdict. **Class: unbounded or stacked waiters (ER-32; earlier: the 36
+stuck waiters of 2026-11-03/04).**
+
+## The shell scripts deleted computed paths with a bare rm -rf while Rust had a guard (2026-11-15)
+paddock-dev's deletes go through `safe_remove::remove_under` (strictly under a vetted root, no `..`, no link on the way), but
+the shell scripts, which still run as the CI kit's fallback, on tag runs and on the development machine, had no such helper:
+each computed `rm -rf "$x"` trusted its variable. The class has bitten or nearly bitten four times: the 2026-10-31 scratchpad
+wipe, the 2026-11-10 live-worktree removal, the prune script's IFS near-miss and its stat fallback. `conformance/ci/safe-rm.sh`
+(`safe_rm <root> <path>...`, POSIX sh) is the shell copy of the Rust guard (docs/known-copies.toml, `safe-remove-under`): it
+refuses an empty path, `/`, a top-level or home root, `..`, a relative path, a path outside the root and a link on the way,
+and removes nothing when one path is refused. The prune, host-cleanup, node-caches, stable-workspace, kept-clone and vm-win
+prepare sites use it with the same roots as their Rust twins. C127 (report-only) lists every other recursive `rm` of a computed
+path in a shell script. **Rule:** a shell script deletes a computed path only through `safe_rm`, with the root it owns; a
+mktemp folder of its own, or a site that cannot name a root two folders deep (a guest VM's home, Linux's `/tmp`), carries
+`# conformance: computed-rm — <why>`. Review then found that both copies checked one spelling and removed another: `root/link/`
+(a final link with a trailing slash) passed as a path strictly under the root, and the OS read it as the folder the link names, so
+the delete emptied a folder outside the root; the Rust guard had the same hole. Both now remove the path rebuilt from its checked
+names, and one table (`tools/paddock-dev/tests/fixtures/safe-remove-parity.tsv`) is answered by both copies' tests. **Class:
+computed deletes beyond their folder (C115's third sighting, ER-21); check and act on the same normalised value.**
+
+## A train waiting to dispatch was starved by scheduled runs (2026-11-15)
+`./dev ci dispatch` waited while another run held the single Mac or Windows runner, and `ci schedule-skip` ends a scheduled run
+early only while a train's run is queued or running. A train whose dispatcher was still waiting had nothing queued, so each new
+scheduled run took the runner first: on 2026-11-14 around 11:00 and on 2026-11-15 from 05:03 to 07:07 (runs 8112 to 8114). A
+first fix recorded a "waiting" marker in a repository Actions variable; review found that it needs a repo-admin-scoped token,
+and the common-practice answer is a queued run, as CI systems do (a job waits on a free runner, not the client). It was
+reverted. Now `ci dispatch` sends a `train/*` run of a workflow whose first job runs the `runner-wait` action at once, and that
+Linux job waits (`./dev ci runner-wait`, at most 2h30m, logged) until no OLDER run has an unfinished job on its Mac or Windows class (an older run's later Linux jobs do not hold it:
+review round 2 found that waiting for the whole run could fill the Linux slots with waiters).
+Older only: two runs of one train never wait for each other, so the oldest always goes. The queued run is what schedule-skip
+already yields to, with its bounds (never twice in a row, never past the gap). Conformance checks that every macOS or Windows
+job of such a workflow needs the runner-wait job. **Rule:** a wait for a shared resource lives in the queued job, not in the
+client that has not queued yet. **Class: a scheduler that cannot see work that has not been queued.**

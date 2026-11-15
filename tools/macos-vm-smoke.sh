@@ -167,6 +167,7 @@ if [ "$guest" = linux ]; then
   for _ in $(seq 1 60); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 1; done
   export XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
 fi
+# conformance: computed-rm — runs inside the disposable guest VM, whose home folder holds only the copy this smoke test made
 rm -rf "$HOME/smoke" && mkdir -p "$HOME/smoke" && cp -R "$share"/. "$HOME/smoke/"
 export PADDOCK_DISPOSABLE_MAC=1 PADDOCK_DISPOSABLE_VM=1
 bash "$HOME/smoke/smoke.sh" "$HOME/smoke/old/$name" "$HOME/smoke/new/$name"

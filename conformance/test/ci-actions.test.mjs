@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { conjuncts, expr, job as workflowJob, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
+import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
@@ -2396,4 +2396,60 @@ test('the bash-before-Git-bash check flags the 7880 shape and passes the fixed o
   assert.deepEqual(bashBeforeGitBash(wf(gitBash + check)), []);
   assert.deepEqual(bashBeforeGitBash(wf(check.replace('        run', "        if: runner.os == 'Linux'\n        run") + gitBash)), []);
   assert.deepEqual(bashBeforeGitBash(wf(check, 'ubuntu-latest')), []);
+});
+
+// 2026-11-15 (user): the nightly's disk summary scanned the dev-targets folder, which a CI runner does not have, so it measured
+// nothing; `./dev disk report` gives the same on the machine. No workflow or composite action step scans or reports the dev
+// folders, in any spelling of the tool (./dev, dev, paddock-dev, $PADDOCK_DEV, bash ./dev).
+const DEV_DISK = /(?:^|[\s;&|("'/])(?:\.\/)?(?:dev|paddock-dev(?:\.exe)?|"?\$\{?PADDOCK_DEV\}?"?)\s+disk\s+(?:scan|report)\b/m;
+
+test('the dev-disk matcher knows every spelling of the tool', () => {
+  for (const s of ['./dev disk scan', 'bash ./dev disk report --summary', 'dev disk scan', '"$PADDOCK_DEV" disk report', '${PADDOCK_DEV} disk scan', '/x/paddock-dev disk report', 'a && ./dev disk scan']) assert.match(s, DEV_DISK, s);
+  for (const s of ['./dev disk check', 'echo dev disks', './dev diskscan', './dev ci run x']) assert.doesNotMatch(s, DEV_DISK, s);
+});
+
+test('no workflow or composite action step runs ./dev disk scan or ./dev disk report (a runner has no dev-targets folder)', () => {
+  const found = [];
+  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    for (const [id, j] of Object.entries(loadWorkflow(f).jobs ?? {})) {
+      for (const s of stepsOf(j)) if (DEV_DISK.test(String(s.run ?? ''))) found.push(`${f}: ${id}`);
+    }
+  }
+  for (const n of names) {
+    for (const s of stepsOf(loadAction(n))) if (DEV_DISK.test(String(s.run ?? ''))) found.push(`actions/${n}`);
+  }
+  assert.ok(names.length > 10, 'the composite actions are read');
+  assert.deepEqual(found, [], 'remove these steps: run `./dev disk report` locally instead');
+});
+
+// 2026-11-15 review (P1-3): a train run is dispatched at once and its first job waits for the single-machine runner
+// (./dev ci runner-wait). That holds only if the wait runs before every macOS or Windows job of the run.
+test('a workflow that runs runner-wait runs it in a first job that every macOS or Windows job needs', () => {
+  const single = (j, seen = new Set()) => {
+    if (typeof j.uses === 'string') {
+      const m = /^\.\/\.gitea\/workflows\/([\w.-]+)$/.exec(j.uses.trim());
+      if (!m || seen.has(m[1])) return false;
+      seen.add(m[1]);
+      return Object.values(loadWorkflow(m[1]).jobs ?? {}).some((x) => single(x, seen));
+    }
+    return /macos|windows/i.test(JSON.stringify([j['runs-on'] ?? '', j.strategy?.matrix ?? null]));
+  };
+  const users = [];
+  for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
+    const jobs = loadWorkflow(f).jobs ?? {};
+    const waiters = Object.entries(jobs).filter(([, j]) => stepsOf(j).some((s) => s.uses === './.gitea/actions/runner-wait')).map(([id]) => id);
+    if (!waiters.length) continue;
+    users.push(f);
+    for (const w of waiters) assert.deepEqual(needsOf(jobs[w]), [], `${f}: ${w} runs runner-wait, so it must be a first job (no needs): ./dev ci dispatch reads it that way`);
+    const upstream = (id, acc = new Set()) => {
+      for (const n of needsOf(jobs[id])) if (!acc.has(n)) { acc.add(n); upstream(n, acc); }
+      return acc;
+    };
+    for (const [id, j] of Object.entries(jobs)) {
+      if (waiters.includes(id) || !single(j)) continue;
+      const up = upstream(id);
+      assert.ok(waiters.some((w) => up.has(w)), `${f}: job ${id} runs on macOS or Windows but does not need ${waiters.join(' or ')} (the runner-wait job)`);
+    }
+  }
+  assert.ok(users.includes('ci.yml') && users.includes('debrief.yml') && users.includes('dyno-release.yml'), `the train workflows wait in their first job: ${users}`);
 });

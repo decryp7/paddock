@@ -315,8 +315,12 @@ enum CiCommand {
     /// GITHUB_OUTPUT). Fails open: an unreadable API lets the run proceed, with a warning.
     ScheduleSkip(ci_runs::ScheduleSkipArgs),
     /// Dispatch a workflow once no other run is on its single-machine runner (macOS, Windows): waits like `wait --ci-run`, at
-    /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once.
+    /// most --max, then ends with an `::error::` naming the busy run. Linux-only workflows dispatch at once, and so does a train
+    /// (`train/*`) whose workflow waits in its own first job (the runner-wait action), so scheduled runs see it queued.
     Dispatch(ci_runs::DispatchArgs),
+    /// The first job of a train run (the runner-wait action): wait, at most --max, until no older run has an unfinished job on this run's
+    /// single-machine runner (macOS, Windows). Fails open when the runs cannot be read; ends with an `::error::` at --max.
+    RunnerWait(ci_runs::RunnerWaitArgs),
     /// Delete the `trial/*` refs (`ci dispatch --trial`) of branches that are gone or landed on main (ADR 0098 WP-4).
     TrialPrune(ci_runs::TrialPruneArgs),
 }
@@ -649,6 +653,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Ci {
             command: CiCommand::Dispatch(a),
         } => ci_runs::dispatch(&a),
+        Command::Ci {
+            command: CiCommand::RunnerWait(a),
+        } => ci_runs::runner_wait(&a),
         Command::Ci {
             command: CiCommand::TrialPrune(a),
         } => ci_runs::trial_prune(&a),

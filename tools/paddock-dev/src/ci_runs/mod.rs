@@ -106,6 +106,30 @@ pub struct DispatchArgs {
     root: Option<PathBuf>,
 }
 
+/// Arguments of `ci runner-wait` (the `runner-wait` action, the first job of a train run). The run, server and repository
+/// default to the job's (`GITHUB_RUN_ID`, `GITHUB_SERVER_URL`, `GITHUB_REPOSITORY`); the token is `PLAN_TOKEN` or `GITEA_TOKEN`.
+#[derive(Args)]
+pub struct RunnerWaitArgs {
+    /// This run's id (default: GITHUB_RUN_ID).
+    #[arg(long)]
+    run_id: Option<u64>,
+    /// The longest to wait, for example 2h. Required: the wait always ends.
+    #[arg(long, value_name = "DURATION")]
+    max: String,
+    /// How often to look (default 30s).
+    #[arg(long, value_name = "DURATION")]
+    interval: Option<String>,
+    /// The repository (default: GITHUB_REPOSITORY, then decryp7/paddock).
+    #[arg(long)]
+    repo: Option<String>,
+    /// The Gitea server (default: GITHUB_SERVER_URL, then the family's).
+    #[arg(long)]
+    server: Option<String>,
+    /// The checkout whose `.gitea/workflows` is read (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+}
+
 /// Arguments of `ci timings`.
 #[derive(Args)]
 pub struct TimingsArgs {
@@ -420,6 +444,73 @@ pub fn verdict(a: &VerdictArgs) -> Result<Report, CliError> {
     Ok(r)
 }
 
+/// `ci runner-wait`: waits (bounded) until no older run holds this run's single-machine runner. Exit 0 when free or when the
+/// runs cannot be read (fail open, with a warning); a failure naming the busy run at `--max`.
+pub fn runner_wait(a: &RunnerWaitArgs) -> Result<Report, CliError> {
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let hint = "Run `./dev ci runner-wait --help`.";
+    let own = a
+        .run_id
+        .or_else(|| env("GITHUB_RUN_ID").and_then(|v| v.parse().ok()))
+        .ok_or_else(|| CliError::usage("no run id: pass --run-id or run it in a CI job (GITHUB_RUN_ID).").with_hint(hint))?;
+    let max = crate::wait::parse_duration(&a.max).map_err(|e| CliError::usage(e).with_hint(hint))?;
+    if max.is_zero() || max > crate::wait::MAX_LIMIT {
+        return Err(CliError::usage(format!("--max {} is out of range: use 1s to 24h.", a.max)).with_hint(hint));
+    }
+    let interval = match &a.interval {
+        Some(i) => crate::wait::parse_duration(i).map_err(|e| CliError::usage(e).with_hint(hint))?,
+        None => std::time::Duration::from_secs(30),
+    }
+    .max(crate::wait::MIN_INTERVAL);
+    let server = a
+        .server
+        .clone()
+        .or_else(|| env("GITHUB_SERVER_URL"))
+        .unwrap_or_else(|| SERVER.into());
+    let repo = a
+        .repo
+        .clone()
+        .or_else(|| env("GITHUB_REPOSITORY"))
+        .unwrap_or_else(|| "decryp7/paddock".into());
+    let token = env("PLAN_TOKEN").or_else(|| env("GITEA_TOKEN")).unwrap_or_default();
+    let root = a
+        .root
+        .clone()
+        .or_else(|| std::env::current_dir().ok().and_then(|d| find_root(&d)))
+        .ok_or_else(|| CliError::usage("not inside a repository checkout.").with_hint("Pass --root <checkout>."))?;
+    let read = |name: &str| std::fs::read_to_string(root.join(".gitea/workflows").join(name)).ok();
+    let mut http = CurlHttp;
+    let mut clock = dispatch::system_clock();
+    let target = dispatch::Target {
+        server: &server,
+        repo: &repo,
+        token: &token,
+    };
+    let r = dispatch::runner_wait(
+        &mut http,
+        &target,
+        own,
+        max,
+        interval,
+        &read,
+        &mut clock,
+        &mut std::io::stdout(),
+        500,
+    )
+    .map_err(|e| CliError::failure(e).with_hint("Check the workflow file and the job token's read access to Actions runs."))?;
+    match r {
+        dispatch::RunnerWait::Free { waited } => Ok(Report::new(
+            serde_json::json!({"waitedMs": waited.as_millis() as u64}),
+            String::new(),
+        )),
+        dispatch::RunnerWait::Unreadable(e) => Ok(Report::new(serde_json::json!({"waited": false, "unreadable": e}), String::new())),
+        dispatch::RunnerWait::StillBusy { last } => Err(CliError::failure(format!("the runner stayed busy for --max ({last})."))
+            .with_hint(
+                "Wait for that run with `./dev wait --ci-run <id> --max <duration>` or cancel it if it is stale, then rerun this run.",
+            )),
+    }
+}
+
 /// `ci dispatch`: waits while a run shares the workflow's single-machine runner class, then dispatches.
 pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
     let hint = "Run `./dev ci dispatch --help`.";
@@ -459,8 +550,13 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         inputs.push(format!("base={base}"));
         trial = Some((g, trial_ref));
     }
-    let req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
+    let mut req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
+    // The Linux slot count is declared once (conformance/ci/runner-slots.json); without it a train dispatch waits here.
+    match dispatch::train_waiters(&root) {
+        Ok(n) => req.train_waiters = n,
+        Err(e) => eprintln!("::warning::dispatch: {e}; a train run waits here, not in its first job."),
+    }
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
     let result = dispatch::run(

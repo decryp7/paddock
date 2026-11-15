@@ -5,6 +5,8 @@
 # tools/paddock-dev/tests/it/host_steps.rs. Deleted with the release-path lane (WP-11). Input: NAME (the kept folder's name).
 here=$(cd "$(dirname "$0")" && pwd)
 set -euo pipefail
+# shellcheck source=../safe-rm.sh
+. "$here/../safe-rm.sh"
 # The Linux jobs run in a container with a fixed workspace already.
 if [ "$RUNNER_OS" = Linux ]; then exit 0; fi
 if [ -L "$GITHUB_WORKSPACE" ]; then echo "stable-workspace: already linked"; exit 0; fi
@@ -77,14 +79,14 @@ if ! bounded "compare the volumes of $ws and $root" same_volume; then
   echo "::warning::stable-workspace: the work folder $ws is on another volume than the kept folder $stable (or one could not be read: $(tail -c 300 "$scratch/err" | tr '\r\n' '  ')), so moving it would copy the whole checkout; building from the work folder (sccache misses the workspace crates). Next step: put the runner's host.workdir_parent (config.yaml) on the CI home's volume."
   exit 0
 fi
-move_checkout() { mkdir -p "$root" && cd "$root" && rm -rf "$stable" && mv "$ws" "$stable"; }
+move_checkout() { mkdir -p "$root" && cd "$root" && safe_rm "$root" "$stable" && mv "$ws" "$stable"; }
 # Under act on Windows the runner keeps a handle on the work folder, so it cannot move. Keep a clone at the stable
 # path instead and bring it to this commit (a local clone and fetch: hard links, no network), with every file
 # that is not git's removed; ignored files (no build output lives there: the build folder is elsewhere) stay.
 clone_checkout() {
   local sha
   sha=$(git -C "$ws" rev-parse HEAD) &&
-  if [ ! -d "$stable/.git" ]; then rm -rf "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable"; fi &&
+  if [ ! -d "$stable/.git" ]; then safe_rm "$root" "$stable" && git clone -q --no-checkout --no-tags "$ws" "$stable"; fi &&
   # The checkout is shallow: --update-shallow lets the clone take a commit whose parents it does not have.
   git -C "$stable" fetch -q --no-tags --update-shallow "$ws" HEAD &&
     [ "$(git -C "$stable" rev-parse FETCH_HEAD)" = "$sha" ] &&

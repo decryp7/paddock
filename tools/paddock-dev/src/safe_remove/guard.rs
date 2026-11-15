@@ -131,9 +131,15 @@ pub fn strictly_under(root: &Path, target: &Path, rules: Rules) -> Result<bool, 
 
 /// Removes `target` (a file, a folder with everything in it, or a link) if it lies strictly under `root` and no folder on the way
 /// from `root` to `target` is a link (a link in the middle would send the delete somewhere else). The last component may be a
-/// link: it is removed as a link and its target stays. `Ok(true)`: removed; `Ok(false)`: it was not there.
+/// link, also when the target is spelled with a trailing `/` or `/.`: it is removed as a link and its target stays. `Ok(true)`:
+/// removed; `Ok(false)`: it was not there.
 pub fn remove_under(root: &Path, target: &Path, home: Option<&Path>) -> Result<bool, RemoveError> {
     check_root(root, home).map_err(RemoveError::Refused)?;
+    // The path that is checked and removed is the target's names joined again: a trailing `/`, `//` or `/.` would make the OS
+    // read a final link as the folder it names (`root/link/` is what `link` points at), so `symlink_metadata` would see a folder
+    // and `remove_dir_all` would empty it (review of 2026-11-15; the shared parity table, tests/fixtures/safe-remove-parity.tsv).
+    let target: PathBuf = target.components().collect();
+    let target = target.as_path();
     match strictly_under(root, target, Rules::host()) {
         Ok(true) => {}
         Ok(false) => {
@@ -210,6 +216,105 @@ mod tests {
         std::fs::create_dir_all(root.join("a/b")).unwrap();
         std::fs::write(root.join("a/b/f"), b"x").unwrap();
         (d, root)
+    }
+
+    /// The shared parity table of the Rust guard and its shell copy (conformance/ci/safe-rm.sh; docs/known-copies.toml).
+    #[cfg(unix)]
+    #[test]
+    fn the_shared_parity_table_holds_for_the_rust_guard() {
+        let table = include_str!("../../tests/fixtures/safe-remove-parity.tsv");
+        let mut rows = 0;
+        for line in table
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.starts_with("name\t") && !l.is_empty())
+        {
+            let f: Vec<&str> = line.split('\t').collect();
+            let [name, root, target, result, gone] = f[..] else {
+                panic!("bad row: {line}")
+            };
+            let d = crate::ci_host::canonical_tempdir();
+            let b = d.path().to_string_lossy().to_string();
+            std::fs::create_dir_all(d.path().join("root/a/b")).unwrap();
+            std::fs::write(d.path().join("root/a/b/f"), b"x").unwrap();
+            std::fs::create_dir_all(d.path().join("outside/keep")).unwrap();
+            std::fs::write(d.path().join("outside/keep/f"), b"x").unwrap();
+            std::os::unix::fs::symlink(d.path().join("outside"), d.path().join("root/link")).unwrap();
+            std::os::unix::fs::symlink(d.path().join("root"), d.path().join("rootlink")).unwrap();
+            let fill = |s: &str| PathBuf::from(s.replace("<B>", &b));
+            let got = remove_under(&fill(root), &fill(target), None);
+            let want_ok = match result {
+                "ok" => true,
+                "refused" => false,
+                "ok-fold|refused-nofold" => Rules::host().fold,
+                r => panic!("{name}: unknown result {r}"),
+            };
+            if want_ok {
+                assert!(got.is_ok(), "{name}: {got:?}");
+            } else {
+                assert!(matches!(got, Err(RemoveError::Refused(_))), "{name}: {got:?}");
+                assert!(d.path().join("root/a/b/f").exists(), "{name}: a refusal removes nothing");
+            }
+            // `gone` is what an ok row removes; a row refused here (ok-fold|refused-nofold where case matters) removes nothing.
+            if want_ok && gone != "-" {
+                assert!(
+                    std::fs::symlink_metadata(d.path().join(gone)).is_err(),
+                    "{name}: {gone} is still there"
+                );
+            }
+            assert!(
+                d.path().join("outside/keep/f").exists(),
+                "{name}: the folder outside the root was touched"
+            );
+            rows += 1;
+        }
+        assert!(rows >= 15, "the table was read ({rows} rows)");
+    }
+
+    /// The same table on Windows, in Windows spelling: `\\` separators, and every target once more as `\\?\\<path>`. The
+    /// rows that need a link are left out (a symlink needs Developer Mode or an elevated token on Windows; junctions are
+    /// covered by `a_link_is_removed_as_a_link_and_its_target_stays`), and so is the shell copy, which Windows CI does not run.
+    #[cfg(windows)]
+    #[test]
+    fn the_shared_parity_table_holds_in_windows_spelling() {
+        let table = include_str!("../../tests/fixtures/safe-remove-parity.tsv");
+        let mut rows = 0;
+        for line in table
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.starts_with("name\t") && !l.is_empty())
+        {
+            let f: Vec<&str> = line.split('\t').collect();
+            let [name, root, target, result, gone] = f[..] else {
+                panic!("bad row: {line}")
+            };
+            if line.contains("link") {
+                continue;
+            }
+            for verbatim in [false, true] {
+                let d = crate::ci_host::canonical_tempdir();
+                let b = d.path().to_string_lossy().trim_start_matches(r"\\?\").to_string();
+                std::fs::create_dir_all(d.path().join("root/a/b")).unwrap();
+                std::fs::write(d.path().join("root/a/b/f"), b"x").unwrap();
+                std::fs::create_dir_all(d.path().join("outside/keep")).unwrap();
+                std::fs::write(d.path().join("outside/keep/f"), b"x").unwrap();
+                let fill = |s: &str| s.replace("<B>", &b).replace('/', "\\");
+                let t = if verbatim { format!(r"\\?\{}", fill(target)) } else { fill(target) };
+                let got = remove_under(Path::new(&fill(root)), Path::new(&t), None);
+                let want_ok = matches!(result, "ok" | "ok-fold|refused-nofold");
+                assert_eq!(got.is_ok(), want_ok, "{name} ({t}): {got:?}");
+                if want_ok && gone != "-" {
+                    assert!(
+                        std::fs::symlink_metadata(d.path().join(gone)).is_err(),
+                        "{name}: {gone} is still there"
+                    );
+                }
+                assert!(
+                    d.path().join("outside/keep/f").exists(),
+                    "{name}: the folder outside the root was touched"
+                );
+                rows += 1;
+            }
+        }
+        assert!(rows >= 14, "the table was read ({rows} runs)");
     }
 
     #[test]

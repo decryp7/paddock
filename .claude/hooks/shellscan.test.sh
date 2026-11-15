@@ -19,5 +19,7 @@ eq("$HOME is the home folder", s.scan("ls $HOME/a", home="/h")[0].argv, ["ls", "
 eq("HOME set by the command wins", s.scan("HOME=/o; ls $HOME/a", home="/h")[1].argv, ["ls", "/o/a"])
 eq("ANSI-C hex", s.scan(r"$'\x6bill' 1")[0].argv, ["kill", "1"])
 eq("alias", s.scan("alias k='kill -9'; k 1")[1].argv, ["kill", "-9", "1"])
+eq("a while condition names its loop and its !", [(c.loop, c.negated) for c in s.scan("while ! grep -q x f; do sleep 1; done")][:2], [("while", True), ("", False)])
+eq("an if condition is no loop", s.scan("if grep -q x f; then :; fi")[0].loop, "")
 sys.exit(fail)
 PY

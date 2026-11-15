@@ -23,6 +23,8 @@
 # folder (tauri-driver --native-driver <checkout>/.drivers/msedgedriver.exe).
 # PADDOCK_PKILL, PADDOCK_PS and PADDOCK_POWERSHELL override those programs (tests).
 set -uo pipefail
+# shellcheck source=../conformance/ci/safe-rm.sh
+. "$(dirname "$0")/../conformance/ci/safe-rm.sh"
 
 id=""; build=0; prefix=""
 patterns=()
@@ -103,7 +105,10 @@ else
   echo "host-cleanup: no temp folder of this job (PADDOCK_JOB_TEMP); temp folders are left to the runner"
 fi
 if [ "$build" = 1 ]; then
-  if [ -n "${CARGO_TARGET_DIR:-}" ]; then rm -rf "$CARGO_TARGET_DIR/dist" "$CARGO_TARGET_DIR/debug" 2>/dev/null; fi
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    # A refusal is a warning, as in `ci host-cleanup`: the clean-up goes on.
+    for out in dist debug; do SAFE_RM_ANNOTATION=warning safe_rm "$CARGO_TARGET_DIR" "$CARGO_TARGET_DIR/$out" || true; done
+  fi
   rm -rf dist app/dist app/coverage app/playwright-report 2>/dev/null
 fi
 exit 0

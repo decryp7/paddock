@@ -129,7 +129,12 @@ changes here, every app's copy is updated in the same change.
     machine busy but not overloaded: start more agents when load stays low, hold or stop starting them when it stays
     high (Mac mini, 14 cores: aim for a 1-minute load of about 6–16, at most ~5 heavy jobs, `CARGO_BUILD_JOBS=2` each),
     use the shared build cache (`sccache`) and copy-on-write target folders, and never let tests crowd out a release.
-    Only one train's CI runs at a time on each shared runner class; `./dev ci dispatch` waits while it is busy (planned; ER-24; 2026-11-12).
+    Only one train's CI runs at a time on each shared runner class: `./dev ci dispatch` sends a train run at once and its first
+    job waits (`runner-wait`, on Linux) while an older run holds the Mac or Windows runner it needs; other dispatches wait in
+    the dispatcher. A run holds a class while it has an unfinished job on it; in a busy check, unknown counts as busy (a job
+    whose label is unresolved, empty or of no known class counts its run by its workflow file); only an unreadable API fails
+    open. At most the Linux slots less one (`conformance/ci/runner-slots.json`) train runs wait at once, so one Linux slot
+    stays free (ER-24; 2026-11-12, mechanism 2026-11-15; first live run: pending).
 
 ## Sharing (user, 2026-10-24)
 42. **Share first.** Before building anything in an app, check Paddock's shared crates and packages (crates/README.md,

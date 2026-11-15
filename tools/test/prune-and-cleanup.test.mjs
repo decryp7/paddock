@@ -47,12 +47,23 @@ test('prune: counts the size of the files, not only the blocks the file system h
 });
 
 test('prune: still over after that, the folder is removed', () => {
-  const dir = scratch();
+  // One level below a scratch folder: the folder goes only strictly under its parent, which is not the home folder (safe_rm).
+  const dir = join(scratch(), 'build');
   big(dir, 'debug/incremental', 10);
   big(dir, 'debug/deps', 400);
   const r = prune(dir, 300);
   assert.match(r.out, /still .*removing/);
   assert.ok(!existsSync(dir));
+});
+
+test('prune: a folder whose parent is the home folder is refused and kept (safe_rm, as in ci prune-folder)', () => {
+  const home = scratch();
+  const dir = join(home, 'build');
+  big(dir, 'debug/deps', 400);
+  const r = run('prune-build-folders.sh', [dir, '300'], { env: { PADDOCK_PRUNE_UNIT: 'kb', HOME: home } });
+  assert.notEqual(r.status, 0, r.out);
+  assert.match(r.out, /::error::safe_rm: the root .* is the home folder or above it/);
+  assert.ok(existsSync(join(dir, 'debug/deps/blob')), 'the folder is kept');
 });
 
 test('prune: a missing folder is fine, a symlink is never followed, a bad cap is refused', () => {
@@ -95,6 +106,20 @@ test('host-cleanup: kills only processes anchored on this job, removes only the 
   assert.ok(!existsSync(join(cwd, 'dist')) && !existsSync(join(cwd, 'app/dist')));
   assert.ok(!existsSync(join(target, 'dist')) && !existsSync(join(target, 'debug')));
   assert.ok(existsSync(join(target, 'release/blob')), 'only dist and debug of the target folder');
+});
+
+test('host-cleanup: a build folder with no usable root is a warning, never an error, and the clean-up goes on', () => {
+  const bin = scratch('paddock-bin-');
+  shim(bin, 'pkill');
+  shim(bin, 'ps');
+  const cwd = scratch();
+  write(cwd, { 'dist/x': '1' });
+  const env = { PADDOCK_PKILL: join(bin, 'pkill'), PADDOCK_PS: join(bin, 'ps'), RUNNER_OS: 'macOS', CARGO_TARGET_DIR: '/paddock-top-level-target' };
+  const r = run('host-cleanup.sh', ['--id', 'pitwall', '--build-outputs'], { bin, cwd, env });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /::warning::safe_rm: the root \/paddock-top-level-target is a drive root or a top-level folder/);
+  assert.doesNotMatch(r.out, /::error::/);
+  assert.ok(!existsSync(join(cwd, 'dist')), 'the checkout outputs still go');
 });
 
 test('host-cleanup: the leak check names what still runs after the clean-up; on Windows PowerShell ends and lists processes (Git bash has no pkill)', () => {

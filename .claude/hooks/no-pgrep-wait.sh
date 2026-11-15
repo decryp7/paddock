@@ -1,8 +1,15 @@
 #!/bin/bash
-# PreToolUse(Bash): refuse waits that poll `pgrep -f` in a while/until loop.
-# `pgrep -f PATTERN` matches the waiting shell's own command line, so the loop never ends.
-cmd=$(jq -r '.tool_input.command // ""')
-if printf '%s' "$cmd" | tr '\n' ' ' | grep -Eq '(while|until)[^;]*pgrep[[:space:]]+(-[[:alnum:]]*[[:space:]]+)*-[[:alnum:]]*f'; then
-  jq -n '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:"Blocked: don'"'"'t wait with pgrep -f (it matches its own command line). Wait on the job'"'"'s own completion notification, plock'"'"'s '"'"'<name> done'"'"' line in that job'"'"'s output, or `./dev wait --pid/--plock/--file/--ci-run ... --max <duration>`."}}'
-fi
-exit 0
+# PreToolUse(Bash): the waiter guard (ER-32). Logic: no-pgrep-wait.py on lib/shellscan.py.
+#  Refused (blocks): a while/until loop whose condition runs `pgrep -f` (also inside a `$( )`), or whose body runs it while the
+#  loop sleeps or never ends by itself (`while true`, `while :`): the pattern matches the waiting shell's own command line, so the
+#  loop never ends. Text in heredocs, comments and quoted arguments is not a loop.
+#  Warned: `pgrep -f` in a loop body that neither sleeps nor loops forever (a lookup per line of a `while read`).
+#  Warned (never blocks, ER-36: a hook that judges text only warns), through additionalContext:
+#  - a `while ! grep ...; do sleep ...` (or `until grep`) polling loop: no maximum duration; `./dev wait --file --line --max` is;
+#  - two `./dev wait` for the same --file, --pid, --ci-run or --plock in one command;
+#  - a `./dev wait` for a target a running `dev wait` already waits on (read from `ps`). The hook cannot tell which agent
+#    started that process, so the warning says so; it is quiet when the table cannot be read.
+# Never fails closed: a parse problem allows the command and warns on stderr. NO_PGREP_WAIT_PS_FILE replaces `ps` (tests).
+# Needs python3 on PATH (as every guard on lib/shellscan.py does); without it the exec fails, the hook exits non-zero and Claude
+# Code runs the command with the hook's error shown, so the pgrep refusal is then not enforced.
+exec python3 -I -B "$(dirname "$0")/no-pgrep-wait.py"

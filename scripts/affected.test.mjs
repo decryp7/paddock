@@ -1105,6 +1105,8 @@ describe('contracts', () => {
       if (/^\s*(\/\/|\*|#)/.test(text)) continue; // a comment names the file, nothing reads it
       if (DOCS.some((r) => r.test(file))) continue; // a docs tool (docs/images/src) reading docs is docs
       if (file === 'scripts/affected.test.mjs') continue; // this file names docs as test data
+      // It asks git for the docs' merge attribute (`git check-attr`) and never reads their text.
+      if (file === 'conformance/test/union-merge.test.mjs') continue;
       for (const m of text.matchAll(new RegExp(re, 'g'))) {
         const inc = /include_str!\("([^"]+)"\)/.exec(m[0]);
         const path = inc ? posix.normalize(posix.join(posix.dirname(file), inc[1])) : m[0].slice(1, -1);

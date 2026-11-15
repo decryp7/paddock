@@ -1371,3 +1371,21 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The guard hooks' copy (dev_targets_of, dev_targets, main_checkout): Python, because the hooks run before any binary is built; scripts call `./dev places` instead. .claude/hooks/paddockpaths-parity.test.sh runs both on one table (named, root-level, relative, `..`, blank and whitespace values). Goes when the guards move onto `./dev hook pre-tool-use` (ADR 0083)."
+
+# =====================================================================================================================
+# Guarded removal under an explicit root (C127)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "safe-remove-under"
+title = "Removing a path only strictly under an explicit root that is not /, a top-level or the home folder, with no `..` and no link on the way"
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/safe_remove/guard.rs"]
+symbols = ["item:check_root_for", "item:strictly_under", "item:remove_under", "item:split"]
+status = "built"
+
+  [[mechanism.copy]]
+  paths = ["conformance/ci/safe-rm.sh"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The shell scripts' copy (safe_rm): the CI kit's shell fallback and the dev scripts run without the paddock-dev binary. Same root and path rules, read lexically; Windows paths are spelled by cygpath -m first. conformance/test/safe-rm.test.mjs tests it in bash and sh; there is no parity table with the Rust guard yet. Goes with the shell kit (docs/plans/ci-in-rust.md, WP-11) for the CI scripts; the dev scripts move to `./dev` or keep it."

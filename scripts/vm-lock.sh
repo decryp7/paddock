@@ -109,6 +109,7 @@ vm_lock_release() {
   local t0=$SECONDS rc=0
   _vm_lock_dev ci slot release --slot "$_vm_lock_slot" --token "$_vm_lock_token" --root "$_vm_lock_root" >/dev/null 2>&1 || rc=$?
   _vm_lock_slow "$t0" release "$rc"
+  # conformance: computed-rm — this call's own mktemp -d owner folder (in TMPDIR, which is /tmp on Linux: safe_rm refuses that root)
   [ -z "$_vm_lock_owner" ] || rm -rf "$_vm_lock_owner"
   echo "vm-lock: $_vm_lock_label released the test machines lock after $((SECONDS - _vm_lock_since))s" >&2
   _vm_lock_slot=""; _vm_lock_owner=""

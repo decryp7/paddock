@@ -381,6 +381,9 @@ fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
         ) {
             continue; // these files name docs as test data
         }
+        if file == "conformance/test/union-merge.test.mjs" {
+            continue; // it asks git for the docs' merge attribute (`git check-attr`) and never reads their text
+        }
         for m in re.find_iter(text) {
             let path = match include.captures(m.as_str()) {
                 Some(c) => normalize(&format!("{}/{}", file.rsplit_once('/').map_or(".", |(d, _)| d), &c[1])),
