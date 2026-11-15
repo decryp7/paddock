@@ -3,11 +3,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: it runs the ./dev shell wrapper, which Windows runs through Git bash on every job
 #![cfg(unix)]
-use super::wrapper::{Fixture, fake_rustc, shim_cargo, write_script};
+use super::wrapper::{Fixture, fake_rustc, launcher, shim_cargo, write_script};
 use paddock_testkit::TestCommand;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -100,16 +99,8 @@ fn published_tool(hash: &str) -> Vec<u8> {
         .into_bytes()
 }
 
-fn sha256_of(bytes: &[u8], scratch: &Path) -> String {
-    let p = scratch.join("sum-input");
-    std::fs::write(&p, bytes).unwrap();
-    let out = TestCommand::new("sh")
-        .args(["-c", "(sha256sum \"$1\" 2>/dev/null || shasum -a 256 \"$1\") | cut -d' ' -f1"])
-        .arg("x")
-        .arg(&p)
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
+fn sha256_of(bytes: &[u8]) -> String {
+    dev_launch::sha256::hex(bytes)
 }
 
 /// A fixture, the fake compiler, the hash for it and a scratch folder.
@@ -149,9 +140,8 @@ impl Setup {
         let shims = self.f.cargo_home.path().join("shims");
         write_script(&shims.join("cargo"), &shim_cargo(0));
         let shims_dir = shims.to_path_buf();
-        let mut cmd = TestCommand::new("sh");
-        cmd.arg(self.f.root().join("dev"))
-            .arg("hello")
+        let mut cmd = TestCommand::new(launcher());
+        cmd.arg("hello")
             .current_dir(self.f.root())
             .path_first(&shims_dir)
             .env("PADDOCK_DEV_HOME", self.scratch.path().join("home"))
@@ -195,7 +185,7 @@ impl Setup {
 fn a_published_tool_is_downloaded_checked_cached_and_run_without_a_build() {
     let s = setup();
     let body = published_tool(&s.hash);
-    let sha = sha256_of(&body, s.scratch.path());
+    let sha = sha256_of(&body);
     let server = Server::start(s.published(&body, &sha));
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1"), ("PADDOCK_DEV_TOKEN", "sekrit-token")]);
     assert_eq!((code, out.trim()), (0, "downloaded-binary"), "{err}");
@@ -254,7 +244,7 @@ fn a_download_whose_checksum_differs_is_refused_and_built_instead() {
 fn a_download_built_for_another_hash_is_refused_and_built_instead() {
     let s = setup();
     let body = published_tool(&"f".repeat(40));
-    let sha = sha256_of(&body, s.scratch.path());
+    let sha = sha256_of(&body);
     let server = Server::start(s.published(&body, &sha));
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
@@ -276,7 +266,7 @@ fn a_server_that_never_answers_ends_at_the_timeout_and_the_tool_is_built() {
 fn locally_nothing_is_downloaded_unless_asked_and_in_ci_it_is_by_default() {
     let s = setup();
     let body = published_tool(&s.hash);
-    let sha = sha256_of(&body, s.scratch.path());
+    let sha = sha256_of(&body);
     let server = Server::start(s.published(&body, &sha));
     let (code, out, err) = s.run(&server, &[]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
@@ -311,7 +301,7 @@ fn locally_nothing_is_downloaded_unless_asked_and_in_ci_it_is_by_default() {
 fn a_release_style_fresh_build_never_downloads() {
     let s = setup();
     let body = published_tool(&s.hash);
-    let sha = sha256_of(&body, s.scratch.path());
+    let sha = sha256_of(&body);
     let server = Server::start(s.published(&body, &sha));
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1"), ("PADDOCK_DEV_FRESH", "1")]);
     assert_eq!((code, out.trim()), (0, "built-by-shim"), "{err}");
@@ -342,7 +332,7 @@ fn a_refused_read_says_whether_a_token_was_sent_and_the_tool_is_built() {
 fn a_download_never_touches_the_source_only_cache() {
     let s = setup();
     let body = published_tool(&s.hash);
-    let sha = sha256_of(&body, s.scratch.path());
+    let sha = sha256_of(&body);
     let server = Server::start(s.published(&body, &sha));
     let (code, out, err) = s.run(&server, &[("PADDOCK_DEV_DOWNLOAD", "1")]);
     assert_eq!((code, out.trim()), (0, "downloaded-binary"), "{err}");
@@ -387,7 +377,7 @@ fn a_server_error_and_a_binary_that_404s_while_its_checksum_exists_both_fall_bac
 
     let s = setup();
     let body = published_tool(&s.hash);
-    let sha = sha256_of(&body, s.scratch.path());
+    let sha = sha256_of(&body);
     let only_sum: Vec<_> = s
         .published(&body, &sha)
         .into_iter()
@@ -404,15 +394,13 @@ fn a_server_error_and_a_binary_that_404s_while_its_checksum_exists_both_fall_bac
 }
 
 #[test]
-fn a_shell_trace_of_a_download_never_prints_the_token() {
+fn the_launchers_log_of_a_download_never_prints_the_token() {
     let s = setup();
     let server = Server::start(vec![(s.route("paddock-dev-test-host.sha256"), Reply::Status("401 Unauthorized"))]);
     let shims = s.f.cargo_home.path().join("shims");
     write_script(&shims.join("cargo"), &shim_cargo(0));
     let shims_dir = shims.to_path_buf();
-    let out = TestCommand::new("sh")
-        .arg("-x")
-        .arg(s.f.root().join("dev"))
+    let out = TestCommand::new(launcher())
         .arg("hello")
         .current_dir(s.f.root())
         .path_first(&shims_dir)
@@ -428,5 +416,5 @@ fn a_shell_trace_of_a_download_never_prints_the_token() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{err}");
     assert!(err.contains("HTTP 401") && err.contains("a read token was sent"), "{err}");
-    assert!(!err.contains("trace-secret-token-9876"), "the token reached the trace");
+    assert!(!err.contains("trace-secret-token-9876"), "the token reached the log");
 }

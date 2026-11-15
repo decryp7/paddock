@@ -1465,6 +1465,18 @@ jobs:
           if [ -n "$FILTER" ]; then echo "::notice::nextest reruns only the failed tests: $FILTER"; filter=(-E "$FILTER" --no-tests=warn); fi
           cargo nextest run --profile ci --locked --no-fail-fast ${filter[@]+"${filter[@]}"}
 
+      # The launcher behind ./dev (tools/dev-launch, std only, shell-to-rust WP-1): its own Cargo workspace, so its own format, lints and
+      # tests, on every OS (a path dependency of the tool, so a change to it runs this job). A leg that reruns failed tests skips it.
+      - name: Launcher (tools/dev-launch)
+        if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && !matrix.filter }}
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/tools/dev-launch
+        run: |
+          cargo metadata --locked --format-version 1 > /dev/null || {
+            echo "::error::tools/dev-launch/Cargo.lock is stale, run cargo update -w in tools/dev-launch and commit it"; exit 1; }
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --locked
+
       # Licences, advisories, sources (tools/paddock-dev/deny.toml, the crates' rules); the image has cargo-deny.
       - name: Deny
         if: ${{ !cancelled() && env.PADDOCK_JOB_ABORTED != '1' && runner.os == 'Linux' && !matrix.filter }}

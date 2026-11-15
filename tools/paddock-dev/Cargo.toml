@@ -29,6 +29,8 @@ sha2 = "0.10"
 # C102 (ipc_endpoints): the syn pass over non-test code and the register/ratchet files.
 syn = { version = "2", default-features = false, features = ["full", "parsing", "visit", "printing"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
+# The one copy of the input hash (shell-to-rust WP-1, rule 55): the ./dev launcher runs the same code.
+dev-launch = { path = "../dev-launch" }
 paddock-cli = { path = "../../crates/paddock-cli" }
 paddock-env = { path = "../../crates/paddock-env" }
 paddock-proc = { path = "../../crates/paddock-proc" }

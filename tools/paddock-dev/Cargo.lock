@@ -392,6 +392,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "dev-launch"
+version = "0.1.0"
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1101,6 +1105,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "ctrlc",
+ "dev-launch",
  "libc",
  "paddock-cli",
  "paddock-env",

@@ -20,6 +20,7 @@ mod ci_isolation_windows;
 mod cli;
 mod contracts;
 mod dev_tool_publish;
+mod dev_stage0;
 mod dev_tool_workflow;
 mod generators;
 mod golden;

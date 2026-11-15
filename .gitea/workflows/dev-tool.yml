@@ -16,6 +16,7 @@ on:
     paths:
       - dev
       - tools/paddock-dev/**
+      - tools/dev-launch/**
       - crates/Cargo.toml
       - crates/paddock-cli/**
       - crates/paddock-env/**

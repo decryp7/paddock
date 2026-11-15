@@ -2,6 +2,7 @@
 # these paths plus the compiler's release and commit-hash lines. One path per line, relative to the repository root, no
 # globs. tests/inputs.rs compares the list with `cargo metadata` (normal and build path dependencies only).
 tools/paddock-dev
+tools/dev-launch
 crates/Cargo.toml
 crates/paddock-cli
 crates/paddock-env

@@ -1,0 +1,32 @@
+# `dev-launch`: the launcher behind `./dev` (shell-to-rust WP-1; ADR 0022 amendment 2026-11-15). Standard library only: it runs
+# before any Paddock binary exists, so it needs nothing but `cargo` and a Rust toolchain, and `paddock-dev` depends on its hash
+# code (one copy, rule 55). Its own Cargo workspace and lockfile (ADR 0014's third kind, `tools/<tool>/`).
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "dev-launch"
+version = "0.1.0"
+description = "The launcher behind ./dev: finds the paddock-dev binary for the checkout's input hash, fetches or builds it, runs it."
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+publish = false
+
+[lib]
+name = "dev_launch"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dev-launch"
+path = "src/main.rs"
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
