@@ -1,7 +1,9 @@
 # Every shell script to Rust: inventory, exceptions and work packages
 
-- Status: plan, for the user's decisions in section 8. The user decided on 2026-11-15: "move all shell now", before the app
-  releases.
+- Status: plan, decided. The user decided on 2026-11-15: "move all shell now", before the app releases, and took D1 to D9 the
+  same day (section 8; D5 changed: the PowerShell logic is ported too). Running lanes: WP-0 (`feat/no-new-shell-check`), WP-1
+  (`feat/dev-launch-rust`), WP-2 (`feat/retire-ci-kit-shell`), WP-7 (`feat/port-dev-app-scripts`). WP-5 and WP-6 start after
+  train 12 lands.
 - Date: 2026-11-15.
 - Heads read (ADR 0091), re-read right before committing: `origin/main` at `23213a35e`, `origin/train/2026-11-15-12` at
   `285c8f47a`, `origin/train/2026-11-15-13` at `13881087a`, `origin/fix/c125-and-arm64-tests` at `f2e644a9f`,
@@ -113,7 +115,7 @@ and `ci-host-steps` in `docs/known-copies.toml`, each `delete_by = "v0.5.0"`.
 | `apps/debrief/scripts/ci/macos-smoke.sh` | 101 | debrief.yml:832; `macos-smoke.test.mjs` | M | `cargo xtask macos-smoke` | WP-4 |
 | `apps/pitwall/scripts/ci/privacy-check.sh` | 22 | `apps/pitwall/paddock.ci.json`, lefthook.yml:52 | M L W | a Rust check (`./dev check run`) or a Pitwall test | WP-4 |
 | `ci-image/verify.sh` | 101 | ci-image.yml (inside the image, which has Rust) | L | `./dev ci image-verify` | WP-4 |
-| `scripts/shell-demo/build-linux-arm64.sh` | 53 | service-smoke.yml:107; its `.test.mjs` | M (Docker) | `./dev demo build-linux` (uses `./dev linux-container`, WP-6) | WP-4 |
+| `scripts/shell-demo/build-linux-arm64.sh` | 53 | service-smoke.yml:107; its `.test.mjs` | M (Docker) | `./dev demo build-linux` (uses `./dev linux-container`, WP-6a) | WP-4 |
 
 ### 1.5 Claude hooks
 
@@ -139,22 +141,27 @@ each checkout's untracked `.claude/settings.json` by the coordinator (their head
 
 | Script | Lines | Called by | OS | Rust home | WP |
 |---|---:|---|---|---|---|
-| `scripts/vm-win.sh` | 424 | people; `vm-win.test.mjs` runs in ci.yml's VM tooling job; `docs/harnesses.toml` | M host | `./dev vm win` | WP-6 |
-| `scripts/vm-win/prepare.sh` | 230 | `vm-win.sh`; tests | M host | `./dev vm win prepare` | WP-6 |
-| `scripts/vm-win/target.sh` | 64 | `vm-win.sh`, `vm-smoke/win-vm-target.mjs`, `vm-win-path.mjs` | M host | `./dev vm win target` | WP-6 |
-| `scripts/vm-lock.sh` | 180 | `vm-lock-run.sh`, `vm-checks/*`, `vm-lock-reexec.mjs`; `vm-lock.test.mjs` in ci.yml | M host | `./dev vm lock` on `paddock-slots` | WP-6 |
-| `scripts/vm-lock-run.sh` | 14 | docs, `vm-lock-reexec.mjs` | M host | `./dev vm lock run` | WP-6 |
-| `tools/macos-vm-smoke.sh` | 186 | service-smoke.yml:104 and :115; `macos-vm-smoke.test.mjs` | M host | `./dev vm tart-smoke` | WP-6 |
-| `scripts/shell-demo/smoke-service-update.sh` | 90 | `macos-vm-smoke.sh` in the Tart guest; its `.test.mjs` | M guest | a Rust binary cross-built and copied into the guest, or E5 (decided in WP-6) | WP-6 |
-| `scripts/shell-demo/smoke-service-update-linux.sh`, `smoke-desktop-linux.sh` | 67 + 85 | `macos-vm-smoke.sh` (Linux guest) | L guest | as above | WP-6 |
-| `scripts/vm-smoke/vm-smoke.sh` | 7 | docs, releasing guides | M host | deleted: it only runs `node run.mjs` (the JS harness is ci-in-rust WP-14) | WP-6 |
-| `scripts/vm-smoke/chain-release.sh`, `login-probe-linux.sh`, `login-probe-mac.sh`, `make-no-dyno-snapshot.sh` | 48 + 56 + 76 + 24 | docs, `win-vm-target.test.mjs`, `vm-win.test.mjs` | M host | `./dev vm` subcommands | WP-6 |
-| `scripts/vm-checks/dyno-wp6-cross-account-pipe.sh` | 60 | named by `crates/paddock-ipc/tests/it/system.rs` | M host | `./dev vm check cross-account-pipe` | WP-6 |
-| `scripts/disk-record.sh` | 10 | `vm-smoke/disk-record.mjs`, `disk-record.test.mjs` | M | deleted: callers run `./dev disk record` | WP-6 |
-| `tools/linux-container.sh` | 83 | the app wrappers below; `linux-container.test.mjs` | M (Docker) | `./dev linux-container` | WP-6 |
-| `apps/dyno/scripts/linux-container.sh`, `linux-verify.sh` | 51 + 16 | docs | M (Docker) | `./dev linux-container --app dyno` | WP-6 |
-| `apps/pitwall/scripts/linux-container-verify.sh`, `linux-container-inner.sh` | 28 + 68 | docs (the inner one runs in the container) | M, L container | `./dev linux-container --app pitwall` | WP-6 |
-| `apps/debrief/scripts/ci/e2e-linux-local.sh`, `smoke-linux-docker.sh` | 45 + 51 | docs | M (Docker) | `./dev linux-container --app debrief` profiles | WP-6 |
+| `scripts/vm-win.sh` | 424 | people; `vm-win.test.mjs` runs in ci.yml's VM tooling job; `docs/harnesses.toml` | M host | `./dev vm win` | WP-6a |
+| `scripts/vm-win/prepare.sh` | 230 | `vm-win.sh`; tests | M host | `./dev vm win prepare` | WP-6a |
+| `scripts/vm-win/target.sh` | 64 | `vm-win.sh`, `vm-smoke/win-vm-target.mjs`, `vm-win-path.mjs` | M host | `./dev vm win target` | WP-6a |
+| `scripts/vm-lock.sh` | 180 | `vm-lock-run.sh`, `vm-checks/*`, `vm-lock-reexec.mjs`; `vm-lock.test.mjs` in ci.yml | M host | `./dev vm lock` on `paddock-slots` | WP-6a |
+| `scripts/vm-lock-run.sh` | 14 | docs, `vm-lock-reexec.mjs` | M host | `./dev vm lock run` | WP-6a |
+| `tools/macos-vm-smoke.sh` | 186 | service-smoke.yml:104 and :115; `macos-vm-smoke.test.mjs` | M host | `./dev vm tart-smoke` | WP-6a |
+| `scripts/shell-demo/smoke-service-update.sh` | 90 | `macos-vm-smoke.sh` in the Tart guest; its `.test.mjs` | M guest | a Rust binary cross-built and copied into the guest, or an exception added to §2 (decided in WP-6a) | WP-6a |
+| `scripts/shell-demo/smoke-service-update-linux.sh`, `smoke-desktop-linux.sh` | 67 + 85 | `macos-vm-smoke.sh` (Linux guest) | L guest | as above | WP-6a |
+| `scripts/vm-smoke/vm-smoke.sh` | 7 | docs, releasing guides | M host | deleted: it only runs `node run.mjs` (the JS harness is ci-in-rust WP-14) | WP-6a |
+| `scripts/vm-smoke/chain-release.sh`, `login-probe-linux.sh`, `login-probe-mac.sh`, `make-no-dyno-snapshot.sh` | 48 + 56 + 76 + 24 | docs, `win-vm-target.test.mjs`, `vm-win.test.mjs` | M host | `./dev vm` subcommands | WP-6a |
+| `scripts/vm-checks/dyno-wp6-cross-account-pipe.sh` | 60 | named by `crates/paddock-ipc/tests/it/system.rs` | M host | `./dev vm check cross-account-pipe` | WP-6a |
+| `scripts/disk-record.sh` | 10 | `vm-smoke/disk-record.mjs`, `disk-record.test.mjs` | M | deleted: callers run `./dev disk record` | WP-6a |
+| `tools/linux-container.sh` | 83 | the app wrappers below; `linux-container.test.mjs` | M (Docker) | `./dev linux-container` | WP-6a |
+| `apps/dyno/scripts/linux-container.sh`, `linux-verify.sh` | 51 + 16 | docs | M (Docker) | `./dev linux-container --app dyno` | WP-6a |
+| `apps/pitwall/scripts/linux-container-verify.sh`, `linux-container-inner.sh` | 28 + 68 | docs (the inner one runs in the container) | M, L container | `./dev linux-container --app pitwall` | WP-6a |
+| `apps/debrief/scripts/ci/e2e-linux-local.sh`, `smoke-linux-docker.sh` | 45 + 51 | docs | M (Docker) | `./dev linux-container --app debrief` profiles | WP-6a |
+| `crates/paddock-setup/nsis/test/run-harness.ps1`, `run-dyno-e2e.ps1` | 313 + 88 | `docs/harnesses.toml` | W guest | `paddock-vm-guest nsis-harness`, `dyno-e2e` (xwin-built, run in the VM) | WP-6b |
+| `scripts/vm-smoke/win-suite.ps1` | 227 | `run-win.mjs`, `win-cdp.mjs`, `win-rows.mjs`, `win-tray.mjs`, `win-ui.mjs` | W guest | `paddock-vm-guest suite` | WP-6b |
+| `scripts/vm-smoke/win-act.ps1` | 128 | `run-win.mjs`, `win-act.mjs`, `win-snap.mjs`, `win-tray.mjs`, `win-tray-icons.mjs` | W guest | `paddock-vm-guest act` (SendInput, foreground window, screenshots through the `windows` crate) | WP-6b |
+| `scripts/vm-smoke/win-gui-probe.ps1`, `win-menu-control.ps1` | 72 + 20 | docs; `run-win.mjs`, `win-tray.mjs` | W guest | `paddock-vm-guest gui-probe`, `menu-control` (UI Automation, `Shell_NotifyIcon` and `TrackPopupMenu`) | WP-6b |
+| `scripts/vm-win/ci-like.ps1` | 109 | `vm-win.sh run --ci-like` | W guest | `paddock-vm-guest ci-like` | WP-6b |
 
 ### 1.7 Developer and app scripts
 
@@ -175,8 +182,8 @@ each checkout's untracked `.claude/settings.json` by the coordinator (their head
 | `crates/paddock-setup/nsis/test/build.sh` | 14 | docs | M L | `./dev setup-harness build` | WP-7 |
 | `scripts/perf/link-time/cc-timed.sh`, `disfn.sh` | 26 + 9 | research note, `performance.md` | M | deleted; the research note links the commit (D8) | WP-7 |
 | `apps/debrief/docs/research/2026-10-28-duckdb-server-mode/harness/bench.sh` | 123 | research notes | M | deleted, the note links the commit (D8) | WP-7 |
-| `apps/dyno/scripts/wp0/wp0-run.sh` and three `.ps1` | 91 + 4 + 4 + 156 | `wp0/PLAN.md`, Dyno ADR 0033, `performance.md` | M host, W guest | deleted if WP0 is done (D8) | WP-7 |
-| `apps/pitcrew/scripts/windows-retire-legacy-runner.ps1` | 142 | docs | W | deleted if the old runner is retired (D8) | WP-7 |
+| `apps/dyno/scripts/wp0/wp0-run.sh` and three `.ps1` | 91 + 4 + 4 + 156 | `wp0/PLAN.md`, Dyno ADR 0033, `performance.md` | M host, W guest | deleted (D8) | WP-7 |
+| `apps/pitcrew/scripts/windows-retire-legacy-runner.ps1` | 142 | docs | W | deleted (D8) | WP-7 |
 | `apps/debrief/scripts/clean-build-dirs.ps1` | 56 | docs | W | deleted: `./dev ci prune-agent-builds` (built) | WP-7 |
 
 ### 1.8 What stays as data or guest code
@@ -186,9 +193,7 @@ each checkout's untracked `.claude/settings.json` by the coordinator (their head
 | `tools/heavy/tests/fixtures/plock.sh` | 281 | `tools/heavy/tests/it/mixed.rs` | the reference shell lock for mixed shell and Rust runs on one lock folder; deleted when no machine runs the shell plock | E6 |
 | `tools/paddock-dev/src/hook/fixtures/no-force-push.sh`, `no-pgrep-wait.sh` | 8 + 8 | `hook/oracle_tests.rs` | oracle copies of the old hooks; deleted in WP-5 when the corpus files hold all their cases | E6 |
 | `tools/paddock-dev/tests/golden/**/build-folder.sh`, `paths.sh` (3) | 4 + 3 + 3 | the planner's golden test | planner input fixtures, not tools | E6 |
-| `scripts/vm-win/*.ps1` (5) | 279 | `vm-win.sh`, `prepare.sh`, `autounattend.xml.in` | run inside a fresh Windows guest before anything is installed | E5 |
-| `scripts/vm-smoke/win-*.ps1` (4) | 447 | `run-win.mjs`, `win-tray.mjs` and others | run inside the guest; UI automation through .NET | E5 |
-| `crates/paddock-setup/nsis/test/run-harness.ps1`, `run-dyno-e2e.ps1` | 313 + 88 | `docs/harnesses.toml` | run inside the guest | E5 |
+| `scripts/vm-win/firstlogon.ps1`, `admin-setup.ps1`, `gui-setup.ps1`, `logon-runner.ps1` | 106 + 21 + 20 + 23 | `vm-win.sh`, `prepare.sh`, `autounattend.xml.in` | provisioning at first logon, before our binaries exist in the guest | E5 |
 | `apps/dyno/app/src-tauri/linux/postinst`, `postrm`, `prerm` | small | dpkg | Debian maintainer scripts | E7 |
 
 ## 2. What stays shell, and why
@@ -204,9 +209,9 @@ each checkout's untracked `.claude/settings.json` by the coordinator (their head
   call. The shim finds the installed binary and `exec`s it, with builtins only (about 10 ms; the `./dev` wrapper costs 150 ms or
   more per call, `hook/mod.rs`). It already exists and stays as it is.
 - **E4. `ci-image/fetch-verified.sh` in the Dockerfile.** It runs in `RUN` lines while the image is built, before Rust is in it.
-- **E5. PowerShell inside a Windows guest.** It runs in a fresh VM before anything is installed (first logon, admin and GUI setup)
-  or drives the desktop through .NET UI automation in the guest. PowerShell is Windows' own scripting language. Each file stays
-  until WP-14 of ci-in-rust.md decides it.
+- **E5. Four provisioning scripts in a fresh Windows guest** (`scripts/vm-win/firstlogon.ps1`, `admin-setup.ps1`, `gui-setup.ps1`,
+  `logon-runner.ps1`, 170 lines). They run at first logon, from the unattended setup, before any of our binaries is in the guest.
+  Every other PowerShell file is ported (D5, WP-6b).
 - **E6. Test fixtures.** Files that are the input or the oracle of a test, not tools. They live under `tests/` or `fixtures/`.
 - **E7. Debian maintainer scripts.** dpkg runs them; Debian Policy §6 asks for "proper executable files" starting with `#!` and
   `set -e` for shell. They are a few lines each and call nothing of ours.
@@ -245,7 +250,7 @@ logic is what rust-lang and xtask do. The content-addressed binary (ADR 0022 §3
 
 **The cheaper common-practice option** (D1): WP-0, WP-1 and WP-2 only (8.5 days). That removes both run 8138 shell causes, the
 duplicate kit and new shell, and leaves the other scripts in shell until each is next changed ("port on touch", as uv keeps its
-scripts). The full plan is 33.5 days.
+scripts). The full plan is 39 days.
 
 ## 4. Work packages, by risk
 
@@ -262,11 +267,20 @@ test VM under `scripts/vm-lock.sh` (later `./dev vm lock`) or the Windows CI leg
 | **WP-3** | **Release-path scripts** of §1.3: `./dev release bundle` (tauri-bundle, demo bundle, updater key passed only to the bundler), `release macos-verify` (Debrief's copy deleted), `release notes --first`, `release check-version`, `release check-bundle dyno`, `ci tag-node-caches`, `ci dev-tool-publish`, `./dev notices` (salvage `tools/dev-notices`). A rule 54 dry run per app and demo | §1.3 files, `app-release.yml`, `debrief.yml` release jobs, `dyno-release.yml`, `pitwall-release.yml`, demo releases, `dev-tool.yml`, `macos-verify`, `tauri-bundle`, `app-gates` actions | the `.test.mjs` suites pointed at the command (`*_CMD`, as `ISOLATION_CMD`) before their cases move to Rust; a test that the updater key reaches no child but the bundler; the bundles of the dry run inspected (rule 54) | 5 | 1 | **6** (4.5-8) | WP-2 |
 | **WP-4** | **Other CI scripts** of §1.4 and the ci.yml draw.io call: Debrief's four through its xtask, Pitwall's privacy check, `ci image-verify`, `demo build-linux`; `./dev fetch` (salvage `tools/dev-fetch-r3`) for draw.io | §1.4 files, `ci.yml`, `debrief.yml` (non-release jobs), `debrief-bench.yml`, `ci-image.yml`, `service-smoke.yml`, `lefthook.yml` (one line), `apps/pitwall/paddock.ci.json` | `libduckdb-env.test.mjs` and `macos-smoke.test.mjs` against the command; one CI run of each job that used a script | 2.5 | 0.5 | **3** (2.25-4.5) | WP-2 (same actions and workflows) |
 | **WP-5** | **Claude hooks**: the six guards of §1.5 as rules of `dev hook pre-tool-use` and a `dev hook stop`; the Python and `.test.sh` files deleted; the coordinator rewires local settings to the one shim | `tools/paddock-dev/src/hook/**`, `.claude/hooks/**`, `tools/githooks/claude-settings.json` | each `.test.sh` case as a corpus row, run against the old hook first (oracle) and then the rule; the kill proof on a real child tree on macOS and Linux | 4 | 0.5 | **4.5** (3.5-6) | – |
-| **WP-6** | **VM, container and host harness shell** of §1.6: `./dev vm win`, `vm lock`, `vm tart-smoke`, `vm check`, `./dev linux-container --app`; guest scripts decided (a cross-built Rust binary copied in, or E5) | §1.6 files, `docs/harnesses.toml`, `service-smoke.yml` (two lines) | `vm-win.test.mjs`, `vm-lock.test.mjs`, `macos-vm-smoke.test.mjs`, `linux-container.test.mjs` against the command; one locked VM run and one Tart smoke run | 4 | 0.5 | **4.5** (3.5-6.5) | WP-1 (target.sh's env handling moves into the launcher's contract) |
+| **WP-6a** | **VM, container and host harness shell** of §1.6: `./dev vm win`, `vm lock`, `vm tart-smoke`, `vm check`, `./dev linux-container --app`; the Tart guest scripts decided per file (a cross-built binary copied in, or an exception added to §2) | §1.6 files, `docs/harnesses.toml`, `service-smoke.yml` (two lines) | `vm-win.test.mjs`, `vm-lock.test.mjs`, `macos-vm-smoke.test.mjs`, `linux-container.test.mjs` against the command; one locked VM run and one Tart smoke run | 4 | 0.5 | **4.5** (3.5-6.5) | WP-1 (target.sh's env handling moves into the launcher's contract); train 12 |
+| **WP-6b** | **The Windows guest PowerShell** (D5): one program `paddock-vm-guest`, built with `cargo xwin` for `x86_64-pc-windows-msvc`, copied into the VM by `./dev vm win`, with the subcommands `nsis-harness`, `dyno-e2e`, `suite`, `ci-like`, `act`, `gui-probe` and `menu-control`. The GUI parts use the `windows` crate (0.62, already in the family): UI Automation (`IUIAutomation`), `SendInput`, window enumeration, GDI screenshots, `Shell_NotifyIcon` and `TrackPopupMenu`; OS state through WMI or `powercfg` by `ToolCall`. The JS callers call the program instead of `powershell -File` | the 7 `.ps1` files of §1.6, a new crate under `scripts/vm-smoke/guest/` (or `tools/`), the JS callers named in §1.6, `docs/harnesses.toml` | the old script and the program side by side in one locked VM session on the same build, comparing the step JSON and logs after normalisation; the UI probe shown red on a hidden window and a missing menu (ER-33); host unit tests of the pure parts; `cargo xwin clippy` | 5 | 0.5 | **5.5** (4.5-7) | WP-6a; train 12 |
 | **WP-7** | **Developer and app scripts** of §1.7, in two lanes: (a) shared: `./dev diagrams`, `app bootstrap`, `app verify-installed`, `setup --check`, `gen` entry for Dyno's wire fixtures, deletions of the app copies and of D8's one-offs; (b) app xtasks: Debrief's chores, a new `apps/dyno/xtask` | §1.7 files, `apps/dyno/.cargo/config.toml`, `apps/*/docs` that name the scripts | parity with the old script on a fixture app (stdout and exit code; for verify-installed a fake install tree); `bootstrap.test.mjs` and `verify-installed.test.mjs` against the command | 6 | 1 | **7** (5-10) | WP-1 |
-| | **Total** | about 8,800 shell and 1,690 Python lines retired; about 1,500 stay (E1 to E7) | | **28.25** | **4.75** | **33.5** (25-47.5) | |
+| | **Total** | about 9,700 shell and 1,690 Python lines retired; about 550 stay (E1 to E7) | | **33.25** | **5.25** | **39** (29.5-54.5) | |
 
 The ranges are summed end to end, so the high end is pessimistic.
+
+**WP-6b's estimate, by part.** The NSIS harness and its Dyno end-to-end run (401 lines: process runs, exit codes, files left
+behind) 1 day; the suite and `ci-like` (336 lines: WMI process checks, `powercfg`, the runner-like environment) 1.25; `act`,
+`gui-probe` and `menu-control` (220 lines, but new Win32 code: `origin/main` has no UI Automation in Rust, so this part carries the
+most risk) 1.75; the build, the copy into the VM and switching the JS callers 0.5; the side-by-side runs in a locked VM 0.5; review
+0.5. The rough guess was 3 days; the firm figure is 5.5, which is more than 20% over it, so it goes back to the user (ER-37). Common
+practice for automation inside a Windows guest is PowerShell, Microsoft's own scripting language; porting it costs these 5.5 days
+beyond keeping it.
 
 **Lanes at about 5 agents.** The shared files are `.gitea/actions/*` and the workflows (WP-2, WP-3, WP-4), `tools/paddock-dev/src/cli.rs`
 (one declared line per new subcommand, merged by the integrator), `tools/paddock-dev/Cargo.toml` and its lock (WP-1 only), and the
@@ -275,8 +289,8 @@ WP-0 baseline (each WP removes its own lines). So:
 | Lane | WPs | Days |
 |---|---|---:|
 | A, CI path | WP-2, then WP-3, then WP-4 (serial: the same actions and workflows) | 12.5 |
-| B, launcher | WP-0 first, then WP-1, then WP-6 | 9.5 |
-| C, hooks | WP-5 | 4.5 |
+| B, launcher | WP-0 first, then WP-1, then WP-6a | 9.5 |
+| C, hooks and guest | WP-5, then WP-6b (both after train 12) | 10 |
 | D, shared dev scripts | WP-7a (after WP-1) | 3.5 |
 | E, app xtasks | WP-7b | 3.5 |
 
@@ -343,27 +357,22 @@ check under `tools/paddock-dev/src/check` or `conformance/src/checks` counts too
   shows as a test failure and not as CI downloading the wrong binary.
 - **Windows without Git Bash.** After WP-1 the launcher needs no Git tools, but scripts not yet ported still do. Until a script is
   ported, its Windows callers keep Git Bash on PATH, as today.
-- **Guest scripts** (E5, the Tart guests in WP-6) may need a cross-built binary per guest OS; WP-6 decides per file and may keep
+- **Windows guest programs** (WP-6b): UI Automation from Rust is new in the family. A probe that sees less than the PowerShell one
+  would turn GUI rows into "not seen"; the side-by-side run in the VM and the planted red cases catch that before a script goes.
+- **Tart guest scripts** (WP-6a) may need a cross-built binary per guest OS; WP-6a decides per file and may keep
   them as exceptions.
 
-## 8. Decisions for the user
+## 8. Decisions taken (user, 2026-11-15)
 
-1. **D1, scope.** The full plan (33.5 days), or the cheaper common-practice option: WP-0, WP-1 and WP-2 now (8.5 days) and the
-   other scripts when each is next changed. Recommended: the full plan, as decided on 2026-11-15; the cheaper option is offered
-   under ER-37.
-2. **D2, the release path before the tags.** WP-2 and WP-3 change what release jobs run before the coming tags, each with rule 54
-   dry runs. Confirm, or keep the release-path shell until after the tags (then the kit duplicate stays for release runs).
-3. **D3, the launcher.** (a) the std-only Rust launcher behind a 20-line stage 0, keeping the content-addressed binary
-   (recommended, 4 days); or (b) a plain xtask alias (`cargo run -p paddock-dev`), about 1.5 days less, but every CI job without a
-   warm build folder compiles the tool and ADR 0022 §3.3 changes.
-4. **D4, fallbacks.** No long-lived shell fallback: one-PR switch, revert as the fallback, a one-train shadow only for read-only
-   steps (recommended). Or a kit.sh-style switch variable until the next tags.
-5. **D5, PowerShell in the Windows guest** stays (E5, recommended) or is ported later with ci-in-rust WP-14.
-6. **D6, the Python hooks.** WP-5 ports the Python the `.claude/hooks/*.sh` files run (recommended: porting only the one-line `.sh`
-   files changes nothing).
-7. **D7, inline workflow shell** (1,308 lines) stays in ci-in-rust.md's WP-7 and WP-11 and is only counted here (recommended), or
-   joins this plan (about 5 more days by that plan's WP-7 estimate and the release share of its WP-11).
-8. **D8, one-off scripts deleted without a port:** Dyno's `wp0/*`, Pitcrew's `windows-retire-legacy-runner.ps1`, the DuckDB
-   research `bench.sh`, the link-time scripts and Debrief's `clean-build-dirs.ps1`. Confirm each is done with.
-9. **D9, an ADR 0022 amendment** in WP-1 for §3.2 (`dev.cmd` without Git Bash, the launcher crate) and §3.3 (the hash computed in
-   Rust). Recommended; no new ADR.
+1. **D1, scope:** the full plan, WP-0 to WP-7, before the releases.
+2. **D2:** the release path changes before the tags, with rule 54 release dry runs (WP-2, WP-3).
+3. **D3:** the std-only Rust launcher behind a short stage 0 (WP-1).
+4. **D4:** each script switches in one change; `git revert` is the fallback. A one-train shadow only for read-only steps.
+5. **D5, changed from the recommendation:** the PowerShell logic is ported too. Only the four provisioning scripts stay (E5). The
+   NSIS harness, the VM suite, the GUI probes and `ci-like.ps1` become `paddock-vm-guest`, built with xwin and run in the VM
+   (WP-6b, 5.5 days; the rough guess was 3, so the firm figure goes back to the user under ER-37).
+6. **D6:** WP-5 ports the Python hooks.
+7. **D7:** inline workflow shell is counted by WP-0's check, not ported here (ci-in-rust.md WP-7 and WP-11).
+8. **D8:** all listed one-offs are deleted without a port: Dyno's `wp0/*`, Pitcrew's `windows-retire-legacy-runner.ps1`, the
+   DuckDB research `bench.sh`, the link-time scripts and Debrief's `clean-build-dirs.ps1` (WP-7).
+9. **D9:** the ADR 0022 amendment for §3.2 and §3.3 is written in WP-1.
