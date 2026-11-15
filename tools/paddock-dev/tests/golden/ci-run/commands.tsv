@@ -95,7 +95,7 @@ job	conformance			exit 0
 job	conformance			exit 1
 job	conformance			for c in 
 job	conformance			for name in "" stable
-job	conformance			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	conformance			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true
 job	conformance			installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	conformance			missing=0
 job	conformance			missing=1
@@ -128,7 +128,7 @@ job	crates			exit 0
 job	crates			exit 1
 job	crates			for c in 
 job	crates			for name in "" stable
-job	crates			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	crates			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true
 job	crates			installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	crates			missing=0
 job	crates			missing=1
@@ -169,7 +169,7 @@ job	e2e			exit 0
 job	e2e			exit 1
 job	e2e			for c in 
 job	e2e			for name in "" stable
-job	e2e			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	e2e			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true
 job	e2e			installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	e2e			missing=0
 job	e2e			missing=1
@@ -203,7 +203,7 @@ job	eslint-preset			exit 0
 job	eslint-preset			exit 1
 job	eslint-preset			for c in 
 job	eslint-preset			for name in "" stable
-job	eslint-preset			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	eslint-preset			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true
 job	eslint-preset			installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	eslint-preset			missing=0
 job	eslint-preset			missing=1
@@ -236,7 +236,7 @@ job	icons			exit 0
 job	icons			exit 1
 job	icons			for c in 
 job	icons			for name in "" stable
-job	icons			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	icons			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true
 job	icons			installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	icons			missing=0
 job	icons			missing=1
@@ -276,7 +276,7 @@ job	tools			exit 0
 job	tools			exit 1
 job	tools			for c in 
 job	tools			for name in "" stable
-job	tools			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	tools			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true
 job	tools			installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	tools			missing=0
 job	tools			missing=1
@@ -314,7 +314,7 @@ job	ui			exit 0
 job	ui			exit 1
 job	ui			for c in 
 job	ui			for name in "" stable
-job	ui			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}'
+job	ui			have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}' || true
 job	ui			installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true
 job	ui			missing=0
 job	ui			missing=1
