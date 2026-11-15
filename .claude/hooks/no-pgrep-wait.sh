@@ -1,7 +1,9 @@
 #!/bin/bash
 # PreToolUse(Bash): the waiter guard (ER-32). Logic: no-pgrep-wait.py on lib/shellscan.py.
-#  Refused (blocks): a while/until loop whose condition runs `pgrep -f`: the pattern matches the waiting shell's own command
-#  line, so the loop never ends. Text in heredocs, comments and quoted arguments is not a loop.
+#  Refused (blocks): a while/until loop whose condition runs `pgrep -f` (also inside a `$( )`), or whose body runs it while the
+#  loop sleeps or never ends by itself (`while true`, `while :`): the pattern matches the waiting shell's own command line, so the
+#  loop never ends. Text in heredocs, comments and quoted arguments is not a loop.
+#  Warned: `pgrep -f` in a loop body that neither sleeps nor loops forever (a lookup per line of a `while read`).
 #  Warned (never blocks, ER-36: a hook that judges text only warns), through additionalContext:
 #  - a `while ! grep ...; do sleep ...` (or `until grep`) polling loop: no maximum duration; `./dev wait --file --line --max` is;
 #  - two `./dev wait` for the same --file, --pid, --ci-run or --plock in one command;

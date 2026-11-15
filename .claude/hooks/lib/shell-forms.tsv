@@ -89,3 +89,6 @@ pgrep -f in a for list is no wait	-	for p in $(pgrep -f x); do echo $p; done	-	-
 two dev waits for one file and one line	-	./dev wait --file /x/log --line a --max 5m & ./dev wait --file /x/log --line a --max 5m	-	-	-	-	warn
 dev waits for one file, other lines	-	./dev wait --file /x/a/./b --line x --max 1m; ./dev wait --file /x/a/b --line y --max 1m	-	-	-	-	allow
 grep poll on a curl pipe warns without --file	-	while ! curl -s localhost:8080 | grep -q ok; do sleep 1; done	-	-	-	-	warn
+pgrep -f in a read loop's body is a lookup per line, warned	-	while read n; do pgrep -f "$n" || echo gone; done < names	-	-	-	-	warn
+pgrep -f in a body that sleeps waits	-	while [ "$i" -lt 9 ]; do pgrep -f x && break; sleep 1; i=$((i+1)); done	-	-	-	-	deny
+pgrep -f in the body of while : waits	-	while :; do pgrep -f x || break; done	-	-	-	-	deny

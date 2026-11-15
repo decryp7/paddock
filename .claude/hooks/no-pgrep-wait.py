@@ -133,9 +133,19 @@ def decide(cmd):
         if c.loop:
             cond = chain(cmds, c)
             inside = body(cmds, cond[-1])
-            # pgrep -f anywhere in the loop (its condition, its body, a `$( )` of either) waits on a pattern that matches itself.
-            if any(pgrep_f(x) for x in with_subs(cond + inside)):
+            # pgrep -f in the condition (or a `$( )` of it) waits on a pattern that matches the waiting shell itself: refused.
+            if any(pgrep_f(x) for x in with_subs(cond)):
                 return DENY, []
+            # In the body it waits only when the loop sleeps or never ends by itself (`while true`, `while :`): refused then;
+            # otherwise (a lookup per line of a `while read`) it is warned, since the pattern still matches this shell.
+            if any(pgrep_f(x) for x in with_subs(inside)):
+                forever = len(cond) == 1 and cond[0].argv[:1] in (["true"], [":"])
+                if forever or any(x.argv[:1] == ["sleep"] for x in inside):
+                    return DENY, []
+                warns.append(
+                    "Warning: this loop runs `pgrep -f` in its body; the pattern also matches this shell's own command line, so "
+                    "it always finds one. Next step: match by exact name (`pgrep -x`) or by a pid you hold; to wait for a "
+                    "process, use `./dev wait --pid <pid> --max <duration>`.")
             f = grep_file(cond)
             if f is not None and any(x.argv[:1] == ["sleep"] for x in inside):
                 nxt = ("`./dev wait --file %s --line '<regex>' --max <duration>`" % f) if f else \
