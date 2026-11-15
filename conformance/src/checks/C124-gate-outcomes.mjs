@@ -2,8 +2,9 @@
 // "a gate gives its verdict from an indirect signal" recurred at rows 2 to 7 of the amendment's table).
 // Flagged, one site at a time, in the gate and check tools' Rust (`tools/paddock-dev/src/`, `crates/paddock-bench/src/`) outside test code (a `tests/`
 // folder, `tests.rs`, `*_test.rs`, and everything after a file's first `#[cfg(test)]`):
-// - the `NotMeasured`, `Clean`, `Pass`, `Current` or `Green` variants of a local enum that is a result type, one with a `NotMeasured`
-//   variant or two or more result words (`Clean`, `Pass`, `Passed`, `Current`, `Green`, `Red`, `Stale`, `Fail`, `Failed`, `Findings`):
+// - the `NotMeasured`, `Clean`, `Pass`, `Passed`, `Success`, `Current` or `Green` variants of a local enum that is a result type, one
+//   with a `NotMeasured` variant or two or more result words (those, and `Red`, `Stale`, `Fail`, `Failed`, `Findings`, `Dirty`,
+//   `Outdated`, `Broken`, `Error`, `Mismatch`, `Missing`, `Skipped`):
 //   a second result type (use `paddock_cli::Outcome`); one such word among others names a phase or a command (`PhaseId::Clean`);
 // - a JSON object literal with a `"status"`, `"verdict"` or `"outcome"` key: a result a consumer would read without evidence
 //   (use `Outcome::json()`, read it with `Outcome::from_wire`);
@@ -27,10 +28,10 @@ export const ALLOW = 'conformance/c124-allow.json';
 const RUST = /^(?:tools\/paddock-dev\/src|crates\/paddock-bench\/src)\/.*\.rs$/;
 const OWNER = /^crates\/paddock-cli\//;
 const TEST_PATH = /(?:^|\/)(?:tests?|__tests__)\/|(?:^|\/)tests\.rs$|_test\.rs$/;
-const VARIANT = /^\s*(NotMeasured|Clean|Pass|Current|Green)\b/;
+const VARIANT = /^\s*(NotMeasured|Clean|Pass|Passed|Success|Current|Green)\b/;
 // The words of a result: an enum is a second result type when it has a `NotMeasured` variant or two or more of these (`Earlier { Clean,
 // Failed }`), never for one word among others (`PhaseId { Resolve, Clean, Fetch }`, `DiskCommand { Clean(..) }`: a phase or a command).
-const RESULT_WORD = /^\s*(NotMeasured|Clean|Pass|Passed|Current|Green|Red|Stale|Fail|Failed|Findings)\b/;
+const RESULT_WORD = /^\s*(NotMeasured|Clean|Pass|Passed|Success|Current|Green|Red|Stale|Fail|Failed|Findings|Dirty|Outdated|Broken|Error|Mismatch|Missing|Skipped)\b/;
 const ENUM = /^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+\w+/;
 const JSON_KEY = /"(?:status|verdict|outcome)"\s*:/;
 const BOOL_FN = /\bfn\s+(?:fails|passed)\s*\(\s*&self\s*\)\s*->\s*bool\b/;

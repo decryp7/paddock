@@ -112,3 +112,30 @@ test('C124 allow list: an entry for a file C124 does not read is a warning', asy
   const found = await findingsOf('C124', makeApp({ 'conformance/c124-allow.json': allow, 'docs/notes.md': 'NotMeasured\n', [DEV]: 'fn f() {}\n' }));
   assert.deepEqual(found.map((x) => [x.file, x.message]), [['conformance/c124-allow.json', 'allow entry (docs/notes.md: NotMeasured) names a file this check does not read']]);
 });
+
+// Each result word makes an enum a result type together with one flaggable variant; `Passed` and `Success` are flaggable themselves.
+// One shape per word: [enum, the lines flagged].
+const SHAPES = [
+  ['enum Tree {\n    Clean,\n    Dirty,\n}\n', [2]],
+  ['enum Lock {\n    Current,\n    Outdated,\n}\n', [2]],
+  ['enum Probe {\n    Pass,\n    Broken(String),\n}\n', [2]],
+  ['enum Job {\n    Green,\n    Error(String),\n}\n', [2]],
+  ['enum Golden {\n    Clean,\n    Mismatch { diff: String },\n}\n', [2]],
+  ['enum Pin {\n    Current,\n    Missing,\n}\n', [2]],
+  ['enum Step {\n    Pass,\n    Skipped,\n}\n', [2]],
+  ['enum JobState {\n    Passed,\n    Failed(String),\n}\n', [2]],
+  ['enum RunState {\n    Running,\n    Success,\n    Failed(String),\n}\n', [3]],
+  ['enum Last {\n    Passed,\n    PassedOnRetry,\n    Flaky,\n    Failed,\n}\n', [2]],
+];
+
+for (const [text, lines] of SHAPES) {
+  test(`C124 result word shape: ${text.split('\n').map((l) => l.trim()).join(' ')}`, () => {
+    assert.deepEqual(flaggedRust(DEV, text).map((f) => f.line), lines);
+  });
+}
+
+test('C124 result words: an enum with one result word, or without a flaggable variant, is not flagged', () => {
+  for (const text of ['enum PhaseId {\n    Resolve,\n    Clean,\n    Fetch,\n}\n', 'enum Cmd {\n    Missing,\n    Error,\n}\n', 'enum Disk {\n    Success,\n    Run,\n}\n']) {
+    assert.deepEqual(flaggedRust(DEV, text), [], text);
+  }
+});

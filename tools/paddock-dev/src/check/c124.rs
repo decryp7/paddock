@@ -4,9 +4,9 @@
 //! Flagged, one site at a time, in the gate and check tools' Rust (`tools/paddock-dev/src/`, `crates/paddock-bench/src/`) outside
 //! test code (a `tests/` folder, `tests.rs`, `*_test.rs`, and everything after a file's first `#[cfg(test)]`):
 //!
-//! - the `NotMeasured`, `Clean`, `Pass`, `Current` or `Green` variants of a local enum that is a result type, one with a `NotMeasured`
-//!   variant or two or more result words (`Clean`, `Pass`, `Passed`, `Current`, `Green`, `Red`, `Stale`, `Fail`, `Failed`,
-//!   `Findings`): a second result type; one such word among others names a phase or a command (`PhaseId::Clean`);
+//! - the `NotMeasured`, `Clean`, `Pass`, `Passed`, `Success`, `Current` or `Green` variants of a local enum that is a result type, one
+//!   with a `NotMeasured` variant or two or more result words (those, and `Red`, `Stale`, `Fail`, `Failed`, `Findings`, `Dirty`,
+//!   `Outdated`, `Broken`, `Error`, `Mismatch`, `Missing`, `Skipped`): a second result type; one such word among others names a phase or a command (`PhaseId::Clean`);
 //! - a JSON object literal with a `"status"`, `"verdict"` or `"outcome"` key: a result a consumer would read without evidence;
 //! - `fn fails(&self) -> bool` or `fn passed(&self) -> bool`: the bool conversion the shared type forbids;
 //! - a call of `Evidence::ci_run(` or `Evidence::adopt(` outside the modules that own them;
@@ -39,11 +39,14 @@ pub const ALLOW: &str = "conformance/c124-allow.json";
 static RUST: LazyLock<Regex> = LazyLock::new(|| rx(r"^(?:tools/paddock-dev/src|crates/paddock-bench/src)/.*\.rs$"));
 static OWNER: LazyLock<Regex> = LazyLock::new(|| rx(r"^crates/paddock-cli/"));
 static TEST_PATH: LazyLock<Regex> = LazyLock::new(|| rx(r"(?:^|/)(?:tests?|__tests__)/|(?:^|/)tests\.rs$|_test\.rs$"));
-static VARIANT: LazyLock<Regex> = LazyLock::new(|| rx(r"^\s*(NotMeasured|Clean|Pass|Current|Green)\b"));
+static VARIANT: LazyLock<Regex> = LazyLock::new(|| rx(r"^\s*(NotMeasured|Clean|Pass|Passed|Success|Current|Green)\b"));
 /// The words of a result: an enum is a second result type when it has a `NotMeasured` variant or two or more of these (`Earlier {
 /// Clean, Failed }`), never for one word among others (`PhaseId { Resolve, Clean, Fetch }`: a phase, not a result).
-static RESULT_WORD: LazyLock<Regex> =
-    LazyLock::new(|| rx(r"^\s*(NotMeasured|Clean|Pass|Passed|Current|Green|Red|Stale|Fail|Failed|Findings)\b"));
+static RESULT_WORD: LazyLock<Regex> = LazyLock::new(|| {
+    rx(
+        r"^\s*(NotMeasured|Clean|Pass|Passed|Success|Current|Green|Red|Stale|Fail|Failed|Findings|Dirty|Outdated|Broken|Error|Mismatch|Missing|Skipped)\b",
+    )
+});
 static ENUM: LazyLock<Regex> = LazyLock::new(|| rx(r"^\s*(?:pub(?:\([^)]*\))?\s+)?enum\s+\w+"));
 static JSON_KEY: LazyLock<Regex> = LazyLock::new(|| rx(r#""(?:status|verdict|outcome)"\s*:"#));
 static BOOL_FN: LazyLock<Regex> = LazyLock::new(|| rx(r"\bfn\s+(?:fails|passed)\s*\(\s*&self\s*\)\s*->\s*bool\b"));
@@ -283,5 +286,49 @@ impl Check for C124 {
             }
         }
         allow.output(ctx, findings)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DEV: &str = "tools/paddock-dev/src/x/mod.rs";
+
+    fn lines(text: &str) -> Vec<usize> {
+        flagged_rust(DEV, text).into_iter().map(|s| s.0).collect()
+    }
+
+    /// One shape per result word, as the JavaScript tests list them: the enum, then the lines flagged.
+    #[test]
+    fn each_result_word_makes_an_enum_with_a_flaggable_variant_a_result_type() {
+        for (text, want) in [
+            ("enum Tree {\n    Clean,\n    Dirty,\n}\n", vec![2]),
+            ("enum Lock {\n    Current,\n    Outdated,\n}\n", vec![2]),
+            ("enum Probe {\n    Pass,\n    Broken(String),\n}\n", vec![2]),
+            ("enum Job {\n    Green,\n    Error(String),\n}\n", vec![2]),
+            ("enum Golden {\n    Clean,\n    Mismatch { diff: String },\n}\n", vec![2]),
+            ("enum Pin {\n    Current,\n    Missing,\n}\n", vec![2]),
+            ("enum Step {\n    Pass,\n    Skipped,\n}\n", vec![2]),
+            ("enum JobState {\n    Passed,\n    Failed(String),\n}\n", vec![2]),
+            ("enum RunState {\n    Running,\n    Success,\n    Failed(String),\n}\n", vec![3]),
+            (
+                "enum Last {\n    Passed,\n    PassedOnRetry,\n    Flaky,\n    Failed,\n}\n",
+                vec![2],
+            ),
+        ] {
+            assert_eq!(lines(text), want, "{text}");
+        }
+    }
+
+    #[test]
+    fn an_enum_with_one_result_word_or_no_flaggable_variant_is_not_flagged() {
+        for text in [
+            "enum PhaseId {\n    Resolve,\n    Clean,\n    Fetch,\n}\n",
+            "enum Cmd {\n    Missing,\n    Error,\n}\n",
+            "enum Disk {\n    Success,\n    Run,\n}\n",
+        ] {
+            assert!(lines(text).is_empty(), "{text}");
+        }
     }
 }
