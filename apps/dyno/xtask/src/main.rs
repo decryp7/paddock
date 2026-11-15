@@ -43,6 +43,7 @@ pub(crate) fn run(program: &str, args: &[&str], env: &[(&str, Option<&str>)], ti
 const USAGE: &str = "usage: cargo xtask <task>\n\ntasks:\n  linux-units [machine]                      run the benchmark unit tests on a Linux machine with a systemd user manager (default paddock-gate-arm)\n  bench-smoke <folder>                       check the benchmark runners' mechanics (folder holding dyno-bench and dyno-bench-gpu)\n  verify-tool-pin <file> <file.asc> [key]    check a downloaded tool's OpenPGP signature and print the pack lines\n  help                                       show this message";
 
 fn main() -> ExitCode {
+    paddock_proc::guardian::run_if_requested();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("linux-units") => linux_units::run_task(&args[1..]),

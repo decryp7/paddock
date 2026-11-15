@@ -16,6 +16,7 @@ use std::process::ExitCode;
 const USAGE: &str = "usage: cargo xtask <task>\n\ntasks:\n  verify-bundle [Pitwall.app] [--smoke]   check a built macOS app bundle (default /Applications/Pitwall.app); --smoke also runs the bundled server and the app headless\n  help                                    show this message";
 
 fn main() -> ExitCode {
+    paddock_proc::guardian::run_if_requested();
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("verify-bundle") => bundle::run_task(&args[1..]),

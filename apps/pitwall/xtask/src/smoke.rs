@@ -220,33 +220,43 @@ mod tests {
         assert_eq!(tail3(""), "");
     }
 
-    /// A stand-in program that ignores the world and stays: started, seen alive, ended with its child, and its pids are gone.
+    /// A stand-in program that stays and leaves a child behind: started, seen alive, ended with its child, and its pids are gone.
+    /// The test waits for the stand-in's own "ready" connection, not for time.
     #[cfg(unix)]
     #[test]
     fn a_started_process_is_ended_as_a_tree_and_nothing_is_left() {
         let d = tempfile::tempdir().unwrap();
+        let ready = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = ready.local_addr().unwrap().port();
         let script = d.path().join("stay");
         let pids = d.path().join("pids");
-        std::fs::write(
-            &script,
-            format!(
-                "#!/bin/sh\necho $$ > '{p}'\nsleep 300 &\necho $! >> '{p}'\nwait\n",
-                p = pids.display()
-            ),
-        )
-        .unwrap();
+        let body = format!(
+            "#!/bin/bash\necho $$ > '{p}'\nsleep 300 &\necho $! >> '{p}'\necho ok > /dev/tcp/127.0.0.1/{port}\nwait\n",
+            p = pids.display()
+        );
+        std::fs::write(&script, body).unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
         let mut s = Started::spawn(&script, &[], d.path(), &d.path().join("log")).unwrap();
-        let t0 = Instant::now();
-        while std::fs::read_to_string(&pids).map_or(0, |t| t.lines().count()) < 2 && t0.elapsed() < Duration::from_secs(10) {
-            std::thread::sleep(Duration::from_millis(50));
-        }
+        let (mut c, _) = ready.accept().unwrap();
+        let mut buf = [0u8; 8];
+        let _ = c.read(&mut buf).unwrap();
         assert!(s.alive());
+        let listed = std::fs::read_to_string(&pids).unwrap();
+        // Identities taken while both processes run: after the end a reused pid cannot be mistaken for them (rule 53).
+        let ids: Vec<ProcessId> = listed
+            .split_whitespace()
+            .map(|p| ProcessId::of(p.parse().unwrap()).unwrap())
+            .collect();
+        assert_eq!(ids.len(), 2, "{listed}");
         s.end();
         assert!(!s.alive());
-        for pid in std::fs::read_to_string(&pids).unwrap().split_whitespace() {
-            let pid: u32 = pid.parse().unwrap();
-            assert!(ProcessId::of(pid).is_none(), "process {pid} is still there");
+        // A killed process may still be mid-exit for a moment: wait on the condition (bounded), not on time.
+        let t0 = Instant::now();
+        for id in ids {
+            while !id.has_ended() && t0.elapsed() < Duration::from_secs(10) {
+                std::thread::yield_now();
+            }
+            assert!(id.has_ended(), "process {} is still running", id.pid());
         }
     }
 }

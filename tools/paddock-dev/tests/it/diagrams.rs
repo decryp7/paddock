@@ -312,9 +312,17 @@ fn a_hung_draw_io_is_ended_with_its_whole_tree_and_nothing_is_left_behind() {
     let listed = std::fs::read_to_string(&pids).unwrap();
     let both: Vec<&str> = listed.split_whitespace().collect();
     assert_eq!(both.len(), 2, "the stand-in and its child both started: {listed}");
+    // A killed process may be mid-exit for a moment: wait on the condition (bounded), not on time.
+    let t0 = std::time::Instant::now();
     for pid in both {
-        let mut ps = TestCommand::new("ps");
-        ps.args(["-p", pid]);
-        assert_ne!(ps.status().unwrap().code(), Some(0), "process {pid} is gone");
+        let gone = || {
+            let mut ps = TestCommand::new("ps");
+            ps.args(["-p", pid]);
+            ps.output().unwrap().status.code() != Some(0)
+        };
+        while !gone() && t0.elapsed() < std::time::Duration::from_secs(10) {
+            std::thread::yield_now();
+        }
+        assert!(gone(), "process {pid} is still there");
     }
 }
