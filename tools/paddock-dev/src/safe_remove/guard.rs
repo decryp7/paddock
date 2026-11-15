@@ -254,7 +254,8 @@ mod tests {
                 assert!(matches!(got, Err(RemoveError::Refused(_))), "{name}: {got:?}");
                 assert!(d.path().join("root/a/b/f").exists(), "{name}: a refusal removes nothing");
             }
-            if gone != "-" {
+            // `gone` is what an ok row removes; a row refused here (ok-fold|refused-nofold where case matters) removes nothing.
+            if want_ok && gone != "-" {
                 assert!(
                     std::fs::symlink_metadata(d.path().join(gone)).is_err(),
                     "{name}: {gone} is still there"
@@ -300,7 +301,7 @@ mod tests {
                 let got = remove_under(Path::new(&fill(root)), Path::new(&t), None);
                 let want_ok = matches!(result, "ok" | "ok-fold|refused-nofold");
                 assert_eq!(got.is_ok(), want_ok, "{name} ({t}): {got:?}");
-                if gone != "-" {
+                if want_ok && gone != "-" {
                     assert!(
                         std::fs::symlink_metadata(d.path().join(gone)).is_err(),
                         "{name}: {gone} is still there"

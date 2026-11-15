@@ -148,7 +148,8 @@ for (const shell of SHELLS) {
         const ok = result === 'ok' || (result === 'ok-fold|refused-nofold' && FOLD);
         assert.equal(r.status, ok ? 0 : 1, `${name}: ${r.err}`);
         if (!ok) assert.ok(existsSync(join(b, 'root', 'a', 'b', 'f')), `${name}: a refusal removes nothing`);
-        if (goneRel !== '-') assert.ok(gone(join(b, goneRel)), `${name}: ${goneRel} is still there`);
+        // `gone` is what an ok row removes; a row refused here (ok-fold|refused-nofold on a case-sensitive OS) removes nothing.
+        if (ok && goneRel !== '-') assert.ok(gone(join(b, goneRel)), `${name}: ${goneRel} is still there`);
         assert.ok(existsSync(join(b, 'outside', 'keep', 'f')), `${name}: the folder outside the root was touched`);
       } finally {
         rmSync(b, { recursive: true, force: true });

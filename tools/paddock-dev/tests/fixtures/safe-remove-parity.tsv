@@ -9,7 +9,7 @@
 #   <B>/rootlink -> <B>/root       a link to the root
 # Columns (tab separated): name, root, target, result, gone.
 #   result: ok (exit 0 / Ok) or refused (exit 1 / Err(Refused)).
-#   gone: the path below <B> that is gone afterwards, or - when nothing is removed. Every row also checks that
+#   gone: the path below <B> that an ok row removes, or - when nothing is removed (a row refused on this OS removes nothing). Every row also checks that
 #   <B>/outside/keep/f is still there and, for a refused row, that <B>/root/a/b/f is too.
 #   A result `ok-fold|refused-nofold` is ok where names are compared without case (macOS, Windows) and refused elsewhere.
 # On Windows, guard.rs's `the_shared_parity_table_holds_in_windows_spelling` runs the rows without a link in Windows spelling
