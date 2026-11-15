@@ -21,6 +21,7 @@ mod cli;
 mod contracts;
 mod dev_tool_publish;
 mod dev_tool_workflow;
+mod diagrams;
 mod generators;
 mod golden;
 mod host_steps;

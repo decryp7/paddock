@@ -2,8 +2,7 @@
 
 Debrief's diagrams follow the suite spec in the Paddock repo: [`diagrams/STYLE.md`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/STYLE.md)
 (roles, type, grid, connectors, size limits, export). Start new diagrams from Paddock's templates and shape library
-([`diagrams/README.md`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/README.md)); `scripts/export-diagrams.sh` is Paddock's,
-copied unchanged.
+([`diagrams/README.md`](https://dev.decryptology.net/decryp7/paddock/src/branch/main/diagrams/README.md)); `./dev diagrams export` is Paddock's.
 
 ## Debrief's colours
 
@@ -35,5 +34,5 @@ serves light and dark through a `prefers-color-scheme` style block, so docs embe
 
 ## Changing a diagram
 
-Edit the generator in `src/`, run `src/generate.sh`, run `scripts/export-diagrams.sh`, then look at every changed PNG (and a dark
+Edit the generator in `src/`, run `./dev diagrams generate --app debrief`, run `./dev diagrams export --app debrief`, then look at every changed PNG (and a dark
 render) at README width. The `.drawio` files stay editable in draw.io, but re-running a generator overwrites its diagrams.

@@ -7,7 +7,7 @@ The shared way to draw Debrief, Pitcrew, Pitwall, Dyno and Spotter diagrams. The
 | `STYLE.md` | the spec: roles, colours per app, type, grid, connectors, sizes, export |
 | `paddock.xml` | draw.io shape library: person, own container, core, UI, plugin, process, external, planned, groups, note, legend, title block, sequence parts, state, class box, edges |
 | `templates/` | one starting `.drawio` per kind: `c4-context`, `c4-containers`, `sequence`, `state`, `class`, `deployment`, `flow` |
-| `scripts/export-diagrams.sh` | canonical export to theme-aware SVG and 2x PNG; apps copy it unchanged |
+| `./dev diagrams export` | the one export to theme-aware SVG and 2x PNG (`tools/paddock-dev/src/diagrams.rs`) |
 | `tools/apply-accent.mjs` | turns a template into an app's colours |
 | `tools/overview.mjs` | the hand-drawn, theme-aware overview SVG (Pitcrew's content as the worked example) |
 | `tools/lib.mjs`, `uml.mjs`, `themes.mjs`, `build-kit.mjs` | the generator that builds the templates and the library (`node diagrams/tools/build-kit.mjs`) |
@@ -18,7 +18,7 @@ The shared way to draw Debrief, Pitcrew, Pitwall, Dyno and Spotter diagrams. The
    `node diagrams/tools/apply-accent.mjs pitcrew diagrams/templates/c4-containers.drawio docs/diagrams/c4-2-containers.drawio`
    (from a checkout of this repo; `<app>` is `debrief`, `pitcrew`, `pitwall`, `dyno` or `spotter`).
 2. Open it in draw.io and edit. Keep the 8 px grid on, the labels beside the lines and the canvas inside the size limit.
-3. Export: `scripts/export-diagrams.sh` (copy it from `diagrams/scripts/` once into the app's `scripts/`).
+3. Export: `./dev diagrams export --app <app>` (its generators, if it has them: `./dev diagrams generate --app <app>`).
 4. Look at the PNG and a dark render before you commit.
 5. Never edit an exported SVG by hand (ER-40). CI re-exports every `.drawio` with the pinned draw.io (`ci-image/Dockerfile`,
    `DRAWIO_VERSION`) and fails on a difference: `node scripts/svg-drift.mjs` runs the same check where draw.io is installed

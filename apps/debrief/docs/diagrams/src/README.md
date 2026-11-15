@@ -19,8 +19,8 @@ re-running a script overwrites its diagrams.
 | `common.mjs` | Shared helpers (grid layout, groups, realisation arrows, sequence scripts) |
 
 ```sh
-docs/diagrams/src/generate.sh      # regenerate every .drawio and the overview SVG
-scripts/export-diagrams.sh         # then export SVG (and the git-ignored 2x PNGs); draw.io desktop, one export at a time
+./dev diagrams generate --app debrief   # regenerate every .drawio and the overview SVG (the order is generators.txt)
+./dev diagrams export --app debrief     # then export SVG (and the git-ignored 2x PNGs); draw.io desktop, one export at a time
 ```
 
 Each script sets the product name "Debrief" in titles and footers and keeps code identifiers (`debrief-core` and so on) as they are in

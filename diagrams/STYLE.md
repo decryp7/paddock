@@ -2,7 +2,7 @@
 
 One look for every Debrief, Pitcrew, Pitwall, Dyno and Spotter diagram: C4, UML, flow and overview drawings. The spec is
 identical in every repo; only the three role colours in "Per-app roles" change. Diagrams are draw.io files (uncompressed XML,
-`.drawio`), exported to theme-aware SVG and a 2x PNG by `scripts/export-diagrams.sh`. Start from `templates/`, load
+`.drawio`), exported to theme-aware SVG and a 2x PNG by `./dev diagrams export`. Start from `templates/`, load
 `paddock.xml` as the shape library (see [README.md](README.md)), and apply the app's colours with `tools/apply-accent.mjs`.
 
 ## Roles and colours
@@ -91,7 +91,7 @@ The table is generated from `tools/themes.mjs`, which is the source. The kit its
 
 ## Export
 
-`scripts/export-diagrams.sh [src [out [name...]]]` (defaults `docs/diagrams`) writes `svg/<name>.svg` (transparent,
+`./dev diagrams export [--app <app>] [--src <dir>] [--out <dir>] [name...]` (default source `docs/diagrams`, output beside it) writes `svg/<name>.svg` (transparent,
 `light-dark()` colours, system fonts, no embedded fonts, no PNG fallbacks) and `png/<name>.png` (2x, light, opaque white).
 Reference the SVG from docs; the PNG is for review and for places that cannot render SVG (it is large: apps git-ignore `png/`). A hand-drawn overview SVG uses the same tokens in a
 `prefers-color-scheme` style block and lives at one path (`tools/overview.mjs` draws one; one SVG serves light and dark READMEs). SVGs follow the viewer's operating-system theme (draw.io's `color-scheme`).

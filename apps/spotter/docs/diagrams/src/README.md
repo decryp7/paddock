@@ -6,7 +6,7 @@ re-running a script overwrites its diagram. The scripts are development tooling 
 
 ```sh
 node docs/diagrams/src/c4.mjs         # one diagram family: c4, c43, state, seq, cls, deploy, overview
-scripts/export-diagrams.sh            # then export SVG (and the git-ignored 2x PNGs); needs draw.io desktop
+./dev diagrams export --app spotter   # then export SVG (and the git-ignored 2x PNGs); needs draw.io desktop
 ```
 
 | Script | Writes |

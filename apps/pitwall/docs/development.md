@@ -118,7 +118,7 @@ Tests never leave processes behind (children are killed on drop), never touch re
 Diagram sources are draw.io files in `docs/diagrams/`; SVGs are generated.
 
 ```sh
-bash ../../diagrams/scripts/export-diagrams.sh "$PWD/docs/diagrams"   # from apps/pitwall; needs draw.io desktop (DRAWIO=/path overrides discovery) and node
+./dev diagrams export --app pitwall   # needs draw.io desktop (DRAWIO=/path overrides discovery) and node
 ```
 
 Follow [diagrams/STYLE.md](diagrams/STYLE.md), keep the `.drawio` uncompressed, update the footer date when a diagram

@@ -116,7 +116,7 @@ CI home, Paddock ADR 0025), which the shared
 ## Architecture documents and diagrams
 
 The diagrams are generated, not hand-drawn: `docs/diagrams/src/*.mjs` build `diagrams/*.drawio` from the Paddock diagram kit
-(`diagrams/tools` at the monorepo root) and `docs/diagrams/src/build.sh [name…]` regenerates everything and exports it
+(`diagrams/tools` at the monorepo root) and `./dev diagrams generate --app dyno --src diagrams --export [name…]` regenerates everything and exports it
 to `diagrams/svg/` (theme-aware SVG) with the draw.io desktop CLI; `dyno-overview.svg` is a hand-written SVG from
 `overview.mjs`. Change the script, not the picture. Follow [`diagrams/STYLE.md`](../diagrams/STYLE.md), look at the exported
 picture in both themes before committing and update the date in `common.mjs` when a diagram changes.

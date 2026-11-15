@@ -56,6 +56,7 @@ pub mod ci_runs;
 pub mod ci_setup_rust;
 pub mod ci_tool;
 mod cli;
+pub mod diagrams;
 pub mod disk;
 pub mod full_tree;
 pub mod gates;

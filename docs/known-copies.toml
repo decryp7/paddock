@@ -876,34 +876,17 @@ status = "planned"
 [[mechanism]]
 id = "diagram-export-script"
 title = "Exporting an app's draw.io diagrams to SVG"
-canonical = "diagrams"
-paths = ["diagrams/scripts/export-diagrams.sh"]
+canonical = "tools/paddock-dev"
+paths = ["tools/paddock-dev/src/diagrams.rs"]
+symbols = ["item:SVG_ARGS"]
 status = "built"
-
-  [[mechanism.copy]]
-  paths = ["apps/debrief/scripts/export-diagrams.sh"]
-  owner = "debrief"
-  delete_by = "debrief-v1.2.0"
-  note = "Byte-identical to the canonical."
-
-  [[mechanism.copy]]
-  paths = ["apps/pacenotes/scripts/export-diagrams.sh"]
-  owner = "pacenotes"
-  delete_by = "pacenotes-v1.0.0"
-  note = "Byte-identical to the canonical."
-
-  [[mechanism.copy]]
-  paths = ["apps/sighter/scripts/export-diagrams.sh"]
-  owner = "sighter"
-  delete_by = "sighter-v1.0.0"
-  note = "Byte-identical to the canonical."
 
   [[mechanism.copy]]
   paths = ["scripts/svg-drift.mjs"]
   symbols = ["text:EXPORT_ARGS"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "The drift check re-exports with the same draw.io flags as the export script (EXPORT_ARGS); when the diagram tool moves into paddock-dev (ADR 0022 phase 5) both read one list."
+  note = "The drift check re-exports with the same draw.io flags as `./dev diagrams export` (SVG_ARGS in tools/paddock-dev/src/diagrams.rs); the five shell copies of the export script are gone (shell-to-Rust WP-7). The drift check joins the Rust command when scripts/svg-drift.mjs is ported (ci-in-rust.md WP-12)."
 
 [[mechanism]]
 id = "drawio-install"

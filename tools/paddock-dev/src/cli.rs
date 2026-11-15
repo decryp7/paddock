@@ -1,5 +1,5 @@
 use crate::{
-    brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, disk, gates,
+    brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, diagrams, disk, gates,
     generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue,
     release_isolation, slots, wait, worktree,
 };
@@ -75,6 +75,11 @@ enum Command {
     Worktree {
         #[command(subcommand)]
         command: worktree::WorktreeCommand,
+    },
+    /// An app's draw.io diagrams: `export` to SVG and PNG, `generate` the sources (replaces the export-diagrams.sh copies).
+    Diagrams {
+        #[command(subcommand)]
+        command: diagrams::DiagramsCommand,
     },
     /// Disk watch and clean-up: free-space check, usage report, scan, owner records, clean.
     Disk {
@@ -719,6 +724,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             command: CheckCommand::Primary(a),
         } => worktree::check_primary(&a),
         Command::Worktree { command } => worktree::command(command),
+        Command::Diagrams { command } => diagrams::command(command),
         Command::Disk { command } => disk::command(command),
         Command::Pr { command } => pr::command(command),
         Command::Queue { command } => queue::command(command),

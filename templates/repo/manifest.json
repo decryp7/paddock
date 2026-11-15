@@ -12,7 +12,6 @@
     { "path": "deny.toml", "mode": "sections", "sections": ["graph", "advisories", "licenses", "sources"] },
     { "path": "Cargo.toml", "source": "Cargo.profiles.toml", "mode": "sections", "sections": ["profile.dev.package.\"*\"", "profile.dev", "profile.dist"] },
     { "path": "renovate.json", "mode": "extends" },
-    { "path": "scripts/export-diagrams.sh" },
     { "path": "app/.nvmrc" },
     { "path": "app/tsconfig.json" }
   ]

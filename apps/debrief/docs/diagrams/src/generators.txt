@@ -1,0 +1,11 @@
+# The generators of this app's diagrams, in the order `./dev diagrams generate --app debrief` runs them (node, from this folder).
+c4.mjs
+c43.mjs
+cls.mjs
+proto.mjs
+act.mjs
+seq.mjs
+state.mjs
+ucs.mjs
+deploy.mjs
+overview.mjs

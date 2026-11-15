@@ -129,7 +129,7 @@ requirements, and [Pitcrew](https://dev.decryptology.net/decryp7/pitcrew) runs t
 
 - [Design proposal](docs/proposal.md) (status: proposal, open questions pending)
 - [Architecture direction](docs/architecture-direction.md)
-- Diagrams: [docs/diagrams](docs/diagrams) (draw.io sources and exported SVG; regenerate with `node docs/diagrams/src/generate.mjs` and `scripts/export-diagrams.sh`)
+- Diagrams: [docs/diagrams](docs/diagrams) (draw.io sources and exported SVG; regenerate with `node docs/diagrams/src/generate.mjs` and `./dev diagrams export --app pacenotes`)
 - [Lessons from the suite](docs/suite-lessons.md)
 - [Engineering rules](AGENTS.md)
 

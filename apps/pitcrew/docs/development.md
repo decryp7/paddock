@@ -131,7 +131,7 @@ check) and publishes `pitcrew-v*` tags through the shared `app-release.yml`. See
   [diagrams/STYLE.md](diagrams/STYLE.md). After editing one, export all of them:
 
   ```sh
-  bash ../../diagrams/scripts/export-diagrams.sh "$PWD/docs/diagrams"   # from apps/pitcrew; needs draw.io desktop (DRAWIO overrides the executable) and node
+  ./dev diagrams export --app pitcrew   # needs draw.io desktop (DRAWIO overrides the executable) and node
   ```
 
   It writes `docs/diagrams/svg/<name>.svg` (transparent, follows light or dark; `design.md` and the README embed these)

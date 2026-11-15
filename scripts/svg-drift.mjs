@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SVG drift check (ER-40: a generated file is never hand-edited). Re-exports every tracked `.drawio` with draw.io's own CLI,
-// the way diagrams/scripts/export-diagrams.sh does, and fails when the committed SVG differs from the export.
+// the way `./dev diagrams export` does, and fails when the committed SVG differs from the export.
 //
 //   node scripts/svg-drift.mjs [--root <repo>] [--drawio <command>] [--list] [--keep <dir>]   (--keep: leave the exports in <dir>/<source folder>)
 //
@@ -15,7 +15,7 @@
 // What is compared. An export is not byte-stable across machines: the fallback <text> that draw.io writes beside every HTML
 // label (for viewers without foreignObject) is wrapped with the host's font metrics, and a label that overflows its cell moves
 // the canvas by a few pixels. So both sides are normalised, then compared:
-//   1. the PNG copy of each HTML label is dropped (as export-diagrams.sh does);
+//   1. the PNG copy of each HTML label is dropped (as `./dev diagrams export` does);
 //   2. the random id draw.io gives the root of a diagram that uses adaptive colours (`ge-svg-<random>`, new on every export, also
 //      in the <style> that names it) is replaced by a fixed one;
 //   3. the fallback <text>...</text> after each </foreignObject> inside <switch> is reduced to its words with all white space and
@@ -114,11 +114,11 @@ export function differs(a, b, tolerance = ROOT_TOLERANCE) {
 }
 
 /**
- * Where each source folder's committed exports live, when that is not `<folder>/svg` (the layout export-diagrams.sh writes
+ * Where each source folder's committed exports live, when that is not `<folder>/svg` (the layout `./dev diagrams export` writes
  * under its out-dir). The one declared table: add a line here for a folder that keeps its SVGs elsewhere.
  */
 export const EXPORT_DIRS = {
-  'apps/sighter/docs/diagrams': 'apps/sighter/docs/images/diagrams/svg', // its export script is run with out-dir docs/images/diagrams
+  'apps/sighter/docs/diagrams': 'apps/sighter/docs/images/diagrams/svg', // its export is run with --out docs/images/diagrams
   'docs/images/src/drawio': 'docs/images', // integrations.mjs copies the two family drawings out
 };
 
@@ -140,13 +140,13 @@ export function regenerate(drawio, files) {
   const dir = dirname(drawio);
   const name = basename(drawio, '.drawio');
   if (dir === 'docs/images/src/drawio') return 'node docs/images/src/integrations.mjs';
-  const app = dir.match(/^(apps\/[^/]+)\/(.*)$/);
-  if (app && files.has(`${app[1]}/scripts/export-diagrams.sh`)) {
+  const app = dir.match(/^apps\/([^/]+)\/(.*)$/);
+  if (app) {
     const svgDir = EXPORT_DIRS[dir] ?? `${dir}/svg`;
-    const out = svgDir.slice(app[1].length + 1).replace(/\/svg$/, '');
-    return `(cd ${app[1]} && scripts/export-diagrams.sh ${app[2]} ${out} ${name})`;
+    const out = svgDir.slice(`apps/${app[1]}/`.length).replace(/\/svg$/, '');
+    return `./dev diagrams export --app ${app[1]} --src ${app[2]}${out === app[2] ? '' : ` --out ${out}`} ${name}`;
   }
-  return `diagrams/scripts/export-diagrams.sh   (adapt: copy it into the app's scripts/ as the other apps do, then run it for ${name})`;
+  return `./dev diagrams export --src ${dir} ${name}`;
 }
 
 /** The pinned draw.io version: the Dockerfile's ARG, the single source. */

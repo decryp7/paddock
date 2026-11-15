@@ -44,7 +44,6 @@ function repo(name, { label = 'Hello world', fill = '#aabbcc', width = 100 } = {
   mkdirSync(join(root, 'apps/x/scripts'), { recursive: true });
   mkdirSync(join(root, 'ci-image'), { recursive: true });
   writeFileSync(join(root, 'ci-image/Dockerfile'), `ARG DRAWIO_VERSION=${PIN}\n`);
-  writeFileSync(join(root, 'apps/x/scripts/export-diagrams.sh'), '#!/bin/sh\n');
   const shim = join(scratch, 'drawio-shim');
   writeFileSync(shim, SHIM);
   chmodSync(shim, 0o755);
@@ -52,7 +51,7 @@ function repo(name, { label = 'Hello world', fill = '#aabbcc', width = 100 } = {
   const svgDir = join(root, 'apps/x/docs/diagrams');
   const r = spawnSync(shim, ['--export', '--output', join(svgDir, 'svg'), svgDir, '--no-sandbox'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  // What export-diagrams.sh commits: the same bytes minus the PNG copy of the label.
+  // What `./dev diagrams export` commits: the same bytes minus the PNG copy of the label.
   const f = join(svgDir, 'svg/a.svg');
   writeFileSync(f, readFileSync(f, 'utf8').replace(/<image [^>]*\/>/, ''));
   for (const c of [['init', '-q'], ['add', '-A'], ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x']]) {
@@ -100,7 +99,7 @@ describe('the check on a repository', () => {
     const { code, out } = check(r);
     assert.equal(code, 1);
     assert.match(out, /::error file=apps\/x\/docs\/diagrams\/svg\/a\.svg::/);
-    assert.match(out, /\(cd apps\/x && scripts\/export-diagrams\.sh docs\/diagrams docs\/diagrams a\)/);
+    assert.match(out, /\.\/dev diagrams export --app x --src docs\/diagrams a/);
     assert.match(out, /ER-40/);
   });
 
@@ -261,7 +260,7 @@ describe('normalising and comparing', () => {
 });
 
 describe('layout', () => {
-  const files = new Set(['apps/x/docs/diagrams/a.drawio', 'apps/x/docs/diagrams/svg/a.svg', 'apps/x/scripts/export-diagrams.sh', 'diagrams/templates/t.drawio']);
+  const files = new Set(['apps/x/docs/diagrams/a.drawio', 'apps/x/docs/diagrams/svg/a.svg', 'diagrams/templates/t.drawio']);
 
   test('a source is paired with <dir>/svg/<name>.svg, a declared folder with its table entry, templates with nothing', () => {
     assert.equal(committedSvg('apps/x/docs/diagrams/a.drawio'), 'apps/x/docs/diagrams/svg/a.svg');
@@ -270,11 +269,11 @@ describe('layout', () => {
     assert.equal(committedSvg('diagrams/templates/t.drawio'), null);
   });
 
-  test('the regeneration command is the app copy of the export script when there is one', () => {
-    assert.equal(regenerate('apps/x/docs/diagrams/a.drawio', files), '(cd apps/x && scripts/export-diagrams.sh docs/diagrams docs/diagrams a)');
+  test('the regeneration command is `./dev diagrams export` with the app, the source and the declared out-dir', () => {
+    assert.equal(regenerate('apps/x/docs/diagrams/a.drawio', files), './dev diagrams export --app x --src docs/diagrams a');
     assert.equal(regenerate('docs/images/src/drawio/p.drawio', files), 'node docs/images/src/integrations.mjs');
-    const sighter = new Set([...files, 'apps/sighter/scripts/export-diagrams.sh']);
-    assert.equal(regenerate('apps/sighter/docs/diagrams/q.drawio', sighter), '(cd apps/sighter && scripts/export-diagrams.sh docs/diagrams docs/images/diagrams q)');
+    assert.equal(regenerate('apps/sighter/docs/diagrams/q.drawio', files), './dev diagrams export --app sighter --src docs/diagrams --out docs/images/diagrams q');
+    assert.equal(regenerate('diagrams/x/q.drawio', files), './dev diagrams export --src diagrams/x q');
   });
 });
 

@@ -6,5 +6,5 @@ re-running a script overwrites its diagram.
 
 ```sh
 node docs/diagrams/src/state.mjs      # one diagram family (c4, c43, cls, deploy, seq, state, uc-run, overview)
-bash ../../diagrams/scripts/export-diagrams.sh "$PWD/docs/diagrams"   # (from apps/pitcrew) then export SVG (and the git-ignored 2x PNGs)
+./dev diagrams export --app pitcrew   # then export SVG (and the git-ignored 2x PNGs)
 ```
