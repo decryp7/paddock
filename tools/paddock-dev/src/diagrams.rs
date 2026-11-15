@@ -34,7 +34,8 @@ pub const SVG_ARGS: &[&str] = &[
 pub const PNG_ARGS: &[&str] = &["--export", "--format", "png", "--scale", "2", "--border", "16", "--theme", "light"];
 
 /// One draw.io export, or one generator, at most this long (draw.io is an Electron app; a hang must not hold a job).
-const STEP_TIMEOUT: Duration = Duration::from_secs(600);
+const STEP_TIMEOUT_SECS: u64 = 600;
+const STEP_TIMEOUT: Duration = Duration::from_secs(STEP_TIMEOUT_SECS);
 
 /// The display, session and profile variables draw.io (Electron) needs on a Linux or macOS desktop besides `PATH` and `HOME`.
 const DRAWIO_ENV: &[&str] = &[
@@ -74,6 +75,9 @@ pub struct ExportArgs {
     /// The repository root (default: the current repository).
     #[arg(long)]
     root: Option<PathBuf>,
+    /// The longest one draw.io run may take, in seconds; its whole process tree is ended at the limit.
+    #[arg(long, default_value_t = STEP_TIMEOUT_SECS)]
+    timeout_secs: u64,
     /// Diagram names without `.drawio` (default: every `.drawio` in the source folder, in name order).
     names: Vec<String>,
 }
@@ -214,9 +218,50 @@ fn drawio_failure(program: &Path, what: &str, how: &str, stderr: &str) -> CliErr
     ))
 }
 
-fn run_drawio(drawio: &Path, flags: &[&str], target: &Path, source: &Path, env: &HashMap<String, String>) -> Result<(), CliError> {
+/// A private profile folder for one export run: draw.io (Electron) would otherwise open the user's own profile
+/// (`~/Library/Application Support/draw.io`, its keychain and its windows). Removed when dropped.
+struct Profile(PathBuf);
+
+impl Profile {
+    /// A fresh 0700 folder in the run's temp folder (`TMPDIR`, `TEMP` or `TMP`).
+    fn new(env: &HashMap<String, String>) -> Result<Profile, CliError> {
+        let temp = ["TMPDIR", "TEMP", "TMP"]
+            .iter()
+            .find_map(|k| env.get(*k).filter(|v| !v.is_empty()))
+            .ok_or_else(|| {
+                CliError::failure(error_line(
+                    "No temp folder is set (TMPDIR, TEMP or TMP) for draw.io's private profile.",
+                    "set TMPDIR to a scratch folder and run again.",
+                ))
+            })?;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir = Path::new(temp).join(format!("paddock-drawio-{}-{nanos}", std::process::id()));
+        paddock_env::create_private_dir_all(&dir)
+            .map_err(|e| CliError::failure(error_line(&format!("{} cannot be created: {e}.", dir.display()), "check TMPDIR.")))?;
+        Ok(Profile(dir))
+    }
+}
+
+impl Drop for Profile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn run_drawio(
+    drawio: &Path,
+    profile: &Profile,
+    timeout: Duration,
+    flags: &[&str],
+    target: &Path,
+    source: &Path,
+    env: &HashMap<String, String>,
+) -> Result<(), CliError> {
     let call = ToolCall::new(drawio.to_string_lossy())
         .args(flags.iter().copied())
+        .args([format!("--user-data-dir={}", profile.0.display())])
         .args([
             "--output".to_string(),
             target.to_string_lossy().into_owned(),
@@ -224,7 +269,7 @@ fn run_drawio(drawio: &Path, flags: &[&str], target: &Path, source: &Path, env: 
             "--no-sandbox".to_string(),
         ])
         .pass(DRAWIO_ENV.iter().copied())
-        .timeout(STEP_TIMEOUT);
+        .timeout(timeout);
     let ran = call
         .run(env, &mut std::io::stderr())
         .map_err(|why| CliError::failure(error_line(&why, "install draw.io desktop or set DRAWIO to its executable.")))?;
@@ -262,6 +307,8 @@ pub fn export(args: &ExportArgs) -> Result<Report, CliError> {
             )));
         }
     }
+    let profile = Profile::new(&env)?;
+    let timeout = Duration::from_secs(args.timeout_secs);
     let (svg_dir, png_dir) = (out.join("svg"), out.join("png"));
     for d in [&svg_dir, &png_dir] {
         std::fs::create_dir_all(d).map_err(|e| {
@@ -275,7 +322,7 @@ pub fn export(args: &ExportArgs) -> Result<Report, CliError> {
     for n in &names {
         let source = src.join(format!("{n}.drawio"));
         let svg = svg_dir.join(format!("{n}.svg"));
-        run_drawio(&drawio, SVG_ARGS, &svg, &source, &env)?;
+        run_drawio(&drawio, &profile, timeout, SVG_ARGS, &svg, &source, &env)?;
         let text = std::fs::read_to_string(&svg).map_err(|e| {
             CliError::failure(error_line(
                 &format!("{} was not written by draw.io: {e}.", svg.display()),
@@ -288,7 +335,15 @@ pub fn export(args: &ExportArgs) -> Result<Report, CliError> {
                 "check the folder's rights.",
             ))
         })?;
-        run_drawio(&drawio, PNG_ARGS, &png_dir.join(format!("{n}.png")), &source, &env)?;
+        run_drawio(
+            &drawio,
+            &profile,
+            timeout,
+            PNG_ARGS,
+            &png_dir.join(format!("{n}.png")),
+            &source,
+            &env,
+        )?;
         lines.push(format!("exported {n}"));
     }
     Ok(Report::new(
@@ -358,6 +413,7 @@ pub fn generate(args: &GenerateArgs) -> Result<Report, CliError> {
         out: None,
         drawio: args.drawio.clone(),
         root: args.root.clone(),
+        timeout_secs: STEP_TIMEOUT_SECS,
         names: args.names.clone(),
     })?;
     Ok(Report::new(

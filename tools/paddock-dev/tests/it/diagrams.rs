@@ -77,7 +77,23 @@ fn an_export_runs_the_script_s_flags_per_diagram_and_prints_its_lines() {
          --export --format svg --transparent --embed-svg-fonts false --border 16 --output {o}/svg/b.svg {s}/b.drawio --no-sandbox\n\
          --export --format png --scale 2 --border 16 --theme light --output {o}/png/b.png {s}/b.drawio --no-sandbox\n"
     );
-    assert_eq!(std::fs::read_to_string(&log).unwrap(), want);
+    let logged = std::fs::read_to_string(&log).unwrap();
+    // The private profile is the one flag the script never had; everything else is the script's, in its order.
+    let without_profile: String = logged
+        .lines()
+        .map(|l| {
+            l.split(' ')
+                .filter(|t| !t.starts_with("--user-data-dir="))
+                .collect::<Vec<_>>()
+                .join(" ")
+                + "\n"
+        })
+        .collect();
+    assert_eq!(without_profile, want);
+    assert!(
+        logged.lines().all(|l| l.contains("--user-data-dir=")),
+        "every call has a profile: {logged}"
+    );
     assert_eq!(
         std::fs::read_to_string(out.join("svg/a.svg")).unwrap(),
         "<svg><foreignObject>t</foreignObject></svg>"
@@ -226,4 +242,79 @@ fn a_failing_generator_stops_the_run_and_a_bad_list_is_named() {
     let out = run(&[]);
     assert_eq!(out.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&out.stderr).contains("is not a generator file name"));
+}
+
+/// ER-14: the export never opens the user's own draw.io profile. Each run gets a private folder in its temp folder, the same one for
+/// the SVG and the PNG call, and removes it when it ends.
+#[test]
+fn an_export_runs_draw_io_with_a_private_profile_in_the_temp_folder_and_removes_it() {
+    let d = tempfile::tempdir().unwrap();
+    let (src, out, log) = (d.path().join("src"), d.path().join("out"), d.path().join("calls.log"));
+    std::fs::create_dir(&src).unwrap();
+    std::fs::write(src.join("a.drawio"), "x").unwrap();
+    let bin = drawio(d.path(), &log);
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.args([
+        "diagrams",
+        "export",
+        "--src",
+        src.to_str().unwrap(),
+        "--out",
+        out.to_str().unwrap(),
+        "--drawio",
+        bin.to_str().unwrap(),
+    ]);
+    let temp = cmd.private_dir().to_path_buf();
+    let o = cmd.output().unwrap();
+    assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+    let logged = std::fs::read_to_string(&log).unwrap();
+    let profiles: Vec<&str> = logged.split(' ').filter_map(|t| t.strip_prefix("--user-data-dir=")).collect();
+    assert_eq!(profiles.len(), 2, "{logged}");
+    assert_eq!(profiles[0], profiles[1]);
+    assert!(
+        profiles[0].starts_with(temp.to_str().unwrap()) && profiles[0].contains("paddock-drawio-"),
+        "{}",
+        profiles[0]
+    );
+    assert!(!profiles[0].contains("Library/Application Support"), "never the user's profile");
+    assert!(!Path::new(profiles[0]).exists(), "the profile is removed when the run ends");
+}
+
+/// A stand-in that hangs and leaves a child behind: the run ends at the limit with an error, and neither process is left.
+#[test]
+fn a_hung_draw_io_is_ended_with_its_whole_tree_and_nothing_is_left_behind() {
+    let d = tempfile::tempdir().unwrap();
+    let (src, pids) = (d.path().join("src"), d.path().join("pids"));
+    std::fs::create_dir(&src).unwrap();
+    std::fs::write(src.join("a.drawio"), "x").unwrap();
+    let hang = shim(
+        d.path(),
+        "hang",
+        &format!("echo $$ > '{}'; sleep 300 & echo $! >> '{}'; wait", pids.display(), pids.display()),
+    );
+    let started = std::time::Instant::now();
+    let (code, _, stderr) = dev(&[
+        "diagrams",
+        "export",
+        "--src",
+        src.to_str().unwrap(),
+        "--drawio",
+        hang.to_str().unwrap(),
+        "--timeout-secs",
+        "2",
+    ]);
+    assert_eq!(code, 1, "{stderr}");
+    assert!(
+        stderr.contains("::error::draw.io") && stderr.contains("timed out after 2 s"),
+        "{stderr}"
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(60), "the limit ended it");
+    let listed = std::fs::read_to_string(&pids).unwrap();
+    let both: Vec<&str> = listed.split_whitespace().collect();
+    assert_eq!(both.len(), 2, "the stand-in and its child both started: {listed}");
+    for pid in both {
+        let mut ps = TestCommand::new("ps");
+        ps.args(["-p", pid]);
+        assert_ne!(ps.status().unwrap().code(), Some(0), "process {pid} is gone");
+    }
 }
