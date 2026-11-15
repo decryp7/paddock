@@ -43,10 +43,20 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   `TMPDIR`, `TEMP` and `TMP` point into a **private folder** made for the command and removed when it
   drops (`TestCommand::new_in` takes a folder the test owns). A slot tool that keeps its slots under `$HOME/.cache` then
   keeps them in the private folder, never in `~/.cache/heavy-slots`.
-- `PATH` is **curated**: the folder of the cargo that runs the test (`CARGO`, so also `rustc`), the folders of the
-  `NAMED_TOOLS` as the test process finds them (the toolchain with `rustup`'s proxies, `node`, `git`, the shells and the shell
-  tools `./dev` and the CI scripts call, each by name: ci.yml run 8138 failed 11 Windows tests when Git for Windows' `usr/bin`
-  was missing), then (Windows) Git for Windows' `usr/bin` and `bin` above any of `git`, `sh` or `bash`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the Windows folder). The folder of `node` is added whole, so on a Homebrew Mac it exposes `/opt/homebrew/bin` (other Homebrew tools, not the slot tool); a narrower PATH would need a private folder of links to `node` and `git`, which Windows cannot make cheaply, so it is accepted and named here.
+- `PATH` is **curated**: first a private folder of **links to the toolchain's programs** (`cargo`, `rustc`, `rustup`,
+  `cargo-clippy`, `cargo-fmt`, `rustfmt`, `clippy-driver`, `rustdoc`: symbolic links on Unix, where rustup's proxies dispatch on
+  the name they were started as, hard links or copies on Windows), never the folder they came from, because `cargo install`
+  puts other tools beside them in `$CARGO_HOME/bin` (`heavy`: the review of `7edb8cad6` measured `command -v heavy` finding it,
+  which reopened incident 1); then the folders of `node`, `npm`, `npx` and `git` as the test process finds them; on Windows Git
+  for Windows' `usr/bin` and `bin`, from `git --exec-path` (asked once per `git`; the layout around `git.exe` when it cannot
+  answer), because Git's bash puts `mingw64/bin` first and the shell tools live in `usr/bin` (ci.yml run 8138: 11 Windows tests
+  found no `grep`, `tr` or `touch`); then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the
+  Windows folder; Windows folders compare without case). `TestCommand::path_report()` says what decided it (the child's and
+  the machine's `PATH`, where `git`, `sh`, `bash`, `node`, `cargo`, `rustc` and `rustup` were found, Git's root, the links) for
+  a failure message. **Remaining exposure, accepted:** the folders of `node` and `git` are added whole, so on a Homebrew Mac
+  `/opt/homebrew/bin` and its other tools are reachable, and on Windows all of Git's `usr/bin`; cargo itself still finds
+  `cargo-<name>` subcommands in `$CARGO_HOME/bin`, and the toolchain's own children see what rustup adds. A narrower PATH
+  would need links for `node` and `git` too, which is the next step if a tool there bites.
   `path_first(dir)` puts a test's stand-in folder first; `.env("PATH", ..)` replaces it whole. A bare program name is
   resolved once, at construction, against the **test process's** `PATH`: `path_first` and `env("PATH", ..)` change only the
   child's own lookups, never which program starts (a test that starts a stand-in names it by its path).

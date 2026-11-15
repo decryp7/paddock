@@ -126,16 +126,14 @@ fn the_curated_path_has_the_toolchain_and_the_system_but_not_the_machines_path()
     );
 }
 
-/// A tool the children's scripts need by name (`grep`, `tr`, `touch`; ci.yml run 8138: Git for Windows' `usr/bin` was not on the
-/// curated PATH, so `./dev` and the gate scripts failed with "command not found") brings its folder from the machine's PATH; a
-/// folder that holds no listed tool stays out.
+/// A listed tool (`node`) brings its folder from the machine's PATH; a folder that holds no listed tool stays out.
 #[cfg(unix)]
 #[test]
 fn a_listed_tool_brings_its_machine_folder_and_an_unlisted_one_does_not() {
     use std::os::unix::fs::PermissionsExt;
     let d = tempfile::tempdir().unwrap();
     let (tools, other) = (d.path().join("tools"), d.path().join("other"));
-    for (dir, name) in [(&tools, "grep"), (&other, "not-a-listed-tool")] {
+    for (dir, name) in [(&tools, "node"), (&other, "not-a-listed-tool")] {
         std::fs::create_dir(dir).unwrap();
         let f = dir.join(name);
         std::fs::write(&f, "#!/bin/sh\n").unwrap();
@@ -365,14 +363,97 @@ fn a_childs_git_stops_at_the_temp_root_and_still_finds_a_repository_below_it() {
 /// `grep`, `tr` and `touch` were "command not found" because Git for Windows' `usr/bin` was not on the curated PATH).
 #[test]
 fn a_childs_shell_finds_the_tools_the_scripts_call() {
-    let out = TestCommand::new("sh")
-        .args(["-c", "command -v grep && command -v tr && command -v touch && command -v sed && command -v git"])
-        .output()
-        .unwrap();
+    let mut cmd = TestCommand::new("sh");
+    cmd.args([
+        "-c",
+        "command -v grep && command -v tr && command -v touch && command -v sed && command -v git",
+    ]);
+    // The failure names what decided the PATH (ER-27): the child's, the machine's, and where git, sh and bash were found.
+    let report = cmd.path_report();
+    let out = cmd.output().unwrap();
     assert!(
         out.status.success(),
-        "{}{}",
+        "{}{}\n{report}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+}
+
+/// The toolchain reaches a child, its siblings do not (review of 7edb8cad6, P1-1): `cargo install` puts tools such as `heavy`
+/// beside the rustup proxies in `$CARGO_HOME/bin`, and that folder on the child's PATH reopened ADR 0100's first incident. The
+/// child gets links to the toolchain's programs in a private folder instead.
+#[cfg(unix)]
+#[test]
+fn an_installed_tool_beside_the_toolchain_is_not_reachable_and_the_toolchain_is() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let home_bin = d.path().join("cargo-home-bin");
+    std::fs::create_dir(&home_bin).unwrap();
+    for name in ["rustc", "rustup", "heavy"] {
+        let f = home_bin.join(name);
+        std::fs::write(&f, "#!/bin/sh\necho $0\n").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut env = env_lock();
+    env.set("PATH", format!("{}:/usr/bin:/bin", home_bin.display()));
+    let mut cmd = TestCommand::new("/bin/sh");
+    cmd.args([
+        "-c",
+        "if command -v heavy; then exit 3; fi; command -v rustc && rustc",
+    ]);
+    let report = cmd.path_report();
+    let out = cmd.output().unwrap();
+    let said = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert_ne!(
+        out.status.code(),
+        Some(3),
+        "heavy is reachable: {said}\n{report}"
+    );
+    assert!(
+        out.status.success(),
+        "rustc is not reachable: {said}{}\n{report}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        !said.contains(home_bin.to_str().unwrap()),
+        "the child ran rustc from the machine folder, not a link: {said}"
+    );
+    assert!(
+        said.trim_end().ends_with("/rustc"),
+        "rustup dispatches on the name it was started as: {said}"
+    );
+}
+
+/// Git for Windows found only through `mingw64\bin` (what Git's bash puts first on PATH): its `usr\bin`, where the shell tools are,
+/// still reaches the child, and a folder that is not Git's never does (review of 7edb8cad6, P2-4; ci.yml run 8138).
+#[cfg(windows)]
+#[test]
+fn git_for_windows_found_through_mingw64_brings_its_usr_bin() {
+    let d = tempfile::tempdir().unwrap();
+    let git = d.path().join("Git");
+    for sub in ["mingw64\\bin", "cmd", "usr\\bin", "bin"] {
+        std::fs::create_dir_all(git.join(sub)).unwrap();
+    }
+    for f in [
+        "mingw64\\bin\\git.exe",
+        "cmd\\git.exe",
+        "bin\\git.exe",
+        "usr\\bin\\bash.exe",
+    ] {
+        std::fs::write(git.join(f), "").unwrap();
+    }
+    let mut env = env_lock();
+    env.set("PATH", git.join("mingw64\\bin"));
+    let cmd = TestCommand::new("cmd");
+    let report = cmd.path_report();
+    // Compared as Windows compares folders: without case, either separator.
+    let dirs: Vec<String> = report
+        .child
+        .iter()
+        .map(|p| p.to_string_lossy().replace('/', "\\").to_lowercase())
+        .collect();
+    let usr_bin = git.join("usr\\bin").to_string_lossy().to_lowercase();
+    assert!(dirs.iter().any(|d| d == &usr_bin), "{report}");
+    let system32 = dirs.iter().filter(|d| d.ends_with("system32")).count();
+    assert_eq!(system32, 1, "System32 joined more than once: {report}");
 }
