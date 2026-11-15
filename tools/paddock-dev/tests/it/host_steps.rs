@@ -655,7 +655,8 @@ fn prune_folder_removes_the_incremental_caches_first_then_the_folder_and_never_f
 /// the regular files (hard links once, the total rounded up). Folder lengths are not content: GNU `du --apparent-size` counts them
 /// as 0 while BSD `du -A` counts them and rounds each entry up, and Rust counted them too, so a folder of empty folders was 0 KB in
 /// the shell and 1 KB in Rust on btrfs (OrbStack, where an empty folder has 0 blocks and a length of 18 bytes), and 2 KB in the
-/// shell against 1 KB in Rust on APFS.
+/// shell against 1 KB in Rust on APFS. Folder blocks are not content either: ext4 gives each folder 4 KiB, so both sides once called
+/// this layout 20 KiB on CI's Linux runner (run 8138).
 #[test]
 fn prune_folder_sizes_count_file_content_only_the_same_on_every_file_system() {
     let empty_folders = |fx: &Fx| {

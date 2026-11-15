@@ -1475,3 +1475,29 @@ the single-machine runners busy.
   runners' own configured timeout was not read).
 - **Notes:** the span counts jobs queued behind the runner too (start is when a runner took the job). Raw output in the agent's
   scratch folder, not kept.
+
+## Prune size, one pass (2026-11-15, fix/c125-and-arm64-tests)
+
+Question: how long does `tools/prune-build-folders.sh` (the shell kit's `prune-folder`, the release path) take to size a large build
+folder, now that the size is the regular files' own length and blocks from `kit.sh portable` instead of `du` (CI run 8138)? Before
+this change `size()` ran two kit passes (file-allocated, file-bytes) and the script called it twice under the cap (up to four times
+over it); now one `portable file-sizes` pass gives both numbers and the script measures once (and again only after the incremental
+caches went).
+
+- **Machine:** Mac mini (arm64), macOS 27.2.1, 14 cores, 1-minute load 6.5 to 9.6 (5-minute 10 to 15), no CI run active
+- **Folder:** a paddock-dev `CARGO_TARGET_DIR` (15,306 files, 3.1 GiB), warm in the file cache (one stat pass first)
+- **Command:** `bash <script> <folder> 100000` (a cap in GB far above the folder, so nothing is removed), wall time by
+  `Time::HiRes`, three runs interleaved
+- **Numbers:**
+
+  | What | Runs (s) |
+  |---|---|
+  | `du -sk <folder>` alone | 0.106, 0.113, 0.105 |
+  | one `kit.sh portable file-sizes` pass (find + BSD `stat -f`, sorted) | 7.16, 7.14, 7.31 |
+  | script at f51766792 (`du -sk` plus its own find + stat, two `size()` calls) | 16.0, 14.5, 14.7 |
+  | script at ffe91b1ac (two kit passes per `size()`, two calls) | 28.4, 28.4, 27.8 |
+  | script now (one pass) | 6.9, 9.0, 7.3 |
+
+- **Memory measure:** not measured
+- **Reading:** one pass costs about 70 times `du` on macOS, so the script now runs it once (four times faster than ffe91b1ac).
+  Not measured: GNU `find -printf` on the Linux runners (no `stat` per file), Windows (Git Bash) and a cold file cache.
