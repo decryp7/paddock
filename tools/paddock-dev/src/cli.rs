@@ -1,6 +1,6 @@
 use crate::{
-    brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, diagrams, disk, gates,
-    generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue,
+    brief_check, check, check_ids, ci_build_env, ci_build_jobs, ci_host, ci_isolation, ci_run, ci_runs, ci_setup_rust, diagrams, disk,
+    gates, generators, heavy_cmd, hook, input_hash, ipc_endpoints, load, locks, merge_check, places, plan, plan_cmd, pr, pre_push, queue,
     release_isolation, setup, setup_harness, slots, wait, worktree,
 };
 use clap::{Args, Parser, Subcommand};
