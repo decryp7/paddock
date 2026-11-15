@@ -1504,7 +1504,66 @@ fn a_raw_commit_reads_its_tree_its_parents_in_order_and_its_message_byte_for_byt
         None,
         "the tree header comes first"
     );
+    // Fails closed on anything git does not write: a carriage return in the headers, ids that are not lowercase hex of 40 or 64.
+    for bad in [
+        format!("tree {t}\r\nparent {p1}\nauthor q <q@x> 1 +0000\n\nm\n"),
+        format!("tree {t}\nparent {p1}\r\nauthor q <q@x> 1 +0000\n\nm\n"),
+        format!("tree {t}\nparent {p1}\nauthor q <q@x> 1 +0000\r\n\nm\n"),
+        format!("tree {}\n\nm\n", "a".repeat(39)),
+        format!("tree {}\n\nm\n", "a".repeat(41)),
+        format!("tree {}\n\nm\n", "A".repeat(40)),
+        format!("tree {}\n\nm\n", "g".repeat(40)),
+        format!("tree {t}\nparent {}\n\nm\n", &p1[..12]),
+        format!("tree {t}\nparent {p1} \n\nm\n"),
+        format!("tree {t}\nparent \n\nm\n"),
+    ] {
+        assert_eq!(real::parse_raw_commit(&bad), None, "{bad:?}");
+    }
+    let sha256 = real::parse_raw_commit(&format!("tree {}\nparent {}\n\nm\n", "d".repeat(64), "e".repeat(64))).unwrap();
+    assert_eq!((sha256.tree.len(), sha256.parents.len()), (64, 1), "SHA-256 ids");
+    assert_eq!(
+        real::parse_raw_commit(&format!("tree {t}\nparent {p1}\nauthor q\n\nline\r\n"))
+            .unwrap()
+            .message,
+        "line\r\n",
+        "a message is bytes, not headers"
+    );
     assert_eq!(real::parse_raw_commit(""), None);
+}
+
+#[test]
+fn a_train_head_whose_object_git_would_not_write_is_refused_not_an_error() {
+    let w = World::new();
+    let mut g = GitTrain::for_clone(w.repos.queue.clone(), w.repos.origin.to_str().unwrap());
+    g.fetch(&["main".into()]).unwrap();
+    let main = g.main_head().unwrap();
+    let tree = git(&w.repos.queue, &["rev-parse", &format!("{main}^{{tree}}")]);
+    let marker = Marker {
+        prs: vec![1],
+        round: 1,
+        since_run: None,
+        since_workflow: None,
+    };
+    // A marker commit with a carriage return after its tree header: git stores it (hash-object --literally), the queue never wrote it.
+    let raw = format!(
+        "tree {tree}\r\nparent {main}\nauthor q <q@x> 1 +0000\ncommitter q <q@x> 1 +0000\n\nchore(queue): train round 1\n\nQueue-Prs: 1\nQueue-Round: 1\n"
+    );
+    let file = w.repos.queue.join("forged.txt");
+    std::fs::write(&file, raw).unwrap();
+    let forged = git(
+        &w.repos.queue,
+        &["hash-object", "-t", "commit", "-w", "--literally", file.to_str().unwrap()],
+    );
+    let member = TrainMember {
+        number: 1,
+        branch: "feat/pr1".into(),
+        head: main.clone(),
+    };
+    let why = g.verify_train(None, &forged, &[member], &marker).unwrap();
+    assert!(
+        why.is_some_and(|w| w.contains("not a commit object")),
+        "refused, not an error and not accepted"
+    );
 }
 
 #[test]

@@ -470,13 +470,25 @@ pub struct RawCommit {
     pub message: String,
 }
 
-/// Parses `git cat-file commit` output. Only the top-level headers count: a continuation line of a multi-line header (a
-/// signature, an embedded tag) starts with a space and is never read as a `tree` or `parent` header. `None` without a tree.
+/// Parses `git cat-file commit` output as git writes it, and fails closed on anything else: the first header is `tree`, the
+/// `parent` headers follow it, ids are lowercase hex of 40 (SHA-1) or 64 (SHA-256) characters, and the headers hold no carriage
+/// return (lines end at `\n` only). A continuation line of a multi-line header (a signature, an embedded tag) starts with a
+/// space and is never read as a `tree` or `parent` header. The message is kept byte for byte.
 pub fn parse_raw_commit(raw: &str) -> Option<RawCommit> {
+    fn id(v: &str) -> Option<String> {
+        (matches!(v.len(), 40 | 64) && v.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))).then(|| v.to_string())
+    }
     let (headers, message) = raw.split_once("\n\n").unwrap_or((raw, ""));
-    let mut lines = headers.lines();
-    let tree = lines.next()?.strip_prefix("tree ")?.to_string();
-    let parents = lines.map_while(|l| l.strip_prefix("parent ")).map(str::to_string).collect();
+    if headers.contains('\r') {
+        return None;
+    }
+    let mut lines = headers.split('\n').peekable();
+    let tree = id(lines.next()?.strip_prefix("tree ")?)?;
+    let mut parents = Vec::new();
+    while let Some(p) = lines.peek().and_then(|l| l.strip_prefix("parent ")) {
+        parents.push(id(p)?);
+        lines.next();
+    }
     Some(RawCommit {
         tree,
         parents,
@@ -551,7 +563,9 @@ impl Train for GitTrain {
     fn contains(&mut self, ancestor: &str, descendant: &str) -> Result<bool, String> {
         // `--is-ancestor` fails for an object that is missing or no commit as it does for one that is not an ancestor: both are
         // "not contained", in one git child.
-        Ok(self.git(&["merge-base", "--is-ancestor", ancestor, descendant])?.0)
+        Ok(self
+            .git(&["merge-base", "--is-ancestor", "--end-of-options", ancestor, descendant])?
+            .0)
     }
 
     fn build(&mut self, main: &str, prs: &[Pull], marker: &Marker) -> Result<Built, String> {
@@ -633,26 +647,40 @@ impl Train for GitTrain {
         // Each commit is read once, as its raw object: its tree, its parents and its message byte for byte (one git child per
         // commit instead of three; a tick verifies the train once or twice).
         let mut seen: BTreeMap<String, RawCommit> = BTreeMap::new();
-        let mut read = |g: &GitTrain, c: &str| -> Result<RawCommit, String> {
+        // `None`: an object git would not write as a commit, which refuses the train (fails closed).
+        let mut read = |g: &GitTrain, c: &str| -> Result<Option<RawCommit>, String> {
             if let Some(r) = seen.get(c) {
-                return Ok(r.clone());
+                return Ok(Some(r.clone()));
             }
-            let r = parse_raw_commit(&g.ok(&["cat-file", "commit", c])?)
-                .ok_or_else(|| format!("git cat-file commit {c} gave no commit object"))?;
+            let Some(r) = parse_raw_commit(&g.ok(&["cat-file", "commit", c])?) else {
+                return Ok(None);
+            };
             seen.insert(c.to_string(), r.clone());
-            Ok(r)
+            Ok(Some(r))
         };
+        let unreadable = |c: &str| Some(format!("commit {} is not a commit object as git writes it", short_id(c)));
         // The marker commit.
         let mut cur = head.to_string();
         let expected = format!("chore(queue): train round {}\n\n{}", marker.round, marker_text(marker));
-        let top = read(self, &cur)?;
+        let Some(top) = read(self, &cur)? else {
+            return Ok(unreadable(&cur));
+        };
         if top.message != expected {
             return Ok(Some(format!(
                 "the marker commit {} has a message the queue did not write",
                 short_id(&cur)
             )));
         }
-        if top.parents.len() != 1 || top.tree != read(self, &top.parents[0])?.tree {
+        if top.parents.len() != 1 {
+            return Ok(Some(format!(
+                "the marker commit {} does not have exactly one parent and its parent's tree",
+                short_id(&cur)
+            )));
+        }
+        let Some(parent) = read(self, &top.parents[0])? else {
+            return Ok(unreadable(&top.parents[0]));
+        };
+        if top.tree != parent.tree {
             return Ok(Some(format!(
                 "the marker commit {} does not have exactly one parent and its parent's tree",
                 short_id(&cur)
@@ -661,7 +689,9 @@ impl Train for GitTrain {
         cur = top.parents[0].clone();
         // The merges, last first: every first-parent commit down to the base is one of them.
         for m in members.iter().rev() {
-            let c = read(self, &cur)?;
+            let Some(c) = read(self, &cur)? else {
+                return Ok(unreadable(&cur));
+            };
             let ps = &c.parents;
             if ps.len() != 2 || ps[1] != m.head {
                 return Ok(Some(format!(
