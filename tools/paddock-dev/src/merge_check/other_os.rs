@@ -152,12 +152,15 @@ pub fn select(changed: &[String], tree: &dyn Tree) -> Selection {
             });
             note("conformance/ changed: its tests run on Linux".into(), &mut s);
         }
-        if file.starts_with("scripts/vm-") {
+        if file.starts_with("scripts/vm-") || file.starts_with("scripts/member-gate") {
             s.linux.insert(Target::Node {
                 dir: ".".into(),
-                cmd: "node --test scripts/vm-*.test.mjs".into(),
+                cmd: "node --test scripts/vm-*.test.mjs scripts/member-gate.test.mjs".into(),
             });
-            note("scripts/vm-* changed: its tests run on Linux".into(), &mut s);
+            note(
+                "scripts/vm-* or scripts/member-gate* changed: their tests run on Linux".into(),
+                &mut s,
+            );
         }
         if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") {
             continue;
@@ -595,7 +598,10 @@ mod tests {
 
     #[test]
     fn conformance_and_the_vm_scripts_run_node_tests_on_linux_only() {
-        let s = select(&files(&["conformance/ci/kit.sh", "scripts/vm-win.sh"]), &table());
+        let s = select(
+            &files(&["conformance/ci/kit.sh", "scripts/vm-win.sh", "scripts/member-gate-linux.sh"]),
+            &table(),
+        );
         assert_eq!(s.linux.len(), 2);
         assert!(s.windows.is_empty());
         assert!(s.linux.iter().all(|t| matches!(t, Target::Node { .. })));
