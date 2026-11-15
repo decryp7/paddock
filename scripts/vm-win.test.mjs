@@ -765,7 +765,9 @@ describe('the VM lock', () => {
     for (const f of readdirSync(join(here, 'vm-smoke')).filter((n) => /\.mjs$/.test(n) && !n.endsWith('.test.mjs'))) {
       const text = read(`vm-smoke/${f}`);
       if (!/vm-win\.sh|VMWIN|vmwin/.test(text)) continue;
-      for (const m of text.matchAll(/[ ,{]env:\s*([^,}]+)/g)) assert.match(m[1].trim(), /^(process\.env|\{ \.\.\.process\.env|env \?\? process\.env|tartEnv|devEnv\(\))/, `${f}: ${m[0]}`);
+      // devEnv() is win-vm-target.mjs's own (the caller's environment minus PADDOCK_*/GIT_*, for its ./dev call): no other runner may use the name.
+      const allowed = f === 'win-vm-target.mjs' ? /^(process\.env|\{ \.\.\.process\.env|env \?\? process\.env|tartEnv|devEnv\(\))/ : /^(process\.env|\{ \.\.\.process\.env|env \?\? process\.env|tartEnv)/;
+      for (const m of text.matchAll(/[ ,{]env:\s*([^,}]+)/g)) assert.match(m[1].trim(), allowed, `${f}: ${m[0]}`);
     }
   });
 });

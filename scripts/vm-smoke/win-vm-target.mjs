@@ -12,16 +12,20 @@ import { isMain } from '../../conformance/src/util/is-main.mjs';
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
- * The environment ./dev runs under: the caller's own, without any `PADDOCK_*` variable (PADDOCK_DEV, PADDOCK_DEV_HOME,
- * PADDOCK_CI_MOUNT, PADDOCK_DEV_TARGET_DIR and the like pick or place the binary, so none can). ./dev finds its toolchain the way it
- * does for the caller: CI's cargo is not under $HOME/.cargo/bin, so a fixed PATH made ./dev stop with "no Rust compiler runs here".
+ * The environment ./dev runs under: the caller's own, minus what picks or places the binary or the checkout it is built from: every
+ * `PADDOCK_*` variable (PADDOCK_DEV, PADDOCK_DEV_HOME, PADDOCK_CI_MOUNT, PADDOCK_DEV_TARGET_DIR ...) and every `GIT_*` one (GIT_DIR,
+ * GIT_WORK_TREE). Three `PADDOCK_*` values only restrict the build and stay: PADDOCK_DEV_DOWNLOAD=0 (a release job never downloads,
+ * ADR 0022 amendment), PADDOCK_TOOLCHAIN_FAILED=1 and PADDOCK_DEV_FRESH=1; a caller cannot switch a download on. ./dev finds its
+ * toolchain the way it does for the caller: CI's cargo is not under $HOME/.cargo/bin, so a fixed PATH made it stop with "no Rust compiler
+ * runs here" (run 8138). This keeps the environment from choosing the program; it is not a sandbox.
  */
-const devEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('PADDOCK_')));
+const RESTRICTING = { PADDOCK_DEV_DOWNLOAD: '0', PADDOCK_TOOLCHAIN_FAILED: '1', PADDOCK_DEV_FRESH: '1' };
+const devEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k, v]) => !/^(PADDOCK_|GIT_)/.test(k) || RESTRICTING[k] === v));
 
 /**
  * One folder from `./dev places` (dev-targets, dev-disk, vm-data, lock-root, main-checkout; docs/dev-setup.md), run through the
- * repository's own ./dev, never a program the environment names, without `PADDOCK_*` variables (the first run
- * after its inputs change builds paddock-dev in the default cache, about 35 s measured on 2026-11-15, 63 s on the macOS runner). `pinned` ignores every environment variable (paddock-dev reads
+ * repository's own ./dev, never a program the environment names, without the variables above, run from the repository (the first run
+ * after its inputs change builds paddock-dev once into the default cache). `pinned` ignores every environment variable (paddock-dev reads
  * git config with an empty environment). Throws with paddock-dev's reason when the folder cannot be derived (fail closed).
  * @param {string} name
  * @param {{pinned?: boolean, run?: typeof execFileSync}} [o] `run` injected for tests
@@ -29,7 +33,7 @@ const devEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k])
 export function devPlace(name, { pinned = false, run = execFileSync } = {}) {
   const args = ['places', '--get', name, '--repo', REPO, ...(pinned ? ['--pinned'] : [])];
   try {
-    const out = String(run(join(REPO, 'dev'), args, { encoding: 'utf8', env: devEnv(), stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 })).trim();
+    const out = String(run(join(REPO, 'dev'), args, { encoding: 'utf8', cwd: REPO, env: devEnv(), stdio: ['ignore', 'pipe', 'pipe'], timeout: 600_000 })).trim();
     if (!out) throw new Error('it printed nothing');
     return out;
   } catch (e) {

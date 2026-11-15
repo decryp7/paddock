@@ -10,15 +10,24 @@
 WIN_VM_NAME=paddock-win11-test
 # The repository's own ./dev, never PADDOCK_DEV: the program that names the target must not come from the environment either.
 _win_vm_repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# ./dev runs with the caller's environment minus every PADDOCK_* variable (PADDOCK_DEV, PADDOCK_DEV_HOME, PADDOCK_CI_MOUNT,
-# PADDOCK_DEV_TARGET_DIR and the like pick or place the binary): none can make the wrapper pick a planted one. PATH and the toolchain's
-# variables stay, because ./dev finds its compiler the way it does for the caller (CI's cargo is not under $HOME/.cargo/bin; a fixed PATH
-# made it stop with "no Rust compiler runs here", run 8138). The first run after the tool's inputs change builds paddock-dev in the
-# default cache (about 35 s measured on 2026-11-15, 63 s on the macOS runner).
+# ./dev runs from the repository with the caller's environment minus what picks or places the binary or the checkout it is built from:
+# every PADDOCK_* variable (PADDOCK_DEV, PADDOCK_DEV_HOME, PADDOCK_CI_MOUNT, PADDOCK_DEV_TARGET_DIR ...) and every GIT_* one (GIT_DIR,
+# GIT_WORK_TREE). Three PADDOCK_* values only restrict the build and stay: PADDOCK_DEV_DOWNLOAD=0 (a release job never downloads, ADR
+# 0022 amendment), PADDOCK_TOOLCHAIN_FAILED=1 and PADDOCK_DEV_FRESH=1; a caller cannot switch a download on. PATH and the toolchain's
+# variables stay, because ./dev finds its compiler the way it does for the caller (CI's cargo is not under $HOME/.cargo/bin; a fixed
+# PATH made it stop with "no Rust compiler runs here", run 8138). This keeps the environment from choosing the program; it is not a
+# sandbox. The first run after the tool's inputs change builds paddock-dev once into the default cache.
 _win_vm_dev() {
   local unset=() v
-  while IFS= read -r v; do unset+=(-u "$v"); done < <(compgen -e | grep '^PADDOCK_')
-  env ${unset[@]+"${unset[@]}"} "$_win_vm_repo/dev" "$@"
+  while IFS= read -r v; do
+    case "$v" in
+      PADDOCK_DEV_DOWNLOAD) [ "${!v}" = 0 ] && continue ;;
+      PADDOCK_TOOLCHAIN_FAILED) [ "${!v}" = 1 ] && continue ;;
+      PADDOCK_DEV_FRESH) [ "${!v}" = 1 ] && continue ;;
+    esac
+    unset+=(-u "$v")
+  done < <(compgen -e | grep -E '^(PADDOCK_|GIT_)')
+  (cd "$_win_vm_repo" && env ${unset[@]+"${unset[@]}"} "$_win_vm_repo/dev" "$@")
 }
 # Empty when it cannot be derived: then only fake mode passes, and the real VM is refused with the reason (fail closed).
 WIN_VM_DIR_UNKNOWN=""
