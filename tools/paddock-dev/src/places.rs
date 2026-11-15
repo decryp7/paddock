@@ -47,13 +47,30 @@ pub fn dev_targets_pinned(from: &Path) -> Result<PathBuf, CliError> {
 }
 
 fn pinned_worktree_root(from: &Path) -> Option<PathBuf> {
-    let mut cmd = paddock_proc::command("git");
-    cmd.arg("-C").arg(from).args(["config", "--local", "--get", "paddock.worktreeRoot"]);
-    cmd.env_clear().env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin");
+    // Unix: git from the system folders only. Windows has no such fixed folder, so git is found once on the caller's PATH and
+    // runs with only its own folder on PATH (and SystemRoot, which Windows programs need).
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = paddock_proc::command("git");
+        c.env_clear().env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin");
+        c
+    };
     #[cfg(windows)]
-    if let Some(root) = std::env::var_os("SystemRoot") {
-        cmd.env("SystemRoot", root);
-    }
+    let mut cmd = {
+        let path = std::env::var("PATH").unwrap_or_default();
+        let exts = crate::pathfind::extensions(std::env::var("PATHEXT").ok().as_deref());
+        let git = crate::pathfind::find_program(&path, "git", true, &exts)?;
+        let mut c = paddock_proc::command(&git);
+        c.env_clear();
+        if let Some(dir) = git.parent() {
+            c.env("PATH", dir);
+        }
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            c.env("SystemRoot", root);
+        }
+        c
+    };
+    cmd.arg("-C").arg(from).args(["config", "--local", "--get", "paddock.worktreeRoot"]);
     let out = paddock_proc::run_bounded(
         cmd,
         paddock_proc::Limits::new(std::time::Duration::from_secs(30)).max_output(1 << 16),
@@ -231,16 +248,22 @@ mod tests {
     use super::*;
     use crate::worktree::git::Git;
 
+    /// An invented absolute folder on this platform: the path itself on Unix, on drive `C:` on Windows (`/srv` is not absolute
+    /// there). Tests name invented folders only (C125).
+    pub(crate) fn abs(unix: &str) -> String {
+        if cfg!(windows) { format!("C:{unix}") } else { unix.to_string() }
+    }
+
     #[test]
     fn the_named_folder_beats_the_worktree_root() {
-        let got = dev_targets_of(Some("/srv/dt".into()), Some("/elsewhere/dev-targets/wt".into())).unwrap();
-        assert_eq!(got, PathBuf::from("/srv/dt"));
+        let got = dev_targets_of(Some(abs("/srv/dt")), Some(abs("/elsewhere/dev-targets/wt").into())).unwrap();
+        assert_eq!(got, PathBuf::from(abs("/srv/dt")));
     }
 
     #[test]
     fn without_a_name_it_is_the_parent_of_the_worktree_root() {
-        let got = dev_targets_of(None, Some("/srv/dev-targets/wt".into())).unwrap();
-        assert_eq!(got, PathBuf::from("/srv/dev-targets"));
+        let got = dev_targets_of(None, Some(abs("/srv/dev-targets/wt").into())).unwrap();
+        assert_eq!(got, PathBuf::from(abs("/srv/dev-targets")));
     }
 
     #[test]
@@ -250,7 +273,7 @@ mod tests {
             (Some("relative/dt".to_string()), None),
             (None, Some(PathBuf::from("/wt"))),
             (Some("/".to_string()), None),
-            (Some("/srv/../x".to_string()), None),
+            (Some(abs("/srv/../x")), None),
         ] {
             let e = dev_targets_of(set.clone(), root.clone()).unwrap_err().to_string();
             assert!(e.contains("dev-targets"), "{set:?} {root:?}: {e}");
@@ -266,10 +289,11 @@ mod tests {
         git.text(&["init", "-q"]).unwrap();
         let none = |_: &str| None;
         assert!(dev_targets(d.path(), &none).is_err(), "no worktree root set: refused");
-        git.text(&["config", "paddock.worktreeRoot", "/srv/disk-a/dev-targets/wt"]).unwrap();
-        assert_eq!(dev_targets(d.path(), &none).unwrap(), PathBuf::from("/srv/disk-a/dev-targets"));
-        let named = |k: &str| (k == DEV_TARGETS_ENV).then(|| "/srv/disk-b/dt".to_string());
-        assert_eq!(dev_targets(d.path(), &named).unwrap(), PathBuf::from("/srv/disk-b/dt"));
+        git.text(&["config", "paddock.worktreeRoot", &abs("/srv/disk-a/dev-targets/wt")])
+            .unwrap();
+        assert_eq!(dev_targets(d.path(), &none).unwrap(), PathBuf::from(abs("/srv/disk-a/dev-targets")));
+        let named = |k: &str| (k == DEV_TARGETS_ENV).then(|| abs("/srv/disk-b/dt"));
+        assert_eq!(dev_targets(d.path(), &named).unwrap(), PathBuf::from(abs("/srv/disk-b/dt")));
         let main = main_checkout(d.path()).unwrap();
         let real = |p: &Path| paddock_env::winpath::real(p).unwrap();
         assert_eq!(real(&main), real(d.path()));
@@ -278,8 +302,8 @@ mod tests {
     #[test]
     fn outside_a_repository_the_worktree_root_variable_still_works() {
         let d = tempfile::tempdir().unwrap();
-        let env = |k: &str| (k == "PADDOCK_WORKTREE_ROOT").then(|| "/srv/disk-c/dev-targets/wt".to_string());
-        assert_eq!(dev_targets(d.path(), &env).unwrap(), PathBuf::from("/srv/disk-c/dev-targets"));
+        let env = |k: &str| (k == "PADDOCK_WORKTREE_ROOT").then(|| abs("/srv/disk-c/dev-targets/wt"));
+        assert_eq!(dev_targets(d.path(), &env).unwrap(), PathBuf::from(abs("/srv/disk-c/dev-targets")));
         assert!(main_checkout(d.path()).is_err());
     }
 
@@ -302,39 +326,40 @@ mod tests {
             "x",
         ])
         .unwrap();
-        git.text(&["config", "paddock.worktreeRoot", "/srv/disk-d/dev-targets/wt"]).unwrap();
+        git.text(&["config", "paddock.worktreeRoot", &abs("/srv/disk-d/dev-targets/wt")])
+            .unwrap();
         let linked = d.path().join("linked");
         git.text(&["worktree", "add", "-q", "--detach", &linked.to_string_lossy()]).unwrap();
         let real = |p: &Path| paddock_env::winpath::real(p).unwrap();
         assert_eq!(real(&main_checkout(&linked).unwrap()), real(&main));
         let none = |_: &str| None;
-        assert_eq!(dev_targets(&linked, &none).unwrap(), PathBuf::from("/srv/disk-d/dev-targets"));
-        assert_eq!(dev_targets_pinned(&linked).unwrap(), PathBuf::from("/srv/disk-d/dev-targets"));
+        assert_eq!(dev_targets(&linked, &none).unwrap(), PathBuf::from(abs("/srv/disk-d/dev-targets")));
+        assert_eq!(dev_targets_pinned(&linked).unwrap(), PathBuf::from(abs("/srv/disk-d/dev-targets")));
     }
 
     #[test]
     fn the_layout_puts_the_vm_and_lock_folders_on_the_dev_disk_and_refuses_a_root_level_dev_targets_folder() {
         let d = tempfile::tempdir().unwrap();
         Git::at(d.path()).text(&["init", "-q"]).unwrap();
-        let env = |k: &str| (k == DEV_TARGETS_ENV).then(|| "/srv/disk-e/dev-targets".to_string());
+        let env = |k: &str| (k == DEV_TARGETS_ENV).then(|| abs("/srv/disk-e/dev-targets"));
         let l = Layout::derive(d.path(), &env, false);
-        assert_eq!(l.get("dev-disk").unwrap(), Path::new("/srv/disk-e"));
-        assert_eq!(l.get("vm-data").unwrap(), Path::new("/srv/disk-e/vm-data"));
-        assert_eq!(l.get("lock-root").unwrap(), Path::new("/srv/disk-e/ci/locks/test-machines"));
+        assert_eq!(l.get("dev-disk").unwrap(), Path::new(&abs("/srv/disk-e")));
+        assert_eq!(l.get("vm-data").unwrap(), Path::new(&abs("/srv/disk-e/vm-data")));
+        assert_eq!(l.get("lock-root").unwrap(), Path::new(&abs("/srv/disk-e/ci/locks/test-machines")));
         let named = |k: &str| match k {
-            DEV_TARGETS_ENV => Some("/srv/disk-e/dev-targets".to_string()),
-            "PADDOCK_VM_DATA" => Some("/srv/vms".to_string()),
+            DEV_TARGETS_ENV => Some(abs("/srv/disk-e/dev-targets")),
+            "PADDOCK_VM_DATA" => Some(abs("/srv/vms")),
             "PADDOCK_VM_LOCK_ROOT" => Some("relative".to_string()),
             _ => None,
         };
         let l = Layout::derive(d.path(), &named, false);
-        assert_eq!(l.get("vm-data").unwrap(), Path::new("/srv/vms"));
+        assert_eq!(l.get("vm-data").unwrap(), Path::new(&abs("/srv/vms")));
         assert!(l.get("lock-root").is_err(), "a relative lock root is refused");
         // Pinned: every variable is ignored, and this repository has no worktree root.
         assert!(Layout::derive(d.path(), &named, true).get("vm-data").is_err());
-        let top = |k: &str| (k == DEV_TARGETS_ENV).then(|| "/dt".to_string());
+        let top = |k: &str| (k == DEV_TARGETS_ENV).then(|| abs("/dt"));
         let l = Layout::derive(d.path(), &top, false);
-        assert_eq!(l.get("dev-targets").unwrap(), Path::new("/dt"));
+        assert_eq!(l.get("dev-targets").unwrap(), Path::new(&abs("/dt")));
         assert!(
             l.get("dev-disk").is_err() && l.get("vm-data").is_err(),
             "no dev disk above a root-level folder"

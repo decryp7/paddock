@@ -905,9 +905,12 @@ mod tests {
         let none = |_: &str| None;
         // Fail closed: no worktree root, no places.
         assert!(Places::derive(d.path(), &none).is_err());
-        git.text(&["config", "paddock.worktreeRoot", "/srv/disk-c/dev-targets/wt"]).unwrap();
+        // An invented folder that is absolute on this platform (`/srv` is not absolute on Windows).
+        let abs = |unix: &str| if cfg!(windows) { format!("C:{unix}") } else { unix.to_string() };
+        git.text(&["config", "paddock.worktreeRoot", &abs("/srv/disk-c/dev-targets/wt")])
+            .unwrap();
         let p = Places::derive(d.path(), &none).unwrap();
-        assert_eq!(p.dev_targets, "/srv/disk-c/dev-targets/");
+        assert_eq!(p.dev_targets, abs("/srv/disk-c/dev-targets/"));
         let real = |p: &std::path::Path| paddock_env::winpath::real(p).unwrap();
         assert_eq!(real(std::path::Path::new(&p.main_checkout)), real(d.path()));
         // After a disk move the same brief text follows the new folder: the old one is refused, the new one passes.
