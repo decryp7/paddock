@@ -1403,7 +1403,7 @@ test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and n
   };
   walk('.gitea');
   walk('conformance/ci');
-  files.push('dev');
+  files.push('dev', 'tools/dev-launch/src/launch.rs');
   // The repo scripts the workflows run.
   for (const f of workflowFiles()) {
     for (const m of read(join(WORKFLOWS, f)).matchAll(/\b(scripts\/[\w./-]+\.(?:sh|mjs))\b/g)) if (existsSync(join(PADDOCK, m[1]))) files.push(m[1]);
@@ -1412,8 +1412,6 @@ test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and n
   for (const f of [...new Set(files)]) {
     read(join(PADDOCK, f)).split('\n').forEach((line, i) => {
       let code = line.replace(/^\s*(#|\/\/|rem\b).*$/i, '');
-      // The wrapper's one default for the tool's own first build (docs/benchmarks.md, "Kit shim default"): only that exact line.
-      if (f === 'dev' && line.trim() === 'if [ "${GITHUB_ACTIONS:-}" = true ] && [ -z "${CARGO_BUILD_JOBS:-}" ]; then CARGO_BUILD_JOBS=4; export CARGO_BUILD_JOBS; fi') code = '';
       // A number (or a number as the fallback) for CARGO_BUILD_JOBS, in bash, cmd or YAML.
       if (/CARGO_BUILD_JOBS["']?\s*(=|:)\s*["']?\d|CARGO_BUILD_JOBS:-\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
       // A fixed -j/--jobs on a cargo build or test. `cargo mutants --jobs N` is the number of mutants built at once; each
@@ -1421,8 +1419,9 @@ test('CI never pins the build jobs: only build-jobs sets CARGO_BUILD_JOBS, and n
       if (/\bcargo\b(?!\s+mutants)[^\n]*\s(-j\s*|--jobs[ =])\d/.test(code)) offenders.push(`${f}:${i + 1}: ${line.trim()}`);
     });
   }
-  const wrapper = read(join(PADDOCK, 'dev'));
-  assert.equal(wrapper.split('\n').filter((l) => /CARGO_BUILD_JOBS=\d+; export CARGO_BUILD_JOBS/.test(l)).length, 1, 'the dev wrapper has the one default for the tool\'s own first build, before ./dev ci build-jobs sets the real value');
+  // The launcher's one default for the tool's own first build (docs/benchmarks.md, "Kit shim default"), set on that build's command only.
+  const launcher = read(join(PADDOCK, 'tools', 'dev-launch', 'src', 'launch.rs'));
+  assert.equal(launcher.split('\n').filter((l) => /\.env\("CARGO_BUILD_JOBS", "\d+"\)/.test(l)).length, 1, 'the launcher has the one default for the tool\'s own first build, before ./dev ci build-jobs sets the real value');
   assert.deepEqual(offenders, [], 'set build jobs with the build-jobs action (`./dev ci build-jobs`) only');
 });
 

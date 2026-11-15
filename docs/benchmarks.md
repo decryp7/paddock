@@ -104,7 +104,7 @@ that quotes a result links to the block instead of carrying the only copy.
 - **Load:** (1) 1-minute load 14 to 17, CPU idle 45 %; (2) 1 to 4 inside the container
 - **Build:** the launcher as `./dev` builds it: release, std only. The tool is a cached stand-in that answers `--version`, so only the start-up is timed
 - **Corpus:** none. A throw-away repository with the real `inputs.txt` (placeholder files), the real compiler, no `RUSTC` override
-- **Command:** `tools/dev-launch/bench/start-up.sh <worktree> <old dev> <work dir> 30`: `sh <old dev> --print-binary` and `./dev --print-binary`, the same with `hello` (runs the stand-in), and once the cold build of the launcher
+- **Command:** `node tools/dev-launch/bench/start-up.mjs <worktree> <old dev> <work dir> 30`: `sh <old dev> --print-binary` and `./dev --print-binary`, the same with `hello` (runs the stand-in), and once the cold build of the launcher
 - **Runs:** 30 per cell, two interleaved rounds (old, new, old, new); median (minimum) of the wall time
 - **Numbers** (two rounds per cell):
 

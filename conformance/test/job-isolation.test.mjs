@@ -619,20 +619,22 @@ test('acquire says so, naming the fallback, when the tool cannot be pinned (a bu
 
 // Wiring of the Rust path (RT-1; docs/adr/amendments/0025-2026-11-10-rt1-source-key.md): the job-isolation action's release step must run
 // the tool `acquire` pinned (PADDOCK_DEV), and a build of the tool must land under the CI home (PADDOCK_DEV_HOME and
-// PADDOCK_DEV_TARGET_DIR, taken from the shared `tools` folder), never inside a job folder. Both are the `dev` wrapper's (WP-2 of
+// PADDOCK_DEV_TARGET_DIR, taken from the shared `tools` folder), never inside a job folder. Both are the launcher's, tools/dev-launch/src/launch.rs (WP-2 of
 // docs/plans/shell-to-rust.md moved them there from conformance/ci/kit.sh), tested in tools/paddock-dev/tests/it/wrapper_ci.rs.
-const wiringProblems = (wrapper) => {
+const wiringProblems = (launcher) => {
   const found = [];
-  if (!/\[ "\$\{1:-\}" = ci \][^\n]*\[ -n "\$\{PADDOCK_DEV:-\}" \][^\n]*\n(?:.*\n)*?.*exec "\$PADDOCK_DEV" "\$@"/.test(wrapper)) found.push('the wrapper does not run the pinned PADDOCK_DEV for a ci command');
-  for (const v of ['PADDOCK_DEV_HOME', 'PADDOCK_DEV_TARGET_DIR']) if (!new RegExp(`${v}="?\\$(?:_cihome|\\{_cihome\\})/tools/`).test(wrapper)) found.push(`${v} is not under the CI home (the tools folder)`);
+  if (!/Some\("ci"\)[\s\S]*env_non_empty\("PADDOCK_DEV"\)[\s\S]*replace_with\(c\)/.test(launcher)) found.push('the launcher does not run the pinned PADDOCK_DEV for a ci command');
+  if (!/"PADDOCK_DEV_HOME",\s*format!\("\{tools\}\/paddock-dev"\)/.test(launcher)) found.push('PADDOCK_DEV_HOME is not under the CI home (the tools folder)');
+  if (!/format!\("\{tools\}\/paddock-dev-target"\)[\s\S]{0,200}"PADDOCK_DEV_TARGET_DIR"/.test(launcher)) found.push('PADDOCK_DEV_TARGET_DIR is not under the CI home (the tools folder)');
   return found;
 };
 
 test('the job-isolation action runs ./dev, which releases with the pinned tool and builds it under the CI home (with a positive control)', () => {
   const action = read(join(PADDOCK, '.gitea', 'actions', 'job-isolation', 'action.yml'));
   assert.match(action, /\.\.\/dev" ci isolation "\$MODE" && exit 0/, 'the action runs the wrapper');
-  assert.deepEqual(wiringProblems(read(join(PADDOCK, 'dev'))), [], 'the wrapper is wired as the amendment addendum says');
-  // Positive controls: a wrapper without the pieces is caught, a complete one passes.
-  assert.equal(wiringProblems('echo nothing').length, 3);
-  assert.equal(wiringProblems('if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${1:-}" = ci ] && [ -n "${PADDOCK_DEV:-}" ]; then\n  exec "$PADDOCK_DEV" "$@"\nfi\nPADDOCK_DEV_HOME="$_cihome/tools/paddock-dev"\nPADDOCK_DEV_TARGET_DIR="$_cihome/tools/paddock-dev-target"').length, 0);
+  assert.deepEqual(wiringProblems(read(join(PADDOCK, 'tools', 'dev-launch', 'src', 'launch.rs'))), [], 'the launcher is wired as the amendment addendum says');
+  // Positive controls: a launcher without the pieces is caught, a complete one passes.
+  assert.equal(wiringProblems('// nothing').length, 3);
+  const complete = 'fn run_pinned() { if args.first().map(String::as_str) != Some("ci") {} let pin = env_non_empty("PADDOCK_DEV")?; proc::replace_with(c) }\nextra_env.push(("PADDOCK_DEV_HOME", format!("{tools}/paddock-dev")));\nlet t = format!("{tools}/paddock-dev-target");\nextra_env.push(("PADDOCK_DEV_TARGET_DIR", t));';
+  assert.equal(wiringProblems(complete).length, 0);
 });
