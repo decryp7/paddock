@@ -33,6 +33,7 @@ use clap::Args as ClapArgs;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -110,32 +111,70 @@ fn phase_limit(env: &HashMap<String, String>, id: PhaseId, general: Duration) ->
         .map_or(general, Duration::from_secs)
 }
 
-/// What the phases share: the job's environment, the credentials for git, the folders and the two buffers a phase writes to (what the
-/// shell's `$scratch/err` and the `run:` lines were).
+/// What one phase writes (what the shell's `$scratch/err` and the `run:` lines were), and whether one of its git commands ended at its
+/// limit. Each phase writes to its own, set on the phase's own thread ([`PHASE_OUT`]): a phase abandoned at its bound can still finish
+/// a git command later, and that command then writes only here, where nobody reads any more. With one shared state it set the next
+/// phase's flag, and that phase (`create the clone`) reported a hang it never had (1 of 80 parity runs under load, 2026-11-15).
+#[derive(Default)]
+struct PhaseOut {
+    /// The error output.
+    err: Mutex<String>,
+    /// `run:` and `ran:` lines of the noisy git commands, flushed to the job log after the phase.
+    log: Mutex<Vec<u8>>,
+    /// A git command ended at its limit (the phase is then reported as one that did not finish, as the shell's `bounded` did).
+    timed_out: AtomicBool,
+}
+
+thread_local! {
+    /// Set on a phase's own thread: where its git commands and notes write.
+    static PHASE_OUT: std::cell::RefCell<Option<Arc<PhaseOut>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// What the phases share: the job's environment, the credentials for git, the folders, and the step's own output: what was written
+/// outside any phase, and what the last phase wrote once it ended or was abandoned (`last_lines` reads it).
 struct Kc {
     env: HashMap<String, String>,
     windows: bool,
     limit: Duration,
-    /// A git command ended at its limit (the phase is then reported as one that did not finish, as the shell's `bounded` did).
-    timed_out: std::sync::atomic::AtomicBool,
     /// The checkout's `http.*.extraheader` value, for git's environment only.
     header: Option<String>,
     /// An empty folder this step owns: `core.hooksPath` of every git command.
     hooks: PathBuf,
     home: Option<PathBuf>,
-    /// The phase's error output (cleared at the start of each phase).
-    err: Mutex<String>,
-    /// `run:` and `ran:` lines of the noisy git commands, flushed to the job log after each phase.
-    log: Mutex<Vec<u8>>,
+    /// The step's output outside the phases, and the last phase's error output (cleared at the start of each phase).
+    own: Arc<PhaseOut>,
 }
 
 impl Kc {
+    /// Where this thread writes: its phase's output on a phase's thread, else the step's own.
+    fn out(&self) -> Arc<PhaseOut> {
+        PHASE_OUT.with(|p| p.borrow().clone()).unwrap_or_else(|| self.own.clone())
+    }
+
+    /// Takes a phase's output as the step's: its error output replaces the last phase's, its log lines are appended. A command the
+    /// phase still runs writes into `phase` only, after this.
+    fn adopt(&self, phase: &PhaseOut) {
+        let err = phase.err.lock().map(|e| e.clone()).unwrap_or_default();
+        if let Ok(mut e) = self.own.err.lock() {
+            *e = err;
+        }
+        let log = phase.log.lock().map(|mut l| std::mem::take(&mut *l)).unwrap_or_default();
+        if let Ok(mut l) = self.own.log.lock() {
+            l.extend_from_slice(&log);
+        }
+    }
+
+    /// The error output so far (outside a phase, or the last phase's).
+    fn err_text(&self) -> String {
+        self.own.err.lock().map(|e| e.clone()).unwrap_or_default()
+    }
+
     fn note(&self, text: impl AsRef<str>) {
         // A command that wrote nothing (a git ended at its limit) adds nothing, as the shell's `$scratch/err` (no blank line).
         if text.as_ref().is_empty() {
             return;
         }
-        if let Ok(mut e) = self.err.lock() {
+        if let Ok(mut e) = self.out().err.lock() {
             e.push_str(text.as_ref());
             if !text.as_ref().ends_with('\n') {
                 e.push('\n');
@@ -145,7 +184,7 @@ impl Kc {
 
     /// The last four whole, non-blank lines of the phase's error output on one line (never cut in the middle of a path).
     fn last_lines(&self) -> String {
-        let text = self.err.lock().map(|e| e.clone()).unwrap_or_default();
+        let text = self.err_text();
         let lines: Vec<&str> = text.split('\n').filter(|l| !l.trim().is_empty()).collect();
         let from = lines.len().saturating_sub(4);
         lines[from..].join("\n").replace(['\r', '\n'], " ")
@@ -171,9 +210,15 @@ impl Kc {
                 .secret(h.clone());
         }
         let sub = subcommand(args);
+        // The `run:` lines go to a buffer of this command, then to the thread's log: a command never holds the log while it runs (a hung
+        // one would block whoever reads the log next).
         let ran = if noisy {
-            let mut log = self.log.lock().map_err(|_| "the log is poisoned".to_string())?;
-            call.run(&self.env, &mut *log)
+            let mut buf = Vec::new();
+            let ran = call.run(&self.env, &mut buf);
+            if let Ok(mut log) = self.out().log.lock() {
+                log.extend_from_slice(&buf);
+            }
+            ran
         } else {
             call.run(&self.env, &mut io::sink())
         };
@@ -187,7 +232,7 @@ impl Kc {
                     self.note(format!("{NAME}: git {sub} failed ({})", r.how));
                 }
                 if r.how.starts_with("timed out") {
-                    self.timed_out.store(true, std::sync::atomic::Ordering::SeqCst);
+                    self.out().timed_out.store(true, Ordering::SeqCst);
                 }
                 Err(r.how)
             }
@@ -424,12 +469,10 @@ pub fn run(env: &HashMap<String, String>, windows: bool, args: &Args, out: &mut 
         env: env.clone(),
         windows,
         limit,
-        timed_out: Default::default(),
         header: None,
         hooks: hooks.clone(),
         home: env.get("HOME").or_else(|| env.get("USERPROFILE")).map(PathBuf::from),
-        err: Mutex::new(String::new()),
-        log: Mutex::new(Vec::new()),
+        own: Default::default(),
     });
     let code = run_inner(
         &mut step, kc, args, &profile, &excludes, &ws, &ws_text, started, limit, max_mib, hint, err,
@@ -462,7 +505,7 @@ fn run_inner(
         (Ok(s), Ok(u)) => (s, u),
         (a, b) => {
             let why = a.err().or(b.err()).unwrap_or_default();
-            let _ = write!(err, "{}", kc.err.lock().map(|e| e.clone()).unwrap_or_default());
+            let _ = write!(err, "{}", kc.err_text());
             return step.fail(
                 format!("cannot read the commit and the origin of the work folder {ws_text} ({why})."),
                 "run this step after actions/checkout, in the job's checkout.",
@@ -485,12 +528,10 @@ fn run_inner(
         env: kc.env.clone(),
         windows: kc.windows,
         limit: kc.limit,
-        timed_out: Default::default(),
         header,
         hooks: kc.hooks.clone(),
         home: kc.home.clone(),
-        err: Mutex::new(String::new()),
-        log: Mutex::new(Vec::new()),
+        own: Default::default(),
     });
     let mut flow = Flow {
         kc,
@@ -520,7 +561,7 @@ fn run_inner(
                 }
                 Err(_) => {
                     flow.flush(step);
-                    step.say(flow.kc.err.lock().map(|e| e.clone()).unwrap_or_default().trim_end().to_string());
+                    step.say(flow.kc.err_text().trim_end().to_string());
                     step.warn("could not expand the work folder to the profile; steps that read paths outside the bootstrap will fail.");
                 }
             }
@@ -706,6 +747,7 @@ impl Flow {
     fn flush(&self, step: &mut Step<'_>) {
         let text = self
             .kc
+            .own
             .log
             .lock()
             .map(|mut l| String::from_utf8_lossy(&std::mem::take(&mut *l)).into_owned())
@@ -725,17 +767,20 @@ impl Flow {
         f: impl FnOnce(&Kc) -> Result<T, String> + Send + 'static,
     ) -> Result<T, Soft> {
         let limit = phase_limit(&self.kc.env, id, self.limit);
-        if let Ok(mut e) = self.kc.err.lock() {
+        if let Ok(mut e) = self.kc.own.err.lock() {
             e.clear();
         }
-        self.kc.timed_out.store(false, std::sync::atomic::Ordering::SeqCst);
-        let kc = self.kc.clone();
+        let out = Arc::new(PhaseOut::default());
+        let (kc, mine) = (self.kc.clone(), out.clone());
         // A git command ends itself at the limit (and its whole process tree with it); the phase waits one second longer so that it is
-        // the git command's end that is seen first, and a phase that hangs elsewhere (a file call) is abandoned after that.
-        let r = bounded_hung(step, label, limit + Duration::from_secs(1), Some(&self.kc.timed_out), move || {
+        // the git command's end that is seen first, and a phase that hangs elsewhere (a file call) is abandoned after that. The phase's
+        // thread writes only to `out`: what it wrote by now becomes the step's, anything it writes after that goes nowhere.
+        let r = bounded_hung(step, label, limit + Duration::from_secs(1), Some(&out.timed_out), move || {
             IN_PHASE.with(|p| p.set(Some(limit)));
+            PHASE_OUT.with(|p| *p.borrow_mut() = Some(mine));
             f(&kc)
         });
+        self.kc.adopt(&out);
         self.flush(step);
         match r {
             Ok(v) => Ok(v),
@@ -848,7 +893,7 @@ impl Flow {
             std::fs::write(stable.join(".git").join("paddock-kept-clone"), "1\n").map_err(|e| e.to_string())
         });
         if r.is_err() {
-            let _ = write!(err, "{}", self.kc.err.lock().map(|e| e.clone()).unwrap_or_default());
+            let _ = write!(err, "{}", self.kc.err_text());
         }
         r
     }
@@ -1020,6 +1065,82 @@ mod tests {
         PhaseId::Verify,
         PhaseId::Link,
     ];
+
+    /// The step's shared context with a `git` of the test's own (a script in `bin`) first on PATH.
+    fn kc_with_git(bin: &Path, env: &[(&str, &str)]) -> Arc<Kc> {
+        let mut env: HashMap<String, String> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        env.insert("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()));
+        Arc::new(Kc {
+            env,
+            windows: false,
+            limit: Duration::from_secs(900),
+            header: None,
+            hooks: bin.join("no-hooks"),
+            home: None,
+            own: Default::default(),
+        })
+    }
+
+    fn flow_of(kc: Arc<Kc>) -> Flow {
+        Flow {
+            kc,
+            ws: PathBuf::new(),
+            ws_text: String::new(),
+            stable: PathBuf::new(),
+            sha: String::new(),
+            url: String::new(),
+            excludes: Vec::new(),
+            limit: Duration::from_secs(900),
+            hint: "h".into(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::mpsc;
+        // The fetch phase (own limit 1 s, bound 2 s) is held until it is abandoned; while the next phase runs, the held phase goes on and
+        // its git ends at its limit (a git that sleeps), so it notes the failure and sets its timed-out flag. The next phase must not
+        // be reported as hung, and its error output must not carry the abandoned phase's line.
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let git = bin.join("git");
+        std::fs::write(&git, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        std::fs::set_permissions(&git, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let kc = kc_with_git(&bin, &[(PhaseId::Fetch.var(), "1")]);
+        let flow = flow_of(kc);
+        let mut out = Vec::new();
+        let mut step = Step {
+            env: &flow.kc.env.clone(),
+            out: &mut out,
+            windows: false,
+            name: NAME,
+        };
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        let first = flow.phase(&mut step, PhaseId::Fetch, "fetch", move |kc| {
+            go_rx.recv().ok(); // held past the phase's bound (limit + 1 s)
+            let r = kc.git(true, &["fetch", "late"]);
+            done_tx.send(()).ok();
+            r
+        });
+        assert!(matches!(first, Err(Hung)), "the held phase is abandoned at its bound");
+        let second = flow.phase(&mut step, PhaseId::Checkout, "check out", move |_| {
+            go_tx.send(()).ok();
+            done_rx.recv().ok(); // the abandoned phase's git has ended at its limit and written what it writes
+            Ok(())
+        });
+        let text = String::from_utf8_lossy(&out).into_owned();
+        assert!(second.is_ok(), "the next phase did not hang; it was reported as hung: {text}");
+        assert!(
+            !flow.kc.last_lines().contains("git fetch failed"),
+            "the next phase's error output carries the abandoned phase's line: {:?}",
+            flow.kc.last_lines()
+        );
+        assert!(!text.contains("'check out' did not finish"), "{text}");
+    }
 
     #[test]
     fn each_phase_reads_only_its_own_limit_and_falls_back_to_the_general_one() {
