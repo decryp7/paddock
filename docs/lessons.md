@@ -2120,9 +2120,10 @@ measured less); earlier: the 2026-11-12 base choice from origin/main for train-b
 ## Two branches that each added a lesson conflicted at the end of the file (2026-11-15)
 Every train that merged two branches with a new lesson (or a new benchmark block) stopped on a conflict in `docs/lessons.md`:
 both sides added lines after the same last line, so git saw one hunk changed twice, and the integrator resolved it by hand each
-time. The append-only logs now merge with git's union driver (`.gitattributes`: `docs/lessons.md`, `docs/benchmarks.md` and
-each app's `docs/performance.md`, `merge=union`), which keeps both sides' added lines; `conformance/test/union-merge.test.mjs`
-merges two such branches in a scratch repository. **When union is not safe:** it never reports a conflict, so a change that
+time. The lessons log now merges with git's union driver (`.gitattributes`: `docs/lessons.md merge=union`), which keeps both
+sides' added lines; `conformance/test/union-merge.test.mjs` merges two such branches in a scratch repository.
+`docs/benchmarks.md` and the apps' `docs/performance.md` stay on the normal merge: their results blocks are corrected in place
+(review of 2026-11-15), and the test checks that they are not union. **When union is not safe:** it never reports a conflict, so a change that
 edits or deletes lines in place (a reworded lesson, a corrected benchmark row) merged with another branch's edit of the same
 lines keeps both versions, silently. Rewording an earlier entry goes in its own change, merged alone, and the integrator reads
 the merged hunk of these files like any other. Registers, tables whose rows must be unique and generated files (`gates.toml`,

@@ -44,9 +44,8 @@ conformance/ci/*.txt text eol=lf
 /tools/githooks/* text eol=lf
 /tools/paddock-dev/tests/** text eol=lf
 
-# Append-only logs: each change adds a section, so two branches that both add one at the end merge without a conflict (union keeps
-# both sides' lines). Union is wrong for a file whose lines are edited in place (both versions are kept, with no conflict to warn),
-# so registers (gates.toml, known-copies.toml) and generated files are never listed here. See docs/lessons.md (2026-11-15).
+# The lessons log only gains sections, so two branches that both add one at the end merge without a conflict (union keeps both
+# sides' lines). Union is wrong for a file whose lines are edited in place (both versions are kept, with no conflict to warn):
+# benchmarks.md and the apps' performance.md (results blocks are corrected in place), registers and generated files are never
+# listed here. See docs/lessons.md (2026-11-15).
 /docs/lessons.md merge=union
-/docs/benchmarks.md merge=union
-/apps/*/docs/performance.md merge=union

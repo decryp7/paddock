@@ -11,9 +11,11 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** The append-only logs: new sections are added, earlier ones are not rewritten. Only their git attribute is read, never their
- * text, so they are no doc input of this test (scripts/affected.test.mjs); the names are joined, not quoted repo paths. */
-const APPEND_ONLY = [['docs', 'lessons.md'], ['docs', 'benchmarks.md'], ['apps', 'dyno', 'docs', 'performance.md'], ['apps', 'debrief', 'docs', 'performance.md']].map((p) => p.join('/'));
+/** The append-only log: new sections are added, earlier ones are not rewritten. Only its git attribute is read, never its text
+ * (scripts/affected.test.mjs lists this file as not reading docs). */
+const APPEND_ONLY = ['docs/lessons.md'];
+/** Edited in place (a corrected results block): union would keep both versions silently. */
+const EDITED_IN_PLACE = ['docs/benchmarks.md', 'apps/dyno/docs/performance.md', 'docs/gates.toml'];
 
 function git(cwd, ...args) {
   const r = spawnSync('git', args, {
@@ -30,8 +32,8 @@ test('the append-only docs use the union merge driver', () => {
     assert.equal(r.status, 0, r.out);
     assert.match(r.out, /: merge: union$/m, `${file} has no merge=union in .gitattributes: ${r.out}`);
   }
-  // A register is not append-only text: two edits of one row must conflict, not be kept both.
-  assert.match(git(root, 'check-attr', 'merge', '--', 'docs/gates.toml').out, /: merge: unspecified$/m);
+  // Files edited in place must conflict on two edits of one line, not keep both.
+  for (const file of EDITED_IN_PLACE) assert.match(git(root, 'check-attr', 'merge', '--', file).out, /: merge: unspecified$/m, file);
 });
 
 test('two branches that each add a lesson at the end merge without a conflict and keep both', () => {
