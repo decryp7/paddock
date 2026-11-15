@@ -2,7 +2,7 @@
 //! their tests in `tools/test`, and the apps' own bootstrap and verify scripts): every program the command probes is a shim on a PATH
 //! of its own, so nothing on the machine is touched. The checklist lines, the exit codes and the programs called must be what the
 //! scripts' tests expected. Unix only: the shims are shell scripts.
-// windows-twin: none: waived until 2026-12-31; the shim programs are shell scripts and a Windows twin needs a compiled shim (the unit tests of src/app_install.rs run on every OS)
+// windows-twin: none: waived until 2026-12-31; the shim programs are shell scripts and a Windows twin needs a compiled shim. The unit tests of src/app_install.rs run on every OS but cover only the readers (the Node major, the install section, the data folder, the discovery port, launchctl); the checklists and the build are tested here, on Unix.
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -357,5 +357,53 @@ fn a_server_that_answers_the_keyed_call_passes_and_one_that_does_not_is_one_prob
     assert!(
         String::from_utf8_lossy(&o.stdout).contains("fail  discovery file\n        missing: the server is not running")
             || String::from_utf8_lossy(&o.stderr).contains("fail  discovery file")
+    );
+}
+
+/// The build inherits the user's environment (common practice), and `--json` still gets exactly one object on standard output: the
+/// progress goes to standard error.
+#[test]
+fn a_build_inherits_the_environment_and_json_output_stays_one_object() {
+    let d = tempfile::tempdir().unwrap();
+    let (bin, home) = (d.path().join("bin"), d.path().join("home"));
+    std::fs::create_dir_all(&bin).unwrap();
+    let root = repo(d.path(), r#"{"name":"Demo"}"#);
+    std::fs::create_dir_all(root.join("apps/demo/app")).unwrap();
+    mac_machine(&bin, "14.2");
+    shim(
+        &bin,
+        "npm",
+        r#"echo "npm sees HTTPS_PROXY=$HTTPS_PROXY" >> "${0%/*}/env.log""#,
+    );
+    shim(
+        &bin,
+        "npx",
+        r#"echo "npx sees HTTPS_PROXY=$HTTPS_PROXY CI=$CI" >> "${0%/*}/env.log""#,
+    );
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.env("PATH", &bin)
+        .env("HOME", &home)
+        .env("HTTPS_PROXY", "http://proxy.invalid:3128");
+    cmd.args([
+        "--json",
+        "app",
+        "bootstrap",
+        "demo",
+        "--os",
+        "macos",
+        "--root",
+        root.to_str().unwrap(),
+    ]);
+    let o = cmd.output().unwrap();
+    let stdout = String::from_utf8_lossy(&o.stdout);
+    assert_eq!(o.status.code(), Some(0), "{stdout}{}", String::from_utf8_lossy(&o.stderr));
+    let v: serde_json::Value =
+        serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("stdout is not one JSON object ({e}): {stdout}"));
+    assert_eq!(v["ok"], true);
+    let seen = std::fs::read_to_string(bin.join("env.log")).unwrap();
+    assert!(
+        seen.contains("npm sees HTTPS_PROXY=http://proxy.invalid:3128")
+            && seen.contains("npx sees HTTPS_PROXY=http://proxy.invalid:3128 CI=true"),
+        "{seen}"
     );
 }

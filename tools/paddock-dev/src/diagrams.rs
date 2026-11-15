@@ -449,6 +449,27 @@ mod tests {
         assert_eq!(find_drawio_in(None, &env, false, &[PathBuf::from("/nonexistent/draw.io")]), None);
     }
 
+    /// Windows spelling: `PATH` may be `Path`, programs are looked for with `.exe` and `.cmd`, and the vendor's install places come from
+    /// `ProgramFiles` and `ProgramW6432`.
+    #[test]
+    fn on_windows_the_program_is_found_with_its_extension_and_the_vendor_places_follow_the_environment() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("drawio.exe"), "x").unwrap();
+        let env: HashMap<String, String> = [("Path".to_string(), d.path().to_string_lossy().into_owned())].into();
+        assert_eq!(find_drawio_in(None, &env, true, &[]), Some(d.path().join("drawio.exe")));
+        assert_eq!(find_drawio_in(None, &env, false, &[]), None, "on Unix `drawio.exe` is not `drawio`");
+        let env: HashMap<String, String> = [
+            ("ProgramFiles".to_string(), r"C:\Apps".to_string()),
+            ("ProgramW6432".to_string(), r"D:\Apps".to_string()),
+        ]
+        .into();
+        let places = vendor_places(&env, true);
+        assert!(places.contains(&Path::new(r"C:\Apps").join("draw.io").join("draw.io.exe")));
+        assert!(places.contains(&Path::new(r"D:\Apps").join("draw.io").join("draw.io.exe")));
+        assert!(places.contains(&PathBuf::from(r"C:\Program Files\draw.io\draw.io.exe")));
+        assert!(!vendor_places(&env, false).iter().any(|p| p.to_string_lossy().contains("Apps")));
+    }
+
     #[test]
     fn the_given_executable_wins_over_the_variable_and_the_path() {
         let env: HashMap<String, String> = [("DRAWIO".to_string(), "/env/drawio".to_string())].into();

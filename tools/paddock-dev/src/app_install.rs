@@ -7,7 +7,7 @@
 //! `apps/<app>/paddock.ci.json` ([`Install`], documented in `.gitea/actions/README.md`). Both commands install nothing and verify
 //! changes nothing: bootstrap runs `npm ci` and the Tauri build; verify only reads and runs the service's own `status`.
 
-use crate::ci_tool::{Output, ToolCall};
+use crate::ci_tool::ToolCall;
 use clap::{Args, Subcommand};
 use paddock_cli::{CliError, Report};
 use std::collections::HashMap;
@@ -84,6 +84,8 @@ pub struct Install {
     pub runners: Option<Runners>,
     /// An environment variable that moves the data folder (Pitwall's `PITWALL_HOME`).
     pub data_env: Option<String>,
+    /// The data folder's name on Linux under `$XDG_DATA_HOME`, when it is not `name` (Pitwall keeps `pitwall`, in lower case).
+    pub linux_data_name: Option<String>,
     /// The server's discovery file and a call to prove it answers: `{ "file": "discovery.json", "key": "admin.key", "rpc": "/mgmt/v1/rpc/overview" }`.
     pub discovery: Option<Discovery>,
 }
@@ -115,12 +117,10 @@ pub fn load_install(root: &Path, app: &str) -> Result<Install, CliError> {
     if app.is_empty() || app.contains(['/', '\\']) || app.starts_with('.') {
         return Err(CliError::usage(format!("`{app}` is not an app folder name.")));
     }
-    let file = root.join("apps").join(app).join("paddock.ci.json");
-    let text = std::fs::read_to_string(&file).map_err(|e| {
-        CliError::usage(format!("{} cannot be read: {e}.", file.display())).with_hint("Name an app under apps/, for example `pitcrew`.")
-    })?;
-    let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| CliError::failure(format!("::error::{} is not JSON: {e}. Next step: fix the file.", file.display())))?;
+    // The one reader of an app's contract file (ER-42).
+    let file = crate::ci_run::contract::path_of(root, app);
+    let v = crate::ci_run::contract::load(root, app)
+        .map_err(|why| CliError::usage(format!("{why}.")).with_hint("Name an app under apps/, for example `pitcrew`."))?;
     let section = v.get("install").ok_or_else(|| {
         CliError::failure(format!(
             "::error::{} has no `install` section. Next step: add one ({{\"name\": \"...\", ...}}; the fields are in .gitea/actions/README.md).",
@@ -137,7 +137,7 @@ pub fn load_install(root: &Path, app: &str) -> Result<Install, CliError> {
 
 /// Reads the section by hand (no serde derive here): known keys only, each a string.
 fn parse_install(v: &serde_json::Value) -> Result<Install, String> {
-    const KEYS: [&str; 7] = ["name", "service", "label", "unit", "socket", "log", "dataEnv"];
+    const KEYS: [&str; 8] = ["name", "service", "label", "unit", "socket", "log", "dataEnv", "linuxDataName"];
     let o = v.as_object().ok_or("it is not an object")?;
     for k in o.keys() {
         if !KEYS.contains(&k.as_str()) && k != "runners" && k != "discovery" {
@@ -201,8 +201,30 @@ fn parse_install(v: &serde_json::Value) -> Result<Install, String> {
         log: text(o, "log")?,
         runners,
         data_env: text(o, "dataEnv")?,
+        linux_data_name: text(o, "linuxDataName")?,
         discovery,
     })
+}
+
+/// The app's data folder: the one given, else what `dataEnv` names, else the OS default (macOS `~/Library/Application Support/<name>`;
+/// Linux `$XDG_DATA_HOME` when it is set and absolute, else `~/.local/share`, then `linuxDataName` or `name`). The app's own
+/// rule is what this repeats; Pitwall's is `pitwall-server/src/paths.rs`.
+pub fn data_folder(i: &Install, os: &str, env: &HashMap<String, String>, home: &str, given: Option<&Path>) -> PathBuf {
+    if let Some(g) = given {
+        return g.to_path_buf();
+    }
+    if let Some(v) = i.data_env.as_ref().and_then(|k| env.get(k)).filter(|v| !v.is_empty()) {
+        return PathBuf::from(v);
+    }
+    if os == "macos" {
+        return Path::new(home).join("Library/Application Support").join(&i.name);
+    }
+    let base = env
+        .get("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| Path::new(home).join(".local/share"));
+    base.join(i.linux_data_name.as_deref().unwrap_or(&i.name))
 }
 
 /// The Node major of the root `.nvmrc` (`24`, `v24.1.0` and `24.1` all give `24`): the one reader of the file for the family's tools.
@@ -371,37 +393,28 @@ pub fn bootstrap(a: &BootstrapArgs) -> Result<Report, CliError> {
         ));
     }
     let _ = writeln!(l.text, "\nBuilding (a first build takes several minutes)...");
-    print!("{}", l.text);
+    eprint!("{}", l.text);
     l.text.clear();
+    // The build inherits the user's environment on purpose (common practice: a developer's proxy, certificates, signing identity and
+    // Apple credentials reach `npm` and `tauri`, as when they run the commands by hand); only the process tree is bounded.
     let stream = |program: &str, args: &[&str], dir: PathBuf, ci: bool| -> Result<(), CliError> {
-        let mut call = ToolCall::new(program)
-            .args(args.iter().copied())
-            .cwd(dir)
-            .output(Output::Stream)
-            .pass([
-                "HOME",
-                "CARGO_*",
-                "RUSTUP_*",
-                "TAURI_*",
-                "npm_*",
-                "NPM_*",
-                "APPLE_*",
-                "SCCACHE_*",
-                "RUSTC_WRAPPER",
-            ])
-            .timeout(Duration::from_secs(3 * 3600));
+        eprintln!("run: {program} {}", args.join(" "));
+        let mut cmd = paddock_proc::command(program);
+        cmd.args(args).current_dir(dir);
         if ci {
-            call = call.env("CI", "true");
+            cmd.env("CI", "true");
         }
-        let ran = call.run(&env, &mut std::io::stderr()).map_err(CliError::failure)?;
-        if ran.success {
-            Ok(())
-        } else {
-            Err(CliError::failure(format!(
-                "::error::`{program} {}` failed: {}. Next step: read its output above and run it again.",
-                args.join(" "),
-                ran.how
-            )))
+        let outcome = paddock_proc::run_waited(cmd, Duration::from_secs(3 * 3600), paddock_proc::Sink::Inherit).map_err(|e| {
+            CliError::failure(format!(
+                "::error::could not run `{program}`: {e}. Next step: install it and run again."
+            ))
+        })?;
+        match outcome {
+            paddock_proc::Outcome::Exited(s) if s.success() => Ok(()),
+            other => Err(CliError::failure(format!(
+                "::error::`{program} {}` failed ({other:?}). Next step: read its output above and run it again.",
+                args.join(" ")
+            ))),
         }
     };
     // The monorepo has one npm workspace at the root. Unsigned updater artefacts unless the signing key is in the environment.
@@ -500,23 +513,13 @@ pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
     let mut l = Lines::new();
     let _ = writeln!(l.text, "{name} on this machine");
     let mut svc: Option<PathBuf> = None;
-    let data_override = a.data.clone().or_else(|| {
-        i.data_env
-            .as_ref()
-            .and_then(|k| env.get(k))
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    });
-    let data;
+    let data = data_folder(&i, os, &env, &home, a.data.as_deref());
     match os {
         "macos" => {
             let bundle = a
                 .bundle
                 .clone()
                 .unwrap_or_else(|| PathBuf::from(format!("/Applications/{name}.app")));
-            data = data_override
-                .clone()
-                .unwrap_or_else(|| Path::new(&home).join("Library/Application Support").join(name));
             if bundle.is_dir() {
                 l.ok(&format!("app bundle {}", bundle.display()));
             } else {
@@ -561,12 +564,6 @@ pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
             }
         }
         "linux" => {
-            data = data_override.clone().unwrap_or_else(|| {
-                env.get("XDG_DATA_HOME")
-                    .filter(|v| !v.is_empty())
-                    .map_or_else(|| Path::new(&home).join(".local/share"), PathBuf::from)
-                    .join(name)
-            });
             if let Some(s) = &i.service {
                 let on_path = env.get("PATH").and_then(|p| crate::pathfind::find_program(p, s, false, &[]));
                 let in_data = Some(data.join("bin").join(s)).filter(|p| p.is_file());
@@ -661,8 +658,12 @@ pub fn verify_installed(a: &VerifyArgs) -> Result<Report, CliError> {
     let log = data.join(i.log.as_deref().unwrap_or("logs/service.log"));
     if let Some(s) = &svc {
         let _ = writeln!(l.text);
+        // The service reads its own data folder from the same variables the check used.
+        let mut pass = vec!["HOME".to_string(), "XDG_*".to_string()];
+        pass.extend(i.data_env.clone());
         let ran = ToolCall::new(s.to_string_lossy())
             .arg_status()
+            .pass(pass)
             .timeout(Duration::from_secs(60))
             .run(&env, &mut std::io::sink());
         match ran {
@@ -733,6 +734,35 @@ pub fn command(c: AppCommand) -> Result<Report, CliError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pitwall's real section: its server keeps `~/Library/Application Support/Pitwall` on macOS (XDG ignored), and `pitwall` in lower
+    /// case under an absolute `$XDG_DATA_HOME` on Linux (`pitwall-server/src/paths.rs`); `PITWALL_HOME` moves it anywhere.
+    #[test]
+    fn pitwalls_data_folder_follows_its_own_rule_on_each_os() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let i = load_install(&root, "pitwall").unwrap();
+        let env = |pairs: &[(&str, &str)]| pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<HashMap<_, _>>();
+        let xdg = env(&[("XDG_DATA_HOME", "/x/share")]);
+        assert_eq!(data_folder(&i, "linux", &xdg, "/h", None), Path::new("/x/share/pitwall"));
+        assert_eq!(
+            data_folder(&i, "linux", &env(&[]), "/h", None),
+            Path::new("/h/.local/share/pitwall")
+        );
+        assert_eq!(
+            data_folder(&i, "linux", &env(&[("XDG_DATA_HOME", "rel")]), "/h", None),
+            Path::new("/h/.local/share/pitwall")
+        );
+        assert_eq!(
+            data_folder(&i, "macos", &xdg, "/h", None),
+            Path::new("/h/Library/Application Support/Pitwall")
+        );
+        let moved = env(&[("PITWALL_HOME", "/m"), ("XDG_DATA_HOME", "/x/share")]);
+        assert_eq!(data_folder(&i, "linux", &moved, "/h", None), Path::new("/m"));
+        assert_eq!(data_folder(&i, "linux", &moved, "/h", Some(Path::new("/g"))), Path::new("/g"));
+        // An app without the field keeps `name` as it is (Pitcrew's folder is `Pitcrew`).
+        let pc = load_install(&root, "pitcrew").unwrap();
+        assert_eq!(data_folder(&pc, "linux", &xdg, "/h", None), Path::new("/x/share/Pitcrew"));
+    }
 
     #[test]
     fn the_port_is_read_from_the_discovery_text() {
