@@ -110,6 +110,27 @@ that quotes a result links to the block instead of carrying the only copy.
   machine's finding, reported "not measured" with the time queued and the load. Not measured: the queue time per push (the log
   does not say which push a step belonged to).
 
+### 2026-11-15, `./dev diagrams export` against `export-diagrams.sh` (shell-to-Rust WP-7)
+
+- **Commit:** the WP-7 branch `feat/port-dev-app-scripts` at the commit that adds `tools/paddock-dev/src/diagrams.rs`; the old script is `diagrams/scripts/export-diagrams.sh` of its parent
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, macOS 27.2, the local draw.io desktop 32.6.10 (`/Applications/draw.io.app`)
+- **Load:** 1-minute load 40 to 108 during the run (other agents' builds); parity, not speed, is the question
+- **Build:** `paddock-dev` debug build, `CARGO_BUILD_JOBS=2`
+- **Corpus:** every `.drawio` of the seven apps with diagrams (Debrief 46, Pacenotes 3, Pitcrew 23, Pitwall 33, Sighter 8, Spotter 10, Dyno 18 in `apps/dyno/diagrams`), 141 sources
+- **Command:** per app, `bash export-diagrams.sh <src> <old>` and `dev diagrams export --src <src> --out <new>` on copies of the sources, then every SVG and PNG compared byte for byte
+- **Runs:** 1 run per app, old then new, one export at a time
+- **Numbers:**
+
+  | Measure | Result |
+  |---|---|
+  | files compared (SVG and 2x PNG) | 282 |
+  | byte-identical | 277 |
+  | differ only by draw.io's random root id (`ge-svg-<id>`), identical after replacing it | 5 (Dyno `uml-state-window`, four of Debrief's) |
+  | any other difference | 0 |
+  | time per diagram (SVG and PNG, draw.io start-up included) | about 14 s, the same for both |
+
+- **Notes:** the old script itself writes a different random id on every run, so the 5 are not a difference of the port. The new command's stdout is the script's (`exported <name>` per diagram) once the `run:` and `ran:` lines it logs to stderr are set aside. Not measured: the Linux CI image run and the Windows run (draw.io there is the drift check's, `scripts/svg-drift.mjs`, which still has its own flag list: docs/known-copies.toml). The harness installer of `./dev setup-harness build` differs between two runs of its old script, so only its stub executables were compared (identical).
+
 ### 2026-11-12, SVG drift check: font metrics (ci/svg-drift-check)
 
 - **Commit:** 8a3c3111a (the branch merged with origin/main 0b736ac0b, which has train 7's Pitwall re-export c8057ff13)
