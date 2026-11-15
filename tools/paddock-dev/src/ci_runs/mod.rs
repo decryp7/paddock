@@ -550,8 +550,13 @@ pub fn dispatch(a: &DispatchArgs) -> Result<Report, CliError> {
         inputs.push(format!("base={base}"));
         trial = Some((g, trial_ref));
     }
-    let req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
+    let mut req = dispatch::parse_request(&a.workflow, &git_ref, &inputs, &a.max, a.interval.as_deref())
         .map_err(|e| CliError::usage(e).with_hint(hint))?;
+    // The Linux slot count is declared once (conformance/ci/runner-slots.json); without it a train dispatch waits here.
+    match dispatch::train_waiters(&root) {
+        Ok(n) => req.train_waiters = n,
+        Err(e) => eprintln!("::warning::dispatch: {e}; a train run waits here, not in its first job."),
+    }
     let mut http = CurlHttp;
     let mut clock = dispatch::system_clock();
     let result = dispatch::run(

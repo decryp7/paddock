@@ -257,6 +257,9 @@ pub struct Request {
     pub max: Duration,
     /// How often to look.
     pub interval: Duration,
+    /// At most this many train runs may wait for their runner at once (the Linux slots less one, [`train_waiters`]); 0 when
+    /// unknown, and then a train dispatch waits here like any other.
+    pub train_waiters: usize,
 }
 
 /// Parses `--max` and `--input k=v`.
@@ -288,6 +291,7 @@ pub fn parse_request(workflow: &str, git_ref: &str, inputs: &[String], max: &str
         inputs,
         max,
         interval,
+        train_waiters: 0,
     })
 }
 
@@ -336,18 +340,22 @@ pub fn run(
             req.workflow
         );
     } else {
-        if is_train(&req.git_ref) && waits_itself(&req.workflow, read) {
-            // Staggered: each queued train run holds a Linux slot in its runner-wait job, so at most MAX_TRAIN_WAITERS wait at
+        if req.train_waiters > 0 && is_train(&req.git_ref) && waits_itself(&req.workflow, read) {
+            // Staggered: each queued train run holds a Linux slot in its runner-wait job, so at most `train_waiters` wait at
             // once and a Linux slot stays free for the older runs' own Linux jobs.
             let mut client = Client::new(http, server, repo, token);
             client.backoff_ms = 0;
-            let mut probe = WaitersProbe { client: &mut client, read };
+            let mut probe = WaitersProbe {
+                client: &mut client,
+                read,
+                cap: req.train_waiters,
+            };
             let waited = match wait_for(&mut probe, clock, req.max, req.interval, log) {
                 Outcome::Done { elapsed, .. } => elapsed,
                 Outcome::TimedOut { last, max } => {
                     let _ = writeln!(
                         log,
-                        "::error::dispatch: not dispatching {}: {last} after {} (--max). Next: wait for one of those train runs to start its Mac or Windows jobs, then dispatch again.",
+                        "::error::dispatch: not dispatching {}: {last} after {} (--max). The Mac or Windows runner may be offline (those runs wait for it): check the runners in Gitea's Actions settings. Next: wait for one of those train runs to leave its runner-wait job, then dispatch again.",
                         req.workflow,
                         fmt_duration(max)
                     );
@@ -412,35 +420,63 @@ fn send(http: &mut dyn Http, target: &Target<'_>, req: &Request, waited: Duratio
     Ok(Dispatched::Yes { waited })
 }
 
-/// The Linux runner slots (three: docs/ci-schedules.md, canary.yml). Each queued train run takes one in its runner-wait job.
-pub const LINUX_SLOTS: usize = 3;
+/// The file that declares how many jobs each runner class runs at once (`{"linux": 3}`), relative to the repository root.
+pub const RUNNER_SLOTS: &str = "conformance/ci/runner-slots.json";
 
-/// At most this many train runs wait in their runner-wait job at once: one Linux slot stays free for the older runs' Linux jobs
-/// (a Mac job that needs them would otherwise never start, and every waiter would stall to its limit).
-pub const MAX_TRAIN_WAITERS: usize = LINUX_SLOTS - 1;
+/// How many train runs may wait in their runner-wait job at once: the Linux slots of [`RUNNER_SLOTS`] less one, so one slot
+/// stays free for the older runs' own Linux jobs (a Mac job that needs them would otherwise never start, and every waiter would
+/// stall to its limit). `Err` when the file cannot be read or holds no `linux` count of at least 2.
+pub fn train_waiters(root: &std::path::Path) -> Result<usize, String> {
+    let path = root.join(RUNNER_SLOTS);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{} cannot be read: {e}", path.display()))?;
+    let v: Value = serde_json::from_str(&text).map_err(|e| format!("{} is not JSON: {e}", path.display()))?;
+    match v["linux"].as_u64() {
+        Some(n) if n >= 2 => Ok(n as usize - 1),
+        _ => Err(format!("{} has no `linux` slot count of at least 2", path.display())),
+    }
+}
 
-/// Waits while [`MAX_TRAIN_WAITERS`] or more train runs (unfinished `workflow_dispatch` runs on `train/*` of a workflow that
-/// waits itself) have not started a Mac or Windows job yet: they are, or will be, in their runner-wait job.
+/// The display name of a workflow's runner-wait job (the first job whose steps use [`RUNNER_WAIT_ACTION`]): its `name`, else its id.
+fn waiter_job_name(workflow: &str, read: ReadWorkflow<'_>) -> Option<String> {
+    let docs = YamlLoader::load_from_str(&read(workflow)?).ok()?;
+    docs.iter().find_map(|doc| {
+        doc["jobs"].as_hash()?.iter().find_map(|(id, job)| {
+            let waits = job["needs"].is_badvalue()
+                && job["steps"]
+                    .as_vec()
+                    .is_some_and(|steps| steps.iter().any(|s| s["uses"].as_str() == Some(RUNNER_WAIT_ACTION)));
+            waits.then(|| job["name"].as_str().or(id.as_str()).unwrap_or_default().to_string())
+        })
+    })
+}
+
+/// Waits while `cap` or more train runs (unfinished `workflow_dispatch` runs on `train/*` of a workflow that waits itself) are
+/// still in their runner-wait step: that job is not finished and its runner-wait step has not ended. A run past it holds no
+/// Linux slot for the wait.
 struct WaitersProbe<'a, 'b> {
     client: &'a mut Client<'b>,
     read: ReadWorkflow<'a>,
+    cap: usize,
 }
 
 impl WaitersProbe<'_, '_> {
     fn waiting(&mut self) -> Result<Vec<u64>, String> {
         let page = self.client.runs_page_where(1, "event=workflow_dispatch")?;
         let mut ids = Vec::new();
-        for r in page
-            .runs
-            .iter()
-            .filter(|r| !r.finished() && is_train(r.git_ref()) && waits_itself(r.workflow(), self.read))
-        {
-            let started = self.client.timed_jobs(r.id)?.unwrap_or_default().iter().any(|j| {
-                let mut c = BTreeSet::new();
-                classify_all(&j.labels, &mut c);
-                !c.is_empty() && j.status != "waiting" && j.status != "blocked" && !j.status.is_empty()
-            });
-            if !started {
+        for r in page.runs.iter().filter(|r| !r.finished() && is_train(r.git_ref())) {
+            let Some(name) = waiter_job_name(r.workflow(), self.read) else {
+                continue;
+            };
+            let jobs = self.client.timed_jobs(r.id)?.unwrap_or_default();
+            // No job list yet, or the waiter job not listed yet: the run is about to wait.
+            let still = match jobs.iter().find(|j| j.name == name) {
+                None => true,
+                Some(j) => {
+                    let step_done = j.steps.iter().any(|(s, secs)| s.contains("actions/runner-wait") && secs.is_some());
+                    j.status != "completed" && !step_done
+                }
+            };
+            if still {
                 ids.push(r.id);
             }
         }
@@ -450,18 +486,22 @@ impl WaitersProbe<'_, '_> {
 
 impl Probe for WaitersProbe<'_, '_> {
     fn describe(&self) -> String {
-        format!("fewer than {MAX_TRAIN_WAITERS} train runs waiting for their runner ({LINUX_SLOTS} Linux slots)")
+        format!(
+            "fewer than {} train runs waiting for their runner ({} Linux slots, {RUNNER_SLOTS})",
+            self.cap,
+            self.cap + 1
+        )
     }
     fn poll(&mut self) -> Result<Poll, String> {
         let w = self.waiting()?;
-        Ok(if w.len() < MAX_TRAIN_WAITERS {
+        Ok(if w.len() < self.cap {
             Poll::Done(format!("{} train run(s) waiting", w.len()))
         } else {
             Poll::Pending(format!("train runs {w:?} are waiting for their runner"))
         })
     }
     fn next_step(&self) -> String {
-        "wait for one of those train runs to start its Mac or Windows jobs, then dispatch again".into()
+        "wait for one of those train runs to leave its runner-wait job (or check that the Mac and Windows runners are online), then dispatch again".into()
     }
 }
 
@@ -688,6 +728,10 @@ mod tests {
         })).collect::<Vec<_>>()})
     }
 
+    fn repo_root() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    }
+
     fn files(name: &str) -> Option<String> {
         match name {
             "mac.yml" => Some("jobs:\n  t:\n    runs-on: macos-latest\n".into()),
@@ -765,7 +809,8 @@ mod tests {
 
     fn go_ref(http: &mut Script, wf: &str, git_ref: &str) -> (Result<Dispatched, String>, String) {
         let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
-        let req = parse_request(wf, git_ref, &[], "10m", Some("15s")).unwrap();
+        let mut req = parse_request(wf, git_ref, &[], "10m", Some("15s")).unwrap();
+        req.train_waiters = train_waiters(&repo_root()).unwrap();
         let r = run(
             http,
             &Target {
@@ -802,16 +847,22 @@ mod tests {
         let train = |id: u64| json!({"id": id, "path": "waits.yml@refs/heads/train/2026-11-15-12", "status": "in_progress", "event": "workflow_dispatch"});
         let two = json!({"workflow_runs": [train(8131), train(8130)]});
         let mut http = Script::new(vec![two]);
-        let waiting = || vec![jobs(&[("plan", "ubuntu-latest", "in_progress"), ("t", "macos-latest", "waiting")])];
+        // The waiter job of waits.yml is `plan`; its runner-wait step has no end time while it waits.
+        let plan = |status: &str, wait_done: bool| {
+            let step = if wait_done {
+                json!({"name": "Run ./.gitea/actions/runner-wait", "started_at": "2026-11-15T10:00:00Z", "completed_at": "2026-11-15T10:20:00Z"})
+            } else {
+                json!({"name": "Run ./.gitea/actions/runner-wait", "started_at": "2026-11-15T10:00:00Z"})
+            };
+            json!({"jobs": [
+                {"id": 1, "name": "plan", "labels": ["ubuntu-latest"], "status": status, "steps": [step]},
+                {"id": 2, "name": "t", "labels": ["macos-latest"], "status": "waiting"}
+            ]})
+        };
         http.jobs = vec![
-            (
-                8130,
-                VecDeque::from(vec![
-                    jobs(&[("plan", "ubuntu-latest", "in_progress"), ("t", "macos-latest", "waiting")]),
-                    jobs(&[("plan", "ubuntu-latest", "completed"), ("t", "macos-latest", "queued")]),
-                ]),
-            ),
-            (8131, waiting().into()),
+            // 8130 leaves its runner-wait step while its plan job still runs: it no longer counts.
+            (8130, VecDeque::from(vec![plan("in_progress", false), plan("in_progress", true)])),
+            (8131, VecDeque::from(vec![plan("in_progress", false)])),
         ];
         let (r, log) = go_ref(&mut http, "waits.yml", "train/2026-11-15-12");
         assert_eq!(
@@ -826,7 +877,77 @@ mod tests {
             "{log}"
         );
         assert_eq!(http.posts.len(), 1);
-        assert_eq!(MAX_TRAIN_WAITERS, LINUX_SLOTS - 1);
+        assert_eq!(
+            train_waiters(&repo_root()),
+            Ok(2),
+            "conformance/ci/runner-slots.json declares 3 Linux slots"
+        );
+    }
+
+    #[test]
+    fn the_slot_count_is_read_from_its_file_and_a_train_without_it_waits_here() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(train_waiters(d.path()).unwrap_err().contains("cannot be read"));
+        std::fs::create_dir_all(d.path().join("conformance/ci")).unwrap();
+        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 1}"#).unwrap();
+        assert!(train_waiters(d.path()).unwrap_err().contains("at least 2"));
+        std::fs::write(d.path().join(RUNNER_SLOTS), r#"{"linux": 5}"#).unwrap();
+        assert_eq!(train_waiters(d.path()), Ok(4));
+        // Unknown (0): the train dispatch waits in the dispatcher, as before runner-wait.
+        let mut http = Script::new(vec![
+            runs(&[(8112, "mac.yml", "in_progress")]),
+            runs(&[(8112, "mac.yml", "completed")]),
+        ]);
+        let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+        let req = parse_request("waits.yml", "train/t", &[], "1h", Some("15s")).unwrap();
+        assert_eq!(req.train_waiters, 0);
+        let r = run(
+            &mut http,
+            &Target {
+                server: SERVER,
+                repo: REPO,
+                token: "t",
+            },
+            &req,
+            &files,
+            &mut clock,
+            &mut log,
+        );
+        let log = String::from_utf8(log).unwrap();
+        assert_eq!(
+            r.unwrap(),
+            Dispatched::Yes {
+                waited: Duration::from_secs(15)
+            },
+            "{log}"
+        );
+        assert!(!log.contains("dispatching at once"), "{log}");
+    }
+
+    #[test]
+    fn a_stagger_that_never_frees_names_the_runner_as_maybe_offline() {
+        let train =
+            |id: u64| json!({"id": id, "path": "waits.yml@refs/heads/train/t", "status": "in_progress", "event": "workflow_dispatch"});
+        let mut http = Script::new(vec![json!({"workflow_runs": [train(8131), train(8130)]})]);
+        let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+        let mut req = parse_request("waits.yml", "train/t", &[], "1m", Some("15s")).unwrap();
+        req.train_waiters = 2;
+        let r = run(
+            &mut http,
+            &Target {
+                server: SERVER,
+                repo: REPO,
+                token: "t",
+            },
+            &req,
+            &files,
+            &mut clock,
+            &mut log,
+        );
+        assert!(matches!(r.unwrap(), Dispatched::StillBusy { .. }));
+        let log = String::from_utf8(log).unwrap();
+        assert!(log.contains("The Mac or Windows runner may be offline"), "{log}");
+        assert!(http.posts.is_empty());
     }
 
     #[test]
