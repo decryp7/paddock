@@ -20,6 +20,21 @@ unset PADDOCK_DEV_RESTARTED
 # folder the hook runs in, or name another repository. The repository is the one this folder is in, for the wrapper and the tool.
 unset GIT_DIR GIT_WORK_TREE
 
+# `./dev --job-setup <arguments>`: a job's setup step (the build-jobs and job-isolation actions; setup-rust runs build-jobs). It runs
+# `./dev <arguments>` and, when that fails for any reason (a tool that cannot be built included), marks the job with
+# PADDOCK_JOB_ABORTED=1 in its environment and says so once: the later steps that run after a failure (`if: !cancelled()`, so one run
+# reports every failed check) test the variable (conformance C117) and do not run without the slot, temp folders and core share that
+# step sets up (run 8027: the crate job on Windows ran its tests after ./dev could not be built). This is the one place that does it.
+if [ "${1:-}" = "--job-setup" ]; then
+  shift
+  _rc=0
+  sh "$0" "$@" || _rc=$?
+  [ "$_rc" -ne 0 ] || exit 0
+  echo "::error::A job setup step failed (exit $_rc: ./dev $*). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job." >&2
+  if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || true; fi
+  exit "$_rc"
+fi
+
 # run_bounded <seconds> <command...>: runs it in the background and ends it at the limit (ER-32: no wait without a maximum). The
 # command is ended by the pid this function started, never by a name.
 run_bounded() {
@@ -121,6 +136,14 @@ toolchain_repair_step() {
   printf "on the machine, with no jobs running, run 'rustup toolchain uninstall %s' and then '%s'" "$1" "$_rs"
 }
 
+# toolchain_failed: remembers, for the rest of the job, that the pinned toolchain could not be installed, so that no later step (the
+# always-run clean-ups) tries the install again (a 900 s wait each): in this process and, on a CI runner, in the job's environment.
+toolchain_failed() {
+  PADDOCK_TOOLCHAIN_FAILED=1
+  export PADDOCK_TOOLCHAIN_FAILED
+  if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_TOOLCHAIN_FAILED=1" >> "$GITHUB_ENV" || true; fi
+}
+
 # --install-toolchain <toolchain> [<components>] [<targets>] (space-separated lists): the setup-rust action's install, before anything
 # else of the job (no repository or compiler needed). One install of a toolchain at a time per rustup home (toolchain_lock, shared with
 # ensure_toolchain below), checked by toolchain_install_checked and never uninstalled, bounded by PADDOCK_DEV_TOOLCHAIN_TIMEOUT (default 900 s).
@@ -151,6 +174,7 @@ if [ "${1:-}" = "--install-toolchain" ]; then
       _why="$_why: rustup was found but Windows ended it with an NTSTATUS crash code, which Git Bash reports as 127"
     fi
     echo "::error::rustup could not install the $_name toolchain ($_why). CI never uninstalls a toolchain, since other jobs may be using it. Next step: $(toolchain_repair_step "$_name" "$_comps")." >&2
+    toolchain_failed
     exit 1
   fi
   exit 0
@@ -329,6 +353,7 @@ ensure_toolchain() {
   toolchain_lock release "$pin"
   if [ "$_rc" -ne 0 ]; then
     echo "::error::./dev: 'rustup toolchain install' for $tf failed ($toolchain_why, $(($(date +%s) - _i0)) s; exit 124 means the time limit). ./dev never uninstalls a toolchain, since other jobs may be using it. Next step: $(toolchain_repair_step "$pin" "$comps"), by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
+    toolchain_failed
     return 1
   fi
   echo "dev: installed the pinned toolchain in $(($(date +%s) - _i0)) s." >&2

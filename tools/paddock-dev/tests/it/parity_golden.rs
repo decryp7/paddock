@@ -32,11 +32,8 @@ pub(crate) fn case(group: &str, text: &str) {
         c.set(c.get() + 1);
         c.get()
     });
-    let path: PathBuf = [env!("CARGO_MANIFEST_DIR"), "tests/golden/parity", group, &format!("{test}.txt")]
-        .iter()
-        .collect();
-    let block = format!("{}{}\n", marker(n), text.trim_end_matches('\n').replace("\r\n", "\n"));
     if GoldenMode::from_env() == GoldenMode::Update {
+        let path = golden_path(group, &test);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut f = std::fs::OpenOptions::new()
             .create(true)
@@ -45,40 +42,77 @@ pub(crate) fn case(group: &str, text: &str) {
             .truncate(n == 1)
             .open(&path)
             .unwrap();
-        f.write_all(block.as_bytes()).unwrap();
+        f.write_all(block(n, text).as_bytes()).unwrap();
         return;
     }
+    if let Err(why) = check(group, &test, n, text) {
+        panic!("{why}");
+    }
+}
+
+fn golden_path(group: &str, test: &str) -> PathBuf {
+    [env!("CARGO_MANIFEST_DIR"), "tests/golden/parity", group, &format!("{test}.txt")]
+        .iter()
+        .collect()
+}
+
+fn block(n: usize, text: &str) -> String {
+    format!("{}{}\n", marker(n), text.trim_end_matches('\n').replace("\r\n", "\n"))
+}
+
+/// Whether case `n` of `test` in `group` is `text`: `Err` says why not (no file, no such case, or the first line that differs).
+fn check(group: &str, test: &str, n: usize, text: &str) -> Result<(), String> {
+    let path = golden_path(group, test);
+    let block = block(n, text);
     let file = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| {
-            panic!(
+        .map_err(|e| {
+            format!(
                 "golden file {} cannot be read ({e}); run the test with {UPDATE_VAR}=1 and commit it",
                 path.display()
             )
-        })
+        })?
         .replace("\r\n", "\n");
     let want = file
         .split(&marker(n))
         .nth(1)
         .map(|rest| rest.split("=== case ").next().unwrap_or(""))
-        .unwrap_or_else(|| {
-            panic!(
+        .ok_or_else(|| {
+            format!(
                 "golden file {} has no case {n}; run the test with {UPDATE_VAR}=1 to add it",
                 path.display()
             )
-        });
+        })?;
     let want = format!("{}{}", marker(n), want);
-    if want != block {
-        let line = want
-            .lines()
-            .zip(block.lines())
-            .position(|(a, b)| a != b)
-            .unwrap_or_else(|| want.lines().count().min(block.lines().count()));
-        panic!(
-            "case {n} differs from {} at line {}\n  file:   {:?}\n  actual: {:?}\nrun the test with {UPDATE_VAR}=1 to accept the new output",
-            path.display(),
-            line + 1,
-            want.lines().nth(line).unwrap_or(""),
-            block.lines().nth(line).unwrap_or("")
-        );
+    if want == block {
+        return Ok(());
     }
+    let line = want
+        .lines()
+        .zip(block.lines())
+        .position(|(a, b)| a != b)
+        .unwrap_or_else(|| want.lines().count().min(block.lines().count()));
+    Err(format!(
+        "case {n} differs from {} at line {}\n  file:   {:?}\n  actual: {:?}\nrun the test with {UPDATE_VAR}=1 to accept the new output",
+        path.display(),
+        line + 1,
+        want.lines().nth(line).unwrap_or(""),
+        block.lines().nth(line).unwrap_or("")
+    ))
+}
+
+/// ER-33: a golden comparison counts only once it has been shown to see a difference. `_probe/probe.txt` holds one case, `same text`.
+#[test]
+fn a_changed_case_a_missing_case_and_a_missing_file_all_fail_and_the_same_text_passes() {
+    assert_eq!(check("_probe", "probe", 1, "same text"), Ok(()));
+    assert_eq!(
+        check("_probe", "probe", 1, "same text\n"),
+        Ok(()),
+        "a trailing newline is not a difference"
+    );
+    let changed = check("_probe", "probe", 1, "other text").unwrap_err();
+    assert!(changed.contains("differs") && changed.contains("at line 2"), "{changed}");
+    let missing = check("_probe", "probe", 2, "same text").unwrap_err();
+    assert!(missing.contains("has no case 2"), "{missing}");
+    let nofile = check("_probe", "no-such-test", 1, "same text").unwrap_err();
+    assert!(nofile.contains("cannot be read"), "{nofile}");
 }

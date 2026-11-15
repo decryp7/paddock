@@ -1464,10 +1464,10 @@ test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); 
   }
   assert.deepEqual(missing, [], 'these jobs run cargo without build-jobs or setup-rust');
   const setup = read(join(ACTIONS, 'setup-rust', 'action.yml'));
-  assert.match(setup, /if \[ -n "\$\{CARGO_BUILD_JOBS:-\}" \]; then echo "CARGO_BUILD_JOBS=\$CARGO_BUILD_JOBS \(set earlier in the job\)"; exit 0; fi\n\s+bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/dev" ci build-jobs && exit 0/);
+  assert.match(setup, /if \[ -n "\$\{CARGO_BUILD_JOBS:-\}" \]; then echo "CARGO_BUILD_JOBS=\$CARGO_BUILD_JOBS \(set earlier in the job\)"; exit 0; fi\n\s+bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/dev" --job-setup ci build-jobs/);
   // ./dev ci build-jobs needs rustc: it comes after the toolchain step.
   assert.ok(setup.indexOf('- name: Rust toolchain') < setup.indexOf('- name: Build jobs for this runner'), 'build-jobs after the toolchain');
-  assert.match(read(join(ACTIONS, 'build-jobs', 'action.yml')), /\.\.\/dev" ci build-jobs "\$SPLIT" && exit 0/, 'the build-jobs action runs ./dev ci build-jobs and marks the job when it fails');
+  assert.match(read(join(ACTIONS, 'build-jobs', 'action.yml')), /\.\.\/dev" --job-setup ci build-jobs "\$SPLIT"/, 'the build-jobs action runs ./dev ci build-jobs through the job-setup mode, which marks the job when it fails');
 });
 
 test('every workflow step that runs the ui Playwright config provides every port variable that config requires on CI', () => {
@@ -1710,4 +1710,25 @@ test('a workflow that runs runner-wait runs it in a first job that every macOS o
     }
   }
   assert.ok(users.includes('ci.yml') && users.includes('debrief.yml') && users.includes('dyno-release.yml'), `the train workflows wait in their first job: ${users}`);
+});
+
+// A failed setup step marks the job (PADDOCK_JOB_ABORTED=1) in one place, the dev wrapper's `--job-setup` mode (tested in
+// tools/paddock-dev/tests/it/wrapper_ci.rs); the three actions that set a job up call it, and nothing else writes the variable.
+test('the job-abort marker has one writer, `./dev --job-setup`, and the build-jobs, job-isolation and setup-rust actions call it', () => {
+  assert.match(read(join(ACTIONS, 'build-jobs', 'action.yml')), /\.\.\/dev" --job-setup ci build-jobs "\$SPLIT"/);
+  const iso = read(join(ACTIONS, 'job-isolation', 'action.yml'));
+  assert.match(iso, /if \[ "\$MODE" = acquire \]; then setup=--job-setup; else setup=; fi/, 'only the acquire marks the job');
+  assert.match(iso, /\.\.\/dev" \$setup ci isolation "\$MODE"/);
+  assert.match(read(join(ACTIONS, 'setup-rust', 'action.yml')), /\.\.\/dev" --job-setup ci build-jobs\n/);
+  const writers = spawnSync('git', ['grep', '-l', '-E', '>> "?\\$GITHUB_ENV.*PADDOCK_JOB_ABORTED|PADDOCK_JOB_ABORTED=1"? *>> *"?\\$GITHUB_ENV', '--', '.gitea', 'dev', 'conformance/ci', 'scripts'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
+  assert.deepEqual(writers, ['dev'], 'only the wrapper writes the marker');
+});
+
+// The Linux skip of an action is in its script, not in a composite step's `if:` (which the runner evaluates before any step of ours runs).
+test('the host-only actions skip Linux in their script, with no `if: runner.os` on the step', () => {
+  for (const a of ['job-isolation', 'stable-workspace', 'kept-clone']) {
+    const text = read(join(ACTIONS, a, 'action.yml'));
+    assert.doesNotMatch(text, /if: runner\.os/, `${a}: no step condition`);
+    assert.match(text, /if \[ "\$\{RUNNER_OS:-\}" = Linux \]; then exit 0; fi/, `${a}: the script leaves a Linux container alone`);
+  }
 });
