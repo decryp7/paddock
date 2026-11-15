@@ -2059,6 +2059,9 @@ nearest commit of the remote the push contains, verified live; a person's run us
 base commit and count only against a base the remote has. The queue keeps its own bound, now for the whole push, and heavy
 steps of one push run one at a time while light rows go on.
 **Rule:** before fixing "it ran out of time", read the run and queue time each row reports; and a check's scope is defined by
-what the push sends, never by local names. Pushing a train before stacking work on it keeps the checks small.
+what the push sends, never by local names. Pushing a train before stacking work on it keeps the checks small. A property test that builds git repositories pays a process
+spawn per git call, and spawns are slow on the Windows runner: the first version (24 random stacks, 1,651 git processes,
+17 s on the Mac) hit nextest's 60 s limit there (run 8138); enumerating the shapes pairwise (5 stacks, 267 processes, 2.9 s)
+kept the coverage. Count a fixture's processes before adding cases.
 **Class: the pre-push gate's scope differs from what the push sends (an old base measured more; a local base would have
 measured less); earlier: the 2026-11-12 base choice from origin/main for train-based branches.**

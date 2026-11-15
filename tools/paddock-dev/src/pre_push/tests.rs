@@ -2138,27 +2138,38 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
     );
 }
 
-/// A small deterministic generator for the property test (no new dependency).
-struct Lcg(u64);
-impl Lcg {
-    fn below(&mut self, n: u64) -> u64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        (self.0 >> 33) % n
-    }
+/// One stack shape of the property test below.
+struct Shape {
+    /// Commits on the local train, of which the first `pushed` are on the remote's `train/x`.
+    train: usize,
+    pushed: usize,
+    /// A pushed sibling branch at the last train commit (so the remote holds the train through it).
+    sibling: bool,
+    /// A file added and removed again on the branch.
+    undone: bool,
+    /// An unpushed local side branch merged in with `--no-ff`.
+    merge: bool,
+    /// The remote has an old `fix` the pushed commit does not contain (a force push).
+    force: bool,
 }
 
-/// Property (review of c4e32e462, P1-1): for any stack of a train (partly pushed or not) and a branch on it, with or without a
-/// pushed sibling and a change made and undone, every commit the remote lacks (`git rev-list <tip> --not --remotes=origin`) has
-/// its files in the planned diff, and an unpushed train commit in a workspace the branch never touches still plans that
-/// workspace's Clippy.
+/// Property (review of c4e32e462, P1-1): for every stack shape (a local train unpushed, partly or wholly pushed, or reached
+/// through a pushed sibling; a change made and undone; an unpushed side branch merged with `--no-ff`; a force push), live and with
+/// `git ls-remote` unreadable, every commit the remote lacks (`git log <tip> --not --remotes=origin`) has its files in the planned
+/// diff, and an unpushed train commit in a workspace the branch never touches still plans that workspace's Clippy. The shapes are
+/// enumerated so each combination that matters runs once (pairwise): 2026-11-15 the 24 random cases took 1,651 git processes
+/// and hit nextest's 60 s limit on the Windows runner (run 8138).
 #[test]
 fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
-    let mut rng = Lcg(0x5eed_2026_1115);
-    let (mut with_unpushed_train, mut with_merge, mut with_force) = (0, 0, 0);
-    for case in 0..24 {
+    #[rustfmt::skip]
+    let shapes = [
+        Shape { train: 2, pushed: 0, sibling: false, undone: true, merge: true, force: true },
+        Shape { train: 2, pushed: 1, sibling: false, undone: false, merge: false, force: false },
+        Shape { train: 2, pushed: 2, sibling: false, undone: false, merge: true, force: false },
+        Shape { train: 0, pushed: 0, sibling: false, undone: true, merge: false, force: true },
+        Shape { train: 1, pushed: 0, sibling: true, undone: false, merge: true, force: false },
+    ];
+    for (case, sh) in shapes.iter().enumerate() {
         let r = Repo::new();
         let add = |path: &str| {
             let full = r.root.join(path);
@@ -2171,73 +2182,70 @@ fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
         let c0 = add("README");
         r.remote("main", &c0);
         r.git(&["checkout", "-q", "-b", "train/x"]);
-        let train: Vec<String> = (0..rng.below(4)).map(|i| add(&format!("apps/dyno/src/t{i}.rs"))).collect();
-        let pushed = rng.below(train.len() as u64 + 1) as usize;
-        if pushed > 0 {
-            r.remote("train/x", &train[pushed - 1]);
+        let train: Vec<String> = (0..sh.train).map(|i| add(&format!("apps/dyno/src/t{i}.rs"))).collect();
+        if sh.pushed > 0 {
+            r.remote("train/x", &train[sh.pushed - 1]);
         }
-        if rng.below(2) == 1 && !train.is_empty() {
-            let at = train[rng.below(train.len() as u64) as usize].clone();
-            r.remote("feat/sibling", &at);
+        if sh.sibling {
+            r.remote("feat/sibling", train.last().unwrap());
         }
-        let train_tip = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+        let train_tip = train.last().cloned().unwrap_or_else(|| c0.clone());
         r.git(&["checkout", "-q", "-b", "fix"]);
-        for i in 0..=rng.below(3) {
-            add(&format!("tools/x/f{i}.rs"));
-        }
-        if rng.below(2) == 1 {
+        add("tools/x/f0.rs");
+        if sh.undone {
             add("apps/pitwall/src/undone.rs");
             r.git(&["rm", "-q", "apps/pitwall/src/undone.rs"]);
             r.git(&["commit", "-q", "-m", "undo"]);
         }
-        // An unpushed local side branch merged in with --no-ff: its commits are sent too.
-        if rng.below(2) == 1 {
-            with_merge += 1;
+        if sh.merge {
             r.git(&["checkout", "-q", "-b", "side"]);
-            for i in 0..=rng.below(2) {
-                add(&format!("apps/pitwall/src/side{i}.rs"));
-            }
+            add("apps/pitwall/src/side.rs");
             r.git(&["checkout", "-q", "fix"]);
             add("tools/x/before-merge.rs");
             r.git(&["merge", "-q", "--no-ff", "--no-edit", "side"]);
         }
-        // A force push: the remote has an old `fix` that the pushed commit does not contain.
         let mut push = new_ref("fix", "");
-        if rng.below(3) == 0 {
-            with_force += 1;
+        if sh.force {
             r.git(&["checkout", "-q", "-b", "old-fix", &c0]);
-            let old = add("tools/x/old.rs");
-            r.remote("fix", &old);
+            push.remote_sha = add("tools/x/old.rs");
+            r.remote("fix", &push.remote_sha);
             r.git(&["checkout", "-q", "fix"]);
-            push.remote_sha = old;
         }
-        let tip = r.git(&["rev-parse", "HEAD"]).trim().to_string();
-        push.sha = tip.clone();
-        let lacks = r.git(&["rev-list", &tip, "--not", "--remotes=origin"]);
-        // Live, and with `git ls-remote` unreadable.
+        push.sha = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+        let tip = push.sha.clone();
+        // Every commit the remote lacks with its files, in one git process: `commit <sha>` lines, then its files.
+        let log = r.git(&[
+            "log",
+            "--no-merges",
+            "--name-only",
+            "--format=commit %H",
+            &tip,
+            "--not",
+            "--remotes=origin",
+        ]);
+        let (mut lacks, mut wanted) = (Vec::new(), Vec::new());
+        for l in log.lines().filter(|l| !l.is_empty()) {
+            match l.strip_prefix("commit ") {
+                Some(c) => lacks.push(c.to_string()),
+                None => wanted.push((lacks.last().cloned().unwrap_or_default(), l.to_string())),
+            }
+        }
+        let unpushed_train = train.iter().any(|t| lacks.contains(t));
+        assert_eq!(
+            unpushed_train,
+            sh.pushed < sh.train && !sh.sibling,
+            "case {case}: the shape is what it says"
+        );
         for (how, look) in [("live", r.live()), ("unreadable", base_choice::Remote(None))] {
             let (base, why) = super::choose_base(&r.root, &push, Some("origin"), "origin/main", &look);
             let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&tip)).unwrap();
-            for c in lacks.lines() {
-                for f in r
-                    .git(&["show", "--no-merges", "--name-only", "--format=", c])
-                    .lines()
-                    .filter(|l| !l.is_empty())
-                {
-                    assert!(
-                        change.files.iter().any(|x| x == f),
-                        "case {case} ({how}): {f} of {c} is not planned; base {base} ({why})"
-                    );
-                }
-            }
-            if train.iter().any(|t| lacks.lines().any(|l| l == t)) {
-                with_unpushed_train += 1;
-                // The branch's own diff (from the train's local tip) does not reach apps/dyno; the push's check must.
-                let (own, _, _) = super::discover(&r.root, &train_tip, &[], std::slice::from_ref(&tip)).unwrap();
+            for (c, f) in &wanted {
                 assert!(
-                    !ids(&plan_gates(&plan(), &own, &facts())).contains(&"clippy apps/dyno".to_string()),
-                    "case {case}"
+                    change.files.contains(f),
+                    "case {case} ({how}): {f} of {c} is not planned; base {base} ({why})"
                 );
+            }
+            if unpushed_train {
                 let got = ids(&plan_gates(&plan(), &change, &facts()));
                 assert!(
                     got.contains(&"clippy apps/dyno".to_string()),
@@ -2245,9 +2253,13 @@ fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
                 );
             }
         }
+        if unpushed_train {
+            // The branch's own diff (from the train's local tip) does not reach apps/dyno; the push's check must.
+            let (own, _, _) = super::discover(&r.root, &train_tip, &[], std::slice::from_ref(&tip)).unwrap();
+            assert!(
+                !ids(&plan_gates(&plan(), &own, &facts())).contains(&"clippy apps/dyno".to_string()),
+                "case {case}"
+            );
+        }
     }
-    assert!(
-        with_unpushed_train >= 8 && with_merge >= 4 && with_force >= 4,
-        "the cases must cover each shape: unpushed train {with_unpushed_train}, merge {with_merge}, force push {with_force}"
-    );
 }
