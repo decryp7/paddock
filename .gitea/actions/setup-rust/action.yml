@@ -83,16 +83,12 @@ runs:
         rustc --version
         cargo --version
     # Every Rust job gets its runner's share of the host's cores, also when no build-jobs step ran before this one. It comes after
-    # the toolchain: `./dev ci build-jobs` needs rustc. A failed setup marks the job (PADDOCK_JOB_ABORTED=1, conformance C117).
+    # the toolchain: `./dev ci build-jobs` needs rustc. A failed setup marks the job (`./dev --job-setup`, conformance C117).
     - name: Build jobs for this runner
       shell: bash
       run: |
         if [ -n "${CARGO_BUILD_JOBS:-}" ]; then echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"; exit 0; fi
-        bash "${{ github.action_path }}/../../../dev" ci build-jobs && exit 0
-        rc=$?
-        echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
-        if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || true; fi
-        exit "$rc"
+        bash "${{ github.action_path }}/../../../dev" --job-setup ci build-jobs
     # Everything after the toolchain is `./dev ci setup-rust` (tools/paddock-dev/src/ci_setup_rust.rs). The two steps above stay
     # here: ./dev needs rustc to hash and build itself, and the job's later ./dev calls must see the same compiler.
     - name: Compile cache and Tauri libraries

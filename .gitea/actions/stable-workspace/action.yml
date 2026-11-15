@@ -8,9 +8,10 @@ runs:
   using: composite
   steps:
     - name: Move the checkout to a stable path
-      # A Linux container has a fixed workspace: nothing to do, so no tool is fetched or built for it.
-      if: runner.os != 'Linux'
       shell: bash
       env:
         NAME: ${{ inputs.name }}
-      run: bash "${{ github.action_path }}/../../../dev" ci stable-workspace --name "$NAME"
+      run: |
+        # A Linux container has a fixed workspace: nothing to do, so no tool is fetched or built for it.
+        if [ "${RUNNER_OS:-}" = Linux ]; then exit 0; fi
+        bash "${{ github.action_path }}/../../../dev" ci stable-workspace --name "$NAME"

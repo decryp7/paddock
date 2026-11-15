@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 // windows-twin: none: the cargo stand-in is an sh script; the launcher it runs is built and tested on Windows too (ci.yml, "Launcher")
 #![cfg(unix)]
-use super::wrapper::{Fixture, fake_rustc, launcher, write_script};
+use super::wrapper::{Fixture, fake_rustc, launcher, run_wrapper, rustup_without_toolchain, write_script};
 use paddock_testkit::TestCommand;
 use std::path::{Path, PathBuf};
 
@@ -231,4 +231,117 @@ fn a_tool_the_job_pinned_runs_as_it_is_for_ci_commands_only() {
     let (code, out, _) = r.run(&["ci", "x"], &me);
     assert_eq!(code, 0);
     assert!(out.contains("tool wrapper="), "{out}");
+}
+
+/// P1-2 of the WP-2 review: the kit's shell wrote PADDOCK_TOOLCHAIN_FAILED=1 to the job's environment when the pinned toolchain could not
+/// be installed, so that the job's other steps (the always-run clean-ups) did not each try the 900 s install again. The wrapper reads the
+/// variable; it now also writes it.
+#[test]
+fn a_failed_toolchain_install_in_a_ci_job_marks_the_job_so_no_later_step_tries_again() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    rustup_without_toolchain(&f, "exit 1");
+    let env_file = scratch.path().join("github-env");
+    let job = [
+        ("GITHUB_ACTIONS", "true".to_string()),
+        ("GITHUB_ENV", env_file.display().to_string()),
+    ];
+    let (code, _, err) = run_wrapper(&f, &scratch.path().join("home"), &job);
+    assert_eq!(code, 2, "{err}");
+    assert_eq!(
+        std::fs::read_to_string(&env_file).unwrap_or_default(),
+        "PADDOCK_TOOLCHAIN_FAILED=1\n",
+        "{err}"
+    );
+    // A person's run (no GITHUB_ACTIONS) writes nothing, whatever GITHUB_ENV holds.
+    let other = scratch.path().join("other-env");
+    let (code, _, _) = run_wrapper(&f, &scratch.path().join("home2"), &[("GITHUB_ENV", other.display().to_string())]);
+    assert_eq!(code, 2);
+    assert!(!other.exists());
+}
+
+/// The wrapper reads the CI home itself, because the tool that knows the rule is not built yet (docs/known-copies.toml, `ci-home-rule`).
+/// This holds the two equal: for each way a CI home can be given, the folder the wrapper keeps the tool in is `ci isolation path tools`'s
+/// answer, and a home the tool refuses stops the wrapper the same way.
+#[test]
+fn the_wrappers_ci_home_is_the_one_ci_isolation_gives() {
+    let r = Runner::new();
+    let disk = r.path("disk");
+    std::fs::create_dir_all(&disk).unwrap();
+    std::os::unix::fs::symlink(&disk, r.path("link")).unwrap();
+    let cases: Vec<(&str, Option<String>)> = vec![
+        ("the default home", None),
+        ("a relocated home", Some(disk.display().to_string())),
+        // conformance: path-text — the trailing slash is the case under test, not an expected path
+        ("a trailing slash", Some(format!("{}/", disk.display()))),
+        ("a link", Some(r.path("link").display().to_string())),
+        ("a relative path", Some("disk".to_string())),
+        ("an unmounted disk", Some(r.path("unmounted").display().to_string())),
+    ];
+    for (what, home) in cases {
+        let mut env = vec![("GITHUB_ACTIONS", "true".to_string()), ("RUNNER_OS", "macOS".to_string())];
+        if let Some(h) = &home {
+            env.push(("PADDOCK_CI_HOME", h.clone()));
+        }
+        let tool = {
+            let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+            cmd.args(["ci", "isolation", "path", "tools"]).env("HOME", r.path("home"));
+            for (k, v) in &env {
+                cmd.env(k, v);
+            }
+            cmd.output().unwrap()
+        };
+        let (code, out, err) = r.run(&["hello"], &env);
+        if tool.status.success() {
+            let tools = String::from_utf8_lossy(&tool.stdout).trim().to_string();
+            assert_eq!(code, 0, "{what}: {err}");
+            assert!(
+                out.contains(&format!("home={tools}/paddock-dev")),
+                "{what}: the wrapper keeps the tool in {tools}/paddock-dev: {out}"
+            );
+        } else {
+            assert_eq!(code, tool.status.code().unwrap(), "{what}: both stop the job: {err}");
+            let said = String::from_utf8_lossy(&tool.stdout).to_string() + &String::from_utf8_lossy(&tool.stderr);
+            for phrase in ["is not an absolute path", "does not exist: is its disk mounted"] {
+                assert_eq!(
+                    said.contains(phrase),
+                    err.contains(phrase),
+                    "{what}: the same refusal ({phrase}): tool {said} wrapper {err}"
+                );
+            }
+        }
+        // Each case starts from its own home folder, so a default home made by one is not found by the next.
+        let _ = std::fs::remove_dir_all(r.path("home/.paddock-ci"));
+    }
+}
+
+/// rustup 1.28.1 and later install a missing pin from any proxy that runs below rust-toolchain.toml (measured with 1.29.3), unlocked and
+/// unbounded: run 8060 again. Every probe of the launcher (`rustc -vV` for the hash, the check under the install lock, the version
+/// lines) says it may not (`RUSTUP_AUTO_INSTALL=0`); the one install is its own, under the lock.
+#[test]
+fn the_launchers_probes_never_start_an_install_of_a_missing_pin() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let (shims, _) = rustup_without_toolchain(&f, "[ \"$1 $2\" = 'toolchain install' ] && touch 'MARKER'");
+    let dist = scratch.path().join("dist.log");
+    let body = std::fs::read_to_string(shims.join("rustc")).unwrap();
+    let body = body.strip_prefix("#!/bin/sh\n").unwrap_or(&body);
+    write_script(
+        &shims.join("rustc"),
+        &format!(
+            "[ \"${{RUSTUP_AUTO_INSTALL:-}}\" != 0 ] && echo \"dist: rustc $*\" >> '{}'\n{body}",
+            dist.display()
+        ),
+    );
+    let (code, _, err) = run_wrapper(
+        &f,
+        &scratch.path().join("home"),
+        &[("GITHUB_ACTIONS", "true".to_string()), ("PADDOCK_DEV_DOWNLOAD", "0".to_string())],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(
+        err.contains("installed the pinned toolchain"),
+        "the launcher's own install ran: {err}"
+    );
+    assert_eq!(std::fs::read_to_string(&dist).unwrap_or_default(), "", "a probe started an install");
 }

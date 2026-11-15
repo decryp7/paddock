@@ -515,6 +515,20 @@ test('every kind a CI file asks for is in kept-folders.txt, and every kind there
   for (const k of kinds) assert.ok(used.has(k), `${k} is declared but nothing uses it`);
 });
 
+// Two bash 5 differences the shell script had to guard against (patsub_replacement turning the separator class [/\\] into [/\], and a
+// missing CI home becoming an empty one, paths at the root of the disk) are the behaviours this test keeps against the tool: a pattern is
+// filled as plain text, and a CI home that is not there stops `path` with nothing printed.
+test('ci isolation fills patterns as plain text, and a CI home that is not there prints no path', () => {
+  const h = host();
+  const a = h.job('a'.repeat(16));
+  a.exec(['acquire']);
+  const p = a.later(['pattern', '{build}[/\\\\]x'], { PADDOCK_BUILD_FOLDER: '/ci/target-x-s1' });
+  assert.equal(p.stdout.trim(), '[/\\\\]ci[/\\\\]target-x-s1[/\\\\]x');
+  const gone = a.later(['path', 'target', 'x'], { PADDOCK_CI_HOME: join(h.root, 'unmounted') });
+  assert.notEqual(gone.status, 0);
+  assert.equal(gone.stdout, '', 'no path is printed for a home that is not there');
+});
+
 // CI run 6731: stable-workspace took `path src` with 2>&1, so the migration's message became part of the path ("invalid
 // format", "cannot change to 'job-isolation: moved ...'"). A value command prints exactly its value on stdout; every message
 // goes to stderr, and no CI file folds stderr into a captured value.
@@ -631,7 +645,7 @@ const wiringProblems = (launcher) => {
 
 test('the job-isolation action runs ./dev, which releases with the pinned tool and builds it under the CI home (with a positive control)', () => {
   const action = read(join(PADDOCK, '.gitea', 'actions', 'job-isolation', 'action.yml'));
-  assert.match(action, /\.\.\/dev" ci isolation "\$MODE" && exit 0/, 'the action runs the wrapper');
+  assert.match(action, /\.\.\/dev" \$setup ci isolation "\$MODE"/, 'the action runs the wrapper');
   assert.deepEqual(wiringProblems(read(join(PADDOCK, 'tools', 'dev-launch', 'src', 'launch.rs'))), [], 'the launcher is wired as the amendment addendum says');
   // Positive controls: a launcher without the pieces is caught, a complete one passes.
   assert.equal(wiringProblems('// nothing').length, 3);

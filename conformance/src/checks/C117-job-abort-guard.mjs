@@ -1,11 +1,11 @@
 // C117 (rule 3: fix everything locally first; ER-9, ER-33): a step that still runs after an earlier step failed (`if: ... !cancelled()`,
-// so one run reports every failed check) in a job that sets up with build-jobs or job-isolation must also test
+// so one run reports every failed check) in a job that sets up with build-jobs, job-isolation or setup-rust (which runs build-jobs) must also test
 // `env.PADDOCK_JOB_ABORTED != '1'`. When that setup fails (./dev could not be built, no slot) the build-jobs, job-isolation and setup-rust actions write the variable
 // to GITHUB_ENV; without the test the job goes on and runs its checks without the slot, temp folders and core share (run 8027: crate on
 // Windows ran its tests after ./dev failed). The second sighting of "a job that went on after its setup failed" (runs 7773 to 7775, 8027).
 //
 // Reads `.gitea/workflows/*.yml|yaml` and `.gitea/actions/**/action.yml|yaml` (the `yaml` package, as C111). A job is isolated when one
-// of its steps uses ./.gitea/actions/build-jobs or ./.gitea/actions/job-isolation; the composite actions such a job uses are held to the
+// of its steps uses ./.gitea/actions/build-jobs, ./.gitea/actions/job-isolation or ./.gitea/actions/setup-rust; the composite actions such a job uses are held to the
 // same rule in their own steps. A job-level `if:` is not a step and is not read (the `env` context does not exist there, and a job
 // starts with its own setup). Report-only (a warning) until its first green run (ER-41); then `mode: 'gate'`.
 // Positive controls (ER-33): no workflow found, or no `yaml` package, is "check broken", never a pass; a repository with workflows
@@ -14,7 +14,7 @@ import { error, unwaivable, warn } from '../finding.mjs';
 
 const WORKFLOW = /^\.gitea\/workflows\/[^/]+\.ya?ml$/;
 const ACTION = /^\.gitea\/actions\/((?:.+\/)?[^/]+)\/action\.ya?ml$/;
-const SETUP_USES = /^\.\/\.gitea\/actions\/(?:build-jobs|job-isolation)\/?$/;
+const SETUP_USES = /^\.\/\.gitea\/actions\/(?:build-jobs|job-isolation|setup-rust)\/?$/;
 const LOCAL_USES = /^\.\/\.gitea\/actions\/(.+?)\/?$/;
 const GUARD = 'PADDOCK_JOB_ABORTED';
 

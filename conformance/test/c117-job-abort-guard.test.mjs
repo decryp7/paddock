@@ -68,3 +68,14 @@ test('C117: no workflow, or no isolated job at all, is check broken and never a 
   assert.equal(blind.length, 1);
   assert.match(blind[0].message, /check broken/);
 });
+
+test('C117: a job that sets up with setup-rust alone (it runs build-jobs through ./dev --job-setup) is held to the guard too', async () => {
+  const root = makeApp({
+    '.gitea/workflows/ci.yml': wf(
+      job('a', `      - uses: ./.gitea/actions/setup-rust\n      - run: echo a\n        if: \${{ !cancelled() }}\n`) + job('b', `${SETUP}      - run: echo b\n        if: \${{ !cancelled() && ${G} }}\n`),
+    ),
+  });
+  const f = await findingsOf('C117', root);
+  assert.equal(f.length, 1, JSON.stringify(f));
+  assert.match(f[0].message ?? f[0].text ?? JSON.stringify(f[0]), /a|setup/);
+});

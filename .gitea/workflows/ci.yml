@@ -111,6 +111,10 @@ jobs:
           done
 
       - name: The plan's tests
+        # Its process-pattern cases run `./dev ci isolation pattern`: the tool, fetched or built the way the next step gets it.
+        env:
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+          PADDOCK_DEV_DOWNLOAD: ${{ (inputs.release == true || startsWith(github.ref, 'refs/tags/')) && '0' || '' }}
         run: node --test scripts/affected.test.mjs
 
       - name: Affected projects

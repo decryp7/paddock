@@ -3,7 +3,7 @@ Seen {
     code: 0,
     stdout: "Building the paddock-proc and paddock-chromium unit tests\nRunning as uid N: env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::\nproc tests: guardian::\nRunning as uid N: env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_chromium-9f8e7d launch::tests::a_browser_whose_owner_is_killed\nchromium tests: launch::tests::a_browser_whose_owner_is_killed\nThe guardian's acting tests passed as uid N",
     github_env: "",
-    github_path: "### Orphan guardian as a user\n\n| Tests | As | Result | Time |\n|---|---|---|---|\n| `guardian::` | uid 501 | passed | N s |\n| `launch::tests::a_browser_whose_owner_is_killed` | uid 501 | passed | N s |",
+    github_path: "### Orphan guardian as a user\n\n| Tests | As | Result | Time |\n|---|---|---|---|\n| `guardian::` | uid N | passed | N s |\n| `launch::tests::a_browser_whose_owner_is_killed` | uid N | passed | N s |",
     calls: "cargo test --no-run --all-features -p paddock-proc -p paddock-chromium token=",
     tree: [
         "d crates",
@@ -23,9 +23,9 @@ Seen {
 === case 2 ===
 Seen {
     code: 1,
-    stdout: "Building the paddock-proc and paddock-chromium unit tests\nRunning as uid N: env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::\nproc tests: guardian::\nThe guardian's log:\nguardian said no\n::error::guardian-as-user: `guardian::` failed as uid 501 (exit 3, 0 s): env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::.",
+    stdout: "Building the paddock-proc and paddock-chromium unit tests\nRunning as uid N: env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::\nproc tests: guardian::\nThe guardian's log:\nguardian said no\n::error::guardian-as-user: `guardian::` failed as uid N (exit 3, 0 s): env TMPDIR=<PRIVATE> HOME=<PRIVATE> PADDOCK_PROC_GUARDIAN_LOG=<PRIVATE>/guardian.log target/debug/deps/paddock_proc-0123abcd guardian::.",
     github_env: "",
-    github_path: "### Orphan guardian as a user\n\n| Tests | As | Result | Time |\n|---|---|---|---|\n| `guardian::` | uid 501 | failed (exit 3) | N s |",
+    github_path: "### Orphan guardian as a user\n\n| Tests | As | Result | Time |\n|---|---|---|---|\n| `guardian::` | uid N | failed (exit 3) | N s |",
     calls: "cargo test --no-run --all-features -p paddock-proc -p paddock-chromium token=",
     tree: [
         "d crates",

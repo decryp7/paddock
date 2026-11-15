@@ -11,11 +11,5 @@ runs:
       shell: bash
       env:
         SPLIT: ${{ inputs.split }}
-      # A failed setup marks the job (PADDOCK_JOB_ABORTED=1, which the later `!cancelled()` steps test, conformance C117), so those steps
-      # do not run without the job's core share (run 8027: the crate job on Windows ran its tests after ./dev could not be built).
-      run: |
-        bash "${{ github.action_path }}/../../../dev" ci build-jobs "$SPLIT" && exit 0
-        rc=$?
-        echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
-        if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || true; fi
-        exit "$rc"
+      # A failed setup marks the job (`./dev --job-setup`: PADDOCK_JOB_ABORTED=1, which the later `!cancelled()` steps test, conformance C117).
+      run: bash "${{ github.action_path }}/../../../dev" --job-setup ci build-jobs "$SPLIT"

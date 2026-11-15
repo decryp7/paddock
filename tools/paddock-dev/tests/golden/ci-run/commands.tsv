@@ -80,20 +80,17 @@ app	workbench-demo	ubuntu-latest		npm run workbench-demo:build -w ui
 job	conformance			./dev gates check
 job	conformance			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	conformance			TOOLCHAIN=${TOOLCHAIN:-stable
-job	conformance			bash "dev" ci build-jobs
+job	conformance			bash "dev" --job-setup ci build-jobs
 job	conformance			bash "dev" ci sccache-stats
 job	conformance			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	conformance			cargo --version
 job	conformance			continue
 job	conformance			do
-job	conformance			echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
 job	conformance			echo "::error::rustup is not installed on this runner"
 job	conformance			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	conformance			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
-job	conformance			echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV"
 job	conformance			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	conformance			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
-job	conformance			exit "$rc"
 job	conformance			exit 0
 job	conformance			exit 1
 job	conformance			for c in 
@@ -106,7 +103,6 @@ job	conformance			node conformance/bin/paddock-conformance.mjs --app paddock --r
 job	conformance			npm ci --ignore-scripts -w conformance
 job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	conformance			printf '%s\n' "$installed"
-job	conformance			rc=$?
 job	conformance			rustc --version
 job	conformance			rustup default ""
 job	conformance			rustup toolchain list 2>/dev/null
@@ -117,20 +113,17 @@ job	conformance			then
 job	conformance		conformance	npm test
 job	crates			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	crates			TOOLCHAIN=${TOOLCHAIN:-stable
-job	crates			bash "dev" ci build-jobs
+job	crates			bash "dev" --job-setup ci build-jobs
 job	crates			bash "dev" ci sccache-stats
 job	crates			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	crates			cargo --version
 job	crates			continue
 job	crates			do
-job	crates			echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
 job	crates			echo "::error::rustup is not installed on this runner"
 job	crates			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	crates			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
-job	crates			echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV"
 job	crates			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	crates			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
-job	crates			exit "$rc"
 job	crates			exit 0
 job	crates			exit 1
 job	crates			for c in 
@@ -141,7 +134,6 @@ job	crates			missing=0
 job	crates			missing=1
 job	crates			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	crates			printf '%s\n' "$installed"
-job	crates			rc=$?
 job	crates			rustc --version
 job	crates			rustup default ""
 job	crates			rustup toolchain list 2>/dev/null
@@ -160,7 +152,7 @@ job	crates		crates	cargo machete $(ls -d paddock-*/ | grep -v '^paddock-workspac
 job	crates		crates	node ../scripts/coverage-gate.mjs lcov.info 90
 job	e2e			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	e2e			TOOLCHAIN=${TOOLCHAIN:-stable
-job	e2e			bash "dev" ci build-jobs
+job	e2e			bash "dev" --job-setup ci build-jobs
 job	e2e			bash "dev" ci node-caches --angular-dir "ui" --name "e2e-1"
 job	e2e			bash "dev" ci node-caches --angular-dir "ui" --name "e2e-2"
 job	e2e			bash "dev" ci sccache-stats
@@ -168,14 +160,11 @@ job	e2e			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db 
 job	e2e			cargo --version
 job	e2e			continue
 job	e2e			do
-job	e2e			echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
 job	e2e			echo "::error::rustup is not installed on this runner"
 job	e2e			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	e2e			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
-job	e2e			echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV"
 job	e2e			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	e2e			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
-job	e2e			exit "$rc"
 job	e2e			exit 0
 job	e2e			exit 1
 job	e2e			for c in 
@@ -187,7 +176,6 @@ job	e2e			missing=1
 job	e2e			npm ci
 job	e2e			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	e2e			printf '%s\n' "$installed"
-job	e2e			rc=$?
 job	e2e			rustc --version
 job	e2e			rustup default ""
 job	e2e			rustup toolchain list 2>/dev/null
@@ -199,21 +187,18 @@ job	e2e		ui	npx playwright test --shard=1/2
 job	e2e		ui	npx playwright test --shard=2/2
 job	eslint-preset			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	eslint-preset			TOOLCHAIN=${TOOLCHAIN:-stable
-job	eslint-preset			bash "dev" ci build-jobs
+job	eslint-preset			bash "dev" --job-setup ci build-jobs
 job	eslint-preset			bash "dev" ci node-caches --angular-dir "" --name "${{ github.job }}"
 job	eslint-preset			bash "dev" ci sccache-stats
 job	eslint-preset			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	eslint-preset			cargo --version
 job	eslint-preset			continue
 job	eslint-preset			do
-job	eslint-preset			echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
 job	eslint-preset			echo "::error::rustup is not installed on this runner"
 job	eslint-preset			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	eslint-preset			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
-job	eslint-preset			echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV"
 job	eslint-preset			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	eslint-preset			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
-job	eslint-preset			exit "$rc"
 job	eslint-preset			exit 0
 job	eslint-preset			exit 1
 job	eslint-preset			for c in 
@@ -225,7 +210,6 @@ job	eslint-preset			missing=1
 job	eslint-preset			npm ci
 job	eslint-preset			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	eslint-preset			printf '%s\n' "$installed"
-job	eslint-preset			rc=$?
 job	eslint-preset			rustc --version
 job	eslint-preset			rustup default ""
 job	eslint-preset			rustup toolchain list 2>/dev/null
@@ -236,21 +220,18 @@ job	eslint-preset			then
 job	eslint-preset		eslint	npm test
 job	icons			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	icons			TOOLCHAIN=${TOOLCHAIN:-stable
-job	icons			bash "dev" ci build-jobs
+job	icons			bash "dev" --job-setup ci build-jobs
 job	icons			bash "dev" ci node-caches --angular-dir "ui" --name "${{ github.job }}"
 job	icons			bash "dev" ci sccache-stats
 job	icons			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	icons			cargo --version
 job	icons			continue
 job	icons			do
-job	icons			echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
 job	icons			echo "::error::rustup is not installed on this runner"
 job	icons			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	icons			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
-job	icons			echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV"
 job	icons			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	icons			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
-job	icons			exit "$rc"
 job	icons			exit 0
 job	icons			exit 1
 job	icons			for c in 
@@ -263,7 +244,6 @@ job	icons			node icons/tools/install.mjs --check
 job	icons			npm ci
 job	icons			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	icons			printf '%s\n' "$installed"
-job	icons			rc=$?
 job	icons			rustc --version
 job	icons			rustup default ""
 job	icons			rustup toolchain list 2>/dev/null
@@ -274,7 +254,7 @@ job	icons			then
 job	icons		icons	npm test
 job	tools			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	tools			TOOLCHAIN=${TOOLCHAIN:-stable
-job	tools			bash "dev" ci build-jobs
+job	tools			bash "dev" --job-setup ci build-jobs
 job	tools			bash "dev" ci sccache-stats
 job	tools			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	tools			bash .claude/hooks/run-tests.sh
@@ -283,7 +263,6 @@ job	tools			cargo --version
 job	tools			continue
 job	tools			do
 job	tools			dpkg-deb -x "$RUNNER_TEMP/drawio.deb" "$RUNNER_TEMP/drawio"
-job	tools			echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
 job	tools			echo "::error::could not fetch the pinned draw.io $v (see the line above). Fix: re-run, or check the release still exists and the SHA-256 in ci-image/Dockerfile."
 job	tools			echo "::error::rustup is not installed on this runner"
 job	tools			echo "::error::unpacking draw.io $v failed. Fix: run dpkg-deb -x on the same file in the paddock-ci image to see why."
@@ -291,10 +270,8 @@ job	tools			echo "::notice::the CI image has no draw.io yet (it comes with the n
 job	tools			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	tools			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
 job	tools			echo "DRAWIO=$RUNNER_TEMP/drawio/opt/drawio/drawio" >> "$GITHUB_ENV"
-job	tools			echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV"
 job	tools			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	tools			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
-job	tools			exit "$rc"
 job	tools			exit 0
 job	tools			exit 1
 job	tools			for c in 
@@ -310,7 +287,6 @@ job	tools			node --test tools/test/*.test.mjs
 job	tools			node scripts/svg-drift.mjs
 job	tools			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	tools			printf '%s\n' "$installed"
-job	tools			rc=$?
 job	tools			rustc --version
 job	tools			rustup default ""
 job	tools			rustup toolchain list 2>/dev/null
@@ -322,21 +298,18 @@ job	tools			then
 job	tools			v=$(sed -n 's/^ARG DRAWIO_VERSION=//p' ci-image/Dockerfile | head -n 1
 job	ui			TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' "$pin" | head -1
 job	ui			TOOLCHAIN=${TOOLCHAIN:-stable
-job	ui			bash "dev" ci build-jobs
+job	ui			bash "dev" --job-setup ci build-jobs
 job	ui			bash "dev" ci node-caches --angular-dir "ui" --name "${{ github.job }}"
 job	ui			bash "dev" ci sccache-stats
 job	ui			bash "dev" ci setup-rust --sccache-backend "local" --sccache-redis-db "${{ vars.SCCACHE_REDIS_DB }}" --tauri-linux-deps "false"
 job	ui			cargo --version
 job	ui			continue
 job	ui			do
-job	ui			echo "::error::A job setup step failed (exit $rc: ./dev ci build-jobs). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job."
 job	ui			echo "::error::rustup is not installed on this runner"
 job	ui			echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
 job	ui			echo "CARGO_BUILD_JOBS=$CARGO_BUILD_JOBS (set earlier in the job)"
-job	ui			echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV"
 job	ui			echo "Rust toolchain  (from rust-toolchain.toml)"
 job	ui			echo "Rust toolchain $name from the Paddock CI image (components: ${COMPONENTS:-none})"
-job	ui			exit "$rc"
 job	ui			exit 0
 job	ui			exit 1
 job	ui			for c in 
@@ -348,7 +321,6 @@ job	ui			missing=1
 job	ui			npm ci
 job	ui			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	ui			printf '%s\n' "$installed"
-job	ui			rc=$?
 job	ui			rustc --version
 job	ui			rustup default ""
 job	ui			rustup toolchain list 2>/dev/null

@@ -77,6 +77,11 @@ fn fixture() -> Fx {
     fx
 }
 
+thread_local! {
+    /// The user ids the last step named in its raw output (the guardian step says which user runs the tests).
+    static UIDS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// What a run leaves: the exit code, the normalised output and the files the job reads, and the folders' state.
 #[derive(Debug, PartialEq, Eq)]
 struct Seen {
@@ -93,10 +98,10 @@ fn norm(text: &str, fx: &Fx) -> String {
     let root = fx.root().display().to_string();
     let dur = regex::Regex::new(r" in \d+ s\b").unwrap();
     let private = regex::Regex::new(r"<ROOT>/tmp/(tmp\.[A-Za-z0-9]+|guardian-as-user\.[0-9]+\.[0-9]+)").unwrap();
-    // Who runs the tests decides whether the command drops to an unprivileged user with setpriv (root, as in the CI containers) or runs
-    // them as itself (a person's Mac); the root path is the unit tests' (a fake machine records its command line).
-    let as_uid =
-        regex::Regex::new(r"Running as uid \d+: (?:setpriv \S+ \S+ --clear-groups --no-new-privs -- )?|passed as uid \d+").unwrap();
+    // Who runs the tests decides whether the command drops to an unprivileged user with setpriv (root, as in the CI containers: uid 65534) or
+    // runs them as itself (a person's Mac: their uid), in every place the guardian step names the user. The golden holds `uid N`; the
+    // test of the step asserts the number (`guardian_uids_are_the_expected_user`).
+    let as_uid = regex::Regex::new(r"(setpriv \S+ \S+ --clear-groups --no-new-privs -- )|\buid \d+\b").unwrap();
     let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
     let bash_killed = regex::Regex::new(r": line \d+: +\d+ Killed ").unwrap();
@@ -105,12 +110,7 @@ fn norm(text: &str, fx: &Fx) -> String {
     let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)$").unwrap();
     as_uid
         .replace_all(text, |c: &regex::Captures| {
-            if c[0].starts_with("passed") {
-                "passed as uid N"
-            } else {
-                "Running as uid N: "
-            }
-            .to_string()
+            if c.get(1).is_some() { "" } else { "uid N" }.to_string()
         })
         .replace(&root, "<ROOT>")
         .lines()
@@ -302,6 +302,13 @@ fn run_one(fx: &Fx, step: &Step) -> Seen {
         out.status,
         String::from_utf8_lossy(&out.stdout)
     );
+    UIDS.with(|u| {
+        *u.borrow_mut() = regex::Regex::new(r"\buid (\d+)\b")
+            .unwrap()
+            .captures_iter(&String::from_utf8_lossy(&out.stdout))
+            .map(|c| c[1].to_string())
+            .collect();
+    });
     Seen {
         code: out.status.code().unwrap_or(-1),
         stdout: norm(&String::from_utf8_lossy(&out.stdout), fx),
@@ -1731,6 +1738,20 @@ fn guardian_as_user_three_machines() {
     same(&guardian_broken_build, &guardian());
 }
 
+/// The user the guardian's tests ran as: `PADDOCK_TEST_UID` when set, else 65534 (nobody) when the tests run as root, which is what the
+/// command drops to with setpriv (the CI containers), else the caller's own uid (a person's Mac). Every uid the last step printed is it,
+/// and at least one was printed: the goldens hold `uid N`, so this is where the number is checked.
+fn guardian_uids_are_the_expected_user() {
+    let mine = String::from_utf8(TestCommand::new("id").arg("-u").output().unwrap().stdout)
+        .unwrap()
+        .trim()
+        .to_string();
+    let want = std::env::var("PADDOCK_TEST_UID").unwrap_or_else(|_| if mine == "0" { "65534".to_string() } else { mine });
+    let seen = UIDS.with(|u| u.borrow().clone());
+    assert!(!seen.is_empty(), "the step named no user");
+    assert!(seen.iter().all(|u| *u == want), "the guardian ran as {seen:?}, expected {want}");
+}
+
 #[test]
 fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the_calling_user() {
     // Run by a user (the test is not root: no setpriv, no sudo, ER-14), the tests run directly; the root path is the unit tests' (a fake
@@ -1747,8 +1768,9 @@ fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the
             .contains("chromium tests: launch::tests::a_browser_whose_owner_is_killed"),
         "{seen:?}"
     );
-    assert!(seen.stdout.contains("The guardian's acting tests passed as uid "), "{seen:?}");
-    assert!(seen.github_path.contains("| `guardian::` | uid "), "{seen:?}");
+    assert!(seen.stdout.contains("The guardian's acting tests passed as uid N"), "{seen:?}");
+    guardian_uids_are_the_expected_user();
+    assert!(seen.github_path.contains("| `guardian::` | uid N "), "{seen:?}");
     assert!(
         seen.calls
             .starts_with("cargo test --no-run --all-features -p paddock-proc -p paddock-chromium"),
@@ -1760,10 +1782,11 @@ fn guardian_as_user_builds_the_unit_tests_and_runs_the_two_guardian_cases_as_the
     assert!(red.stdout.contains("The guardian's log:\nguardian said no"), "{red:?}");
     assert_eq!(red.stdout.lines().filter(|l| l.starts_with("::error::")).count(), 1, "{red:?}");
     assert!(
-        red.stdout.contains("::error::guardian-as-user: `guardian::` failed as uid "),
+        red.stdout.contains("::error::guardian-as-user: `guardian::` failed as uid N"),
         "{red:?}"
     );
     assert!(red.github_path.contains("failed (exit 3)"), "{red:?}");
+    guardian_uids_are_the_expected_user();
     // A build that fails: its last lines, then one error line.
     let broken = guardian_rust(&guardian_broken_build);
     assert_eq!(broken.code, 1);

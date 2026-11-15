@@ -419,7 +419,7 @@ pub(crate) fn shim_cargo(slow: u32) -> String {
 
 /// Runs the whole wrapper (not just `--wrapper-hash`) with a scratch cache and a stand-in `cargo` that "builds" a script.
 #[cfg(unix)]
-fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
+pub(crate) fn run_wrapper(f: &Fixture, home: &Path, extra_env: &[(&str, String)]) -> (i32, String, String) {
     run_wrapper_with_cargo(f, home, extra_env, &shim_cargo(0))
 }
 
@@ -543,7 +543,7 @@ fn without_a_compiler_no_cached_binary_is_run_and_the_error_names_the_next_step(
 /// A Windows-shaped runner: rustup is there, its `rustc` shim cannot run until the pinned toolchain is installed, no RUSTC is set.
 /// Returns the folder of the shims and the log of the fake rustup.
 #[cfg(unix)]
-fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf) {
+pub(crate) fn rustup_without_toolchain(f: &Fixture, rustup_body: &str) -> (PathBuf, PathBuf) {
     std::fs::write(
         f.root().join("rust-toolchain.toml"),
         "[toolchain]\nchannel = \"1.90.0\"\nprofile = \"minimal\"\ncomponents = [\"clippy\"]\n",
