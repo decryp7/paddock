@@ -170,8 +170,8 @@ pub fn run(a: &CheckArgs, env: &dyn Fn(&str) -> Option<String>, out: &mut dyn Wr
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(unix)]
     use crate::disk::index::{Index, SizeRow};
+    use paddock_testkit::StandIn;
 
     const GIB: u64 = 1 << 30;
 
@@ -202,22 +202,20 @@ mod tests {
         assert!(parse_df("h\nno capacity here\n").is_err());
     }
 
-    /// A fake `df` (ER-14: the real disk is never read): a script printing `avail_kib` KiB available.
-    #[cfg(unix)]
+    /// A fake `df` (ER-14: the real disk is never read): the testkit's stand-in printing `avail_gib` GiB available in `df -Pk`'s
+    /// shape, on every OS.
     fn fake_df(dir: &Path, avail_gib: u64) -> String {
-        use std::os::unix::fs::PermissionsExt;
-        let p = dir.join("df");
         let kib = avail_gib * 1024 * 1024;
-        std::fs::write(
-            &p,
-            format!("#!/bin/sh\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\necho '/dev/x 9 9 {kib} 50% /x'\n"),
-        )
-        .unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
-        p.to_string_lossy().to_string()
+        StandIn::new(dir, "df")
+            .stdout("Filesystem 1024-blocks Used Available Capacity Mounted on")
+            .stdout(&format!("/dev/x 9 9 {kib} 50% /x"))
+            .install()
+            .unwrap()
+            .program()
+            .to_string_lossy()
+            .to_string()
     }
 
-    #[cfg(unix)]
     fn run_with(df: &str, index: &Path) -> (i32, String, String) {
         let a = CheckArgs {
             paths: vec![PathBuf::from("/work")],
@@ -236,7 +234,6 @@ mod tests {
         )
     }
 
-    #[cfg(unix)]
     #[test]
     fn plenty_of_space_prints_one_line_and_exits_0() {
         let d = tempfile::tempdir().unwrap();
@@ -246,7 +243,6 @@ mod tests {
         assert!(err.is_empty(), "{err}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn below_the_warning_level_one_warning_and_the_largest_folders_and_exit_0() {
         let d = tempfile::tempdir().unwrap();
@@ -277,7 +273,6 @@ mod tests {
         );
     }
 
-    #[cfg(unix)]
     #[test]
     fn below_the_refusal_level_one_error_with_the_next_step_and_exit_1() {
         let d = tempfile::tempdir().unwrap();
@@ -288,7 +283,6 @@ mod tests {
         assert!(err.contains("run ./dev disk scan"), "no index yet is said, not hidden: {err}");
     }
 
-    #[cfg(unix)]
     #[test]
     fn a_df_that_cannot_be_read_is_not_measured_and_does_not_refuse() {
         let d = tempfile::tempdir().unwrap();

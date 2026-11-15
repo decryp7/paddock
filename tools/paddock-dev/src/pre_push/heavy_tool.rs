@@ -170,13 +170,14 @@ mod tests {
         }
         let entry = home.path().join("bin").join(format!("heavy-{}", h.hash));
         std::fs::create_dir_all(&entry).unwrap();
-        let bin = entry.join(exe("heavy"));
-        // A probe that fails: `--version` prints nothing.
-        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        // A probe that fails: `--version` prints nothing and the program exits 1.
+        let bin = paddock_testkit::StandIn::new(&entry, "heavy")
+            .exit(1)
+            .install()
+            .unwrap()
+            .program()
+            .to_path_buf();
+        assert_eq!(bin, entry.join(exe("heavy")));
         let two_days = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
         std::fs::File::open(&entry).unwrap().set_modified(two_days).unwrap();
         // No budget left: ensure stops after the probe and builds nothing.
