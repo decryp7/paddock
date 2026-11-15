@@ -1,4 +1,4 @@
-import { signal } from '@angular/core';
+import { signal, WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { settle } from '../../../testing/helpers';
 import { AppMenu } from './app-menu.service';
@@ -46,10 +46,12 @@ function press(target: Element, key: string): void {
 describe('MenuBar', () => {
   let ran: string[];
   let fixture: ComponentFixture<MenuBar>;
+  let menuModel: WritableSignal<TopMenu[]>;
 
   beforeEach(async () => {
     ran = [];
-    TestBed.configureTestingModule({ providers: [{ provide: AppMenu, useValue: { menus: signal(MENUS), run: (id: string) => ran.push(id) } }] });
+    menuModel = signal(MENUS);
+    TestBed.configureTestingModule({ providers: [{ provide: AppMenu, useValue: { menus: menuModel, run: (id: string) => ran.push(id) } }] });
     fixture = TestBed.createComponent(MenuBar);
     document.body.appendChild(fixture.nativeElement);
     await settle(fixture);
@@ -98,6 +100,43 @@ describe('MenuBar', () => {
     await settle(fixture);
     expect(ran).toEqual(['view:events']);
     expect(menus()).toEqual([]);
+  });
+
+  // A lazy command set that loads while a menu is open hides its unavailable items (Export report…), and the items below
+  // move up. A button must keep running the item it shows: one rendered for "Close workspace" never runs "Close window"
+  // (ux-demo-tour.e2e.ts flaked in debrief.yml run 8116 when Playwright's click landed on the reused button).
+  it('keeps each open item bound to its own command when an item above it goes away', async () => {
+    menuModel.set([
+      {
+        id: 'file',
+        label: 'File',
+        items: [
+          { kind: 'item', id: 'report.export', label: 'Export report…' },
+          { kind: 'item', id: 'file.close', label: 'Close workspace' },
+          { kind: 'item', id: 'window.close', label: 'Close window' },
+        ],
+      },
+    ]);
+    await settle(fixture);
+    top('File').click();
+    await settle(fixture);
+    const close = item('Close workspace')!;
+    menuModel.set([
+      {
+        id: 'file',
+        label: 'File',
+        items: [
+          { kind: 'item', id: 'file.close', label: 'Close workspace' },
+          { kind: 'item', id: 'window.close', label: 'Close window' },
+        ],
+      },
+    ]);
+    await settle(fixture);
+    expect(item('Export report…')).toBeUndefined();
+    expect(close.querySelector('.label')!.textContent?.trim()).toBe('Close workspace');
+    close.click();
+    await settle(fixture);
+    expect(ran).toEqual(['file.close']);
   });
 
   it('opens a submenu on click and runs its items', async () => {
