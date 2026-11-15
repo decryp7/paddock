@@ -1,57 +1,71 @@
 #!/usr/bin/env node
 // Rewrites the lists that name every conformance check from the check modules (src/derived-lists.mjs says which and how).
 //
-//   node conformance/bin/paddock-check-lists.mjs [--root <repo>]           rewrite index.mjs and paddock.ci.json's `only`
-//   node conformance/bin/paddock-check-lists.mjs --check [--root <repo>]   exit 1 and print the difference when either is stale
+//   node conformance/bin/paddock-check-lists.mjs [--root <repo>]           rewrite index.mjs, paddock.ci.json's `only` and
+//                                                                          the README's check index; print what changed
+//   node conformance/bin/paddock-check-lists.mjs --check [--root <repo>]   exit 1 and print the difference when one is stale
 //
-// Each module is imported once to make sure the id it exports is the id in its file name.
+// Each module is imported once: its exported id must be the id in its file name, and its title, scope, mode and needs fill
+// the README index. A rewrite is refused when CI=true (CI checks, it never regenerates).
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { REGENERATE, generate, lineDiff, modules } from '../src/derived-lists.mjs';
+import { CONTRACT_PATH, README_PATH, REGENERATE, generate, lineDiff, modules } from '../src/derived-lists.mjs';
+
+const USAGE = `usage: ${REGENERATE} [--check] [--root <repo>]`;
+const fail = (code, msg) => {
+  console.error(`::error::paddock-check-lists: ${msg}`);
+  process.exit(code);
+};
 
 const args = process.argv.slice(2);
-const check = args.includes('--check');
-const at = args.indexOf('--root');
-const root = at >= 0 ? resolve(args[at + 1] ?? '.') : resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const unknown = args.filter((a, i) => a !== '--check' && a !== '--root' && args[i - 1] !== '--root');
-if (unknown.length) {
-  console.error(`::error::paddock-check-lists: unknown argument ${unknown[0]} (usage: ${REGENERATE} [--check] [--root <repo>])`);
-  process.exit(2);
+let check = false;
+let root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--check') check = true;
+  else if (args[i] === '--root') {
+    const v = args[++i];
+    if (!v || v.startsWith('--')) fail(2, `--root needs a folder (${USAGE})`);
+    root = resolve(v);
+  } else fail(2, `unknown argument ${args[i]} (${USAGE})`);
 }
+if (!check && process.env.CI === 'true') fail(2, `CI=true: CI checks the lists (--check) and never rewrites them; run \`${REGENERATE}\` on your machine and commit the result`);
 
 try {
   const dir = join(root, 'conformance/src/checks');
-  const files = readdirSync(dir);
+  const files = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => !e.isDirectory())
+    .map((e) => e.name);
+  const metas = [];
   for (const m of modules(files)) {
-    const mod = await import(pathToFileURL(join(dir, m.file)).href);
-    if (mod.default?.id !== m.id) {
-      throw new Error(`conformance/src/checks/${m.file} exports id ${JSON.stringify(mod.default?.id)}, not ${m.id}: the file name and the id must agree`);
+    const mod = (await import(pathToFileURL(join(dir, m.file)).href)).default;
+    if (mod?.id !== m.id) {
+      throw new Error(`conformance/src/checks/${m.file} exports id ${JSON.stringify(mod?.id)}, not ${m.id}: the file name and the id must agree`);
     }
+    metas.push({ id: mod.id, title: mod.title, scope: mod.scope, mode: mod.mode, needs: mod.needs });
   }
-  const out = generate(files, readFileSync(join(root, 'conformance/paddock.ci.json'), 'utf8'));
+  const read = (p) => {
+    try {
+      return readFileSync(join(root, p), 'utf8');
+    } catch {
+      return '';
+    }
+  };
+  const out = generate(files, read(CONTRACT_PATH), read(README_PATH), metas);
   let stale = 0;
   for (const { path, text } of out) {
-    const file = join(root, path);
-    let have = '';
-    try {
-      have = readFileSync(file, 'utf8');
-    } catch {
-      // a missing file is stale
-    }
+    const have = read(path);
     if (have === text) continue;
-    if (check) {
-      stale++;
-      console.error(`::error file=${path}::${path} is stale: run \`${REGENERATE}\` and commit the result`);
-      for (const l of lineDiff(have, text)) console.error(`  ${l}`);
-    } else {
-      writeFileSync(file, text);
+    stale++;
+    if (check) console.error(`::error file=${path}::${path} is stale: run \`${REGENERATE}\` and commit the result`);
+    else {
+      writeFileSync(join(root, path), text);
       console.log(`wrote ${path}`);
     }
+    for (const l of lineDiff(have, text)) (check ? console.error : console.log)(`  ${l}`);
   }
   if (check && stale) process.exit(1);
-  if (check) console.log(`check lists: current (${modules(files).length} checks)`);
+  if (!stale) console.log(`check lists: current (${metas.length} checks)`);
 } catch (e) {
-  console.error(`::error::paddock-check-lists: ${e.message}. Next step: fix what it names, then run \`${REGENERATE}\`.`);
-  process.exit(1);
+  fail(1, `${e.message}. Next step: fix what it names, then run \`${REGENERATE}\``);
 }
