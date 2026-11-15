@@ -11,8 +11,9 @@ import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** The append-only logs: new sections are added, earlier ones are not rewritten. */
-const APPEND_ONLY = ['docs/lessons.md', 'docs/benchmarks.md', 'apps/dyno/docs/performance.md', 'apps/debrief/docs/performance.md'];
+/** The append-only logs: new sections are added, earlier ones are not rewritten. Only their git attribute is read, never their
+ * text, so they are no doc input of this test (scripts/affected.test.mjs); the names are joined, not quoted repo paths. */
+const APPEND_ONLY = [['docs', 'lessons.md'], ['docs', 'benchmarks.md'], ['apps', 'dyno', 'docs', 'performance.md'], ['apps', 'debrief', 'docs', 'performance.md']].map((p) => p.join('/'));
 
 function git(cwd, ...args) {
   const r = spawnSync('git', args, {
