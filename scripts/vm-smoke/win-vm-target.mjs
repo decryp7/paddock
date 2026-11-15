@@ -11,19 +11,17 @@ import { isMain } from '../../conformance/src/util/is-main.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-/** Build and toolchain variables that pass to ./dev when set: none of them can pick a cached paddock-dev binary. */
-const DEV_ENV_KEEP = ['CARGO_BUILD_JOBS', 'RUSTUP_HOME', 'CARGO_HOME', 'RUSTUP_TOOLCHAIN'];
-/** The environment ./dev runs under: PATH, HOME (the tool's cache and rustup) and DEV_ENV_KEEP, so no variable can pick a planted binary. */
-const devEnv = () => ({
-  PATH: [join(process.env.HOME ?? '', '.cargo', 'bin'), '/usr/bin', '/bin', '/usr/sbin', '/sbin', '/opt/homebrew/bin', '/usr/local/bin'].join(':'),
-  HOME: process.env.HOME ?? '',
-  ...Object.fromEntries(DEV_ENV_KEEP.filter((k) => process.env[k]).map((k) => [k, process.env[k]])),
-});
+/**
+ * The environment ./dev runs under: the caller's own, without any `PADDOCK_*` variable (PADDOCK_DEV, PADDOCK_DEV_HOME,
+ * PADDOCK_CI_MOUNT, PADDOCK_DEV_TARGET_DIR and the like pick or place the binary, so none can). ./dev finds its toolchain the way it
+ * does for the caller: CI's cargo is not under $HOME/.cargo/bin, so a fixed PATH made ./dev stop with "no Rust compiler runs here".
+ */
+const devEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('PADDOCK_')));
 
 /**
  * One folder from `./dev places` (dev-targets, dev-disk, vm-data, lock-root, main-checkout; docs/dev-setup.md), run through the
- * repository's own ./dev, never a program the environment names, under an empty environment (PATH and HOME only; the first run
- * after its inputs change builds paddock-dev, about 35 s measured on 2026-11-15). `pinned` ignores every environment variable (paddock-dev reads
+ * repository's own ./dev, never a program the environment names, without `PADDOCK_*` variables (the first run
+ * after its inputs change builds paddock-dev in the default cache, about 35 s measured on 2026-11-15, 63 s on the macOS runner). `pinned` ignores every environment variable (paddock-dev reads
  * git config with an empty environment). Throws with paddock-dev's reason when the folder cannot be derived (fail closed).
  * @param {string} name
  * @param {{pinned?: boolean, run?: typeof execFileSync}} [o] `run` injected for tests
