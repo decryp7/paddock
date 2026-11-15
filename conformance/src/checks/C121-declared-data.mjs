@@ -14,6 +14,7 @@
 // site beyond an entry's count at its own line, and never allows a whole file or folder.
 // The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else), and a
 // file the check cannot read is not measured (an error finding at that file).
+// Not read: the check's own files (`IMPLEMENTATION`, as C120's): their invented lines are test data, not reads.
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
 // The Rust host (`tools/paddock-dev/src/check/c121.rs`) is the rule's own implementation; this is its port, and
 // `tools/paddock-dev/tests/it/check.rs` (the `c121` tests) compares the two finding for finding.
@@ -21,6 +22,14 @@ import { warn } from '../finding.mjs';
 import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c121-allow.json';
+/** The check's own files, as C120's: its sources and tests name the patterns (their invented lines are test data), and its allow list. */
+export const IMPLEMENTATION = new Set([
+  'conformance/src/checks/C121-declared-data.mjs',
+  'conformance/test/c121-declared-data.test.mjs',
+  'tools/paddock-dev/src/check/c121.rs',
+  'tools/paddock-dev/tests/it/check_c121.rs',
+  ALLOW,
+]);
 const TOOL = /\b(?:grep|egrep|fgrep|sed|awk|rg|perl)\b/;
 const WORKFLOW = /\.gitea\/workflows\/|(?:^|[\s"'`/])workflows\/[\w.-]+\.ya?ml/;
 const REGEX_USE = /\.(?:match|matchAll)\(|new RegExp\(|Regex::new\(/;
@@ -69,7 +78,7 @@ export default {
     if (broken) return broken;
     const out = [];
     for (const f of ctx.files()) {
-      const kind = kindOf(f);
+      const kind = IMPLEMENTATION.has(f) ? null : kindOf(f);
       if (!kind) continue;
       const { text, finding } = allow.read(f);
       if (finding) {

@@ -16,6 +16,8 @@
 //! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale entry, reports a site
 //! beyond an entry's count at its own line and never allows a whole file or folder.
 //!
+//! Not read: the check's own files ([`IMPLEMENTATION`], as C120's): their invented lines are test data, not reads.
+//!
 //! The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else),
 //! and a file the check cannot read is not measured (an error finding at that file).
 //!
@@ -33,6 +35,15 @@ use std::sync::LazyLock;
 
 /// The allow list both hosts read.
 pub const ALLOW: &str = "conformance/c121-allow.json";
+
+/// The check's own files, as C120's: its sources and tests name the patterns (their invented lines are test data), and its allow list.
+pub const IMPLEMENTATION: [&str; 5] = [
+    "conformance/src/checks/C121-declared-data.mjs",
+    "conformance/test/c121-declared-data.test.mjs",
+    "tools/paddock-dev/src/check/c121.rs",
+    "tools/paddock-dev/tests/it/check_c121.rs",
+    ALLOW,
+];
 
 static TOOL: LazyLock<Regex> = LazyLock::new(|| rx(r"\b(?:grep|egrep|fgrep|sed|awk|rg|perl)\b"));
 static WORKFLOW: LazyLock<Regex> = LazyLock::new(|| rx(r#"\.gitea/workflows/|(?:^|[\s"'`/])workflows/[\w.-]+\.ya?ml"#));
@@ -167,6 +178,9 @@ impl Check for C121 {
         };
         let mut findings = Vec::new();
         for f in ctx.files().iter() {
+            if IMPLEMENTATION.contains(&f.as_str()) {
+                continue;
+            }
             let Some(kind) = kind_of(f) else { continue };
             let text = match allow.read(ctx, f) {
                 Ok(text) => text,
