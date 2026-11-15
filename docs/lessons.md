@@ -2116,3 +2116,18 @@ steps of one push run one at a time while light rows go on.
 what the push sends, never by local names. Pushing a train before stacking work on it keeps the checks small.
 **Class: the pre-push gate's scope differs from what the push sends (an old base measured more; a local base would have
 measured less); earlier: the 2026-11-12 base choice from origin/main for train-based branches.**
+
+## A test took a helper's identity after the code under test had already ended it (2026-11-15, CI run 8118)
+Spotter's `a_browser_that_exits_leaves_no_helper_behind` failed once on the macOS runner after 10.09 s with "timed out waiting
+for the helper's pid file" and passed on its retry in 0.15 s. First hypotheses: the helper started late (a cold exec or a
+first-launch scan, the "macOS host stalls a test" class), a torn pid file, a reused temp folder. Refuted: the stand-in and its
+helper are `/bin/sh` and `/bin/sleep` (signed system binaries, no first-launch scan); with the timeout naming its last look, 10
+of 200 runs under 6 CPU burners failed, and every one had read a complete pid file whose process had already ended. **Cause:**
+the stand-in wrote the helper's pid and exited at once; `Chromium::launch` saw the exit within its 50 ms poll and ended the
+tree, so a test thread that the loaded host kept off the CPU for that long took `ProcessId::of` of a pid that was gone, and
+polled for a "pid file" that was there all along. **Fix:** the stand-in waits on a FIFO the test opens only after it has the
+helper's identity (a real signal, no sleep, no longer bound); the pid file is written by temp file plus rename; the poll's
+timeout says what it saw last. A second test makes the slow path certain (the helper announces itself a second late): red
+before (the tree is ended before the helper writes), green after; 200 of 200 green under the same burners. **Rule for tests:** a test that must observe a process
+the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
+observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**
