@@ -24,7 +24,7 @@ function isolation(args, env, tables = join(PADDOCK, 'conformance', 'ci')) {
   return spawnSync(ISOLATION_CMD, ['ci', 'isolation', ...args], { env: { ...env, PADDOCK_CI_TABLES: tables }, encoding: 'utf8' });
 }
 /** The command line `idle-run` is given to run for a sweep of a slot (what the fake dev logs after `--`). */
-const SWEEP_CMD = '\\S+paddock-dev ci isolation sweep-slot';
+const SWEEP_CMD = '\\S+ ci isolation sweep-slot';
 
 /**
  * A stand-in for `./dev ci slot` (paddock-dev), for these sequential tests of the shell wiring: a slot is a folder made with
