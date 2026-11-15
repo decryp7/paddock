@@ -104,6 +104,7 @@ The check index (generated from each module's id, title, scope, mode and needs):
 | C124 | A gate's result is built through the shared outcome, never by hand | root | report-only | all |
 | C125 | No hard-coded machine disk paths | root | report-only | all |
 | C126 | Tests bound each step on progress and end every process they start | root | report-only | all |
+| C128 | Tests take a recorded pid's identity through the kit, never ProcessId::of | root | report-only | all |
 <!-- checks:end -->
 
 Notes per check (written by hand; the index above is the complete list):
