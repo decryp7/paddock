@@ -15,3 +15,4 @@ mod runner;
 mod scratch;
 #[cfg(windows)]
 mod scratch_private;
+mod stand_in;
