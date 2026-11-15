@@ -907,6 +907,69 @@ The 1.4 s the user's 1.0.2 log showed between the window and the AI line was not
 folder (30 ms here); it depends on that Mac's state (stored settings with plugin sections, an AI model loading). The
 `Steps` field of the next start's line names the step.
 
+## 2026-11-15, start-up bench over budget in CI: main against train 11, and the runner's launchd class (branch docs/debrief-startup-ab)
+
+Trigger: debrief.yml run 8126 (train 11, 381e4758a), job 38999 (real-app smoke, runner d7-mac-mini-2): `setupDone` median
+409 ms against the 400 ms budget. Per start 409, 366, 384, 420, 413; first start 238. `app state` 106-173 ms in the counted
+starts, 77 in the first; `before setup` 123-153, 61 in the first. The same shape in run 8091 (job 38120, median 388,
+`app state` 30-172) and run 8033 (job 37228, median 417, `app state` 30-94, `before setup` 195-238). Run 8126 listed no
+artifacts through the API; the numbers are from the job log. No other macOS CI job ran on the host during the bench.
+
+Heads read: origin/main 3a342cb42 (A), origin/train/2026-11-14-11 381e4758a (B). Debug `.app` of each, built as the
+macOS smoke job builds it (`npx tauri build --debug --bundles app --config src-tauri/tauri.sidecars.conf.json`, own
+worktree and build folder on vault-dev). Harness: `startup-bench.mjs`'s own `runOnce`, one throw-away data folder per
+series (a first start, then five counted ones), A and B interleaved (ABBA), 6 blocks of each variant, 5 s between
+series. Mac mini M4 Pro, 14 cores. 5-minute load before each block 3.6-5.6 (other agents held quiet); the 1-minute load
+rises to 10-13 during the fresh-profile series from the bench's own starts. Data: invented, empty data folders only.
+
+Counted starts (30 per row), median (min-max), ms:
+
+| Context and variant | Build | `setupDone` | block medians | `app state` | `before setup` |
+|---|---|---|---|---|---|
+| terminal, back to back (the bench) | A | 238 (226-259) | 232-240 | 24 (22-25) | 102 (93-117) |
+| terminal, back to back (the bench) | B | 237 (226-259) | 234-244 | 24 (22-25) | 102 (89-120) |
+| terminal, 5 s between starts | A | 218 (210-233) | 213-222 | 24 (22-25) | 87 (81-108) |
+| terminal, 5 s between starts | B | 216 (210-236) | 215-219 | 24 (22-25) | 86 (82-103) |
+| terminal, fresh data folder each start | A | 277 (264-303) | 268-285 | 64 (61-87) | 100 (90-118) |
+| terminal, fresh data folder each start | B | 280 (261-303) | 276-287 | 64 (60-75) | 104 (90-119) |
+| launchd job, no `ProcessType` (as the runners) | A | 298 (229-333) | 282-314 | 90 (23-98) | 96 (87-130) |
+| launchd job, no `ProcessType` (as the runners) | B | 288 (223-327) | 267-300 | 80 (23-98) | 96 (83-129) |
+| launchd job, no `ProcessType`, + CI's `DYLD_LIBRARY_PATH` | A | 295 (229-336) | 277-300 | 84 (25-98) | 95 (81-126) |
+| launchd job, `ProcessType` Interactive | A | 229 (220-279) | 226-251 | 24 (22-30) | 92 (84-132) |
+| launchd job, `ProcessType` Interactive | B | 231 (218-273) | 224-261 | 25 (23-33) | 92 (82-127) |
+
+The part of `app state` that moves, measured apart (`load_manifests`, debrief-plugin-host `builtins.rs`: it starts
+`debrief-plugins --manifests` and polls `try_wait` with 20 ms sleeps); Python probe, 30 sleeps and 20 runs each, median (min-max), ms:
+
+| Context | `sleep(20 ms)` takes | `--manifests`, blocking wait | `--manifests`, 20 ms poll |
+|---|---|---|---|
+| terminal | 23.3 (20.0-25.0) | 6.9 (6.0-14.9) | 23.1 (21.3-26.3) |
+| launchd job, no `ProcessType` | 93.2 (20.1-95.0) | 22.5 (16.0-25.9) | 94.5 (48.5-98.8) |
+| launchd job, `ProcessType` Interactive | 28.6 (20.3-30.0) | 6.9 (6.3-22.4) | 22.0 (21.3-31.6) |
+
+Findings:
+
+- **Train 11 is not the cause.** A and B agree within 2-10 ms in every context; block medians overlap.
+- **State does not grow per start.** A reused data folder makes `app state` faster (24 ms) than a fresh one (64 ms: the
+  first run's performance probe and saved suggestion); the bench's reuse is the everyday start it means to measure.
+- **Cause of the `app state` growth in CI: the runner's launchd class.** The Gitea runners' LaunchAgents
+  (`~/Library/LaunchAgents/net.decryptology.gitea-runner.*.plist`) set no `ProcessType`; `launchctl print` shows
+  `spawn type = daemon (3)` for them, against `app (1)` for a terminal. launchd.plist(5): "If left unspecified, the system
+  will apply light resource limits to the job, throttling its CPU usage and I/O bandwidth". Under it a 20 ms sleep takes
+  about 93 ms, so the manifests poll takes about 95 ms instead of 22 and `app state` swings between 23 and 98 ms.
+  Confirmed both ways in the same launchd setup: without `ProcessType` 80-90 ms median, with `Interactive` 24-25 ms; `setupDone` 288-298 against 229-231.
+- `DYLD_LIBRARY_PATH` (set by `libduckdb-env.sh` in CI) changes nothing measurable.
+- Back-to-back starts cost about 15-20 ms against 5 s apart (`before setup` 102 against 87: the previous start's
+  teardown overlaps). Not a defect; it is part of the everyday start the budget was set on.
+- **Not reproduced: the rest of CI's excess.** Locally the runner's class gives a median of about 290 ms; CI reads
+  366-420, with `before setup` 123-238 and `app state` up to 173 ms (above the 98 ms local ceiling), and a first start
+  faster than the counted ones. That part is not explained by these measurements (not measured inside a runner job).
+
+Comparable practice: GitHub's runner installs its macOS LaunchAgent with `ProcessType` `Interactive`
+(https://raw.githubusercontent.com/actions/runner/main/src/Misc/layoutbin/actions.runner.plist.template, read
+2026-11-15). GitLab Runner also runs as a per-user LaunchAgent (https://gitlab.com/gitlab-org/gitlab-runner/-/raw/main/docs/install/osx.md, read 2026-11-15); its page
+says nothing about `ProcessType`.
+
 ## Query and import performance, DuckDB 1.5.6 against 2.0 (2026-10-28 and 29)
 
 Every block says what it measured: machine (Apple M4 Pro, 14 cores, macOS), the load average when it ran (load over 10 is marked and
