@@ -1324,10 +1324,19 @@ fn booby_trapped(w: &World, name: &str, sentinel: &Path) -> String {
         put(&format!(".git-hooks/{hook}"), &script, true);
     }
     put("scripts/gate.sh", &script, true);
+    // Windows cannot start a `#!/bin/sh` script, so cargo's rustc-wrapper there is a batch file that does the same. In ci.yml run
+    // 8147 the control never fired on Windows: `gate.sh` was the wrapper, which CreateProcess cannot start, and the toolchain-folder
+    // trap is off wherever `RUSTUP_TOOLCHAIN` pins the toolchain (CI's setup-rust sets it on every OS).
+    put(
+        "scripts/gate.cmd",
+        &format!("@echo off\r\ntype nul > \"{}\"\r\n", sentinel.display()),
+        false,
+    );
     put("scripts/toolchain/bin/cargo", &script, true);
+    let wrapper = if cfg!(windows) { "./scripts/gate.cmd" } else { "./scripts/gate.sh" };
     put(
         ".cargo/config.toml",
-        "[build]\nrustc-wrapper = \"./scripts/gate.sh\"\n[alias]\nmetadata = \"!./scripts/gate.sh\"\n",
+        &format!("[build]\nrustc-wrapper = \"{wrapper}\"\n[alias]\nmetadata = \"!./scripts/gate.sh\"\n"),
         false,
     );
     put("rust-toolchain.toml", "[toolchain]\npath = \"./scripts/toolchain\"\n", false);
@@ -2682,13 +2691,37 @@ fn the_planner_runs_cargo_only_in_the_checkout_of_main_never_in_the_merge_clone(
     let head = booby_trapped(&w, "feat/pr1", &sentinel);
     w.gitea.pull(1, "feat/pr1", &head, "open", None, &["state/approved"]);
     w.approve(1, &head);
-    // Positive control: cargo check in the pull request's own tree runs its build script and its toolchain wrapper.
+    // Positive control: cargo check in the pull request's own tree runs its rustc wrapper (and, where nothing pins the toolchain,
+    // its toolchain folder). On failure it says what ran and what the child had (ER-27).
     git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
-    let _ = TestCommand::new(rustup_proxy_cargo())
-        .args(["check", "--offline", "--quiet"])
-        .current_dir(&w.repos.author)
-        .output();
-    assert!(sentinel.exists(), "cargo check in a pull request's tree executes it (the control)");
+    let proxy = rustup_proxy_cargo();
+    let mut control = TestCommand::new(&proxy);
+    control.args(["check", "--offline", "--quiet"]).current_dir(&w.repos.author);
+    let report = control.path_report();
+    let child_env = control.environment();
+    let reaches = |name: &str| {
+        child_env
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| v.to_string_lossy().into_owned())
+    };
+    let ran = match control.output() {
+        Ok(o) => format!(
+            "exit: {}\nstdout: {}\nstderr: {}",
+            o.status,
+            String::from_utf8_lossy(&o.stdout),
+            String::from_utf8_lossy(&o.stderr)
+        ),
+        Err(e) => format!("did not start: {e}"),
+    };
+    assert!(
+        sentinel.exists(),
+        "cargo check in a pull request's tree executes it (the control)\nproxy: {}\nRUSTUP_TOOLCHAIN in the child: {:?}\nRUSTUP_HOME in the \
+         child: {:?}\n{ran}\n{report}",
+        proxy.display(),
+        reaches("RUSTUP_TOOLCHAIN"),
+        reaches("RUSTUP_HOME"),
+    );
     std::fs::remove_file(&sentinel).unwrap();
     let scratch = tempfile::tempdir().unwrap();
     w.real_train = Some(scratch.path().to_path_buf());
