@@ -1,18 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { axeViolations } from '../src/index.ts';
+import { axeInThemes, axeViolations } from '../src/index.ts';
 
 // Pitwall run 8134 (WebKit): axe read Benchmarks' muted cells on a row half-way through the theme's 100 ms background
-// transition (#a0a7b2 on #5c5d60, 2.71:1), although the transitions had been settled before the scan: the transition started
-// while axe ran. Colours read mid-transition are not a measurement: axeViolations sees that a colour moved during the scan,
-// says so, settles and scans again. These pages start motion from inside axe's own scan (`onEveryScan`), so the order is
-// certain.
-const table = (dark: string) => `<!doctype html><html lang="en"><title>Themes</title><style>
-    td { background: rgb(255, 255, 255); color: rgb(85, 85, 85); transition: background 3s linear; }
-    .dark td { ${dark} }
-  </style>
-  <table><tbody><tr><td>muted text</td><td>more muted text</td></tr></tbody></table></html>`;
-const GOOD_DARK = table('background: rgb(17, 17, 17); color: rgb(160, 160, 160);');
-const BAD_DARK = table('background: rgb(17, 17, 17); color: rgb(60, 60, 60);');
+// transition (#a0a7b2 on #5c5d60, 2.71:1). Colours read while they change are not a measurement, so axeViolations holds the
+// page still for the scan (no transitions or animations, reduced motion). These pages start motion from inside axe's own
+// scan (`onEveryScan`), so the order is certain: before the change, axe read them mid-change.
 
 /** Runs `body` (the source of a function of the scan number `n`) in the page at the start of each of axe's scans. */
 async function onEveryScan(page: Page, body: string): Promise<void> {
@@ -39,60 +31,54 @@ async function onEveryScan(page: Page, body: string): Promise<void> {
   }, body);
 }
 
-const scans = (page: Page) => page.evaluate(() => (window as unknown as { scans: number }).scans);
-const rescans = () => test.info().annotations.filter((a) => a.type === 'axe-rescan');
+const open = (page: Page, html: string) => page.goto(`data:text/html,${encodeURIComponent(`<!doctype html><html lang="en"><title>Motion</title>${html}</html>`)}`);
 
-test('axeViolations does not report colours read while a transition that began during the scan runs', async ({ page }) => {
-  await page.goto(`data:text/html,${encodeURIComponent(GOOD_DARK)}`);
-  // The text turns light at once, the background follows over 3 s: light on white until then.
-  await onEveryScan(page, "if (n === 1) document.documentElement.classList.add('dark');");
+// Text that is fine on its end background, and fails on the grey an animation starts from.
+const CELL = 'td { background: rgb(255, 255, 255); color: rgb(85, 85, 85); }';
+const FLASH = '@keyframes flash { from { background: rgb(110, 110, 110); } to { background: rgb(255, 255, 255); } }';
+
+test('a 90 ms colour animation that starts as the scan begins is not read half-way', async ({ page }) => {
+  await open(page, `<style>${CELL} ${FLASH} .go td { animation: flash 90ms linear; }</style><table><tbody><tr><td>muted text</td></tr></tbody></table>`);
+  await onEveryScan(page, "document.documentElement.classList.add('go');");
   expect(await axeViolations(page)).toEqual([]);
-  expect(await scans(page), 'the first scan was discarded and a second one made').toBe(2);
-  expect(rescans().map((a) => a.description)).toEqual([
-    expect.stringMatching(/^scan 1 of 4 counted for nothing: transition background-color started during it; .*prefers-color-scheme: dark matches/),
-  ]);
+  expect(await page.evaluate(() => (window as unknown as { scans: number }).scans), 'the probe ran in the scan').toBe(1);
+});
+
+test('the same animation on a ::before is not read half-way either', async ({ page }) => {
+  const style = `td::before { content: 'before '; background: rgb(255, 255, 255); color: rgb(85, 85, 85); } ${FLASH}
+    .go td::before { animation: flash 90ms linear; }`;
+  await open(page, `<style>${CELL} ${style}</style><table><tbody><tr><td>muted text</td></tr></tbody></table>`);
+  // axe judges text against what lies behind it, and reads a pseudo-element's colours only partly, so the probe also reads
+  // the ::before's background as the scan starts: its end state, not the animation's first frame.
+  await onEveryScan(page, "document.documentElement.classList.add('go'); window.seen = getComputedStyle(document.querySelector('td'), '::before').backgroundColor;");
+  expect(await axeViolations(page)).toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as { seen: string }).seen)).toBe('rgb(255, 255, 255)');
+});
+
+test('a fill-opacity transition started in the scan is at its end state while axe reads', async ({ page }) => {
+  await open(page, `<style>rect { fill-opacity: 0.2; transition: fill-opacity 3s linear; } .go rect { fill-opacity: 1; }</style>
+    <svg width="40" height="40" aria-hidden="true"><rect id="r" width="40" height="40" fill="rgb(0, 0, 0)" /></svg><p>text</p>`);
+  await onEveryScan(page, "document.documentElement.classList.add('go'); window.seen = getComputedStyle(document.getElementById('r')).fillOpacity;");
+  expect(await axeViolations(page)).toEqual([]);
+  expect(await page.evaluate(() => (window as unknown as { seen: string }).seen)).toBe('1');
 });
 
 test('axeViolations still reports a real contrast failure', async ({ page }) => {
-  await page.goto(`data:text/html,${encodeURIComponent(table('').replace('rgb(85, 85, 85)', 'rgb(200, 200, 200)'))}`);
+  await open(page, `<style>td { background: rgb(255, 255, 255); color: rgb(200, 200, 200); }</style><table><tbody><tr><td>faint text</td></tr></tbody></table>`);
   expect(await axeViolations(page, { idsOnly: true })).toEqual(['color-contrast']);
 });
 
-test('motion in the first scan into a theme that fails is still reported by the next scan', async ({ page }) => {
-  await page.goto(`data:text/html,${encodeURIComponent(BAD_DARK)}`);
-  await onEveryScan(page, "if (n === 1) document.documentElement.classList.add('dark');");
-  expect(await axeViolations(page, { idsOnly: true })).toEqual(['color-contrast']);
-  expect(await scans(page)).toBe(2);
-});
-
-test('axeViolations throws, naming what moved, when every scan sees a colour start', async ({ page }) => {
-  await page.goto(`data:text/html,${encodeURIComponent(GOOD_DARK)}`);
-  await onEveryScan(page, "document.documentElement.classList.toggle('dark');");
-  await expect(axeViolations(page)).rejects.toThrow(/colours kept changing during 4 scans \(transition background-color\)/);
-  expect(await scans(page)).toBe(4);
-  expect(rescans()).toHaveLength(4);
-});
-
-test('a ticking stroke-dashoffset (a progress ring) is not colour motion', async ({ page }) => {
-  const ring = `<!doctype html><html lang="en"><title>Ring</title><style>circle { transition: stroke-dashoffset 1s linear; }</style>
-    <svg width="40" height="40" aria-hidden="true"><circle id="r" cx="20" cy="20" r="15" fill="none" stroke="rgb(0, 0, 0)" stroke-dasharray="94" stroke-dashoffset="0" /></svg>
-    <p>ring</p></html>`;
-  await page.goto(`data:text/html,${encodeURIComponent(ring)}`);
-  await onEveryScan(page, "document.getElementById('r').style.strokeDashoffset = String(10 * n);");
-  expect(await axeViolations(page)).toEqual([]);
-  expect(await scans(page)).toBe(1);
-});
-
-test("an empty animation (CDK's autofill detector) is not colour motion", async ({ page }) => {
-  const form = `<!doctype html><html lang="en"><title>Form</title><style>
-      @keyframes cdk-text-field-autofill-start { /*!*/ }
-      input.watch { animation: cdk-text-field-autofill-start 0s 1ms; }
-    </style><main></main></html>`;
-  await page.goto(`data:text/html,${encodeURIComponent(form)}`);
-  await onEveryScan(
+test('axeInThemes reads each theme at its end state, not the switch into it', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await open(
     page,
-    "const i = document.createElement('input'); i.className = 'watch'; i.setAttribute('aria-label', 'field ' + n); document.querySelector('main').append(i);",
+    `<style>td { background: rgb(255, 255, 255); color: rgb(85, 85, 85); transition: background 3s linear, color 3s linear; }
+      @media (prefers-color-scheme: dark) { td { background: rgb(17, 17, 17); color: rgb(160, 160, 160); } }</style>
+    <table><tbody><tr><td>muted text</td></tr></tbody></table>`,
   );
-  expect(await axeViolations(page)).toEqual([]);
-  expect(await scans(page)).toBe(1);
+  expect(await axeInThemes(page, { themes: ['dark', 'light'] })).toEqual([]);
+  // Motion is back after the scan: the page's transitions and its reduced-motion preference are as they were.
+  expect(
+    await page.evaluate(() => [getComputedStyle(document.querySelector('td') as HTMLElement).transitionDuration, matchMedia('(prefers-reduced-motion: reduce)').matches]),
+  ).toEqual(['3s, 3s', false]);
 });

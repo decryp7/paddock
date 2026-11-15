@@ -4,17 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
-### `@decryp7/paddock-e2e`: `axeViolations` does not report colours read mid-transition
-- A scan during which a colour transition or animation started (`transitionrun`/`animationstart` of a colour property, by
-  whole name: `color`, any `*-color`, `background`, `background-color`, `background-image`, `opacity`, `filter`,
-  `backdrop-filter`, `fill`, `stroke`, `box-shadow`, `text-shadow`, `visibility`, `border`, `outline`; an animation by its own
-  keyframes, empty ones not counted) counts for nothing: it is logged and added to the test's annotations (`axe-rescan`, with
-  what moved, the scan, the time since the last scheme switch and `prefers-color-scheme`), and the page is settled and scanned
-  again, at most 4 times (measured: 3 at most), then `axeViolations` throws naming what kept changing. Pitwall run 8134
-  (WebKit) reported Benchmarks' cells on a row half-way into the dark theme.
-- `axeInThemes` and `axeTargets` wait until the emulated colour scheme is live (`matchMedia` and two animation frames) before
-  they scan.
-- Selftest `selftest/axe-themes.spec.ts`, now run in CI (ui's e2e job in Chromium, e2e-webkit in WebKit).
+### `@decryp7/paddock-e2e`: `axeViolations` holds the page still while axe reads it
+- Before its scan, `axeViolations` turns motion off: a constructed stylesheet sets `transition: none !important;
+  animation: none !important` on `*, *::before, *::after` and `prefers-reduced-motion: reduce` is emulated; two animation
+  frames pass, axe scans once, and both are undone. Colours read mid-change are no longer reported (Pitwall run 8134, WebKit:
+  Benchmarks' cells on a row half-way into the dark theme). An animation's end state is not applied: axe reads the element's
+  own style.
+- `axeInThemes` and `axeTargets` wait until the emulated colour scheme is live (`matchMedia` and two animation frames).
+- Selftest `selftest/axe-themes.spec.ts`, run in CI (ui's e2e job in Chromium, e2e-webkit in WebKit).
 
 ### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
 - New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the

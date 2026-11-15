@@ -2099,6 +2099,11 @@ click. Proof that matches the rate: a probe that forces the pill to fall due dur
 between press and release; paused: `pauseAhead`'s 5 s jump inside the helper) lost the click 6 of 6 times with the clock running
 (Stop from x 1140.5 or 1180.2 to 1092.9) and landed it 6 of 6 times through `clickWithTimePaused`; the two Stop tests were then
 60 of 60 green (`--repeat-each=30`), all in the CI image on WebKit. At CI's rate (2 in 147) 60 runs alone would not prove it.
+The probe, to rerun it: a spec that installs the clock, opens with `openAiApp`, switches the chat's browser to Agent, asks,
+waits for the chip and for no `status-jobs`, then either presses the Stop button with `page.mouse.down()`, runs
+`page.clock.runFor(3000)`, waits for `status-jobs` and releases (expect the chip to stay: the lost click), or calls
+`clickWithTimePaused(page, stop)` (expect the chip gone); run it with
+`npx playwright test <probe> --project=webkit --repeat-each=6` in `apps/debrief/app` (CI image, `DEBRIEF_E2E_PREBUILT=1`).
 The product still moves Stop when a status item to its right appears: the user approved ADR 0061 for the status bar and the
 toast stack (2026-11-15), which will replace the helper. Why the logs did not show it: the app logs Stop, so its absence named
 the lost click; the click's target is not logged. **Class: a control that moves under the pointer during a click (third instance after the
@@ -2113,13 +2118,15 @@ the grey rows 375 ms after it, during the scan, so the transition began after `s
 0 of 20 runs in the CI image, and probes of emulate plus settle (40 switches, with the page kept busy 0 to 450 ms) always
 found the transition and finished it; with six CPU burners the runs timed out instead. So why the transition started late
 on the runner is open; the likeliest cause is that WebKit applies an emulated scheme only at its next rendering update, which a
-loaded runner delays past settling. **Fix (helper):** `axeInThemes` and `axeTargets` now wait until the scheme is live
-(`matchMedia` and two animation frames) before settling (ER-33), and `axeViolations` records colour transitions and animations
-that begin during a scan (by whole property name, an animation by its own keyframes, empty ones not counted), logs and
-annotates the discarded scan (what moved, the scan, ms since the scheme switch, `prefers-color-scheme`), settles and scans again,
-at most 4 times (measured: at most 3, docs/benchmarks.md), then fails naming them. A first version matched parts of names
-(`stroke-dashoffset` as `stroke`) and counted unreadable keyframes as colour, so Dyno's ticking ring and CDK's empty autofill
-animation used every scan; the review caught it, and selftests now cover both. Selftest `selftest/axe-themes.spec.ts`, run in
-CI (ui's e2e job, Chromium; e2e-webkit, WebKit), forces motion from inside axe's scan: red before in both engines, green after.
-**Class: axe read colours that were still changing (earlier: the theme switch
-transition that `settleTransitions` was made for, and the hover tooltip fading in, run 7872).**
+loaded runner delays past settling. **Fix (helper), after three rounds:** first a detect-and-rescan (record colour transitions
+and animations that start during a scan, scan again); its review found partial name matches (`stroke-dashoffset` read as
+`stroke`) and unreadable keyframes counted as colour, and the next check found short animations (30 to 90 ms) and `::before`
+ones that its lookup after `animationstart` never saw, so false contrast failures came back in both engines. The user then
+chose common practice: `axeViolations` turns motion off for the scan (a constructed stylesheet with `transition: none
+!important; animation: none !important` on `*, *::before, *::after`, plus `prefers-reduced-motion: reduce`), waits two frames,
+scans once and undoes both; `axeInThemes` and `axeTargets` also wait until the switched scheme is live (`matchMedia`, two
+frames; ER-33). Selftest `selftest/axe-themes.spec.ts`, run in CI (ui's e2e job, Chromium; e2e-webkit, WebKit), starts motion
+from inside axe's scan: a 90 ms colour animation, the same on `::before`, and a `fill-opacity` transition were red against the
+rescan version in both engines and are green now. **Rule:** a check that reads a moving page stops the motion; it does not try
+to detect every kind of motion. **Class: axe read colours that were still changing (fourth instance: the theme switch transition that `settleTransitions`
+was made for, the hover tooltip fading in, run 7872, this run, and the rescan's own misses).**
