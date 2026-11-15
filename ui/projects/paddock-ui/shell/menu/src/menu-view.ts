@@ -39,12 +39,14 @@ export class PdMenuTriggerGuard {
 
 /*
  * One menu list template for the bar and context menus: menus are looked up by path on every render (CDK keeps the data
- * a menu was first opened with), so an open menu follows check marks and enabled states as they change.
+ * a menu was first opened with), so an open menu follows check marks and enabled states as they change. Rows are keyed
+ * by what they run, never by position: when a row above goes away while the menu is open, a row keeps its command
+ * instead of taking over its neighbour's (Debrief's run 8116).
  */
 const LIST = `
   <ng-template #list let-path let-label="label">
     <div cdkMenu class="pd-menu" [attr.aria-label]="label" [attr.data-menu]="label">
-      @for (node of nodesAt(path); track $index) {
+      @for (node of nodesAt(path); track nodeKey(node, $index)) {
         @switch (node.kind) {
           @case ('separator') {
             <div role="separator" class="pd-menu-sep"></div>
@@ -105,6 +107,11 @@ abstract class MenuView {
 
   /** The entries at `path` (the root menu id, then submenu ids). */
   protected abstract nodesAt(path: readonly string[]): readonly MenuNode[];
+
+  /** A row's identity in an open menu: its command or submenu id; separators by position (they run nothing). */
+  protected nodeKey(node: MenuNode, index: number): string {
+    return node.kind === 'separator' ? `separator:${index}` : `${node.kind}:${node.id}`;
+  }
 
   protected hint(binding: string | undefined): string {
     return binding ? formatKey(binding, this.platform) : '';

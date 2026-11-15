@@ -1,5 +1,6 @@
 import { buildMenus, menuItems, recentLabel, RECENT_MENU_FILES, RECENT_MENU_PROJECTS, MenuNode, MenuState, MenuView, tidy, TopMenu, topLevelSize } from './menu-model';
 import { at } from '../../../testing/must';
+import { DEBRIEF_MENU_ITEMS } from './menu.contributions';
 
 const COMMANDS: [string, string, string?][] = [
   ['project.new', 'New project'],
@@ -244,6 +245,24 @@ describe('menu model', () => {
     }
     expect(ids).toContain('window.layout.reset');
     expect(ids).toContain('window.perspective.1');
+  });
+
+  // The menu bar keys its rows by command id, so a level must not hold one twice; a contributed placement (a plugin's, or a
+  // second placement in the same group) that repeats a command already placed there is dropped.
+  it('never lists an action twice in one menu level, also when a contribution places it again', () => {
+    const items = [
+      ...DEBRIEF_MENU_ITEMS,
+      { menu: 'file', command: 'file.openFiles', group: 'open', order: 301 },
+      { menu: 'file', command: 'file.openFiles', group: 'plugin', order: 10 },
+    ];
+    const levels = (nodes: readonly MenuNode[]): MenuNode[][] => [nodes as MenuNode[], ...nodes.flatMap((n) => (n.kind === 'submenu' ? levels(n.items) : []))];
+    for (const m of buildMenus(state({ items }))) {
+      for (const level of levels(m.items)) {
+        const ids = level.flatMap((n) => (n.kind === 'item' || n.kind === 'submenu' ? [n.id] : []));
+        expect(new Set(ids).size, m.label).toBe(ids.length);
+      }
+    }
+    expect(labels(menu(buildMenus(state({ items })), 'file').items).filter((l) => l === 'Open files…')).toHaveLength(1);
   });
 
   it('keeps every menu at most about 20 entries at the top level', () => {

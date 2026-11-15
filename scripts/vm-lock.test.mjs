@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import { after, afterEach, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { waitProgressing } from './test-kit.mjs';
-import { endHolders, fileReaper, warmDev } from './vm-test-support.mjs';
+import { endHolders, fileReaper, running, warmDev } from './vm-test-support.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const LIB = join(here, 'vm-lock.sh');
@@ -276,9 +276,8 @@ test('ER-14: a holder killed by its test leaves no `slot hold` process once the 
   const holder = Number(readFileSync(join(t.root, 'slots', 's1.owner'), 'utf8').match(/^pid=(\d+)$/m)?.[1]);
   assert.ok(holder > 0, 'the slot names its holder process');
   await h.stop();
-  let alive = true;
-  try { process.kill(holder, 0); } catch { alive = false; }
-  assert.equal(alive, false, `the detached \`slot hold\` (pid ${holder}) outlived the test's guard`);
+  // A zombie has ended (CI's PID 1 never collects an orphan): `running`, not a bare kill(pid, 0) (CI run 8110).
+  assert.equal(running(holder), false, `the detached \`slot hold\` (pid ${holder}) outlived the test's guard`);
 });
 
 test('ER-27: a slow paddock-dev call is logged with its step, duration and exit code', () => {

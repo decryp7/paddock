@@ -30,6 +30,9 @@ export function warmDev() {
 }
 
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+/** Is `pid` running: it exists and is not a zombie. A zombie has ended (its parent has not collected it); in CI's job container
+ * PID 1 never collects, so an orphaned holder stays a zombie that `kill(pid, 0)` still answers for (CI run 8110). */
+export const running = (pid) => alive(pid) && !spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim().startsWith('Z');
 const commandOf = (pid) => spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
 
 /**
@@ -62,11 +65,11 @@ export async function endHolders(scratch) {
     const owner = h.command.match(/--owner (\S+)/)?.[1];
     if (owner && inside(owner, scratch)) rmSync(owner, { recursive: true, force: true });
   }
-  const running = () => holders.filter((h) => alive(h.pid)).length;
+  const left = () => holders.filter((h) => running(h.pid)).length;
   try {
-    await waitProgressing(`${holders.length} slot holder(s) to see their owner folder gone`, () => running() === 0, { noProgressMs: 15_000, progress: running });
+    await waitProgressing(`${holders.length} slot holder(s) to see their owner folder gone`, () => left() === 0, { noProgressMs: 15_000, progress: left });
   } catch { /* the survivors are killed and reported below */ }
-  const killed = holders.filter((h) => alive(h.pid) && commandOf(h.pid) === h.command);
+  const killed = holders.filter((h) => running(h.pid) && commandOf(h.pid) === h.command);
   for (const h of killed) { try { process.kill(h.pid, 'SIGKILL'); } catch { /* gone */ } }
   return killed;
 }
