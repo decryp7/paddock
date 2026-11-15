@@ -87,9 +87,13 @@ fn wait_bounded(child: &mut Child, limit: Duration) -> i32 {
             let _ = child.wait();
             return TIMED_OUT;
         }
-        // Short naps at first (most programs here end within milliseconds), then longer ones.
+        // Most programs here end within milliseconds, so the first naps are short; a long run is polled less often.
         naps += 1;
-        std::thread::sleep(Duration::from_millis(if naps < 40 { 2 } else { 20 }));
+        std::thread::sleep(match naps {
+            0..=50 => Duration::from_micros(200),
+            51..=150 => Duration::from_millis(2),
+            _ => Duration::from_millis(20),
+        });
     }
 }
 
