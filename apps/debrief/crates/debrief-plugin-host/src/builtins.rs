@@ -81,6 +81,7 @@ pub fn load_manifests_within(exe: &Path, bound: Duration) -> Result<Vec<Manifest
     // How it ended and how long it took is paddock_proc's `tool.run` line (a warning when it failed, with its error output).
     let limits = paddock_proc::Limits::new(bound).max_output(MAX_MANIFESTS_BYTES).stop_on_cap();
     let out = paddock_proc::run_bounded(cmd, limits).map_err(|e| match e {
+        paddock_proc::RunError::NotFound(_) => format!("the plugins binary is missing ({}); reinstall Debrief", exe.display()),
         paddock_proc::RunError::Wait(..) => format!("the plugins could not be waited for ({}): {e}", exe.display()),
         _ => format!("cannot start the plugins ({}): {e}", exe.display()),
     })?;
@@ -89,7 +90,7 @@ pub fn load_manifests_within(exe: &Path, bound: Duration) -> Result<Vec<Manifest
         paddock_proc::Outcome::Exited(status) => return Err(format!("the plugins could not describe themselves ({status})")),
         paddock_proc::Outcome::TimedOut => return Err("the plugins did not describe themselves in time".into()),
         paddock_proc::Outcome::OutputCap => {
-            return Err(format!("the plugins' manifests are larger than {} MiB", MAX_MANIFESTS_BYTES >> 20));
+            return Err(format!("the plugins wrote more than {} MiB", MAX_MANIFESTS_BYTES >> 20));
         }
     }
     let manifests: Vec<Manifest> = serde_json::from_slice(&out.stdout).map_err(|e| format!("the plugins' manifests are not valid: {e}"))?;
@@ -268,7 +269,10 @@ mod tests {
     fn a_missing_binary_means_no_plugins_with_a_reason() {
         let b = Builtins::load(Path::new("/definitely/not/debrief-plugins"));
         assert!(b.plugins().is_empty());
-        assert!(b.problem().unwrap().contains("cannot start the plugins"));
+        assert_eq!(
+            b.problem().unwrap(),
+            "the plugins binary is missing (/definitely/not/debrief-plugins); reinstall Debrief"
+        );
         assert!(Builtins::none().problem().is_none());
     }
 }

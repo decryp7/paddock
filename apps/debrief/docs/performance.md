@@ -926,8 +926,12 @@ benched once with `scripts/ci/startup-bench.mjs --runs 5 --os macos` from a term
 `app state` drops by about 14 ms per start, as the A/B predicted for a terminal; the `setupDone` median moves less (4 ms)
 because `before setup` varied by 109-147 ms across both series under this load. Under the launchd class without
 `ProcessType` the poll's sleeps stretched to about 93 ms (A/B above), so the CI saving should be larger; not measured here.
-The regression test (`tests/it/manifests.rs`) compares the call with the fake binary's own run: before the fix the fastest
-of 10 calls took 21.6 ms against 3.5 ms for the binary itself.
+Measured apart with the test fake (debrief-plugin-host's `debrief-plugin-host-fake --manifests`, 10 calls against 10 blocking
+runs of the binary, interleaved, load about 40): before the fix the fastest call took 21.6 ms against 3.5 ms for the
+binary's own run. This is a benchmark, not a test: the tests (`tests/it/manifests.rs`) cover the bound, the output cap,
+a crash and malformed output. Over the 4 MiB cap the old code stopped reading, so the real plugins binary's next write
+failed (EPIPE) and it exited 101 ("could not describe themselves"); now the cap ends the run at once with "the plugins
+wrote more than 4 MiB".
 
 ## Query and import performance, DuckDB 1.5.6 against 2.0 (2026-10-28 and 29)
 
