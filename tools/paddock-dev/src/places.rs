@@ -9,7 +9,12 @@
 //! - The main checkout: the folder that holds the git common directory ([`Repo::discover`]).
 //!
 //! `./dev places` prints them for the scripts (vm-lock, vm-win, the vm-smoke harness, wp0-run); `--pinned` reads only the
-//! repository's own git config, with an empty environment for git, so no variable can move a guarded folder (the Windows test VM).
+//! repository's own git config (`git config --local`) and ignores every variable `./dev places` itself reads. Its trust, said
+//! plainly: on Unix git runs with an otherwise empty environment and a fixed PATH of `/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin`,
+//! so no variable picks the git or the config it reads; `/usr/local/bin` and `/opt/homebrew/bin` are writable by the user, so a
+//! program the user put there is trusted. It guards against mistakes, not against the user (the Windows test VM's guards: the
+//! user's own VMs must never be targeted by accident). On Windows `--pinned` is refused: nothing runs it there (its callers are
+//! the Mac host's VM scripts) and Windows has no fixed system folder to take git from.
 //! Each fails closed with the next step when it cannot be derived. The one other copy of the rule is the hooks'
 //! `.claude/hooks/lib/paddockpaths.py` (hooks run before any binary is built; docs/known-copies.toml, `dev-places`;
 //! .claude/hooks/paddockpaths-parity.test.sh runs both on one table). The layout itself is described once, in docs/dev-setup.md.
@@ -40,36 +45,29 @@ pub fn dev_targets(from: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<
     dev_targets_of(set, root)
 }
 
-/// The dev-targets folder from the repository's own git config alone (`git config --local`, git run with an empty environment):
-/// no environment variable can move it. For the guards of the Windows test VM.
+/// The dev-targets folder from the repository's own git config alone (`git config --local`; on Unix git runs with an empty
+/// environment and the fixed PATH of the module doc, whose `/usr/local/bin` and `/opt/homebrew/bin` the user can write to). No
+/// variable of `./dev places` moves it. For the guards of the Windows test VM, which run on the Mac host; refused on Windows.
 pub fn dev_targets_pinned(from: &Path) -> Result<PathBuf, CliError> {
+    if let Some(why) = pinned_unsupported() {
+        return Err(CliError::usage(why));
+    }
     dev_targets_of(None, pinned_worktree_root(from))
 }
 
+/// Why `--pinned` is refused on this platform: on Windows, with the cause and the next step; elsewhere `None`.
+pub fn pinned_unsupported() -> Option<&'static str> {
+    cfg!(windows).then_some(
+        "`./dev places --pinned` is not supported on Windows: it runs git from fixed system folders, which Windows does not have, \
+         and its only callers (the Windows test VM's guards) run on the Mac host. Next step: run it on the Mac host, or use \
+         `./dev places` without --pinned.",
+    )
+}
+
+#[cfg(not(windows))]
 fn pinned_worktree_root(from: &Path) -> Option<PathBuf> {
-    // Unix: git from the system folders only. Windows has no such fixed folder, so git is found once on the caller's PATH and
-    // runs with only its own folder on PATH (and SystemRoot, which Windows programs need).
-    #[cfg(not(windows))]
-    let mut cmd = {
-        let mut c = paddock_proc::command("git");
-        c.env_clear().env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin");
-        c
-    };
-    #[cfg(windows)]
-    let mut cmd = {
-        let path = std::env::var("PATH").unwrap_or_default();
-        let exts = crate::pathfind::extensions(std::env::var("PATHEXT").ok().as_deref());
-        let git = crate::pathfind::find_program(&path, "git", true, &exts)?;
-        let mut c = paddock_proc::command(&git);
-        c.env_clear();
-        if let Some(dir) = git.parent() {
-            c.env("PATH", dir);
-        }
-        if let Some(root) = std::env::var_os("SystemRoot") {
-            c.env("SystemRoot", root);
-        }
-        c
-    };
+    let mut cmd = paddock_proc::command("git");
+    cmd.env_clear().env("PATH", "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin");
     cmd.arg("-C").arg(from).args(["config", "--local", "--get", "paddock.worktreeRoot"]);
     let out = paddock_proc::run_bounded(
         cmd,
@@ -78,6 +76,11 @@ fn pinned_worktree_root(from: &Path) -> Option<PathBuf> {
     .ok()?;
     let v = out.stdout_text().trim().to_string();
     (out.success() && !v.is_empty()).then(|| PathBuf::from(v))
+}
+
+#[cfg(windows)]
+fn pinned_worktree_root(_from: &Path) -> Option<PathBuf> {
+    None
 }
 
 /// The pure rule (the hooks' copy is `paddockpaths.dev_targets_of`): the named folder (absolute, not `/`, no `..`), else the
@@ -212,12 +215,23 @@ pub struct PlacesArgs {
     repo: Option<PathBuf>,
 }
 
+/// The refusal of `--pinned`: one `::error::` line with the cause and the next step on `err`, nothing on standard output, exit 2.
+fn pinned_refused(why: &str, err: &mut dyn std::io::Write) -> Report {
+    let _ = writeln!(err, "::error::{why}");
+    Report::new(json!({ "error": why }), String::new()).with_exit(paddock_cli::Exit::Usage)
+}
+
 /// `places`: the folders, or the one `--get` names.
 pub fn command(a: &PlacesArgs) -> Result<Report, CliError> {
     let from = match &a.repo {
         Some(r) => r.clone(),
         None => std::env::current_dir().map_err(|e| CliError::failure(format!("cannot read the current folder: {e}.")))?,
     };
+    if a.pinned
+        && let Some(why) = pinned_unsupported()
+    {
+        return Ok(pinned_refused(why, &mut std::io::stderr()));
+    }
     let layout = Layout::derive(&from, &|k| std::env::var(k).ok(), a.pinned);
     if let Some(name) = &a.get {
         let p = layout.get(name)?;
@@ -243,16 +257,20 @@ pub fn command(a: &PlacesArgs) -> Result<Report, CliError> {
     Ok(Report::new(serde_json::Value::Object(data), text.trim_end().to_string()))
 }
 
+/// Test helper: an invented folder that is absolute on this platform, the path itself on Unix and on drive `C:` on Windows (`/srv`
+/// is not absolute there). Tests name invented folders only (C125). Shared by the places and brief_check tests; train 14 moves it
+/// to `paddock_testkit::path`.
+#[cfg(test)]
+pub(crate) fn test_abs(unix: &str) -> String {
+    if cfg!(windows) { format!("C:{unix}") } else { unix.to_string() }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::worktree::git::Git;
 
-    /// An invented absolute folder on this platform: the path itself on Unix, on drive `C:` on Windows (`/srv` is not absolute
-    /// there). Tests name invented folders only (C125).
-    pub(crate) fn abs(unix: &str) -> String {
-        if cfg!(windows) { format!("C:{unix}") } else { unix.to_string() }
-    }
+    use super::test_abs as abs;
 
     #[test]
     fn the_named_folder_beats_the_worktree_root() {
@@ -334,6 +352,8 @@ mod tests {
         assert_eq!(real(&main_checkout(&linked).unwrap()), real(&main));
         let none = |_: &str| None;
         assert_eq!(dev_targets(&linked, &none).unwrap(), PathBuf::from(abs("/srv/disk-d/dev-targets")));
+        // `--pinned` is for the Mac host's VM guards; on Windows it is refused (its own test below).
+        #[cfg(not(windows))]
         assert_eq!(dev_targets_pinned(&linked).unwrap(), PathBuf::from(abs("/srv/disk-d/dev-targets")));
     }
 
@@ -365,5 +385,67 @@ mod tests {
             "no dev disk above a root-level folder"
         );
         assert!(l.get("nope").is_err());
+    }
+
+    #[test]
+    fn the_pinned_refusal_is_one_error_line_with_the_cause_and_the_next_step() {
+        let why = "`./dev places --pinned` is not supported here. Next step: run it on the Mac host.";
+        let mut err = Vec::new();
+        let r = pinned_refused(why, &mut err);
+        assert_eq!(r.exit, paddock_cli::Exit::Usage);
+        assert!(r.text.is_empty(), "nothing on standard output");
+        let err = String::from_utf8(err).unwrap();
+        assert_eq!(err.lines().count(), 1, "{err}");
+        assert!(err.starts_with("::error::") && err.contains("Next step"), "{err}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn on_windows_pinned_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        Git::at(d.path()).text(&["init", "-q"]).unwrap();
+        Git::at(d.path())
+            .text(&["config", "paddock.worktreeRoot", &abs("/srv/disk-f/dev-targets/wt")])
+            .unwrap();
+        let why = pinned_unsupported().unwrap();
+        assert!(why.contains("not supported on Windows") && why.contains("Next step"), "{why}");
+        let e = dev_targets_pinned(d.path()).unwrap_err();
+        assert!(e.text().contains("not supported on Windows"), "{}", e.text());
+        assert!(Layout::derive(d.path(), &|_| None, true).get("vm-data").is_err());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn elsewhere_pinned_is_supported() {
+        assert!(pinned_unsupported().is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_roots_and_relative_forms_are_refused_and_drive_paths_are_absolute() {
+        // A named folder: the filesystem roots, drive-relative, rooted without a drive, and a bare Unix path are refused.
+        for bad in [
+            abs("/"),
+            "C:/".to_string(),
+            "C:\\".to_string(),
+            "C:srv".to_string(),
+            "\\srv".to_string(),
+            "/srv/dt".to_string(),
+        ] {
+            assert!(dev_targets_of(Some(bad.clone()), None).is_err(), "{bad:?} must be refused");
+        }
+        // A worktree root whose parent is a root (`C:\wt`) or is not absolute is refused too.
+        for bad in ["C:/wt", "C:\\wt", "C:srv\\wt", "\\srv\\wt", "/srv/dt/wt"] {
+            assert!(dev_targets_of(None, Some(PathBuf::from(bad))).is_err(), "{bad:?} must be refused");
+        }
+        // A UNC share root is a root: a folder directly under it has no dev disk above it.
+        let unc = dev_targets_of(Some("\\\\h\\s\\dt".to_string()), None).unwrap();
+        assert!(dev_disk_of(&unc).is_err(), "{unc:?}: no dev disk above a UNC share's root");
+        // Drive paths work with either separator.
+        assert_eq!(
+            dev_targets_of(None, Some(PathBuf::from("C:\\srv\\dt\\wt"))).unwrap(),
+            PathBuf::from("C:\\srv\\dt")
+        );
+        assert_eq!(dev_targets_of(Some(abs("/srv/dt")), None).unwrap(), PathBuf::from("C:/srv/dt"));
     }
 }

@@ -905,24 +905,21 @@ mod tests {
         let none = |_: &str| None;
         // Fail closed: no worktree root, no places.
         assert!(Places::derive(d.path(), &none).is_err());
-        // An invented folder that is absolute on this platform (`/srv` is not absolute on Windows).
-        let abs = |unix: &str| if cfg!(windows) { format!("C:{unix}") } else { unix.to_string() };
+        let abs = crate::places::test_abs;
         git.text(&["config", "paddock.worktreeRoot", &abs("/srv/disk-c/dev-targets/wt")])
             .unwrap();
         let p = Places::derive(d.path(), &none).unwrap();
         assert_eq!(p.dev_targets, abs("/srv/disk-c/dev-targets/"));
         let real = |p: &std::path::Path| paddock_env::winpath::real(p).unwrap();
         assert_eq!(real(std::path::Path::new(&p.main_checkout)), real(d.path()));
-        // After a disk move the same brief text follows the new folder: the old one is refused, the new one passes.
-        let brief = filled().replace("/srv/disk-b/", "/srv/disk-c/");
+        // After a disk move the same brief text follows the derived folder: under the old places it is refused, under the
+        // derived ones it passes.
+        let brief = filled().replace("/srv/disk-b/dev-targets/", &p.dev_targets);
         assert!(check(&brief, &places()).iter().any(|f| f.code == "bad-scratch"));
-        let moved = Places::new(
-            std::path::Path::new("/srv/disk-c/dev-targets"),
-            std::path::Path::new("/srv/disk-c/src/paddock"),
-        );
+        let moved = p.clone();
         assert_eq!(check(&brief, &moved), Vec::new());
         // A git write in the derived main checkout is caught wherever that is.
-        let write = format!("{brief}\ngit -C /srv/disk-c/src/paddock commit -m x\n");
+        let write = format!("{brief}\ngit -C {} commit -m x\n", p.main_checkout);
         assert!(check(&write, &moved).iter().any(|f| f.code == "main-checkout-write"));
     }
 
