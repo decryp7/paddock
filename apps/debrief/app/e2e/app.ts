@@ -1,4 +1,4 @@
-import { expect, Page } from '@playwright/test';
+import { expect, Locator, Page } from '@playwright/test';
 
 /** How long the first load of the demo workspace may take (it is slower while the whole suite runs in parallel). */
 export const APP_LOAD_TIMEOUT = 15_000;
@@ -23,6 +23,20 @@ export async function openApp(page: Page): Promise<void> {
   await expect(page.locator('debrief-status-bar')).toContainText('events');
   await expect(page.locator('debrief-timeline-panel .lane').first()).toBeVisible();
   await expect(gridRows(page).first()).toBeVisible();
+}
+
+/**
+ * Clicks `target` with the page's clock paused, then lets time run again. Status-bar items appear on their own timers
+ * (a job shows 2 s after it was queued, the problems badge after its scan) to the right of a right-anchored control and
+ * move it; when one lands between mousedown and mouseup the two hit different elements and the browser fires no click
+ * (debrief.yml run 8136, the AI browsing chip's Stop; lessons.md). Paused, no timer can move the layout during the click.
+ * The page needs `page.clock.install()` before it loads.
+ */
+export async function clickWithTimePaused(page: Page, target: Locator): Promise<void> {
+  // Pause a little ahead (time keeps running until the pause lands, so leave room); due timers run once on the way.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5000));
+  await target.click();
+  await page.clock.resume();
 }
 
 /** Parses a count like "40,123" or "40.1k" shown in the UI into a number. */

@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { expectNoSeriousViolations } from './axe';
 import { ask, openAiApp, openChat, rowMenu, waitAnswered } from './ai-support';
+import { clickWithTimePaused } from './app';
 
 // The AI's browser against the mock backends (src/app/browser/mock-browser-backend.ts and the AI mock): search the web
 // for an error (the AI drafts the search text; the search opens in the default browser), the composer's Browser modes,
@@ -69,6 +70,7 @@ test.describe('AI browser', () => {
   });
 
   test('agent mode asks before new sites, highlights data from the logs, and Stop ends it', async ({ page }, testInfo) => {
+    await page.clock.install();
     await openAiApp(page);
     const chat = await openChat(page);
     await chat.getByTestId('ai-browser-menu').click();
@@ -99,7 +101,8 @@ test.describe('AI browser', () => {
     await expect(chip).toBeVisible();
     await expect(chip).toHaveAttribute('role', 'status');
     await expectNoSeriousViolations(page, testInfo, 'browser-status-chip', 'debrief-status-bar');
-    await chip.getByRole('button', { name: "Stop the AI's browser" }).click();
+    // The jobs pill appears 2 s after the question, to the right of the chip, and moves Stop (run 8136): click it paused.
+    await clickWithTimePaused(page, chip.getByRole('button', { name: "Stop the AI's browser" }));
     await expect(chip).toHaveCount(0);
     await expect(chat.getByTestId('agent-paused')).toContainText('You stopped the AI');
     await expect(chat.getByTestId('ai-browser-menu')).toContainText('Browser: Off');
@@ -118,12 +121,13 @@ test.describe('AI browser', () => {
   });
 
   test('the status chip shows research, then Stop cancels it', async ({ page }, testInfo) => {
+    await page.clock.install();
     await openAiApp(page, 'mockDriving=research');
     const chip = page.locator('debrief-status-bar').getByTestId('ai-browsing');
     await expect(chip).toBeVisible();
     await expect(chip).toHaveAttribute('aria-live', 'polite');
     await expectNoSeriousViolations(page, testInfo, 'browser-status-chip-research', 'debrief-status-bar');
-    await chip.getByRole('button', { name: "Stop the AI's browser" }).click();
+    await clickWithTimePaused(page, chip.getByRole('button', { name: "Stop the AI's browser" }));
     await expect(chip).toHaveCount(0);
   });
 });
