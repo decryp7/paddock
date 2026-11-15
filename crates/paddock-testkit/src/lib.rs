@@ -35,7 +35,7 @@
 //!   build-folder layouts (before cargo 1.100 and after) and refusing any other shape.
 //!
 //! Nothing here touches the user's folders or starts a process, except [`TestCommand`] (a child with a listed environment) and [`boot_volume`], which runs the shared rule
-//! (`conformance/ci/boot-volume.sh`) once per process on macOS; the only real time is [`wait`]'s poll interval.
+//! (`paddock_env::boot_volume`: `df`, `diskutil` and `getconf`) once per process on macOS; the only real time is [`wait`]'s poll interval.
 
 pub mod boot_volume;
 pub mod cargo_layout;

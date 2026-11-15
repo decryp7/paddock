@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { devBeforeToolchain, toolchainActions } from '../src/checks/C119-dev-before-toolchain.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
-const setup = toolchainActions([['kept', 'run: bash conformance/ci/kit.sh host x'], ['plain', 'run: echo']]);
+const setup = toolchainActions([['kept', 'run: bash "${{ github.action_path }}/../../../dev" ci host-tools'], ['plain', 'run: echo']]);
 const lines = (text) => devBeforeToolchain(text, setup).map((e) => e.line);
 
 test('C119 bad: a job that runs ./dev before any toolchain setup, once per job, in a one-line or a block run', () => {
@@ -11,10 +11,10 @@ test('C119 bad: a job that runs ./dev before any toolchain setup, once per job, 
   assert.deepEqual(lines('jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/plain\n      - name: n\n        run: |\n          set -e\n          ./dev x\n'), [8]);
 });
 
-test('C119 good: setup-rust, or an action that goes through kit.sh, or kit.sh itself, comes first', () => {
+test('C119 good: setup-rust, or an action that runs the `ci` command of the dev wrapper, or `--ensure-toolchain` itself, comes first', () => {
   assert.deepEqual(lines('jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/setup-rust\n      - run: ./dev x\n'), []);
   assert.deepEqual(lines('jobs:\n  a:\n    steps:\n      - uses: ./.gitea/actions/kept\n      - run: ./dev x\n'), []);
-  assert.deepEqual(lines('jobs:\n  a:\n    steps:\n      - run: bash conformance/ci/kit.sh which\n      - run: ./dev x\n'), []);
+  assert.deepEqual(lines('jobs:\n  a:\n    steps:\n      - run: bash dev --ensure-toolchain\n      - run: ./dev x\n'), []);
 });
 
 test('C119: a waiver needs a reason; the bare comment is a finding that says so', async () => {

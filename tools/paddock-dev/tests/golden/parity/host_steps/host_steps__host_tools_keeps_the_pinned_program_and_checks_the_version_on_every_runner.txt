@@ -1,0 +1,70 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "cargo-nextest 0.9.149 kept in <ROOT>/home/.paddock-ci/tools/cargo-nextest/0.9.149\ncargo-nextest 0.9.149",
+    github_env: "",
+    github_path: "<ROOT>/home/.paddock-ci/tools/cargo-nextest/0.9.149",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d home/.paddock-ci/tools",
+        "d home/.paddock-ci/tools/cargo-nextest",
+        "d home/.paddock-ci/tools/cargo-nextest/0.9.149",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f home/.paddock-ci/tools/cargo-nextest/0.9.149/cargo-nextest \"#!/bin/sh\\necho 'cargo-nextest 0.9.149 (x)'\\n\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 1,
+    stdout: "cargo-nextest 0.9.149 kept in <ROOT>/home/.paddock-ci/tools/cargo-nextest/0.9.149\n::error::cargo-nextest is 0.9.1 on this runner, the pin is 0.9.149",
+    github_env: "",
+    github_path: "<ROOT>/home/.paddock-ci/tools/cargo-nextest/0.9.149",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d home/.paddock-ci/tools",
+        "d home/.paddock-ci/tools/cargo-nextest",
+        "d home/.paddock-ci/tools/cargo-nextest/0.9.149",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f home/.paddock-ci/tools/cargo-nextest/0.9.149/cargo-nextest \"#!/bin/sh\\necho 'cargo-nextest 0.9.1 (x)'\\n\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 3 ===
+Seen {
+    code: 0,
+    stdout: "cargo-nextest 0.9.149",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 4 ===
+Seen {
+    code: 1,
+    stdout: "::error::cargo-nextest is missing on this runner, the pin is 0.9.149",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

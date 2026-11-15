@@ -1,0 +1,21 @@
+=== case 1 ===
+code 0
+--- GITHUB_ENV
+--- GITHUB_PATH
+--- calls
+--version port= io= dir= size= redis= db=
+--version port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--stop-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--start-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--stop-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+=== case 2 ===
+code 0
+--- GITHUB_ENV
+--- GITHUB_PATH
+--- calls
+--version port= io= dir= size= redis= db=
+--version port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--stop-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--start-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--show-stats port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=
+--stop-server port=4227 io=1 dir=<ROOT>/home/.paddock-ci/sccache-s1 size=10G redis= db=

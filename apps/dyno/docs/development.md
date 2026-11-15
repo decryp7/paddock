@@ -111,7 +111,7 @@ Dyno is on Paddock's shared CI kit (WP-C4): its gates are legs of `.gitea/workfl
 
 Host runners keep a persistent build folder outside the workspace (the job slot's kept folder `target-dyno-app-s<n>` in the
 CI home, Paddock ADR 0025), which the shared
-`prune-build-folder` action (`tools/prune-build-folders.sh`, 20 GB) caps at the end of each host job, so nothing piles up. CI could not be run when the workflow was written; see roadmap G15.
+`prune-build-folder` action (`./dev ci prune-build-folder`, 20 GB) caps at the end of each host job, so nothing piles up. CI could not be run when the workflow was written; see roadmap G15.
 
 ## Architecture documents and diagrams
 

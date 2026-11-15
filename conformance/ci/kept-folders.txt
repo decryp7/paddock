@@ -1,4 +1,4 @@
-# The kept folders of a host runner's CI home (ci-home.sh): the one list job-isolation.sh reads (.gitea/actions/README.md,
+# The kept folders of a host runner's CI home (`./dev ci isolation`'s CI home): the one list it reads (.gitea/actions/README.md,
 # "Job isolation"). Everything else a job writes lives in the runner's per-job folder ($RUNNER_TEMP) and dies with the job.
 #
 #   <kind>  <layout under the CI home>  <scope>
@@ -12,7 +12,7 @@
 # scope `shared`: one folder for every job of the host, only for stores that are safe for concurrent writers (tool installs
 #   that land by an atomic rename).
 #
-# A new cache is one line here; the actions ask `job-isolation.sh path <kind> [<name>]` for its folder.
+# A new cache is one line here; the actions ask `./dev ci isolation path <kind> [<name>]` for its folder.
 target     target-{name}-{slot}       slot
 src        src/{name}-{slot}          slot
 angular    angular/{name}-{slot}      slot

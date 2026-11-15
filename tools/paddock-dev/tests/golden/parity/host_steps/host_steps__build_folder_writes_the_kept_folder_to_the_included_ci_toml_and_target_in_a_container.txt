@@ -1,0 +1,117 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "build folder: <ROOT>/home/.paddock-ci/target-spotter-rust-s1",
+    github_env: "PADDOCK_BUILD_FOLDER=<ROOT>/home/.paddock-ci/target-spotter-rust-s1",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d home/.paddock-ci/target-spotter-rust-s1",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/.cargo",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/.cargo/ci.toml \"# Written by <the step>\\n[build]\\ntarget-dir = '<ROOT>/home/.paddock-ci/target-spotter-rust-s1'\\n\"",
+        "f ws/.cargo/config.toml \"include = [{ path = \\\"ci.toml\\\", optional = true }]\\n\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "build folder: <ROOT>/ws/target",
+    github_env: "PADDOCK_BUILD_FOLDER=<ROOT>/ws/target",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/.cargo",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/.cargo/config.toml \"include = [{ path = \\\"ci.toml\\\", optional = true }]\\n\"",
+    ],
+}
+=== case 3 ===
+Seen {
+    code: 0,
+    stdout: "build folder: <ROOT>/home/.paddock-ci/target-x-s2",
+    github_env: "PADDOCK_BUILD_FOLDER=<ROOT>/home/.paddock-ci/target-x-s2",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d home/.paddock-ci/target-x-s2",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/.cargo",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/.cargo/ci.toml \"# Written by <the step>\\n[build]\\ntarget-dir = '<ROOT>/home/.paddock-ci/target-x-s2'\\n\"",
+        "f ws/.cargo/config.toml \"include = [{ path = \\\"ci.toml\\\", optional = true }]\\n\"",
+    ],
+}
+=== case 4 ===
+Seen {
+    code: 1,
+    stdout: "::error::build-folder: <ROOT>/ws/.cargo/config.toml must include the job's build folder: include = [{ path = \"ci.toml\", optional = true }]",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/.cargo",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/.cargo/ci.toml \"# left by an earlier job\\n\"",
+        "f ws/.cargo/config.toml \"[alias]\\n\"",
+    ],
+}
+=== case 5 ===
+Seen {
+    code: 1,
+    stdout: "::error::build-folder: the name 'a b' may only hold letters, digits, '.', '_' and '-'",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/.cargo",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/.cargo/ci.toml \"# left by an earlier job\\n\"",
+        "f ws/.cargo/config.toml \"include = [{ path = \\\"ci.toml\\\", optional = true }]\\n\"",
+    ],
+}
+=== case 6 ===
+Seen {
+    code: 1,
+    stdout: "::error::job-isolation: this job holds no slot: run the job-isolation action before any step that uses a kept folder",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/.cargo",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/.cargo/ci.toml \"# left by an earlier job\\n\"",
+        "f ws/.cargo/config.toml \"include = [{ path = \\\"ci.toml\\\", optional = true }]\\n\"",
+    ],
+}

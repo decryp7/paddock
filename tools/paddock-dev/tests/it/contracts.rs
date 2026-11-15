@@ -1,5 +1,5 @@
 //! The repository contracts `scripts/affected.test.mjs` also held, moved so the script can be retired (ADR 0022 R4): the
-//! apps' CI contracts (`paddock.ci.json`) and the host-cleanup process patterns they hand to `job-isolation.sh`, the markdown
+//! apps' CI contracts (`paddock.ci.json`) and the host-cleanup process patterns they hand to `ci isolation`, the markdown
 //! that code reads (declared doc inputs), CODEOWNERS, Renovate and the one npm workspace.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{is_declared_doc_input, is_docs};
@@ -115,16 +115,12 @@ fn a_legs_nextest_config_names_only_packages_of_its_cargo_workspace_and_its_rele
     }
 }
 
-/// `job-isolation.sh pattern <pattern>` the way the host-cleanup action runs it: bash to bash, the pattern in an environment variable
-/// (the action's `PATTERNS`), never as an argument of a native process, which Windows' command line parsing rewrites (`\\` became `\`
-/// in run 7724's log, so a `[^/\\]` class reached the script as `[^/\]`).
+/// `ci isolation pattern <pattern>` the way the host-cleanup action runs it. The pattern is an argument of the native tool, which reads
+/// its command line as the C runtime does, so a `[^/\\]` class arrives whole (run 7724's log had it rewritten when it went through a
+/// shell script's `$0`).
 fn pattern_command(pattern: &str, env: &[(&str, String)]) -> std::process::Output {
-    let mut cmd = TestCommand::new("bash");
-    cmd.arg("-c")
-        .arg(r#"exec bash "$0" pattern "$PADDOCK_TEST_PATTERN""#)
-        .arg(root().join("conformance/ci/job-isolation.sh"))
-        .env("PATH", "/usr/bin:/bin")
-        .env("PADDOCK_TEST_PATTERN", pattern);
+    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.args(["ci", "isolation", "pattern"]).arg(pattern);
     if let Ok(v) = std::env::var("SYSTEMROOT") {
         cmd.env("SYSTEMROOT", v);
     }
@@ -138,8 +134,8 @@ const JOB_TMP: &str = "/Users/x/gitea-runner/work/0123456789abcdef/tmp";
 const OTHER_TMP: &str = "/Users/x/gitea-runner/work/fedcba9876543210/tmp";
 
 /// A paddock.ci.json process pattern as host-cleanup runs it: `{tmp}`, `{build}` and `{slot}` filled in by the real
-/// `conformance/ci/job-isolation.sh` for a sample job (slot s1, its runner folder, its build folder), as a regular expression;
-/// `None` when the script refuses it (not anchored on a folder of the job).
+/// `ci isolation pattern` for a sample job (slot s1, its runner folder, its build folder), as a regular expression;
+/// `None` when the tool refuses it (not anchored on a folder of the job).
 fn scoped(pattern: &str, app: &str, os: &str) -> Option<Regex> {
     let win = if os == "Windows" { "C:" } else { "" };
     let out = pattern_command(
@@ -152,9 +148,9 @@ fn scoped(pattern: &str, app: &str, os: &str) -> Option<Regex> {
         ],
     );
     if !out.status.success() {
-        // Shown with a failing test: why the script refused this pattern on this host.
+        // Shown with a failing test: why the tool refused this pattern on this host.
         eprintln!(
-            "job-isolation.sh refused {pattern:?} ({os}): {}",
+            "ci isolation pattern refused {pattern:?} ({os}): {}",
             String::from_utf8_lossy(&out.stderr).trim()
         );
     }

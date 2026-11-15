@@ -76,6 +76,14 @@ struct Ctx {
     binroot: &'static str,
     restarted: bool,
     args: Vec<String>,
+    /// The effective `PADDOCK_DEV_TARGET_DIR` (the CI home's on a host runner), else none.
+    target_dir: Option<PathBuf>,
+    /// Whether the tool's home was named (by the caller or the CI home), so nothing says "nothing is kept".
+    home_set: bool,
+    /// This run never downloads (`PADDOCK_DEV_DOWNLOAD=0`, or a CI job with no read token).
+    no_download: bool,
+    /// Variables the tool and what it starts see besides the caller's: the CI home's folders and a download switched off.
+    extra_env: Vec<(&'static str, String)>,
 }
 
 /// The compiler as it was found and what was hashed with it.
@@ -179,6 +187,22 @@ impl Ctx {
             .current_dir(&self.tool)
             .env("CARGO_TARGET_DIR", target)
             .env("PADDOCK_DEV_HASH", hash);
+        // Never through the job's compiler wrapper: at release the job's sccache server is stopped and its temp folder removed, and a
+        // wrapper that cannot start fails the build of the tool itself (runs 7773 to 7775). The tool is a content-addressed binary, not
+        // cached by sccache. The tool's own first build needs a core limit before the job's CARGO_BUILD_JOBS exists (`ci build-jobs`
+        // writes it): 4, the share of a runner on the shared Mac (docs/benchmarks.md, "Kit shim default"). Only for this build: the
+        // tool and what it starts keep the job's own variables.
+        for k in [
+            "RUSTC_WRAPPER",
+            "RUSTC_WORKSPACE_WRAPPER",
+            "CARGO_BUILD_RUSTC_WRAPPER",
+            "CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER",
+        ] {
+            c.env_remove(k);
+        }
+        if env_var("GITHUB_ACTIONS").as_deref() == Some("true") && env_non_empty("CARGO_BUILD_JOBS").is_none() {
+            c.env("CARGO_BUILD_JOBS", "4");
+        }
         let code = proc::run_inherit(c);
         if code != 0 {
             self.toolchain_changed(f, code)?;
@@ -239,7 +263,9 @@ impl Ctx {
 
     fn start(&self, binary: &Path, hash: &str) -> i32 {
         let mut c = proc::command(binary);
-        c.args(&self.args).env("PADDOCK_DEV_WRAPPER_HASH", hash);
+        c.args(&self.args)
+            .env("PADDOCK_DEV_WRAPPER_HASH", hash)
+            .envs(self.extra_env.iter().map(|(k, v)| (*k, v)));
         proc::replace_with(c)
     }
 }
@@ -326,6 +352,9 @@ pub fn run(args: Vec<String>) -> i32 {
         }
         PathBuf::from(top)
     };
+    if let Some(code) = run_pinned(&root, &args) {
+        return code;
+    }
     let tool = root.join("tools/paddock-dev");
     if !tool.join("inputs.txt").is_file() {
         eprintln!("dev: tools/paddock-dev is not in this checkout (a sparse checkout without it). Run: git sparse-checkout add tools");
@@ -348,19 +377,52 @@ pub fn run(args: Vec<String>) -> i32 {
     let ci_mount = PathBuf::from(env_non_empty("PADDOCK_CI_MOUNT").unwrap_or_else(|| "/sccache".to_string()));
     let mut kept_target = false;
     let mut home = env_non_empty("PADDOCK_DEV_HOME").map(PathBuf::from);
-    if env_var("GITHUB_ACTIONS").as_deref() == Some("true") && writable_dir(&ci_mount) && home.is_none() {
+    let mut target_dir = env_non_empty("PADDOCK_DEV_TARGET_DIR").map(PathBuf::from);
+    let mut extra_env: Vec<(&'static str, String)> = Vec::new();
+    let in_ci = env_var("GITHUB_ACTIONS").as_deref() == Some("true");
+    if in_ci && writable_dir(&ci_mount) && home.is_none() {
         home = Some(ci_mount.join("paddock-dev"));
         // One build folder per hash: jobs of other hashes on the same mount never replace the binary this job just built.
-        kept_target = env_non_empty("PADDOCK_DEV_TARGET_DIR").is_none();
+        kept_target = target_dir.is_none();
     }
+    // On a host runner (macOS, Windows) a CI job keeps the tool and its build folder in the CI home's `tools` folder, never in the
+    // runner's own home: a Windows job folder must stay deletable while the slot's holder runs, and the release steps of the job must
+    // find the tool after the job's temp folder is gone (runs 7773 to 7775). The CI home is the one `ci isolation` uses
+    // (`PADDOCK_CI_HOME`, which must exist and be absolute, else `~/.paddock-ci`; tools/paddock-dev/src/ci_isolation/home.rs,
+    // `ci_home`): it is read here because the tool that knows the rule is not built yet. An explicit `PADDOCK_DEV_HOME` wins.
+    let runner_os = env_non_empty("RUNNER_OS");
+    if in_ci && runner_os.as_deref().is_some_and(|os| os != "Linux") && home.is_none() {
+        match ci_home() {
+            Ok(ci) => {
+                let tools = format!("{ci}/tools");
+                home = Some(PathBuf::from(format!("{tools}/paddock-dev")));
+                extra_env.push(("PADDOCK_DEV_HOME", format!("{tools}/paddock-dev")));
+                if target_dir.is_none() {
+                    let t = format!("{tools}/paddock-dev-target");
+                    target_dir = Some(PathBuf::from(&t));
+                    extra_env.push(("PADDOCK_DEV_TARGET_DIR", t));
+                }
+            }
+            Err(code) => return code,
+        }
+    }
+    // Without a read credential a CI job builds the tool from source and never takes a binary from the store (ADR 0022 section
+    // 3.3): the download could only fail, and a source build keeps its own cache folder (bin-source) below.
+    let mut no_download = env_var("PADDOCK_DEV_DOWNLOAD").as_deref() == Some("0");
+    if in_ci
+        && env_non_empty("PADDOCK_DEV_DOWNLOAD").is_none()
+        && env_non_empty("PADDOCK_DEV_TOKEN")
+            .or_else(|| env_non_empty("GITHUB_TOKEN"))
+            .is_none()
+    {
+        no_download = true;
+        extra_env.push(("PADDOCK_DEV_DOWNLOAD", "0".to_string()));
+    }
+    let home_set = home.is_some();
     let home = home.unwrap_or_else(|| PathBuf::from(home_dir()).join(".paddock-dev"));
     // A run that never downloads (PADDOCK_DEV_DOWNLOAD=0: release and tag jobs) keeps its tools in its own folder, bin-source,
     // which the download path never writes: what it runs was built from source by a run that also did not download.
-    let binroot = if env_var("PADDOCK_DEV_DOWNLOAD").as_deref() == Some("0") {
-        "bin-source"
-    } else {
-        "bin"
-    };
+    let binroot = if no_download { "bin-source" } else { "bin" };
     let ctx = Ctx {
         root,
         tool,
@@ -370,6 +432,10 @@ pub fn run(args: Vec<String>) -> i32 {
         binroot,
         restarted,
         args,
+        target_dir,
+        home_set,
+        no_download,
+        extra_env,
     };
 
     let (config_paths, configs) = read_configs(&ctx.root);
@@ -470,6 +536,84 @@ fn fresh_dir() -> PathBuf {
     std::env::temp_dir().join(download::unique("paddock-dev-fresh-"))
 }
 
+/// Whether two paths name one file (the same program reached by two names).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "std only: paddock_env::winpath does not exist before the launcher has run; both sides take the same path form"
+)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => false,
+    }
+}
+
+/// One tool per job: when the job's first step pinned the tool (`ci isolation acquire` writes `PADDOCK_DEV` to the job's environment),
+/// a `ci` command in CI runs that binary as it is, with no hash and no build. The hash covers files the job itself writes, so at the
+/// job's end (the release steps, after the job's temp folder is gone) ./dev would want another build (runs 7773 to 7775). The pin
+/// never is this launcher or its stage 0 (a test may name it as `PADDOCK_DEV`): that case falls through. `None`: not pinned.
+fn run_pinned(root: &Path, args: &[String]) -> Option<i32> {
+    if env_var("GITHUB_ACTIONS").as_deref() != Some("true") || args.first().map(String::as_str) != Some("ci") {
+        return None;
+    }
+    let pin = PathBuf::from(env_non_empty("PADDOCK_DEV")?);
+    if !is_executable(&pin) || std::env::current_exe().is_ok_and(|me| same_file(&pin, &me)) || same_file(&pin, &root.join("dev")) {
+        return None;
+    }
+    let mut v = proc::command(&pin);
+    v.arg("--version");
+    let out = proc::capture(v, Duration::from_secs(60), None);
+    if !out.ok() || out.stdout.trim().is_empty() {
+        return None;
+    }
+    let mut c = proc::command(&pin);
+    c.args(args);
+    Some(proc::replace_with(c))
+}
+
+/// The CI home a host runner's tool lives in, as a path both a shell and the tool read (forward slashes, no `\\?\\` prefix): see
+/// the comment in [`run`]. `Err` is the exit code after the `::error::` line.
+fn ci_home() -> Result<String, i32> {
+    let home = if let Some(h) = env_non_empty("PADDOCK_CI_HOME") {
+        let absolute = h.starts_with('/') || h.as_bytes().get(1) == Some(&b':') && matches!(h.as_bytes().get(2), Some(b'\\' | b'/'));
+        if !absolute {
+            eprintln!(
+                "::error::PADDOCK_CI_HOME ({h}) is not an absolute path. Set it to the runner's CI home, for example /Volumes/ci/paddock-ci."
+            );
+            return Err(1);
+        }
+        if !Path::new(&h).is_dir() {
+            eprintln!(
+                "::error::PADDOCK_CI_HOME ({h}) does not exist: is its disk mounted? Mount it (or create the folder once by hand); the job stops here rather than fill the internal disk."
+            );
+            return Err(1);
+        }
+        PathBuf::from(h)
+    } else {
+        let h = PathBuf::from(home_dir()).join(".paddock-ci");
+        if let Err(e) = std::fs::create_dir_all(&h) {
+            eprintln!(
+                "::error::./dev cannot make the CI home {}: {e}. Make it writable or set PADDOCK_CI_HOME, then run ./dev again.",
+                h.display()
+            );
+            return Err(1);
+        }
+        h
+    };
+    Ok(mixed_path(&home))
+}
+
+/// The folder with links resolved, in the mixed form (`C:/ci/x`) that bash and the native tool both read.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "std only: paddock_env::winpath does not exist before the launcher has run; the verbatim prefix is removed below"
+)]
+fn mixed_path(p: &Path) -> String {
+    let real = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()).display().to_string();
+    let real = real.strip_prefix(r"\\?\").unwrap_or(&real);
+    if cfg!(windows) { real.replace('\\', "/") } else { real.to_string() }
+}
+
 /// Whether `dir` is a folder this process can write to (`[ -d ] && [ -w ]`).
 fn writable_dir(dir: &Path) -> bool {
     if !dir.is_dir() {
@@ -484,9 +628,7 @@ fn writable_dir(dir: &Path) -> bool {
 /// The rest of a launch once the hash is known: build or fetch the tool, then run it.
 fn launch(ctx: &Ctx, f: &Found) -> i32 {
     let name = format!("paddock-dev-{}{EXE}", f.host);
-    let target_base = env_non_empty("PADDOCK_DEV_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| ctx.tool.join("target"));
+    let target_base = ctx.target_dir.clone().unwrap_or_else(|| ctx.tool.join("target"));
     let first = ctx.args.first().map(String::as_str);
 
     if env_var("PADDOCK_DEV_FRESH").as_deref() == Some("1") {
@@ -508,7 +650,9 @@ fn launch(ctx: &Ctx, f: &Found) -> i32 {
             c
         } else {
             let mut run = proc::command(fresh.join("release").join(format!("paddock-dev{EXE}")));
-            run.args(&ctx.args).env("PADDOCK_DEV_WRAPPER_HASH", &f.hash);
+            run.args(&ctx.args)
+                .env("PADDOCK_DEV_WRAPPER_HASH", &f.hash)
+                .envs(ctx.extra_env.iter().map(|(k, v)| (*k, v)));
             proc::run_inherit(run)
         };
         let _ = std::fs::remove_dir_all(&fresh);
@@ -541,7 +685,8 @@ fn launch(ctx: &Ctx, f: &Found) -> i32 {
         stale = true;
     }
     if stale || !is_executable(&cached) {
-        let fetched = download::enabled()
+        let fetched = !ctx.no_download
+            && download::enabled()
             && download::prebuilt(&Fetch {
                 hash: &f.hash,
                 name: &name,
@@ -584,7 +729,7 @@ impl Ctx {
     /// `PADDOCK_DEV_TARGET_DIR` (or the tool's own target folder). `Err` is the launcher's exit code.
     fn build_into_cache(&self, f: &Found, name: &str, cache_dir: &Path, target_base: &Path) -> Result<(), i32> {
         let tbase: &Path = if self.kept_target { &self.home } else { target_base };
-        if !self.kept_target && env_var("GITHUB_ACTIONS").as_deref() == Some("true") && env_non_empty("PADDOCK_DEV_HOME").is_none() {
+        if !self.kept_target && env_var("GITHUB_ACTIONS").as_deref() == Some("true") && !self.home_set {
             eprintln!(
                 "::notice::./dev builds paddock-dev in this job: the runner has no writable {}, so nothing is kept between runs (cold build, about a minute or two).",
                 self.ci_mount.display()

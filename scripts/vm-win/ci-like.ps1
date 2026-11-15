@@ -5,7 +5,7 @@
 #   ci-like.ps1 -Bundle <git bundle> -Ref <ref in the bundle> -ScriptFile <bash script> [-Slot <clone folder name>]
 #
 # 1. temp folder C:\gitea-runner\work\<16 hex>\tmp whose ACL grants Authenticated Users (S-1-5-11) write; TEMP, TMP, TMPDIR,
-#    RUNNER_TEMP and PADDOCK_JOB_TEMP point at it (the runner's conformance/ci/job-tmpdir.sh)
+#    RUNNER_TEMP and PADDOCK_JOB_TEMP point at it (`./dev ci isolation tmpdir`)
 # 2. a git checkout (fetched from the bundle) with core.autocrlf=true checked out in the guest (not copied LF files)
 # 3. Git's bin first on PATH, then the script runs as: bash --noprofile --norc -e -o pipefail <script> (cwd = the clone)
 #    $env:CI_LIKE_DIR names the folder of the script and of the files `run --ci-like --with` copied

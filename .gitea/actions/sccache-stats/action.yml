@@ -5,4 +5,7 @@ runs:
   steps:
     - name: sccache statistics
       shell: bash
-      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host sccache-stats || echo "::warning::sccache-stats did not run (exit $?); it never fails a job."
+      run: |
+        # Without sccache there are no statistics, and no tool is fetched or built for that.
+        command -v sccache >/dev/null 2>&1 || exit 0
+        bash "${{ github.action_path }}/../../../dev" ci sccache-stats || echo "::warning::sccache-stats did not run (exit $?); it never fails a job."

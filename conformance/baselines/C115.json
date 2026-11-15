@@ -22,21 +22,6 @@
    "hash": "77b9eed00fd77360"
   },
   {
-   "file": "conformance/ci/job-isolation.sh",
-   "line": 178,
-   "hash": "3a4eb424992eaddb"
-  },
-  {
-   "file": "conformance/ci/job-tmpdir.sh",
-   "line": 147,
-   "hash": "88828da3160ea13d"
-  },
-  {
-   "file": "conformance/ci/job-tmpdir.sh",
-   "line": 157,
-   "hash": "9cb843ea621be30d"
-  },
-  {
    "file": "crates/paddock-setup/nsis/test/run-dyno-e2e.ps1",
    "line": 22,
    "hash": "eeaa3714e3701b2f"

@@ -1,0 +1,234 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 1,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 3 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 4 ===
+Seen {
+    code: 1,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 5 ===
+Seen {
+    code: 0,
+    stdout: "<ROOT>/home",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 6 ===
+Seen {
+    code: 0,
+    stdout: "boot-volume: using <ROOT>/home/internal-temp instead of <ROOT>/ext/tmp: <ROOT>/ext/tmp is on an external volume, where macOS (TCC, Removable Volumes) prompts for or denies programs that are their own responsible process\n<ROOT>/home/internal-temp",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 7 ===
+Seen {
+    code: 0,
+    stdout: "boot-volume: using <ROOT>/home/internal-temp instead of <ROOT>/ext/tmp: <ROOT>/ext/tmp is on an external volume, where macOS (TCC, Removable Volumes) prompts for or denies programs that are their own responsible process\n<ROOT>/home/internal-temp",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 8 ===
+Seen {
+    code: 0,
+    stdout: "::warning::boot-volume: <ROOT>/ext/tmp is on an external volume and getconf DARWIN_USER_TEMP_DIR gave no internal folder (nothing): macOS may prompt for removable-volume access. Next step: point TMPDIR at the internal disk\n<ROOT>/ext/tmp",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 9 ===
+Seen {
+    code: 0,
+    stdout: "::warning::boot-volume: <ROOT>/ext/tmp is on an external volume and getconf DARWIN_USER_TEMP_DIR gave no internal folder (relative): macOS may prompt for removable-volume access. Next step: point TMPDIR at the internal disk\n<ROOT>/ext/tmp",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 10 ===
+Seen {
+    code: 0,
+    stdout: "::warning::boot-volume: <ROOT>/ext/tmp is on an external volume and getconf DARWIN_USER_TEMP_DIR gave no internal folder (<ROOT>/missing): macOS may prompt for removable-volume access. Next step: point TMPDIR at the internal disk\n<ROOT>/ext/tmp",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 11 ===
+Seen {
+    code: 0,
+    stdout: "::warning::boot-volume: <ROOT>/ext/tmp is on an external volume and getconf DARWIN_USER_TEMP_DIR gave no internal folder (<ROOT>/ext/tmp): macOS may prompt for removable-volume access. Next step: point TMPDIR at the internal disk\n<ROOT>/ext/tmp",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 12 ===
+Seen {
+    code: 1,
+    stdout: "boot-volume: cannot judge <ROOT>/ext/tmp: df names no mount; treated as internal",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 13 ===
+Seen {
+    code: 1,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ext",
+        "d ext/tmp",
+        "d home",
+        "d home/internal-temp",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

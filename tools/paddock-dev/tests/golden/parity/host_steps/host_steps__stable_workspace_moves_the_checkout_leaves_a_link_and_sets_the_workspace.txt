@@ -1,0 +1,18 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "stable-workspace: resolve the job slot's kept folder ...\nstable-workspace: resolve the job slot's kept folder: done in N s\nstable-workspace: compare the volumes of <ROOT>/work/abc/hostexecutor and <ROOT>/home/.paddock-ci/src ...\nstable-workspace: compare the volumes of <ROOT>/work/abc/hostexecutor and <ROOT>/home/.paddock-ci/src: done in N s\nstable-workspace: move the checkout to <ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1 ...\nstable-workspace: move the checkout to <ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1: done in N s\nstable-workspace: link <ROOT>/work/abc/hostexecutor to <ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1 ...\nstable-workspace: link <ROOT>/work/abc/hostexecutor to <ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1: done in N s\nstable-workspace: <ROOT>/work/abc/hostexecutor -> <ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1\nstable-workspace: building from <ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1",
+    github_env: "PADDOCK_WORKSPACE=<ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d home/.paddock-ci/src",
+        "d home/.paddock-ci/src/decryp7_paddock-crate-s1",
+        "d work",
+        "d work/abc",
+        "f home/.paddock-ci/src/decryp7_paddock-crate-s1/Cargo.toml \"x\"",
+        "l work/abc/hostexecutor -> <ROOT>/home/.paddock-ci/src/decryp7_paddock-crate-s1",
+    ],
+}

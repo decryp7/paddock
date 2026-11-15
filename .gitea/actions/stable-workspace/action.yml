@@ -8,7 +8,9 @@ runs:
   using: composite
   steps:
     - name: Move the checkout to a stable path
+      # A Linux container has a fixed workspace: nothing to do, so no tool is fetched or built for it.
+      if: runner.os != 'Linux'
       shell: bash
       env:
         NAME: ${{ inputs.name }}
-      run: bash "${{ github.action_path }}/../../../conformance/ci/kit.sh" host stable-workspace "$NAME"
+      run: bash "${{ github.action_path }}/../../../dev" ci stable-workspace --name "$NAME"

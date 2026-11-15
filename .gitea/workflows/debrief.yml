@@ -41,8 +41,6 @@ on:
         default: ""
 
 env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
   # Line tables only (file:line in backtraces, no variable info): smaller debug builds and caches and much less
   # memory when linking the test binaries. The test profile inherits this from dev.
@@ -362,7 +360,7 @@ jobs:
         run: |
           # Outside the checkout, which stable-workspace moves: the job slot's kept folder (the installer stamps the pinned
           # version in it).
-          dir="$(bash ../../conformance/ci/kit.sh isolation path browser debrief)"
+          dir="$(bash ../../dev ci isolation path browser debrief)"
           echo "DEBRIEF_TEST_BROWSER_DIR=$dir" >> "$GITHUB_ENV"
 
       - name: libduckdb
@@ -723,7 +721,7 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: .
         run: |
-          dir="$(bash conformance/ci/kit.sh isolation path npm)"
+          dir="$(bash dev ci isolation path npm)"
           echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
       # Host runners: the same checkout path every run, so sccache hits the workspace crates.
@@ -991,7 +989,7 @@ jobs:
         if: ${{ runner.os == 'Windows' && !startsWith(github.ref, 'refs/tags/') }}
         working-directory: .
         run: |
-          dir="$(bash conformance/ci/kit.sh isolation path npm)"
+          dir="$(bash dev ci isolation path npm)"
           echo "npm_config_cache=$(cygpath -w "$dir")" >> "$GITHUB_ENV"
 
       # Host runners: the same checkout path every run, so sccache hits the workspace crates.
@@ -1247,14 +1245,14 @@ jobs:
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v3
     env:
-      # A release job: ./dev ci steps never download a stored tool binary here (conformance/ci/kit.sh keeps the shell scripts too).
+      # A release job: ./dev ci steps never download a stored tool binary here.
       PADDOCK_DEV_DOWNLOAD: "0"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       - uses: actions/download-artifact@v3

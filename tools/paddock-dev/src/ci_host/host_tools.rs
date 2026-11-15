@@ -511,17 +511,4 @@ mod tests {
             assert!(a.sum.len() == 64 && a.sum.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
         }
     }
-
-    #[test]
-    fn the_pin_matches_the_image_and_the_shell_copy() {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let action = std::fs::read_to_string(repo.join("conformance/ci/host/host-tools.sh")).unwrap();
-        assert!(
-            action.contains(&format!("VERSION={}", PIN.version)),
-            "bump the shell copy with the pin"
-        );
-        for a in [&PIN.macos, &PIN.windows] {
-            assert!(action.contains(a.sum), "the shell copy has the sum of {}", a.archive);
-        }
-    }
 }

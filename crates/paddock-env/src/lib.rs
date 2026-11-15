@@ -19,6 +19,7 @@
 
 mod app;
 mod atomic;
+pub mod boot_volume;
 pub mod cargo_layout;
 pub mod dev_override;
 mod dirs;

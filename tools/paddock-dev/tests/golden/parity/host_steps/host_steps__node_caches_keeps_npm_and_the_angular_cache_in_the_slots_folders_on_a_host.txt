@@ -1,0 +1,45 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "node-caches: npm <ROOT>/home/.paddock-ci/npm-s1\nnode-caches: Angular <ROOT>/ws/ui/.angular/cache -> <ROOT>/home/.paddock-ci/angular/e2e-1-s1",
+    github_env: "npm_config_cache=<ROOT>/home/.paddock-ci/npm-s1",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d home/.paddock-ci/angular",
+        "d home/.paddock-ci/angular/e2e-1-s1",
+        "d home/.paddock-ci/npm-s1",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/ui",
+        "d ws/ui/.angular",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "l ws/ui/.angular/cache -> <ROOT>/home/.paddock-ci/angular/e2e-1-s1",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "node-caches: npm <ROOT>/home/.paddock-ci/npm-s1",
+    github_env: "npm_config_cache=<ROOT>/home/.paddock-ci/npm-s1",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d home/.paddock-ci/npm-s1",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d ws",
+        "d ws/ui",
+        "d ws/ui/.angular",
+        "d ws/ui/.angular/cache",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f ws/ui/.angular/cache/stale \"\"",
+    ],
+}

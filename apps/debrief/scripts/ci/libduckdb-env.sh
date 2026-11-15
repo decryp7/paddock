@@ -7,13 +7,13 @@
 # In the paddock-ci image the library is already in DUCKDB_LIB_DIR (/opt/libduckdb): it is used when its header has the
 # version crates/debrief-store-duck/scripts/fetch-libduckdb.sh pins. Otherwise the pinned, SHA-256-checked download is
 # fetched by that script, into a folder that outlives the job on a host runner (the job slot's kept folder
-# libduckdb/<job>-<slot>, conformance/ci/job-isolation.sh: two jobs on one host never write the same archive) and into the job's temp folder in a
+# libduckdb/<job>-<slot>, from `./dev ci isolation path`: two jobs on one host never write the same archive) and into the job's temp folder in a
 # container. Set on the loader path through GITHUB_ENV, never under `nice`/`env`, which macOS's SIP strips DYLD_* from.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here/../.."
 fetch=${DEBRIEF_FETCH_LIBDUCKDB:-crates/debrief-store-duck/scripts/fetch-libduckdb.sh}
-isolation=${DEBRIEF_JOB_ISOLATION:-../../conformance/ci/job-isolation.sh}  # Paddock's job isolation (kept folders of the job slot)
+dev=${DEBRIEF_DEV:-../../dev}  # Paddock's ./dev: `ci isolation` gives the kept folders of the job slot
 want=$(sed -n 's/^VERSION=//p' "$fetch" | head -n 1)
 [ -n "$want" ] || { echo "::error::no VERSION= line in $fetch"; exit 1; }
 out=${GITHUB_ENV:?GITHUB_ENV is not set}
@@ -43,7 +43,7 @@ else
   if [ -n "${PADDOCK_CI_IMAGE:-}" ]; then echo "::notice::the CI image's libduckdb is not $want; fetching the pinned download."; fi
   # A host keeps it in the job slot's kept folder (job isolation), so a concurrent run of the same job never writes it too.
   if [ "${RUNNER_OS:?}" = Linux ]; then keep="${RUNNER_TEMP:-/tmp}/libduckdb"
-  else keep="$(bash "$isolation" path libduckdb "${GITHUB_JOB:-job}")"; fi
+  else keep="$(bash "$dev" ci isolation path libduckdb "${GITHUB_JOB:-job}")"; fi
   # The script prints `export DUCKDB_LIB_DIR=... DUCKDB_INCLUDE_DIR=...` and the loader path. Its status is checked on its
   # own: `eval "$(...)"` would swallow a failed download and leave the image's DUCKDB_LIB_DIR (another DuckDB) in place.
   if ! exports=$(bash "$fetch" "$keep"); then

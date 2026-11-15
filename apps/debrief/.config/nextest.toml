@@ -84,8 +84,8 @@ fail-fast = false
 retries = 1
 flaky-result = "fail"
 failure-output = "immediate-final"
-# Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) build-jobs.sh
-# sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (conformance/ci/build-jobs.sh).
+# Every core, where a CI job has its host to itself. On a shared host (three macOS runners on one Mac) `./dev ci build-jobs`
+# sets NEXTEST_TEST_THREADS to the job's core share, which overrides this (tools/paddock-dev/src/ci_build_jobs.rs).
 test-threads = "num-cpus"
 # The time budget of one test (Paddock rule 40, as crates/.config/nextest.toml): reported SLOW after 30 s and stopped,
 # failing the run, after 90 s, so a hung test costs a minute and a half instead of five (CI 6381: a hang in long_ops held

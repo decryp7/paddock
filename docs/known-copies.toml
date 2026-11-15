@@ -1053,87 +1053,6 @@ status = "planned"
   delete_by = "pitwall-v1.2.0"
   note = "The same wiring as Dyno's (B6b). Follow-up as in Dyno's note."
 
-# =====================================================================================================================
-# CI kit: job isolation (ADR 0025, ADR 0022 R1; Rust tooling plan RT-1)
-# =====================================================================================================================
-
-[[mechanism]]
-id = "ci-job-isolation"
-title = "Job isolation on a host runner: slots, kept folders, ports, process patterns, the job's temp and socket folders"
-canonical = "tools/paddock-dev"
-paths = ["tools/paddock-dev/src/ci_isolation/**"]
-status = "built"
-adr = "docs/adr/0025-ci-job-isolation.md"
-
-  [[mechanism.copy]]
-  paths = ["conformance/ci/job-isolation.sh", "conformance/ci/job-tmpdir.sh", "conformance/ci/ci-home.sh"]
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "The shell kit runs one release in parallel with `dev ci isolation` (plan decision D5, `PADDOCK_CI_KIT=shell` as the fallback); `conformance/test/job-isolation.test.mjs` runs the same cases against both (ISOLATION_CMD). The retirement PR after the next app tag whose release run went through the Rust path green deletes the scripts, that switch and this entry; the date follows that point (a paddock tag, as no app tag fits `owner = paddock`)."
-
-# =====================================================================================================================
-# CI kit: setup-rust's compile cache (docs/plans/ci-in-rust.md, step 1)
-# =====================================================================================================================
-
-[[mechanism]]
-id = "ci-setup-rust"
-title = "A CI job's sccache: the pinned install, the backend, the slot's port and folder, a fresh server, RUSTC_WRAPPER"
-canonical = "tools/paddock-dev"
-paths = ["tools/paddock-dev/src/ci_setup_rust.rs"]
-status = "built"
-adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
-
-  [[mechanism.copy]]
-  paths = [".gitea/actions/setup-rust/action.yml"]
-  symbols = ["text:sccache"]
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "The action's shell steps (Install sccache, sccache, Linux dependencies for Tauri) stay for release, rule 54 and tag runs until the release-path lane (plan step 5), which deletes them and the Implementation step after the app tags; tools/paddock-dev/tests/it/setup_rust.rs runs both on the same inputs. A paddock tag, as no app tag fits owner = paddock."
-
-
-[[mechanism]]
-id = "ci-kit-shell"
-title = "A CI kit step in two implementations: build-jobs and job-isolation in Rust, and the shell scripts the release path keeps"
-canonical = "tools/paddock-dev"
-paths = ["tools/paddock-dev/src/ci_build_jobs.rs", "tools/paddock-dev/src/ci_isolation/mod.rs"]
-status = "built"
-adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
-
-  [[mechanism.copy]]
-  paths = ["conformance/ci/build-jobs.sh", "conformance/ci/job-isolation.sh", "conformance/ci/kit.sh"]
-  symbols = ["text:build-jobs", "text:job-isolation"]
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh picks the implementation by the same rule as setup-rust's Implementation step) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/build_jobs.rs and conformance/test/job-isolation.test.mjs (ISOLATION_CMD) run both on the same inputs."
-
-[[mechanism]]
-id = "ci-host-steps"
-title = "The host-runner steps of the CI kit in two implementations: stable-workspace, node-caches, host-tools, sccache-stats, build-folder, the prune steps, host-cleanup, kept-clone, guardian-as-user and boot-volume in Rust, and the shell the release path keeps"
-canonical = "tools/paddock-dev"
-paths = ["tools/paddock-dev/src/ci_host/mod.rs"]
-status = "built"
-adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
-
-  [[mechanism.copy]]
-  paths = [
-    "conformance/ci/host/stable-workspace.sh",
-    "conformance/ci/host/node-caches.sh",
-    "conformance/ci/host/host-tools.sh",
-    "conformance/ci/host/sccache-stats.sh",
-    "conformance/ci/build-folder.sh",
-    "tools/prune-build-folders.sh",
-    "tools/prune-ci-build-folder.sh",
-    "tools/host-cleanup.sh",
-    "conformance/ci/kept-clone.sh",
-    "conformance/ci/bounded.sh",
-    "conformance/ci/guardian-as-user.sh",
-    "conformance/ci/boot-volume.sh",
-  ]
-  symbols = ["text:kit.sh", "text:prune", "text:host-cleanup", "text:kept-clone", "text:guardian-as-user", "text:boot-volume"]
-  owner = "paddock"
-  delete_by = "v0.5.0"
-  note = "The scripts stay for tag, release and rule 54 runs (conformance/ci/kit.sh `host <step>` picks the implementation by the rule of the other kit steps) until the release-path lane (docs/plans/ci-in-rust.md, WP-11) deletes them and the shim; tools/paddock-dev/tests/it/host_steps.rs runs both on the same inputs, and conformance/test/ci-actions.test.mjs and tools/test/prune-and-cleanup.test.mjs keep the scripts' own cases. WP-5 (docs/plans/ci-in-rust.md): kept-clone.sh (with bounded.sh, which only it sources) runs in Rust as `ci kept-clone`, held equal by host_steps.rs and by conformance/test/kept-clone.test.mjs run against the binary (KEPT_CLONE_CMD); guardian-as-user.sh runs as `ci guardian-as-user` (its parity runs where bash is 4.4 or newer: the Linux legs; the root path is a fake machine's unit tests); boot-volume.sh stays for job-tmpdir.sh (sourced), paddock_testkit::boot_volume and Dyno's check-bundle.sh, and `ci boot-volume` is the same rule in Rust (job-tmpdir's rule in process delegates to it). host-tools' pin is held equal by a unit test of ci_host/host_tools.rs. tools/prune-build-folders.ps1 was deleted with the port: a manual lister with no workflow, action, script or test caller, so no release-path run can need it; `./dev ci prune-agent-builds` replaces it on every OS."
-
 [[mechanism]]
 id = "ci-build-env"
 title = "The build's commit and date for the About page (PADDOCK_BUILD_COMMIT, PADDOCK_BUILD_DATE) in two implementations: `./dev ci build-env` in Rust, and the script the release path keeps"
@@ -1147,7 +1066,7 @@ adr = "docs/adr/0022-rust-developer-and-ci-tool.md"
   symbols = ["text:buildEnv"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "CI-in-Rust WP-3 (docs/plans/ci-in-rust.md): the script stays for tag, release and rule 54 runs (conformance/ci/kit.sh `build-env` picks the implementation by the kit's rule, as for the other kit steps) and for conformance check C56, which reads the two names from its `buildEnv` function (conformance/src/checks/C56-build-env-names.mjs), until the conformance engine (WP-10) and the release path (WP-11) are ported; tools/paddock-dev/tests/it/build_env.rs runs both on the same inputs."
+  note = "CI-in-Rust WP-3 (docs/plans/ci-in-rust.md): every caller runs `./dev ci build-env` (WP-2 of docs/plans/shell-to-rust.md deleted conformance/ci/kit.sh, which chose between the two); the script stays only for conformance check C56, which reads the two names from its `buildEnv` function (conformance/src/checks/C56-build-env-names.mjs), until the conformance engine (WP-10 of ci-in-rust.md) is ported; tools/paddock-dev/tests/it/build_env.rs runs both on the same inputs."
 
 # =====================================================================================================================
 # CI run readers (RT-8)
@@ -1388,4 +1307,4 @@ status = "built"
   paths = ["conformance/ci/safe-rm.sh"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "The shell scripts' copy (safe_rm): the CI kit's shell fallback and the dev scripts run without the paddock-dev binary. Same root and path rules, read lexically; Windows paths are spelled by cygpath -m first. conformance/test/safe-rm.test.mjs tests it in bash and sh; there is no parity table with the Rust guard yet. Goes with the shell kit (docs/plans/ci-in-rust.md, WP-11) for the CI scripts; the dev scripts move to `./dev` or keep it."
+  note = "The shell scripts' copy (safe_rm): the dev scripts (scripts/vm-win/prepare.sh) run without the paddock-dev binary. Same root and path rules, read lexically; Windows paths are spelled by cygpath -m first. conformance/test/safe-rm.test.mjs tests it in bash and sh; there is no parity table with the Rust guard yet. The CI kit's shell that used it is gone (WP-2 of docs/plans/shell-to-rust.md); it goes with the last dev script that sources it (WP-6 and WP-7 of that plan)."

@@ -1,4 +1,5 @@
 // Fixture helpers: apps are built as real folders in a temp dir, good and bad variants side by side.
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -139,4 +140,18 @@ export function pe({ imports = [], delay = [], plus = true, delayAttributes = 1 
   b.writeUInt32LE(raw, secTable + 20);
   sec.copy(b, raw);
   return b;
+}
+
+let devBinaryPath;
+/**
+ * The paddock-dev binary that the tests of the CI kit's commands run: the one `./dev` builds (or finds in its cache) for this checkout, named
+ * by `./dev --print-binary` (PADDOCK_DEV_BIN names another). Resolved once per process; a tool that cannot be had stops the file with the
+ * wrapper's own message, never a pass.
+ */
+export function devBinary() {
+  if (devBinaryPath) return devBinaryPath;
+  if (process.env.PADDOCK_DEV_BIN) return (devBinaryPath = process.env.PADDOCK_DEV_BIN);
+  const r = spawnSync('sh', [join(PADDOCK, 'dev'), '--print-binary'], { cwd: PADDOCK, encoding: 'utf8', env: process.env });
+  if (r.status !== 0 || !r.stdout.trim()) throw new Error(`./dev --print-binary failed (exit ${r.status}): ${r.stderr.slice(-500)}`);
+  return (devBinaryPath = r.stdout.trim().split('\n').pop());
 }

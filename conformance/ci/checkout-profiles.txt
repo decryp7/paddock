@@ -1,4 +1,4 @@
-# What a host job's kept clone checks out (kept-clone.sh, .gitea/actions/kept-clone; ADR 0025, "Kept clones"). Declared lines:
+# What a host job's kept clone checks out (`./dev ci kept-clone`, .gitea/actions/kept-clone; ADR 0025, "Kept clones"). Declared lines:
 #
 #   bootstrap <dir>                  a folder the plain checkout step fetches before any local action can run (the sparse set
 #                                    of actions/checkout in ci.yml, kept equal to this list by a conformance test; it must

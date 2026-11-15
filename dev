@@ -1,29 +1,87 @@
 #!/bin/sh
-# ./dev, stage 0 (shell-to-rust WP-1, ADR 0022 amendment 2026-11-15): builds the launcher, tools/dev-launch, once and runs it. The
-# launcher (std-only Rust) does the rest: the input hash, the toolchain install, the download, the build and the cache. Only shell
-# builtins, git, cargo and rustup are used. `./dev --wrapper-hash` prints the hash; PADDOCK_DEV_* variables are the launcher's.
+# ./dev, stage 0 (shell-to-rust WP-1, ADR 0022 amendment 2026-11-15): builds the launcher, tools/dev-launch, when its sources changed and
+# runs it. The launcher (std-only Rust) does the rest: the input hash, the toolchain install, the download, the build and the cache.
+# Only shell builtins, git, cargo and rustup are used. The binary is published under a stamp of the launcher's sources (git's tree id,
+# plus a hash of any uncommitted change), so an up-to-date launcher costs no cargo start, a running launcher is never replaced (Windows
+# cannot) and a build in another ./dev never leaves this one a missing file. `./dev --wrapper-hash` prints the tool's hash.
 set -eu
 # A git hook runs its commands with GIT_DIR and GIT_WORK_TREE set: the repository is the one this folder is in, never an inherited one.
 unset GIT_DIR GIT_WORK_TREE
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
 l=$root/tools/dev-launch
 [ -f "$l/Cargo.toml" ] || { echo "dev: tools/dev-launch is not in this checkout (a sparse checkout without it). Run: git sparse-checkout add tools" >&2; exit 2; }
-b=$l/target/release/dev-launch
-bin=$b
-[ -f "$bin" ] || bin=$b.exe
-stale=
-for f in "$l/Cargo.toml" "$l/Cargo.lock" "$l"/src/*.rs; do [ "$bin" -nt "$f" ] || { stale=1; break; }; done
-if [ -n "$stale" ]; then
-  # rustup 1.28 does not install a pinned toolchain by itself, so `cargo` may not run yet. Install the pin the way the old wrapper did
-  # (rustup reads rust-toolchain.toml in tools/paddock-dev: version, profile, components); the launcher then holds the install lock for
-  # every later install. If that fails, build the launcher with any installed toolchain (the first of `rustup toolchain list`).
+key=$(git -C "$root" rev-parse HEAD:tools/dev-launch 2>/dev/null) || key=untracked
+dirt=$(git -C "$root" status --porcelain --untracked-files=all -- tools/dev-launch 2>/dev/null || :)
+if [ -n "$dirt" ]; then key=$key-$({ printf '%s\n' "$dirt"; git -C "$root" diff HEAD -- tools/dev-launch 2>/dev/null || :; } | git hash-object --stdin); fi
+bin=$l/target/bin/dev-launch-$key
+if [ ! -f "$bin" ] && [ ! -f "$bin.exe" ]; then
+  # The first installed toolchain whose rustc is 1.89 or newer (the launcher's rust-version), by what its rustc says: "no installed
+  # toolchains", an old one and one that does not run are skipped.
+  pick() {
+    rustup toolchain list 2>/dev/null | while read -r t _; do
+      v=$(RUSTUP_TOOLCHAIN=$t rustc --version 2>/dev/null) || continue
+      # shellcheck disable=SC2086 # the words of `rustc 1.100.0 (hash date)`
+      set -- $v
+      v=${2:-}
+      case ${v%%.*} in 1) ;; *) continue ;; esac
+      m=${v#*.}
+      m=${m%%.*}
+      case $m in '' | *[!0-9]*) continue ;; esac
+      [ "$m" -ge 89 ] || continue
+      printf '%s' "$t"
+      break
+    done
+  }
+  # The one install stage 0 makes: a machine with rustup and no toolchain at all (rustup 1.28 installs no pin by itself). One at a time
+  # (a lock folder this script removes on any exit but SIGKILL: delete it by hand then), bounded, no self-update, and not again after
+  # an earlier step of the job failed to (PADDOCK_TOOLCHAIN_FAILED). Every other install is the launcher's, under its own lock.
+  install_pin() {
+    if [ "${PADDOCK_TOOLCHAIN_FAILED:-}" = 1 ]; then
+      echo "::error::./dev: no Rust toolchain is installed and an earlier step of this job failed to install one (PADDOCK_TOOLCHAIN_FAILED=1). Install the toolchain rust-toolchain.toml pins by hand, then run ./dev again." >&2
+      exit 2
+    fi
+    lk=${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}/.paddock-stage0-install.lock
+    lim=${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}
+    mkdir -p "${lk%/*}" 2>/dev/null || :
+    w=0
+    until mkdir "$lk" 2>/dev/null; do
+      # The holder installed it meanwhile.
+      if [ -n "$(pick)" ]; then return 0; fi
+      [ "$w" -lt "$lim" ] || { echo "::error::./dev: another ./dev has been installing the toolchain for $lim s ($lk). Wait for it, or if no install runs on this host delete $lk, then run ./dev again." >&2; exit 1; }
+      sleep 1
+      w=$((w + 1))
+    done
+    trap 'rmdir "$lk" 2>/dev/null || :' EXIT
+    trap 'exit 1' INT TERM HUP
+    if [ -z "$(pick)" ]; then
+      echo "dev: no Rust toolchain is installed; installing the toolchain rust-toolchain.toml pins with rustup (at most $lim s)." >&2
+      (cd "$root/tools/paddock-dev" && exec rustup toolchain install --no-self-update >&2) &
+      ip=$!
+      w=0
+      while kill -0 "$ip" 2>/dev/null; do
+        [ "$w" -lt "$lim" ] || { kill "$ip" 2>/dev/null || :; break; }
+        sleep 1
+        w=$((w + 1))
+      done
+      rc=0
+      wait "$ip" || rc=$?
+      if [ "$rc" -ne 0 ] || [ -z "$(pick)" ]; then
+        echo "::error::./dev: 'rustup toolchain install' did not leave a working toolchain (exit $rc, at most $lim s). Run it by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
+        exit 1
+      fi
+    fi
+    rmdir "$lk" 2>/dev/null || :
+    trap - EXIT INT TERM HUP
+  }
   tc=
   if ! cargo --version >/dev/null 2>&1; then
     command -v rustup >/dev/null 2>&1 || { echo "::error::./dev: no Rust toolchain runs here and rustup is not installed. Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2; exit 2; }
-    echo "dev: cargo does not run here; installing the toolchain rust-toolchain.toml pins with rustup." >&2
-    (cd "$root/tools/paddock-dev" && rustup toolchain install >&2) || echo "dev: 'rustup toolchain install' failed; trying an installed toolchain." >&2
-    if ! cargo --version >/dev/null 2>&1; then
-      tc=$(rustup toolchain list 2>/dev/null | { read -r t _ || :; printf '%s' "$t"; })
+    tc=$(pick)
+    if [ -z "$tc" ]; then
+      case $(rustup toolchain list 2>/dev/null) in
+        '' | 'no installed toolchains'*) install_pin; tc=$(pick) ;;
+        *) echo "::error::./dev: no installed Rust toolchain is 1.89 or newer, which the launcher needs. Install one with 'rustup toolchain install stable', then run ./dev again." >&2; exit 2 ;;
+      esac
     fi
   fi
   # shellcheck disable=SC2086 # tc is one word or empty
@@ -31,10 +89,23 @@ if [ -n "$stale" ]; then
     echo "::error::./dev could not build its launcher (tools/dev-launch, Rust 1.89 or newer). Install Rust with rustup (https://rustup.rs) and run ./dev again; to see why, run 'cargo build --release --locked' in tools/dev-launch." >&2
     exit 1
   }
-  # A build of another ./dev may be relinking the binary (cargo removes it, then links it again): wait for it, at most 5 s.
+  src=$l/target/release/dev-launch
+  ext=
+  [ -f "$src" ] || { src=$src.exe; ext=.exe; }
+  mkdir -p "$l/target/bin"
+  # Published by a rename, so no reader meets half a file; if a ./dev with the same stamp published first (Windows will not replace a
+  # running program), theirs is the same bytes.
   n=0
-  while [ ! -f "$b" ] && [ ! -f "$b.exe" ] && [ "$n" -lt 50 ]; do n=$((n + 1)); sleep 0.1; done
-  bin=$b
-  [ -f "$bin" ] || bin=$b.exe
+  until cp "$src" "$bin$ext.new.$$" 2>/dev/null; do
+    n=$((n + 1))
+    [ "$n" -lt 20 ] || { echo "::error::./dev could not copy the launcher into $l/target/bin. Close programs that use it, then run ./dev again." >&2; exit 1; }
+    sleep 0.2
+  done
+  mv -f "$bin$ext.new.$$" "$bin$ext" 2>/dev/null || { rm -f "$bin$ext.new.$$"; [ -f "$bin$ext" ] || { echo "::error::./dev could not publish the launcher as $bin$ext." >&2; exit 1; }; }
+  # Binaries of other stamps go (a running one, on Windows, stays until it ends).
+  for f in "$l"/target/bin/dev-launch-*; do
+    case $f in "$bin"*) ;; *) rm -f "$f" 2>/dev/null || : ;; esac
+  done
 fi
+[ -f "$bin" ] || bin=$bin.exe
 exec "$bin" "$@"

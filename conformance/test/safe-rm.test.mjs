@@ -158,7 +158,7 @@ for (const shell of SHELLS) {
   });
 }
 
-// kept-clone.sh calls safe_rm inside a phase bounded by a limit (PADDOCK_KEPT_CLONE_TIMEOUT_<ID>): every program it starts per call
+// kept-clone.sh (now `./dev ci kept-clone`) called safe_rm inside a phase bounded by a limit (PADDOCK_KEPT_CLONE_TIMEOUT_<ID>): every program it starts per call
 // costs a fork and an exec, which under load added up to more than the checkout phase's 1 s limit in its test before the phase reached
 // its own git (4 of 40 runs at load 40 to 60; 0 of 40 with the plain `rm -rf` it replaced). The OS is asked once when the helper is
 // sourced, and plain ASCII case is folded by the shell, so a call starts no program but `rm`.

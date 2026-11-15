@@ -2291,3 +2291,17 @@ tests at load 20 to 40); the build and a copy named by size and time now happen 
 `println!` where the shell's `echo` ended on SIGPIPE (failing first: `a_reader_that_closed_standard_output_does_not_make_it_panic`).
 **Rule:** read the whole script before porting it, from line 1; carry its tests over first and make each one red on a planted
 difference; a test that starts a program a sibling test process builds copies it under a lock. Recurring: none known.
+## The kit's shell copy cost a fix per round until the parity became goldens (2026-11-15)
+CI run 8138 failed on the prune script's folder blocks (ext4 gives each folder 4 KiB, so a folder of empty folders read 20 KiB);
+the same branch had already fixed GNU `du --apparent-size` against BSD `du -A`, GNU `stat -f` printing file-system lines, and a bash
+octal read of `010`, all in the kit's shell, while the Rust port of each step existed and a shim picked between the two. WP-2 of
+docs/plans/shell-to-rust.md deleted the shell: every action and workflow runs `./dev ci <step>`, and the bootstrap the shim did
+before the tool existed (the tool in the CI home's `tools` folder, no download without a token, no job compiler wrapper and four build
+jobs for the tool's own first build, the pinned tool for a job's later `ci` steps) moved into the `dev` wrapper, tested in
+`tests/it/wrapper_ci.rs`. Each parity case ran the script and the command on the same fixture one last time, and the agreed result
+is a golden file (`tests/golden/parity`, `parity_golden.rs`); a golden captured on the Mac then failed on Linux for three reasons
+that were never the step's (a `git init` config key only macOS writes, the CI image's own `/sccache` mount, the machine's RAM read from
+a file on Linux but from `sysctl` on macOS), so each is now an input the test sets or a line it drops. **Rule:** when a script is
+retired, run the golden on every OS it will run on before deleting the script, and make each case name every input it reads from the
+machine; a copy of an implementation that survives "until the release path moves" is deleted in the release-path change itself.
+**Class: a second implementation kept as a fallback (ci-kit-shell, ci-host-steps; see also ADR 0022 section 3.7).**

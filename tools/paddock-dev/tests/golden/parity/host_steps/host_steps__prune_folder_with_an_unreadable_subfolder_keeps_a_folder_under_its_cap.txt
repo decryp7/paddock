@@ -1,0 +1,22 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d ci/build",
+        "d ci/build/debug",
+        "d ci/build/debug/data",
+        "d ci/build/locked",
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f ci/build/debug/data/blob \"8192 bytes\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "unreadable ci/build/locked",
+    ],
+}

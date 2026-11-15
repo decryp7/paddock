@@ -1,10 +1,10 @@
 // C119: no workflow job runs `./dev` before its toolchain is set up (ER-9, ER-26). `./dev` hashes its own sources with `rustc -vV` and
 // builds itself with that compiler, so a step that runs it before `.gitea/actions/setup-rust` (or any action that goes through
-// `conformance/ci/kit.sh`, whose first act is `./dev --ensure-toolchain`) can hash and build with another compiler than the job's later
+// `bash .../dev" ci ...`, which installs the pinned toolchain itself when none runs) can hash and build with another compiler than the job's later
 // steps, or find none (run 8034: build-jobs ran before the pinned toolchain existed; CI-in-Rust WP-3 review: five root jobs called
 // `./dev ci run` with no setup-rust). Judged per job of `.gitea/workflows/*.yml`: a step whose `run:` script has a line that runs
 // `./dev` is a finding unless an earlier step of the same job `uses:` a local action that sets the toolchain up (an action whose
-// text names `kit.sh`, `--ensure-toolchain` or `actions/setup-rust`) or runs `kit.sh` / `--ensure-toolchain` itself. A justified case
+// text runs the wrapper as `dev" ci`, names `--ensure-toolchain` or `actions/setup-rust`) or runs `--ensure-toolchain` itself. A justified case
 // carries `conformance: dev-before-toolchain — <why>` (any comment form) on the line or the line above. ER-41: report-only (warnings)
 // until its first green run on main; flip SEVERITY to `error` and `mode` to 'gate' then (docs/gates.toml, C119).
 // The Rust host has the same check (tools/paddock-dev/src/check/c119.rs); tools/paddock-dev/tests/it/check_c119.rs holds them equal.
@@ -16,11 +16,11 @@ import { error, unwaivable, warn } from '../finding.mjs';
 export const SEVERITY = warn;
 const WORKFLOW = /^\.gitea\/workflows\/[^/]+\.ya?ml$/;
 const ACTION = /^\.gitea\/actions\/([^/]+)\/action\.ya?ml$/;
-const SETS_UP = /kit\.sh|--ensure-toolchain|actions\/setup-rust/;
+const SETS_UP = /--ensure-toolchain|actions\/setup-rust|\/dev"\s+ci\s/;
 const RUNS_DEV = /(?:^|[\s;&|(])\.\/dev(?:\s|$)/;
 const FIX = 'Add `- uses: ./.gitea/actions/setup-rust` before the first step that runs `./dev` (the job then hashes and builds the tool with the pinned compiler). A justified case carries `# conformance: dev-before-toolchain — <why>`.';
 
-/** The local actions that set the toolchain up: those whose text goes through kit.sh or names setup-rust. */
+/** The local actions that set the toolchain up: those whose text runs the `dev` wrapper's `ci` command (its first act installs the pinned toolchain when none runs) or names setup-rust. */
 export function toolchainActions(actionTexts) {
   const names = new Set(['setup-rust']);
   for (const [name, text] of actionTexts) if (SETS_UP.test(text)) names.add(name);
@@ -73,7 +73,7 @@ export function devBeforeToolchain(text, setupActions) {
 
   function check(scriptLine, i) {
     if (scriptLine.trimStart().startsWith('#')) return;
-    if (/kit\.sh|--ensure-toolchain/.test(scriptLine)) { ready = true; return; }
+    if (/--ensure-toolchain/.test(scriptLine)) { ready = true; return; }
     if (ready || !RUNS_DEV.test(scriptLine)) return;
     out.push({ line: i + 1, job, waived: view.waiver(i + 1, 'dev-before-toolchain') });
     ready = true; // one finding per job: the first run is the one to fix

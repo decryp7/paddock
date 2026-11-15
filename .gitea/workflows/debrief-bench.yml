@@ -19,8 +19,6 @@ on:
   workflow_dispatch:
 
 env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
   CARGO_TERM_COLOR: always
 
 # A newer push to the same branch (or pull request) supersedes the run still going; tags have their own ref,
@@ -103,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       # Restore and save separately, with the run id in the saved key: a fixed key can never be updated once it
@@ -182,7 +180,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./.gitea/actions/build-jobs
 
       # The store crates link the official prebuilt libduckdb (ADR 0014): fetched once per version, SHA-256 pinned,

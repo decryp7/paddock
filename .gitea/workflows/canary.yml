@@ -18,10 +18,6 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
-env:
-  # The fallback switch of conformance/ci/kit.sh (WP-1): set the repository variable to shell and every kit step runs its script.
-  PADDOCK_CI_KIT: ${{ vars.PADDOCK_CI_KIT }}
-
 jobs:
   # A scheduled run ends early while a train's dispatch run is in CI (./dev ci schedule-skip; ADR 0093 amendment 2026-11-12).
   # Only scheduled runs have it; the jobs below run when it was skipped (any other event) or said run, never when it failed or was cancelled.
@@ -73,7 +69,7 @@ jobs:
         with:
           path: paddock
 
-      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs` through conformance/ci/kit.sh; Linux keeps cargo's default).
+      # CARGO_BUILD_JOBS: this runner's share of the host (`./dev ci build-jobs`; Linux keeps cargo's default).
       - uses: ./paddock/.gitea/actions/build-jobs
 
       - name: ${{ matrix.app }} (main)

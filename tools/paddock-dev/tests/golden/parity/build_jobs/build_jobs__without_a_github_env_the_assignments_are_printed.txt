@@ -1,0 +1,7 @@
+=== case 1 ===
+Result {
+    code: 0,
+    env_file: "",
+    stdout: "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n",
+    stderr: "build-jobs: this host: 14 cores, 65536 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=4 ((14 cores - 2 kept) / 3 jobs per host; the macOS class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}

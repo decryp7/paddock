@@ -15,8 +15,6 @@ const APP = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 function scratch() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'debrief-ci-folder-')));
   const app = join(root, 'apps', 'debrief');
-  mkdirSync(join(root, 'conformance', 'ci'), { recursive: true });
-  copyFileSync(join(APP, '..', '..', 'conformance', 'ci', 'ci-home.sh'), join(root, 'conformance', 'ci', 'ci-home.sh'));
   mkdirSync(join(app, 'scripts', 'ci'), { recursive: true });
   mkdirSync(join(app, '.cargo'));
   mkdirSync(join(app, 'src'));
@@ -111,8 +109,11 @@ test('an image with another libduckdb version, or a host runner, fetches the pin
     assert.match(linux.stdout, /::notice::the CI image's libduckdb is not 1\.5\.6/);
     assert.match(linux.env, new RegExp(`^DUCKDB_LIB_DIR=${join(s.root, 'tmp', 'libduckdb')}/x$`, 'm'));
     writeFileSync(join(s.root, 'github-env'), '');
-    const isolation = join(APP, '..', '..', 'conformance', 'ci', 'job-isolation.sh');
-    const mac = run(s, 'libduckdb-env.sh', { RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's2', DEBRIEF_JOB_ISOLATION: isolation, DEBRIEF_FETCH_LIBDUCKDB: fakeFetch(s, '1.5.6') });
+    // The kept folder is `./dev ci isolation path libduckdb <job>`, asked of the shared tool (tested once, in the tool); a stand-in
+    // answers in the same shape: <CI home>/libduckdb/<job>-<slot>.
+    const dev = join(s.root, 'fake-dev');
+    writeFileSync(dev, '#!/bin/sh\n[ "$1 $2 $3" = "ci isolation path" ] && echo "$HOME/.paddock-ci/$4/$5-$PADDOCK_CI_SLOT"\n');
+    const mac = run(s, 'libduckdb-env.sh', { RUNNER_OS: 'macOS', PADDOCK_CI_SLOT: 's2', DEBRIEF_DEV: dev, DEBRIEF_FETCH_LIBDUCKDB: fakeFetch(s, '1.5.6') });
     const kept = join(s.root, 'home', '.paddock-ci', 'libduckdb', 'tauri-smoke-s2');
     assert.equal(readFileSync(join(s.root, 'fetched'), 'utf8').trim(), kept, 'one kept folder per job and job slot on a host');
     // (macOS strips DYLD_* from a protected shell's environment, so the job's own entries are checked on Linux above.)

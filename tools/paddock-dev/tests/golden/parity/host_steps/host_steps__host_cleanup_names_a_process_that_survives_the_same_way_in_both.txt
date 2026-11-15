@@ -1,0 +1,23 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "::warning::host-cleanup: processes of this job are still running after the clean-up (pattern [/\\\\]ci[/\\\\]target-pitwall-app-s2[/\\\\]debug[/\\\\]pitwall-server):\n   3999999999 /ci/target-pitwall-app-s2/debug/pitwall-server --fake",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d home/.paddock-ci",
+        "d tmp",
+        "d tmp/other-job",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "d work/app",
+        "d work/app/dist",
+        "d work/dist",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "f work/app/dist/y \"2\"",
+        "f work/dist/x \"1\"",
+    ],
+}

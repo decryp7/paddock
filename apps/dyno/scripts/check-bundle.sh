@@ -131,8 +131,8 @@ case "$(uname -s)" in
       # agent's own sockets): ask the running bundled agent what it is shown, started the way the login service starts it, as a
       # launchd job. `dyno-agent view` prints `identifier=… announced=… sent=… cut_down=…`.
       # A launchd job is its own responsible process: its output files go on the boot volume, never on an external one, where
-      # macOS (TCC, Removable Volumes) prompts or denies (conformance/ci/boot-volume.sh, the one rule; docs/lessons.md).
-      view_root="$(bash "$(cd "$(dirname "$0")/../../.." && pwd)/conformance/ci/boot-volume.sh" temp "${TMPDIR:-/tmp}")" || view_root="${TMPDIR:-/tmp}"
+      # macOS (TCC, Removable Volumes) prompts or denies (`./dev ci boot-volume`, the one rule: crates/paddock-env/src/boot_volume.rs; docs/lessons.md).
+      view_root="$(bash "$(cd "$(dirname "$0")/../../.." && pwd)/dev" ci boot-volume temp "${TMPDIR:-/tmp}")" || view_root="${TMPDIR:-/tmp}"
       view="$(mktemp "${view_root%/}/dyno-view-ci.XXXXXX")"
       label="net.decryptology.dyno.checkbundle.$$"
       launchctl submit -l "$label" -o "$view" -e "$view.err" -- "$agent" view || err "launchctl could not start the bundled dyno-agent view"

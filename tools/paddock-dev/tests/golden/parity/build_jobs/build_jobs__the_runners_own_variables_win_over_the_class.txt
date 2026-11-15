@@ -1,0 +1,336 @@
+=== case 1 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=6\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=6 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 2 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=2 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the macOS class's measured test threads / 3 test runs at once)\n",
+}
+=== case 3 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=6\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=6 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the Windows class's measured test threads / 1 test runs at once)\n",
+}
+=== case 4 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=2 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the Windows class's measured test threads / 3 test runs at once)\n",
+}
+=== case 5 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=6\nNEXTEST_TEST_THREADS=6\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=6 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=6 (the runner's PADDOCK_CI_BUILD_JOBS / 1 test runs at once)\n",
+}
+=== case 6 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=2 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the runner's PADDOCK_CI_BUILD_JOBS / 3 test runs at once)\n",
+}
+=== case 7 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 8 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the macOS class's measured test threads / 3 test runs at once)\n",
+}
+=== case 9 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the Windows class's measured test threads / 1 test runs at once)\n",
+}
+=== case 10 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the Windows class's measured test threads / 3 test runs at once)\n",
+}
+=== case 11 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=1\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 1 test runs at once)\n",
+}
+=== case 12 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=1\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=1 (the runner's PADDOCK_CI_BUILD_JOBS / 3 test runs at once)\n",
+}
+=== case 13 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=6\nNEXTEST_TEST_THREADS=12\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=6 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=12 (the runner's PADDOCK_CI_TEST_THREADS / 1 test runs at once)\n",
+}
+=== case 14 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=4\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=2 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=4 (the runner's PADDOCK_CI_TEST_THREADS / 3 test runs at once)\n",
+}
+=== case 15 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=6\nNEXTEST_TEST_THREADS=12\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=6 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=12 (the runner's PADDOCK_CI_TEST_THREADS / 1 test runs at once)\n",
+}
+=== case 16 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=4\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=2 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=4 (the runner's PADDOCK_CI_TEST_THREADS / 3 test runs at once)\n",
+}
+=== case 17 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=6\nNEXTEST_TEST_THREADS=12\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=6 (the runner's PADDOCK_CI_BUILD_JOBS / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=12 (the runner's PADDOCK_CI_TEST_THREADS / 1 test runs at once)\n",
+}
+=== case 18 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=4\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=2 (the runner's PADDOCK_CI_BUILD_JOBS / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=4 (the runner's PADDOCK_CI_TEST_THREADS / 3 test runs at once)\n",
+}
+=== case 19 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=3\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (3 jobs per host x 1536 MB per rustc); the macOS class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=3 (the runner's PADDOCK_CI_TEST_THREADS / 1 test runs at once)\n",
+}
+=== case 20 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=1\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (3 jobs per host x 1536 MB per rustc); the macOS class default of 3 jobs per host / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=1 (the runner's PADDOCK_CI_TEST_THREADS / 3 test runs at once)\n",
+}
+=== case 21 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=5\nNEXTEST_TEST_THREADS=3\n",
+    stdout: "::notice::build-jobs assumes the Windows runner's capacity is 3 (the class default); set PADDOCK_CI_JOBS_PER_HOST or fix the class table in ci_build_jobs.rs if it differs\n",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=5 ((16 cores - 0 kept) / 3 jobs per host; the Windows class default of 3 jobs per host / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=3 (the runner's PADDOCK_CI_TEST_THREADS / 1 test runs at once)\n",
+}
+=== case 22 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=1\n",
+    stdout: "::notice::build-jobs assumes the Windows runner's capacity is 3 (the class default); set PADDOCK_CI_JOBS_PER_HOST or fix the class table in ci_build_jobs.rs if it differs\n",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=1 ((16 cores - 0 kept) / 3 jobs per host; the Windows class default of 3 jobs per host / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=1 (the runner's PADDOCK_CI_TEST_THREADS / 3 test runs at once)\n",
+}
+=== case 23 ===
+Result {
+    code: 0,
+    env_file: "",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS stays unset: cargo uses all 16 cores, as before (this runner class's share is not measured yet)\n",
+}
+=== case 24 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=5\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=5 (16 cores / 3 builds at once; otherwise the runner class keeps cargo's default)\n",
+}
+=== case 25 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (2 jobs per host x 1536 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 26 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (2 jobs per host x 1536 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the macOS class's measured test threads / 3 test runs at once)\n",
+}
+=== case 27 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=7\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=7 ((16 cores - 1 kept) / 2 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the Windows class's measured test threads / 1 test runs at once)\n",
+}
+=== case 28 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=2 ((16 cores - 1 kept) / 2 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the Windows class's measured test threads / 3 test runs at once)\n",
+}
+=== case 29 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=7\nNEXTEST_TEST_THREADS=7\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=7 ((16 cores - 1 kept) / 2 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=7 ((16 cores - 1 kept) / 2 jobs per host / 1 test runs at once)\n",
+}
+=== case 30 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=2\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=2 ((16 cores - 1 kept) / 2 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 ((16 cores - 1 kept) / 2 jobs per host / 3 test runs at once)\n",
+}
+=== case 31 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=3\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=3 ((16 cores - 2 kept) / 4 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 32 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((16 cores - 2 kept) / 4 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the macOS class's measured test threads / 3 test runs at once)\n",
+}
+=== case 33 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=4 ((16 cores - 0 kept) / 4 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the Windows class's measured test threads / 1 test runs at once)\n",
+}
+=== case 34 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=1 ((16 cores - 0 kept) / 4 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the Windows class's measured test threads / 3 test runs at once)\n",
+}
+=== case 35 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=4\nNEXTEST_TEST_THREADS=4\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=4 ((16 cores - 0 kept) / 4 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=4 ((16 cores - 0 kept) / 4 jobs per host / 1 test runs at once)\n",
+}
+=== case 36 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=1\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=1 ((16 cores - 0 kept) / 4 jobs per host; the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=1 ((16 cores - 0 kept) / 4 jobs per host / 3 test runs at once)\n",
+}
+=== case 37 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (2 jobs per host x 8192 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the macOS class's measured test threads / 1 test runs at once)\n",
+}
+=== case 38 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 32768 MB kept) / (2 jobs per host x 8192 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the macOS class's measured test threads / 3 test runs at once)\n",
+}
+=== case 39 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 2048 MB kept) / (2 jobs per host x 8192 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 (the Windows class's measured test threads / 1 test runs at once)\n",
+}
+=== case 40 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 2048 MB kept) / (2 jobs per host x 8192 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 (the Windows class's measured test threads / 3 test runs at once)\n",
+}
+=== case 41 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=8\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 2048 MB kept) / (2 jobs per host x 8192 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 1 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=8 ((16 cores - 0 kept) / 2 jobs per host / 1 test runs at once)\n",
+}
+=== case 42 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=1\nNEXTEST_TEST_THREADS=2\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=1 ((32768 MB - 2048 MB kept) / (2 jobs per host x 8192 MB per rustc); the runner's PADDOCK_CI_JOBS_PER_HOST / 3 builds at once)\nbuild-jobs: NEXTEST_TEST_THREADS=2 ((16 cores - 0 kept) / 2 jobs per host / 3 test runs at once)\n",
+}
+=== case 43 ===
+Result {
+    code: 0,
+    env_file: "",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS stays unset: cargo uses all 16 cores, as before (this runner class's share is not measured yet)\n",
+}
+=== case 44 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=5\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class macOS\nbuild-jobs: CARGO_BUILD_JOBS=5 (16 cores / 3 builds at once; otherwise the runner class keeps cargo's default)\n",
+}
+=== case 45 ===
+Result {
+    code: 0,
+    env_file: "",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS stays unset: cargo uses all 16 cores, as before (this runner class's share is not measured yet)\n",
+}
+=== case 46 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=5\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Windows\nbuild-jobs: CARGO_BUILD_JOBS=5 (16 cores / 3 builds at once; otherwise the runner class keeps cargo's default)\n",
+}
+=== case 47 ===
+Result {
+    code: 0,
+    env_file: "",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS stays unset: cargo uses all 16 cores, as before (this runner class's share is not measured yet)\n",
+}
+=== case 48 ===
+Result {
+    code: 0,
+    env_file: "CARGO_BUILD_JOBS=5\n",
+    stdout: "",
+    stderr: "build-jobs: this host: 16 cores, 32768 MB of RAM, runner class Linux\nbuild-jobs: CARGO_BUILD_JOBS=5 (16 cores / 3 builds at once; otherwise the runner class keeps cargo's default)\n",
+}

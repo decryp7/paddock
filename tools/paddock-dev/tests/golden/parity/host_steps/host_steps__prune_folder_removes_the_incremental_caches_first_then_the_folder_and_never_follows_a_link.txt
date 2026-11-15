@@ -1,0 +1,115 @@
+=== case 1 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d ci/build",
+        "d ci/build/debug",
+        "d ci/build/debug/deps",
+        "d ci/build/debug/incremental",
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f ci/build/debug/deps/blob \"1024 bytes\"",
+        "f ci/build/debug/incremental/blob \"102400 bytes\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 2 ===
+Seen {
+    code: 0,
+    stdout: "prune: <ROOT>/ci/build is N (cap 300); removing incremental caches",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d ci/build",
+        "d ci/build/debug",
+        "d ci/build/debug/deps",
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f ci/build/debug/deps/blob \"51200 bytes\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 3 ===
+Seen {
+    code: 0,
+    stdout: "prune: <ROOT>/ci/build is N (cap 300); removing incremental caches\nprune: still N; removing <ROOT>/ci/build",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 4 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}
+=== case 5 ===
+Seen {
+    code: 0,
+    stdout: "",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d home",
+        "d real",
+        "d real/incremental",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f real/incremental/blob \"512000 bytes\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+        "l ci/link -> <ROOT>/real",
+    ],
+}
+=== case 6 ===
+Seen {
+    code: 2,
+    stdout: "prune: the cap must be a whole number, got 'many'",
+    github_env: "",
+    github_path: "",
+    calls: "",
+    tree: [
+        "d ci",
+        "d ci/build",
+        "d ci/build/debug",
+        "d ci/build/debug/deps",
+        "d ci/build/debug/incremental",
+        "d home",
+        "d work",
+        "d work/abc",
+        "d work/abc/hostexecutor",
+        "f ci/build/debug/deps/blob \"1024 bytes\"",
+        "f ci/build/debug/incremental/blob \"1024 bytes\"",
+        "f work/abc/hostexecutor/Cargo.toml \"x\"",
+    ],
+}

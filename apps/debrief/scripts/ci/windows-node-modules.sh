@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Windows host runners: a finished node_modules per package-lock.json, kept in the job slot's kept folder node-modules
-# (Paddock's job isolation, conformance/ci/job-isolation.sh: one per slot, so the clean-up of older lockfiles' copies below
+# (Paddock's job isolation, `./dev ci isolation path`: one per slot, so the clean-up of older lockfiles' copies below
 # never removes a copy a concurrent job is linked to), linked into the checkout as a directory junction, so `npm ci` runs only when the lockfile changed (unpacking ~900 packages into a fresh
 # node_modules took 7-14 min per job even with the npm cache on disk).
 #
@@ -11,7 +11,7 @@
 # junction is ever removed (rmdir on a junction removes the link, never the target's files).
 set -euo pipefail
 action=${1:?usage: windows-node-modules.sh link|unlink}
-isolation="$(dirname "$0")/../../../../conformance/ci/job-isolation.sh"
+dev="$(dirname "$0")/../../../../dev"
 
 unlink_junction() {
   [ -e node_modules ] || [ -L node_modules ] || return 0
@@ -29,7 +29,7 @@ case "$action" in
   unlink) unlink_junction ;;
   link)
     unlink_junction
-    base="$(bash "$isolation" path node-modules debrief)"
+    base="$(bash "$dev" ci isolation path node-modules debrief)"
     key=$(sha256sum package-lock.json | cut -c1-16)
     # <hash>/node_modules, not node_modules-<hash>: Node resolves packages from the junction's real path, so it must still
     # contain a folder named node_modules (else e.g. @tauri-apps/cli cannot find its native binary).
