@@ -288,6 +288,21 @@ outputs = ["apps/dyno/app/src/app/core/generated/*.ts"]
 cost = "heavy"
 drift_marker = ["test result: FAILED"]
 
+# Was apps/dyno/scripts/regen-wire-fixtures.sh, which regenerated the fixtures and then failed on a `git diff`; the check is the
+# wire test itself (a stale fixture fails it and prints the regenerate command), and the regeneration is the same test with the
+# variable set. The pre-push gate `dyno-wire-fixtures` runs this entry.
+[[generator]]
+id = "dyno-wire-fixtures"
+what = "Dyno's wire fixtures (*.wire.json), the JSON the Rust types serialise to, compared with the contract specs' TypeScript"
+check = ["cargo", "test", "--locked", "-p", "dyno-core", "--test", "wire"]
+build = ["cargo", "test", "--no-run", "--locked", "-p", "dyno-core", "--test", "wire"]
+regenerate = "DYNO_UPDATE_WIRE_FIXTURE=1 cargo test --locked -p dyno-core --test wire   # in apps/dyno; then update the matching *.contract.spec.ts (the same values as TypeScript) and commit the *.wire.json with it"
+cwd = "apps/dyno/crates/dyno-core"
+paths = ["apps/dyno/crates/dyno-core/src/**", "apps/dyno/crates/dyno-core/tests/wire/**", "apps/dyno/app/src/app/core/*.wire.json", "apps/dyno/Cargo.lock"]
+outputs = ["apps/dyno/app/src/app/core/*.wire.json"]
+cost = "heavy"
+drift_marker = ["test result: FAILED"]
+
 [[generator]]
 id = "ts-pitwall-widgets"
 what = "Pitwall's widget wire types for the UI, generated from pitwall-core"

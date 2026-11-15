@@ -136,7 +136,7 @@ fn a_dyno_core_change_regenerates_the_wire_fixtures_and_others_skip_it() {
     let g = g.expect("dyno-wire-fixtures is planned for a dyno-core change");
     assert_eq!(
         (g.program.as_str(), g.args.join(" ")),
-        ("sh", "apps/dyno/scripts/regen-wire-fixtures.sh".to_string())
+        (facts().dev_exe.as_str(), "gen check --only dyno-wire-fixtures".to_string())
     );
     assert!(g.heavy, "it runs cargo test");
     let other = plan_gates(&plan(), &change(&["apps/dyno/src/a.rs"]), &facts());

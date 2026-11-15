@@ -336,7 +336,7 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
         });
     }
     // Dyno's wire fixtures (the UI contract) are regenerated from the Rust types when dyno-core's sources changed; a stale one
-    // fails the push with the files named (apps/dyno/scripts/regen-wire-fixtures.sh runs cargo test).
+    // fails the push with the files named (`gen check --only dyno-wire-fixtures` runs the wire test, docs/generators.toml).
     if change
         .files
         .iter()
@@ -347,10 +347,10 @@ pub fn plan_gates(plan: &Value, change: &Change, facts: &Facts) -> Vec<Planned> 
             ..gate(
                 "dyno-wire-fixtures".into(),
                 "",
-                "sh",
-                &["apps/dyno/scripts/regen-wire-fixtures.sh"],
+                &facts.dev_exe,
+                &["gen", "check", "--only", "dyno-wire-fixtures"],
                 1,
-                "update the *.contract.spec.ts the script names and commit the regenerated *.wire.json with it".into(),
+                "regenerate with the command the check prints (DYNO_UPDATE_WIRE_FIXTURE=1 cargo test -p dyno-core --test wire in apps/dyno), update the matching *.contract.spec.ts and commit the *.wire.json with it".into(),
             )
         }));
     } else {

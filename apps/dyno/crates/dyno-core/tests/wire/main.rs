@@ -6,7 +6,7 @@
 //! same values as TypeScript. A fixture went stale twice because a wire type changed and only some of the comparisons ran;
 //! now they are modules of this one target, so a run of `wire` is a run of all of them, and
 //! [`every_wire_fixture_has_a_comparison`] fails for a fixture no module reads. After a deliberate change to a wire type or to
-//! `protocol.rs`, regenerate them all with `scripts/regen-wire-fixtures.sh` (the pre-push hook runs it) and update the specs.
+//! `protocol.rs`, regenerate them all with `DYNO_UPDATE_WIRE_FIXTURE=1 cargo test -p dyno-core --test wire` (the pre-push hook runs `./dev gen check --only dyno-wire-fixtures`) and update the specs.
 
 mod counters;
 mod disk;
