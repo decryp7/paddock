@@ -35,7 +35,8 @@ runs:
         PADDOCK_DEV_SCRIPT: ${{ github.action_path }}/../../../dev
       run: |
         set -euo pipefail
-        command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
+        # A failed setup marks the job (`./dev --job-setup`, conformance C117), the missing rustup included.
+        sh "$PADDOCK_DEV_SCRIPT" --job-setup --require-rustup
         # One source for the version: the root rust-toolchain.toml (rule 55). A job that names a toolchain (the fuzz jobs' nightly) keeps it.
         if [ -z "$TOOLCHAIN" ]; then
           pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
@@ -78,7 +79,7 @@ runs:
         # rustc, cargo and the components really run; a half-installed or conflicted toolchain is uninstalled and installed again inside
         # the lock (CI run 8060: two Windows jobs installed 1.100.0 at once and left cargo-clippy "not applicable"; ER-26). It prints the
         # one ::error:: line with the cause and the next step itself.
-        sh "$PADDOCK_DEV_SCRIPT" --install-toolchain "$TOOLCHAIN" "$COMPONENTS" "$TARGETS" || exit 1
+        sh "$PADDOCK_DEV_SCRIPT" --job-setup --install-toolchain "$TOOLCHAIN" "$COMPONENTS" "$TARGETS" || exit 1
         rustup default "$TOOLCHAIN"
         settle "$TOOLCHAIN"
         rustc --version
@@ -99,4 +100,4 @@ runs:
         PADDOCK_SCCACHE_REDIS_ENDPOINT: ${{ inputs.sccache-redis-endpoint }}
         REDIS_DB: ${{ inputs.sccache-redis-db }}
         TAURI_LINUX_DEPS: ${{ inputs.tauri-linux-deps }}
-      run: bash "${{ github.action_path }}/../../../dev" ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"
+      run: bash "${{ github.action_path }}/../../../dev" --job-setup ci setup-rust --sccache-backend "$BACKEND" --sccache-redis-db "$REDIS_DB" --tauri-linux-deps "$TAURI_LINUX_DEPS"

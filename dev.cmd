@@ -7,6 +7,7 @@ set "GIT_DIR="
 set "GIT_WORK_TREE="
 set "CARGO_BUILD_TARGET="
 if /i "%~1"=="--job-setup" goto jobsetup
+if /i "%~1"=="--require-rustup" (where rustup >nul 2>&1 && exit /b 0 & echo ::error::rustup is not installed on this runner. Next step: install it ^(https://rustup.rs^) on the runner, then rerun the job. 1>&2 & exit /b 1)
 set "ROOT="
 for /f "delims=" %%R in ('git rev-parse --show-toplevel 2^>nul') do set "ROOT=%%R"
 if not defined ROOT (echo dev: run this inside the Paddock repository. 1>&2 & exit /b 2)

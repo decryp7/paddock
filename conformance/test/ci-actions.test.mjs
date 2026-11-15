@@ -323,7 +323,9 @@ test('a failed toolchain install fails the step with a message that names the ca
   // repair, done with no jobs running.
   assert.doesNotMatch(failed.calls, /uninstall/);
   assert.match(failed.out, /with no jobs running, run 'rustup toolchain uninstall stable'/);
-  assert.equal((failed.out.match(/::error::/g) ?? []).length, 1, 'one error line (ER-27)');
+  // One line for the cause (ER-27), then the one line `./dev --job-setup` adds when it marks the job.
+  assert.equal((failed.out.match(/::error::(?!A job setup step failed)/g) ?? []).length, 1, 'one cause line (ER-27)');
+  assert.equal((failed.out.match(/::error::A job setup step failed/g) ?? []).length, 1, 'and the job-setup line');
 });
 
 // setup-rust runs ./dev ci setup-rust on every run, release and rule 54 runs included (docs/plans/shell-to-rust.md, WP-2): a job
@@ -332,7 +334,7 @@ test('a failed toolchain install fails the step with a message that names the ca
 test('setup-rust runs ./dev ci setup-rust after the toolchain, with no shell copy of its steps', () => {
   const text = read(join(ACTIONS, 'setup-rust', 'action.yml'));
   const dev = text.slice(text.indexOf('- name: Compile cache and Tauri libraries'));
-  assert.match(dev, /run: bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/dev" ci setup-rust /);
+  assert.match(dev, /run: bash "\$\{\{ github\.action_path \}\}\/\.\.\/\.\.\/\.\.\/dev" --job-setup ci setup-rust /);
   assert.doesNotMatch(text, /kit\.sh|steps\.kit\.outputs|Install sccache|SCCACHE_DIR=/, 'no shell copy of the compile cache steps, no choice between two implementations');
   // The toolchain comes before the first ./dev of the action (./dev hashes and builds itself with it).
   assert.ok(text.indexOf('- name: Rust toolchain') < text.indexOf('- name: Compile cache and Tauri libraries'));
@@ -1718,7 +1720,11 @@ test('the job-abort marker has one writer, `./dev --job-setup`, and the build-jo
   const iso = read(join(ACTIONS, 'job-isolation', 'action.yml'));
   assert.match(iso, /if \[ "\$MODE" = acquire \]; then setup=--job-setup; else setup=; fi/, 'only the acquire marks the job');
   assert.match(iso, /\.\.\/dev" \$setup ci isolation "\$MODE"/);
-  assert.match(read(join(ACTIONS, 'setup-rust', 'action.yml')), /\.\.\/dev" --job-setup ci build-jobs\n/);
+  const rust = read(join(ACTIONS, 'setup-rust', 'action.yml'));
+  assert.match(rust, /\.\.\/dev" --job-setup ci build-jobs\n/);
+  assert.match(rust, /--job-setup --require-rustup\n/, 'a runner without rustup marks the job');
+  assert.match(rust, /--job-setup --install-toolchain "\$TOOLCHAIN"/, 'a failed install marks the job');
+  assert.match(rust, /\.\.\/dev" --job-setup ci setup-rust /, 'a failed compile-cache step marks the job');
   const writers = spawnSync('git', ['grep', '-l', '-E', '>> "?\\$GITHUB_ENV.*PADDOCK_JOB_ABORTED|PADDOCK_JOB_ABORTED=1"? *>> *"?\\$GITHUB_ENV', '--', '.gitea', 'dev', 'conformance/ci', 'scripts'], { cwd: PADDOCK, encoding: 'utf8' }).stdout.split('\n').filter(Boolean);
   assert.deepEqual(writers, ['dev'], 'only the wrapper writes the marker');
 });

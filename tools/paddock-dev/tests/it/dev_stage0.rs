@@ -430,3 +430,36 @@ fn without_rustup_and_without_cargo_it_is_one_error_line_with_the_next_step() {
         "{err}"
     );
 }
+
+/// setup-rust's toolchain step starts with `./dev --job-setup --require-rustup`: no repository, compiler or launcher is needed, a runner
+/// without rustup marks the job, and one with it passes.
+#[test]
+fn a_missing_rustup_marks_the_job_through_job_setup_and_one_with_rustup_passes() {
+    let s = setup(true, GOOD);
+    let outside = tempfile::tempdir().unwrap();
+    let env_file = s.dir.path().join("github-env");
+    let empty = s.dir.path().join("empty-bin");
+    std::fs::create_dir_all(&empty).unwrap();
+    // Only `sh` (what stage 0 starts itself with): no rustup, no cargo.
+    std::os::unix::fs::symlink("/bin/sh", empty.join("sh")).unwrap();
+    let mut cmd = TestCommand::new("sh");
+    cmd.arg(s.root().join("dev"))
+        .args(["--job-setup", "--require-rustup"])
+        .current_dir(outside.path())
+        .env("PATH", &empty)
+        .env("GITHUB_ENV", &env_file);
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("rustup is not installed"), "{err}");
+    assert_eq!(err.matches("A job setup step failed").count(), 1, "{err}");
+    assert_eq!(std::fs::read_to_string(&env_file).unwrap(), "PADDOCK_JOB_ABORTED=1\n");
+    std::fs::remove_file(&env_file).unwrap();
+    let (code, _, err) = s.dev(
+        outside.path(),
+        &["--job-setup", "--require-rustup"],
+        &[("GITHUB_ENV", env_file.display().to_string())],
+    );
+    assert_eq!(code, 0, "{err}");
+    assert!(!env_file.exists());
+}

@@ -673,7 +673,7 @@ fn rustup_installing_broken(f: &Fixture, what: &str) -> (PathBuf, PathBuf) {
 }
 
 #[cfg(unix)]
-fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::Output {
+pub(crate) fn install_toolchain(f: &Fixture, shims: &Path, args: &[&str]) -> std::process::Output {
     // Run from outside any repository: the setup-rust action calls this mode before anything else is set up.
     let outside = tempfile::tempdir().unwrap();
     TestCommand::new(launcher())

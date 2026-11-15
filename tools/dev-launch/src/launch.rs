@@ -341,6 +341,16 @@ pub fn run(args: Vec<String>) -> i32 {
     if args.first().map(String::as_str) == Some("--install-toolchain") {
         return install_toolchain(&args);
     }
+    // The check setup-rust's toolchain step starts with (through the stage 0's `--job-setup`): no repository or compiler needed.
+    if args.first().map(String::as_str) == Some("--require-rustup") {
+        if toolchain::on_path("rustup") {
+            return 0;
+        }
+        eprintln!(
+            "::error::rustup is not installed on this runner. Next step: install it (https://rustup.rs) on the runner, then rerun the job."
+        );
+        return 1;
+    }
     let cwd = std::env::current_dir().unwrap_or_default();
     let root = {
         let mut c = proc::command("git");

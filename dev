@@ -23,7 +23,17 @@ if [ "${1:-}" = "--job-setup" ]; then
   if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || :; fi
   exit "$rc"
 fi
-root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
+
+# `./dev --require-rustup`: the check setup-rust's toolchain step starts with (through `--job-setup`, so a runner without rustup marks the
+# job). It needs no repository, compiler or launcher.
+if [ "${1:-}" = "--require-rustup" ]; then
+  command -v rustup >/dev/null 2>&1 || { echo "::error::rustup is not installed on this runner. Next step: install it (https://rustup.rs) on the runner, then rerun the job." >&2; exit 1; }
+  exit 0
+fi
+# `./dev --install-toolchain ...` (setup-rust) needs no repository of the caller's: the launcher is next to this script.
+if root=$(git rev-parse --show-toplevel 2>/dev/null); then :
+elif [ "${1:-}" = "--install-toolchain" ] && [ -f "${0%/*}/tools/dev-launch/Cargo.toml" ]; then root=${0%/*}
+else echo "dev: run this inside the Paddock repository." >&2; exit 2; fi
 l=$root/tools/dev-launch
 [ -f "$l/Cargo.toml" ] || { echo "dev: tools/dev-launch is not in this checkout (a sparse checkout without it). Run: git sparse-checkout add tools" >&2; exit 2; }
 key=$(git -C "$root" rev-parse HEAD:tools/dev-launch 2>/dev/null) || key=untracked
