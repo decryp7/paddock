@@ -2146,3 +2146,16 @@ that judges text only warns) on a grep polling loop, on two waits for one target
 running `dev wait` already has (read from `ps`; it cannot tell which agent started it, so the warning says so). Rows are in
 `lib/shell-forms.tsv`, whose runner now knows a `warn` verdict. **Class: unbounded or stacked waiters (ER-32; earlier: the 36
 stuck waiters of 2026-11-03/04).**
+
+## The shell scripts deleted computed paths with a bare rm -rf while Rust had a guard (2026-11-15)
+paddock-dev's deletes go through `safe_remove::remove_under` (strictly under a vetted root, no `..`, no link on the way), but
+the shell scripts, which still run as the CI kit's fallback, on tag runs and on the development machine, had no such helper:
+each computed `rm -rf "$x"` trusted its variable. The class has bitten or nearly bitten four times: the 2026-10-31 scratchpad
+wipe, the 2026-11-10 live-worktree removal, the prune script's IFS near-miss and its stat fallback. `conformance/ci/safe-rm.sh`
+(`safe_rm <root> <path>...`, POSIX sh) is the shell copy of the Rust guard (docs/known-copies.toml, `safe-remove-under`): it
+refuses an empty path, `/`, a top-level or home root, `..`, a relative path, a path outside the root and a link on the way,
+and removes nothing when one path is refused. The prune, host-cleanup, node-caches, stable-workspace, kept-clone and vm-win
+prepare sites use it with the same roots as their Rust twins. C127 (report-only) lists every other recursive `rm` of a computed
+path in a shell script. **Rule:** a shell script deletes a computed path only through `safe_rm`, with the root it owns; a
+mktemp folder of its own, or a site that cannot name a root two folders deep (a guest VM's home, Linux's `/tmp`), carries
+`# conformance: computed-rm — <why>`. **Class: computed deletes beyond their folder (C115's third sighting, ER-21).**

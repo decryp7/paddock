@@ -42,6 +42,8 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 # shellcheck source=bounded.sh
 . "$here/bounded.sh"
+# shellcheck source=safe-rm.sh
+. "$here/safe-rm.sh"
 export GIT_TERMINAL_PROMPT=0
 BOUNDED_SOFT=1
 # Every git command of this script: no hook of the kept clone's .git runs (core.hooksPath is a folder this script owns, empty).
@@ -133,7 +135,8 @@ foreign_key() {
 }
 # sanitize: nothing a job could have planted in .git is left to act: hooks (also never run: core.hooksPath), attributes, excludes.
 sanitize() {
-  rm -rf "$stable/.git/hooks" && mkdir -p "$stable/.git/hooks" && rm -f "$stable/.git/info/attributes" "$stable/.git/info/exclude" && rm -rf "$stable/.git/refs/replace"
+  safe_rm "$stable/.git" "$stable/.git/hooks" && mkdir -p "$stable/.git/hooks" && rm -f "$stable/.git/info/attributes" "$stable/.git/info/exclude" &&
+    safe_rm "$stable/.git" "$stable/.git/refs/replace"
 }
 clone_kib() { # the clone's object size in KiB
   gq -C "$stable" count-objects -v 2>/dev/null | awk '/^(size|size-pack): / { k += $2 } END { printf "%d", k }'
@@ -164,7 +167,7 @@ unlink_caches() {
     fi
   done < <(find "$stable" -maxdepth 6 -path '*/.angular/cache' -not -path '*/node_modules/*' -not -path "$stable/.git/*" 2>/dev/null || true)
 }
-create_clone() { unlink_caches && rm -rf "$stable" && mkdir -p "$(dirname "$stable")" && g clone -q --no-checkout --no-tags --depth=1 --filter=blob:none "$url" "$stable" &&
+create_clone() { unlink_caches && safe_rm "$(dirname "$stable")" "$stable" && mkdir -p "$(dirname "$stable")" && g clone -q --no-checkout --no-tags --depth=1 --filter=blob:none "$url" "$stable" &&
     echo 1 > "$stable/.git/paddock-kept-clone"; }
 if [ "$mode" = created ]; then
   if ! phase CREATE "create the clone" create_clone; then
@@ -200,7 +203,7 @@ checkout_commit() {
 drop_excluded() {
   local p d
   for p in ${excludes[@]+"${excludes[@]}"}; do
-    while IFS= read -r d; do rm -rf "$d"; done < <(compgen -G "$stable/$p" || true)
+    while IFS= read -r d; do safe_rm "$stable" "$d"; done < <(compgen -G "$stable/$p" || true)
   done
 }
 verify_clone() {
@@ -241,7 +244,7 @@ link_work_folder() {
   local old="$ws.old-$$"
   cd "$(dirname "$ws")" && mv "$ws" "$old" || return 1
   if ! ln -s "$stable" "$ws"; then mv "$old" "$ws"; return 1; fi
-  rm -rf "$old" || echo "kept-clone: could not delete the replaced work folder $old" >&2
+  safe_rm "$(dirname "$ws")" "$old" || echo "kept-clone: could not delete the replaced work folder $old" >&2
 }
 if [ "$RUNNER_OS" != Windows ]; then
   if ! phase LINK "link $ws to $stable" link_work_folder; then

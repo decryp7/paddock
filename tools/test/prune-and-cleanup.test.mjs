@@ -47,12 +47,23 @@ test('prune: counts the size of the files, not only the blocks the file system h
 });
 
 test('prune: still over after that, the folder is removed', () => {
-  const dir = scratch();
+  // One level below a scratch folder: the folder goes only strictly under its parent, which is not the home folder (safe_rm).
+  const dir = join(scratch(), 'build');
   big(dir, 'debug/incremental', 10);
   big(dir, 'debug/deps', 400);
   const r = prune(dir, 300);
   assert.match(r.out, /still .*removing/);
   assert.ok(!existsSync(dir));
+});
+
+test('prune: a folder whose parent is the home folder is refused and kept (safe_rm, as in ci prune-folder)', () => {
+  const home = scratch();
+  const dir = join(home, 'build');
+  big(dir, 'debug/deps', 400);
+  const r = run('prune-build-folders.sh', [dir, '300'], { env: { PADDOCK_PRUNE_UNIT: 'kb', HOME: home } });
+  assert.notEqual(r.status, 0, r.out);
+  assert.match(r.out, /::error::safe_rm: the root .* is the home folder or above it/);
+  assert.ok(existsSync(join(dir, 'debug/deps/blob')), 'the folder is kept');
 });
 
 test('prune: a missing folder is fine, a symlink is never followed, a bad cap is refused', () => {

@@ -22,6 +22,8 @@ unit=1048576
 # `du`: GNU `du --apparent-size` counts folders as 0 and BSD `du -A` counts them and rounds each entry up. What cannot be read counts
 # 0 on both sides, as in `ci prune-folder` (tools/paddock-dev/src/ci_host/prune.rs, `sizes`), which counts the same way.
 kit="$(cd "$(dirname "$0")/.." && pwd)/conformance/ci/kit.sh"
+# The one guarded delete (conformance/ci/safe-rm.sh): the folder goes only strictly under its parent, as `ci prune-folder` does.
+. "$(dirname "$kit")/safe-rm.sh"
 size() {
   local used apparent
   used=$(du -sk "$dir" 2>/dev/null | cut -f1 || true)
@@ -38,5 +40,5 @@ if [ "$(size)" -ge "$max" ]; then
 fi
 if [ "$(size)" -ge "$max" ]; then
   echo "prune: still $(size); removing $dir"
-  rm -rf "$dir"
+  safe_rm "$(dirname "$dir")" "$dir"
 fi
