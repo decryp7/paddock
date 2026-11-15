@@ -1,0 +1,19 @@
+{
+ "_comment": "What stays shell, and why (docs/plans/shell-to-rust.md section 2, E1 to E7). C129 reads it; an entry that names no file is stale.",
+ "exceptions": [
+  {"path": "dev", "id": "E1", "reason": "stage-0 launcher: something must start before any Rust binary exists; about 20 lines once WP-1 lands", "owner": "shell-to-rust plan section 2"},
+  {"path": "dev.cmd", "id": "E1", "reason": "stage-0 launcher for Windows: needs no Git Bash once WP-1 lands", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/githooks/claude-pre-tool-use", "id": "E3", "reason": "Claude Code runs a command line per tool call; the shim only finds the installed binary and execs it (about 10 ms)", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/src/hook/claude-pre-tool-use.sh", "id": "E3", "reason": "the source of the shim above, embedded by hook/install.rs", "owner": "shell-to-rust plan section 2"},
+  {"path": "ci-image/fetch-verified.sh", "id": "E4", "reason": "runs in RUN lines while the CI image is built, before Rust is in it", "owner": "shell-to-rust plan section 2"},
+  {"path": "scripts/vm-win/*.ps1", "id": "E5", "reason": "PowerShell inside a fresh Windows guest before anything is installed (first logon, admin and GUI setup)", "owner": "shell-to-rust plan section 2"},
+  {"path": "scripts/vm-smoke/win-*.ps1", "id": "E5", "reason": "PowerShell inside the Windows guest: UI automation through .NET", "owner": "shell-to-rust plan section 2"},
+  {"path": "crates/paddock-setup/nsis/test/run-*.ps1", "id": "E5", "reason": "PowerShell inside the Windows guest: the installer test harness runs there", "owner": "shell-to-rust plan section 2"},
+  {"path": "apps/dyno/app/src-tauri/linux/*", "id": "E7", "reason": "Debian maintainer scripts: dpkg runs them (Debian Policy section 6), a few lines each", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/heavy/tests/fixtures/plock.sh", "id": "E6", "reason": "reference shell lock for mixed shell and Rust runs on one lock folder; deleted when no machine runs the shell plock", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/src/hook/fixtures/*.sh", "id": "E6", "reason": "oracle copies of the old hooks for hook/oracle_tests.rs; deleted in WP-5 when the corpus holds their cases", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/tests/fixtures/", "id": "E6", "reason": "fixture inputs of the check tests, not tools", "owner": "shell-to-rust plan section 2"},
+  {"path": "tools/paddock-dev/tests/golden/", "id": "E6", "reason": "planner and gate golden inputs, not tools", "owner": "shell-to-rust plan section 2"},
+  {"path": "crates/paddock-service/tests/golden/*.cmd", "id": "E6", "reason": "golden output of the Windows service installer tests, not a tool", "owner": "shell-to-rust plan section 2"}
+ ]
+}

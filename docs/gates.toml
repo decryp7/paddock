@@ -1204,3 +1204,11 @@ owner = "Dyno 1.1.1"
 since = 2026-11-12
 review_by = 2026-12-20
 approved = "coordinator"
+
+[[report_only]]
+id = "C129"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here and in C129-no-new-shell.mjs and c129.rs, then flip the warnings to errors and the mode to gate. It keeps new shell and Python files out (shell-to-rust plan WP-0): a file not in the shrink-only baseline conformance/shell-baseline.json or in the exceptions conformance/shell-exceptions.json is a finding, so is one that grew; it also reports callers of scripts the tree lacks and the count of inline run lines in .gitea. Recorded: not yet"
+owner = "shell-to-rust plan WP-0 (ER-21 class: a shell script behaves differently on macOS, Linux and Git Bash, run 8138)"
+since = 2026-11-15
+review_by = 2026-12-15
+approved = "user"
