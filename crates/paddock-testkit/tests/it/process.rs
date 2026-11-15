@@ -457,3 +457,46 @@ fn git_for_windows_found_through_mingw64_brings_its_usr_bin() {
     let system32 = dirs.iter().filter(|d| d.ends_with("system32")).count();
     assert_eq!(system32, 1, "System32 joined more than once: {report}");
 }
+
+/// `new("cargo")` starts the cargo that runs this test (`CARGO`), not rustup's proxy, which puts all of `$CARGO_HOME/bin` in
+/// front of its child's PATH (review of 0916c8060, P2-1: a build script found `cargo-hakari` that way). A build script of a
+/// child cargo must not reach a tool planted in the `CARGO_HOME` it was given.
+#[cfg(unix)]
+#[test]
+fn a_child_cargos_build_script_does_not_reach_the_tools_of_cargo_home() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let crate_dir = d.path().join("probe");
+    std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+    std::fs::write(
+        crate_dir.join("Cargo.toml"),
+        "[package]\nname = \"probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n[workspace]\n",
+    )
+    .unwrap();
+    std::fs::write(crate_dir.join("src/lib.rs"), "").unwrap();
+    std::fs::write(
+        crate_dir.join("build.rs"),
+        "fn main() {\n    let path = std::env::var_os(\"PATH\").unwrap_or_default();\n    if let Some(d) = std::env::split_paths(&path).find(|d| d.join(\"cargo-hakari\").exists()) {\n        panic!(\"cargo-hakari is reachable in {}\", d.display());\n    }\n}\n",
+    )
+    .unwrap();
+    // The CARGO_HOME the child is given, with an installed tool in its bin (the real one's registry is not needed: no dependencies).
+    let cargo_home = d.path().join("cargo-home");
+    std::fs::create_dir_all(cargo_home.join("bin")).unwrap();
+    let tool = cargo_home.join("bin/cargo-hakari");
+    std::fs::write(&tool, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut cmd = TestCommand::new("cargo");
+    cmd.args(["build", "--offline", "--quiet"])
+        .current_dir(&crate_dir)
+        .env("CARGO_HOME", &cargo_home)
+        .env("CARGO_TARGET_DIR", d.path().join("target"));
+    let report = cmd.path_report();
+    let program = cmd.get_program().to_owned();
+    let out = cmd.output().unwrap();
+    assert!(
+        out.status.success(),
+        "started {}: {}\n{report}",
+        program.to_string_lossy(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

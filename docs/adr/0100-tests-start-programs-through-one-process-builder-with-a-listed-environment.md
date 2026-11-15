@@ -55,8 +55,11 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   the machine's `PATH`, where `git`, `sh`, `bash`, `node`, `cargo`, `rustc` and `rustup` were found, Git's root, the links) for
   a failure message. **Remaining exposure, accepted:** the folders of `node` and `git` are added whole, so on a Homebrew Mac
   `/opt/homebrew/bin` and its other tools are reachable, and on Windows all of Git's `usr/bin`; cargo itself still finds
-  `cargo-<name>` subcommands in `$CARGO_HOME/bin`, and the toolchain's own children see what rustup adds. A narrower PATH
-  would need links for `node` and `git` too, which is the next step if a tool there bites.
+  `cargo-<name>` subcommands in `$CARGO_HOME/bin`, and rustup's proxy adds all of `$CARGO_HOME/bin` in front of its child's
+  `PATH` (measured in the review of `0916c8060`: a build script found `cargo-hakari`). So a bare `cargo`, `rustc` or `rustup`
+  starts through the command's own link (`cargo`: the cargo that runs the test, `CARGO`), never the proxy; a test that needs
+  the proxy (a `rust-toolchain.toml` that names a toolchain folder) names it by its path. A narrower PATH would need links for
+  `node` and `git` too, which is the next step if a tool there bites.
   `path_first(dir)` puts a test's stand-in folder first; `.env("PATH", ..)` replaces it whole. A bare program name is
   resolved once, at construction, against the **test process's** `PATH`: `path_first` and `env("PATH", ..)` change only the
   child's own lookups, never which program starts (a test that starts a stand-in names it by its path).
@@ -162,6 +165,13 @@ named list) is about 0.4 agent-day but does not stop the next lookup; it is not 
   judged by C123 and have no builder yet; a JavaScript `testProcess()` in `conformance/test/helpers.mjs` and a C123 arm that
   reads `.mjs` would be about 0.5 agent-day. Not done here: the incidents were Rust tests, and a second builder needs the
   parity rule applied once more.
+- **Follow-up for train 14's env-builder item (review of `0916c8060`, P2-2 to P2-4; not done here):**
+  - one toolchain link folder per test process, not one per command and never inside a `new_in` folder;
+  - log the Windows copy fallback of a link (which program, why the hard link failed);
+  - `path_report()` shows each link's target, not only the link;
+  - a time limit on `git --exec-path`;
+  - the doc of `git_root_from` says "three folders above the exec path" where the code takes the third ancestor: word it as
+    the code does.
 - **D4 (decided): git is not in C123.** `git` reads `HOME` and the git config, which `TestCommand` redirects when it is
   used; plain `Command::new("git")` fixtures (about 60) keep working. If a git-config incident appears, add it to the check.
 - **D5 (decided, review of f39597fbb P1-3): every `CARGO_BIN_EXE_*` binary a test starts itself.** The check judges a constructor

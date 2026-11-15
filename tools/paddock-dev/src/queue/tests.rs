@@ -2502,11 +2502,23 @@ fn the_merge_checks_git_children_have_hooks_off_and_no_token() {
 
 static PLANNER_DIRS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
+/// rustup's `cargo` proxy as this test process finds it on its PATH (the machine's): the planner tests need the proxy, because only
+/// the proxy honours a `rust-toolchain.toml` that names a toolchain folder. A bare `cargo` starts the cargo that runs the tests,
+/// which ignores that file (ADR 0100).
+fn rustup_proxy_cargo() -> PathBuf {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let name = if cfg!(windows) { "cargo.exe" } else { "cargo" };
+    std::env::split_paths(&path)
+        .map(|d| d.join(name))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
 /// The most dangerous thing a planner can do: `cargo check` (it runs build scripts, wrappers and toolchain files) in the folder
 /// it is given. Run in a pull request's tree it would execute the pull request.
 fn cargo_planner(trusted: &Path, _main: &str, _head: &str) -> Result<serde_json::Value, String> {
     PLANNER_DIRS.lock().unwrap().push(trusted.to_path_buf());
-    let _ = TestCommand::new("cargo")
+    let _ = TestCommand::new(rustup_proxy_cargo())
         .args(["check", "--offline", "--quiet"])
         .current_dir(trusted)
         .output();
@@ -2523,7 +2535,7 @@ fn the_planner_runs_cargo_only_in_the_checkout_of_main_never_in_the_merge_clone(
     w.approve(1, &head);
     // Positive control: cargo check in the pull request's own tree runs its build script and its toolchain wrapper.
     git(&w.repos.author, &["checkout", "--quiet", "feat/pr1"]);
-    let _ = TestCommand::new("cargo")
+    let _ = TestCommand::new(rustup_proxy_cargo())
         .args(["check", "--offline", "--quiet"])
         .current_dir(&w.repos.author)
         .output();

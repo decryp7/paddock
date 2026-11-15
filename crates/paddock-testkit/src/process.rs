@@ -28,7 +28,8 @@
 //! it derefs to the `Command` read-only (`get_program`, `get_envs`), never mutably, so nothing can reach past the listed set.
 //!
 //! The program is resolved once, when the command is made: a bare name (`node`, `git`) becomes the full path found on the **test
-//! process's** `PATH`. [`TestCommand::path_first`] and `env("PATH", ..)` change only the child's own lookups, never which program
+//! process's** `PATH`, except `cargo`, `rustc` and `rustup`, which start through the command's own toolchain links (`cargo` is
+//! the cargo that runs the test, `CARGO`), never rustup's proxy, which puts all of `$CARGO_HOME/bin` in front of its child's PATH. [`TestCommand::path_first`] and `env("PATH", ..)` change only the child's own lookups, never which program
 //! starts: to start a stand-in, name it by its path.
 //!
 //! A child [`TestCommand::spawn`] starts is a [`TestChild`], which ends that child through its handle when it drops. What the child
@@ -172,7 +173,22 @@ impl TestCommand {
 
     #[allow(clippy::disallowed_methods)] // the one place a test's child process is made (C123 forbids it elsewhere)
     fn build(program: &OsStr, private: PrivateDir) -> TestCommand {
-        let resolved = resolve(program, std::env::var_os("PATH").as_deref());
+        let ambient = std::env::var_os("PATH");
+        // `cargo`, `rustc` and `rustup` start through the command's own links (`cargo`: the cargo that runs this test), never
+        // rustup's proxy in `$CARGO_HOME/bin`, which puts all of that folder in front of its child's PATH (review of 0916c8060).
+        let bin = bin_dir(private.path());
+        let linked = (Path::new(program).components().count() == 1
+            && TOOLCHAIN_STARTED.contains(&program.to_string_lossy().as_ref()))
+        .then(|| {
+            link_toolchain(&bin, ambient.as_deref())
+                .then(|| linked_program(&bin, program))
+                .flatten()
+        })
+        .flatten();
+        let resolved = linked.map_or_else(
+            || resolve(program, ambient.as_deref()),
+            PathBuf::into_os_string,
+        );
         let mut cmd = Command::new(resolved);
         #[cfg(windows)]
         {
@@ -614,6 +630,18 @@ impl TestCommand {
             toolchain,
         }
     }
+}
+
+/// The bare program names a [`TestCommand`] starts through its own link, never through the machine's `PATH`.
+const TOOLCHAIN_STARTED: &[&str] = &["cargo", "rustc", "rustup"];
+
+/// The link to `program` in `bin` (with `.exe` on Windows), when there is one.
+fn linked_program(bin: &Path, program: &OsStr) -> Option<PathBuf> {
+    let mut name = program.to_os_string();
+    if cfg!(windows) {
+        name.push(".exe");
+    }
+    Some(bin.join(name)).filter(|p| p.exists())
 }
 
 /// The command's private folder of toolchain links.
