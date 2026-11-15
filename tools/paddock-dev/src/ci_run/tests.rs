@@ -240,16 +240,26 @@ fn a_set_stop_flag_ends_the_phase_before_the_next_line() {
 /// model's contexts do not give), so its call of the executor is asserted as text below.
 const JOBS: [&str; 7] = ["ui", "e2e", "conformance", "tools", "icons", "eslint-preset", "crates"];
 
-/// The commands of the root jobs of ci.yml and of the app legs' contract lists, as the CI model reads them from the real tree. The
-/// conformance arguments (`--only` with every check Paddock runs, from conformance/paddock.ci.json) are written back as
-/// `$PADDOCK_CONFORMANCE_ARGS`, the variable the contract line uses: that list has its own generator (`conformance-check-lists`),
-/// so adding a check changes no row here.
+/// The commands of the root jobs of ci.yml and of the app legs' contract lists, as the CI model reads them from the real tree.
 fn modelled_commands() -> std::collections::BTreeSet<String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let src = crate::gates::edge::load_sources(&root).unwrap();
-    let model = crate::gates::ci::build(&src);
+    rows_of(&crate::gates::edge::load_sources(&root).unwrap())
+}
+
+/// The golden rows of a CI model's sources. Only the value of the conformance line's `--only` (every check Paddock runs, from
+/// conformance/paddock.ci.json) is written as `$ONLY`: that list has its own generator (`conformance-check-lists`), so adding a
+/// check changes no row here, while the rest of the line (`--app`, `--root`, `--strict`) stays literal and a change to it does.
+fn rows_of(src: &crate::gates::ci::Sources) -> std::collections::BTreeSet<String> {
+    let model = crate::gates::ci::build(src);
     assert!(model.problems.is_empty(), "{:?}", model.problems);
-    let args = contract::conformance_args_at(&root).unwrap()[1..].join(" ");
+    let contract: serde_json::Value = serde_json::from_str(src.root_contracts.get("conformance").expect("a conformance contract")).unwrap();
+    let args = contract::conformance_args(&contract).unwrap();
+    let only = args
+        .iter()
+        .position(|a| a == "--only")
+        .and_then(|i| args.get(i + 1))
+        .expect("the conformance line has --only");
+    let only = format!("--only {only}");
     let jobs = [
         "ui",
         "e2e",
@@ -262,12 +272,17 @@ fn modelled_commands() -> std::collections::BTreeSet<String> {
     ];
     let mut out = std::collections::BTreeSet::new();
     for l in model.lines.iter().filter(|l| l.root == ".gitea/workflows/ci.yml") {
+        let text = match l.text.find(&only) {
+            Some(i) if l.text[i + only.len()..].is_empty() || l.text[i + only.len()..].starts_with(' ') => {
+                format!("{}--only $ONLY{}", &l.text[..i], &l.text[i + only.len()..])
+            }
+            _ => l.text.clone(),
+        };
         let row = |kind: &str, who: &str| {
             format!(
-                "{kind}\t{who}\t{}\t{}\t{}",
+                "{kind}\t{who}\t{}\t{}\t{text}",
                 l.os.clone().unwrap_or_default(),
                 l.cwd.clone().unwrap_or_default(),
-                l.text.replace(&args, "$PADDOCK_CONFORMANCE_ARGS")
             )
         };
         if jobs.contains(&l.job.as_str()) {
@@ -291,7 +306,7 @@ const GOLDEN_HEADER: &str = "\
 # Generated from the CI model by the regenerate command below; do not edit (ER-40). The commands CI runs: `job` rows are every command
 # of a root job of ci.yml, `app` rows the commands an app contract adds to its legs, as the CI model reads them from the contracts
 # (the paddock.ci.json files) and the workflows (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_in_the_golden`). The
-# conformance arguments stay `$PADDOCK_CONFORMANCE_ARGS` (their list is generated from the check modules). It began as the commands
+# conformance line's `--only` value is `$ONLY` (that list is generated from the check modules; the rest of the line is literal). It began as the commands
 # CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract or a job shows
 # here as added and removed rows in the same commit. Regenerate:
 #   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
@@ -439,22 +454,34 @@ fn the_golden_is_rewritten_only_on_request_and_never_under_ci() {
 }
 
 #[test]
-fn adding_a_check_changes_no_golden_row() {
-    // The conformance row carries the variable, not the expanded `--only` list.
-    let rows = modelled_commands();
-    let conf: Vec<&String> = rows
-        .iter()
-        .filter(|r| r.contains("paddock-conformance.mjs --app paddock"))
-        .collect();
-    assert!(
-        conf.is_empty(),
-        "the expanded conformance arguments are in the golden rows: {conf:?}"
-    );
-    assert!(
+fn adding_a_check_changes_no_golden_row_but_the_rest_of_the_conformance_line_does() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let src = crate::gates::edge::load_sources(&root).unwrap();
+    let rows = rows_of(&src);
+    let line = |rows: &std::collections::BTreeSet<String>| {
         rows.iter()
-            .any(|r| r.ends_with("node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS")),
-        "the conformance line is a row, with the variable"
+            .find(|r| r.starts_with("job\tconformance\t") && r.contains("node conformance/bin/paddock-conformance.mjs --app "))
+            .cloned()
+            .expect("the conformance line is a row")
+    };
+    let conf = line(&rows);
+    assert!(conf.contains("--root . --only $ONLY --strict C36"), "{conf}");
+    let changed = |edit: &dyn Fn(&mut serde_json::Value)| {
+        let mut s = src.clone();
+        let c = s.root_contracts.get_mut("conformance").unwrap();
+        let mut v: serde_json::Value = serde_json::from_str(c).unwrap();
+        edit(&mut v);
+        *c = v.to_string();
+        line(&rows_of(&s))
+    };
+    // A new check (one more id in `only`) changes no row.
+    assert_eq!(
+        changed(&|v| v["conformance"]["only"].as_array_mut().unwrap().push("C99999".into())),
+        conf
     );
+    // Dropping `strict` (the review's probe) or changing the app does.
+    assert_ne!(changed(&|v| v["conformance"]["strict"] = serde_json::json!([])), conf);
+    assert_ne!(changed(&|v| v["conformance"]["app"] = "other".into()), conf);
 }
 
 /// The probe can see a difference (ER-33): a contract line that was changed shows up as a missing and an extra command.

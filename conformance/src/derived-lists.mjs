@@ -29,7 +29,7 @@ export const README_END = '<!-- checks:end -->';
 
 /**
  * The check modules among `files` (the file names in conformance/src/checks, folders left out), in id order:
- * `[{ id, n, file }]`. Every file but index.mjs must be a module: a misnamed one (`C127_foo.mjs`, `c127-foo.mjs`,
+ * `[{ id, n, file }]`. Every file but index.mjs and dotfiles must be a module: a misnamed one (`C127_foo.mjs`, `c127-foo.mjs`,
  * `C127-foo.js`, `C127.mjs`) would otherwise never be imported, so its check would never run. Throws on that and on two
  * modules with one id, so a clash between branches fails at the regenerate, not at run time.
  */
@@ -37,7 +37,7 @@ export function modules(files) {
   const out = [];
   const seen = new Map();
   for (const file of files) {
-    if (file === 'index.mjs') continue;
+    if (file === 'index.mjs' || file.startsWith('.')) continue; // dotfiles (.DS_Store from Finder) are no modules
     const m = MODULE.exec(file);
     if (!m) {
       throw new Error(

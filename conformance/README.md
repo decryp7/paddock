@@ -30,8 +30,8 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
    the check index below. If Paddock must not run the new check, add it to `conformance.skip` with the reason (a
    `docs/gates.toml` entry where there is one), then run the command again.
 
-Adding a check changes no row of the CI golden (`tools/paddock-dev/tests/golden/ci-run/commands.tsv` holds the conformance line
-as `$PADDOCK_CONFORMANCE_ARGS`). When CI gains or loses a command (a contract line, a job step), regenerate that golden:
+Adding a check changes no row of the CI golden (`tools/paddock-dev/tests/golden/ci-run/commands.tsv` writes the conformance line's
+`--only` value as `$ONLY`). When CI gains or loses a command (a contract line, a job step), regenerate that golden:
 `PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden` in
 `tools/paddock-dev` (it prints the rows it adds and removes; refused when `CI=true`).
 

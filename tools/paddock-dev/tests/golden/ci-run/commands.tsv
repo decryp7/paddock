@@ -1,7 +1,7 @@
 # Generated from the CI model by the regenerate command below; do not edit (ER-40). The commands CI runs: `job` rows are every command
 # of a root job of ci.yml, `app` rows the commands an app contract adds to its legs, as the CI model reads them from the contracts
 # (the paddock.ci.json files) and the workflows (src/ci_run/tests.rs, `the_contracts_run_exactly_the_commands_in_the_golden`). The
-# conformance arguments stay `$PADDOCK_CONFORMANCE_ARGS` (their list is generated from the check modules). It began as the commands
+# conformance line's `--only` value is `$ONLY` (that list is generated from the check modules; the rest of the line is literal). It began as the commands
 # CI ran before the gate executor (11c365fc4, CI-in-Rust WP-3); it is now a reviewed snapshot: a change to a contract or a job shows
 # here as added and removed rows in the same commit. Regenerate:
 #   PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev
@@ -175,7 +175,7 @@ job	conformance			missing=1
 job	conformance			mkdir -p "$DEST"
 job	conformance			mkdir -p "$DIR"
 job	conformance			mv -f "$DEST/$BIN.part.$$" "$DEST/$BIN"
-job	conformance			node conformance/bin/paddock-conformance.mjs $PADDOCK_CONFORMANCE_ARGS
+job	conformance			node conformance/bin/paddock-conformance.mjs --app paddock --root . --only $ONLY --strict C36
 job	conformance			npm ci --ignore-scripts -w conformance
 job	conformance			pin="${GITHUB_WORKSPACE:-.}/rust-toolchain.toml"
 job	conformance			powershell -NoProfile -Command "Expand-Archive -Path '$(cygpath -w "$dl/$NAME.$EXT")' -DestinationPath '$(cygpath -w "$dl")'"

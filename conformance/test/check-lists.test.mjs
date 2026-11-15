@@ -48,9 +48,9 @@ test('a new module with no other edit is imported, listed, run on Paddock and in
   assert.match(readme.text, /^\| C99999 \| A fake check \| root \| report-only \| all \|$/m);
 });
 
-test('modules: id order by number; two modules with one id refused', () => {
+test('modules: id order by number; index.mjs and dotfiles (.DS_Store) are no modules; two modules with one id refused', () => {
   assert.deepEqual(
-    modules(['index.mjs', 'C104-b.mjs', 'C99-a.mjs', 'C3-c.mjs']).map((m) => m.id),
+    modules(['index.mjs', '.DS_Store', 'C104-b.mjs', 'C99-a.mjs', 'C3-c.mjs']).map((m) => m.id),
     ['C3', 'C99', 'C104'],
   );
   assert.throws(() => modules(['C7-a.mjs', 'C7-b.mjs']), /C7 has two modules \(C7-a\.mjs and C7-b\.mjs\)/);
@@ -120,8 +120,9 @@ test('the command refuses a misnamed module file and one whose exported id is no
   const root = scratchRepo();
   try {
     mkdirSync(join(root, 'conformance/src/checks/lib'));
+    writeFileSync(join(root, 'conformance/src/checks/.DS_Store'), 'Bud1');
     assert.equal(run(root).status, 0);
-    assert.equal(run(root, ['--check']).status, 0, 'a folder (lib/) is no module');
+    assert.equal(run(root, ['--check']).status, 0, 'a folder (lib/) and a .DS_Store are no modules');
     writeFileSync(join(root, 'conformance/src/checks/C2-two.mjs'), "export default { id: 'C3' };\n");
     const r = run(root, ['--check']);
     assert.equal(r.status, 1);

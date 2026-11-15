@@ -413,7 +413,7 @@ requires = ["node_modules/.package-lock.json"]   # the modules are imported to c
 
 [[generator]]
 id = "ci-run-golden"
-what = "tools/paddock-dev/tests/golden/ci-run/commands.tsv, every command CI's root jobs and app legs run, from the CI model over the contracts and workflows (the conformance arguments stay `$PADDOCK_CONFORMANCE_ARGS`, so a new check changes no row); a contract or job that gains or loses a command leaves it stale"
+what = "tools/paddock-dev/tests/golden/ci-run/commands.tsv, every command CI's root jobs and app legs run, from the CI model over the contracts and workflows (the conformance line's `--only` value is `$ONLY`, so a new check changes no row; its other arguments stay literal); a contract or job that gains or loses a command leaves it stale"
 check = ["cargo", "test", "--lib", "ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden"]
 build = ["cargo", "test", "--no-run", "--lib"]
 regenerate = "PADDOCK_UPDATE_GOLDEN=1 cargo test --lib ci_run::tests::the_contracts_run_exactly_the_commands_in_the_golden -- --nocapture   # in tools/paddock-dev; it prints the rows it adds and removes (refused under CI=true)"
