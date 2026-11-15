@@ -2159,4 +2159,8 @@ and removes nothing when one path is refused. The prune, host-cleanup, node-cach
 prepare sites use it with the same roots as their Rust twins. C127 (report-only) lists every other recursive `rm` of a computed
 path in a shell script. **Rule:** a shell script deletes a computed path only through `safe_rm`, with the root it owns; a
 mktemp folder of its own, or a site that cannot name a root two folders deep (a guest VM's home, Linux's `/tmp`), carries
-`# conformance: computed-rm — <why>`. **Class: computed deletes beyond their folder (C115's third sighting, ER-21).**
+`# conformance: computed-rm — <why>`. Review then found that both copies checked one spelling and removed another: `root/link/`
+(a final link with a trailing slash) passed as a path strictly under the root, and the OS read it as the folder the link names, so
+the delete emptied a folder outside the root; the Rust guard had the same hole. Both now remove the path rebuilt from its checked
+names, and one table (`tools/paddock-dev/tests/fixtures/safe-remove-parity.tsv`) is answered by both copies' tests. **Class:
+computed deletes beyond their folder (C115's third sighting, ER-21); check and act on the same normalised value.**

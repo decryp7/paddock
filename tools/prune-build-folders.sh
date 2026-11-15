@@ -36,7 +36,10 @@ size() {
 
 if [ "$(size)" -ge "$max" ]; then
   echo "prune: $dir is $(size) (cap $max); removing incremental caches"
-  find "$dir" -type d -name incremental -prune -exec rm -rf {} + 2>/dev/null || true
+  # Each cache strictly under the folder, a refusal a warning, as `ci prune-folder` does (find -prune never enters a link).
+  find "$dir" -type d -name incremental -prune 2>/dev/null | while IFS= read -r f; do
+    SAFE_RM_ANNOTATION=warning safe_rm "$dir" "$f" || true
+  done
 fi
 if [ "$(size)" -ge "$max" ]; then
   echo "prune: still $(size); removing $dir"

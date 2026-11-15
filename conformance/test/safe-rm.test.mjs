@@ -3,13 +3,15 @@
 // and sh against a scratch tree and checks both the exit code and what is left on disk.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', 'ci', 'safe-rm.sh');
+/** The parity table the Rust guard's tests read too (tools/paddock-dev/src/safe_remove/guard.rs). */
+const PARITY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'tools', 'paddock-dev', 'tests', 'fixtures', 'safe-remove-parity.tsv');
 const SHELLS = ['bash', 'sh'];
 
 /** Runs `safe_rm <args>` after sourcing the helper; HOME is `home`. */
@@ -94,6 +96,18 @@ for (const shell of SHELLS) {
   });
 }
 
+test('SAFE_RM_ANNOTATION=warning makes a refusal a warning for a caller that goes on', () => {
+  const { base, root, home } = tree();
+  try {
+    const r = spawnSync('bash', ['-c', `. '${LIB}' && SAFE_RM_ANNOTATION=warning safe_rm '${root}' /`], { encoding: 'utf8', env: { ...process.env, HOME: home } });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /^::warning::safe_rm: /m);
+    assert.doesNotMatch(r.stderr, /::error::/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('safe_rm needs a root and a path', () => {
   const { base, home } = tree();
   try {
@@ -104,3 +118,41 @@ test('safe_rm needs a root and a path', () => {
     rmSync(base, { recursive: true, force: true });
   }
 });
+
+const FOLD = process.platform === 'darwin' || process.platform === 'win32';
+const gone = (p) => {
+  try {
+    lstatSync(p);
+    return false;
+  } catch {
+    return true;
+  }
+};
+
+for (const shell of SHELLS) {
+  test(`${shell}: the shared parity table with the Rust guard holds`, () => {
+    const rows = readFileSync(PARITY, 'utf8').split('\n').filter((l) => l && !l.startsWith('#') && !l.startsWith('name\t'));
+    assert.ok(rows.length >= 15, `the table was read (${rows.length} rows)`);
+    for (const row of rows) {
+      const [name, root, target, result, goneRel] = row.split('\t');
+      const b = realpathSync(mkdtempSync(join(tmpdir(), 'safe-rm-parity-')));
+      try {
+        mkdirSync(join(b, 'root', 'a', 'b'), { recursive: true });
+        writeFileSync(join(b, 'root', 'a', 'b', 'f'), 'x');
+        mkdirSync(join(b, 'outside', 'keep'), { recursive: true });
+        writeFileSync(join(b, 'outside', 'keep', 'f'), 'x');
+        symlinkSync(join(b, 'outside'), join(b, 'root', 'link'));
+        symlinkSync(join(b, 'root'), join(b, 'rootlink'));
+        const fill = (s) => s.replaceAll('<B>', b);
+        const r = safeRm(shell, [fill(root), fill(target)], join(b, 'home'));
+        const ok = result === 'ok' || (result === 'ok-fold|refused-nofold' && FOLD);
+        assert.equal(r.status, ok ? 0 : 1, `${name}: ${r.err}`);
+        if (!ok) assert.ok(existsSync(join(b, 'root', 'a', 'b', 'f')), `${name}: a refusal removes nothing`);
+        if (goneRel !== '-') assert.ok(gone(join(b, goneRel)), `${name}: ${goneRel} is still there`);
+        assert.ok(existsSync(join(b, 'outside', 'keep', 'f')), `${name}: the folder outside the root was touched`);
+      } finally {
+        rmSync(b, { recursive: true, force: true });
+      }
+    }
+  });
+}

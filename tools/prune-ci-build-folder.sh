@@ -18,6 +18,6 @@ if ! bash "$iso" owns "$dir" target 2>/dev/null; then
 fi
 real="$(cd "$dir" && pwd -P)"
 . "$(dirname "$0")/../conformance/ci/safe-rm.sh"
-if [ "$drop" = --drop-bundles ]; then safe_rm "$real" "$real/dist/bundle" || true; fi
+if [ "$drop" = --drop-bundles ]; then SAFE_RM_ANNOTATION=warning safe_rm "$real" "$real/dist/bundle" || true; fi
 bash "$(dirname "$0")/prune-build-folders.sh" "$real" "$max" || true
 exit 0

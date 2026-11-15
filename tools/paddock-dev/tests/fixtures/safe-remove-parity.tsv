@@ -1,0 +1,31 @@
+# The one table both copies of "remove only strictly under a root" answer (docs/known-copies.toml, safe-remove-under): the Rust
+# canonical (tools/paddock-dev/src/safe_remove/guard.rs, `remove_under`) and the shell copy (conformance/ci/safe-rm.sh, `safe_rm`).
+# Read by guard.rs's tests and by conformance/test/safe-rm.test.mjs; a row changes for both or for neither.
+#
+# The tree, made fresh for every row under a scratch folder <B>:
+#   <B>/root/a/b/f              a folder with a file
+#   <B>/outside/keep/f          what must never go
+#   <B>/root/link -> <B>/outside   a link to a folder outside the root
+#   <B>/rootlink -> <B>/root       a link to the root
+# Columns (tab separated): name, root, target, result, gone.
+#   result: ok (exit 0 / Ok) or refused (exit 1 / Err(Refused)).
+#   gone: the path below <B> that is gone afterwards, or - when nothing is removed. Every row also checks that
+#   <B>/outside/keep/f is still there and, for a refused row, that <B>/root/a/b/f is too.
+#   A result `ok-fold|refused-nofold` is ok where names are compared without case (macOS, Windows) and refused elsewhere.
+name	root	target	result	gone
+a folder strictly under the root	<B>/root	<B>/root/a	ok	root/a
+a file strictly under the root	<B>/root	<B>/root/a/b/f	ok	root/a/b/f
+a path that is not there	<B>/root	<B>/root/nope/x	ok	-
+a final link goes as a link	<B>/root	<B>/root/link	ok	root/link
+a final link with a trailing slash goes as a link, never what it names	<B>/root	<B>/root/link/	ok	root/link
+a final link with a trailing slash and dot goes as a link	<B>/root	<B>/root/link/.	ok	root/link
+a final link with two trailing slashes goes as a link	<B>/root	<B>/root/link//	ok	root/link
+a link in the middle is refused	<B>/root	<B>/root/link/keep	refused	-
+a .. that climbs out is refused	<B>/root	<B>/root/a/../../outside	refused	-
+a .. that stays inside is refused too	<B>/root	<B>/root/a/../a	refused	-
+the root itself is refused	<B>/root	<B>/root	refused	-
+the root with a trailing slash is the root	<B>/root	<B>/root/	refused	-
+a path outside the root is refused	<B>/root	<B>/outside	refused	-
+a root with a trailing slash works	<B>/root/	<B>/root/a	ok	root/a
+known limit: a root that is a link is read as written, not resolved	<B>/rootlink	<B>/rootlink/a	ok	root/a
+names differ in case	<B>/ROOT	<B>/root/a	ok-fold|refused-nofold	root/a

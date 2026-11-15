@@ -9,15 +9,20 @@
 #   home folder or a folder above it;
 # - <path> is not empty, absolute, has no `..` and lies strictly under <root> (names compared without case on macOS and Windows);
 # - no folder between <root> and <path> is a link (a link in the middle would send the delete somewhere else).
-# Paths are read as written (no link is resolved), as the Rust guard does. A path that is not there is the goal (exit 0). When one
-# path is refused nothing is removed and it returns 1 with one `::error::safe_rm: ...` line naming the cause and the next step;
-# 2 for a usage error. On Windows (Git Bash, MSYS, Cygwin) every path, $HOME included, is first spelled as `C:/x` by `cygpath -m`
+# Paths are read as written (no link is resolved), as the Rust guard does; what goes is the path rebuilt from its checked names,
+# so a trailing `/` or `/.` never turns a final link into the folder it names. A path that is not there is the goal (exit 0).
+# When one path is refused nothing is removed and it returns 1 with one `::error::safe_rm: ...` line naming the cause and the next
+# step (`::warning::` with SAFE_RM_ANNOTATION=warning, for a caller that goes on after a refusal); 2 for a usage error.
+# Limits: a root that is itself a link is not resolved (the shared parity table names it); the links are checked, then removed,
+# so a link made in between (a race with another process writing below the root) is not seen, as in the Rust guard; and a root
+# must be two folders deep and not the home folder, so `/tmp/x` on Linux has no usable root (`/tmp` is top-level) and neither has
+# a folder directly in $HOME: such a caller waives the site (C127) or picks a deeper root. On Windows (Git Bash, MSYS, Cygwin) every path, $HOME included, is first spelled as `C:/x` by `cygpath -m`
 # (without cygpath only `\` becomes `/`), so `D:\a\_temp`, `D:/a/_temp` and `/d/a/_temp` are one folder; the drive is not a
 # folder name (`C:/x` is a top-level folder).
 # Variables are prefixed `_safe_rm_` (POSIX sh has no `local`); the function changes no option and no IFS.
 
 _safe_rm_err() {
-  echo "::error::safe_rm: $1; it is not removed. Next step: give a path strictly under a folder this script owns (not /, a top-level folder or the home folder), with no \`..\` and no link on the way." >&2
+  echo "::${SAFE_RM_ANNOTATION:-error}::safe_rm: $1; it is not removed. Next step: give a path strictly under a folder this script owns (not /, a top-level folder or the home folder), with no \`..\` and no link on the way." >&2
 }
 
 # Whether this is Windows (Git Bash, MSYS, Cygwin).
@@ -134,10 +139,13 @@ safe_rm() {
   for _safe_rm_t in "$@"; do
     _safe_rm_check "$_safe_rm_t" || return 1
     [ "$_safe_rm_absent" = 0 ] || continue
-    # rm -r removes a link (a Windows junction too) as a link and never follows it.
-    if [ -L "$_safe_rm_t" ] || [ -e "$_safe_rm_t" ]; then
+    # The path that goes is the one checked: its names joined again, so a trailing `/`, `//` or `/.` cannot make the last name
+    # a folder seen through a link (`root/link/` names what the link points at). rm -r removes a link (a Windows junction too)
+    # as a link and never follows it.
+    _safe_rm_go=$_safe_rm_tn
+    if [ -L "$_safe_rm_go" ] || [ -e "$_safe_rm_go" ]; then
       # conformance: scoped-cleanup — the guard itself: the path was checked above (strictly under a vetted root, no `..`, no link on the way)
-      rm -rf -- "$_safe_rm_t" || { _safe_rm_err "$_safe_rm_t could not be removed (see rm's message above)"; return 1; }
+      rm -rf -- "$_safe_rm_go" || { _safe_rm_err "$_safe_rm_t could not be removed (see rm's message above)"; return 1; }
     fi
   done
   return 0

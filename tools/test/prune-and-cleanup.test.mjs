@@ -108,6 +108,20 @@ test('host-cleanup: kills only processes anchored on this job, removes only the 
   assert.ok(existsSync(join(target, 'release/blob')), 'only dist and debug of the target folder');
 });
 
+test('host-cleanup: a build folder with no usable root is a warning, never an error, and the clean-up goes on', () => {
+  const bin = scratch('paddock-bin-');
+  shim(bin, 'pkill');
+  shim(bin, 'ps');
+  const cwd = scratch();
+  write(cwd, { 'dist/x': '1' });
+  const env = { PADDOCK_PKILL: join(bin, 'pkill'), PADDOCK_PS: join(bin, 'ps'), RUNNER_OS: 'macOS', CARGO_TARGET_DIR: '/paddock-top-level-target' };
+  const r = run('host-cleanup.sh', ['--id', 'pitwall', '--build-outputs'], { bin, cwd, env });
+  assert.equal(r.status, 0, r.out);
+  assert.match(r.out, /::warning::safe_rm: the root \/paddock-top-level-target is a drive root or a top-level folder/);
+  assert.doesNotMatch(r.out, /::error::/);
+  assert.ok(!existsSync(join(cwd, 'dist')), 'the checkout outputs still go');
+});
+
 test('host-cleanup: the leak check names what still runs after the clean-up; on Windows PowerShell ends and lists processes (Git bash has no pkill)', () => {
   const bin = scratch('paddock-bin-');
   shim(bin, 'pkill');

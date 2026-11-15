@@ -106,7 +106,8 @@ else
 fi
 if [ "$build" = 1 ]; then
   if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-    for out in dist debug; do safe_rm "$CARGO_TARGET_DIR" "$CARGO_TARGET_DIR/$out" || true; done
+    # A refusal is a warning, as in `ci host-cleanup`: the clean-up goes on.
+    for out in dist debug; do SAFE_RM_ANNOTATION=warning safe_rm "$CARGO_TARGET_DIR" "$CARGO_TARGET_DIR/$out" || true; done
   fi
   rm -rf dist app/dist app/coverage app/playwright-report 2>/dev/null
 fi
