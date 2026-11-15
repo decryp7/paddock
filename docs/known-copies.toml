@@ -1079,11 +1079,11 @@ status = "built"
 adr = "docs/adr/0025-ci-job-isolation.md"
 
   [[mechanism.copy]]
-  paths = ["dev"]
-  symbols = ["text:_cihome"]
+  paths = ["tools/dev-launch/src/launch.rs"]
+  symbols = ["item:ci_home", "item:mixed_path"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "WP-2 of docs/plans/shell-to-rust.md moved this out of conformance/ci/kit.sh (tools_home): the wrapper cannot ask the tool where the tool goes, because the tool is not built yet. It reads PADDOCK_CI_HOME (absolute, must exist), else creates ~/.paddock-ci, resolves links and uses the mixed path on Git bash, as `ci isolation path tools` does. tools/paddock-dev/tests/it/wrapper_ci.rs, `the_wrappers_ci_home_is_the_one_ci_isolation_gives`, holds the two equal. WP-1 (the launcher crate) carries the block over; the entry leaves with the shell copy."
+  note = "WP-2 of docs/plans/shell-to-rust.md moved this out of conformance/ci/kit.sh (tools_home) into the `dev` wrapper; WP-1 carried it into the launcher (the stage 0 does not read it). The launcher cannot ask the tool where the tool goes, because the tool is not built yet, and it is std only, so it cannot call home.rs. It reads PADDOCK_CI_HOME (absolute, must exist), else creates ~/.paddock-ci, resolves links (SUBST and mapped drives too) and refuses a volume, a device or a too long path, as `ci isolation path tools` does. tools/paddock-dev/tests/it/wrapper_ci.rs, `the_wrappers_ci_home_is_the_one_ci_isolation_gives`, holds the two equal against the launcher."
 
 # =====================================================================================================================
 # CI run readers (RT-8)
@@ -1355,3 +1355,17 @@ status = "built"
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "FIPS 180-4 in 70 lines of std, held equal to Python's hashlib by the published vectors and the padding boundaries in its tests. The launcher has no dependency (a crate would need a registry at stage 0); the tool uses the `sha2` crate."
+
+[[mechanism]]
+id = "dev-stage-0"
+title = "The ./dev stage 0: stamp of the launcher's sources, toolchain choice, build and publish of the launcher, in sh and in batch"
+canonical = "dev"
+paths = ["dev"]
+status = "built"
+adr = "docs/adr/amendments/0022-launcher-2026-11-15.md"
+
+  [[mechanism.copy]]
+  paths = ["dev.cmd"]
+  owner = "paddock"
+  delete_by = "v0.5.0"
+  note = "The same steps for Windows without Git Bash (a person's shell): the stamp (git tree id, plus status, diff and untracked files when uncommitted), the toolchain of 1.89 or newer picked by its rustc, RUSTUP_AUTO_INSTALL=0 on every probe, the build, the publish by rename under the stamp and the prune after a minute. Nothing can start before a Rust binary exists, so there is no one implementation. tools/paddock-dev/tests/it/dev_stage0.rs tests the sh script on Unix; the Windows run of dev.cmd is recorded in the ADR 0022 amendment (2026-11-15), until the shared compiled stand-in builder of train 14 lets a Windows twin of dev_stage0.rs run in CI."

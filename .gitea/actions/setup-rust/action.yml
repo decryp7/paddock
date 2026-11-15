@@ -52,15 +52,16 @@ runs:
         # In the Paddock CI image (it writes /etc/paddock-ci-release) the toolchain and its components (llvm-tools too) are installed
         # under the pinned version's name (an older image: as `stable`, a different toolchain name to rustup). When it is the pinned
         # version, use it as it is (nothing downloads); `RUSTUP_TOOLCHAIN=<name>` makes the check itself skip the rust-toolchain.toml,
-        # which would start a download.
+        # which would start a download. Every probe also sets RUSTUP_AUTO_INSTALL=0: rustup 1.28.1 and later install a missing pin from any
+        # proxy that runs below rust-toolchain.toml, unlocked (run 8060); the one install is ./dev --install-toolchain's, below.
         # Skipped when this job asks for extra targets or a component the image lacks. An image whose version differs from the pin
         # installs the pinned one below.
         if [ -f "${PADDOCK_CI_RELEASE_FILE:-/etc/paddock-ci-release}" ] && [ -z "$TARGETS" ]; then
           for name in "$TOOLCHAIN" stable; do
-            if [ "$name" != stable ] && ! rustup toolchain list 2>/dev/null | grep -q "^${name}-"; then continue; fi
-            have=$(RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}')
+            if [ "$name" != stable ] && ! RUSTUP_AUTO_INSTALL=0 rustup toolchain list 2>/dev/null | grep -q "^${name}-"; then continue; fi
+            have=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustc --version 2>/dev/null | awk '{print $2}')
             if [ "$TOOLCHAIN" = stable ] || [ "$have" = "$TOOLCHAIN" ]; then
-              installed=$(RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true)
+              installed=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$name rustup component list --installed 2>/dev/null || true)
               missing=0
               for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
               if [ "$missing" = 0 ]; then

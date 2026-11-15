@@ -40,7 +40,7 @@ pub fn make_executable(path: &Path) {
 
 /// Whether `binary self hash` reports `embedded <hash>` (the binary was built for that hash).
 pub fn reports_hash(binary: &Path, hash: &str) -> bool {
-    let mut c = proc::command(binary);
+    let mut c = proc::probe(binary);
     c.args(["self", "hash"]);
     let out = proc::capture(c, Duration::from_secs(60), None);
     out.ok() && out.stdout.lines().any(|l| l == format!("embedded {hash}"))

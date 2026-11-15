@@ -94,7 +94,7 @@ pub fn lock(pin: &str) -> Result<File, String> {
 }
 
 fn with_toolchain(name: &str, program: &str, args: &[&str]) -> std::process::Command {
-    let mut c = proc::command(program);
+    let mut c = proc::probe(program);
     c.args(args).env("RUSTUP_TOOLCHAIN", name);
     c
 }
@@ -237,8 +237,24 @@ pub struct Ensure<'a> {
     pub named_rustc: Option<&'a str>,
 }
 
-/// The toolchain the repository pins is installed (rustup 1.28 no longer installs a pinned toolchain by itself, so a runner
-/// that has rustup but not yet that version has a `rustc` shim that cannot run; run 8034). Only when rustup exists, no
+/// Remembers, for the rest of the job, that the pinned toolchain could not be installed, so that no later step (the always-run
+/// clean-ups) tries the install again (a 900 s wait each): in the job's environment on a CI runner. (The launcher ends right after, so
+/// the variable is not set in its own process.)
+pub fn toolchain_failed() {
+    if std::env::var("GITHUB_ACTIONS").as_deref() != Ok("true") {
+        return;
+    }
+    if let Some(file) = std::env::var_os("GITHUB_ENV").filter(|v| !v.is_empty())
+        && let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(file)
+    {
+        use std::io::Write;
+        let _ = f.write_all(b"PADDOCK_TOOLCHAIN_FAILED=1\n");
+    }
+}
+
+/// The toolchain the repository pins is installed (a runner whose `rustc` shim cannot run because the pin is missing; run 8034;
+/// rustup 1.28.1 and later would install it from any proxy that runs below `rust-toolchain.toml`, which every probe of the launcher
+/// forbids with `RUSTUP_AUTO_INSTALL=0`, [`proc::probe`]). Only when rustup exists, no
 /// compiler was named by `RUSTC` or a cargo config, a toolchain file exists and an earlier step of the job did not already fail
 /// to install it (`PADDOCK_TOOLCHAIN_FAILED`). Logged with its duration; a failure says the next step. Returns whether it works.
 pub fn ensure(e: &Ensure) -> bool {
@@ -260,7 +276,7 @@ pub fn ensure(e: &Ensure) -> bool {
         return false;
     };
     let runs_here = || {
-        let mut c = proc::command("rustc");
+        let mut c = proc::probe("rustc");
         c.arg("-vV").current_dir(e.tool);
         proc::capture(c, Duration::from_secs(60), None).ok()
     };
@@ -277,7 +293,7 @@ pub fn ensure(e: &Ensure) -> bool {
     );
     let install_pinned = || {
         let mut c = proc::command("rustup");
-        c.args(["toolchain", "install"]).current_dir(e.tool);
+        c.args(["toolchain", "install", "--no-self-update"]).current_dir(e.tool);
         proc::run_to_stderr(c, Duration::from_secs(install_timeout()))
     };
     let result = install_checked(&pin, &comps, &install_pinned);
@@ -296,6 +312,7 @@ pub fn ensure(e: &Ensure) -> bool {
             t0.elapsed().as_secs(),
             repair_step(&pin, &comps)
         );
+        toolchain_failed();
         return false;
     }
     eprintln!("dev: installed the pinned toolchain in {} s.", t0.elapsed().as_secs());

@@ -31,6 +31,16 @@ pub fn command(program: impl AsRef<OsStr>) -> Command {
     cmd
 }
 
+/// A program run only to find something out (`rustc -vV`, `rustup toolchain list`, a version): rustup 1.28.1 and later install a missing
+/// `rust-toolchain.toml` pin when any proxy runs below it, so the probe says it never may (`RUSTUP_AUTO_INSTALL=0`). Every install is
+/// the launcher's own, under its file lock, with its limit and `--no-self-update` (run 8060: two jobs installed one pin at once).
+/// Not for the tool, a build, or the install itself.
+pub fn probe(program: impl AsRef<OsStr>) -> Command {
+    let mut cmd = command(program);
+    cmd.env("RUSTUP_AUTO_INSTALL", "0");
+    cmd
+}
+
 /// What a bounded run left.
 #[derive(Debug, Clone, Default)]
 pub struct Captured {

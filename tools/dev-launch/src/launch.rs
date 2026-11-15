@@ -59,7 +59,7 @@ fn run_for_hash(program: &str, args: &[&str], cwd: &Path, stdin: Option<&[u8]>) 
 /// `rustc -vV` of the compiler cargo will use, run in the tool's folder, with carriage returns dropped; `None` when it does not
 /// run or prints nothing.
 fn rustc_vv(rustc: &str, tool: &Path) -> Option<String> {
-    let mut c = proc::command(rustc);
+    let mut c = proc::probe(rustc);
     c.arg("-vV").current_dir(tool);
     let out = proc::capture(c, Duration::from_secs(60), None);
     let text = out.stdout.replace('\r', "");
@@ -299,12 +299,12 @@ fn install_toolchain(args: &[String]) -> i32 {
     // Once per job, which rustup and which compiler it got: drift (a rustup self-update, a moved channel) shows in the log (ER-26).
     let first_line = |c: proc::Captured| c.stdout.lines().next().unwrap_or_default().to_string();
     let rv = {
-        let mut c = proc::command("rustup");
+        let mut c = proc::probe("rustup");
         c.arg("--version");
         first_line(proc::capture(c, Duration::from_secs(30), None))
     };
     let cv = {
-        let mut c = proc::command("rustc");
+        let mut c = proc::probe("rustc");
         c.arg("-V").env("RUSTUP_TOOLCHAIN", &name);
         first_line(proc::capture(c, Duration::from_secs(30), None))
     };
@@ -323,6 +323,7 @@ fn install_toolchain(args: &[String]) -> i32 {
         "::error::rustup could not install the {name} toolchain ({why}). CI never uninstalls a toolchain, since other jobs may be using it. Next step: {}.",
         toolchain::repair_step(&name, &comps)
     );
+    toolchain::toolchain_failed();
     1
 }
 
@@ -600,18 +601,46 @@ fn ci_home() -> Result<String, i32> {
         }
         h
     };
-    Ok(mixed_path(&home))
+    mixed_path(&home).map_err(|why| {
+        eprintln!("::error::./dev cannot use the CI home {} for the tool: {why}. Set PADDOCK_CI_HOME to a plain drive folder such as C:/ci/paddock-ci, then run ./dev again.", home.display());
+        1
+    })
 }
 
-/// The folder with links resolved, in the mixed form (`C:/ci/x`) that bash and the native tool both read.
+/// The folder with links resolved (a SUBST or mapped drive too: `canonicalize` follows them), in the mixed form (`C:/ci/x`,
+/// `//server/share/x`) that bash and the native tool both read. As `paddock_env::winpath::for_tools` does for the tool (the launcher
+/// cannot depend on it): a volume or device path, an unsafe spelling or one over 259 UTF-16 units is refused, never passed on in its
+/// verbatim form.
 #[expect(
     clippy::disallowed_methods,
-    reason = "std only: paddock_env::winpath does not exist before the launcher has run; the verbatim prefix is removed below"
+    reason = "std only: paddock_env::winpath does not exist before the launcher has run; the verbatim prefix is handled below"
 )]
-fn mixed_path(p: &Path) -> String {
-    let real = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()).display().to_string();
-    let real = real.strip_prefix(r"\\?\").unwrap_or(&real);
-    if cfg!(windows) { real.replace('\\', "/") } else { real.to_string() }
+fn mixed_path(p: &Path) -> Result<String, String> {
+    let real = std::fs::canonicalize(p)
+        .map_err(|e| format!("cannot resolve {}: {e}", p.display()))?
+        .display()
+        .to_string();
+    if !cfg!(windows) {
+        return Ok(real);
+    }
+    let plain = if let Some(unc) = real.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(rest) = real.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        if !(b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\') {
+            return Err(format!("{real} is a volume or device path, not a drive folder"));
+        }
+        rest.to_string()
+    } else if real.starts_with(r"\\.\") {
+        return Err(format!("{real} is a device path, not a drive folder"));
+    } else {
+        real
+    };
+    let units = plain.encode_utf16().count();
+    if units > 259 {
+        return Err(format!("{plain} is {units} characters long, over the 259 a program accepts"));
+    }
+    Ok(plain.replace('\\', "/"))
 }
 
 /// Whether `dir` is a folder this process can write to (`[ -d ] && [ -w ]`).

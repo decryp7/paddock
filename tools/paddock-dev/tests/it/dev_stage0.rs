@@ -2,7 +2,7 @@
 //! stand-in `cargo`, `rustc` and `rustup` "build" a script and keep a list of installed toolchains, so these tests need no compiler;
 //! the launcher itself is tested in `tools/dev-launch/tests` and `wrapper.rs`.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
-// windows-twin: none: the cargo and rustup stand-ins are sh scripts; Windows runs dev-launch's own tests (tools/dev-launch/tests/it) on every run, and dev.cmd in the test VM
+// windows-twin: none: owed to the shared compiled stand-in builder of train 14 (these stand-ins are sh scripts); until then the Windows run of dev.cmd on the test VM is recorded in the ADR 0022 amendment of 2026-11-15, and dev-launch's own tests run on Windows in ci.yml ("Launcher")
 #![cfg(unix)]
 use super::wrapper::write_script;
 use paddock_testkit::TestCommand;
@@ -34,6 +34,11 @@ fn setup(cargo_runs: bool, toolchains: &[&str]) -> Stage0 {
     std::fs::create_dir_all(root.join("tools/paddock-dev")).unwrap();
     std::fs::copy(repo_root().join("dev"), root.join("dev")).unwrap();
     std::fs::write(root.join(".gitignore"), "/tools/dev-launch/target/\n").unwrap();
+    std::fs::write(
+        root.join("rust-toolchain.toml"),
+        "# the pin\n[toolchain]\nchannel = \"1.100.0\"\nprofile = \"minimal\"\ncomponents = [\"rustfmt\", \"clippy\"]\n",
+    )
+    .unwrap();
     std::fs::write(root.join("tools/dev-launch/Cargo.toml"), "# placeholder\n").unwrap();
     std::fs::write(root.join("tools/dev-launch/Cargo.lock"), "# placeholder\n").unwrap();
     std::fs::write(root.join("tools/dev-launch/src/main.rs"), "fn main() {}\n").unwrap();
@@ -42,16 +47,23 @@ fn setup(cargo_runs: bool, toolchains: &[&str]) -> Stage0 {
     git(&root, &["commit", "-q", "-m", "fixture"]);
     let shims = dir.path().join("shims");
     let (log, marker, list) = (dir.path().join("cargo.log"), shims.join("installed"), shims.join("list"));
+    // rustup 1.28.1 and later install a missing pin from any proxy that runs below rust-toolchain.toml, unless RUSTUP_AUTO_INSTALL=0:
+    // while `shims/pin-missing` exists, every stand-in that runs without it "contacts the dist server" (dist.log).
+    let dist = format!(
+        "[ -e '{}' ] && [ \"${{RUSTUP_AUTO_INSTALL:-}}\" != 0 ] && echo \"dist: $0 $*\" >> '{}'\n",
+        shims.join("pin-missing").display(),
+        dir.path().join("dist.log").display()
+    );
     std::fs::create_dir_all(&shims).unwrap();
     std::fs::write(&list, toolchains.iter().map(|t| format!("{t}\n")).collect::<String>()).unwrap();
     write_script(
         &shims.join("cargo"),
         &format!(
-            r#"if [ "$1" = --version ]; then {run}; fi
+            r#"{dist}if [ "$1" = --version ]; then {run}; fi
 echo "build rustup_toolchain=[${{RUSTUP_TOOLCHAIN:-}}] build_target=[${{CARGO_BUILD_TARGET:-}}] $*" >> '{log}'
 while [ $# -gt 0 ]; do [ "$1" = --target-dir ] && t=$2; shift; done
 /bin/mkdir -p "$t/release"
-printf '#!/bin/sh\necho "launcher ran: $*; toolchain=[${{RUSTUP_TOOLCHAIN:-}}] git_dir=[${{GIT_DIR:-}}]"\n' > "$t/release/dev-launch"
+printf '#!/bin/sh\necho "launcher ran: $*; toolchain=[${{RUSTUP_TOOLCHAIN:-}}] git_dir=[${{GIT_DIR:-}}]"\n[ "$1" = fail3 ] && exit 3\nexit 0\n' > "$t/release/dev-launch"
 /bin/chmod +x "$t/release/dev-launch""#,
             run = if cargo_runs {
                 "echo cargo 1.100.0; exit 0".to_string()
@@ -61,23 +73,28 @@ printf '#!/bin/sh\necho "launcher ran: $*; toolchain=[${{RUSTUP_TOOLCHAIN:-}}] g
                     marker.display()
                 )
             },
-            log = log.display()
+            log = log.display(),
+            dist = dist
         ),
     );
     write_script(
         &shims.join("rustc"),
-        r#"case "${RUSTUP_TOOLCHAIN:-}" in no|none*|'') exit 1 ;; 1.80*) echo "rustc 1.80.0 (abc 2024-01-01)" ;; *) echo "rustc 1.100.0 (abc 2026-01-01)" ;; esac"#,
+        &format!(
+            "{dist}{}",
+            r#"case "${RUSTUP_TOOLCHAIN:-}" in no|none*|'') exit 1 ;; 1.80*) echo "rustc 1.80.0 (abc 2024-01-01)" ;; *) echo "rustc 1.100.0 (abc 2026-01-01)" ;; esac"#
+        ),
     );
     write_script(
         &shims.join("rustup"),
         &format!(
-            r#"case "$1 $2" in
+            r#"{dist}case "$1 $2" in
   'toolchain list') if [ -s '{list}' ]; then cat '{list}'; else echo 'no installed toolchains'; fi ;;
   'toolchain install') echo "install in $PWD: $*" >> '{inst}'; sleep 2; echo '1.100.0-test (default)' >> '{list}'; touch '{marker}' ;;
 esac"#,
             list = list.display(),
             inst = dir.path().join("installs.log").display(),
-            marker = marker.display()
+            marker = marker.display(),
+            dist = dist
         ),
     );
     Stage0 { dir }
@@ -153,7 +170,12 @@ fn the_first_run_builds_the_launcher_and_passes_every_argument_on_later_runs_do_
     ] {
         assert!(log.contains(part), "cargo build lacks {part}: {log}");
     }
-    assert_eq!(s.bins().len(), 1, "one published launcher: {:?}", s.bins());
+    assert_eq!(
+        s.bins().iter().filter(|p| !p.to_string_lossy().ends_with(".at")).count(),
+        1,
+        "one published launcher: {:?}",
+        s.bins()
+    );
     let (code, _, err) = s.dev(&s.root(), &["again"], &[]);
     assert_eq!(code, 0, "{err}");
     assert_eq!(
@@ -170,7 +192,7 @@ fn the_published_launcher_is_never_replaced_and_does_not_depend_on_cargos_own_ou
     use std::os::unix::fs::MetadataExt;
     let s = setup(true, GOOD);
     assert_eq!(s.dev(&s.root(), &[], &[]).0, 0);
-    let bin = s.bins().remove(0);
+    let bin = s.bins().into_iter().find(|p| !p.to_string_lossy().ends_with(".at")).unwrap();
     let before = std::fs::metadata(&bin).unwrap().ino();
     std::fs::remove_file(s.root().join("tools/dev-launch/target/release/dev-launch")).unwrap();
     assert_eq!(s.dev(&s.root(), &[], &[]).0, 0);
@@ -179,7 +201,7 @@ fn the_published_launcher_is_never_replaced_and_does_not_depend_on_cargos_own_ou
 }
 
 #[test]
-fn a_changed_source_builds_again_committed_or_not_and_the_old_launcher_goes() {
+fn a_changed_source_builds_again_committed_or_not() {
     let s = setup(true, GOOD);
     assert_eq!(s.dev(&s.root(), &[], &[]).0, 0);
     let first = s.bins();
@@ -192,7 +214,6 @@ fn a_changed_source_builds_again_committed_or_not_and_the_old_launcher_goes() {
     assert_eq!(s.dev(&s.root(), &[], &[]).0, 0, "the same change, committed, is a new stamp");
     assert_eq!(s.builds(), 3);
     let now = s.bins();
-    assert_eq!(now.len(), 1, "{now:?}");
     assert_ne!(now, first);
 }
 
@@ -219,65 +240,120 @@ fn only_old_toolchains_is_an_error_that_installs_nothing() {
     let (code, _, err) = s.dev(&s.root(), &[], &[]);
     assert_eq!(code, 2, "{err}");
     assert!(
-        err.contains("no installed Rust toolchain is 1.89 or newer") && err.contains("rustup toolchain install stable"),
+        err.contains("no installed Rust toolchain is 1.89 or newer") && err.contains("rustup toolchain install 1.100.0"),
         "{err}"
     );
     assert_eq!((s.installs(), s.builds()), (0, 0));
 }
 
+/// Stage 0 installs nothing, as xtask and cargo never do: a machine with rustup and no toolchain at all gets one `::error::` line with
+/// the exact command (from rust-toolchain.toml) and exit 2, and a CI job is marked so no later step tries again.
 #[test]
-fn a_machine_with_rustup_and_no_toolchain_at_all_installs_the_pin_once_in_the_tools_folder() {
+fn a_machine_with_rustup_and_no_toolchain_at_all_gets_the_install_command_and_nothing_is_installed() {
     let s = setup(false, &[]);
-    let (code, out, err) = s.dev(&s.root(), &["hello"], &[]);
-    assert_eq!(code, 0, "{err}");
-    let installs = std::fs::read_to_string(s.dir.path().join("installs.log")).unwrap();
+    let env_file = s.dir.path().join("github-env");
+    let job = [
+        ("GITHUB_ACTIONS", "true".to_string()),
+        ("GITHUB_ENV", env_file.display().to_string()),
+    ];
+    let (code, _, err) = s.dev(&s.root(), &["hello"], &job);
+    assert_eq!(code, 2, "{err}");
     assert!(
-        installs
-            .trim_end()
-            .ends_with("tools/paddock-dev: toolchain install --no-self-update"),
-        "rustup reads the pin from the tool's folder and never updates itself: {installs}"
+        err.contains("::error::./dev: rustup has no toolchain installed")
+            && err.contains("rustup toolchain install 1.100.0 --profile minimal --component rustfmt --component clippy"),
+        "{err}"
     );
-    assert!(out.contains("launcher ran: hello"), "{out}");
+    assert_eq!((s.installs(), s.builds()), (0, 0), "nothing installed, nothing built");
+    assert_eq!(std::fs::read_to_string(&env_file).unwrap(), "PADDOCK_TOOLCHAIN_FAILED=1\n");
+    assert!(
+        !s.dir.path().join("rustup").exists() || std::fs::read_dir(s.dir.path().join("rustup")).unwrap().count() == 0,
+        "no lock folder"
+    );
+    // A person's run writes nothing, whatever GITHUB_ENV holds.
+    let other = s.dir.path().join("other-env");
+    let (code, _, _) = s.dev(&s.root(), &[], &[("GITHUB_ENV", other.display().to_string())]);
+    assert_eq!(code, 2);
+    assert!(!other.exists());
 }
 
-/// Run 8060's shape: two jobs of one runner meet a machine with no toolchain at the same moment (setup-rust now starts with stage 0).
-/// One install runs; the other waits for it and builds with what it left.
+/// rustup 1.28.1 and later install a missing pin from any proxy run below rust-toolchain.toml: every probe of stage 0 says it may not.
 #[test]
-fn two_concurrent_stage_0s_with_no_toolchain_make_exactly_one_install() {
-    let s = setup(false, &[]);
-    let runs: Vec<_> = std::thread::scope(|sc| {
-        let handles: Vec<_> = (0..2).map(|_| sc.spawn(|| s.dev(&s.root(), &["x"], &[]))).collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-    for (code, _, err) in &runs {
-        assert_eq!(*code, 0, "{err}");
+fn a_probe_with_a_missing_pin_never_contacts_the_dist_server() {
+    for toolchains in [&["1.95.0-test"][..], &[][..], &["1.80.0-test (default)"][..]] {
+        let s = setup(false, toolchains);
+        std::fs::write(s.dir.path().join("shims/pin-missing"), "").unwrap();
+        let _ = s.dev(&s.root(), &["hello"], &[]);
+        let dist = std::fs::read_to_string(s.dir.path().join("dist.log")).unwrap_or_default();
+        assert_eq!(
+            dist, "",
+            "toolchains {toolchains:?}: a probe or the launcher build started an install"
+        );
     }
-    assert_eq!(s.installs(), 1, "one install, not two");
+}
+
+/// The job-setup mode is the one place a failed setup step marks the job (PADDOCK_JOB_ABORTED=1, which the later `!cancelled()` steps
+/// test, conformance C117) and says so once; it covers a launcher that cannot be built, which no action's own script could.
+#[test]
+fn job_setup_marks_the_job_and_says_so_once_when_the_step_or_the_tool_build_fails() {
+    let s = setup(true, GOOD);
+    let env_file = s.dir.path().join("github-env");
+    let job = [("GITHUB_ENV", env_file.display().to_string())];
+    // A good step: exit 0 and nothing written.
+    let (code, out, err) = s.dev(&s.root(), &["--job-setup", "hello"], &job);
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("launcher ran: hello"), "{out}");
+    assert!(!env_file.exists(), "a good step marks nothing");
+    // A step that fails keeps its own exit code.
+    let (code, _, err) = s.dev(&s.root(), &["--job-setup", "fail3"], &job);
+    assert_eq!(code, 3, "{err}");
+    assert_eq!(std::fs::read_to_string(&env_file).unwrap(), "PADDOCK_JOB_ABORTED=1\n");
+    assert_eq!(err.matches("A job setup step failed").count(), 1, "one error line: {err}");
     assert!(
-        !s.dir.path().join("rustup/.paddock-stage0-install.lock").exists(),
-        "the lock is released"
+        err.contains("exit 3") && err.contains("./dev fail3"),
+        "it names the step and the exit: {err}"
     );
-}
-
-#[test]
-fn after_a_failed_install_earlier_in_the_job_stage_0_installs_nothing() {
-    let s = setup(false, &[]);
-    let (code, out, err) = s.dev(&s.root(), &[], &[("PADDOCK_TOOLCHAIN_FAILED", "1".to_string())]);
-    assert_eq!((code, s.installs()), (2, 0), "out={out} err={err} log={}", s.log());
-    assert!(err.contains("PADDOCK_TOOLCHAIN_FAILED=1"), "{err}");
-}
-
-#[test]
-fn a_stuck_install_ends_at_the_limit_with_the_next_step_and_removes_its_lock() {
-    let s = setup(false, &[]);
+    // A launcher that cannot be built (another stamp, so it builds).
+    std::fs::remove_file(&env_file).unwrap();
     write_script(
-        &s.dir.path().join("shims/rustup"),
-        "case \"$1 $2\" in 'toolchain list') echo 'no installed toolchains' ;; 'toolchain install') exec sleep 30 ;; esac",
+        &s.dir.path().join("shims/cargo"),
+        "[ \"$1\" = --version ] && exit 0\necho 'error: no build' >&2\nexit 101",
     );
-    let (code, _, err) = s.dev(&s.root(), &[], &[("PADDOCK_DEV_TOOLCHAIN_TIMEOUT", "1".to_string())]);
-    assert_eq!(code, 1, "{err}");
-    assert!(err.contains("did not leave a working toolchain"), "{err}");
-    assert!(!s.dir.path().join("rustup/.paddock-stage0-install.lock").exists());
+    std::fs::write(s.root().join("tools/dev-launch/src/main.rs"), "fn main() { 2; }\n").unwrap();
+    let (code, _, err) = s.dev(&s.root(), &["--job-setup", "ci", "build-jobs"], &job);
+    assert_ne!(code, 0, "{err}");
+    assert_eq!(std::fs::read_to_string(&env_file).unwrap(), "PADDOCK_JOB_ABORTED=1\n", "{err}");
+    assert_eq!(err.matches("A job setup step failed").count(), 1, "{err}");
+    // Without GITHUB_ENV it still fails and says so.
+    let (code, _, err) = s.dev(&s.root(), &["--job-setup", "ci", "build-jobs"], &[]);
+    assert_ne!(code, 0);
+    assert_eq!(err.matches("A job setup step failed").count(), 1, "{err}");
+}
+
+/// Untracked launcher sources are part of the stamp (a new module, or an edit of one, must not run the old launcher), and a
+/// launcher of another stamp that is less than a minute old is never removed by this one.
+#[test]
+fn untracked_files_count_in_the_stamp_and_a_young_launcher_of_another_stamp_is_kept() {
+    let s = setup(true, GOOD);
+    assert_eq!(s.dev(&s.root(), &[], &[]).0, 0);
+    std::fs::write(s.root().join("tools/dev-launch/src/new.rs"), "// one\n").unwrap();
+    assert_eq!(s.dev(&s.root(), &[], &[]).0, 0);
+    assert_eq!(s.builds(), 2, "a new untracked file is a new stamp");
+    std::fs::write(s.root().join("tools/dev-launch/src/new.rs"), "// two\n").unwrap();
+    assert_eq!(s.dev(&s.root(), &[], &[]).0, 0);
+    assert_eq!(s.builds(), 3, "an edit of an untracked file is a new stamp");
+    // The first stamp's launcher was published seconds ago: it is still there, with the second's (the third is current).
+    let bins: Vec<_> = s.bins().iter().filter(|p| !p.to_string_lossy().ends_with(".at")).cloned().collect();
+    assert_eq!(bins.len(), 3, "young launchers of other stamps stay: {bins:?}");
+    // Make them old: their publish time is in the .at file.
+    for p in s.bins() {
+        if p.to_string_lossy().ends_with(".at") {
+            std::fs::write(&p, "1000\n").unwrap();
+        }
+    }
+    std::fs::write(s.root().join("tools/dev-launch/src/new.rs"), "// three\n").unwrap();
+    assert_eq!(s.dev(&s.root(), &[], &[]).0, 0);
+    let bins: Vec<_> = s.bins().iter().filter(|p| !p.to_string_lossy().ends_with(".at")).cloned().collect();
+    assert_eq!(bins.len(), 1, "old ones go, the new one stays: {bins:?}");
 }
 
 #[test]

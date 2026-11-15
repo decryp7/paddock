@@ -2,24 +2,46 @@
 # ./dev, stage 0 (shell-to-rust WP-1, ADR 0022 amendment 2026-11-15): builds the launcher, tools/dev-launch, when its sources changed and
 # runs it. The launcher (std-only Rust) does the rest: the input hash, the toolchain install, the download, the build and the cache.
 # Only shell builtins, git, cargo and rustup are used. The binary is published under a stamp of the launcher's sources (git's tree id,
-# plus a hash of any uncommitted change), so an up-to-date launcher costs no cargo start, a running launcher is never replaced (Windows
-# cannot) and a build in another ./dev never leaves this one a missing file. `./dev --wrapper-hash` prints the tool's hash.
+# plus a hash of any uncommitted change and of untracked files), so an up-to-date launcher costs two git calls and no cargo start, a
+# running launcher is never replaced (Windows cannot) and a build in another ./dev never leaves this one a missing file.
+# `./dev --wrapper-hash` prints the tool's hash. Stage 0 installs nothing (as xtask and cargo never do): see the amendment.
 set -eu
 # A git hook runs its commands with GIT_DIR and GIT_WORK_TREE set: the repository is the one this folder is in, never an inherited one.
 unset GIT_DIR GIT_WORK_TREE
+
+# `./dev --job-setup <arguments>`: a job's setup step (the build-jobs and job-isolation actions; setup-rust runs build-jobs). It runs
+# `./dev <arguments>` and, when that fails for any reason (a launcher or tool that cannot be built included), marks the job with
+# PADDOCK_JOB_ABORTED=1 in its environment and says so once: the later steps that run after a failure (`if: !cancelled()`, so one run
+# reports every failed check) test the variable (conformance C117) and do not run without the slot, temp folders and core share that
+# step sets up (run 8027: the crate job on Windows ran its tests after ./dev could not be built). This is the one place that does it.
+if [ "${1:-}" = "--job-setup" ]; then
+  shift
+  rc=0
+  sh "$0" "$@" || rc=$?
+  [ "$rc" -ne 0 ] || exit 0
+  echo "::error::A job setup step failed (exit $rc: ./dev $*). The job's later steps are skipped, because they would run without the slot, temp folders and core share that step sets up. Read the error above it, fix that, and rerun the job." >&2
+  if [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_JOB_ABORTED=1" >> "$GITHUB_ENV" || :; fi
+  exit "$rc"
+fi
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
 l=$root/tools/dev-launch
 [ -f "$l/Cargo.toml" ] || { echo "dev: tools/dev-launch is not in this checkout (a sparse checkout without it). Run: git sparse-checkout add tools" >&2; exit 2; }
 key=$(git -C "$root" rev-parse HEAD:tools/dev-launch 2>/dev/null) || key=untracked
-dirt=$(git -C "$root" status --porcelain --untracked-files=all -- tools/dev-launch 2>/dev/null || :)
-if [ -n "$dirt" ]; then key=$key-$({ printf '%s\n' "$dirt"; git -C "$root" diff HEAD -- tools/dev-launch 2>/dev/null || :; } | git hash-object --stdin); fi
+dirt=$(git --no-optional-locks -C "$root" status --porcelain --untracked-files=all -- tools/dev-launch 2>/dev/null || :)
+if [ -n "$dirt" ]; then
+  key=$key-$({
+    printf '%s\n' "$dirt"
+    git -C "$root" diff --no-ext-diff --no-textconv HEAD -- tools/dev-launch 2>/dev/null || :
+    git -C "$root" ls-files -o --exclude-standard -- tools/dev-launch 2>/dev/null | git -C "$root" hash-object --stdin-paths 2>/dev/null || :
+  } | git hash-object --stdin)
+fi
 bin=$l/target/bin/dev-launch-$key
 if [ ! -f "$bin" ] && [ ! -f "$bin.exe" ]; then
   # The first installed toolchain whose rustc is 1.89 or newer (the launcher's rust-version), by what its rustc says: "no installed
   # toolchains", an old one and one that does not run are skipped.
   pick() {
-    rustup toolchain list 2>/dev/null | while read -r t _; do
-      v=$(RUSTUP_TOOLCHAIN=$t rustc --version 2>/dev/null) || continue
+    RUSTUP_AUTO_INSTALL=0 rustup toolchain list 2>/dev/null | while read -r t _; do
+      v=$(RUSTUP_AUTO_INSTALL=0 RUSTUP_TOOLCHAIN=$t rustc --version 2>/dev/null) || continue
       # shellcheck disable=SC2086 # the words of `rustc 1.100.0 (hash date)`
       set -- $v
       v=${2:-}
@@ -32,60 +54,41 @@ if [ ! -f "$bin" ] && [ ! -f "$bin.exe" ]; then
       break
     done
   }
-  # The one install stage 0 makes: a machine with rustup and no toolchain at all (rustup 1.28 installs no pin by itself). One at a time
-  # (a lock folder this script removes on any exit but SIGKILL: delete it by hand then), bounded, no self-update, and not again after
-  # an earlier step of the job failed to (PADDOCK_TOOLCHAIN_FAILED). Every other install is the launcher's, under its own lock.
-  install_pin() {
-    if [ "${PADDOCK_TOOLCHAIN_FAILED:-}" = 1 ]; then
-      echo "::error::./dev: no Rust toolchain is installed and an earlier step of this job failed to install one (PADDOCK_TOOLCHAIN_FAILED=1). Install the toolchain rust-toolchain.toml pins by hand, then run ./dev again." >&2
-      exit 2
+  # toolchain_failed: remembers, for the rest of the job, that no toolchain could be had, so that no later step tries again.
+  toolchain_failed() {
+    if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${GITHUB_ENV:-}" ]; then echo "PADDOCK_TOOLCHAIN_FAILED=1" >> "$GITHUB_ENV" || :; fi
+  }
+  # The exact command that installs the pin: the channel, profile and components of rust-toolchain.toml.
+  install_command() {
+    ch=
+    comps=
+    if [ -f "$root/rust-toolchain.toml" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        case $line in
+          channel*=*) v=${line#*=}; v=${v#*\"}; ch=${v%%\"*} ;;
+          components*=*) v=${line#*=}; v=${v#*"["}; v=${v%%"]"*}; for w in $(printf '%s' "$v" | { read -r x || :; printf '%s' "${x%%#*}"; }); do w=${w#\"}; w=${w%%\"*}; [ -z "$w" ] || comps="$comps --component $w"; done ;;
+        esac
+      done < "$root/rust-toolchain.toml"
     fi
-    lk=${RUSTUP_HOME:-${HOME:-/nonexistent}/.rustup}/.paddock-stage0-install.lock
-    lim=${PADDOCK_DEV_TOOLCHAIN_TIMEOUT:-900}
-    mkdir -p "${lk%/*}" 2>/dev/null || :
-    w=0
-    until mkdir "$lk" 2>/dev/null; do
-      # The holder installed it meanwhile.
-      if [ -n "$(pick)" ]; then return 0; fi
-      [ "$w" -lt "$lim" ] || { echo "::error::./dev: another ./dev has been installing the toolchain for $lim s ($lk). Wait for it, or if no install runs on this host delete $lk, then run ./dev again." >&2; exit 1; }
-      sleep 1
-      w=$((w + 1))
-    done
-    trap 'rmdir "$lk" 2>/dev/null || :' EXIT
-    trap 'exit 1' INT TERM HUP
-    if [ -z "$(pick)" ]; then
-      echo "dev: no Rust toolchain is installed; installing the toolchain rust-toolchain.toml pins with rustup (at most $lim s)." >&2
-      (cd "$root/tools/paddock-dev" && exec rustup toolchain install --no-self-update >&2) &
-      ip=$!
-      w=0
-      while kill -0 "$ip" 2>/dev/null; do
-        [ "$w" -lt "$lim" ] || { kill "$ip" 2>/dev/null || :; break; }
-        sleep 1
-        w=$((w + 1))
-      done
-      rc=0
-      wait "$ip" || rc=$?
-      if [ "$rc" -ne 0 ] || [ -z "$(pick)" ]; then
-        echo "::error::./dev: 'rustup toolchain install' did not leave a working toolchain (exit $rc, at most $lim s). Run it by hand in tools/paddock-dev to see why (network, disk, a proxy), then run ./dev again." >&2
-        exit 1
-      fi
-    fi
-    rmdir "$lk" 2>/dev/null || :
-    trap - EXIT INT TERM HUP
+    printf "rustup toolchain install %s --profile minimal%s" "${ch:-<the channel of rust-toolchain.toml>}" "$comps"
   }
   tc=
-  if ! cargo --version >/dev/null 2>&1; then
-    command -v rustup >/dev/null 2>&1 || { echo "::error::./dev: no Rust toolchain runs here and rustup is not installed. Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2; exit 2; }
+  # RUSTUP_AUTO_INSTALL=0 on every probe: rustup 1.28.1 and later install a missing pin from any proxy that runs below
+  # rust-toolchain.toml, unlocked and unbounded (run 8060). Every install is the launcher's, under its lock and limit.
+  if ! RUSTUP_AUTO_INSTALL=0 cargo --version >/dev/null 2>&1; then
+    command -v rustup >/dev/null 2>&1 || { toolchain_failed; echo "::error::./dev: no Rust toolchain runs here and rustup is not installed. Install Rust with rustup (https://rustup.rs), then run ./dev again." >&2; exit 2; }
     tc=$(pick)
     if [ -z "$tc" ]; then
-      case $(rustup toolchain list 2>/dev/null) in
-        '' | 'no installed toolchains'*) install_pin; tc=$(pick) ;;
-        *) echo "::error::./dev: no installed Rust toolchain is 1.89 or newer, which the launcher needs. Install one with 'rustup toolchain install stable', then run ./dev again." >&2; exit 2 ;;
+      toolchain_failed
+      case $(RUSTUP_AUTO_INSTALL=0 rustup toolchain list 2>/dev/null) in
+        '' | 'no installed toolchains'*) echo "::error::./dev: rustup has no toolchain installed, and ./dev installs none (it needs one to build its launcher). Install the toolchain rust-toolchain.toml pins: $(install_command), then run ./dev again." >&2 ;;
+        *) echo "::error::./dev: no installed Rust toolchain is 1.89 or newer, which the launcher needs. Install the toolchain rust-toolchain.toml pins: $(install_command), then run ./dev again." >&2 ;;
       esac
+      exit 2
     fi
   fi
   # shellcheck disable=SC2086 # tc is one word or empty
-  env -u CARGO_BUILD_TARGET ${tc:+RUSTUP_TOOLCHAIN=$tc} cargo build -q --release --locked --manifest-path "$l/Cargo.toml" --target-dir "$l/target" || {
+  env -u CARGO_BUILD_TARGET -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER -u CARGO_BUILD_RUSTC_WRAPPER -u CARGO_BUILD_RUSTC_WORKSPACE_WRAPPER RUSTUP_AUTO_INSTALL=0 ${tc:+RUSTUP_TOOLCHAIN=$tc} cargo build -q --release --locked --manifest-path "$l/Cargo.toml" --target-dir "$l/target" || {
     echo "::error::./dev could not build its launcher (tools/dev-launch, Rust 1.89 or newer). Install Rust with rustup (https://rustup.rs) and run ./dev again; to see why, run 'cargo build --release --locked' in tools/dev-launch." >&2
     exit 1
   }
@@ -102,9 +105,17 @@ if [ ! -f "$bin" ] && [ ! -f "$bin.exe" ]; then
     sleep 0.2
   done
   mv -f "$bin$ext.new.$$" "$bin$ext" 2>/dev/null || { rm -f "$bin$ext.new.$$"; [ -f "$bin$ext" ] || { echo "::error::./dev could not publish the launcher as $bin$ext." >&2; exit 1; }; }
-  # Binaries of other stamps go (a running one, on Windows, stays until it ends).
+  # When this launcher was published, for the prune of the next stamp.
+  date +%s > "$bin$ext.at" 2>/dev/null || :
+  # Launchers of other stamps go, once a minute old (a ./dev of another stamp may be about to run one it published a moment ago; a
+  # running one, on Windows, stays until it ends). A `.new.PID` file is never another run's to remove.
+  now=$(date +%s)
   for f in "$l"/target/bin/dev-launch-*; do
-    case $f in "$bin"*) ;; *) rm -f "$f" 2>/dev/null || : ;; esac
+    case $f in "$bin"* | *.new.* | *.at) continue ;; esac
+    t=0
+    { read -r t < "$f.at"; } 2>/dev/null || :
+    case $t in '' | *[!0-9]*) t=0 ;; esac
+    if [ $((now - t)) -ge 60 ]; then rm -f "$f" "$f.at" 2>/dev/null || :; fi
   done
 fi
 [ -f "$bin" ] || bin=$bin.exe
