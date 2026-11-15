@@ -51,6 +51,10 @@ mod live {
     }
 
     /// Writes an Application event with `eventcreate`; false when it cannot.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a try_wait poll on a child it started (the try_wait class): to move to an event wait (paddock_proc::run_bounded) in the class fix"
+    )]
     fn write_event(description: &str) -> bool {
         let child = debrief_plugin_api::process::quiet_command("eventcreate")
             .args([

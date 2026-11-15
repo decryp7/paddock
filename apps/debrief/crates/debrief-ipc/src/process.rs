@@ -150,6 +150,10 @@ impl OsChild {
         }
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the liveness check of a held child, reaping it if it ended; most callers look once or with the memory sample, but the exit note and the kill grace poll it (the try_wait class, to move to an event wait in the class fix)"
+    )]
     fn try_wait(&mut self) -> std::io::Result<Option<ExitStatus>> {
         match self {
             OsChild::Std(c, _) => c.try_wait(),

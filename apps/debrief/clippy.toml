@@ -17,6 +17,11 @@ disallowed-methods = [
     # A pre_exec hook forces fork+exec instead of posix_spawn (a fork copies the process's descriptors until it execs; the
     # justified sites carry #[expect(clippy::disallowed_methods, reason = "...")]): act on the held child after the spawn.
     { path = "std::os::unix::process::CommandExt::pre_exec", allow-invalid = true, reason = "forces fork+exec: act on the held child after the spawn instead (lessons, 2026-10-31)" },
+    # A `try_wait` in a loop with a sleep notices an exit only on the next tick (16 ms on every Debrief start from the plugin
+    # manifests poll, about 70 ms under a throttled process class: apps/debrief/docs/performance.md, 2026-11-15). Wait on the
+    # exit instead (paddock_proc::run_bounded, a waiter thread and a channel). A one-off liveness check, or a poll not yet
+    # moved, carries #[expect(clippy::disallowed_methods, reason = "...")].
+    { path = "std::process::Child::try_wait", reason = "a try_wait poll notices an exit a tick late: wait on the exit (paddock_proc::run_bounded, a waiter thread); a one-off liveness check says why with #[expect]" },
     # ADR 0057 (rule 72, C99): no shipped process uses the macOS Keychain. Ad-hoc builds lose silent access on every update and
     # a blocked call waits with no window; the admin key and the pasted keys live in owner-only files (paddock-secrets).
     { path = "security_framework::passwords::get_generic_password", allow-invalid = true, reason = "the macOS Keychain: no shipped process uses it; keep secrets in an owner-only file through paddock-secrets (ADR 0057, rule 72); allow-invalid: security-framework is empty off Apple targets, so the path does not resolve on the Linux and Windows legs (it resolves on macOS, measured 2026-11-08)" },

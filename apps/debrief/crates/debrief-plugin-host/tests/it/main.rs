@@ -2,4 +2,5 @@
 //! Each module is a former `tests/<name>.rs`; run one with `cargo test --test it <name>::`.
 
 mod elevated_output;
+mod manifests;
 mod remote;

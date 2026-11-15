@@ -6,10 +6,9 @@ use crate::process::{PluginProcess, PluginSpec};
 use crate::remote::RemotePlugin;
 use debrief_core::Plugin;
 use debrief_plugin_api::manifest::Manifest;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// The flag that prints every built-in's manifest (a JSON array) and exits.
 pub const MANIFESTS_FLAG: &str = "--manifests";
@@ -18,7 +17,7 @@ pub const PLUGIN_FLAG: &str = "--plugin";
 /// Longest the manifest run may take.
 const MANIFESTS_TIMEOUT: Duration = Duration::from_secs(30);
 /// Largest manifest list read.
-const MAX_MANIFESTS_BYTES: u64 = 4 << 20;
+const MAX_MANIFESTS_BYTES: usize = 4 << 20;
 
 /// File name of the plugins binary on this platform (as bundled: no target-triple suffix).
 pub fn binary_name() -> &'static str {
@@ -65,51 +64,36 @@ fn binary_in(dir: &Path, debug: bool) -> PathBuf {
 
 /// Runs `exe --manifests` and reads the manifests it prints; every manifest is checked.
 pub fn load_manifests(exe: &Path) -> Result<Vec<Manifest>, String> {
-    // The plugins binary is Debrief's own; it runs with a cleared environment and no stdin.
-    #[allow(clippy::disallowed_methods)]
-    let mut cmd = std::process::Command::new(exe);
-    cmd.arg(MANIFESTS_FLAG)
-        .env_clear()
-        .envs(
-            debrief_ipc::process::KEPT_ENV
-                .iter()
-                .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
-        )
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("cannot start the plugins ({}): {e}", exe.display()))?;
-    let reader = child.stdout.take().map(|s| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = s.take(MAX_MANIFESTS_BYTES).read_to_end(&mut buf);
-            buf
-        })
-    });
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break s,
-            Ok(None) if started.elapsed() < MANIFESTS_TIMEOUT => std::thread::sleep(Duration::from_millis(20)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("the plugins did not describe themselves in time".into());
-            }
+    load_manifests_within(exe, MANIFESTS_TIMEOUT)
+}
+
+/// [`load_manifests`] with another bound on the run (tests: a binary that never answers). The wait ends when the binary
+/// exits (its output and exit are events, never polled: a poll's sleep was most of this short run, and under a throttled
+/// process class a 20 ms sleep took about 93 ms); at the bound its whole tree is ended by identity and reaped (rule 53).
+pub fn load_manifests_within(exe: &Path, bound: Duration) -> Result<Vec<Manifest>, String> {
+    // The plugins binary is Debrief's own; it runs with a cleared environment and no stdin, without a console window.
+    let mut cmd = paddock_proc::command(exe);
+    cmd.arg(MANIFESTS_FLAG).env_clear().envs(
+        debrief_ipc::process::KEPT_ENV
+            .iter()
+            .filter_map(|k| std::env::var_os(k).map(|v| (k, v))),
+    );
+    // How it ended and how long it took is paddock_proc's `tool.run` line (a warning when it failed, with its error output).
+    let limits = paddock_proc::Limits::new(bound).max_output(MAX_MANIFESTS_BYTES).stop_on_cap();
+    let out = paddock_proc::run_bounded(cmd, limits).map_err(|e| match e {
+        paddock_proc::RunError::NotFound(_) => format!("the plugins binary is missing ({}); reinstall Debrief", exe.display()),
+        paddock_proc::RunError::Wait(..) => format!("the plugins could not be waited for ({}): {e}", exe.display()),
+        _ => format!("cannot start the plugins ({}): {e}", exe.display()),
+    })?;
+    match out.outcome {
+        paddock_proc::Outcome::Exited(status) if status.success() => {}
+        paddock_proc::Outcome::Exited(status) => return Err(format!("the plugins could not describe themselves ({status})")),
+        paddock_proc::Outcome::TimedOut => return Err("the plugins did not describe themselves in time".into()),
+        paddock_proc::Outcome::OutputCap => {
+            return Err(format!("the plugins wrote more than {} MiB", MAX_MANIFESTS_BYTES >> 20));
         }
-    };
-    let out = reader.and_then(|r| r.join().ok()).unwrap_or_default();
-    if !status.success() {
-        return Err(format!("the plugins could not describe themselves ({status})"));
     }
-    let manifests: Vec<Manifest> = serde_json::from_slice(&out).map_err(|e| format!("the plugins' manifests are not valid: {e}"))?;
+    let manifests: Vec<Manifest> = serde_json::from_slice(&out.stdout).map_err(|e| format!("the plugins' manifests are not valid: {e}"))?;
     for m in &manifests {
         m.check()?;
     }
@@ -285,7 +269,10 @@ mod tests {
     fn a_missing_binary_means_no_plugins_with_a_reason() {
         let b = Builtins::load(Path::new("/definitely/not/debrief-plugins"));
         assert!(b.plugins().is_empty());
-        assert!(b.problem().unwrap().contains("cannot start the plugins"));
+        assert_eq!(
+            b.problem().unwrap(),
+            "the plugins binary is missing (/definitely/not/debrief-plugins); reinstall Debrief"
+        );
         assert!(Builtins::none().problem().is_none());
     }
 }
