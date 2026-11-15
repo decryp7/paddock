@@ -2093,11 +2093,15 @@ engine's and the mock's `visibleMs`, emitted on a 400 ms tick), as does the prob
 chip re-created by the status bar (refuted: items are tracked by id), Stop disabled while `stopping` (refuted: no log at
 all), the mock dropping Stop (refuted: nothing called it). Measured in the CI image (WebKit): pressing Stop, letting the
 pill appear and releasing lost the click 10 of 10 times, Stop moved from x 1140.5 to 1092.9 (the failing trace's box is at
-1140.5). **Fix (spec):** `clickWithTimePaused` (`e2e/app.ts`) clicks with the page clock paused, as `live-tail.e2e.ts` does for
-toasts, so no timer can move the bar during the click; 60 of 60 green in the CI image afterwards (`--repeat-each=30`, both
-Stop tests). The product still moves Stop when a status item to its right appears (ADR 0061's rule, not yet applied to the
-status bar): left as a decision. Why the logs did not show it: the app logs Stop, so its absence named the lost click; the
-click's target is not logged. **Class: a control that moves under the pointer during a click (third instance after the
+1140.5). **Fix (spec):** `clickWithTimePaused` (`e2e/app.ts`) clicks with the page clock paused (`pauseAhead`, which
+`live-tail`, `resilience-context-live` and `timeline-header-geometry` now use too), so no timer can move the bar during the
+click. Proof that matches the rate: a probe that forces the pill to fall due during the click (clock running: `runFor(3000)`
+between press and release; paused: `pauseAhead`'s 5 s jump inside the helper) lost the click 6 of 6 times with the clock running
+(Stop from x 1140.5 or 1180.2 to 1092.9) and landed it 6 of 6 times through `clickWithTimePaused`; the two Stop tests were then
+60 of 60 green (`--repeat-each=30`), all in the CI image on WebKit. At CI's rate (2 in 147) 60 runs alone would not prove it.
+The product still moves Stop when a status item to its right appears: the user approved ADR 0061 for the status bar and the
+toast stack (2026-11-15), which will replace the helper. Why the logs did not show it: the app logs Stop, so its absence named
+the lost click; the click's target is not logged. **Class: a control that moves under the pointer during a click (third instance after the
 timeline header, run 7697, and the toast stack, run 8004).**
 
 ## axe read a table row half-way into the dark theme although the transitions had been settled (Pitwall, 2026-11-15, CI run 8134)
@@ -2108,8 +2112,14 @@ from the theme switch until after the dark scan, the screencast still showed the
 the grey rows 375 ms after it, during the scan, so the transition began after `settleTransitions` had looked. Not reproduced:
 0 of 20 runs in the CI image, and probes of emulate plus settle (40 switches, with the page kept busy 0 to 450 ms) always
 found the transition and finished it; with six CPU burners the runs timed out instead. So why the transition started late
-on the runner is open. **Fix (helper):** `axeViolations` records colour transitions and animations that begin during a scan
-(`transitionrun`, `animationstart`, and those still running at its end) and then settles and scans again, at most 3 times,
-then fails naming them. Selftest `selftest/axe-themes.spec.ts` flips the theme as axe starts: red before in Chromium and
-WebKit (the CI symptom), green after. **Class: axe read colours that were still changing (earlier: the theme switch
+on the runner is open; the likeliest cause is that WebKit applies an emulated scheme only at its next rendering update, which a
+loaded runner delays past settling. **Fix (helper):** `axeInThemes` and `axeTargets` now wait until the scheme is live
+(`matchMedia` and two animation frames) before settling (ER-33), and `axeViolations` records colour transitions and animations
+that begin during a scan (by whole property name, an animation by its own keyframes, empty ones not counted), logs and
+annotates the discarded scan (what moved, the scan, ms since the scheme switch, `prefers-color-scheme`), settles and scans again,
+at most 4 times (measured: at most 3, docs/benchmarks.md), then fails naming them. A first version matched parts of names
+(`stroke-dashoffset` as `stroke`) and counted unreadable keyframes as colour, so Dyno's ticking ring and CDK's empty autofill
+animation used every scan; the review caught it, and selftests now cover both. Selftest `selftest/axe-themes.spec.ts`, run in
+CI (ui's e2e job, Chromium; e2e-webkit, WebKit), forces motion from inside axe's scan: red before in both engines, green after.
+**Class: axe read colours that were still changing (earlier: the theme switch
 transition that `settleTransitions` was made for, and the hover tooltip fading in, run 7872).**
