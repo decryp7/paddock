@@ -1256,9 +1256,15 @@ fn c121_without_its_allow_list_cannot_look() {
     let tree = c121_tree();
     std::fs::remove_file(tree.path().join("conformance/c121-allow.json")).unwrap();
     let r = run_checks(&c121_options(tree.path(), "fixture"), &registry()).unwrap();
-    assert!(
-        r.errors() > 0,
-        "a check that could not read its allow list is an error no waiver covers"
+    let got: Vec<(&str, bool, Option<&str>)> = r
+        .findings
+        .iter()
+        .map(|f| (f.file.as_str(), f.unwaivable, f.outcome.map(|o| o.name())))
+        .collect();
+    assert_eq!(
+        got,
+        [("conformance/c121-allow.json", true, Some("check-broken"))],
+        "a check that could not read its allow list is broken, one finding no waiver covers and nothing else"
     );
 }
 
@@ -1386,9 +1392,15 @@ fn c124_without_its_allow_list_cannot_look() {
     let tree = c124_tree();
     std::fs::remove_file(tree.path().join("conformance/c124-allow.json")).unwrap();
     let r = run_checks(&c124_options(tree.path(), "fixture"), &registry()).unwrap();
-    assert!(
-        r.errors() > 0,
-        "a check that could not read its allow list is an error no waiver covers"
+    let got: Vec<(&str, bool, Option<&str>)> = r
+        .findings
+        .iter()
+        .map(|f| (f.file.as_str(), f.unwaivable, f.outcome.map(|o| o.name())))
+        .collect();
+    assert_eq!(
+        got,
+        [("conformance/c124-allow.json", true, Some("check-broken"))],
+        "a check that could not read its allow list is broken, one finding no waiver covers and nothing else"
     );
 }
 

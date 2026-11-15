@@ -3,8 +3,15 @@
 // appears more than once in the file, how many sites it covers (`count`, default 1). A whole file or folder is never allowed.
 // After a run, an entry that matched fewer sites than its count is stale (remove it, or lower its count) and one that matched more is
 // ambiguous (lengthen its `site`): both are warnings, so the list only ever names the sites that still exist.
-// Used by C121, C124 and C125. Rust host: tools/paddock-dev/src/check/allow_list.rs (same entries, same warnings).
-import { warn } from '../finding.mjs';
+// The reader also owns the error paths, so every check that uses it has the same ones on both hosts (ER-21 class "the two hosts
+// diverge on an error path": C125 in 865498235, then C121 and C124): an allow file that is missing, not JSON, without its list or with
+// a malformed entry is one unwaivable check-broken finding and nothing else (`readAllowList`), and a file the check cannot read is a
+// not-measured error at that file (`AllowList.read`).
+// Used by C121, C124 and C125, each naming its file as `allowList`. Rust host: tools/paddock-dev/src/check/allow_list.rs (same
+// entries, same findings; tools/paddock-dev/tests/it/check_allow_list.rs compares the error paths of every user on both hosts).
+import { error, unwaivable, warn } from '../finding.mjs';
+
+const UNREAD_FIX = 'Make the file readable (permissions) and run the check again.';
 
 /** The entries of the allow list `file` (its JSON `text`): [{ path, site, reason, count }], or throws why it cannot be read. */
 export function parseAllowList(text, file) {
@@ -28,12 +35,39 @@ export function parseAllowList(text, file) {
   });
 }
 
-/** The allow list of one run: `allows` answers per flagged site and counts, `warnings` names the stale and ambiguous entries. */
+/**
+ * The allow list of one run of check `spec` ({ id, rule, file, unseen }) over `ctx`: `read` reads a file the check looks at, `allows`
+ * and `admit` answer per flagged site and count, `warnings` names the stale and ambiguous entries.
+ */
 export class AllowList {
-  constructor(file, entries) {
-    this.file = file;
+  constructor(spec, entries, ctx) {
+    this.spec = spec;
+    this.file = spec.file;
     this.entries = entries;
+    this.ctx = ctx;
     this.hits = entries.map(() => 0);
+    this.scanned = new Set();
+    this.unread = new Set();
+  }
+
+  /**
+   * The text of `path`, a file the check looks at: { text }, or, when it cannot be read, { finding }: a not-measured error at that
+   * file, which the check reports in its place (the file is then neither scanned nor a reason to call an entry stale).
+   */
+  read(path) {
+    const text = this.ctx.read(path);
+    if (text === null || text === undefined) {
+      this.unread.add(path);
+      const { id, rule, unseen } = this.spec;
+      return { finding: unwaivable(error(id, rule, path, 1, `not measured: ${path} could not be read, so ${unseen} in it cannot be seen`, UNREAD_FIX), 'not-measured') };
+    }
+    this.scanned.add(path);
+    return { text };
+  }
+
+  /** How many files the run read. */
+  get probes() {
+    return this.scanned.size;
   }
 
   /** Whether an entry names the site at `path` whose line is `text`; every entry that does counts the site. */
@@ -64,10 +98,12 @@ export class AllowList {
   }
 
   /**
-   * The warnings of check `id` (rule `rule`) for the entries that matched another number of sites than their count. `looked(path)` is
-   * true when the run read that file or it does not exist: an entry for a file the run never looked at is neither stale nor matched.
+   * The warnings for the entries that matched another number of sites than their count. An entry is stale only for a file the run
+   * read, or one that does not exist: an entry for a file the run never looked at, or could not read, is neither stale nor matched.
    */
-  warnings(id, rule, looked) {
+  warnings() {
+    const { id, rule } = this.spec;
+    const looked = (path) => this.scanned.has(path) || (!this.unread.has(path) && (this.ctx.read(path) === null || this.ctx.read(path) === undefined));
     const out = [];
     this.entries.forEach((a, i) => {
       const hits = this.hits[i];
@@ -82,9 +118,21 @@ export class AllowList {
   }
 }
 
-/** The allow list `file` read through `ctx`: an `AllowList`, or throws why it cannot be read. */
-export function readAllowList(ctx, file) {
-  const raw = ctx.read(file);
-  if (raw === null || raw === undefined) throw new Error(`${file} cannot be read`);
-  return new AllowList(file, parseAllowList(raw, file));
+/**
+ * The allow list of check `spec` ({ id, rule, file, restore, unseen, parse }) read through `ctx`: { list, data }, or { broken }, the
+ * check's whole result, when the file is missing, not JSON, without its list or with a malformed entry: one unwaivable check-broken
+ * warning at the allow file (the file was the one thing looked at). `parse(text)` returns { entries, data } or throws why it cannot be
+ * read (default: the shared parser, no data); `restore` is the fix of the broken finding, `unseen` what an unreadable file hides.
+ */
+export function readAllowList(ctx, spec) {
+  const parse = spec.parse ?? ((text) => ({ entries: parseAllowList(text, spec.file) }));
+  let parsed;
+  try {
+    const raw = ctx.read(spec.file);
+    if (raw === null || raw === undefined) throw new Error(`${spec.file} cannot be read`);
+    parsed = parse(raw);
+  } catch (e) {
+    return { broken: [unwaivable(warn(spec.id, spec.rule, spec.file, 1, `the check cannot look: ${e.message}`, spec.restore), 'check-broken')] };
+  }
+  return { list: new AllowList(spec, parsed.entries, ctx), data: parsed.data };
 }

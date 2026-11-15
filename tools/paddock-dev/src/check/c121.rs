@@ -16,15 +16,17 @@
 //! and, for a line the file repeats, a `count`; the shared [`super::allow_list`] (also C124's) warns on a stale or ambiguous entry and
 //! never allows a whole file or folder.
 //!
+//! The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else),
+//! and a file the check cannot read is not measured (an error finding at that file).
+//!
 //! **Report-only (warnings) until its first green run on the real tree is recorded here (ER-41).** Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
 //!
 //! Rust first (the rule's own host); `conformance/src/checks/C121-declared-data.mjs` is the port and the `c121` tests of `tests/it/check.rs`
 //! compares them finding for finding.
 
-use super::allow_list::{self, AllowList, Entry};
+use super::allow_list::{self, Entry, Spec};
 use super::finding::Finding;
 use super::jsre::rx;
-use super::record::Precondition;
 use super::{Check, CheckOutput, Control, Ctx};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -84,6 +86,14 @@ pub fn parse_allow(text: &str) -> Result<Vec<Entry>, String> {
     allow_list::parse(text, ALLOW)
 }
 
+static SPEC: Spec = Spec {
+    id: "C121",
+    rule: 79,
+    file: ALLOW,
+    unseen: "a read of a workflow's text",
+    restore: "Restore conformance/c121-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\"}]}.",
+};
+
 const FIX: &str = "Read the data through the one accessor that owns it (`./dev ci conformance-args`, `cargo metadata`, the register's parser, a constant the owner exports; rule 79). A test of a check of workflows may read them: list the site (its path, a piece of the line and a reason) in conformance/c121-allow.json.";
 
 /// The check.
@@ -108,6 +118,10 @@ impl Check for C121 {
 
     fn mode(&self) -> super::Mode {
         super::Mode::ReportOnly
+    }
+
+    fn allow_list(&self) -> Option<&'static str> {
+        Some(ALLOW)
     }
 
     fn control(&self) -> Control {
@@ -147,27 +161,20 @@ impl Check for C121 {
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
-        let allow = ctx
-            .read(ALLOW)
-            .map(|t| parse_allow(&t))
-            .unwrap_or_else(|| Err(format!("{ALLOW} cannot be read")));
-        let (allow, why) = match allow {
-            Ok(a) => (a, None),
-            Err(e) => (Vec::new(), Some(e)),
+        let mut allow = match allow_list::read(ctx, &SPEC, allow_list::entries_only(ALLOW)) {
+            Ok((allow, ())) => allow,
+            Err(broken) => return *broken,
         };
-        let mut allow = AllowList::new(ALLOW, allow);
         let mut findings = Vec::new();
-        let mut probes = 0;
-        let mut completed = true;
-        let mut scanned = std::collections::HashSet::new();
         for f in ctx.files().iter() {
             let Some(kind) = kind_of(f) else { continue };
-            let Some(text) = ctx.read(f) else {
-                completed = false;
-                continue;
+            let text = match allow.read(ctx, f) {
+                Ok(text) => text,
+                Err(unread) => {
+                    findings.push(*unread);
+                    continue;
+                }
             };
-            probes += 1;
-            scanned.insert(f.to_string());
             for (line, what, at) in flagged(kind, &text) {
                 if allow.allows(f, &at) {
                     continue;
@@ -182,15 +189,6 @@ impl Check for C121 {
                 ));
             }
         }
-        findings.extend(allow.warnings("C121", 79, |p| scanned.contains(p) || ctx.read(p).is_none()));
-        CheckOutput {
-            findings,
-            probes,
-            completed,
-            precondition: Precondition {
-                met: why.is_none(),
-                detail: why.unwrap_or_else(|| format!("{ALLOW} is read")),
-            },
-        }
+        allow.output(ctx, findings)
     }
 }

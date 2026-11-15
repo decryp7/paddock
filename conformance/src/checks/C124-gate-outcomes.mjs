@@ -13,13 +13,15 @@
 // - `measure(.., || Ok(Vec::new()))` (also `vec![]`, `Vec::default()`, `Default::default()`): a measurement that always finds nothing
 //   reads as a pass; return the not-measured outcome when the check cannot look, or build the findings from what it saw.
 // In JavaScript, outside `conformance/src/outcome.mjs`: an object literal `status: 'clean'` (a pass made by hand).
+// The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else), and a
+// file the check cannot read is not measured (an error finding at that file).
 // Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line, so an edit
 // that moves the line keeps the entry) and a reason, read and counted by the shared allow list (`util/allow-list.mjs`, also C121's): a
 // whole file or folder is never allowed, an entry that matches no site is stale and one that matches more than its `count` is
 // ambiguous, as PHPStan's reportUnmatchedIgnoredErrors does. A shrink-only seed, expected to empty
 // out as each gate migrates. Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
-import { unwaivable, warn } from '../finding.mjs';
-import { AllowList, parseAllowList } from '../util/allow-list.mjs';
+import { warn } from '../finding.mjs';
+import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c124-allow.json';
 const RUST = /^(?:tools\/paddock-dev\/src|crates\/paddock-bench\/src)\/.*\.rs$/;
@@ -106,36 +108,32 @@ export function flaggedJs(path, text) {
 
 /** The allow list: [{ path, site, reason, count }], or throws why it cannot be read (the shared parser, util/allow-list.mjs). */
 export const parseAllow = (text) => parseAllowList(text, ALLOW);
+const SPEC = { id: 'C124', rule: 21, file: ALLOW, unseen: 'a gate result made by hand', restore: 'Restore conformance/c124-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "..."}]}.' };
 
 export default {
   id: 'C124',
   scope: 'root',
   mode: 'report-only',
+  allowList: ALLOW,
   title: "A gate's result is built through the shared outcome, never by hand",
   rule: 21,
   run(ctx) {
-    const raw = ctx.read(ALLOW);
-    let allow;
-    try {
-      if (raw === null || raw === undefined) throw new Error(`${ALLOW} cannot be read`);
-      allow = new AllowList(ALLOW, parseAllow(raw));
-    } catch (e) {
-      return [unwaivable(warn('C124', 21, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c124-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "..."}]}.'), 'check-broken')];
-    }
+    const { list: allow, broken } = readAllowList(ctx, SPEC);
+    if (broken) return broken;
     const out = [];
-    const scanned = new Set();
     for (const f of ctx.files()) {
       const rust = RUST.test(f);
       if (!rust && !JS_FILE.test(f)) continue;
-      const text = ctx.read(f);
-      if (text === null || text === undefined) continue;
-      scanned.add(f);
+      const { text, finding } = allow.read(f);
+      if (finding) {
+        out.push(finding);
+        continue;
+      }
       for (const { line, what, text: at } of rust ? flaggedRust(f, text) : flaggedJs(f, text)) {
         if (allow.allows(f, at)) continue;
         out.push(warn('C124', 21, f, line, `builds a gate result by hand: ${what}`, FIX));
       }
     }
-    const looked = (path) => scanned.has(path) || ctx.read(path) === null || ctx.read(path) === undefined;
-    return [...out, ...allow.warnings('C124', 21, looked)];
+    return [...out, ...allow.warnings()];
   },
 };

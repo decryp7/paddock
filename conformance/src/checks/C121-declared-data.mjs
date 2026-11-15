@@ -12,11 +12,13 @@
 // each such site goes in `conformance/c121-allow.json` with its path, a `site` (a piece of the flagged line), a reason and, for a
 // line the file repeats, a `count`; the shared allow list (`util/allow-list.mjs`, also C124's) warns on a stale or ambiguous entry,
 // and never allows a whole file or folder.
+// The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else), and a
+// file the check cannot read is not measured (an error finding at that file).
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet. First count (2026-11-13): 10 findings, all the parity fixtures of C121 itself, now allowed with a reason.
 // The Rust host (`tools/paddock-dev/src/check/c121.rs`) is the rule's own implementation; this is its port, and
 // `tools/paddock-dev/tests/it/check.rs` (the `c121` tests) compares the two finding for finding.
-import { unwaivable, warn } from '../finding.mjs';
-import { AllowList, parseAllowList } from '../util/allow-list.mjs';
+import { warn } from '../finding.mjs';
+import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c121-allow.json';
 const TOOL = /\b(?:grep|egrep|fgrep|sed|awk|rg|perl)\b/;
@@ -51,36 +53,32 @@ export function flagged(kind, text) {
 
 /** The allow list: [{ path, site, reason, count }], or throws why it cannot be read (the shared parser, util/allow-list.mjs). */
 export const parseAllow = (text) => parseAllowList(text, ALLOW);
+const SPEC = { id: 'C121', rule: 79, file: ALLOW, unseen: 'a read of a workflow\'s text', restore: 'Restore conformance/c121-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "..."}]}.' };
 
 export default {
   id: 'C121',
   scope: 'root',
   mode: 'report-only',
+  allowList: ALLOW,
   title: 'Declared data is read through its accessor, not by searching a workflow\'s text',
   rule: 79,
   run(ctx) {
-    const raw = ctx.read(ALLOW);
-    let allow;
-    try {
-      if (raw === null || raw === undefined) throw new Error(`${ALLOW} cannot be read`);
-      allow = new AllowList(ALLOW, parseAllow(raw));
-    } catch (e) {
-      return [unwaivable(warn('C121', 79, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c121-allow.json: {"allow": [{"path": "...", "site": "...", "reason": "..."}]}.'), 'check-broken')];
-    }
+    const { list: allow, broken } = readAllowList(ctx, SPEC);
+    if (broken) return broken;
     const out = [];
-    const scanned = new Set();
     for (const f of ctx.files()) {
       const kind = kindOf(f);
       if (!kind) continue;
-      const text = ctx.read(f);
-      if (text === null || text === undefined) continue;
-      scanned.add(f);
+      const { text, finding } = allow.read(f);
+      if (finding) {
+        out.push(finding);
+        continue;
+      }
       for (const { line, what, text: at } of flagged(kind, text)) {
         if (allow.allows(f, at)) continue;
         out.push(warn('C121', 79, f, line, `reads a workflow file's text with ${what}: the data it needs has one accessor`, FIX));
       }
     }
-    const looked = (path) => scanned.has(path) || ctx.read(path) === null || ctx.read(path) === undefined;
-    return [...out, ...allow.warnings('C121', 79, looked)];
+    return [...out, ...allow.warnings()];
   },
 };

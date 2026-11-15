@@ -4,6 +4,7 @@ mod build_env;
 mod build_jobs;
 mod build_jobs_golden;
 mod check;
+mod check_allow_list;
 mod check_c119;
 mod check_c120;
 mod check_c122;

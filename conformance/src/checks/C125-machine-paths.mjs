@@ -22,8 +22,8 @@
 // error finding at that file), and an allow file that cannot be read makes the check broken (one finding, nothing else).
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 // Rust host: tools/paddock-dev/src/check/c125.rs (same findings, line for line).
-import { error, unwaivable, warn } from '../finding.mjs';
-import { AllowList, parseAllowList } from '../util/allow-list.mjs';
+import { warn } from '../finding.mjs';
+import { parseAllowList, readAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c125-allow.json';
 /** The check's own files: they name the pattern. */
@@ -42,7 +42,6 @@ const BINARY = /\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst
 const LITERAL = /\\?\/Volumes\\?\/[A-Za-z0-9][A-Za-z0-9_.+@-]*(?:\\?\/[A-Za-z0-9_.+@-]*)*/g;
 const BEFORE = /[A-Za-z0-9_.~]/;
 const BROKEN_FIX = 'Restore conformance/c125-allow.json: {"history": [{"path": "...", "reason": "..."}], "allow": [{"path": "...", "site": "...", "reason": "...", "count": 1}]}.';
-const UNREAD_FIX = 'Make the file readable (permissions) and run the check again.';
 const FIX = 'Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason.';
 
 /** [{ line, literal }] of every machine disk path in `text`. */
@@ -91,35 +90,39 @@ export function parseAllow(text) {
   return { history, allow };
 }
 
+const SPEC = {
+  id: 'C125',
+  rule: 40,
+  file: ALLOW,
+  unseen: 'a disk path',
+  restore: BROKEN_FIX,
+  parse: (text) => {
+    const { history, allow } = parseAllow(text);
+    return { entries: allow, data: history };
+  },
+};
+
 export default {
   id: 'C125',
   scope: 'root',
   mode: 'report-only',
+  allowList: ALLOW,
   title: 'No hard-coded machine disk paths',
   rule: 40,
   run(ctx) {
-    let lists;
-    try {
-      const raw = ctx.read(ALLOW);
-      if (raw === null || raw === undefined) throw new Error(`${ALLOW} cannot be read`);
-      lists = parseAllow(raw);
-    } catch (e) {
-      return [unwaivable(warn('C125', 40, ALLOW, 1, `the check cannot look: ${e.message}`, BROKEN_FIX), 'check-broken')];
-    }
-    const allow = new AllowList(ALLOW, lists.allow);
-    const historyHits = lists.history.map(() => 0);
+    const { list: allow, data: history, broken } = readAllowList(ctx, SPEC);
+    if (broken) return broken;
+    const historyHits = history.map(() => 0);
     const out = [];
-    const scanned = new Set();
     for (const f of ctx.files()) {
       if (IMPLEMENTATION.has(f) || CHECKOUT.has(f) || BINARY.test(f)) continue;
-      const h = f.endsWith('.md') ? lists.history.findIndex((e) => e.re.test(f)) : -1;
-      const text = ctx.read(f);
-      if (text === null || text === undefined) {
-        out.push(unwaivable(error('C125', 40, f, 1, `not measured: ${f} could not be read, so a disk path in it cannot be seen`, UNREAD_FIX), 'not-measured'));
+      const h = f.endsWith('.md') ? history.findIndex((e) => e.re.test(f)) : -1;
+      const { text, finding } = allow.read(f);
+      if (finding) {
+        out.push(finding);
         continue;
       }
       if (text.includes('\0')) continue;
-      scanned.add(f);
       for (const { line, literal } of machinePaths(text)) {
         if (h >= 0) {
           historyHits[h]++;
@@ -134,10 +137,9 @@ export default {
         );
       }
     }
-    lists.history.forEach((e, i) => {
+    history.forEach((e, i) => {
       if (historyHits[i] === 0) out.push(warn('C125', 40, ALLOW, 1, `stale history entry (${e.path}) skipped no disk path`, `Remove it from ${ALLOW}.`));
     });
-    const looked = (path) => scanned.has(path) || ctx.read(path) === null || ctx.read(path) === undefined;
-    return [...out, ...allow.warnings('C125', 40, looked)];
+    return [...out, ...allow.warnings()];
   },
 };

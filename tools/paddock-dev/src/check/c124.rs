@@ -15,6 +15,9 @@
 //!
 //! In JavaScript, outside `conformance/src/outcome.mjs`: an object literal `status: 'clean'` (a pass made by hand).
 //!
+//! The shared reader owns the error paths: an allow file that cannot be read makes the check broken (one finding, nothing else),
+//! and a file the check cannot read is not measured (an error finding at that file).
+//!
 //! Pre-existing sites are listed one by one in `conformance/c124-allow.json`: a path, a `site` (a piece of the flagged line) and a
 //! reason (shrink only), read and counted by the shared [`super::allow_list`] (also C121's): an entry that matches no site is stale
 //! and one that matches more than its `count` is ambiguous, both warnings. **Report-only (warnings)
@@ -23,10 +26,9 @@
 //! The JavaScript check `conformance/src/checks/C124-gate-outcomes.mjs` is the original; the `c124` tests of `tests/it/check.rs`
 //! compare the two finding for finding.
 
-use super::allow_list::{self, AllowList, Entry};
+use super::allow_list::{self, Entry, Spec};
 use super::finding::Finding;
 use super::jsre::rx;
-use super::record::Precondition;
 use super::{Check, CheckOutput, CheckScope, Control, Ctx, Mode};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -60,6 +62,13 @@ const CALL_OWNERS: [&str; 2] = [
     "tools/paddock-dev/src/ci_runs/verdict.rs",
     "tools/paddock-dev/src/pre_push/known.rs",
 ];
+static SPEC: Spec = Spec {
+    id: "C124",
+    rule: 21,
+    file: ALLOW,
+    unseen: "a gate result made by hand",
+    restore: "Restore conformance/c124-allow.json: {\"allow\": [{\"path\": \"...\", \"site\": \"...\", \"reason\": \"...\"}]}.",
+};
 const FIX: &str = "Build the result with `paddock_cli::measure` (or `Evidence::adopt`) and print it with `Outcome::json()`; read another gate's result with `Outcome::from_wire`, never its exit code (ADR 0089 amendment 2026-11-13).";
 
 /// One flagged site: its line, the text the allow list's `site` is looked for in, and what is wrong with it.
@@ -219,6 +228,10 @@ impl Check for C124 {
         Mode::ReportOnly
     }
 
+    fn allow_list(&self) -> Option<&'static str> {
+        Some(ALLOW)
+    }
+
     fn control(&self) -> Control {
         Control {
             files: vec![
@@ -235,30 +248,23 @@ impl Check for C124 {
     }
 
     fn run(&self, ctx: &Ctx) -> CheckOutput {
-        let allow = ctx
-            .read(ALLOW)
-            .map(|t| parse_allow(&t))
-            .unwrap_or_else(|| Err(format!("{ALLOW} cannot be read")));
-        let (allow, why) = match allow {
-            Ok(a) => (a, None),
-            Err(e) => (Vec::new(), Some(e)),
+        let mut allow = match allow_list::read(ctx, &SPEC, allow_list::entries_only(ALLOW)) {
+            Ok((allow, ())) => allow,
+            Err(broken) => return *broken,
         };
-        let mut allow = AllowList::new(ALLOW, allow);
         let mut findings = Vec::new();
-        let mut probes = 0;
-        let mut completed = true;
-        let mut scanned = std::collections::HashSet::new();
         for f in ctx.files().iter() {
             let rust = RUST.is_match(f);
             if !rust && !JS_FILE.is_match(f) {
                 continue;
             }
-            let Some(text) = ctx.read(f) else {
-                completed = false;
-                continue;
+            let text = match allow.read(ctx, f) {
+                Ok(text) => text,
+                Err(unread) => {
+                    findings.push(*unread);
+                    continue;
+                }
             };
-            probes += 1;
-            scanned.insert(f.to_string());
             let sites = if rust { flagged_rust(f, &text) } else { flagged_js(f, &text) };
             for (line, at, what) in sites {
                 if allow.allows(f, &at) {
@@ -274,15 +280,6 @@ impl Check for C124 {
                 ));
             }
         }
-        findings.extend(allow.warnings("C124", 21, |p| scanned.contains(p) || ctx.read(p).is_none()));
-        CheckOutput {
-            findings,
-            probes,
-            completed,
-            precondition: Precondition {
-                met: why.is_none(),
-                detail: why.unwrap_or_else(|| format!("{ALLOW} is read")),
-            },
-        }
+        allow.output(ctx, findings)
     }
 }

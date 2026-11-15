@@ -238,6 +238,11 @@ pub trait Check {
     fn needs(&self) -> Needs {
         Needs::All
     }
+    /// The allow list the check reads through [`allow_list::read`] (`allowList` of the JavaScript check), if any: the error-path
+    /// parity tests (`tests/it/check_allow_list.rs`) run for every check that names one.
+    fn allow_list(&self) -> Option<&'static str> {
+        None
+    }
 }
 
 /// Where a check runs.
