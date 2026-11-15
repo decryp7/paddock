@@ -37,11 +37,11 @@ echo "other-os-control: os=linux tree=$tree user=root tmp=$fstype clone=fresh-sh
 
 failed=0; ran=0
 for spec in "$@"; do
-  read -r kind a b <<<"$spec"
+  read -r kind a b filter <<<"$spec"
   case "$kind" in
     nextest)
       echo "::group::nextest $a $b"
-      (cd "$src/$a" && cargo nextest run -p "$b" --profile ci --locked --no-fail-fast 2>&1)
+      (cd "$src/$a" && cargo nextest run -p "$b" --profile ci --locked --no-fail-fast ${filter:+-E "$filter"} 2>&1)
       rc=$?
       echo "::endgroup::"
       ;;

@@ -55,6 +55,9 @@ pub enum HostStep {
     NodeCaches(node_caches::Args),
     /// The pinned cargo-nextest on every OS: kept in the CI home on a host, checked everywhere (the port of the host-tools action).
     HostTools,
+    /// Prints the pinned cargo-nextest's Windows x86_64 download as `<version> <url> <sha256> <program>`, one line, for the test-VM
+    /// gate (scripts/member-gate-windows.sh) to fetch and verify the same release the runners keep; nothing is downloaded.
+    HostToolsPin,
     /// Brings the job slot's kept git clone to the job's commit and sets PADDOCK_WORKSPACE (the port of conformance/ci/kept-clone.sh).
     /// Never fails the job for lack of a clone.
     KeptClone(kept_clone::Args),
@@ -89,6 +92,7 @@ pub fn run(step: &HostStep, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
         HostStep::NodeCaches(a) => node_caches::run(&env, windows, a, out),
         HostStep::GuardianAsUser(_) => guardian_as_user::run(&env, out),
         HostStep::HostTools => host_tools::run(&env, windows, out),
+        HostStep::HostToolsPin => host_tools::print_windows_pin(&host_tools::PIN, out),
         HostStep::KeptClone(a) => kept_clone::run(&env, windows, a, out, err),
         HostStep::SccacheStats => sccache_stats::run(&env, out),
         HostStep::BootVolume(a) => boot_volume::run(&env, a, out, err),

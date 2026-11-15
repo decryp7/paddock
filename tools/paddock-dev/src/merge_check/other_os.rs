@@ -162,19 +162,19 @@ pub fn select(changed: &[String], tree: &dyn Tree) -> Selection {
         if !file.ends_with(".rs") && !file.ends_with("Cargo.toml") {
             continue;
         }
-        if let Some(p) = tree.package_of(file) {
-            if tree.starts_programs(&p.dir) {
-                let t = Target::Nextest {
-                    workspace: p.workspace,
-                    package: p.name.clone(),
-                };
-                s.linux.insert(t.clone());
-                s.windows.insert(t);
-                note(
-                    format!("{} changed and its tests start programs: {} runs on both", p.dir, p.name),
-                    &mut s,
-                );
-            }
+        if let Some(p) = tree.package_of(file)
+            && tree.starts_programs(&p.dir)
+        {
+            let t = Target::Nextest {
+                workspace: p.workspace,
+                package: p.name.clone(),
+            };
+            s.linux.insert(t.clone());
+            s.windows.insert(t);
+            note(
+                format!("{} changed and its tests start programs: {} runs on both", p.dir, p.name),
+                &mut s,
+            );
         }
     }
     s
@@ -188,15 +188,15 @@ impl Tree for DiskTree {
         let mut dir = Path::new(file).parent()?.to_path_buf();
         loop {
             let manifest = self.0.join(&dir).join("Cargo.toml");
-            if let Ok(text) = std::fs::read_to_string(&manifest) {
-                if let Some(name) = package_name(&text) {
-                    let rel = dir.to_string_lossy().replace('\\', "/");
-                    return Some(Package {
-                        workspace: self.workspace_of(&dir),
-                        name,
-                        dir: rel,
-                    });
-                }
+            if let Ok(text) = std::fs::read_to_string(&manifest)
+                && let Some(name) = package_name(&text)
+            {
+                let rel = dir.to_string_lossy().replace('\\', "/");
+                return Some(Package {
+                    workspace: self.workspace_of(&dir),
+                    name,
+                    dir: rel,
+                });
             }
             if !dir.pop() || dir.as_os_str().is_empty() {
                 return None;
@@ -215,10 +215,10 @@ impl DiskTree {
     fn workspace_of(&self, package_dir: &Path) -> String {
         let mut dir = package_dir.to_path_buf();
         loop {
-            if let Ok(text) = std::fs::read_to_string(self.0.join(&dir).join("Cargo.toml")) {
-                if text.parse::<toml::Table>().is_ok_and(|t| t.contains_key("workspace")) {
-                    return dir.to_string_lossy().replace('\\', "/");
-                }
+            if let Ok(text) = std::fs::read_to_string(self.0.join(&dir).join("Cargo.toml"))
+                && text.parse::<toml::Table>().is_ok_and(|t| t.contains_key("workspace"))
+            {
+                return dir.to_string_lossy().replace('\\', "/");
             }
             if !dir.pop() || dir.as_os_str().is_empty() {
                 return package_dir.to_string_lossy().replace('\\', "/");
@@ -452,7 +452,7 @@ pub fn execute(root: &Path, tree: &str, selection: &Selection, runner: &dyn Runn
                 ));
             }
             Verdict::NotMeasured(why) => text.push(format!(
-                "{level}::member gate other-os NOT MEASURED on {}: {why}. Next step: run `scripts/member-gate-{}.sh` yourself (docs/testing/member-gate-other-os.md); a member whose other-OS tests did not run is not a member that passed.{report_only}",
+                "{level}::member gate other-os NOT MEASURED on {}: {why}. Next step: run `scripts/member-gate-{}.sh` yourself (docs/adr/amendments/0087-member-gate-other-os-2026-11-16.md); a member whose other-OS tests did not run is not a member that passed.{report_only}",
                 os.name(),
                 os.name()
             )),
@@ -532,6 +532,9 @@ impl Runner for Scripts {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    // Flip ENFORCED only in the change that records the first green report-only run (ER-41); this fails the build until it is decided.
+    const _: () = assert!(!ENFORCED);
     use std::sync::Mutex;
 
     /// A tree table: file folder -> package, and which folders start programs.
@@ -626,8 +629,8 @@ mod tests {
 
     #[test]
     fn the_package_walk_finds_the_workspace_and_the_markers_on_disk() {
-        let dir = std::env::temp_dir().join(format!("other-os-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let scratch = tempfile::tempdir().unwrap();
+        let dir = scratch.path().to_path_buf();
         std::fs::create_dir_all(dir.join("crates/a/src")).unwrap();
         std::fs::create_dir_all(dir.join("crates/b/src")).unwrap();
         std::fs::write(dir.join("crates/Cargo.toml"), "[workspace]\nmembers=[\"a\",\"b\"]\n").unwrap();
@@ -642,7 +645,6 @@ mod tests {
         assert!(!tree.starts_programs("crates/b"));
         let s = select(&files(&["crates/a/src/lib.rs", "crates/b/src/lib.rs"]), &tree);
         assert_eq!(s.windows, BTreeSet::from([nextest("crates", "a")]));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn one() -> BTreeSet<Target> {
@@ -791,7 +793,3 @@ mod tests {
         assert_eq!(*f.asked.lock().unwrap(), vec![Os::Linux]);
     }
 }
-
-// Flip ENFORCED only in the change that records the first green report-only run (ER-41); this fails the build until it is decided.
-#[cfg(test)]
-const _: () = assert!(!ENFORCED);
