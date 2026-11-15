@@ -2138,7 +2138,7 @@ fn a_free_worker_runs_light_rows_while_a_heavy_step_is_in_flight() {
     );
 }
 
-/// One stack shape of the property test below.
+/// One stack shape of the property tests below.
 struct Shape {
     /// Commits on the local train, of which the first `pushed` are on the remote's `train/x`.
     train: usize,
@@ -2149,117 +2149,215 @@ struct Shape {
     undone: bool,
     /// An unpushed local side branch merged in with `--no-ff`.
     merge: bool,
+    /// A file added and removed again inside that side branch.
+    merge_undone: bool,
     /// The remote has an old `fix` the pushed commit does not contain (a force push).
     force: bool,
+    /// The branch moves a file of apps/dyno (that main has) into tools/ with `git mv`.
+    rename: bool,
+    /// The branch adds a file whose path is not ASCII (git quotes it unless told not to).
+    non_ascii: bool,
 }
 
-/// Property (review of c4e32e462, P1-1): for every stack shape (a local train unpushed, partly or wholly pushed, or reached
-/// through a pushed sibling; a change made and undone; an unpushed side branch merged with `--no-ff`; a force push), live and with
-/// `git ls-remote` unreadable, every commit the remote lacks (`git log <tip> --not --remotes=origin`) has its files in the planned
-/// diff, and an unpushed train commit in a workspace the branch never touches still plans that workspace's Clippy. The shapes are
-/// enumerated so each combination that matters runs once (pairwise): 2026-11-15 the 24 random cases took 1,651 git processes
-/// and hit nextest's 60 s limit on the Windows runner (run 8138).
-#[test]
-fn every_commit_the_remote_lacks_is_in_the_planned_diff() {
-    #[rustfmt::skip]
-    let shapes = [
-        Shape { train: 2, pushed: 0, sibling: false, undone: true, merge: true, force: true },
-        Shape { train: 2, pushed: 1, sibling: false, undone: false, merge: false, force: false },
-        Shape { train: 2, pushed: 2, sibling: false, undone: false, merge: true, force: false },
-        Shape { train: 0, pushed: 0, sibling: false, undone: true, merge: false, force: true },
-        Shape { train: 1, pushed: 0, sibling: true, undone: false, merge: true, force: false },
-    ];
-    for (case, sh) in shapes.iter().enumerate() {
-        let r = Repo::new();
-        let add = |path: &str| {
-            let full = r.root.join(path);
-            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-            std::fs::write(&full, "x\n").unwrap();
-            r.git(&["add", path]);
-            r.git(&["commit", "-q", "-m", path]);
-            r.git(&["rev-parse", "HEAD"]).trim().to_string()
-        };
-        let c0 = add("README");
-        r.remote("main", &c0);
-        r.git(&["checkout", "-q", "-b", "train/x"]);
-        let train: Vec<String> = (0..sh.train).map(|i| add(&format!("apps/dyno/src/t{i}.rs"))).collect();
-        if sh.pushed > 0 {
-            r.remote("train/x", &train[sh.pushed - 1]);
+/// Property (review of c4e32e462, P1-1): for the stack `sh`, live and with `git ls-remote` unreadable, every commit the remote
+/// lacks has its files in the planned diff, and a commit the remote lacks in apps/dyno (an unpushed train commit, or the old name
+/// of a moved file) plans that workspace's Clippy. The oracle lists the files itself (`git log --no-renames -z`), independent of
+/// the code under test. The shapes are enumerated, each train state once and each flag on and off in at least one of them, one
+/// `#[test]` each so nextest runs them in parallel and a failure names its shape: 2026-11-15 the first version (24 random cases
+/// in one test, 1,651 git processes) hit nextest's 60 s limit on the Windows runner (run 8138).
+fn check_shape(name: &str, sh: &Shape) {
+    let r = Repo::new();
+    let add = |path: &str| {
+        let full = r.root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(&full, "x\n").unwrap();
+        r.git(&["add", path]);
+        r.git(&["commit", "-q", "-m", path]);
+        r.git(&["rev-parse", "HEAD"]).trim().to_string()
+    };
+    let undo = |path: &str| {
+        add(path);
+        r.git(&["rm", "-q", path]);
+        r.git(&["commit", "-q", "-m", "undo"]);
+    };
+    add("README");
+    let c0 = add("apps/dyno/src/m.rs");
+    r.remote("main", &c0);
+    r.git(&["checkout", "-q", "-b", "train/x"]);
+    let train: Vec<String> = (0..sh.train).map(|i| add(&format!("apps/dyno/src/t{i}.rs"))).collect();
+    if sh.pushed > 0 {
+        r.remote("train/x", &train[sh.pushed - 1]);
+    }
+    if sh.sibling {
+        r.remote("feat/sibling", train.last().unwrap());
+    }
+    let train_tip = train.last().cloned().unwrap_or_else(|| c0.clone());
+    r.git(&["checkout", "-q", "-b", "fix"]);
+    add("tools/x/f0.rs");
+    if sh.undone {
+        undo("apps/pitwall/src/undone.rs");
+    }
+    if sh.rename {
+        r.git(&["mv", "apps/dyno/src/m.rs", "tools/x/m.rs"]);
+        r.git(&["commit", "-q", "-m", "move"]);
+    }
+    if sh.non_ascii {
+        add("tools/x/n\u{e4}me-\u{fc}.rs");
+    }
+    let mut side = None;
+    if sh.merge {
+        r.git(&["checkout", "-q", "-b", "side"]);
+        side = Some(add("apps/pitwall/src/side.rs"));
+        if sh.merge_undone {
+            undo("apps/pitcrew/src/side-undone.rs");
         }
-        if sh.sibling {
-            r.remote("feat/sibling", train.last().unwrap());
+        r.git(&["checkout", "-q", "fix"]);
+        add("tools/x/before-merge.rs");
+        r.git(&["merge", "-q", "--no-ff", "--no-edit", "side"]);
+    }
+    let mut push = new_ref("fix", "");
+    if sh.force {
+        r.git(&["checkout", "-q", "-b", "old-fix", &c0]);
+        push.remote_sha = add("tools/x/old.rs");
+        r.remote("fix", &push.remote_sha);
+        r.git(&["checkout", "-q", "fix"]);
+    }
+    push.sha = r.git(&["rev-parse", "HEAD"]).trim().to_string();
+    let tip = push.sha.clone();
+    // The oracle: every commit the remote lacks with its files, in one git process, both names of a move, paths unquoted.
+    let log = r.git(&[
+        "log",
+        "--no-merges",
+        "--no-renames",
+        "-z",
+        "--name-only",
+        "--format=commit %H",
+        &tip,
+        "--not",
+        "--remotes=origin",
+    ]);
+    let (mut lacks, mut wanted) = (Vec::<String>::new(), Vec::<(String, String)>::new());
+    for t in log.split('\0').map(|t| t.trim_start_matches('\n')).filter(|t| !t.is_empty()) {
+        match t.strip_prefix("commit ") {
+            Some(c) => lacks.push(c.to_string()),
+            None => wanted.push((lacks.last().cloned().unwrap_or_default(), t.to_string())),
         }
-        let train_tip = train.last().cloned().unwrap_or_else(|| c0.clone());
-        r.git(&["checkout", "-q", "-b", "fix"]);
-        add("tools/x/f0.rs");
-        if sh.undone {
-            add("apps/pitwall/src/undone.rs");
-            r.git(&["rm", "-q", "apps/pitwall/src/undone.rs"]);
-            r.git(&["commit", "-q", "-m", "undo"]);
-        }
-        if sh.merge {
-            r.git(&["checkout", "-q", "-b", "side"]);
-            add("apps/pitwall/src/side.rs");
-            r.git(&["checkout", "-q", "fix"]);
-            add("tools/x/before-merge.rs");
-            r.git(&["merge", "-q", "--no-ff", "--no-edit", "side"]);
-        }
-        let mut push = new_ref("fix", "");
-        if sh.force {
-            r.git(&["checkout", "-q", "-b", "old-fix", &c0]);
-            push.remote_sha = add("tools/x/old.rs");
-            r.remote("fix", &push.remote_sha);
-            r.git(&["checkout", "-q", "fix"]);
-        }
-        push.sha = r.git(&["rev-parse", "HEAD"]).trim().to_string();
-        let tip = push.sha.clone();
-        // Every commit the remote lacks with its files, in one git process: `commit <sha>` lines, then its files.
-        let log = r.git(&[
-            "log",
-            "--no-merges",
-            "--name-only",
-            "--format=commit %H",
-            &tip,
-            "--not",
-            "--remotes=origin",
-        ]);
-        let (mut lacks, mut wanted) = (Vec::new(), Vec::new());
-        for l in log.lines().filter(|l| !l.is_empty()) {
-            match l.strip_prefix("commit ") {
-                Some(c) => lacks.push(c.to_string()),
-                None => wanted.push((lacks.last().cloned().unwrap_or_default(), l.to_string())),
-            }
-        }
-        let unpushed_train = train.iter().any(|t| lacks.contains(t));
-        assert_eq!(
-            unpushed_train,
-            sh.pushed < sh.train && !sh.sibling,
-            "case {case}: the shape is what it says"
+    }
+    // The shape is what it says.
+    let unpushed_train = train.iter().any(|t| lacks.contains(t));
+    assert_eq!(unpushed_train, sh.pushed < sh.train && !sh.sibling, "{name}: train state");
+    if let Some(side) = &side {
+        assert!(lacks.contains(side), "{name}: the oracle saw the side branch's commit");
+    }
+    if sh.rename {
+        assert!(
+            wanted.iter().any(|(_, f)| f == "apps/dyno/src/m.rs"),
+            "{name}: the oracle lists the moved file's old name"
         );
-        for (how, look) in [("live", r.live()), ("unreadable", base_choice::Remote(None))] {
-            let (base, why) = super::choose_base(&r.root, &push, Some("origin"), "origin/main", &look);
-            let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&tip)).unwrap();
-            for (c, f) in &wanted {
-                assert!(
-                    change.files.contains(f),
-                    "case {case} ({how}): {f} of {c} is not planned; base {base} ({why})"
-                );
-            }
-            if unpushed_train {
-                let got = ids(&plan_gates(&plan(), &change, &facts()));
-                assert!(
-                    got.contains(&"clippy apps/dyno".to_string()),
-                    "case {case} ({how}): {got:?}; base {base} ({why})"
-                );
-            }
+    }
+    if sh.non_ascii {
+        assert!(
+            wanted.iter().any(|(_, f)| f == "tools/x/n\u{e4}me-\u{fc}.rs"),
+            "{name}: the oracle lists the path unquoted"
+        );
+    }
+    let dyno = unpushed_train || sh.rename;
+    for (how, look) in [("live", r.live()), ("unreadable", base_choice::Remote(None))] {
+        let (base, why) = super::choose_base(&r.root, &push, Some("origin"), "origin/main", &look);
+        if sh.force {
+            assert!(why.contains("(a force push)"), "{name} ({how}): {why}");
         }
-        if unpushed_train {
-            // The branch's own diff (from the train's local tip) does not reach apps/dyno; the push's check must.
-            let (own, _, _) = super::discover(&r.root, &train_tip, &[], std::slice::from_ref(&tip)).unwrap();
+        let (change, _, _) = super::discover(&r.root, &base, &[], std::slice::from_ref(&tip)).unwrap();
+        for (c, f) in &wanted {
             assert!(
-                !ids(&plan_gates(&plan(), &own, &facts())).contains(&"clippy apps/dyno".to_string()),
-                "case {case}"
+                change.files.contains(f),
+                "{name} ({how}): {f} of {c} is not planned; base {base} ({why})"
+            );
+        }
+        if dyno {
+            let got = ids(&plan_gates(&plan(), &change, &facts()));
+            assert!(
+                got.contains(&"clippy apps/dyno".to_string()),
+                "{name} ({how}): {got:?}; base {base} ({why})"
             );
         }
     }
+    if unpushed_train && !sh.rename {
+        // The branch's own diff (from the train's local tip) does not reach apps/dyno; the push's check must.
+        let (own, _, _) = super::discover(&r.root, &train_tip, &[], std::slice::from_ref(&tip)).unwrap();
+        assert!(
+            !ids(&plan_gates(&plan(), &own, &facts())).contains(&"clippy apps/dyno".to_string()),
+            "{name}"
+        );
+    }
+}
+
+#[rustfmt::skip]
+const NONE: Shape = Shape { train: 0, pushed: 0, sibling: false, undone: false, merge: false, merge_undone: false, force: false, rename: false, non_ascii: false };
+
+#[test]
+fn shape_unpushed_train_with_undone_changes_a_merge_and_a_force_push() {
+    check_shape(
+        "unpushed train",
+        &Shape {
+            train: 2,
+            undone: true,
+            merge: true,
+            merge_undone: true,
+            force: true,
+            ..NONE
+        },
+    );
+}
+
+#[test]
+fn shape_partly_pushed_train() {
+    check_shape(
+        "partly pushed train",
+        &Shape {
+            train: 2,
+            pushed: 1,
+            ..NONE
+        },
+    );
+}
+
+#[test]
+fn shape_wholly_pushed_train_with_a_merge() {
+    check_shape(
+        "wholly pushed train",
+        &Shape {
+            train: 2,
+            pushed: 2,
+            merge: true,
+            ..NONE
+        },
+    );
+}
+
+#[test]
+fn shape_no_train_with_a_move_out_of_a_workspace_and_a_force_push() {
+    check_shape(
+        "no train",
+        &Shape {
+            undone: true,
+            force: true,
+            rename: true,
+            ..NONE
+        },
+    );
+}
+
+#[test]
+fn shape_train_on_the_remote_through_a_sibling_with_a_non_ascii_path() {
+    check_shape(
+        "train via sibling",
+        &Shape {
+            train: 1,
+            sibling: true,
+            merge: true,
+            non_ascii: true,
+            ..NONE
+        },
+    );
 }
