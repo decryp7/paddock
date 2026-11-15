@@ -139,6 +139,34 @@ describe('MenuBar', () => {
     expect(ran).toEqual(['file.close']);
   });
 
+  it('keeps the focused item bound to its own command when an item above it goes away (keyboard)', async () => {
+    const file = (withExport: boolean): TopMenu[] => [
+      {
+        id: 'file',
+        label: 'File',
+        items: [
+          ...(withExport ? [{ kind: 'item', id: 'report.export', label: 'Export report…' } as const] : []),
+          { kind: 'item', id: 'file.close', label: 'Close workspace' },
+          { kind: 'item', id: 'window.close', label: 'Close window' },
+        ],
+      },
+    ];
+    menuModel.set(file(true));
+    await settle(fixture);
+    const trigger = top('File');
+    trigger.focus();
+    press(trigger, 'ArrowDown');
+    await settle(fixture);
+    await vi.waitFor(() => expect(document.activeElement).toBe(item('Export report…')));
+    press(document.activeElement!, 'ArrowDown');
+    expect(document.activeElement).toBe(item('Close workspace'));
+    menuModel.set(file(false));
+    await settle(fixture);
+    press(document.activeElement!, 'Enter');
+    await settle(fixture);
+    expect(ran).toEqual(['file.close']);
+  });
+
   it('opens a submenu on click and runs its items', async () => {
     top('View').click();
     await settle(fixture);
