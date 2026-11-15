@@ -3,7 +3,9 @@
 //! The text importer `fake` reads the file's first line: `crash` exits at once, `hang` never answers, `panic`
 //! panics, `many <n>` returns n records, anything else one record per line. The tool `fake.tool` has `settings`
 //! (the last applied value of `level`), `echo` (its arguments) and `pid` (its process id). The annotator
-//! `fake.notes` marks the time range of the records it selects through the host's view.
+//! `fake.notes` marks the time range of the records it selects through the host's view. `--manifests` prints the manifest
+//! and exits, unless the binary's name ends in a mode: `-hang` writes its pid to `<name>.pid` and never exits, `-huge`
+//! writes 5 MiB and never exits, `-crash` aborts, `-garbage` prints text that is not JSON.
 
 use anyhow::{bail, Result};
 use debrief_plugin_api::annotate::{Annotation, AnnotationView, Annotator, Evidence, RecordCursor, Severity, ViewFilter};
@@ -268,6 +270,29 @@ impl Plugin for FakePlugin {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--manifests") {
+        // A link or copy whose name ends in a mode misbehaves (the tests of `load_manifests`).
+        let exe = std::env::current_exe().unwrap_or_default();
+        let stem = exe.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        if stem.ends_with("-hang") {
+            let _ = std::fs::write(exe.with_extension("pid"), std::process::id().to_string());
+            park();
+        } else if stem.ends_with("-huge") {
+            use std::io::Write;
+            let chunk = [b' '; 64 * 1024];
+            let mut out = std::io::stdout().lock();
+            for _ in 0..(5 << 20) / chunk.len() {
+                if out.write_all(&chunk).is_err() {
+                    break;
+                }
+            }
+            let _ = out.flush();
+            park();
+        } else if stem.ends_with("-crash") {
+            std::process::abort();
+        } else if stem.ends_with("-garbage") {
+            println!("not a manifest list");
+            return;
+        }
         let mut c = Contributions::default();
         let _ = FakePlugin.register(&mut c);
         let m: Manifest = c.manifest(&FakePlugin);
@@ -277,5 +302,12 @@ fn main() {
     if let Err(e) = debrief_plugin_api::serve(Arc::new(FakePlugin)) {
         eprintln!("fake plugin: {e}");
         std::process::exit(1);
+    }
+}
+
+/// Never returns (the modes that must not exit on their own).
+fn park() -> ! {
+    loop {
+        std::thread::park();
     }
 }

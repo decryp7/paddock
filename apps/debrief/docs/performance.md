@@ -970,6 +970,32 @@ Comparable practice: GitHub's runner installs its macOS LaunchAgent with `Proces
 2026-11-15). GitLab Runner also runs as a per-user LaunchAgent (https://gitlab.com/gitlab-org/gitlab-runner/-/raw/main/docs/install/osx.md, read 2026-11-15); its page
 says nothing about `ProcessType`.
 
+## 2026-11-15, plugin manifests waited for on exit, not polled (branch fix/debrief-manifests-wait)
+
+Change: `load_manifests` (debrief-plugin-host `builtins.rs`) ran `debrief-plugins --manifests` and looked for its exit with
+`try_wait` every 20 ms; it now runs it through `paddock_proc::run_bounded`, which returns on the exit and output events
+(same 30 s bound, the tree ended by identity at the bound). Cause measured in the start-up A/B of branch
+docs/debrief-startup-ab (76659505a): the poll costs about 16 ms in a terminal and about 70 ms under the runners' launchd class.
+
+Debug `.app` of train 11 (381e4758a) against the same tree with the fix, built as the macOS smoke job builds it, each
+benched once with `scripts/ci/startup-bench.mjs --runs 5 --os macos` from a terminal, before then after. Mac mini M4 Pro,
+14 cores; 1-minute load 6.2-7.8 during both runs (other agents' builds). Empty, throw-away data folders only.
+
+| Build | `setupDone` median (per start) | `app state` per counted start | `app state`, first start |
+|---|---|---|---|
+| before (poll) | 260 ms (259, 278, 255, 260, 285) | 23-24 ms | 71 ms |
+| after (waited on exit) | 256 ms (254, 256, 257, 230, 270) | 8-10 ms | 60 ms |
+
+`app state` drops by about 14 ms per start, as the A/B predicted for a terminal; the `setupDone` median moves less (4 ms)
+because `before setup` varied by 109-147 ms across both series under this load. Under the launchd class without
+`ProcessType` the poll's sleeps stretched to about 93 ms (A/B above), so the CI saving should be larger; not measured here.
+Measured apart with the test fake (debrief-plugin-host's `debrief-plugin-host-fake --manifests`, 10 calls against 10 blocking
+runs of the binary, interleaved, load about 40): before the fix the fastest call took 21.6 ms against 3.5 ms for the
+binary's own run. This is a benchmark, not a test: the tests (`tests/it/manifests.rs`) cover the bound, the output cap,
+a crash and malformed output. Over the 4 MiB cap the old code stopped reading, so the real plugins binary's next write
+failed (EPIPE) and it exited 101 ("could not describe themselves"); now the cap ends the run at once with "the plugins
+wrote more than 4 MiB".
+
 ## Query and import performance, DuckDB 1.5.6 against 2.0 (2026-10-28 and 29)
 
 Every block says what it measured: machine (Apple M4 Pro, 14 cores, macOS), the load average when it ran (load over 10 is marked and

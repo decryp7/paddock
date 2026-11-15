@@ -83,6 +83,10 @@ impl Drain {
 }
 
 impl CommandRunner for SystemRunner {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a try_wait poll on a child it started (the try_wait class): to move to an event wait (paddock_proc::run_bounded) in the class fix"
+    )]
     fn run(&self, program: &str, args: &[String], timeout: Duration) -> Result<CommandOutput, CommandError> {
         let mut child = debrief_core::process::quiet_command(program)
             .args(args)

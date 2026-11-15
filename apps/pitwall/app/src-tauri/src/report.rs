@@ -480,6 +480,15 @@ mod tests {
         std::fs::write(path, text).unwrap();
     }
 
+    /// [`write`] with the file's modified time set to `secs` after the Unix epoch: the order a report lists logs in (newest
+    /// first) then never rests on how fast two writes follow each other.
+    fn write_at(path: &Path, text: &str, secs: u64) {
+        write(path, text);
+        let f = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+            .unwrap();
+    }
+
     /// A data folder as a used Pitwall has it, with the marker in everything a report must leave out.
     fn planted(root: &Path) -> AppDirs {
         let d = dirs(root);
@@ -697,8 +706,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let home = root.path().join("moved");
         let line = "{\"@t\":\"2026-11-08T10:00:00Z\",\"@l\":\"Information\",\"@m\":\"server started\"}\n";
-        write(&home.join("logs/pitwall-server.2026-11-08.log"), line);
-        write(&home.join("logs/pitwall-cli.2026-11-08.log"), line);
+        // Newest first: the command line's log is the newer one. Explicit times, so two writes in one timestamp tick cannot swap
+        // the order (CI run 8124: the tie fell to the name order and the test flaked).
+        write_at(&home.join("logs/pitwall-server.2026-11-08.log"), line, 1_762_596_000);
+        write_at(&home.join("logs/pitwall-cli.2026-11-08.log"), line, 1_762_596_001);
         write(&home.join("logs/other-app.2026-11-08.log"), line);
         let d = dirs(&root.path().join("app"));
         let moved = moved_logs(Some(home.to_str().unwrap()), d.logs()).expect("a moved folder that is not the app's own");
@@ -717,6 +728,28 @@ mod tests {
         assert_eq!(moved_logs(None, d.logs()), None);
         assert_eq!(moved_logs(Some(""), d.logs()), None);
         assert_eq!(moved_logs(Some(d.data().to_str().unwrap()), &d.data().join("logs")), None);
+    }
+
+    /// Two moved logs with the same modified time are listed by name, last name first (`paddock_diag::window::log_files`): the
+    /// order a report shows never depends on the file system's timestamp resolution.
+    #[test]
+    fn moved_logs_with_the_same_modified_time_are_listed_by_name() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("moved");
+        let line = "{\"@t\":\"2026-11-08T10:00:00Z\",\"@l\":\"Information\",\"@m\":\"server started\"}\n";
+        write_at(&home.join("logs/pitwall-cli.2026-11-08.log"), line, 1_762_596_000);
+        write_at(&home.join("logs/pitwall-server.2026-11-08.log"), line, 1_762_596_000);
+        let d = dirs(&root.path().join("app"));
+        let info = AppInfo::new("pitwall", "Pitwall", "1.1.0", "abc1234");
+        let now = chrono::DateTime::from_timestamp(1_762_596_000, 0).unwrap();
+        let sections: Vec<Arc<dyn Section>> = vec![Arc::new(MovedLogs { dir: home.join("logs") })];
+        let c = Collected::collect(&info, &d, &sections, &Redactor::new(), now);
+        let names: Vec<&str> = c.files().iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["logs/moved/pitwall-server.2026-11-08.log", "logs/moved/pitwall-cli.2026-11-08.log"],
+            "{names:?}"
+        );
     }
 
     #[test]
