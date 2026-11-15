@@ -99,28 +99,28 @@ that quotes a result links to the block instead of carrying the only copy.
 
 ### 2026-11-15, the `./dev` launcher against the shell wrapper (feat/dev-launch-rust)
 
-- **Commit:** base 13881087a (train 13, the 639-line shell `dev`) against 864b5fae2 (stage-0 `dev` of 40 lines and `tools/dev-launch`)
+- **Commit:** base 13881087a (train 13, the 639-line shell `dev`) against the branch head at the time (stage 0 with the stamp, 111 lines, and `tools/dev-launch`)
 - **Machine:** (1) Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; (2) the CI image (paddock-ci, linux/arm64, built locally) in an OrbStack container, `--cpus 4 --memory 12g`
-- **Load:** (1) 1-minute load 15 to 35, other agents building; (2) 0.1 to 3 inside the container
+- **Load:** (1) 1-minute load 14 to 17, CPU idle 45 %; (2) 1 to 4 inside the container
 - **Build:** the launcher as `./dev` builds it: release, std only. The tool is a cached stand-in that answers `--version`, so only the start-up is timed
 - **Corpus:** none. A throw-away repository with the real `inputs.txt` (placeholder files), the real compiler, no `RUSTC` override
-- **Command:** `bench-fixture.sh` (kept in the author's scratch, not committed): `sh <old dev> --print-binary` and `./dev --print-binary`, the same with `hello` (runs the stand-in)
-- **Runs:** 30 per cell, two interleaved rounds (old, new, old, new); median, minimum and p90 of the wall time
+- **Command:** `tools/dev-launch/bench/start-up.sh <worktree> <old dev> <work dir> 30`: `sh <old dev> --print-binary` and `./dev --print-binary`, the same with `hello` (runs the stand-in), and once the cold build of the launcher
+- **Runs:** 30 per cell, two interleaved rounds (old, new, old, new); median (minimum) of the wall time
 - **Numbers** (two rounds per cell):
 
   | Measure | Shell wrapper (base) | Launcher (change) | Budget | Verdict |
   |---|---|---|---|---|
-  | Mac, `--print-binary`, median (min) | 131, 126 ms (122) | 88, 82 ms (76) | none | about 35 % faster |
-  | Mac, `hello`, median (min) | 129, 130 ms (122) | 85, 83 ms (79) | none | about 35 % faster |
-  | Mac, real worktree, `--print-binary`, median | 180 ms | 133 to 138 ms | none | about 25 % faster |
-  | Linux container, `--print-binary`, median (min) | 15, 14 ms (13) | 21, 23 ms (17 to 18) | none | about 7 ms slower |
-  | Linux container, `hello`, median (min) | 15, 15 ms (14) | 21, 21 ms (18) | none | about 6 ms slower |
+  | Mac, `--print-binary` | 127, 124 ms (120) | 90, 88 ms (84) | none | about 30 % faster |
+  | Mac, `hello` | 128, 121 ms (117) | 93, 88 ms (85) | none | about 28 % faster |
+  | Linux container, `--print-binary` | 17, 17 ms (14) | 22, 21 ms (14) | none | 4 to 5 ms slower |
+  | Linux container, `hello` | 17, 17 ms (14) | 20, 19 ms (11) | none | about 2 ms slower |
+  | Cold launcher build (first `./dev` after a change to `tools/dev-launch`) | none | Mac 2.4 s, Linux 1.4 s | none | one build per change |
+  | Windows | not measured | not measured | none | the test VM has no toolchain, so only a stand-in build ran |
 
 - **Notes:** on the Mac most of the time is `rustc -vV` through the rustup proxy, which both versions run once; the shell also ran
-  `git`, `tr`, `sed`, `awk` and `grep` about 35 times. On Linux there is no proxy, so the launcher's extra process start (the stage
-  0's `git rev-parse`, then the launcher's own) shows. Before polling every 0.2 ms instead of 2 ms the Linux figure was 24 to 26 ms
-  (commit 86e29ab68). Not measured: Windows (the test VM has no toolchain), a cold launcher build (the first `./dev` after a change
-  to `tools/dev-launch`, a few seconds), and a cache miss.
+  `git`, `tr`, `sed`, `awk` and `grep` about 35 times. On Linux there is no proxy, so the launcher's extra process starts (the
+  stage 0's two git calls and the launcher's own start) show. A first Mac round taken at 0 % idle CPU (254 and 160 ms) is not used.
+  Not measured: Windows, a cache miss, and the cold build of the tool itself.
 
 ### 2026-11-15, pre-push heavy queue times (fix/pre-push-base-and-budget)
 
