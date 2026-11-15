@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn the_ci_home_follows_the_relocation_variable_and_an_unmounted_one_stops_the_job() {
         let d = tempfile::tempdir().unwrap();
-        let root = std::fs::canonicalize(d.path()).unwrap();
+        let root = paddock_env::winpath::real(d.path()).unwrap();
         let (home, disk) = (root.join("home"), root.join("disk"));
         let home_s = home.to_str().unwrap();
         let ask = |relocated: Option<&str>| {
@@ -276,10 +276,18 @@ mod tests {
         assert!(!disk.exists(), "a relocated home is never made again");
         std::fs::create_dir(&disk).unwrap();
         let disk_s = disk.to_str().unwrap();
-        assert_eq!(ask(Some(&format!("{disk_s}/"))).ok().unwrap(), disk_s, "a trailing slash is normalised");
+        assert_eq!(
+            ask(Some(&format!("{disk_s}/"))).ok().unwrap(),
+            disk_s,
+            "a trailing slash is normalised"
+        );
         assert!(ask(Some("disk")).err().unwrap().text.contains("is not an absolute path"));
         std::os::unix::fs::symlink(&disk, root.join("link")).unwrap();
-        assert_eq!(ask(Some(root.join("link").to_str().unwrap())).ok().unwrap(), disk_s, "a link is resolved");
+        assert_eq!(
+            ask(Some(root.join("link").to_str().unwrap())).ok().unwrap(),
+            disk_s,
+            "a link is resolved"
+        );
     }
 
     #[test]

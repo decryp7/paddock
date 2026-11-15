@@ -249,7 +249,10 @@ mod tests {
 
     fn setup() -> BTreeSet<String> {
         toolchain_actions(&[
-            ("kept".into(), "run: bash \"${{ github.action_path }}/../../../dev\" ci host-tools".into()),
+            (
+                "kept".into(),
+                "run: bash \"${{ github.action_path }}/../../../dev\" ci host-tools".into(),
+            ),
             ("plain".into(), "run: echo".into()),
         ])
     }

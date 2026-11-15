@@ -1,10 +1,10 @@
-//! `dev ci build-jobs` against `conformance/ci/build-jobs.sh`, the script it replaces (docs/plans/ci-in-rust.md, WP-1): both run
-//! on the same inputs, as the runner runs the script (`bash -e -o pipefail`), and must agree on everything that reaches the
-//! job: the exit code, what is appended to `$GITHUB_ENV`, standard output and standard error. Two spellings differ on purpose and
-//! are normalised before the comparison: the one `::notice::` that names the file to fix, and a failure's `Next step:` that the
-//! Rust command adds to the shell's cause (ER-27). Cases: every runner class, the runner's own variables, a split job, memory as
-//! the ceiling, wrong values, leading zeros, no core count, no GITHUB_ENV, and the probes (their order, and that no token of the
-//! job reaches them). Unix only: the Windows runner runs the real thing on every run.
+//! `dev ci build-jobs` (docs/plans/ci-in-rust.md, WP-1; docs/plans/shell-to-rust.md, WP-2): CARGO_BUILD_JOBS and NEXTEST_TEST_THREADS for a
+//! runner class, run as a real process on the same inputs the runner gives it, and held to everything that reaches the job: the exit
+//! code, what is appended to `$GITHUB_ENV`, standard output and standard error. Until WP-2 every case also ran
+//! `conformance/ci/build-jobs.sh` (as the runner runs it, `bash -e -o pipefail`) and demanded that both agree; the script is gone, and
+//! the agreed result of every case is its golden in `tests/golden/parity/build_jobs` (`parity_golden.rs`). Cases: every runner class,
+//! the runner's own variables, a split job, memory as the ceiling, wrong values, leading zeros, no core count, no GITHUB_ENV, and the
+//! probes (their order, and that no token of the job reaches them). Unix only: the Windows runner runs the real thing on every run.
 // windows-twin: build_jobs_golden.rs
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -17,7 +17,7 @@ fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct Result {
     code: i32,
     env_file: String,
@@ -83,16 +83,6 @@ impl Scratch {
     }
 
     #[allow(clippy::disallowed_methods)]
-    fn shell(&self, split: Option<&str>, vars: &[(&str, &str)], with_env_file: bool) -> Result {
-        self.reset();
-        let mut cmd = TestCommand::new("bash");
-        cmd.args(["-e", "-o", "pipefail"]).arg(repo().join("conformance/ci/build-jobs.sh"));
-        cmd.args(split);
-        let out = cmd.envs(self.base_env(vars, with_env_file)).output().unwrap();
-        self.collect(out)
-    }
-
-    #[allow(clippy::disallowed_methods)]
     fn rust(&self, split: Option<&str>, vars: &[(&str, &str)], with_env_file: bool) -> Result {
         self.reset();
         let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
@@ -106,42 +96,9 @@ impl Scratch {
     }
 }
 
-/// The shell's output as the Rust command spells it: the notice that names the file to fix, and a failure's next step.
-fn normalised(sh: &Result, rs: &Result) -> (Result, Result) {
-    let fix = |t: &str| {
-        t.replace(
-            "or fix build-jobs.sh if it differs",
-            "or fix the class table in ci_build_jobs.rs if it differs",
-        )
-    };
-    let sh_out = fix(&sh.stdout);
-    // Every `::error::` of the shell is one line; the Rust line starts with it and goes on with ` Next step: ...`.
-    let rs_out = rs
-        .stdout
-        .lines()
-        .map(|l| match (l.starts_with("::error::"), l.find(" Next step: ")) {
-            (true, Some(at)) => l[..at].to_string(),
-            _ => l.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let sh_out = sh_out.trim_end_matches('\n').to_string();
-    let rs_out = rs_out.trim_end_matches('\n').to_string();
-    let copy = |r: &Result, stdout: String| Result {
-        code: r.code,
-        env_file: r.env_file.clone(),
-        stdout,
-        stderr: r.stderr.clone(),
-    };
-    (copy(sh, sh_out), copy(rs, rs_out))
-}
-
-/// The two implementations agree on everything that reaches the job.
+/// Runs the command, checks its result against the golden of this case and that a failure names its next step; returns the result.
 fn same(s: &Scratch, split: Option<&str>, vars: &[(&str, &str)], with_env_file: bool) -> Result {
-    let sh = s.shell(split, vars, with_env_file);
     let rs = s.rust(split, vars, with_env_file);
-    let (a, b) = normalised(&sh, &rs);
-    assert_eq!(a, b, "split {split:?}, vars {vars:?}\nshell: {sh:?}\nrust: {rs:?}");
     crate::parity_golden::case("build_jobs", &format!("{rs:#?}"));
     if rs.code != 0 {
         assert!(rs.stdout.contains(" Next step: "), "a failure names its next step: {}", rs.stdout);
@@ -308,20 +265,19 @@ fn the_probes_are_tried_in_the_shells_order() {
     // sysctl failing, the variable then getconf.
     s.shim("nproc", "exit 1");
     s.shim("sysctl", "exit 1");
-    let r = same(&s, None, &[("RUNNER_OS", "macOS"), ("NUMBER_OF_PROCESSORS", "7"), ("PADDOCK_CI_RAM_MB", "32768")], true);
+    let r = same(
+        &s,
+        None,
+        &[
+            ("RUNNER_OS", "macOS"),
+            ("NUMBER_OF_PROCESSORS", "7"),
+            ("PADDOCK_CI_RAM_MB", "32768"),
+        ],
+        true,
+    );
     assert!(r.stderr.contains("this host: 7 cores"), "{}", r.stderr);
     let r = same(&s, None, &vars, true);
     assert!(r.stderr.contains("this host: 6 cores"), "{}", r.stderr);
-}
-
-/// ER-33: a parity probe counts only once it has been shown to see a difference.
-#[test]
-fn the_comparison_sees_a_difference() {
-    let s = Scratch::new();
-    let sh = s.shell(None, &host("macOS", "14", "65536"), true);
-    let rs = s.rust(None, &host("macOS", "13", "65536"), true);
-    let (a, b) = normalised(&sh, &rs);
-    assert_ne!(a, b, "a different core count must show");
 }
 
 /// A token of the job never reaches a probe (the wrapper contract: every child starts from the base environment).

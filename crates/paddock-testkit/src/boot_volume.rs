@@ -112,7 +112,10 @@ impl Probe for SystemProbe {
     }
 
     fn physical(&self, p: &str) -> Option<String> {
-        std::fs::canonicalize(p).ok()?.to_str().map(str::to_string)
+        paddock_env::winpath::real(Path::new(p))
+            .ok()?
+            .to_str()
+            .map(str::to_string)
     }
 
     fn mount_of(&self, dir: &str) -> Option<String> {

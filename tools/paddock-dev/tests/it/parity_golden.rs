@@ -47,13 +47,23 @@ pub(crate) fn case(group: &str, text: &str) {
         return;
     }
     let file = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("golden file {} cannot be read ({e}); run the test with {UPDATE_VAR}=1 and commit it", path.display()))
+        .unwrap_or_else(|e| {
+            panic!(
+                "golden file {} cannot be read ({e}); run the test with {UPDATE_VAR}=1 and commit it",
+                path.display()
+            )
+        })
         .replace("\r\n", "\n");
     let want = file
         .split(&marker(n))
         .nth(1)
         .map(|rest| rest.split("=== case ").next().unwrap_or(""))
-        .unwrap_or_else(|| panic!("golden file {} has no case {n}; run the test with {UPDATE_VAR}=1 to add it", path.display()));
+        .unwrap_or_else(|| {
+            panic!(
+                "golden file {} has no case {n}; run the test with {UPDATE_VAR}=1 to add it",
+                path.display()
+            )
+        });
     let want = format!("{}{}", marker(n), want);
     if want != block {
         let line = want

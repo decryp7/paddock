@@ -1,11 +1,12 @@
-//! `dev ci setup-rust` against the shell it replaces: the "Install sccache" and "sccache" steps are read from
-//! `.gitea/actions/setup-rust/action.yml` and run as the runner runs them (`bash -e -o pipefail`), then the Rust command runs on
-//! the same inputs, the same folders and the same shim `sccache`. What both wrote to `$GITHUB_ENV` and `$GITHUB_PATH`, the exit
-//! code and every call of sccache (its arguments and the variables that decide its server) must be identical. Cases: the
-//! host runner's slots and budgets, a container with and without the `/sccache` mount, Redis, a server that does not start or
-//! answer, wrong inputs, no sccache at all, and a pinned copy already in the tool cache. Unix only: the Windows runner runs the
-//! real thing on every run (the shell's cygpath branch has no Unix stand-in).
-// windows-twin: none: waived until 2026-12-31; the shim sccache is a shell script and a Windows twin needs a compiled shim (WP-11 removes the shell steps it compares with)
+//! `dev ci setup-rust` (docs/plans/ci-in-rust.md, step 1; docs/plans/shell-to-rust.md, WP-2): the compile cache of a CI job, run as a real
+//! process on a scratch runner (home, temp, tool cache, the job's env and path files) with a shim `sccache`, and held to everything that
+//! reaches the job: the exit code, `$GITHUB_ENV`, `$GITHUB_PATH` and every call of sccache (its arguments and the variables that decide
+//! its server). Until WP-2 the "Install sccache" and "sccache" steps of `.gitea/actions/setup-rust/action.yml` also ran as the runner
+//! runs them (`bash -e -o pipefail`) and had to agree; those steps are gone, and the agreed result of every case is its golden in
+//! `tests/golden/parity/setup_rust` (`parity_golden.rs`). Cases: the host runner's slots and budgets, a container with and without the
+//! `/sccache` mount, Redis, a server that does not start or answer, wrong inputs, no sccache at all, and a pinned copy already in the
+//! tool cache. Unix only: the Windows runner runs the real thing on every run (the cygpath branch had no Unix stand-in).
+// windows-twin: none: waived until 2026-12-31; the shim sccache is a shell script and a Windows twin needs a compiled shim
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -15,24 +16,6 @@ use std::path::{Path, PathBuf};
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
-}
-
-/// The `run: |` body of a step of the action, unindented, with the action's path filled in.
-fn step_body(name: &str) -> String {
-    let action = repo().join(".gitea/actions/setup-rust");
-    let text = std::fs::read_to_string(std::env::var("OLD_SETUP_RUST").unwrap_or_else(|_| action.join("action.yml").display().to_string())).unwrap();
-    let at = text
-        .find(&format!("- name: {name}\n"))
-        .unwrap_or_else(|| panic!("step {name} is in the action"));
-    let rest = &text[at..];
-    let end = rest[1..].find("\n    - ").map_or(rest.len(), |e| e + 1);
-    let block = &rest[..end];
-    let body = &block[block.find("run: |\n").unwrap() + "run: |\n".len()..];
-    body.lines()
-        .map(|l| l.get(8..).unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join("\n")
-        .replace("${{ github.action_path }}", &action.to_string_lossy())
 }
 
 /// One case: a scratch runner (home, temp, tool cache, the job's env and path files) and a shim sccache.
@@ -134,41 +117,6 @@ impl Runner {
         }
     }
 
-    /// The shell steps, in the action's order, as separate steps (a failed step stops the job).
-    #[allow(clippy::disallowed_methods)]
-    fn shell(&self, input: &Input, extra: &[(&str, &str)], with_install: bool) -> Result {
-        self.reset();
-        let mut steps = Vec::new();
-        if with_install {
-            steps.push(step_body("Install sccache"));
-        }
-        steps.push(step_body("sccache"));
-        if input.tauri {
-            steps.push(step_body("Linux dependencies for Tauri"));
-        }
-        let (mut code, mut out) = (0, String::new());
-        for body in steps {
-            let script = self.root.join("step.sh");
-            std::fs::write(&script, body).unwrap();
-            let r = TestCommand::new("bash")
-                .args(["-e", "-o", "pipefail"])
-                .arg(&script)
-                .envs(self.base_env(extra))
-                .env("BACKEND", input.backend)
-                .env("REDIS_ENDPOINT", input.endpoint)
-                .env("REDIS_DB", input.db)
-                .output()
-                .unwrap();
-            out.push_str(&String::from_utf8_lossy(&r.stdout));
-            out.push_str(&String::from_utf8_lossy(&r.stderr));
-            code = r.status.code().unwrap_or(-1);
-            if code != 0 {
-                break;
-            }
-        }
-        self.collect(code, out)
-    }
-
     #[allow(clippy::disallowed_methods)]
     fn rust(&self, input: &Input, extra: &[(&str, &str)]) -> Result {
         self.reset();
@@ -219,29 +167,24 @@ const LOCAL: Input = Input {
 
 /// The Rust command's result as a golden case (the root of the scratch runner shown as `<ROOT>`).
 fn golden(runner: &Runner, rs: &Result) {
-    let seen = format!("code {}\n--- GITHUB_ENV\n{}--- GITHUB_PATH\n{}--- calls\n{}", rs.code, rs.env, rs.path, rs.calls);
+    let seen = format!(
+        "code {}\n--- GITHUB_ENV\n{}--- GITHUB_PATH\n{}--- calls\n{}",
+        rs.code, rs.env, rs.path, rs.calls
+    );
     crate::parity_golden::case("setup_rust", &seen.replace(&runner.root.display().to_string(), "<ROOT>"));
 }
 
-/// The two implementations agree on everything that reaches the job: exit code, `$GITHUB_ENV`, `$GITHUB_PATH`, sccache calls.
-fn same(runner: &Runner, input: &Input, extra: &[(&str, &str)], with_install: bool) -> (Result, Result) {
-    let sh = runner.shell(input, extra, with_install);
+/// Runs the command and holds its result to the case's golden; returns it.
+fn same(runner: &Runner, input: &Input, extra: &[(&str, &str)]) -> Result {
     let rs = runner.rust(input, extra);
-    assert_eq!(
-        (sh.code, &sh.env, &sh.path, &sh.calls),
-        (rs.code, &rs.env, &rs.path, &rs.calls),
-        "shell output:\n{}\nrust output:\n{}",
-        sh.out,
-        rs.out
-    );
     golden(runner, &rs);
-    (sh, rs)
+    rs
 }
 
 #[test]
 fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
     let r = Runner::new(Some("true"));
-    let (_, rs) = same(&r, &LOCAL, &[], true);
+    let rs = same(&r, &LOCAL, &[]);
     assert!(rs.env.contains("RUSTC_WRAPPER=sccache\nCARGO_INCREMENTAL=0\n"), "{}", rs.env);
     assert!(
         !rs.env.contains("__CARGO_"),
@@ -255,7 +198,7 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
     );
     assert!(rs.env.contains("SCCACHE_CACHE_SIZE=10G\n"), "{}", rs.env);
     assert!(rs.calls.contains("--start-server port=4227"), "{}", rs.calls);
-    let (_, rs) = same(
+    let rs = same(
         &r,
         &LOCAL,
         &[
@@ -263,19 +206,13 @@ fn a_host_slot_gets_its_own_folder_port_and_share_of_the_budget() {
             ("PADDOCK_CI_SLOTS", "3"),
             ("PADDOCK_CI_SCCACHE_GB", "60"),
         ],
-        true,
     );
     assert!(
         rs.env.contains("SCCACHE_SERVER_PORT=4228\n") && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"),
         "{}",
         rs.env
     );
-    same(
-        &r,
-        &LOCAL,
-        &[("PADDOCK_CI_SLOTS", "40"), ("PADDOCK_CI_SCCACHE_GB", "not-a-number")],
-        true,
-    );
+    same(&r, &LOCAL, &[("PADDOCK_CI_SLOTS", "40"), ("PADDOCK_CI_SCCACHE_GB", "not-a-number")]);
 }
 
 #[test]
@@ -284,14 +221,14 @@ fn a_container_uses_the_mount_or_a_folder_that_dies_with_it() {
     let mount = r.root.join("mount");
     std::fs::create_dir_all(&mount).unwrap();
     let mount = mount.display().to_string();
-    let (_, rs) = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &mount)], true);
+    let rs = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &mount)]);
     assert!(
         rs.env.contains(&format!("SCCACHE_DIR={mount}\n")) && rs.env.contains("SCCACHE_CACHE_SIZE=20G\n"),
         "{}",
         rs.env
     );
     let absent = r.root.join("absent").display().to_string();
-    let (_, rs) = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &absent)], true);
+    let rs = same(&r, &LOCAL, &[("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", &absent)]);
     assert!(rs.env.contains("/temp/sccache\n"), "{}", rs.env);
     assert!(rs.out.contains("::notice::no /sccache mount in this container"), "{}", rs.out);
 }
@@ -305,7 +242,7 @@ fn redis_is_used_when_asked_for_or_when_auto_has_an_endpoint() {
         db: "",
         tauri: false,
     };
-    let (_, rs) = same(&r, &auto, &[], true);
+    let rs = same(&r, &auto, &[]);
     assert!(
         rs.env.contains("SCCACHE_REDIS_ENDPOINT=redis://h:6379\nSCCACHE_REDIS_DB=5\n"),
         "{}",
@@ -318,17 +255,17 @@ fn redis_is_used_when_asked_for_or_when_auto_has_an_endpoint() {
         db: "7",
         tauri: false,
     };
-    let (_, rs) = same(&r, &redis, &[("RUNNER_OS", "Linux")], true);
+    let rs = same(&r, &redis, &[("RUNNER_OS", "Linux")]);
     assert!(rs.env.contains("SCCACHE_REDIS_DB=7\n"), "{}", rs.env);
     assert!(!rs.out.contains(":pw@"), "the password is never printed: {}", rs.out);
-    same(&r, &Input { endpoint: "", ..auto }, &[], true);
+    same(&r, &Input { endpoint: "", ..auto }, &[]);
 }
 
 #[test]
 fn a_server_that_does_not_start_or_answer_leaves_the_wrapper_unset_and_the_step_green() {
     for shim in ["[ \"$1\" = --start-server ] && exit 1", "[ \"$1\" = --show-stats ] && exit 1"] {
         let r = Runner::new(Some(shim));
-        let (_, rs) = same(&r, &LOCAL, &[], true);
+        let rs = same(&r, &LOCAL, &[]);
         assert_eq!((rs.code, rs.env.as_str()), (0, ""), "{shim}");
         assert!(rs.out.contains("::warning::the sccache server did not start"), "{}", rs.out);
     }
@@ -337,7 +274,7 @@ fn a_server_that_does_not_start_or_answer_leaves_the_wrapper_unset_and_the_step_
 #[test]
 fn wrong_inputs_fail_the_step_with_the_shells_message() {
     let r = Runner::new(Some("true"));
-    let (_, rs) = same(
+    let rs = same(
         &r,
         &Input {
             backend: "disk",
@@ -346,7 +283,6 @@ fn wrong_inputs_fail_the_step_with_the_shells_message() {
             tauri: false,
         },
         &[],
-        true,
     );
     assert_eq!(rs.code, 1);
     assert!(
@@ -355,7 +291,7 @@ fn wrong_inputs_fail_the_step_with_the_shells_message() {
         "{}",
         rs.out
     );
-    let (_, rs) = same(
+    let rs = same(
         &r,
         &Input {
             backend: "redis",
@@ -364,7 +300,6 @@ fn wrong_inputs_fail_the_step_with_the_shells_message() {
             tauri: false,
         },
         &[],
-        true,
     );
     assert!(
         rs.out
@@ -379,7 +314,7 @@ fn without_sccache_the_job_builds_without_the_cache() {
     // The shell's download cannot be pointed away from GitHub, so only its sccache step runs here; the Rust download goes to
     // a folder that has no release and fails, which is a warning.
     let r = Runner::new(None);
-    let (_, rs) = same(&r, &LOCAL, &[], false);
+    let rs = same(&r, &LOCAL, &[]);
     assert_eq!((rs.code, rs.env.as_str(), rs.path.as_str()), (0, "", ""));
     // The runner class of these cases is macOS: on an arm64 host it has a pin and the download fails; on another host there is
     // no pin. Both are a warning, in the shell and here.
@@ -427,14 +362,10 @@ fn a_runner_without_a_pinned_release_is_the_same_warning_in_both() {
     }
     let r = Runner::new(None);
     let win = [("RUNNER_OS", "Windows"), ("PADDOCK_CI_ASSUME_WINDOWS", "1")];
-    let sh = r.shell(&LOCAL, &win, true);
     let rs = r.rust(&LOCAL, &win);
-    assert_eq!((sh.code, &sh.path), (rs.code, &rs.path), "{}\n{}", sh.out, rs.out);
     golden(&r, &rs);
     assert_eq!(rs.path, "", "nothing is put on PATH");
-    for out in [&sh.out, &rs.out] {
-        assert!(out.contains("::warning::no pinned sccache release for Windows"), "{out}");
-    }
+    assert!(rs.out.contains("::warning::no pinned sccache release for Windows"), "{}", rs.out);
 }
 
 #[test]
@@ -445,22 +376,19 @@ fn a_pinned_copy_in_the_tool_cache_is_put_on_path_and_used() {
     write_shim(&pinned.join("sccache"), &r.calls, "true");
     let (os, has_pin) = host_runner();
     let host = [("RUNNER_OS", os)];
-    let sh = r.shell(&LOCAL, &host, true);
     let rs = r.rust(&LOCAL, &host);
-    assert_eq!((sh.code, &sh.env, &sh.path), (rs.code, &rs.env, &rs.path), "{}\n{}", sh.out, rs.out);
     // No golden: the case pairs the OS this test runs on with its own pin, so its result is not one every OS shares.
     assert!(rs.env.contains("RUSTC_WRAPPER=sccache\n"), "{}", rs.env);
     if !has_pin {
-        // No release for this host's architecture: both warn before the tool cache, and use the pinned copy all the same.
-        assert_eq!((rs.path.as_str(), rs.calls.as_str()), ("", sh.calls.as_str()));
+        // No release for this host's architecture: it warns before the tool cache, and uses the pinned copy all the same.
+        assert_eq!(rs.path, "");
         return;
     }
     assert_eq!(rs.path, format!("{}\n", pinned.display()));
-    // The one deliberate difference: the port asks the cached copy for its version before trusting it (the shell trusted
-    // any executable file there); every other call is the shell's.
+    // The port asks the cached copy for its version before trusting it (the shell trusted any executable file there).
     let (first, rest) = rs.calls.split_once('\n').unwrap();
     assert!(first.starts_with("--version "), "{}", rs.calls);
-    assert_eq!(rest, sh.calls);
+    assert!(!rest.is_empty(), "the server calls follow: {}", rs.calls);
 }
 
 #[test]
@@ -493,7 +421,7 @@ fn a_download_with_the_wrong_checksum_fails_the_step() {
 fn the_tauri_libraries_are_installed_through_sudo_as_the_shell_did() {
     let r = Runner::new(Some("true"));
     let tauri = Input { tauri: true, ..LOCAL };
-    let (_, rs) = same(&r, &tauri, &[("RUNNER_OS", "Linux")], true);
+    let rs = same(&r, &tauri, &[("RUNNER_OS", "Linux")]);
     assert!(rs.calls.contains("sudo apt-get update\napt-get update\n"), "{}", rs.calls);
     assert!(
         rs.calls
@@ -509,12 +437,7 @@ fn the_tauri_libraries_are_installed_through_sudo_as_the_shell_did() {
 #[test]
 fn a_token_of_the_job_never_reaches_sccache() {
     let r = Runner::new(Some("true"));
-    let (sh, rs) = same(&r, &LOCAL, &[], true);
-    assert!(
-        sh.tokens.contains("tok=tok-secret"),
-        "the probe sees what the shell passed on: {}",
-        sh.tokens
-    );
+    let rs = same(&r, &LOCAL, &[]);
     assert!(!rs.tokens.is_empty() && !rs.tokens.contains("tok-secret"), "{}", rs.tokens);
 }
 
@@ -586,9 +509,7 @@ fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
     let mount = r.root.join("mount");
     std::fs::create_dir_all(&mount).unwrap();
     let linux = [("RUNNER_OS", "Linux"), ("PADDOCK_SCCACHE_MOUNT", mount.to_str().unwrap())];
-    let sh = r.shell(&LOCAL, &linux, true);
     let rs = r.rust(&LOCAL, &linux);
-    assert_eq!((sh.code, &sh.env, &sh.path), (rs.code, &rs.env, &rs.path), "{}\n{}", sh.out, rs.out);
     golden(&r, &rs);
     assert_eq!(rs.path, format!("{}\n", pinned.display()));
     let (first, rest) = rs.calls.split_once('\n').unwrap();
@@ -597,5 +518,5 @@ fn in_a_container_a_pinned_copy_in_the_tool_cache_is_put_on_path() {
         "the port checks the cached copy's version first: {}",
         rs.calls
     );
-    assert_eq!(rest, sh.calls);
+    assert!(!rest.is_empty(), "{}", rs.calls);
 }

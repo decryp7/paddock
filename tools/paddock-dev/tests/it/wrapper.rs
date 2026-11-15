@@ -854,6 +854,8 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
             .env("CARGO_HOME", f.cargo_home.path())
             .env("RUSTC", &rustc)
             .env("GITHUB_ACTIONS", "true")
+            // A read token: without one a CI job builds from source into `bin-source` and never tries a download (wrapper_ci.rs).
+            .env("PADDOCK_DEV_TOKEN", "test-token")
             .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
             .env("PADDOCK_CI_MOUNT", &mount);
         cmd.envs(extra.iter().map(|(k, v)| (*k, *v)));
@@ -912,6 +914,8 @@ fn run_overlapping(rustcs: &[&str], expected: usize, shared_target: bool) -> (te
                 .env("CARGO_HOME", f.cargo_home.path())
                 .env("RUSTC", rustc)
                 .env("GITHUB_ACTIONS", "true")
+                // A read token: without one a CI job builds from source into `bin-source` and never tries a download (wrapper_ci.rs).
+                .env("PADDOCK_DEV_TOKEN", "test-token")
                 .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
                 .env("PADDOCK_CI_MOUNT", &mount)
                 .env("BARRIER", &barrier);
@@ -1097,6 +1101,8 @@ fn a_ci_run_without_a_kept_mount_says_so() {
         .env("CARGO_HOME", f.cargo_home.path())
         .env("RUSTC", rustc)
         .env("GITHUB_ACTIONS", "true")
+        // A read token: without one a CI job builds from source into `bin-source` and never tries a download (wrapper_ci.rs).
+        .env("PADDOCK_DEV_TOKEN", "test-token")
         .env("PADDOCK_DEV_PACKAGES", "http://127.0.0.1:9/generic")
         .env("PADDOCK_CI_MOUNT", scratch.path().join("missing"))
         .env_remove("PADDOCK_DEV_HOME")

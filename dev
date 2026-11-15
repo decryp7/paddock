@@ -193,7 +193,7 @@ fi
 # after the job's temp folder is gone (runs 7773 to 7775). The CI home is the one `ci isolation` uses (PADDOCK_CI_HOME, which must
 # exist and be absolute, else ~/.paddock-ci; tools/paddock-dev/src/ci_isolation/home.rs, `ci_home`): it is read here because the tool
 # that knows the rule is not built yet. WP-1's launcher carries this block over. An explicit PADDOCK_DEV_HOME wins.
-if [ "${GITHUB_ACTIONS:-}" = true ] && [ "${RUNNER_OS:-}" != Linux ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ -n "${RUNNER_OS:-}" ] && [ "${RUNNER_OS:-}" != Linux ] && [ -z "${PADDOCK_DEV_HOME:-}" ]; then
   if [ -n "${PADDOCK_CI_HOME:-}" ]; then
     case "$PADDOCK_CI_HOME" in
       /* | [A-Za-z]:[\\/]*) ;;

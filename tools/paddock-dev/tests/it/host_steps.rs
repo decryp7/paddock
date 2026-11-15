@@ -1,12 +1,14 @@
-//! The host steps of `dev ci` against the shell they replace (docs/plans/ci-in-rust.md, WP-4): `stable-workspace`, `node-caches`,
-//! `host-tools`, `sccache-stats`, `build-folder`, `prune-folder`, `prune-build-folder` and `host-cleanup` run once as the shell does
-//! (`conformance/ci/host/*.sh`, `build-folder.sh`, `tools/prune-*.sh`, `tools/host-cleanup.sh`, under the runner's `bash -e -o
-//! pipefail`) and once as the Rust command, each on its own copy of the same fixture folder, and must agree on everything that
-//! reaches the job: the exit code, standard output, `$GITHUB_ENV`, `$GITHUB_PATH`, the calls of the wrapped programs and the state of
-//! the folders afterwards. Spellings that differ on purpose are normalised before the comparison: durations, the scratch folder, the
-//! `run:`/`ran:` lines of the wrapper contract, `ci isolation`'s own messages (standard error in the script) and the `Next step:` the Rust errors add to the shell's cause (ER-27). Every case
-//! runs under a scratch folder (ER-14: never the machine's CI home, temp folders or processes). Unix only: Windows jobs run the real
-//! thing, and `host_steps_golden.rs` keeps the answers as literals for every OS.
+//! The host steps of `dev ci` (docs/plans/ci-in-rust.md, WP-4; docs/plans/shell-to-rust.md, WP-2): `stable-workspace`, `node-caches`,
+//! `host-tools`, `sccache-stats`, `build-folder`, `prune-folder`, `prune-build-folder`, `host-cleanup`, `kept-clone`, `guardian-as-user`
+//! and `boot-volume`, each run as a real process on its own copy of a fixture folder (shim programs on PATH, a scratch home), and held
+//! to what reaches the job: the exit code, standard output, `$GITHUB_ENV`, `$GITHUB_PATH`, the calls of the wrapped programs and the
+//! state of the folders afterwards. Until WP-2 each case also ran the shell script the command replaced
+//! (`conformance/ci/host/*.sh`, `build-folder.sh`, `tools/prune-*.sh`, `tools/host-cleanup.sh`, `kept-clone.sh`, `guardian-as-user.sh`,
+//! `boot-volume.sh`) and demanded that both agree; the scripts are gone, and the agreed result of every case is its golden in
+//! `tests/golden/parity/host_steps` (`parity_golden.rs`). Spellings are normalised before the comparison: durations, the scratch
+//! folder, the `run:`/`ran:` lines of the wrapper contract and the like. Every case runs under a scratch folder (ER-14: never the
+//! machine's CI home, temp folders or processes). Unix only: Windows jobs run the real thing, and `host_steps_golden.rs` keeps the
+//! answers as literals for every OS.
 // windows-twin: host_steps_golden.rs
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -91,13 +93,26 @@ fn norm(text: &str, fx: &Fx) -> String {
     let root = fx.root().display().to_string();
     let dur = regex::Regex::new(r" in \d+ s\b").unwrap();
     let private = regex::Regex::new(r"<ROOT>/tmp/(tmp\.[A-Za-z0-9]+|guardian-as-user\.[0-9]+\.[0-9]+)").unwrap();
+    // Who runs the tests decides whether the command drops to an unprivileged user with setpriv (root, as in the CI containers) or runs
+    // them as itself (a person's Mac); the root path is the unit tests' (a fake machine records its command line).
+    let as_uid =
+        regex::Regex::new(r"Running as uid \d+: (?:setpriv \S+ \S+ --clear-groups --no-new-privs -- )?|passed as uid \d+").unwrap();
     let secs_cell = regex::Regex::new(r"\| \d+ s \|").unwrap();
     let sizes = regex::Regex::new(r"(is|still) \d+( \(cap|;)").unwrap();
     let bash_killed = regex::Regex::new(r": line \d+: +\d+ Killed ").unwrap();
     let timed_out_last = regex::Regex::new(r"Last output: kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\.").unwrap();
     let timed_out_why = regex::Regex::new(r"\(kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)\)").unwrap();
     let timed_out_line = regex::Regex::new(r"^kept-clone: git [a-z-]+ failed \(timed out after \d+ s\)$").unwrap();
-    text.replace(&root, "<ROOT>")
+    as_uid
+        .replace_all(text, |c: &regex::Captures| {
+            if c[0].starts_with("passed") {
+                "passed as uid N"
+            } else {
+                "Running as uid N: "
+            }
+            .to_string()
+        })
+        .replace(&root, "<ROOT>")
         .lines()
         // The wrapper contract's lines, and the one line per pattern the Rust clean-up adds (ER-27).
         // The shim's `kit:` lines name the implementation it chose; they are not the step's output.
@@ -215,10 +230,8 @@ fn tree(fx: &Fx) -> Vec<String> {
     out
 }
 
-/// How to run one step: the shell form and the Rust form, with `<ROOT>` in any argument or variable replaced by the fixture's folder.
+/// How to run one step: the command's arguments, with `<ROOT>` in any argument or variable replaced by the fixture's folder.
 struct Step {
-    shell: Vec<&'static str>,
-    shell_env: Vec<(&'static str, String)>,
     rust: Vec<&'static str>,
     env: Vec<(&'static str, String)>,
     cwd: Option<&'static str>,
@@ -240,22 +253,13 @@ fn base_env(fx: &Fx) -> Vec<(String, String)> {
     ]
 }
 
-fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
-    // Standard error joins standard output in the order written (`exec 2>&1`): `ci isolation`'s own messages go to standard error in
-    // the script, and the step prints them with its own lines, so the two are compared as the job log shows them.
+fn run_one(fx: &Fx, step: &Step) -> Seen {
+    // Standard error joins standard output in the order written (`exec 2>&1`): `ci isolation`'s own messages go to standard error and
+    // the step prints them with its own lines, so they are compared as the job log shows them.
     let mut cmd = TestCommand::new("sh");
     cmd.args(["-c", "exec 2>&1; exec \"$@\"", "sh"]);
-    if rust {
-        cmd.arg(env!("CARGO_BIN_EXE_paddock-dev"));
-        cmd.arg("ci").args(step.rust.iter().map(|a| fill(a, fx)));
-    } else {
-        cmd.arg("bash");
-        // The script's own path is the repository's; the arguments after it are the fixture's.
-        let script = repo().join(step.shell[0]);
-        cmd.args(["-e", "-o", "pipefail"])
-            .arg(script)
-            .args(step.shell[1..].iter().map(|a| fill(a, fx)));
-    }
+    cmd.arg(env!("CARGO_BIN_EXE_paddock-dev"));
+    cmd.arg("ci").args(step.rust.iter().map(|a| fill(a, fx)));
     let cwd = step.cwd.map_or_else(repo, |c| fx.p(c));
     cmd.current_dir(cwd);
     for (k, v) in base_env(fx)
@@ -263,11 +267,6 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
         .chain(step.env.iter().map(|(k, v)| (k.to_string(), fill(v, fx))))
     {
         cmd.env(k, v);
-    }
-    if !rust {
-        for (k, v) in &step.shell_env {
-            cmd.env(k, fill(v, fx));
-        }
     }
     // ADR 0103: every process the step starts ends with it. The step runs in a group of the reaper's with its token; the reaper ends
     // anything of the step still running (a hung git shim's `sleep`, a holder a phase limit left), and the test fails on a leak
@@ -294,24 +293,12 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
         stdout: stdout.join().expect("the stdout reader panicked"),
         stderr: stderr.join().expect("the stderr reader panicked"),
     };
-    assert!(
-        left.is_empty(),
-        "the {} step left processes running after it ended: {left:?}",
-        if rust { "Rust" } else { "shell" }
-    );
+    assert!(left.is_empty(), "the step left processes running after it ended: {left:?}");
     let read = |rel: &str| std::fs::read_to_string(fx.p(rel)).unwrap_or_default();
-    // The shell passes the whole environment to the programs it runs, so its shims see the job's token; the Rust command never lets
-    // it through (ToolCall). The shell's side is read without it so every other difference shows, and a Rust leak shows as one.
-    let calls = if rust {
-        read("calls")
-    } else {
-        read("calls").replace("token=tok-secret", "token=")
-    };
     // The raw output, before `norm`: the harness shows it only for a failing test, where a normalised line (a filtered job-control
     // note, a replaced spelling) could otherwise hide what the step really printed (ER-27).
     eprintln!(
-        "---- {} raw output (exit {:?}) ----\n{}",
-        if rust { "Rust" } else { "shell" },
+        "---- raw output (exit {:?}) ----\n{}",
         out.status,
         String::from_utf8_lossy(&out.stdout)
     );
@@ -320,29 +307,18 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
         stdout: norm(&String::from_utf8_lossy(&out.stdout), fx),
         github_env: norm(&read("github-env"), fx),
         github_path: norm(&read("github-path"), fx),
-        calls: norm(&calls, fx),
+        calls: norm(&read("calls"), fx),
         tree: tree(fx),
     }
 }
 
-/// Runs both on a fresh fixture each (made by `setup`) and demands they agree; returns what the Rust command left.
+/// Runs the step on a fresh fixture (made by `setup`), holds its result to the case's golden, and returns it.
 fn same(setup: &(dyn Fn(&Fx) + Sync), step: &Step) -> Seen {
-    // The two implementations share nothing, so they run side by side (ADR 0103): the test takes the slower one, not the sum.
-    let (shell, rust) = paddock_testkit::both(
-        || {
-            let a = fixture();
-            setup(&a);
-            run_one(&a, step, false)
-        },
-        || {
-            let b = fixture();
-            setup(&b);
-            run_one(&b, step, true)
-        },
-    );
-    assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
-    crate::parity_golden::case("host_steps", &format!("{:#?}", rust));
-    rust
+    let fx = fixture();
+    setup(&fx);
+    let seen = run_one(&fx, step);
+    crate::parity_golden::case("host_steps", &format!("{seen:#?}"));
+    seen
 }
 
 // ---- stable-workspace ----
@@ -355,8 +331,6 @@ fn stable(os: &'static str, extra: Vec<(&'static str, String)>) -> Step {
     ];
     env.extend(extra);
     Step {
-        shell: vec!["conformance/ci/host/stable-workspace.sh"],
-        shell_env: vec![("NAME", "decryp7/paddock-crate".into())],
         rust: vec!["stable-workspace", "--name", "decryp7/paddock-crate"],
         env,
         cwd: Some("work/abc/hostexecutor"),
@@ -421,8 +395,6 @@ fn node_caches(os: &'static str, angular: &'static str, extra: Vec<(&'static str
     ];
     env.extend(extra);
     Step {
-        shell: vec!["conformance/ci/host/node-caches.sh"],
-        shell_env: vec![("ANGULAR_DIR", angular.into()), ("NAME", "e2e-1".into())],
         rust: if angular.is_empty() {
             vec!["node-caches", "--name", "e2e-1"]
         } else {
@@ -479,8 +451,6 @@ const PIN: &str = "0.9.149";
 
 fn host_tools(os: &'static str) -> Step {
     Step {
-        shell: vec!["conformance/ci/host/host-tools.sh"],
-        shell_env: vec![],
         rust: vec!["host-tools"],
         env: vec![("RUNNER_OS", os.to_string()), ("PADDOCK_CI_SLOT", "s1".into())],
         cwd: None,
@@ -530,8 +500,6 @@ fn host_tools_keeps_the_pinned_program_and_checks_the_version_on_every_runner() 
 
 fn sccache_stats(port: Option<&'static str>) -> Step {
     Step {
-        shell: vec!["conformance/ci/host/sccache-stats.sh"],
-        shell_env: vec![],
         rust: vec!["sccache-stats"],
         env: port.map(|p| vec![("SCCACHE_SERVER_PORT", p.to_string())]).unwrap_or_default(),
         cwd: None,
@@ -565,8 +533,6 @@ fn build_folder(os: &'static str, name: &'static str, slot: &'static str) -> Ste
         env.push(("PADDOCK_CI_SLOT", slot.to_string()));
     }
     Step {
-        shell: vec!["conformance/ci/build-folder.sh", "<ROOT>/ws", name],
-        shell_env: vec![],
         rust: vec!["build-folder", "<ROOT>/ws", name],
         env,
         cwd: None,
@@ -611,8 +577,6 @@ fn build_folder_writes_the_kept_folder_to_the_included_ci_toml_and_target_in_a_c
 
 fn prune_folder(dir: &'static str, cap: &'static str) -> Step {
     Step {
-        shell: vec!["tools/prune-build-folders.sh", dir, cap],
-        shell_env: vec![],
         rust: vec!["prune-folder", dir, cap],
         env: vec![("PADDOCK_PRUNE_UNIT", "kb".into())],
         cwd: None,
@@ -696,21 +660,16 @@ fn prune_folder_with_an_unreadable_subfolder_keeps_a_folder_under_its_cap() {
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
     };
-    let (a, b) = (fixture(), fixture());
+    let a = fixture();
     setup(&a);
-    setup(&b);
     if std::fs::read_dir(a.p("ci/build/locked")).is_ok() {
         unlock(&a);
-        unlock(&b);
         return skip_note("running as root, which reads a 000 folder: the unreadable case cannot be made here (run it as another user)");
     }
     let step = prune_folder("<ROOT>/ci/build", "100000");
-    let shell = run_one(&a, &step, false);
-    let rust = run_one(&b, &step, true);
+    let rust = run_one(&a, &step);
     unlock(&a);
-    unlock(&b);
-    assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
-    crate::parity_golden::case("host_steps", &format!("{:#?}", rust));
+    crate::parity_golden::case("host_steps", &format!("{rust:#?}"));
     assert_eq!(rust.stdout, "", "12 KB is under a cap of 100000 KB: nothing is removed");
 }
 
@@ -719,10 +678,8 @@ fn skip_note(why: &str) {
 }
 
 fn prune_ci(dir: &'static str, slot: &'static str, drop: bool) -> Step {
-    let mut shell = vec!["tools/prune-ci-build-folder.sh", dir, "1"];
     let mut rust = vec!["prune-build-folder", "--max-gb", "1"];
     if drop {
-        shell.push("--drop-bundles");
         rust.push("--drop-bundles");
     }
     let mut env = vec![
@@ -733,13 +690,7 @@ fn prune_ci(dir: &'static str, slot: &'static str, drop: bool) -> Step {
     if !slot.is_empty() {
         env.push(("PADDOCK_CI_SLOT", slot.to_string()));
     }
-    Step {
-        shell,
-        shell_env: vec![],
-        rust,
-        env,
-        cwd: None,
-    }
+    Step { rust, env, cwd: None }
 }
 
 #[test]
@@ -781,8 +732,6 @@ fn prune_build_folder_caps_only_this_jobs_kept_folder_and_leaves_everything_else
 // ---- host-cleanup ----
 
 fn cleanup(args: Vec<&'static str>, extra: Vec<(&'static str, String)>) -> Step {
-    let mut shell = vec!["tools/host-cleanup.sh"];
-    shell.extend(args.iter().copied());
     let mut rust = vec!["host-cleanup"];
     rust.extend(args.iter().copied());
     let mut env = vec![
@@ -793,8 +742,6 @@ fn cleanup(args: Vec<&'static str>, extra: Vec<(&'static str, String)>) -> Step 
     ];
     env.extend(extra);
     Step {
-        shell,
-        shell_env: vec![],
         rust,
         env,
         cwd: Some("work"),
@@ -1078,12 +1025,6 @@ fn kept_step(os: &'static str, profile: &'static str, extra: Vec<(&'static str, 
     ];
     env.extend(extra);
     Step {
-        shell: vec!["conformance/ci/kept-clone.sh"],
-        shell_env: vec![
-            ("NAME", "decryp7/paddock-crate".into()),
-            ("PROFILE", profile.into()),
-            ("KEPT_CLONE_PROFILES", "<ROOT>/profiles.txt".into()),
-        ],
         rust: vec![
             "kept-clone",
             "--name",
@@ -1140,56 +1081,39 @@ fn kept_facts(fx: &Fx) -> Vec<String> {
     ]
 }
 
-fn run_kept(fx: &Fx, step: &Step, rust: bool) -> Seen {
-    let mut seen = run_one(fx, step, rust);
+fn run_kept(fx: &Fx, step: &Step) -> Seen {
+    let mut seen = run_one(fx, step);
     // The kept clone's own `.git` (and the bootstrap's) hold packs and logs that differ in bytes; `kept_facts` compares what they mean.
     seen.tree.retain(|l| !l.contains("/.git/"));
     seen.tree.extend(kept_facts(fx));
     seen
 }
 
-/// The shell on fixture `a` and the Rust command on fixture `b` at the same time (ADR 0103, `paddock_testkit::both`): two folders and
-/// two processes that share nothing, so a parity check waits for the slower of the two, not for both one after the other (a
-/// kept-clone test runs up to 24 jobs; one after the other they reached nextest's 60 s bound on the loaded CI Mac, runs 8054 and 8099).
-fn run_kept_pair(a: &Fx, b: &Fx, shell: &Step, rust: &Step) -> (Seen, Seen) {
-    paddock_testkit::both(|| run_kept(a, shell, false), || run_kept(b, rust, true))
+/// A kept fixture: the fixture's folders plus the slot's bootstrap and a local origin that allows partial clones.
+fn kept_fixture_one() -> Fx {
+    let fx = fixture();
+    kept_fixture(&fx);
+    fx
 }
 
-/// Two kept fixtures, made at the same time (each is a handful of git commands; see [`run_kept_pair`]).
-fn kept_fixtures() -> (Fx, Fx) {
-    let make = || {
-        let fx = fixture();
-        kept_fixture(&fx);
-        fx
-    };
-    paddock_testkit::both(make, make)
-}
-
-/// Both implementations on a fresh kept fixture each: a first job, then `between` (what a later job finds), then a second job.
-/// Every job's result must agree; returns the Rust command's second result.
+/// A first job on a fresh kept fixture, then `between` (what a later job finds), then a second job. Each job's result is held to its
+/// golden; returns the second.
 fn kept_twice(first: &Step, between: &dyn Fn(&Fx), second: &Step) -> Seen {
-    let (a, b) = kept_fixtures();
-    let (s1, r1) = run_kept_pair(&a, &b, first, first);
-    assert_eq!(s1, r1, "the first job: the shell (left) and the Rust command (right) differ");
-    crate::parity_golden::case("host_steps", &format!("{:#?}", r1));
-    for fx in [&a, &b] {
-        between(fx);
-        fresh_job(fx);
-    }
-    let (s2, r2) = run_kept_pair(&a, &b, second, second);
-    assert_eq!(s2, r2, "the second job: the shell (left) and the Rust command (right) differ");
-    crate::parity_golden::case("host_steps", &format!("{:#?}", r2));
+    let fx = kept_fixture_one();
+    let r1 = run_kept(&fx, first);
+    crate::parity_golden::case("host_steps", &format!("{r1:#?}"));
+    between(&fx);
+    fresh_job(&fx);
+    let r2 = run_kept(&fx, second);
+    crate::parity_golden::case("host_steps", &format!("{r2:#?}"));
     r2
 }
 
 fn kept_once(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
-    let (a, b) = kept_fixtures();
-    for fx in [&a, &b] {
-        setup(fx);
-    }
-    let (s, r) = run_kept_pair(&a, &b, step, step);
-    assert_eq!(s, r, "the shell (left) and the Rust command (right) differ");
-    crate::parity_golden::case("host_steps", &format!("{:#?}", r));
+    let fx = kept_fixture_one();
+    setup(&fx);
+    let r = run_kept(&fx, step);
+    crate::parity_golden::case("host_steps", &format!("{r:#?}"));
     r
 }
 
@@ -1331,19 +1255,15 @@ fn kept_clone_makes_the_clone_again_when_it_is_stale_locked() {
 
 #[test]
 fn kept_clone_makes_the_clone_again_on_a_tag_run() {
-    // The tag run never reuses a clone shared with branch jobs: the shell has FRESH=true, the Rust command --fresh.
-    let (a, b) = kept_fixtures();
+    // The tag run never reuses a clone shared with branch jobs: the command takes --fresh.
+    let fx = kept_fixture_one();
     let first = kept_step("macOS", "lean", vec![]);
-    let _ = run_kept_pair(&a, &b, &first, &first);
-    fresh_job(&a);
-    fresh_job(&b);
-    let mut shell_fresh = kept_step("macOS", "lean", vec![]);
-    shell_fresh.shell_env.push(("FRESH", "true".into()));
-    let mut rust_fresh = kept_step("macOS", "lean", vec![]);
-    rust_fresh.rust.push("--fresh");
-    let (s, r) = run_kept_pair(&a, &b, &shell_fresh, &rust_fresh);
-    assert_eq!(s, r, "FRESH: the shell (left) and the Rust command (right) differ");
-    crate::parity_golden::case("host_steps", &format!("{:#?}", r));
+    let _ = run_kept(&fx, &first);
+    fresh_job(&fx);
+    let mut fresh = kept_step("macOS", "lean", vec![]);
+    fresh.rust.push("--fresh");
+    let r = run_kept(&fx, &fresh);
+    crate::parity_golden::case("host_steps", &format!("{r:#?}"));
     assert!(
         r.stdout.contains("(created, profile lean") && !r.stdout.contains("kept-clone: clean"),
         "{}",
@@ -1646,76 +1566,6 @@ fn kept_fixture_repos_start_no_background_git_maintenance() {
     }
 }
 
-/// `bounded.sh` with a fake clock: `SECONDS` is a plain variable that the fake `sleep` (the poll's wait) moves one second per call,
-/// `pgrep` names a fixed process tree (100 -> 101 -> 102) and `kill` records whom it ends. Prints what the script under test did.
-fn bounded_sh(body: &str) -> String {
-    let script = format!(
-        "unset SECONDS; SECONDS=0\nsleep() {{ SECONDS=$((SECONDS + 1)); }}\n. '{}'\n{body}",
-        repo().join("conformance/ci/bounded.sh").display()
-    );
-    let fx = fixture();
-    fx.script("bin/pgrep", "case \"$2\" in 100) echo 101;; 101) echo 102;; esac");
-    let out = TestCommand::new("bash")
-        .args(["-c", &script])
-        .env("PATH", format!("{}:/usr/bin:/bin", fx.p("bin").display()))
-        .env("SCRATCH", fx.p("work"))
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    String::from_utf8_lossy(&out.stdout).trim().to_string()
-}
-
-#[test]
-fn bounded_sh_never_ends_a_phase_before_its_limit() {
-    // `SECONDS` counts whole seconds: a phase that starts at 0.9 s reads 1 s elapsed at 1.0 s. Ending it at `elapsed >= limit` ended
-    // phases of 0.2 to 1 s as "did not finish within 1 s" (measured: 9 of 20 phases of 0.5 s); `elapsed > limit` means more than
-    // `limit` seconds really passed.
-    let out = bounded_sh(
-        "tool=t limit=3 hint=h scratch=\"$SCRATCH\" BOUNDED_SOFT=1\nhang() { exec /bin/sleep 30; }\nbounded hang hang; echo \"rc=$? ticks=$SECONDS\"",
-    );
-    assert!(
-        out.ends_with("rc=124 ticks=4"),
-        "the phase must outlive its limit (3) by the clock's whole second: {out}"
-    );
-}
-
-#[test]
-fn bounded_sh_counts_the_limit_from_the_clock_mark() {
-    // The phase does work before its hang (real time, while the fake clock races ahead with every poll), then writes the clock mark
-    // and hangs. A stale mark from before the phase is removed when the phase starts. The limit (3) counts from the mark: the phase is ended only after the mark, 4 ticks after it was seen. Without the
-    // mark the limit would have ended the phase in its work, before the mark (the kept-clone parity failure under load).
-    let out = bounded_sh(
-        "tool=t limit=3 hint=h scratch=\"$SCRATCH\" BOUNDED_SOFT=1 clock_mark=\"$SCRATCH/mark\" clock_wait=100000000\n\
-         echo stale > \"$SCRATCH/mark\"\n\
-         hang() { /bin/sleep 0.5; echo hang > \"$SCRATCH/mark\"; exec /bin/sleep 30; }\n\
-         bounded hang hang; rc=$?; [ \"$(cat \"$SCRATCH/mark\" 2>/dev/null)\" = hang ] && m=after-mark || m=before-mark\n\
-         echo \"rc=$rc $m\"",
-    );
-    assert!(
-        out.ends_with("rc=124 after-mark"),
-        "the phase ends at its limit counted from the mark: {out}"
-    );
-    assert!(out.contains("'hang' did not finish within 3 s"), "{out}");
-    // A mark that never appears: the phase is bounded by clock_wait, and the line names that bound.
-    let out = bounded_sh(
-        "tool=t limit=3 hint=h scratch=\"$SCRATCH\" BOUNDED_SOFT=1 clock_mark=\"$SCRATCH/mark\" clock_wait=5\n\
-         hang() { exec /bin/sleep 30; }\nbounded hang hang; echo \"rc=$? ticks=$SECONDS\"",
-    );
-    assert!(
-        out.ends_with("rc=124 ticks=6"),
-        "without its mark the phase ends at clock_wait (5): {out}"
-    );
-    assert!(out.contains("'hang' did not finish within 5 s"), "{out}");
-}
-
-#[test]
-fn bounded_sh_ends_a_process_tree_parent_first() {
-    // Ending the children first let the phase's shell see its child killed and write bash's `Killed: 9` note into the phase's error
-    // output, which then stood in the warning's `Last output` (seen under load: 3 of 180 runs of the hung-phase test).
-    let out = bounded_sh("kill() { echo \"killed $2\"; }\nkill_tree 100");
-    assert_eq!(out, "killed 100\nkilled 101\nkilled 102", "a parent is ended before its children");
-}
-
 // ---- boot-volume ----
 
 /// What a Mac's `df`, `diskutil` and `getconf` answer, by folder: a path under `ext` is on the external volume `/Volumes/Ext Disk`, any
@@ -1763,13 +1613,9 @@ fn boot_machine(fx: &Fx, mac: &Mac) {
 }
 
 fn boot(args: &[&'static str], extra: Vec<(&'static str, String)>) -> Step {
-    let mut shell = vec!["conformance/ci/boot-volume.sh"];
-    shell.extend_from_slice(args);
     let mut rust = vec!["boot-volume"];
     rust.extend_from_slice(args);
     Step {
-        shell,
-        shell_env: vec![],
         rust,
         env: extra,
         cwd: None,
@@ -1854,8 +1700,6 @@ fn guardian_machine(fx: &Fx, proc_exit: i32) {
 
 fn guardian() -> Step {
     Step {
-        shell: vec!["conformance/ci/guardian-as-user.sh"],
-        shell_env: vec![],
         rust: vec!["guardian-as-user"],
         // The summary file is read as `github-path` so the comparison sees it.
         env: vec![
@@ -1866,20 +1710,11 @@ fn guardian() -> Step {
     }
 }
 
-/// bash before 4.4 (macOS ships 3.2) fails `"${as_user[@]}"` of an empty array under `set -u`: the script is for the Linux image (bash 5).
-fn bash_too_old_for_the_script() -> bool {
-    let out = TestCommand::new("bash")
-        .args(["-c", "echo $((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1]))"])
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().unwrap_or(0) < 404
-}
-
 /// The Rust command alone on a fixture (the checks of its own output).
 fn guardian_rust(setup: &dyn Fn(&Fx)) -> Seen {
     let fx = fixture();
     setup(&fx);
-    run_one(&fx, &guardian(), true)
+    run_one(&fx, &guardian())
 }
 
 fn guardian_broken_build(fx: &Fx) {
@@ -1887,21 +1722,10 @@ fn guardian_broken_build(fx: &Fx) {
     fx.shim("cargo", "echo 'error[E0425]: nothing here' >&2; exit 101");
 }
 
-/// The script against the command on the same three fixtures. On a bash older than 4.4 the shell side cannot run, so the case is not
-/// measured: it returns early with the reason printed (an env-gated test in the gate register, like the repo's other environment-gated
-/// tests) unless `PADDOCK_REQUIRE_SHELL_PARITY` is set, which turns "not measured" into a failure (a Linux leg sets it).
+/// The command on the three machines of the retired script's parity test (a clean run, a run with three failing tests, a build that
+/// fails), each held to its golden (`guardian_as_user_three_machines.txt`, written while the script, under bash 4.4 or newer, agreed).
 #[test]
-fn guardian_as_user_matches_the_shell() {
-    if bash_too_old_for_the_script() {
-        assert!(
-            std::env::var_os("PADDOCK_REQUIRE_SHELL_PARITY").is_none(),
-            "NOT MEASURED: bash is older than 4.4 and PADDOCK_REQUIRE_SHELL_PARITY demands the shell side"
-        );
-        eprintln!(
-            "NOT MEASURED: guardian-as-user.sh parity (bash < 4.4: empty-array expansion under set -u); set PADDOCK_REQUIRE_SHELL_PARITY=1 to fail instead"
-        );
-        return;
-    }
+fn guardian_as_user_three_machines() {
     same(&|fx| guardian_machine(fx, 0), &guardian());
     same(&|fx| guardian_machine(fx, 3), &guardian());
     same(&guardian_broken_build, &guardian());

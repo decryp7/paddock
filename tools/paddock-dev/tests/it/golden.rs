@@ -855,7 +855,7 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
         ".gitea/workflows/app-fuzz.yml",
         "conformance/ci/install-test-browser.mjs",
         "conformance/ci/runtime-catalogue.mjs",
-        "conformance/ci/build-folder.sh",
+        "conformance/ci/tag-node-caches.sh",
     ] {
         edits.push((rel.to_string(), None));
     }

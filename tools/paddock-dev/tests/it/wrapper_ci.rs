@@ -49,7 +49,9 @@ chmod +x "$CARGO_TARGET_DIR/release/paddock-dev""#,
             .env("HOME", self.path("home"))
             .env("CARGO_HOME", self.f.cargo_home.path())
             .env("RUSTUP_HOME", self.f.cargo_home.path().join("rustup"))
-            .env("RUSTC", &self.rustc);
+            .env("RUSTC", &self.rustc)
+            // Not the machine's own kept mount (the CI image has /sccache): a host runner has none.
+            .env("PADDOCK_CI_MOUNT", self.path("no-mount"));
         cmd.envs(env.iter().map(|(k, v)| (*k, v.as_str())));
         let out = cmd.output().unwrap();
         (
@@ -83,7 +85,7 @@ fn a_host_runner_job_keeps_the_tool_and_its_build_folder_in_the_ci_homes_tools_f
     let r = Runner::new();
     let ci = r.path("ci");
     std::fs::create_dir_all(&ci).unwrap();
-    let ci_real = std::fs::canonicalize(&ci).unwrap();
+    let ci_real = paddock_env::winpath::real(&ci).unwrap();
     let (code, out, err) = r.run(&["hello"], &host_job(&ci));
     assert_eq!(code, 0, "{err}");
     // No read token: the tool was built from source and is kept in its own folder, in the CI home, not in the runner's home.
@@ -92,10 +94,19 @@ fn a_host_runner_job_keeps_the_tool_and_its_build_folder_in_the_ci_homes_tools_f
         "{err}\n{:?}",
         std::fs::read_dir(ci_real.join("tools")).map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>())
     );
-    assert!(ci_real.join("tools/paddock-dev-target").is_dir(), "the build folder is the CI home's too");
+    assert!(
+        ci_real.join("tools/paddock-dev-target").is_dir(),
+        "the build folder is the CI home's too"
+    );
     assert!(!r.path("home/.paddock-dev").exists(), "nothing in the runner's own home");
-    assert!(out.contains(&format!("home={}", ci_real.join("tools/paddock-dev").display())), "the tool sees its home: {out}");
-    assert!(!err.contains("could not download"), "a job with no token never tries a download: {err}");
+    assert!(
+        out.contains(&format!("home={}", ci_real.join("tools/paddock-dev").display())),
+        "the tool sees its home: {out}"
+    );
+    assert!(
+        !err.contains("could not download"),
+        "a job with no token never tries a download: {err}"
+    );
 }
 
 #[test]
@@ -121,7 +132,10 @@ fn a_linux_container_job_and_a_local_run_do_not_use_the_ci_home() {
     linux[1] = ("RUNNER_OS", "Linux".into());
     let (code, _, err) = r.run(&["hello"], &linux);
     assert_eq!(code, 0, "{err}");
-    let (code, _, err) = r.run(&["hello"], &[("RUNNER_OS", "macOS".into()), ("PADDOCK_CI_HOME", ci.display().to_string())]);
+    let (code, _, err) = r.run(
+        &["hello"],
+        &[("RUNNER_OS", "macOS".into()), ("PADDOCK_CI_HOME", ci.display().to_string())],
+    );
     assert_eq!(code, 0, "{err}");
     assert!(!ci.join("tools").exists(), "neither used the CI home");
 }
@@ -132,7 +146,10 @@ fn a_ci_home_that_is_relative_or_not_mounted_stops_the_job_and_creates_nothing()
     let mut env = host_job(&r.path("unmounted"));
     let (code, out, err) = r.run(&["hello"], &env);
     assert_eq!((code, out.as_str()), (1, ""), "{err}");
-    assert!(err.contains("::error::PADDOCK_CI_HOME") && err.contains("does not exist: is its disk mounted"), "{err}");
+    assert!(
+        err.contains("::error::PADDOCK_CI_HOME") && err.contains("does not exist: is its disk mounted"),
+        "{err}"
+    );
     assert!(!r.path("unmounted").exists(), "the home is not made again on the internal disk");
     env[2] = ("PADDOCK_CI_HOME", "ci".into());
     let (code, _, err) = r.run(&["hello"], &env);
@@ -154,7 +171,7 @@ fn the_default_ci_home_is_made_on_first_use_and_a_link_to_a_relocated_one_is_res
     let (code, _, err) = r.run(&["hello"], &host_job(&r.path("link")));
     assert_eq!(code, 0, "{err}");
     assert!(
-        dir_has_tool(&std::fs::canonicalize(&disk).unwrap().join("tools/paddock-dev/bin-source")),
+        dir_has_tool(&paddock_env::winpath::real(&disk).unwrap().join("tools/paddock-dev/bin-source")),
         "the link is resolved: {err}"
     );
 }
@@ -166,10 +183,18 @@ fn the_tools_own_build_has_no_compiler_wrapper_and_a_core_limit_of_four_and_the_
     std::fs::create_dir_all(&ci).unwrap();
     let mut env = host_job(&ci);
     env.push(("RUSTC_WRAPPER", "sccache".into()));
+    env.push(("CARGO_BUILD_JOBS", String::new()));
     let (code, out, err) = r.run(&["hello"], &env);
     assert_eq!(code, 0, "{err}");
-    assert_eq!(r.cargo_saw().trim(), "wrapper= jobs=4", "the build: no job wrapper, the default limit");
-    assert!(out.contains("tool wrapper=sccache jobs= "), "the tool and what it starts keep the job's own: {out}");
+    assert_eq!(
+        r.cargo_saw().trim(),
+        "wrapper= jobs=4",
+        "the build: no job wrapper, the default limit"
+    );
+    assert!(
+        out.contains("tool wrapper=sccache jobs= "),
+        "the tool and what it starts keep the job's own: {out}"
+    );
     // The job's own CARGO_BUILD_JOBS is the limit once it has one, and a local run is never limited.
     let r2 = Runner::new();
     let ci2 = r2.path("ci");
@@ -179,7 +204,7 @@ fn the_tools_own_build_has_no_compiler_wrapper_and_a_core_limit_of_four_and_the_
     r2.run(&["hello"], &env);
     assert_eq!(r2.cargo_saw().trim(), "wrapper= jobs=7");
     let r3 = Runner::new();
-    r3.run(&["hello"], &[]);
+    r3.run(&["hello"], &[("CARGO_BUILD_JOBS", String::new())]);
     assert_eq!(r3.cargo_saw().trim(), "wrapper= jobs=");
 }
 
@@ -188,7 +213,10 @@ fn a_tool_the_job_pinned_runs_as_it_is_for_ci_commands_only() {
     let r = Runner::new();
     let pinned = r.path("pinned");
     write_script(&pinned, r#"if [ "$1" = "--version" ]; then echo 0; else echo "pinned ran $*"; fi"#);
-    let job = vec![("GITHUB_ACTIONS", "true".to_string()), ("PADDOCK_DEV", pinned.display().to_string())];
+    let job = vec![
+        ("GITHUB_ACTIONS", "true".to_string()),
+        ("PADDOCK_DEV", pinned.display().to_string()),
+    ];
     let (code, out, err) = r.run(&["ci", "isolation", "release"], &job);
     assert_eq!((code, out.trim()), (0, "pinned ran ci isolation release"), "{err}");
     assert!(r.cargo_saw().is_empty(), "no hash, no build");
