@@ -400,7 +400,9 @@ pub fn bootstrap(a: &BootstrapArgs) -> Result<Report, CliError> {
     let stream = |program: &str, args: &[&str], dir: PathBuf, ci: bool| -> Result<(), CliError> {
         eprintln!("run: {program} {}", args.join(" "));
         let mut cmd = paddock_proc::command(program);
-        cmd.args(args).current_dir(dir);
+        // The children's standard output goes to our standard error: `npm ci` prints "added N packages" and the like, and `--json` must
+        // leave standard output to the one report.
+        cmd.args(args).current_dir(dir).stdout(std::process::Stdio::from(std::io::stderr()));
         if ci {
             cmd.env("CI", "true");
         }
@@ -409,13 +411,16 @@ pub fn bootstrap(a: &BootstrapArgs) -> Result<Report, CliError> {
                 "::error::could not run `{program}`: {e}. Next step: install it and run again."
             ))
         })?;
-        match outcome {
-            paddock_proc::Outcome::Exited(s) if s.success() => Ok(()),
-            other => Err(CliError::failure(format!(
-                "::error::`{program} {}` failed ({other:?}). Next step: read its output above and run it again.",
-                args.join(" ")
-            ))),
-        }
+        let how = match outcome {
+            paddock_proc::Outcome::Exited(s) if s.success() => return Ok(()),
+            paddock_proc::Outcome::Exited(s) => crate::ci_tool::describe_status(s),
+            paddock_proc::Outcome::TimedOut => "timed out after 3 h".to_string(),
+            paddock_proc::Outcome::OutputCap => "stopped at the output cap".to_string(),
+        };
+        Err(CliError::failure(format!(
+            "::error::`{program} {}` failed: {how}. Next step: read its output above and run it again.",
+            args.join(" ")
+        )))
     };
     // The monorepo has one npm workspace at the root. Unsigned updater artefacts unless the signing key is in the environment.
     stream("npm", &["ci", "--no-audit", "--no-fund"], root.clone(), false)?;

@@ -40,6 +40,18 @@ pub(crate) fn run(program: &str, args: &[&str], env: &[(&str, Option<&str>)], ti
     })
 }
 
+/// Runs `program args` with its output going straight to ours as it comes (a long run a person watches), bounded by `timeout`, the whole
+/// tree ended at the limit. `Ok(true)` when it exited 0.
+pub(crate) fn run_streamed(program: &str, args: &[&str], timeout: Duration) -> Result<bool, String> {
+    let mut cmd = command(program);
+    cmd.args(args);
+    match paddock_proc::run_waited(cmd, timeout, paddock_proc::Sink::Inherit).map_err(|e| format!("could not run `{program}`: {e}"))? {
+        paddock_proc::Outcome::Exited(s) => Ok(s.success()),
+        paddock_proc::Outcome::TimedOut => Err(format!("`{program}` timed out after {} s and was ended", timeout.as_secs())),
+        paddock_proc::Outcome::OutputCap => Err(format!("`{program}` was stopped at the output cap")),
+    }
+}
+
 const USAGE: &str = "usage: cargo xtask <task>\n\ntasks:\n  linux-units [machine]                      run the benchmark unit tests on a Linux machine with a systemd user manager (default paddock-gate-arm)\n  bench-smoke <folder>                       check the benchmark runners' mechanics (folder holding dyno-bench and dyno-bench-gpu)\n  verify-tool-pin <file> <file.asc> [key]    check a downloaded tool's OpenPGP signature and print the pack lines\n  help                                       show this message";
 
 fn main() -> ExitCode {

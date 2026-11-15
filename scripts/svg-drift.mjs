@@ -168,23 +168,57 @@ const err = (file, msg) => console.log(`::error${file ? ` file=${file}` : ''}::$
 const RUN_TIMEOUT_MS = 600_000;
 
 /**
+ * The supervisor of one draw.io run, started by `run` as `node -e`: it starts the command in its OWN PROCESS GROUP, collects its output
+ * and, at the limit (or when the command ends), kills the whole group, so an Xvfb or an Electron helper that `xvfb-run` or draw.io
+ * left behind dies with it. It prints one JSON line when the group is gone. Windows has no process groups: there it ends the child.
+ */
+const SUPERVISOR = `
+const { spawn } = require('node:child_process');
+const [limit, ...cmd] = process.argv.slice(1);
+const win = process.platform === 'win32';
+let out = '', err = '', timedOut = false, spawnError = null, done = false;
+const c = spawn(cmd[0], cmd.slice(1), { detached: !win, stdio: ['ignore', 'pipe', 'pipe'] });
+const killGroup = () => { try { win ? c.kill('SIGKILL') : process.kill(-c.pid, 'SIGKILL'); } catch {} };
+c.stdout.on('data', (d) => { out += d; });
+c.stderr.on('data', (d) => { err += d; });
+c.on('error', (e) => { spawnError = { code: e.code, message: e.message }; finish(null, null); });
+const timer = setTimeout(() => { timedOut = true; killGroup(); setTimeout(() => finish(null, 'SIGKILL'), 5000); }, Number(limit));
+function finish(status, signal) {
+  if (done) return;
+  done = true;
+  clearTimeout(timer);
+  killGroup();
+  process.stdout.write(JSON.stringify({ status, signal, stdout: out, stderr: err, timedOut, error: spawnError }));
+}
+c.on('close', (status, signal) => finish(status, signal));
+`;
+
+/**
  * Run draw.io headless; `viaXvfb` when there is no display. ER-14: draw.io (Electron) never opens the user's own profile (its
- * keychain and windows): every run gets a private `--user-data-dir` in a fresh folder, removed afterwards, and no run is unbounded.
- * The same recipe as `./dev diagrams export` (tools/paddock-dev/src/diagrams.rs; docs/known-copies.toml).
+ * keychain and windows): every run gets a private `--user-data-dir` in a fresh folder, no run is unbounded, and at the limit the
+ * WHOLE process group is killed (under xvfb-run the Xvfb and draw.io survive a plain child kill). The profile is removed only
+ * after the group is gone. The same recipe as `./dev diagrams export` (tools/paddock-dev/src/diagrams.rs; docs/known-copies.toml).
  */
 function run(drawio, args, viaXvfb) {
   const profile = mkdtempSync(join(process.env.SVG_DRIFT_TMP || tmpdir(), 'drawio-profile-'));
   const all = [...args, `--user-data-dir=${profile}`];
   const cmd = viaXvfb ? ['xvfb-run', '-a', drawio, ...all] : [drawio, ...all];
+  const limit = Number(process.env.SVG_DRIFT_TIMEOUT_MS) || RUN_TIMEOUT_MS;
   const started = Date.now();
   try {
-    const r = spawnSync(cmd[0], cmd.slice(1), {
+    const r = spawnSync(process.execPath, ['-e', SUPERVISOR, String(limit), ...cmd], {
       encoding: 'utf8',
       maxBuffer: 1 << 28,
-      timeout: Number(process.env.SVG_DRIFT_TIMEOUT_MS) || RUN_TIMEOUT_MS,
+      timeout: limit + 30_000,
       killSignal: 'SIGKILL',
     });
-    return { ...r, ms: Date.now() - started, cmd: cmd.join(' '), timedOut: r.error?.code === 'ETIMEDOUT' };
+    let j;
+    try {
+      j = JSON.parse(r.stdout);
+    } catch {
+      j = { status: null, stdout: '', stderr: r.stderr ?? '', timedOut: true, error: { code: 'ETIMEDOUT', message: 'the supervisor did not answer' } };
+    }
+    return { status: j.status, signal: j.signal, stdout: j.stdout, stderr: j.stderr, error: j.error, ms: Date.now() - started, cmd: cmd.join(' '), timedOut: j.timedOut };
   } finally {
     rmSync(profile, { recursive: true, force: true });
   }

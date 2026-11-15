@@ -886,7 +886,7 @@ status = "built"
   symbols = ["text:EXPORT_ARGS"]
   owner = "paddock"
   delete_by = "v0.5.0"
-  note = "The drift check re-exports with the same draw.io flags as `./dev diagrams export` (SVG_ARGS in tools/paddock-dev/src/diagrams.rs) and the same ER-14 recipe (a private --user-data-dir per run, removed afterwards; a bounded run, killed at the limit); the five shell copies of the export script are gone (shell-to-Rust WP-7). The drift check joins the Rust command when scripts/svg-drift.mjs is ported (ci-in-rust.md WP-12)."
+  note = "The drift check re-exports with the same draw.io flags as `./dev diagrams export` (SVG_ARGS in tools/paddock-dev/src/diagrams.rs) and the same ER-14 recipe (a private --user-data-dir per run, removed only after the run's process group is gone; a bounded run, the whole group killed at the limit by a small node supervisor, because under xvfb-run a plain child kill leaves Xvfb and draw.io running); the five shell copies of the export script are gone (shell-to-Rust WP-7). The drift check joins the Rust command when scripts/svg-drift.mjs is ported (ci-in-rust.md WP-12)."
 
 [[mechanism]]
 id = "drawio-install"

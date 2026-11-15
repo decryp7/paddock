@@ -370,11 +370,15 @@ fn a_build_inherits_the_environment_and_json_output_stays_one_object() {
     let root = repo(d.path(), r#"{"name":"Demo"}"#);
     std::fs::create_dir_all(root.join("apps/demo/app")).unwrap();
     mac_machine(&bin, "14.2");
-    shim(&bin, "npm", r#"echo "npm sees HTTPS_PROXY=$HTTPS_PROXY" >> "${0%/*}/env.log""#);
+    shim(
+        &bin,
+        "npm",
+        r#"echo "added 3 packages in 1s"; echo "npm sees HTTPS_PROXY=$HTTPS_PROXY" >> "${0%/*}/env.log""#,
+    );
     shim(
         &bin,
         "npx",
-        r#"echo "npx sees HTTPS_PROXY=$HTTPS_PROXY CI=$CI" >> "${0%/*}/env.log""#,
+        r#"echo "Finished release bundle"; echo "npx sees HTTPS_PROXY=$HTTPS_PROXY CI=$CI" >> "${0%/*}/env.log""#,
     );
     let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
     cmd.env("PATH", &bin)
@@ -396,10 +400,30 @@ fn a_build_inherits_the_environment_and_json_output_stays_one_object() {
     let v: serde_json::Value =
         serde_json::from_str(stdout.trim()).unwrap_or_else(|e| panic!("stdout is not one JSON object ({e}): {stdout}"));
     assert_eq!(v["ok"], true);
+    assert!(
+        String::from_utf8_lossy(&o.stderr).contains("added 3 packages in 1s"),
+        "the children's output is on standard error"
+    );
     let seen = std::fs::read_to_string(bin.join("env.log")).unwrap();
     assert!(
         seen.contains("npm sees HTTPS_PROXY=http://proxy.invalid:3128")
             && seen.contains("npx sees HTTPS_PROXY=http://proxy.invalid:3128 CI=true"),
         "{seen}"
     );
+}
+
+/// A failing build step names its exit code, not a Rust debug string.
+#[test]
+fn a_failing_build_step_names_its_exit_code() {
+    let d = tempfile::tempdir().unwrap();
+    let (bin, home) = (d.path().join("bin"), d.path().join("home"));
+    std::fs::create_dir_all(&bin).unwrap();
+    let root = repo(d.path(), r#"{"name":"Demo"}"#);
+    mac_machine(&bin, "14.2");
+    shim(&bin, "npm", "exit 7");
+    shim(&bin, "npx", "exit 0");
+    let (code, text) = dev(&root, &bin, &home, &["app", "bootstrap", "demo", "--os", "macos"]);
+    assert_eq!(code, 1, "{text}");
+    assert!(text.contains("`npm ci --no-audit --no-fund` failed: exit 7."), "{text}");
+    assert!(!text.contains("Exited("), "{text}");
 }

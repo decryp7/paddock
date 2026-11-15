@@ -53,24 +53,41 @@ pub fn locked_command(repo: &Path, exe: &Path, machine: &str) -> Vec<String> {
     ]
 }
 
+/// The command that asks `scripts/vm-lock-run.sh --check` (vm-lock.sh's `vm_lock_inherited`) whether this process's ancestor holds the lock.
+pub fn held_check_command(repo: &Path) -> Vec<String> {
+    vec![
+        "bash".to_string(),
+        repo.join("scripts/vm-lock-run.sh").to_string_lossy().into_owned(),
+        "--check".to_string(),
+    ]
+}
+
 /// `cargo xtask linux-units [machine]`.
 pub fn run_task(args: &[String]) -> Result<(), String> {
     let machine = args.first().map_or(DEFAULT_MACHINE, String::as_str);
     if !machine_ok(machine) || args.len() > 1 {
         return Err("usage: cargo xtask linux-units [machine]  (a machine name: letters, digits, - _ .)".to_string());
     }
-    if std::env::var_os("PADDOCK_VM_LOCK_HELD").is_none_or(|v| v.is_empty()) {
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    // Is the lock held by an ancestor? Asked of vm-lock.sh itself (`vm_lock_inherited`: the pid, its start time, the owner folder and
+    // its who file all have to agree), never guessed from a variable that anyone can set.
+    let check = held_check_command(&repo);
+    let held = crate::run(
+        "bash",
+        &check[1..].iter().map(String::as_str).collect::<Vec<_>>(),
+        &[],
+        Duration::from_secs(60),
+    )
+    .is_ok_and(|r| r.success);
+    if !held {
         let exe = std::env::current_exe().map_err(|e| format!("cannot find this program: {e}"))?;
         let cmd = locked_command(&repo, &exe, machine);
         let args: Vec<&str> = cmd[1..].iter().map(String::as_str).collect();
-        let ran = crate::run("bash", &args, &[], RUN_LIMIT + Duration::from_secs(3600))?;
-        print!("{}", ran.stdout);
-        eprint!("{}", ran.stderr);
-        return if ran.success {
+        // The re-run's output comes as it happens: the build and the tests take minutes.
+        return if crate::run_streamed("bash", &args, RUN_LIMIT + Duration::from_secs(3600))? {
             Ok(())
         } else {
-            Err("::error::linux-units did not pass (or the test machines lock is busy: the output above names the holder).".to_string())
+            Err("::error::linux-units did not pass, or the test machines lock is busy (the output above names the holder). Next step: read it; a busy lock frees when its holder ends.".to_string())
         };
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -82,10 +99,8 @@ pub fn run_task(args: &[String]) -> Result<(), String> {
     let script = guest_script(machine, &root, &target).replace(&sh_quote(&target), &format!("\"{target}\""));
     eprintln!("linux-units: machine {machine}, checkout {root}");
     let _ = crate::run("orbctl", &["start", machine], &[], Duration::from_secs(120));
-    let ran = crate::run("orb", &["-m", machine, "bash", "-lc", &script], &[], RUN_LIMIT)?;
-    print!("{}", ran.stdout);
-    eprint!("{}", ran.stderr);
-    if ran.success {
+    let passed = crate::run_streamed("orb", &["-m", machine, "bash", "-lc", &script], RUN_LIMIT)?;
+    if passed {
         eprintln!("linux-units: passed on {machine}");
         Ok(())
     } else {
@@ -111,6 +126,14 @@ mod tests {
         assert_eq!(
             c.join(" "),
             "bash /r/scripts/vm-lock-run.sh dyno-linux-units -- /t/xtask linux-units m1"
+        );
+    }
+
+    #[test]
+    fn the_held_lock_is_asked_of_the_lock_script_not_guessed_from_a_variable() {
+        assert_eq!(
+            held_check_command(Path::new("/r")).join(" "),
+            "bash /r/scripts/vm-lock-run.sh --check"
         );
     }
 

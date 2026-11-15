@@ -20,6 +20,7 @@ const fs = require('node:fs'), path = require('node:path');
 const a = process.argv.slice(2);
 if (process.env.FAKE_ARGS_LOG) fs.appendFileSync(process.env.FAKE_ARGS_LOG, a.join(' ') + '\\n');
 if (a.includes('--version')) { console.log('[1:0:ERROR:dbus] noise'); console.log(process.env.FAKE_VERSION || '${PIN}'); process.exit(0); }
+if (process.env.FAKE_FORK) fs.writeFileSync(process.env.FAKE_FORK, String(require('node:child_process').spawn('sleep', ['300'], { stdio: 'ignore' }).pid));
 if (process.env.FAKE_HANG) setInterval(() => {}, 1000);
 const out = a[a.indexOf('--output') + 1];
 const src = a.filter((x) => !x.startsWith('--') && x !== 'false' && x !== 'svg' && x !== '16' && x !== out).pop();
@@ -132,6 +133,25 @@ describe('the check on a repository', () => {
     assert.equal(code, 1, out);
     assert.match(out, /timed out and was killed/);
     assert.ok(Date.now() - t0 < 30_000, 'the limit ended it');
+    assert.deepEqual(readdirSync(tmp).filter((n) => n.startsWith('drawio-profile-')), []);
+  });
+
+  // Under xvfb-run (the Linux CI path) draw.io is a grandchild: a plain kill of the child leaves it, and Xvfb, running.
+  test('at the limit the whole process group is killed, a grandchild included, before the profile goes', () => {
+    const r = repo('tree');
+    const tmp = join(scratch, 'tree-tmp');
+    mkdirSync(tmp);
+    const pidFile = join(scratch, 'grandchild.pid');
+    const { code, out } = check(r, { FAKE_HANG: '1', FAKE_FORK: pidFile, SVG_DRIFT_TMP: tmp, SVG_DRIFT_TIMEOUT_MS: '1500' });
+    assert.equal(code, 1, out);
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    assert.ok(pid > 1, 'the stand-in started a grandchild');
+    const alive = () => {
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    };
+    const wait = new Int32Array(new SharedArrayBuffer(4));
+    for (let i = 0; i < 100 && alive(); i++) Atomics.wait(wait, 0, 0, 50); // a condition wait, bounded: the kill may need a tick to be reaped
+    assert.equal(alive(), false, 'the grandchild is gone');
     assert.deepEqual(readdirSync(tmp).filter((n) => n.startsWith('drawio-profile-')), []);
   });
 
