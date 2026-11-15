@@ -511,11 +511,8 @@ fn many_commands_share_one_toolchain_link_folder_made_once_outside_their_own_fol
     let rustc = tc.join(if cfg!(windows) { "rustc.exe" } else { "rustc" });
     std::fs::write(&rustc, "").unwrap();
     let mut env = env_lock();
-    let mut dirs = vec![tc.clone()];
-    dirs.extend(std::env::split_paths(
-        &std::env::var_os("PATH").unwrap_or_default(),
-    ));
-    env.set("PATH", std::env::join_paths(dirs).unwrap());
+    // Only the stand-in toolchain: the commands are made and looked at, never started.
+    env.set("PATH", &tc);
     let before = paddock_testkit::process::toolchain_folders_made();
     let given = d.path().join("given");
     let mut cmds: Vec<TestCommand> = (0..5).map(|_| TestCommand::new("git")).collect();
