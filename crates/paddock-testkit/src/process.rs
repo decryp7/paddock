@@ -7,7 +7,8 @@
 //!
 //! - `HOME`, `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, the `XDG_*` folders, `TMPDIR`, `TEMP` and `TMP` point into a private
 //!   folder made for this command ([`TestCommand::private_dir`]), removed when the command drops;
-//! - `PATH` is curated: the folders of the toolchain the test run itself uses (`cargo`, `rustc`, `node`, `git`), then the
+//! - `PATH` is curated: the folder of the cargo that runs the test, the folders of the [`NAMED_TOOLS`] (the toolchain, the shells
+//!   and the shell tools the scripts call) as the test process finds them, on Windows Git for Windows' `usr/bin`, then the
 //!   system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`: `lsof` and `ps` are there), nothing else; [`TestCommand::path_first`] puts a test's own stand-in folder first, and `env("PATH", ..)`
 //!   replaces it whole;
 //! - the toolchain variables cargo needs (`RUSTUP_HOME`, `CARGO_HOME`, `RUSTUP_TOOLCHAIN`) and, on Windows, the few the OS
@@ -511,8 +512,74 @@ fn real_home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from)
 }
 
+/// The programs a test's children start by name, from Rust or from the scripts a test runs (`./dev`, the CI scripts, a gate's
+/// shell): the folder each one is in on the test process's `PATH` joins the curated `PATH`, and no other folder of it does. On
+/// Windows these are Git for Windows' `usr/bin` (the shell tools), the folder of `bash` the wrapper runs under and the rustup
+/// proxies' `.cargo/bin` (ci.yml run 8138: without them `./dev` failed with "grep: command not found"). Listed by name, so a
+/// folder of the machine's that holds none of them never reaches a child.
+pub const NAMED_TOOLS: &[&str] = &[
+    // the toolchain
+    "cargo",
+    "rustc",
+    "rustup",
+    "node",
+    "npm",
+    "npx",
+    "git",
+    // the shells and the tools `./dev`, the CI scripts and the gate scripts call
+    "sh",
+    "bash",
+    "env",
+    "grep",
+    "sed",
+    "awk",
+    "tr",
+    "touch",
+    "cat",
+    "cp",
+    "mv",
+    "rm",
+    "mkdir",
+    "ls",
+    "ln",
+    "sort",
+    "uniq",
+    "head",
+    "tail",
+    "wc",
+    "cut",
+    "find",
+    "xargs",
+    "date",
+    "uname",
+    "sleep",
+    "ps",
+    "kill",
+    "lsof",
+    "tar",
+    "gzip",
+    "diff",
+    "mktemp",
+    "basename",
+    "dirname",
+    "readlink",
+    "realpath",
+    "chmod",
+    "tee",
+    "od",
+    "shasum",
+    "sha256sum",
+    "du",
+    "df",
+    "id",
+    "stat",
+    "printf",
+    "test",
+];
+
 /// The curated `PATH`: `first`, then the folder of the cargo that runs this test (`CARGO`, set by cargo for tests, so also the
-/// folder of `rustc`), of `node` and of `git` found on this process's `PATH`, then the system folders.
+/// folder of `rustc`), the folders of the [`NAMED_TOOLS`] found on this process's `PATH` (and, on Windows, Git for Windows'
+/// `usr/bin` and `bin` above any of `git`, `sh` or `bash`), then the system folders.
 fn curated_path(first: &[PathBuf]) -> OsString {
     let mut dirs: Vec<PathBuf> = first.to_vec();
     if let Some(cargo) = std::env::var_os("CARGO").map(PathBuf::from)
@@ -521,29 +588,40 @@ fn curated_path(first: &[PathBuf]) -> OsString {
         dirs.push(d.to_path_buf());
     }
     let ambient = std::env::var_os("PATH");
-    for tool in ["node", "git"] {
-        let found = resolve(OsStr::new(tool), ambient.as_deref());
-        if let Some(d) = Path::new(&found)
+    let system = system_dirs();
+    for tool in NAMED_TOOLS {
+        let found = PathBuf::from(resolve(OsStr::new(tool), ambient.as_deref()));
+        // `resolve` returns the bare name when the tool is not on the PATH: no folder then.
+        if !found.is_absolute() {
+            continue;
+        }
+        #[cfg(windows)]
+        if ["git", "sh", "bash"].contains(tool) {
+            // Git for Windows keeps `sh`, `bash`, `grep` and the other tools its scripts need in `usr/bin`, beside `bin` and `cmd`
+            // (and `mingw64/bin`) that may be what the machine's PATH names: the install root is the nearest folder above with a
+            // `usr/bin`.
+            if let Some(root) = found
+                .ancestors()
+                .skip(1)
+                .take(4)
+                .find(|a| a.join("usr").join("bin").is_dir())
+            {
+                dirs.extend(
+                    ["usr/bin", "bin"]
+                        .map(|sub| root.join(sub))
+                        .into_iter()
+                        .filter(|d| d.is_dir()),
+                );
+            }
+        }
+        if let Some(d) = found
             .parent()
-            .filter(|d| !d.as_os_str().is_empty())
+            .filter(|d| !d.as_os_str().is_empty() && !system.iter().any(|s| s == d))
         {
             dirs.push(d.to_path_buf());
         }
     }
-    #[cfg(windows)]
-    if let Some(git_dir) = Path::new(&resolve(OsStr::new("git"), ambient.as_deref()))
-        .parent()
-        .and_then(Path::parent)
-    {
-        // Git for Windows keeps `sh`, `bash`, `ps`, `sed` and the other tools its scripts need in `usr/bin`, not beside `git.exe`.
-        for sub in ["usr/bin", "bin"] {
-            let d = git_dir.join(sub);
-            if d.is_dir() {
-                dirs.push(d);
-            }
-        }
-    }
-    dirs.extend(system_dirs());
+    dirs.extend(system);
     let mut seen = Vec::new();
     dirs.retain(|d| {
         let new = !seen.contains(d);

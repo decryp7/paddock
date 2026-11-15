@@ -43,8 +43,10 @@ Its own `env_clear` goes **back to the listed set**. It starts from an **empty e
   `TMPDIR`, `TEMP` and `TMP` point into a **private folder** made for the command and removed when it
   drops (`TestCommand::new_in` takes a folder the test owns). A slot tool that keeps its slots under `$HOME/.cache` then
   keeps them in the private folder, never in `~/.cache/heavy-slots`.
-- `PATH` is **curated**: the folder of the cargo that runs the test (`CARGO`, so also `rustc`), the folders of `node` and
-  `git` as the test process finds them, then (Windows) Git for Windows' `usr/bin` and `bin`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the Windows folder). The folder of `node` is added whole, so on a Homebrew Mac it exposes `/opt/homebrew/bin` (other Homebrew tools, not the slot tool); a narrower PATH would need a private folder of links to `node` and `git`, which Windows cannot make cheaply, so it is accepted and named here.
+- `PATH` is **curated**: the folder of the cargo that runs the test (`CARGO`, so also `rustc`), the folders of the
+  `NAMED_TOOLS` as the test process finds them (the toolchain with `rustup`'s proxies, `node`, `git`, the shells and the shell
+  tools `./dev` and the CI scripts call, each by name: ci.yml run 8138 failed 11 Windows tests when Git for Windows' `usr/bin`
+  was missing), then (Windows) Git for Windows' `usr/bin` and `bin` above any of `git`, `sh` or `bash`, then the system folders (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, or `System32` and the Windows folder). The folder of `node` is added whole, so on a Homebrew Mac it exposes `/opt/homebrew/bin` (other Homebrew tools, not the slot tool); a narrower PATH would need a private folder of links to `node` and `git`, which Windows cannot make cheaply, so it is accepted and named here.
   `path_first(dir)` puts a test's stand-in folder first; `.env("PATH", ..)` replaces it whole. A bare program name is
   resolved once, at construction, against the **test process's** `PATH`: `path_first` and `env("PATH", ..)` change only the
   child's own lookups, never which program starts (a test that starts a stand-in names it by its path).

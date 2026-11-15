@@ -126,6 +126,36 @@ fn the_curated_path_has_the_toolchain_and_the_system_but_not_the_machines_path()
     );
 }
 
+/// A tool the children's scripts need by name (`grep`, `tr`, `touch`; ci.yml run 8138: Git for Windows' `usr/bin` was not on the
+/// curated PATH, so `./dev` and the gate scripts failed with "command not found") brings its folder from the machine's PATH; a
+/// folder that holds no listed tool stays out.
+#[cfg(unix)]
+#[test]
+fn a_listed_tool_brings_its_machine_folder_and_an_unlisted_one_does_not() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let (tools, other) = (d.path().join("tools"), d.path().join("other"));
+    for (dir, name) in [(&tools, "grep"), (&other, "not-a-listed-tool")] {
+        std::fs::create_dir(dir).unwrap();
+        let f = dir.join(name);
+        std::fs::write(&f, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut env = env_lock();
+    env.set(
+        "PATH",
+        format!("{}:{}:/usr/bin:/bin", tools.display(), other.display()),
+    );
+    let seen = child_env(&mut TestCommand::new("/usr/bin/env"));
+    let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&seen["PATH"]).collect();
+    assert!(dirs.contains(&tools), "{dirs:?}");
+    assert!(!dirs.contains(&other), "{dirs:?}");
+    assert!(
+        dirs.ends_with(&["/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(std::path::PathBuf::from)),
+        "{dirs:?}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_bare_program_name_is_resolved_once_from_the_test_process() {
@@ -328,5 +358,21 @@ fn a_childs_git_stops_at_the_temp_root_and_still_finds_a_repository_below_it() {
         top.status.success(),
         "{}",
         String::from_utf8_lossy(&top.stderr)
+    );
+}
+
+/// The shell tools `./dev` and the gate scripts call are found by a child's shell on every OS (ci.yml run 8138: on Windows
+/// `grep`, `tr` and `touch` were "command not found" because Git for Windows' `usr/bin` was not on the curated PATH).
+#[test]
+fn a_childs_shell_finds_the_tools_the_scripts_call() {
+    let out = TestCommand::new("sh")
+        .args(["-c", "command -v grep && command -v tr && command -v touch && command -v sed && command -v git"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
     );
 }
