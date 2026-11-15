@@ -5,10 +5,11 @@
 // - a file named `*.sh`, `*.bash`, `*.zsh`, `*.ps1`, `*.psm1`, `*.py`, `*.cmd` or `*.bat`, or an extensionless file whose first line is a
 //   `#!` naming `sh`, `bash`, `zsh`, `python` or `pwsh` (also through `env`),
 // unless it is
-// - an exception: a path or pattern in `conformance/shell-exceptions.json` with its plan id (E1 to E7), a reason and an owner. A
+// - an exception: an exact path (a pattern still parses) in `conformance/shell-exceptions.json` with its plan id (E1 to E7), a reason and
+//   an owner. The list may only shrink: an exception the merge base's list lacks is a finding (it needs the user's approval). A
 //   pattern is a path where `**/` is any number of folders, `*` one name and a trailing `/` the folder and all below it; or
-// - in the baseline `conformance/shell-baseline.json`, which lists today's files with their line counts, one per line, sorted by path.
-//   A file with more lines than its entry has grown (a finding); fewer is fine. The baseline may only shrink: an entry whose file is gone
+// - in the baseline `conformance/baselines/C129-shell.json`, which lists today's files with their line counts, one per line, sorted by path.
+//   A file with more lines than its entry has grown (a finding); fewer is a warning to lower the entry. The baseline may only shrink: an entry whose file is gone
 //   is stale (a warning), and an entry the merge base's baseline lacks, or one with more lines than there, is a finding. Regenerate it
 //   with `node conformance/bin/paddock-shell-baseline.mjs --shrink` (removes stale entries and lowers counts, never adds or raises;
 //   `--init` writes it from scratch: first run, or a reset with the user's approval).
@@ -17,13 +18,17 @@
 // in `.gitea` (the number D7 of the plan is decided on).
 // Read: only files the tree lists; shebangs only of extensionless files (an extension says what a file is). A file that cannot be read is
 // not measured (an error at that file); an unreadable or malformed baseline or exception list makes the check broken (one finding).
+// Known gaps (a script that is not a file of these kinds is not seen): shell inside strings (`execSync('...')`, `Command::new("sh")`,
+// heredocs in workflows), and kinds not listed (`.fish`, `.ksh`, `.command`). Differences from plan §6: the lists are JSON in conformance/,
+// the CI host is the JavaScript one with a Rust twin, shebangs are read on extensionless files only, and the caller check reads `.gitea`
+// YAML, `paddock.ci.json` and `lefthook.yml` only.
 // ER-41: report-only (warnings) until its first green run on the real tree, recorded by run id in docs/gates.toml; then the findings
 // become errors and the mode gate. Recorded: not yet.
 // Rust host: tools/paddock-dev/src/check/c129.rs (same findings, line for line).
 import { error, unwaivable, warn } from '../finding.mjs';
 import { baselineGrowth } from '../util/baseline.mjs';
 
-export const BASELINE = 'conformance/shell-baseline.json';
+export const BASELINE = 'conformance/baselines/C129-shell.json';
 export const EXCEPTIONS = 'conformance/shell-exceptions.json';
 const REGENERATE = 'node conformance/bin/paddock-shell-baseline.mjs --shrink';
 const KINDS = /\.(?:sh|bash|zsh|ps1|psm1|py|cmd|bat)$/i;
@@ -198,6 +203,7 @@ export default {
     const known = new Map(baseline.map((e) => [e.path, e.lines]));
     for (const { file, lines } of shell) {
       if (!known.has(file)) out.push(warn('C129', 55, file, 1, `new shell file (${lines} lines): shell is being ported to Rust`, FIX_NEW));
+      else if (lines < known.get(file)) out.push(warn('C129', 55, BASELINE, 1, `${file} is under its baseline count (${lines} of ${known.get(file)} lines)`, `Lower the entry: \`${REGENERATE}\`.`));
       else if (lines > known.get(file)) out.push(warn('C129', 55, file, 1, `shell file grew from ${known.get(file)} to ${lines} lines: the baseline may only shrink`, `Port the change to Rust instead of growing the script. ${FIX_NEW}`));
     }
     const current = new Set(shell.map((s) => s.file));
@@ -218,6 +224,13 @@ export default {
         if (g.added.length > 0) {
           out.push(warn('C129', 55, BASELINE, 1, `the baseline grew: ${g.added.length} ${plural(g.added.length, 'entry is', 'entries are')} not in the baseline at the merge base ${g.base.slice(0, 9)}; it may only shrink`, 'Remove the entries and port the scripts. Growing the baseline needs the user\'s approval.'));
         }
+      }
+    }
+    if (exceptions.length > 0) {
+      const g = baselineGrowth({ root: ctx.root, path: EXCEPTIONS, current: exceptions, keyOf: (e) => `${e.path}\t${e.id}`, entriesOf: (v) => v.exceptions.map((e) => ({ path: e.path, id: e.id })) });
+      if (g.reason) out.push(warn('C129', 55, EXCEPTIONS, 1, `the exceptions' shrink-only rule is not enforced here: ${g.reason}`, 'Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.'));
+      else if (g.added.length > 0) {
+        out.push(warn('C129', 55, EXCEPTIONS, 1, `the exceptions grew: ${g.added.length} ${plural(g.added.length, 'entry is', 'entries are')} (${g.added.slice(0, 5).map((e) => `${e.path} ${e.id}`).join('; ')}) not in the list at the merge base ${g.base.slice(0, 9)}; an added or widened exception needs the user's approval`, 'Remove the entry and port the script, or get the user\'s approval for the exception and record it in the plan.'));
       }
     }
     const tracked = new Set(files);

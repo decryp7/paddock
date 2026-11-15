@@ -5,9 +5,9 @@
 //! Flagged, one finding per file at line 1: a file named `*.sh`, `*.bash`, `*.zsh`, `*.ps1`, `*.psm1`, `*.py`, `*.cmd` or `*.bat`, or an
 //! extensionless file whose first line is a `#!` naming `sh`, `bash`, `zsh`, `python` or `pwsh` (also through `env`), unless it is an
 //! exception (a path or pattern in `conformance/shell-exceptions.json` with its plan id E1 to E7, a reason and an owner) or is in the
-//! baseline `conformance/shell-baseline.json`: today's files with their line counts, one per line, sorted by path. A file with more lines
+//! baseline `conformance/baselines/C129-shell.json`: today's files with their line counts, one per line, sorted by path. A file with more lines
 //! than its entry has grown (a finding); fewer is fine. The baseline may only shrink: an entry whose file is gone is stale (a warning), and
-//! an entry the merge base's baseline lacks, or one with more lines than there, is a finding. `node conformance/bin/paddock-shell-baseline.mjs
+//! an entry the merge base's baseline lacks, or one with more lines than there, is a finding; a file under its count is a warning to lower the entry. The exceptions list may only shrink too: an exception the merge base's list lacks is a finding (it needs the user's approval). Known gaps: shell inside strings (`execSync`, `Command::new("sh")`, heredocs in workflows) and kinds not listed (`.fish`, `.ksh`, `.command`). Differences from plan §6: JSON lists in conformance/, the JavaScript host is the CI host with this twin, shebangs only on extensionless files, and the caller check reads `.gitea` YAML, `paddock.ci.json` and `lefthook.yml` only. `node conformance/bin/paddock-shell-baseline.mjs
 //! --shrink` regenerates it (removes stale entries and lowers counts, never adds or raises; `--init` writes it from scratch).
 //!
 //! Also reported, never failing the run: a `.sh` or `.ps1` path that `.gitea` workflows and actions, `paddock.ci.json` files and
@@ -30,7 +30,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::LazyLock;
 
 /// The baseline both hosts read.
-pub const BASELINE: &str = "conformance/shell-baseline.json";
+pub const BASELINE: &str = "conformance/baselines/C129-shell.json";
 /// The exceptions both hosts read.
 pub const EXCEPTIONS: &str = "conformance/shell-exceptions.json";
 const REGENERATE: &str = "node conformance/bin/paddock-shell-baseline.mjs --shrink";
@@ -143,6 +143,44 @@ pub fn parse_exceptions(text: &str) -> Result<Vec<Exception>, String> {
             })
         })
         .collect()
+}
+
+/// An exception as the growth check keys it: path and id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExcKey {
+    /// The path or pattern.
+    pub path: String,
+    /// E1 to E7.
+    pub id: String,
+}
+
+/// The `(path, id)` of every exception in a list's text, or why it cannot be read.
+pub fn exception_keys(text: &str) -> Result<Vec<ExcKey>, String> {
+    let v = parse_json(text, EXCEPTIONS)?;
+    let list = v["exceptions"]
+        .as_array()
+        .ok_or_else(|| format!("{EXCEPTIONS} has no `exceptions` array"))?;
+    Ok(list
+        .iter()
+        .map(|e| ExcKey {
+            path: e["path"].as_str().unwrap_or("").into(),
+            id: e["id"].as_str().unwrap_or("").into(),
+        })
+        .collect())
+}
+
+/// Whether the list at `base` holds the exception (for naming the added ones).
+fn known_at_base(root: &std::path::Path, base: &str, k: &ExcKey) -> bool {
+    let mut cmd = paddock_proc::command("git");
+    cmd.arg("-C").arg(root).args(["show", &format!("{base}:{EXCEPTIONS}")]);
+    let out = paddock_proc::run_bounded(
+        cmd,
+        paddock_proc::Limits::new(std::time::Duration::from_secs(60)).max_output(1 << 24),
+    );
+    out.ok()
+        .filter(|o| o.success())
+        .and_then(|o| exception_keys(&o.stdout_text()).ok())
+        .is_some_and(|list| list.contains(k))
 }
 
 /// The number of lines of `text` (a last line without a newline counts).
@@ -399,6 +437,14 @@ impl Check for C129 {
                     format!("shell file grew from {old} to {lines} lines: the baseline may only shrink"),
                     format!("Port the change to Rust instead of growing the script. {FIX_NEW}"),
                 )),
+                Some(old) if lines < old => out.push(Finding::warn(
+                    "C129",
+                    55,
+                    BASELINE,
+                    1,
+                    format!("{file} is under its baseline count ({lines} of {old} lines)"),
+                    format!("Lower the entry: `{REGENERATE}`."),
+                )),
                 Some(_) => {}
             }
         }
@@ -476,6 +522,49 @@ impl Check for C129 {
                         ));
                     }
                 }
+            }
+        }
+        if !exceptions.is_empty() {
+            let current: Vec<ExcKey> = exceptions
+                .iter()
+                .map(|e| ExcKey {
+                    path: e.path.clone(),
+                    id: e.id.clone(),
+                })
+                .collect();
+            let entries_of = |text: &str| exception_keys(text).ok();
+            let exact = |e: &ExcKey| format!("{}\t{}", e.path, e.id);
+            match growth(ctx.root(), &ctx.base_ref(), EXCEPTIONS, &current, &entries_of, &exact, None) {
+                Growth::Reason(reason) => out.push(Finding::warn(
+                    "C129",
+                    55,
+                    EXCEPTIONS,
+                    1,
+                    format!("the exceptions' shrink-only rule is not enforced here: {reason}"),
+                    "Fetch the target branch (`git fetch origin main`, full history), or set PADDOCK_BASE_REF to the ref to compare with.",
+                )),
+                Growth::Added { base, added, .. } if added > 0 => {
+                    let names: Vec<String> = current
+                        .iter()
+                        .filter(|k| !known_at_base(ctx.root(), &base, k))
+                        .take(5)
+                        .map(|k| format!("{} {}", k.path, k.id))
+                        .collect();
+                    out.push(Finding::warn(
+                        "C129",
+                        55,
+                        EXCEPTIONS,
+                        1,
+                        format!(
+                            "the exceptions grew: {added} {} ({}) not in the list at the merge base {}; an added or widened exception needs the user's approval",
+                            plural(added, "entry is", "entries are"),
+                            names.join("; "),
+                            &base[..base.len().min(9)]
+                        ),
+                        "Remove the entry and port the script, or get the user's approval for the exception and record it in the plan.",
+                    ));
+                }
+                Growth::Added { .. } => {}
             }
         }
         let tops: BTreeSet<&str> = files

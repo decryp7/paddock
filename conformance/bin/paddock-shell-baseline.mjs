@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // C129's baseline: the shell and Python files of the tree that no exception covers, each with its line count, one entry per line,
-// sorted by path (conformance/shell-baseline.json). Every work package of docs/plans/shell-to-rust.md removes its own lines.
+// sorted by path (conformance/baselines/C129-shell.json). Every work package of docs/plans/shell-to-rust.md removes its own lines.
 //   (no flag)  lists the files and counts, writes nothing.
 //   --shrink   rewrites the baseline with only the entries whose file is still shell, each lowered to its current line count (stale
 //              entries removed; nothing added, nothing raised).
@@ -8,12 +8,20 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { BASELINE, EXCEPTIONS, parseBaseline, parseExceptions, shellFiles } from '../src/checks/C129-no-new-shell.mjs';
-import { openTree } from '../src/util/fs.mjs';
+import { execFileSync } from 'node:child_process';
 
 const args = process.argv.slice(2);
 const root = resolve(args.includes('--root') ? args[args.indexOf('--root') + 1] : '.');
-const tree = openTree(root);
-const { shell, unread } = shellFiles(tree.files(), tree.read, parseExceptions(readFileSync(join(root, EXCEPTIONS), 'utf8')));
+// The file list is the repository's tracked files (`git ls-files`), the same list the check's CI host reads, never a walk of the folder.
+const tracked = execFileSync('git', ['-C', root, 'ls-files', '-z'], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\0').filter((f) => f && existsSync(join(root, f))).sort();
+const read = (p) => {
+  try {
+    return readFileSync(join(root, p), 'utf8');
+  } catch {
+    return null;
+  }
+};
+const { shell, unread } = shellFiles(tracked, read, parseExceptions(readFileSync(join(root, EXCEPTIONS), 'utf8')));
 if (unread.length) {
   console.error(`cannot read ${unread.length} file(s), for example ${unread[0]}: fix that first`);
   process.exit(2);

@@ -6,7 +6,7 @@ use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
 use std::path::Path;
 
-const BASELINE: &str = "conformance/shell-baseline.json";
+const BASELINE: &str = "conformance/baselines/C129-shell.json";
 const EXCEPTIONS: &str = "conformance/shell-exceptions.json";
 
 /// A new file of each kind, a baselined file that grew, one that shrank, an excepted path and pattern, a stale baseline entry and
@@ -108,11 +108,13 @@ fn c129_flags_new_and_grown_shell_and_names_stale_entries_as_warnings() {
             ("grew.sh", 1, "shell file grew from 2 to 3 lines"),
             ("new.PY", 1, "new shell file"),
             ("new.sh", 1, "new shell file"),
+            (BASELINE, 1, "shrank.sh is under its baseline count"),
             ("vm/sub/b.ps1", 1, "new shell file"),
             ("é/ü.bat", 1, "new shell file"),
             (BASELINE, 1, "stale baseline entry"),
             (EXCEPTIONS, 1, "stale exception"),
             (BASELINE, 1, "the baseline's shrink-only rule is not enforced here"),
+            (EXCEPTIONS, 1, "the exceptions' shrink-only rule is not enforced here"),
             (
                 ".gitea/workflows/x.yml",
                 4,
@@ -277,4 +279,59 @@ fn live_c129_tree_findings_equal_the_js_host() {
     let (got, want) = (shared_part(&r.json()), shared_part(&js));
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
+}
+
+// Plain `git` in a scratch repository, started and awaited here; nothing is killed by pid.
+#[allow(clippy::disallowed_methods)]
+fn git(dir: &Path, args: &[&str]) {
+    let out = std::process::Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// The exceptions only shrink: one the merge base's list lacks (a widening, or a changed id) is a finding that names it; a removed
+/// one is not.
+#[test]
+fn c129_an_added_or_widened_exception_is_a_finding_against_the_merge_base() {
+    let list = |rows: &[(&str, &str)]| {
+        let rows: Vec<String> = rows
+            .iter()
+            .map(|(p, i)| format!("{{\"path\":\"{p}\",\"id\":\"{i}\",\"reason\":\"it must start first\",\"owner\":\"plan\"}}"))
+            .collect();
+        format!("{{\"exceptions\":[{}]}}", rows.join(","))
+    };
+    let tree = tree_of(&[
+        (BASELINE, "{\"files\":[]}".to_string()),
+        (EXCEPTIONS, list(&[("dev", "E1"), ("scripts/b.sh", "E5")])),
+        ("dev", "#!/bin/sh\n".to_string()),
+        ("scripts/a.sh", "x\n".to_string()),
+        ("scripts/b.sh", "x\n".to_string()),
+    ]);
+    let d = tree.path();
+    git(d, &["init", "-q", "-b", "main"]);
+    git(d, &["add", "-A"]);
+    git(d, &["commit", "-q", "-m", "base"]);
+    git(d, &["checkout", "-q", "-b", "work"]);
+    std::fs::write(d.join(EXCEPTIONS), list(&[("scripts/", "E5"), ("dev", "E3")])).unwrap();
+    git(d, &["commit", "-q", "-am", "widen"]);
+    let o = RunOptions {
+        base_ref: Some("main".into()),
+        ..options(d, "fixture")
+    };
+    let r = run_checks(&o, &registry()).unwrap();
+    let grew: Vec<&str> = r
+        .findings
+        .iter()
+        .map(|f| f.message.as_str())
+        .filter(|m| m.contains("exceptions grew"))
+        .collect();
+    assert_eq!(grew.len(), 1, "{:?}", r.findings);
+    assert!(
+        grew[0].contains("2 entries are (scripts/ E5; dev E3)") && grew[0].contains("needs the user's approval"),
+        "{grew:?}"
+    );
 }

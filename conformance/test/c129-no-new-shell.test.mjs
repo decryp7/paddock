@@ -10,7 +10,7 @@ import { findingsOf as run, makeApp } from './helpers.mjs';
 /** The findings of C129 over a fixture, without the note that a fixture has no merge base to compare the baseline with. */
 const findingsOf = async (id, root, opts) => (await run(id, root, opts)).filter((f) => !/shrink-only rule is not enforced here/.test(f.message));
 
-const BASELINE = 'conformance/shell-baseline.json';
+const BASELINE = 'conformance/baselines/C129-shell.json';
 const EXCEPTIONS = 'conformance/shell-exceptions.json';
 const TOOL = fileURLToPath(new URL('../bin/paddock-shell-baseline.mjs', import.meta.url));
 const baseline = (files = []) => JSON.stringify({ files: files.map(([path, lines]) => ({ path, lines })) });
@@ -42,7 +42,8 @@ test('C129 good: a node script, a text file, an extensionless file without a she
 test('C129 the baseline: a listed file passes, a grown one is a finding, a shrunk one is fine', async () => {
   const files = { 'a.sh': 'x\n'.repeat(5), 'b.sh': 'x\n'.repeat(7), 'c.sh': 'x\n'.repeat(2) };
   const found = await findingsOf('C129', tree(files, { base: [['a.sh', 5], ['b.sh', 6], ['c.sh', 9]] }));
-  assert.deepEqual(where(found), [['b.sh', 'shell file grew from 6 to 7 lines']]);
+  assert.deepEqual(where(found), [['b.sh', 'shell file grew from 6 to 7 lines'], [BASELINE, 'c.sh is under its baseline count']]);
+  assert.match(found[1].fix, /--shrink/);
 });
 
 test('C129 exceptions: a path and a pattern are skipped, an exception that names no file is stale', async () => {
@@ -138,8 +139,31 @@ test('C129 the baseline against its merge base: an added entry and a raised coun
   }
 });
 
+test('C129 the exceptions only shrink: an added or widened exception is a finding, a removed one is not', async () => {
+  const files = { dev: '#!/bin/sh\n', 'scripts/a.sh': 'x\n', 'scripts/b.sh': 'x\n' };
+  const root = tree(files, { exc: [['dev'], ['scripts/b.sh', 'E5']] });
+  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-q', '-m', 'base');
+  git(root, 'checkout', '-q', '-b', 'work');
+  // scripts/b.sh is dropped; scripts/ is added (a widening); dev changes its id
+  writeFileSync(join(root, EXCEPTIONS), exceptions([['scripts/', 'E5'], ['dev', 'E3']]));
+  git(root, 'commit', '-q', '-am', 'widen');
+  process.env.PADDOCK_BASE_REF = 'main';
+  try {
+    const found = (await run('C129', root)).filter((f) => /exceptions grew/.test(f.message));
+    assert.equal(found.length, 1);
+    assert.equal(found[0].file, EXCEPTIONS);
+    assert.match(found[0].message, /2 entries are \(scripts\/ E5; dev E3\).*needs the user's approval/);
+  } finally {
+    delete process.env.PADDOCK_BASE_REF;
+  }
+});
+
 test('C129 the regeneration tool: --shrink removes stale entries and lowers counts, never adds or raises; --init writes from scratch', () => {
   const root = tree({ 'a.sh': 'x\n'.repeat(3), 'b.sh': 'x\n'.repeat(9), 'new.sh': 'x\n', dev: '#!/bin/sh\n' }, { base: [['a.sh', 5], ['b.sh', 4], ['gone.sh', 2]], exc: [['dev']] });
+  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'add', '-A');
   const run = (...args) => execFileSync('node', [TOOL, '--root', root, ...args], { encoding: 'utf8' });
   assert.match(run(), /3 shell files/);
   run('--shrink');
