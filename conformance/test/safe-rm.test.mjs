@@ -156,3 +156,52 @@ for (const shell of SHELLS) {
     }
   });
 }
+
+// kept-clone.sh calls safe_rm inside a phase bounded by a limit (PADDOCK_KEPT_CLONE_TIMEOUT_<ID>): every program it starts per call
+// costs a fork and an exec, which under load added up to more than the checkout phase's 1 s limit in its test before the phase reached
+// its own git (4 of 40 runs at load 40 to 60; 0 of 40 with the plain `rm -rf` it replaced). The OS is asked once when the helper is
+// sourced, and plain ASCII case is folded by the shell, so a call starts no program but `rm`.
+for (const shell of SHELLS) {
+  test(`${shell}: a call starts no program but rm, and folds case as before`, () => {
+    const { base, root, home } = tree();
+    try {
+      const bin = join(base, 'bin');
+      const log = join(base, 'calls');
+      mkdirSync(bin);
+      // A case-folding OS (Darwin) on every host, and a `tr` that logs each call before it does the work.
+      for (const [name, body] of [
+        ['uname', 'echo Darwin'],
+        ['tr', `exec /usr/bin/env PATH=/usr/bin:/bin tr "$@"`],
+        ['cygpath', 'echo cygpath-must-not-run >&2; exit 1'],
+      ]) {
+        writeFileSync(join(bin, name), `#!/bin/sh\necho ${name} >> '${log}'\n${body}\n`, { mode: 0o755 });
+      }
+      writeFileSync(log, '');
+      const run = (body) =>
+        spawnSync(shell, ['-c', `. '${LIB}' && : > '${log}' && ${body}`], {
+          encoding: 'utf8',
+          env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` },
+        });
+      const calls = () => readFileSync(log, 'utf8').split('\n').filter(Boolean);
+      const three = `safe_rm '${root}' '${join(root, 'a', 'b', 'f')}' && safe_rm '${root}' '${join(root, 'a')}' && safe_rm '${root}' '${join(root, 'gone')}'`;
+      let r = run(three);
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(existsSync(join(root, 'a')), false);
+      assert.deepEqual(calls(), [], 'three calls whose names match the root started no uname, tr or cygpath');
+      // Only the case differs: on a case-folding OS it is under the root (the parity table's ok-fold rows); plain ASCII is folded by
+      // the shell, so still no program runs.
+      r = run(`safe_rm '${root}' '${join(root.toUpperCase(), 'x')}'`);
+      assert.equal(r.status, 0, `a case-only difference is under the root where case is ignored: ${r.stderr}`);
+      assert.deepEqual(calls(), [], 'an ASCII case-only difference is folded without a program');
+      r = run(`safe_rm '${root}' '${join(root, 'A')}' && safe_rm '${root}' '${join(home.toUpperCase(), 'x')}'`);
+      assert.equal(r.status, 1, 'the home folder is not under the root, in any case');
+      assert.match(r.stderr, /not strictly under/);
+      // A name beyond plain ASCII is left to `tr`, as before (whether it folds `Ä` depends on the host's tr and locale: GNU tr works
+      // on bytes).
+      run(`safe_rm '${join(root, 'Ä')}' '${join(root, 'ä', 'x')}'`);
+      assert.ok(calls().length > 0 && calls().every((c) => c === 'tr'), `only tr folds the case: ${calls()}`);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+}

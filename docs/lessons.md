@@ -2178,3 +2178,17 @@ Older only: two runs of one train never wait for each other, so the oldest alway
 already yields to, with its bounds (never twice in a row, never past the gap). Conformance checks that every macOS or Windows
 job of such a workflow needs the runner-wait job. **Rule:** a wait for a shared resource lives in the queued job, not in the
 client that has not queued yet. **Class: a scheduler that cannot see work that has not been queued.**
+
+## safe_rm's per-call programs pushed kept-clone's checkout phase past its 1 s test limit (2026-11-15)
+`host_steps::kept_clone_the_checkout_phase_is_bounded_by_its_own_limit` failed under load after `kept-clone.sh` moved its deletes
+onto `safe_rm` (997ab3a4e): the shell and Rust kept clones differed in their config keys (the shell had no `core.sparsecheckout`),
+so the shell's 1 s checkout limit had ended the phase in `sanitize`, before `apply_profile` and before the git the test hangs. First
+hypotheses and what refuted them: bounded.sh's polling missing the last output, buffering of the last line, and a comparison of
+differently buffered outputs: the two stdouts were equal in every failing run; only where the shell's phase was killed differed. The
+cause: each `safe_rm` call started about a dozen `uname` and `tr` processes (plus subshells): `sanitize` (two calls) took 236 to
+268 ms on average, at most 675 ms, at 1-minute load 25 to 40, and about 35 ms with the fix (30 calls each, timer included). With 6
+burners: 4 of 40 runs failed with safe_rm at load 40 to 60, 0 of 40 with the plain `rm -rf` before it (load 30 to 46), 0 of 60 with
+the fix (load 17 to 30), and an interleaved run of both at load 18 to 39 passed 32 of 32 each (too little load to tell them apart). The fix: the OS is asked once when the helper is sourced, and plain ASCII case is folded by the shell, so a call
+starts no program but `rm` (`tr` only for names beyond ASCII); the limit is unchanged. **Rule:** a helper that runs inside a bounded
+phase costs no program per call that it can compute once or in the shell itself. **Class: work before the hang point of a 1 s
+hung-phase test meeting its limit under load (earlier: fe1bd861d, a `git rev-parse` over 1 s in 4 of 204 runs; e0fdd0286, run 8099).**
