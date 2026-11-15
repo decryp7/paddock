@@ -134,6 +134,25 @@ fn base_dir(app: Option<&str>, root: Option<&Path>) -> Result<PathBuf, CliError>
 
 /// The draw.io executable: the given path, `$DRAWIO`, then `drawio` and `draw.io` on `PATH` and the vendor's install places.
 pub fn find_drawio(given: Option<&Path>, env: &HashMap<String, String>, windows: bool) -> Option<PathBuf> {
+    find_drawio_in(given, env, windows, &vendor_places(env, windows))
+}
+
+/// The places the vendor's installers put draw.io.
+fn vendor_places(env: &HashMap<String, String>, windows: bool) -> Vec<PathBuf> {
+    let mut places: Vec<PathBuf> = vec![PathBuf::from("/Applications/draw.io.app/Contents/MacOS/draw.io")];
+    if windows {
+        for var in ["ProgramFiles", "ProgramW6432"] {
+            if let Some(dir) = env.get(var) {
+                places.push(Path::new(dir).join("draw.io").join("draw.io.exe"));
+            }
+        }
+        places.push(PathBuf::from(r"C:\Program Files\draw.io\draw.io.exe"));
+    }
+    places
+}
+
+/// [`find_drawio`] with the install places named (the tests give none, so a machine's own draw.io is never found or started).
+pub fn find_drawio_in(given: Option<&Path>, env: &HashMap<String, String>, windows: bool, places: &[PathBuf]) -> Option<PathBuf> {
     if let Some(p) = given {
         return Some(p.to_path_buf());
     }
@@ -147,16 +166,7 @@ pub fn find_drawio(given: Option<&Path>, env: &HashMap<String, String>, windows:
             return Some(found);
         }
     }
-    let mut places: Vec<PathBuf> = vec![PathBuf::from("/Applications/draw.io.app/Contents/MacOS/draw.io")];
-    if windows {
-        for var in ["ProgramFiles", "ProgramW6432"] {
-            if let Some(dir) = env.get(var) {
-                places.push(Path::new(dir).join("draw.io").join("draw.io.exe"));
-            }
-        }
-        places.push(PathBuf::from(r"C:\Program Files\draw.io\draw.io.exe"));
-    }
-    places.into_iter().find(|p| p.is_file())
+    places.iter().find(|p| p.is_file()).cloned()
 }
 
 static LABEL_COPY: LazyLock<Regex> = LazyLock::new(|| {
@@ -375,6 +385,12 @@ mod tests {
         assert_eq!(parse_generators("# c\n\n c4.mjs \nseq.mjs\n").unwrap(), ["c4.mjs", "seq.mjs"]);
         assert!(parse_generators("../x.mjs").is_err());
         assert!(parse_generators("run.sh").is_err());
+    }
+
+    #[test]
+    fn without_a_given_path_a_variable_or_a_program_on_path_nothing_is_found() {
+        let env: HashMap<String, String> = [("PATH".to_string(), "/nonexistent-dir".to_string())].into();
+        assert_eq!(find_drawio_in(None, &env, false, &[PathBuf::from("/nonexistent/draw.io")]), None);
     }
 
     #[test]

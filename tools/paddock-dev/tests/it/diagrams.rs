@@ -160,27 +160,6 @@ fn a_failing_draw_io_ends_the_run_with_its_exit_code_named_and_the_stderr_tail()
 }
 
 #[test]
-fn no_draw_io_is_an_error_that_names_the_variable() {
-    let d = tempfile::tempdir().unwrap();
-    let src = d.path().join("src");
-    std::fs::create_dir(&src).unwrap();
-    std::fs::write(src.join("a.drawio"), "x").unwrap();
-    let mut cmd = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
-    cmd.args(["diagrams", "export", "--src", src.to_str().unwrap()])
-        .env("PATH", d.path());
-    let out = cmd.output().unwrap();
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    // On a Mac the vendor's own install place may exist; then the run goes on and fails in a different way.
-    if !Path::new("/Applications/draw.io.app/Contents/MacOS/draw.io").exists() {
-        assert_eq!(out.status.code(), Some(1));
-        assert!(
-            stderr.contains("::error::draw.io desktop was not found") && stderr.contains("DRAWIO"),
-            "{stderr}"
-        );
-    }
-}
-
-#[test]
 fn generate_runs_the_listed_generators_in_order_from_their_folder_and_exports_on_request() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("repo");
