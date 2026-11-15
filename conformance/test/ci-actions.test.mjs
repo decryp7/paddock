@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import { executableIn, platformId } from '../ci/install-test-browser.mjs';
 import { isMain } from '../src/util/is-main.mjs';
 import { parseSteps } from '../src/util/workflows.mjs';
-import { conjuncts, expr, job as workflowJob, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
+import { conjuncts, expr, job as workflowJob, loadAction, loadWorkflow, needsOf, stepsOf } from './lib/workflow.mjs';
 import { PADDOCK } from './helpers.mjs';
 
 const ACTIONS = join(PADDOCK, '.gitea', 'actions');
@@ -2399,15 +2399,25 @@ test('the bash-before-Git-bash check flags the 7880 shape and passes the fixed o
 });
 
 // 2026-11-15 (user): the nightly's disk summary scanned the dev-targets folder, which a CI runner does not have, so it measured
-// nothing; `./dev disk report` gives the same on the machine. No workflow step scans or reports the dev folders.
-test('no workflow step runs ./dev disk scan or ./dev disk report (a runner has no dev-targets folder)', () => {
+// nothing; `./dev disk report` gives the same on the machine. No workflow or composite action step scans or reports the dev
+// folders, in any spelling of the tool (./dev, dev, paddock-dev, $PADDOCK_DEV, bash ./dev).
+const DEV_DISK = /(?:^|[\s;&|("'/])(?:\.\/)?(?:dev|paddock-dev(?:\.exe)?|"?\$\{?PADDOCK_DEV\}?"?)\s+disk\s+(?:scan|report)\b/m;
+
+test('the dev-disk matcher knows every spelling of the tool', () => {
+  for (const s of ['./dev disk scan', 'bash ./dev disk report --summary', 'dev disk scan', '"$PADDOCK_DEV" disk report', '${PADDOCK_DEV} disk scan', '/x/paddock-dev disk report', 'a && ./dev disk scan']) assert.match(s, DEV_DISK, s);
+  for (const s of ['./dev disk check', 'echo dev disks', './dev diskscan', './dev ci run x']) assert.doesNotMatch(s, DEV_DISK, s);
+});
+
+test('no workflow or composite action step runs ./dev disk scan or ./dev disk report (a runner has no dev-targets folder)', () => {
   const found = [];
   for (const f of readdirSync(WORKFLOWS).filter((x) => /\.ya?ml$/.test(x))) {
     for (const [id, j] of Object.entries(loadWorkflow(f).jobs ?? {})) {
-      for (const s of stepsOf(j)) {
-        if (/\.\/dev disk (scan|report)\b/.test(String(s.run ?? ''))) found.push(`${f}: ${id}`);
-      }
+      for (const s of stepsOf(j)) if (DEV_DISK.test(String(s.run ?? ''))) found.push(`${f}: ${id}`);
     }
   }
+  for (const n of names) {
+    for (const s of stepsOf(loadAction(n))) if (DEV_DISK.test(String(s.run ?? ''))) found.push(`actions/${n}`);
+  }
+  assert.ok(names.length > 10, 'the composite actions are read');
   assert.deepEqual(found, [], 'remove these steps: run `./dev disk report` locally instead');
 });

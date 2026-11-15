@@ -2,8 +2,8 @@
 // shell script goes through `safe_rm <root> <path>` (conformance/ci/safe-rm.sh), the shell copy of paddock-dev's `remove_under`.
 // The class (ER-21): a computed delete that reached beyond its folder or nearly did: the 2026-10-31 scratchpad wipe, the
 // 2026-11-10 live-worktree removal, the prune IFS near-miss and the prune stat fallback (docs/lessons.md).
-// A site is `rm` at a command's start (also after `trap '`, `then`, `do`, `xargs` ...) with `-r`, `-R` or `--recursive` among
-// its flags and a target holding `$` or a backtick: a bare variable, a guarded one (`"${X:?}"` stops an empty value, not a wrong
+// A site is `rm` (or `/bin/rm`) at a command's start (also after `trap '`, `!`, `if`, `while`, `then`, `env X=1`, `sudo`, `xargs` ...)
+// with `-r`, `-R` or `--recursive` among its flags and a target holding `$` or a backtick, or `find <computed folder> ... -exec rm -r`: a bare variable, a guarded one (`"${X:?}"` stops an empty value, not a wrong
 // one) or one below an owned prefix (`"$root/dist"`). C115 already refuses the bare unguarded variable (an error, with its
 // baseline); this check is wider and only warns. Not a site: a literal path, a non-recursive `rm`, the script's own folder from
 // `mktemp` (`tmp=$(mktemp -d)` ... `rm -rf "$tmp"`), full-line comments, and a site with `# conformance: computed-rm — <why>` (or
@@ -22,8 +22,14 @@ const WAIVER = /conformance:\s*(?:computed-rm|scoped-cleanup)\s*[—–-]+\s*\S.
 const SKIP_PATH =
   /(?:^|\/)(?:node_modules|dist|target|vendor)\/|(?:^|\/)(?:tests?|fixtures?)\/|\.test\.(?:ba)?sh$|(?:^|\/)docs\/|^conformance\/ci\/safe-rm\.sh$/;
 const SHELL_FILE = /\.(?:ba)?sh$/;
-/** `rm` where a command starts: line start, after `;`, `&`, `|`, `(`, `{`, a quote that opens a command string, or a keyword. */
-const RM = /(?:^|[;&|({`'"]|\b(?:then|do|else|xargs|exec|command|sudo|time|nice)\s)[ \t]*rm[ \t]+([^\n;&|)#'`]*)/gm;
+/** `rm` (also `/bin/rm`) where a command starts: line start, after `;`, `&`, `|`, `(`, `{`, a quote that opens a command string,
+ * `!`, a keyword (`if`, `while`, `then`, ...) or a wrapper (`env X=1`, `sudo`, `command`, `xargs` ...). */
+const RM =
+  /(?:^|[;&|({`'"]|!\s|\b(?:then|do|else|elif|if|while|until|xargs|exec|command|builtin|sudo|time|nice|nohup|env(?:[ \t]+\w+=\S*)*)[ \t])[ \t]*(?:\S*\/)?rm[ \t]+([^\n;&|)#'`]*)/gm;
+/** `find <start> ... -exec rm ...`: the start folder and the rm words. */
+const FIND_EXEC = /\bfind[ \t]+(\S+)[^\n;|&]*?-(?:exec|execdir|ok|okdir)[ \t]+(?:\S*\/)?rm[ \t]+([^\n;+]*)/g;
+/** Quoted text an `echo` or `printf` prints: blanked, so a message that names `rm -rf $x` is not read as a command. */
+const printed = (line) => line.replace(/\b(?:echo|printf)\b.*$/, (tail) => tail.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, (q) => q[0] + ' '.repeat(q.length - 2) + q[0]));
 const FIX =
   'Remove it with `safe_rm <root> <path>` (`. conformance/ci/safe-rm.sh`): it refuses an empty path, `/`, a top-level or home root, `..`, a path outside the root and a link on the way. A site that is fine carries `# conformance: computed-rm — <why>`.';
 
@@ -41,9 +47,18 @@ export const isShellSource = (file, head = '') =>
 export function computedRmSites(text, file = 'x.sh') {
   if (!isShellSource(file, text.slice(0, 80))) return [];
   const raw = text.split('\n');
-  const code = raw.map((l) => (/^\s*#/.test(l) ? ' '.repeat(l.length) : l)).join('\n');
+  const code = raw.map((l) => (/^\s*#/.test(l) ? ' '.repeat(l.length) : printed(l))).join('\n');
   const temps = tempNames(code);
   const out = [];
+  const lineOf = (index) => code.slice(0, index).split('\n').length;
+  const add = (line) => {
+    if (WAIVER.test(raw[line - 1] ?? '') || WAIVER.test(raw[line - 2] ?? '') || out.some((s) => s.line === line)) return;
+    out.push({ line, text: (raw[line - 1] ?? '').trim() });
+  };
+  const recursiveFlag = (w) => w === '--recursive' || /^-[a-zA-Z]*[rR][a-zA-Z]*$/.test(w);
+  for (const m of code.matchAll(FIND_EXEC)) {
+    if (/[$`]/.test(m[1]) && m[2].split(/\s+/).some(recursiveFlag)) add(lineOf(m.index));
+  }
   for (const m of code.matchAll(RM)) {
     const words = m[1].split(/\s+/).filter(Boolean);
     const flags = [];
@@ -54,17 +69,15 @@ export function computedRmSites(text, file = 'x.sh') {
       else if (!rest && w.startsWith('-') && w.length > 1) flags.push(w);
       else if (!/^\d?>/.test(w)) targets.push(w);
     }
-    const recursive = flags.some((w) => w === '--recursive' || /^-[a-zA-Z]*[rR][a-zA-Z]*$/.test(w));
+    const recursive = flags.some(recursiveFlag);
     const computed = targets.filter((t) => /[$`]/.test(t)).filter((t) => {
       const v = /^\$(?:(\w+)|\{(\w+)\})$/.exec(unquote(t));
       return !(v && temps.has(v[1] ?? v[2]));
     });
     if (!recursive || computed.length === 0) continue;
-    const line = code.slice(0, m.index + m[0].length).split('\n').length;
-    if (WAIVER.test(raw[line - 1] ?? '') || WAIVER.test(raw[line - 2] ?? '') || out.some((s) => s.line === line)) continue;
-    out.push({ line, text: (raw[line - 1] ?? '').trim() });
+    add(lineOf(m.index + m[0].length));
   }
-  return out;
+  return out.sort((a, b) => a.line - b.line);
 }
 
 export default {

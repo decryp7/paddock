@@ -15,6 +15,21 @@ test('C127: a recursive rm of a computed path in a shell script is a site', () =
   assert.deepEqual(lines('x=1; rm -rf "$x" && echo y\n'), [1]);
 });
 
+test('C127: rm after a keyword, a negation, env, a path, sudo, and find -exec rm under a computed folder (review rows)', () => {
+  assert.deepEqual(lines('if rm -rf "$d"; then :; fi\n'), [1]);
+  assert.deepEqual(lines('while rm -rf "$d"; do :; done\n'), [1]);
+  assert.deepEqual(lines('until rm -rf "$d"; do :; done\n'), [1]);
+  assert.deepEqual(lines('! rm -rf "$d"\n'), [1]);
+  assert.deepEqual(lines('env LC_ALL=C rm -rf "$d"\n'), [1]);
+  assert.deepEqual(lines('/bin/rm -rf "$d"\n'), [1]);
+  assert.deepEqual(lines('sudo rm -rf "$d"\n'), [1]);
+  assert.deepEqual(lines('[ -d "$d" ] && command rm -rf "$d"\n'), [1]);
+  assert.deepEqual(lines('find "$dir" -type d -name incremental -prune -exec rm -rf {} +\n'), [1]);
+  assert.deepEqual(lines('find dist -name "*.tmp" -exec rm -rf {} +\n'), [], 'a literal start folder');
+  assert.deepEqual(lines('find "$d" -name x -exec rm -f {} +\n'), [], 'not recursive');
+  assert.deepEqual(lines('echo "if rm -rf $d"\n'), [], 'text in a quoted echo');
+});
+
 test('C127: safe_rm, a literal path, a non-recursive rm, a mktemp folder, comments and waivers are fine', () => {
   assert.deepEqual(lines('safe_rm "$root" "$root/dist"\n'), []);
   assert.deepEqual(lines('rm -rf dist/bundle\n'), []);

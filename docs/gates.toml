@@ -175,7 +175,7 @@ approved = "coordinator"
 
 [[report_only]]
 id = "C127"
-reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then migrate or waive the sites left and flip SEVERITY in C127-computed-rm.mjs and the mode to gate. First count 2026-11-15: 32 warnings in 15 files after migrating the prune, host-cleanup, node-caches, stable-workspace, kept-clone and vm-win prepare sites onto safe_rm (conformance/ci/safe-rm.sh); left: the dev wrapper, job-tmpdir, job-isolation, tag-node-caches, tauri-bundle, the shell-demo smoke scripts and app scripts"
+reason = "ER-41: report-only until its first green run on the real tree, recorded by run id here; then migrate or waive the sites left and flip SEVERITY in C127-computed-rm.mjs and the mode to gate. First count 2026-11-15: 31 warnings in 15 files (after the review rows: if, while, env, a path, find -exec) after migrating the prune (both deletes), host-cleanup, node-caches, stable-workspace, kept-clone and vm-win prepare sites onto safe_rm (conformance/ci/safe-rm.sh); left: the dev wrapper, job-tmpdir, job-isolation, tag-node-caches, tauri-bundle, the shell-demo smoke scripts and app scripts"
 owner = "ER-21 class: computed deletes that reached beyond their folder (fix/small-foundation-2026-11-15)"
 since = 2026-11-15
 review_by = 2026-12-15
