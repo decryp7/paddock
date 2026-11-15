@@ -26,7 +26,9 @@
 # The checkout's credentials (its http extraheader) are passed to git through the environment, never in a command line, never kept.
 # Environment: RUNNER_OS, GITHUB_WORKSPACE, GITHUB_ENV, NAME (the kept folder's name), PROFILE, KEPT_CLONE_PROFILES (the profile file,
 # default checkout-profiles.txt beside this script), PADDOCK_KEPT_CLONE_TIMEOUT (seconds per phase, default 900),
-# PADDOCK_KEPT_CLONE_TIMEOUT_<ID> (one phase's own limit: RESOLVE, CREATE, CLEAN, FETCH, CHECKOUT, VERIFY, LINK; default the general one).
+# PADDOCK_KEPT_CLONE_TIMEOUT_<ID> (one phase's own limit: RESOLVE, CREATE, CLEAN, FETCH, CHECKOUT, VERIFY, LINK; default the general one),
+# PADDOCK_KEPT_CLONE_CLOCK_MARK (tests only: a file the test's hanging git writes; each phase's limit counts from it, and until it
+# appears the phase is bounded by the general limit; bounded.sh's clock mark, ADR 0103 "Hang-point signal").
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 tool=kept-clone
@@ -66,6 +68,7 @@ phase() {
   local var="PADDOCK_KEPT_CLONE_TIMEOUT_$1" own
   own="${!var:-}"
   if [[ "$own" =~ ^[1-9][0-9]*$ ]]; then limit="$own"; else limit="$general_limit"; fi
+  clock_mark="${PADDOCK_KEPT_CLONE_CLOCK_MARK:-}" clock_wait="$general_limit"
   bounded "$2" "$3"
 }
 last_lines() { grep -v '^[[:space:]]*$' "$scratch/err" | tail -n 4 | tr '\r\n' '  '; } # whole lines, never cut in the middle of a path

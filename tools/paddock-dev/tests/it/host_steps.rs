@@ -1432,24 +1432,65 @@ const KEPT_PHASES: [(&str, &str, &str); 7] = [
     ("PADDOCK_KEPT_CLONE_TIMEOUT_LINK", "", "link "),
 ];
 
+/// The environment of a hung-phase test: the hanging phase's own limit (1 s), the clock mark its git writes, and a bounded general
+/// limit, which bounds every other phase and the hanging one until its mark. 20 s because the slowest whole hung-phase test took
+/// 17.4 s (300 runs of the six, 6 burners, 1-minute load 18 to 68, 2026-11-15; `fix/kept-clone-phase-state`'s 50-run stress) and
+/// no phase of a test outlasts the test; a git that misses its mark then ends at 20 s with "did not finish within 20 s", not at
+/// nextest's 60 s.
+fn kept_hang_env(id: &'static str) -> Vec<(&'static str, String)> {
+    vec![
+        (id, "1".into()),
+        ("PADDOCK_KEPT_CLONE_CLOCK_MARK", "<ROOT>/hang-mark".into()),
+        ("PADDOCK_KEPT_CLONE_TIMEOUT", "20".into()),
+    ]
+}
+
+#[test]
+fn kept_clone_no_workflow_or_action_sets_the_clock_mark() {
+    // The clock mark is for tests: a job that set it would bound each phase by the general limit until a mark that never comes.
+    let mut seen = Vec::new();
+    let mut stack = vec![repo().join(".gitea")];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            } else if std::fs::read_to_string(&p).is_ok_and(|t| t.contains("PADDOCK_KEPT_CLONE_CLOCK_MARK")) {
+                seen.push(p.display().to_string());
+            }
+        }
+    }
+    assert!(seen.is_empty(), "a workflow or action sets the tests' clock mark: {seen:?}");
+}
+
 /// One phase hangs (a git that sleeps on that phase's command) and only that phase has a short limit (1 s): it ends in a warning naming
-/// it, the job never fails, and no other phase can meet a limit (they keep the default, 900 s). One test per phase: the five together
+/// it, the job never fails, and no other phase can meet a limit (they keep the default, 900 s). The hanging git writes the clock mark
+/// as it starts (`PADDOCK_KEPT_CLONE_CLOCK_MARK`, ADR 0103 "Hang-point signal") and the 1 s counts from it on both sides, so the
+/// phase's work before its git (sanitize, the sparse settings) cannot meet the limit under load: it once did in the shell and not in
+/// Rust, and the two clones differed in their config keys. One test per phase: the five together
 /// ran 20 jobs with two hung phases each one after the other, 33 s on a quiet Mac and past nextest's 60 s bound on the loaded CI Mac
 /// (run 8099).
 fn kept_phase_is_bounded_by_its_own_limit(id: &str) {
     let (id, word, label) = KEPT_PHASES.iter().find(|(i, ..)| *i == id).expect("a phase of KEPT_PHASES");
     assert!(!word.is_empty(), "{id} runs no git, so no git can hang in it");
     let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
-    let shim = format!(
-        "case \" $* \" in *\"{word}\"*) exec /bin/sleep 30;; esac\nexec '{}' \"$@\"",
-        real.trim()
-    );
-    let step = kept_step("macOS", "lean", vec![(*id, "1".into())]);
+    let real = real.trim().to_string();
+    let shim = |fx: &Fx| {
+        let mark = fx.p("hang-mark");
+        fx.script(
+            "bin/git",
+            &format!(
+                "case \" $* \" in *\"{word}\"*) : > '{}'; exec /bin/sleep 30;; esac\nexec '{real}' \"$@\"",
+                mark.display()
+            ),
+        )
+    };
+    let step = kept_step("macOS", "lean", kept_hang_env(id));
     // The clean phase runs only on a reused clone: a first job makes it, then the second job's clean hangs.
     let seen = if *id == "PADDOCK_KEPT_CLONE_TIMEOUT_CLEAN" {
-        kept_twice(&kept_step("macOS", "lean", vec![]), &|fx: &Fx| fx.script("bin/git", &shim), &step)
+        kept_twice(&kept_step("macOS", "lean", vec![]), &shim, &step)
     } else {
-        kept_once(&|fx: &Fx| fx.script("bin/git", &shim), &step)
+        kept_once(&shim, &step)
     };
     assert_eq!(seen.code, 0, "{id}: {seen:?}");
     let warned = format!("::warning::kept-clone: '{label}");
@@ -1509,18 +1550,20 @@ fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
     // A `git fetch` that sleeps: the fetch phase is bounded (1 s, its own limit; every other phase keeps the default, so a slow clone
     // under load cannot reach a limit), then the work folder is expanded to the profile.
     let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    // The hanging fetch writes the clock mark as it starts; the 1 s counts from it (see kept_phase_is_bounded_by_its_own_limit).
     let setup = move |fx: &Fx| {
         fx.script(
             "bin/git",
             &format!(
-                "case \" $* \" in *\" fetch \"*) exec sleep 30;; esac\nexec '{}' \"$@\"",
+                "case \" $* \" in *\" fetch \"*) : > '{}'; exec sleep 30;; esac\nexec '{}' \"$@\"",
+                fx.p("hang-mark").display(),
                 real.trim()
             ),
         )
     };
     let seen = kept_once(
         &setup,
-        &kept_step("macOS", "lean", vec![("PADDOCK_KEPT_CLONE_TIMEOUT_FETCH", "1".into())]),
+        &kept_step("macOS", "lean", kept_hang_env("PADDOCK_KEPT_CLONE_TIMEOUT_FETCH")),
     );
     assert_eq!(seen.code, 0, "{seen:?}");
     assert!(seen.stdout.contains("did not finish within 1 s"), "{}", seen.stdout);
@@ -1619,6 +1662,35 @@ fn bounded_sh_never_ends_a_phase_before_its_limit() {
         out.ends_with("rc=124 ticks=4"),
         "the phase must outlive its limit (3) by the clock's whole second: {out}"
     );
+}
+
+#[test]
+fn bounded_sh_counts_the_limit_from_the_clock_mark() {
+    // The phase does work before its hang (real time, while the fake clock races ahead with every poll), then writes the clock mark
+    // and hangs. A stale mark from before the phase is removed when the phase starts. The limit (3) counts from the mark: the phase is ended only after the mark, 4 ticks after it was seen. Without the
+    // mark the limit would have ended the phase in its work, before the mark (the kept-clone parity failure under load).
+    let out = bounded_sh(
+        "tool=t limit=3 hint=h scratch=\"$SCRATCH\" BOUNDED_SOFT=1 clock_mark=\"$SCRATCH/mark\" clock_wait=100000000\n\
+         echo stale > \"$SCRATCH/mark\"\n\
+         hang() { /bin/sleep 0.5; echo hang > \"$SCRATCH/mark\"; exec /bin/sleep 30; }\n\
+         bounded hang hang; rc=$?; [ \"$(cat \"$SCRATCH/mark\" 2>/dev/null)\" = hang ] && m=after-mark || m=before-mark\n\
+         echo \"rc=$rc $m\"",
+    );
+    assert!(
+        out.ends_with("rc=124 after-mark"),
+        "the phase ends at its limit counted from the mark: {out}"
+    );
+    assert!(out.contains("'hang' did not finish within 3 s"), "{out}");
+    // A mark that never appears: the phase is bounded by clock_wait, and the line names that bound.
+    let out = bounded_sh(
+        "tool=t limit=3 hint=h scratch=\"$SCRATCH\" BOUNDED_SOFT=1 clock_mark=\"$SCRATCH/mark\" clock_wait=5\n\
+         hang() { exec /bin/sleep 30; }\nbounded hang hang; echo \"rc=$? ticks=$SECONDS\"",
+    );
+    assert!(
+        out.ends_with("rc=124 ticks=6"),
+        "without its mark the phase ends at clock_wait (5): {out}"
+    );
+    assert!(out.contains("'hang' did not finish within 5 s"), "{out}");
 }
 
 #[test]

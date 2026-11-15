@@ -2267,3 +2267,14 @@ the shell, so a call starts no program but `rm` (`tr` only for names beyond ASCI
 runs inside a bounded phase costs no program per call that it can compute once or in the shell itself. **Class: work before the hang
 point of a 1 s hung-phase test meeting its limit under load (earlier: fe1bd861d, a `git rev-parse` over 1 s in 4 of 204 runs;
 e0fdd0286, run 8099).**
+## An abandoned kept-clone phase marked the next one hung, and hung-phase tests timed the work before the hang (2026-11-15)
+Under load (6 burners and ten loops of the checkout parity test, load up to 38), 1 of 80 runs failed with the Rust side printing
+`'create the clone' did not finish within 900 s` at once. The Rust phases shared one error buffer, log and timed-out flag; a
+phase abandoned at its bound (limit + 1 s) keeps its thread, and its git, ended at its own 1 s limit, returned after the next phase
+had started and set that phase's flag. Each phase now writes to its own state, and what an abandoned phase writes later goes
+nowhere (failing first: `a_phase_abandoned_at_its_bound_writes_nothing_into_the_next_phase`). The same tests had met their 1 s
+limit three times through work before the hang (a `git rev-parse` outside the phases, five phases in one test, `sanitize` once
+`safe_rm` started 16 programs per call), so the limit they assert now counts from a mark the stand-in git writes as it enters its
+hang, in the shell and in Rust (ADR 0103, "Amendment"). **Rule:** a test of a time limit times the thing that hangs, from a
+signal it gives, not the setup before it; state that an abandoned worker can still write is that worker's own. **Class: work before
+the hang point of a hung-phase test meeting its limit under load (third sighting; ADR 0103 amendment).**
