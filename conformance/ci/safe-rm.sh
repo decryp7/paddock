@@ -20,6 +20,11 @@
 # (without cygpath only `\` becomes `/`), so `D:\a\_temp`, `D:/a/_temp` and `/d/a/_temp` are one folder; the drive is not a
 # folder name (`C:/x` is a top-level folder).
 # Variables are prefixed `_safe_rm_` (POSIX sh has no `local`); the function changes no option and no IFS.
+# Cost: callers run it inside bounded phases (kept-clone.sh's checkout phase has a 1 s limit in its test), so a call starts no
+# program but `rm` on macOS and Linux: the OS is asked once, when this file is sourced, and case is folded by the shell itself (`tr`
+# only for a path with characters beyond plain ASCII). Before, each call started 16 `uname` and `tr` processes, and under
+# load (1-minute load 40 to 60) that pushed the checkout phase past its limit before it reached its git in 4 of 40 runs.
+_safe_rm_os=$(uname -s 2>/dev/null || true)
 
 _safe_rm_err() {
   echo "::${SAFE_RM_ANNOTATION:-error}::safe_rm: $1; it is not removed. Next step: give a path strictly under a folder this script owns (not /, a top-level folder or the home folder), with no \`..\` and no link on the way." >&2
@@ -27,15 +32,19 @@ _safe_rm_err() {
 
 # Whether this is Windows (Git Bash, MSYS, Cygwin).
 _safe_rm_windows() {
-  case "$(uname -s 2>/dev/null)" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac
+  case "$_safe_rm_os" in MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac
 }
 
-# A path as the guard reads it: on Windows `C:/x` (cygpath -m), else as written.
+# A path as the guard reads it, in _safe_rm_sp: on Windows `C:/x` (cygpath -m), else as written (no subshell).
 _safe_rm_spell() {
   if _safe_rm_windows; then
-    if command -v cygpath >/dev/null 2>&1; then cygpath -m -- "$1" 2>/dev/null || printf '%s' "$1" | tr '\134' '/'; else printf '%s' "$1" | tr '\134' '/'; fi
+    if command -v cygpath >/dev/null 2>&1; then
+      _safe_rm_sp=$(cygpath -m -- "$1" 2>/dev/null || printf '%s' "$1" | tr '\134' '/')
+    else
+      _safe_rm_sp=$(printf '%s' "$1" | tr '\134' '/')
+    fi
   else
-    printf '%s' "$1"
+    _safe_rm_sp=$1
   fi
 }
 
@@ -67,24 +76,64 @@ _safe_rm_names() {
   return 0
 }
 
-# The comparison key of a joined path: lower case where the file system ignores case by default.
-_safe_rm_key() {
-  case "$(uname -s 2>/dev/null)" in
-    Darwin | MINGW* | MSYS* | CYGWIN*) printf '%s' "$1" | tr '[:upper:]' '[:lower:]' ;;
-    *) printf '%s' "$1" ;;
-  esac
+# Whether the file system ignores case by default (macOS, Windows).
+_safe_rm_folds() {
+  case "$_safe_rm_os" in Darwin | MINGW* | MSYS* | CYGWIN*) return 0 ;; *) return 1 ;; esac
 }
 
-# Checks one target against the root in _safe_rm_rn/_safe_rm_rk/_safe_rm_rc; 1 (with the error printed) when it is refused.
+# Whether <text> is plain ASCII path characters only (folded by the shell; anything else is left to `tr`).
+_safe_rm_plain() {
+  case "$1" in *[!abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/._\ +@~,=:-]*) return 1 ;; *) return 0 ;; esac
+}
+
+# _safe_rm_lower <text> [tr]: <text> in lower case, in _safe_rm_lo. Plain ASCII (the usual case) is folded by the shell itself,
+# character by character (no program, so no fork per call); any other text, or any text with `tr` given, by `tr`, whose classes
+# follow the locale.
+_safe_rm_lower() {
+  if [ "${2:-}" = tr ] || ! _safe_rm_plain "$1"; then
+    _safe_rm_lo=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    return 0
+  fi
+  _safe_rm_s=$1
+  _safe_rm_lo=
+  while [ -n "$_safe_rm_s" ]; do
+    _safe_rm_r=${_safe_rm_s#?}
+    _safe_rm_ch=${_safe_rm_s%"$_safe_rm_r"}
+    _safe_rm_s=$_safe_rm_r
+    case "$_safe_rm_ch" in
+      A) _safe_rm_ch=a ;; B) _safe_rm_ch=b ;; C) _safe_rm_ch=c ;; D) _safe_rm_ch=d ;; E) _safe_rm_ch=e ;; F) _safe_rm_ch=f ;;
+      G) _safe_rm_ch=g ;; H) _safe_rm_ch=h ;; I) _safe_rm_ch=i ;; J) _safe_rm_ch=j ;; K) _safe_rm_ch=k ;; L) _safe_rm_ch=l ;;
+      M) _safe_rm_ch=m ;; N) _safe_rm_ch=n ;; O) _safe_rm_ch=o ;; P) _safe_rm_ch=p ;; Q) _safe_rm_ch=q ;; R) _safe_rm_ch=r ;;
+      S) _safe_rm_ch=s ;; T) _safe_rm_ch=t ;; U) _safe_rm_ch=u ;; V) _safe_rm_ch=v ;; W) _safe_rm_ch=w ;; X) _safe_rm_ch=x ;;
+      Y) _safe_rm_ch=y ;; Z) _safe_rm_ch=z ;;
+    esac
+    _safe_rm_lo=$_safe_rm_lo$_safe_rm_ch
+  done
+}
+
+# _safe_rm_within <path> <folder>: whether the joined <path> is <folder> itself or below it (case ignored where the file system
+# ignores it). Names that match as written need no folding.
+_safe_rm_within() {
+  case "$1/" in "$2"/*) return 0 ;; esac
+  _safe_rm_folds || return 1
+  # Both sides are folded the same way: by `tr` when either needs it, so the two never differ only in who folded them.
+  _safe_rm_how=shell
+  if ! _safe_rm_plain "$1" || ! _safe_rm_plain "$2"; then _safe_rm_how='tr'; fi
+  _safe_rm_lower "$1/" "$_safe_rm_how"
+  _safe_rm_lp=$_safe_rm_lo
+  _safe_rm_lower "$2" "$_safe_rm_how"
+  case "$_safe_rm_lp" in "$_safe_rm_lo"/*) return 0 ;; *) return 1 ;; esac
+}
+
+# Checks one target against the root in _safe_rm_rn/_safe_rm_rc; 1 (with the error printed) when it is refused.
 _safe_rm_check() {
   if [ -z "$1" ]; then _safe_rm_err "a path is empty"; return 1; fi
-  _safe_rm_sp=$(_safe_rm_spell "$1")
+  _safe_rm_spell "$1"
   if ! _safe_rm_absolute "$_safe_rm_sp"; then _safe_rm_err "$1 is not an absolute path"; return 1; fi
   if ! _safe_rm_names "$_safe_rm_sp"; then _safe_rm_err "$1 has a \`..\` in it"; return 1; fi
   _safe_rm_tn=$_safe_rm_n
-  _safe_rm_tk=$(_safe_rm_key "$_safe_rm_tn")
   if [ "$_safe_rm_c" -le "$_safe_rm_rc" ]; then _safe_rm_err "$1 is not strictly under $_safe_rm_root"; return 1; fi
-  case "$_safe_rm_tk" in "$_safe_rm_rk"/*) ;; *) _safe_rm_err "$1 is not strictly under $_safe_rm_root"; return 1 ;; esac
+  if ! _safe_rm_within "$_safe_rm_tn" "$_safe_rm_rn"; then _safe_rm_err "$1 is not strictly under $_safe_rm_root"; return 1; fi
   # Every folder between the root and the target: none may be a link. A missing one means nothing below it is there either.
   # The walk starts at the root as the target spells it (the names may differ in case from the root's where case is ignored).
   _safe_rm_at=$_safe_rm_drive
@@ -117,20 +166,17 @@ safe_rm() {
   _safe_rm_root=$1
   shift
   if [ -z "$_safe_rm_root" ]; then _safe_rm_err "the root is empty"; return 1; fi
-  _safe_rm_sp=$(_safe_rm_spell "$_safe_rm_root")
+  _safe_rm_spell "$_safe_rm_root"
   if ! _safe_rm_absolute "$_safe_rm_sp"; then _safe_rm_err "the root $_safe_rm_root is not an absolute path"; return 1; fi
   if ! _safe_rm_names "$_safe_rm_sp"; then _safe_rm_err "the root $_safe_rm_root has a \`..\` in it"; return 1; fi
   if [ "$_safe_rm_c" -lt 2 ]; then _safe_rm_err "the root $_safe_rm_root is a drive root or a top-level folder"; return 1; fi
   _safe_rm_rn=$_safe_rm_n
   _safe_rm_rc=$_safe_rm_c
-  _safe_rm_rk=$(_safe_rm_key "$_safe_rm_rn")
-  if [ -n "${HOME:-}" ] && _safe_rm_names "$(_safe_rm_spell "$HOME")" && [ "$_safe_rm_c" -gt 0 ]; then
-    _safe_rm_hk=$(_safe_rm_key "$_safe_rm_n")
-    case "$_safe_rm_hk/" in "$_safe_rm_rk"/*)
+  if [ -n "${HOME:-}" ] && _safe_rm_spell "$HOME" && _safe_rm_names "$_safe_rm_sp" && [ "$_safe_rm_c" -gt 0 ]; then
+    if _safe_rm_within "$_safe_rm_n" "$_safe_rm_rn"; then
       _safe_rm_err "the root $_safe_rm_root is the home folder or above it"
       return 1
-      ;;
-    esac
+    fi
   fi
   # Every path is checked before any is removed: a refused call removes nothing.
   for _safe_rm_t in "$@"; do
