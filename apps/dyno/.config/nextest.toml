@@ -18,6 +18,9 @@ slow-timeout = { period = "30s", terminate-after = 6 }
 
 # CI: every failure reported, one retry that still fails the run (ER-12: flaky-result = "fail"), a JUnit report.
 [profile.ci]
+# ADR 0103 (D2): a test whose child still holds its output 500 ms after the test ended is reported as LEAK. Report-only (ER-41):
+# result = "pass" until the first green CI run with it on main, recorded here by run id; then "fail" (nextest 0.9.95 or later).
+leak-timeout = { period = "500ms", result = "pass" }
 fail-fast = false
 retries = 1
 flaky-result = "fail"

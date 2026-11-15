@@ -65,4 +65,6 @@ t allow "git rm unrelated + cat root" Bash command "git rm -q old.txt; cat $S/no
 t allow "ls root" Bash command "ls -la $S"
 t allow "empty input fields" Write file_path ""
 
+# The shared shell-forms corpus: every scanner bypass and false refusal found so far, judged by every guard.
+bash "$here/lib/shell-forms.sh" scratch-root-guard "$H" || fail=1
 exit $fail

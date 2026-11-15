@@ -37,7 +37,7 @@ changes here, every app's copy is updated in the same change.
    container of the user's, and Docker was down for about 15 minutes.
     Fixtures recorded from live APIs or CI are scrubbed of names, emails, avatars and hostnames at capture; a check fails on real-looking values (ER-14; 2026-11-12). Paddock's planned check C110 does this.
 8. **Every lesson goes into [lessons.md](lessons.md)**, every rule here; no `Co-Authored-By` or AI attribution anywhere.
-    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; running conformance on every change is planned (ER-41).
+    Hooks and gates are never bypassed: no `--no-verify`, `-n`, `LEFTHOOK=0` or `LEFTHOOK_EXCLUDE`; fix the failure or stop and report (ER-39; the worktree-guard refusal is planned; 2026-11-12). Generated files (SVGs, lockfiles, synced copies) are regenerated from their source, never hand-edited, and CI checks they match (ER-40). Checks run on every change that could bring in their class, not only when their own files change; conformance runs on every change: CI plans its job for every change (`conformance always runs` in `scripts/affected.mjs` and `./dev plan`), and the push gate runs the conformance row and the conformance tests on every push (ER-41; user, 2026-11-14).
 9. **Releases only from a tag in CI**, never from a local machine; a local build for the user to try is fine but is never
    published. Never tag a `[skip ci]` commit.
     A tag or landing counts only a complete CI run on that exact commit, not a skipped run, a failed-only rerun or an in-place retry; `./dev ci verdict` is the one reader (planned; ER-15; 2026-11-12).
@@ -214,10 +214,15 @@ changes here, every app's copy is updated in the same change.
     in parallel and bounded by the machine's load: `./dev check --pre-push` (the pre-push hook runs it): `cargo fmt --check`,
     clippy on the host and, for Windows, `cargo xwin clippy --target x86_64-pc-windows-msvc --workspace --all-targets -- -D warnings`
     (an import or helper used only by a unix-gated test is dead code there; ADR 0021, lessons.md "Windows-only assumptions in
-    tests"), conformance with ci.yml's own list, commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
+    tests"), conformance with ci.yml's own list and the conformance tests (`cd conformance && npm test`, both on every push, ER-41;
+    a flaky conformance test that blocks a push is fixed at once under ER-12, never skipped or bypassed, ER-39),
+    commit-lint (rule 50g) and lockfiles with `--locked`; when `crates/` or `.cargo/`
     changed, also CI's workspace Clippy on Linux in the CI image (`--cpus 4 --memory 12g`). A gate that cannot run (no Docker, no
-    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). Lint and type-check of the touched TS
-    files stay by hand until WP-3. Then dispatch with `./dev`
+    cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). It checks every commit the remote
+    lacks (`git rev-list <tip> --not --remotes`), measured from the nearest commit of the remote the push contains (the header says
+    which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other
+    agents has its own allowance of 30 min per push and is reported apart (ADR 0102 and its 2026-11-15 amendment). Lint and type-check of the touched
+    TS files stay by hand until WP-3. Then dispatch with `./dev`
     and, at the same time, run the slower local checks in parallel: the affected tests on the dev OS, the same tests in the
     `train3-linux-dev:1` container (CI limits, `ulimit -n 1024`) and timing-sensitive tests under load. Cap local builds
     (`CARGO_BUILD_JOBS=2`) while CI runners share the machine. If a local check fails, cancel that run at once through the Gitea
@@ -285,7 +290,9 @@ changes here, every app's copy is updated in the same change.
     membership, never by parent pids alone. Kills go through `paddock_proc` (`kill_tree`, `end`, `ask`, `terminate`,
     `Supervised`). Clippy's `disallowed-methods` (lint/clippy.toml: `libc::kill`, `libc::killpg`, nix's `kill`/`killpg`,
     sysinfo's `Process::kill`/`kill_with`) and conformance check C53 (`taskkill`, kill commands, `Stop-Process`,
-    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it. ADR
+    `TerminateProcess`, `TerminateJobObject`, open ADR 0033 follow-ups) enforce it; for an agent's own Bash commands the
+    blocking hook `.claude/hooks/kill-guard.sh` does, once it is wired in the main checkout's `.claude/settings.json` (`pkill`,
+    `killall`, `fuser -k`, `xargs kill` and a `kill` of a pid it cannot prove is the agent's own are refused). ADR
     [0033](adr/0033-processes-by-identity-never-by-a-bare-pid.md); ADR [0023](adr/0023-tests-never-free-a-port-they-probe.md)
     is the same rule for ports.
     A discovery file, a file that names a pid or a port (Dyno's `agent.json`), is only a hint: act on it only after a held

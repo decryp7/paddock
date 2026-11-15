@@ -361,7 +361,7 @@ do the tiers, shards and fingerprints cost and save?
   cache; query p50/p95/p99 per layer (name, keyword, vector, hybrid) over the 1,000 queries, warm and after a page-cache
   purge; recall@10 against the f32 ground truth; the number of embed calls in scenario 2 (proves fingerprints).
 - **Running it:** one heavy job through `scripts/heavy.sh` and the semaphore, `CARGO_BUILD_JOBS=2`, build before the
-  measuring window, data and targets on `/Volumes/d7sst7` (never under `~`), about 100 GB free disk needed
+  measuring window, data and targets on `<dev disk>` (never under `~`; dev-setup.md names the folders), about 100 GB free disk needed
   **(estimate)**; only when the 1-minute load is below 12 and no release is building (docs/benchmarks.md); indexing at the
   product's utility QoS, queries at normal level. Never during a release (ER-1).
 

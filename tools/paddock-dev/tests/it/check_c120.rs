@@ -20,7 +20,7 @@ process.stdout.write(JSON.stringify({ findings: r.findings, waived: r.waived, er
 "#;
 
 fn js(root: &Path) -> Value {
-    let out = paddock_proc::command("node")
+    let out = paddock_testkit::TestCommand::new("node")
         .args(["--input-type=module", "-e", DRIVER])
         .current_dir(repo())
         .env("C120_ROOT", root)
@@ -121,6 +121,19 @@ fn every_shape_gives_the_same_findings_in_both_hosts() {
         [3],
         "a file marker without a reason waives nothing"
     );
+    // A waiver that waives no site is a warning at the comment (ESLint's --report-unused-disable-directives): a file waiver with no
+    // covered guess, a site waiver whose guess is gone, one two lines above its guess (which stays reported); a used one is silent.
+    let mut unused = at("crates/a/src/c120_unused_waivers.rs");
+    unused.sort_unstable();
+    assert_eq!(unused, [1, 3, 8, 10], "{a}");
+    let said = |line: u64| {
+        a["findings"].as_array().unwrap().iter().any(|f| {
+            f["file"] == "crates/a/src/c120_unused_waivers.rs"
+                && f["line"] == line
+                && f["message"].as_str().unwrap().contains("waives no site")
+        })
+    };
+    assert!(said(1) && said(3) && said(8) && !said(10), "{a}");
 }
 
 #[test]

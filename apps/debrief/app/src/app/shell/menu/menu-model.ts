@@ -177,19 +177,29 @@ const SEP: SeparatorNode = { kind: 'separator' };
 
 type Part = MenuNode | null | undefined | false;
 
-/** Drops missing parts, empty submenus and groups, and leading, trailing and doubled separators. */
+/**
+ * Drops missing parts, empty submenus and groups, leading, trailing and doubled separators, and an item or submenu whose
+ * id this level already holds (the menu bar keys its rows by id; a second placement of a command is left out).
+ */
 export function tidy(parts: readonly Part[]): MenuNode[] {
   const out: MenuNode[] = [];
+  const ids = new Set<string>();
   for (const p of parts) {
-    if (!p) continue;
+    if (!p || ((p.kind === 'item' || p.kind === 'submenu') && ids.has(p.id))) continue;
     if (p.kind === 'separator') {
       if (out.length && out[out.length - 1]?.kind !== 'separator') out.push(p);
     } else if (p.kind === 'submenu') {
       const items = tidy(p.items);
-      if (items.length) out.push({ ...p, items });
+      if (items.length) {
+        ids.add(p.id);
+        out.push({ ...p, items });
+      }
     } else if (p.kind === 'group') {
       if (p.items.length) out.push(p);
-    } else out.push(p);
+    } else {
+      ids.add(p.id);
+      out.push(p);
+    }
   }
   while (out.length && out[out.length - 1]?.kind === 'separator') out.pop();
   return out;

@@ -32,4 +32,5 @@ toml.workspace = true
 zip.workspace = true
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 paddock-proc = { path = "../../../../crates/paddock-proc" }

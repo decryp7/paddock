@@ -5,10 +5,14 @@
 //! removed afterwards through `safe_remove` with the result printed. Inputs with uncommitted changes (a fix to heavy still in the
 //! working tree) are published as `heavy-dirty`, replaced by each such build. Any failure is a message with the
 //! cause and the next step; the caller turns it into "not measured" (ER-33).
+//! The cache, its hold and its prune are the tool cache's one mechanism ([`crate::tool_cache`]): a run starts its own hold, never
+//! the shared path.
 
 use crate::ci_tool::{ToolCall, tail};
 use crate::disk::record::{self, Kind, Record};
 use crate::input_hash::{self, Real};
+pub use crate::tool_cache::Held;
+use crate::tool_cache::{exe, home, touch};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -27,19 +31,6 @@ const PASS: &[&str] = &[
     "CC",
     "CXX",
 ];
-
-/// The cache folder: `PADDOCK_DEV_HOME`, else `~/.paddock-dev` (what `./dev` uses).
-fn home(env: &HashMap<String, String>) -> Result<PathBuf, String> {
-    match (env.get("PADDOCK_DEV_HOME"), env.get("HOME")) {
-        (Some(h), _) if !h.is_empty() => Ok(PathBuf::from(h)),
-        (_, Some(h)) if !h.is_empty() => Ok(Path::new(h).join(".paddock-dev")),
-        _ => Err("neither PADDOCK_DEV_HOME nor HOME is set, so there is no cache folder for the heavy tool".into()),
-    }
-}
-
-fn exe(name: &str) -> String {
-    if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
-}
 
 /// Whether `bin` runs and answers `--version` (an empty or cut-short file is not a tool).
 fn runs(bin: &Path, env: &HashMap<String, String>) -> bool {
@@ -69,10 +60,13 @@ pub fn ensure(root: &Path, env: &HashMap<String, String>, left: Duration) -> Res
     // A cached binary that fails its probe is not removed: a probe that timed out on a loaded machine is no proof the file is
     // broken, and another agent may be running it. The build below replaces it by an atomic rename, which leaves every running
     // copy and every hold intact.
-    if !h.dirty && cached.is_file() && runs(&cached, env) {
-        // A hit is use: `./dev`'s prune of `bin/` spares a folder used within a day (best effort; a miss costs a rebuild).
+    if !h.dirty && cached.is_file() {
+        // Use first, then the probe: the probe may take its whole 30 s on a loaded machine, and an entry marked as used only after it
+        // could be pruned meanwhile. `./dev`'s prune of `bin/` spares a folder used within a day (best effort; a miss costs a rebuild).
         touch(cached.parent().unwrap_or(&home));
-        return Ok(cached);
+        if runs(&cached, env) {
+            return Ok(cached);
+        }
     }
     if left.is_zero() {
         return Err(format!(
@@ -141,77 +135,6 @@ fn build(root: &Path, env: &HashMap<String, String>, target: &Path, key: &str, l
     Ok(built)
 }
 
-/// Marks `dir` as used now (its modification time), so an age-based prune keeps it. Errors are ignored: it is only a hint.
-fn touch(dir: &Path) {
-    let _ = std::fs::File::open(dir).and_then(|f| f.set_modified(std::time::SystemTime::now()));
-}
-
-/// A run's own hold on a cached `heavy`: a hard link (else a copy) under `<cache>/held/`, outside `bin/`, which `./dev` prunes
-/// and other agents' builds replace. A run resolves heavy once and starts it many times over minutes or hours; holding its own
-/// name means no other agent's prune, probe or publish can take it away between those starts (2026-11-14: six generators of
-/// one `gen check` found the shared binary gone). Removed when dropped.
-#[derive(Debug)]
-pub struct Held {
-    path: PathBuf,
-}
-
-impl Held {
-    /// The held binary: start this, never the shared cache path.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for Held {
-    fn drop(&mut self) {
-        // Our own unique name, made by `hold`: nothing else is removed (ER-14).
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-/// How old a hold must be before a later `hold` removes it as left behind by a run that was killed: no run lasts a week.
-const STALE_HOLD: Duration = Duration::from_secs(7 * 24 * 3600);
-
-/// Holds the cached binary `bin` for this run (see [`Held`]). `Err` is the whole explanation.
-pub fn hold(bin: &Path, env: &HashMap<String, String>) -> Result<Held, String> {
-    let dir = home(env)?.join("held");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot hold heavy: cannot make {}: {e}. Next: make it writable", dir.display()))?;
-    sweep(&dir);
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let path = dir.join(exe(&format!("heavy-{}-{nanos:x}", std::process::id())));
-    // A hard link costs nothing and keeps the file alive whatever happens to the cache's name; a copy where links do not work.
-    std::fs::hard_link(bin, &path)
-        .or_else(|_| std::fs::copy(bin, &path).map(|_| ()))
-        .map_err(|e| {
-            format!(
-                "cannot hold heavy: {} could not be linked or copied to {}: {e}. Next: run the command again (another agent may have replaced the cache at that moment)",
-                bin.display(),
-                path.display()
-            )
-        })?;
-    // ER-27: which binary this run starts, so a later "not found" names the hold, not the shared cache.
-    eprintln!("heavy: this run holds {} as {}", bin.display(), path.display());
-    Ok(Held { path })
-}
-
-/// Removes holds older than [`STALE_HOLD`] (a run that was killed before its hold was dropped).
-fn sweep(dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for e in entries.flatten() {
-        let old = e
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age > STALE_HOLD);
-        if old && e.file_name().to_string_lossy().starts_with("heavy-") {
-            let _ = std::fs::remove_file(e.path());
-        }
-    }
-}
-
 /// Publishes `built` as `bin` by an atomic rename from a name of our own beside it.
 fn publish(built: &Path, bin: &Path) -> Result<(), String> {
     let dir = bin.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -222,54 +145,47 @@ fn publish(built: &Path, bin: &Path) -> Result<(), String> {
         .map_err(|e| format!("cannot publish heavy into {}: {e}", dir.display()))
 }
 
-#[cfg(test)]
+/// Holds the cached `heavy` at `bin` for this run: the tool cache's one hold ([`crate::tool_cache::hold`]).
+pub fn hold(bin: &Path, env: &HashMap<String, String>) -> Result<Held, String> {
+    crate::tool_cache::hold("heavy", bin, env)
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    fn fake_heavy(home: &Path) -> PathBuf {
-        let dir = home.join("bin").join("heavy-abc");
-        std::fs::create_dir_all(&dir).unwrap();
-        let bin = dir.join(exe("heavy"));
-        std::fs::write(&bin, "#!/bin/sh\necho held\n").unwrap();
-        #[cfg(unix)]
+    #[test]
+    fn a_cache_hit_is_marked_as_used_before_its_probe_so_a_slow_or_failed_probe_cannot_let_the_prune_take_it() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let home = tempfile::tempdir().unwrap();
+        let mut env: HashMap<String, String> = std::env::vars().collect();
+        env.insert("PADDOCK_DEV_HOME".into(), home.path().display().to_string());
+        let lookup = |k: &str| env.get(k).cloned();
+        let vars: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let h = input_hash::compute_for(&Real, &lookup, &vars, &root, "tools/heavy").unwrap();
+        if h.dirty {
+            // An uncommitted tools/heavy has no cache entry to touch (it builds `heavy-dirty`): nothing to check on this tree.
+            eprintln!("tools/heavy has uncommitted changes; the cache-hit path is not reachable here");
+            return;
+        }
+        let entry = home.path().join("bin").join(format!("heavy-{}", h.hash));
+        std::fs::create_dir_all(&entry).unwrap();
+        let bin = entry.join(exe("heavy"));
+        // A probe that fails: `--version` prints nothing.
+        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        bin
-    }
-
-    #[test]
-    fn a_held_heavy_survives_another_agent_removing_or_replacing_the_cache() {
-        let home = tempfile::tempdir().unwrap();
-        let env = HashMap::from([("PADDOCK_DEV_HOME".to_string(), home.path().display().to_string())]);
-        let cached = fake_heavy(home.path());
-        let held = hold(&cached, &env).unwrap();
-        assert_ne!(held.path(), cached, "the run uses its own name, not the shared cache's");
+        let two_days = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
+        std::fs::File::open(&entry).unwrap().set_modified(two_days).unwrap();
+        // No budget left: ensure stops after the probe and builds nothing.
+        assert!(ensure(&root, &env, Duration::ZERO).is_err());
+        let age = std::fs::metadata(&entry).unwrap().modified().unwrap().elapsed().unwrap();
         assert!(
-            !held.path().starts_with(home.path().join("bin")),
-            "outside the folder `./dev` prunes"
+            age < Duration::from_secs(3600),
+            "the entry was marked as used before the probe (age {age:?})"
         );
-        // Another agent's `./dev` prunes the cache folder (or a failed `--version` probe removes the binary) mid-run.
-        std::fs::remove_dir_all(home.path().join("bin")).unwrap();
-        assert!(held.path().is_file(), "the held binary is still there for the later steps");
-        #[cfg(unix)]
-        {
-            let out = paddock_proc::command(held.path()).output().unwrap();
-            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "held");
-        }
-        // Dropping the hold removes the run's own name, and only it.
-        let path = held.path().to_path_buf();
-        drop(held);
-        assert!(!path.exists(), "the hold is removed when the run ends");
-        assert!(home.path().join("held").is_dir());
-    }
-
-    #[test]
-    fn a_missing_cached_binary_cannot_be_held_and_says_why() {
-        let home = tempfile::tempdir().unwrap();
-        let env = HashMap::from([("PADDOCK_DEV_HOME".to_string(), home.path().display().to_string())]);
-        let why = hold(&home.path().join("bin/heavy-x/heavy"), &env).err().unwrap();
-        assert!(why.contains("cannot hold heavy") && why.contains("Next:"), "{why}");
+        assert!(bin.is_file(), "and the binary that failed its probe is not removed");
     }
 }

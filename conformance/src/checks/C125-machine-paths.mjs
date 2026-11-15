@@ -9,18 +9,21 @@
 // placeholders, not paths; a letter, digit, `_`, `.` or `~` right before it, as in `/System/Volumes/Data`, makes it part of
 // another path) in every text file of the tree. One finding per literal.
 // Not read:
-// - documents that record history, listed by path in the `history` array of `conformance/c125-allow.json`, each with a reason. They say
-//   what was true when they were written (a lesson, a benchmark, an ADR, a research note, a dated plan); rewriting their paths would
-//   falsify the record, and no tool reads a path from them. Skipped rather than allowed site by site: their count is not a ratchet,
-//   they only ever grow. A history entry that names no file is stale (a warning).
-// - the check's own files (its sources, tests and allow list name the pattern).
-// Allowed: one entry per site in the `allow` array of the same file: a `path`, a `site` (a piece of the flagged literal), a `reason`
-// and a `count` (default 1). An entry that matches fewer literals than its count is stale and one that matches more is ambiguous:
-// both are warnings. The allow list has the shape of `conformance/src/util/allow-list.mjs` (fix/allow-list-helper, the train 11
-// integrator's branch, not on the remote when this was written); `AllowList` below moves onto that helper once it lands.
+// - Markdown documents that record history, listed by path in the `history` array of `conformance/c125-allow.json`, each with a reason
+//   (lessons, benchmarks, ADRs, audits, research notes). They say what was true when they were written; rewriting their paths would
+//   falsify the record, and no tool reads a path from them. Only `.md` files are covered (a script or raw result beside them is read),
+//   and their literals are counted, not reported: an entry that skipped no `/Volumes/` literal is stale (a warning). Dated plans are
+//   not history: they are followed, so they are read.
+// - the checkout's own `.git` file and owner note, and the check's own files (its sources, tests and allow list name the pattern).
+// Allowed: per-site entries in the `allow` array of the same file, read by the shared allow list (conformance/src/util/allow-list.mjs):
+// a `path`, a `site` and a `reason`, with a `count` (default 1). A site names a path by whole components: `/Volumes/Data` allows
+// `/Volumes/Data` and `/Volumes/Data/x`, never `/Volumes/Database`. A literal beyond the count of the entries that name it is reported
+// at its own line; an entry that matches fewer literals than its count is stale. A file that cannot be read is not measured (an
+// error finding at that file), and an allow file that cannot be read makes the check broken (one finding, nothing else).
 // Report-only (warnings) until its first green run on the real tree is recorded here (ER-41). Recorded: not yet.
 // Rust host: tools/paddock-dev/src/check/c125.rs (same findings, line for line).
-import { unwaivable, warn } from '../finding.mjs';
+import { error, unwaivable, warn } from '../finding.mjs';
+import { AllowList, parseAllowList } from '../util/allow-list.mjs';
 
 export const ALLOW = 'conformance/c125-allow.json';
 /** The check's own files: they name the pattern. */
@@ -38,6 +41,8 @@ const BINARY = /\.(?:png|jpe?g|gif|ico|icns|webp|bmp|tiff?|pdf|zip|gz|tgz|xz|zst
 // A `/` may be escaped (`\/`, a regular expression literal): the finding names the path unescaped.
 const LITERAL = /\\?\/Volumes\\?\/[A-Za-z0-9][A-Za-z0-9_.+@-]*(?:\\?\/[A-Za-z0-9_.+@-]*)*/g;
 const BEFORE = /[A-Za-z0-9_.~]/;
+const BROKEN_FIX = 'Restore conformance/c125-allow.json: {"history": [{"path": "...", "reason": "..."}], "allow": [{"path": "...", "site": "...", "reason": "...", "count": 1}]}.';
+const UNREAD_FIX = 'Make the file readable (permissions) and run the check again.';
 const FIX = 'Derive the folder (git, `paddock.worktreeRoot`, an environment variable or a setting) and fail closed when it cannot; invented test data and documents that must name a disk get an entry in conformance/c125-allow.json with a reason.';
 
 /** [{ line, literal }] of every machine disk path in `text`. */
@@ -69,68 +74,21 @@ export function globRegExp(pattern) {
   return new RegExp(`^${src}${pattern.endsWith('/') ? '.*' : ''}$`);
 }
 
-/** The allow file's two lists: `history` [{ path, reason, re }] and `allow` [{ path, site, reason, count }], or throws why it cannot be read. */
+/** Whether the allow `site` names `literal` by whole path components. */
+export const namesPath = (site, literal) => literal === site || literal.startsWith(site.endsWith('/') ? site : `${site}/`);
+
+/** The allow file's two lists: `history` [{ path, reason, re }] and `allow` (the shared allow list's entries), or throws why it cannot be read. */
 export function parseAllow(text) {
-  let v;
-  try {
-    v = JSON.parse(text);
-  } catch (e) {
-    throw new Error(`${ALLOW} is not JSON: ${e.message}`);
-  }
-  if (!Array.isArray(v?.allow) || !Array.isArray(v?.history)) throw new Error(`${ALLOW} needs a \`history\` and an \`allow\` array`);
-  const reasonOf = (e) => (typeof e?.reason === 'string' ? e.reason.trim() : '');
+  const allow = parseAllowList(text, ALLOW);
+  const v = JSON.parse(text);
+  if (!Array.isArray(v?.history)) throw new Error(`${ALLOW} has no \`history\` array`);
   const history = v.history.map((e) => {
     const path = typeof e?.path === 'string' ? e.path : '';
-    if (!path || [...reasonOf(e)].length < 8) throw new Error(`${ALLOW}: every history entry needs a path and a reason of at least 8 characters`);
-    return { path, reason: reasonOf(e), re: globRegExp(path) };
-  });
-  const allow = v.allow.map((e) => {
-    const path = typeof e?.path === 'string' ? e.path : '';
-    const site = typeof e?.site === 'string' ? e.site.trim() : '';
-    const count = e?.count === undefined ? 1 : e.count;
-    if (!path || !site || [...reasonOf(e)].length < 8) {
-      throw new Error(`${ALLOW}: every entry needs a path, a site (a piece of the flagged path) and a reason of at least 8 characters`);
-    }
-    if (!Number.isInteger(count) || count < 1) throw new Error(`${ALLOW}: \`count\` (${path}: ${site}) is a whole number of at least 1`);
-    return { path, site, reason: reasonOf(e), count };
+    const reason = typeof e?.reason === 'string' ? e.reason.trim() : '';
+    if (!path || [...reason].length < 8) throw new Error(`${ALLOW}: every history entry needs a path and a reason of at least 8 characters`);
+    return { path, reason, re: globRegExp(path) };
   });
   return { history, allow };
-}
-
-/** The allow list of one run (the shape of fix/allow-list-helper's `AllowList`, which replaces it when it lands). */
-export class AllowList {
-  constructor(file, entries) {
-    this.file = file;
-    this.entries = entries;
-    this.hits = entries.map(() => 0);
-  }
-
-  /** Whether an entry names the site at `path` whose text is `text`; every entry that does counts the site. */
-  allows(path, text) {
-    let named = false;
-    this.entries.forEach((a, i) => {
-      if (a.path === path && text.includes(a.site)) {
-        this.hits[i]++;
-        named = true;
-      }
-    });
-    return named;
-  }
-
-  /** The warnings for entries that matched another number of sites than their count; `looked(path)`: the run read it or it does not exist. */
-  warnings(id, rule, looked) {
-    const out = [];
-    this.entries.forEach((a, i) => {
-      const hits = this.hits[i];
-      if (hits > a.count) {
-        out.push(warn(id, rule, this.file, 1, `ambiguous allow entry (${a.path}: ${a.site}) matches ${hits} sites`, a.count > 1 ? `Lengthen its \`site\`, or raise its \`count\` to ${hits} if every one is meant.` : 'Lengthen its `site` so it names one line.'));
-      } else if (hits < a.count && looked(a.path)) {
-        const what = hits === 0 ? 'matches no site' : `matches only ${hits} of its ${a.count} sites`;
-        out.push(warn(id, rule, this.file, 1, `stale allow entry (${a.path}: ${a.site}) ${what}`, hits === 0 ? `Remove it from ${this.file}.` : `Lower its \`count\` to ${hits}.`));
-      }
-    });
-    return out;
-  }
 }
 
 export default {
@@ -146,7 +104,7 @@ export default {
       if (raw === null || raw === undefined) throw new Error(`${ALLOW} cannot be read`);
       lists = parseAllow(raw);
     } catch (e) {
-      return [unwaivable(warn('C125', 40, ALLOW, 1, `the check cannot look: ${e.message}`, 'Restore conformance/c125-allow.json: {"history": [{"path": "...", "reason": "..."}], "allow": [{"path": "...", "site": "...", "reason": "...", "count": 1}]}.'), 'check-broken')];
+      return [unwaivable(warn('C125', 40, ALLOW, 1, `the check cannot look: ${e.message}`, BROKEN_FIX), 'check-broken')];
     }
     const allow = new AllowList(ALLOW, lists.allow);
     const historyHits = lists.history.map(() => 0);
@@ -154,21 +112,30 @@ export default {
     const scanned = new Set();
     for (const f of ctx.files()) {
       if (IMPLEMENTATION.has(f) || CHECKOUT.has(f) || BINARY.test(f)) continue;
-      const h = lists.history.findIndex((e) => e.re.test(f));
-      if (h >= 0) {
-        historyHits[h]++;
+      const h = f.endsWith('.md') ? lists.history.findIndex((e) => e.re.test(f)) : -1;
+      const text = ctx.read(f);
+      if (text === null || text === undefined) {
+        out.push(unwaivable(error('C125', 40, f, 1, `not measured: ${f} could not be read, so a disk path in it cannot be seen`, UNREAD_FIX), 'not-measured'));
         continue;
       }
-      const text = ctx.read(f);
-      if (text === null || text === undefined || text.includes('\0')) continue;
+      if (text.includes('\0')) continue;
       scanned.add(f);
       for (const { line, literal } of machinePaths(text)) {
-        if (allow.allows(f, literal)) continue;
-        out.push(warn('C125', 40, f, line, `hard-codes the machine disk path \`${literal}\`: it goes stale when the disk is renamed or replaced`, FIX));
+        if (h >= 0) {
+          historyHits[h]++;
+          continue;
+        }
+        const said = allow.admit(f, (site) => namesPath(site, literal));
+        if (said === 'allowed') continue;
+        out.push(
+          said === 'beyond'
+            ? warn('C125', 40, f, line, `hard-codes the machine disk path \`${literal}\` beyond the count of its allow entry`, `Derive it, or raise the entry's \`count\` in ${ALLOW} if it is invented data too.`)
+            : warn('C125', 40, f, line, `hard-codes the machine disk path \`${literal}\`: it goes stale when the disk is renamed or replaced`, FIX),
+        );
       }
     }
     lists.history.forEach((e, i) => {
-      if (historyHits[i] === 0) out.push(warn('C125', 40, ALLOW, 1, `stale history entry (${e.path}) names no file`, `Remove it from ${ALLOW}.`));
+      if (historyHits[i] === 0) out.push(warn('C125', 40, ALLOW, 1, `stale history entry (${e.path}) skipped no disk path`, `Remove it from ${ALLOW}.`));
     });
     const looked = (path) => scanned.has(path) || ctx.read(path) === null || ctx.read(path) === undefined;
     return [...out, ...allow.warnings('C125', 40, looked)];

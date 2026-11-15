@@ -5,7 +5,8 @@
 #   paddock-ci-verify [--manifest FILE]
 #
 # Expected values come from the environment the Dockerfile sets: EXPECT_NODE_MAJOR, EXPECT_SCCACHE, EXPECT_CHROME,
-# EXPECT_RUST (the rustc version), EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK, EXPECT_DRAWIO. An expectation that is not set is not checked.
+# EXPECT_RUST (the rustc version), EXPECT_PLAYWRIGHT, EXPECT_DUCKDB, EXPECT_SHELLCHECK, EXPECT_DRAWIO, EXPECT_NEXTEST, EXPECT_LLVM_COV,
+# EXPECT_DENY (the last three set only by garage-arm64.Dockerfile). An expectation that is not set is not checked.
 set -uo pipefail
 
 manifest=/etc/paddock-ci-release
@@ -35,8 +36,14 @@ fi
 tool cargo cargo --version
 tool rustfmt rustfmt --version
 tool cargo-clippy cargo clippy --version
+# garage's cargo tools: checked against a pin only where the image sets one (the local arm64 stand-in, garage-arm64.Dockerfile).
 for t in nextest llvm-cov deny hakari machete; do
-  tool "cargo-$t" cargo "$t" --version
+  if tool "cargo-$t" cargo "$t" --version; then
+    case $t in nextest) want=${EXPECT_NEXTEST:-} ;; llvm-cov) want=${EXPECT_LLVM_COV:-} ;; deny) want=${EXPECT_DENY:-} ;; *) want= ;; esac
+    if [ -n "$want" ]; then
+      case "$OUT " in *" $want "*) ;; *) bad "cargo-$t is '$OUT', the image pins $want" ;; esac
+    fi
+  fi
 done
 command -v xvfb-run >/dev/null 2>&1 && note "xvfb-run: present" || bad "xvfb-run (xvfb) is missing"
 pkg-config --exists webkit2gtk-4.1 2>/dev/null && note "webkit2gtk-4.1: $(pkg-config --modversion webkit2gtk-4.1)" || bad "webkit2gtk-4.1 (Tauri's Linux libraries) is missing"

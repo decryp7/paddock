@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-testkit`: `TestCommand`, check C123
+- New `paddock_testkit::TestCommand`: a `Command` that starts from an empty environment plus an allow-list (`process::allowed_names()`), with a private `HOME` and temp folder, a curated `PATH` and `path_first`, `cargo_target_dir` and `into_parts`. Every test that starts `./dev`, `cargo` or `node` uses it (ADR 0100); check C123 (report-only) flags any other way.
+- `paddock-dev`: a named `ENGINEERING_RULES` is the only place the sibling `heavy.sh` lookup reads.
+
 ### `@decryp7/paddock-ui`: `shell/contributions`, the contribution registry without the root or Material
 - New entry `@decryp7/paddock-ui/shell/contributions`: `define*`, `provideContributions`, `provideContributionKinds`, `SHELL_CONTRIBUTIONS`, the
   registry, `ShellContext`, the command service, the keys, `msg` and the lazy parts. It imports neither `@decryp7/paddock-ui` nor

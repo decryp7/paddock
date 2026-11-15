@@ -16,6 +16,10 @@ set -eu
 restarted=${PADDOCK_DEV_RESTARTED:-}
 unset PADDOCK_DEV_RESTARTED
 
+# A git hook runs its commands with GIT_DIR (and GIT_WORK_TREE) set; inherited, they make `--show-toplevel` answer the
+# folder the hook runs in, or name another repository. The repository is the one this folder is in, for the wrapper and the tool.
+unset GIT_DIR GIT_WORK_TREE
+
 # run_bounded <seconds> <command...>: runs it in the background and ends it at the limit (ER-32: no wait without a maximum). The
 # command is ended by the pid this function started, never by a name.
 run_bounded() {
@@ -497,6 +501,40 @@ restart_or_fail() {
   exit 1
 }
 
+# The tool cache (`$home/bin`, `$home/bin-source`) holds every cached tool: paddock-dev's entries (`<hash>/paddock-dev-<host>`) and
+# those paddock-dev builds itself (`heavy-<hash>/heavy`, tools/paddock-dev/src/tool_cache.rs). One policy for all of them:
+#  - each tool keeps its five newest entries (a tool is the name of the file an entry holds, so heavy's never count as ours);
+#  - an entry used within the last day is never removed: a job on the same mount (several runners share a host's tools folder)
+#    runs it again at its end, when its temp folder is already gone and a rebuild cannot work (run 7773, job-isolation release),
+#    and every hit touches its entry;
+#  - an entry a run holds is never removed: a hold is a hard link under `$home/held/` (tool_cache::hold), so a file with more
+#    than one link is in use (2026-11-14: heavy vanished in the middle of a train-10 `gen check`).
+# Only paddock-dev's own entries take their legacy build folders (`target-<hash>`) with them.
+# cache_tool <entry>: the tool an entry holds (the first file whose name does not start with a dot; a temp copy sorts after it).
+# shellcheck disable=SC2012 # entry and tool names are hashes and tool names, never with spaces or newlines
+cache_tool() { ls "$1" 2>/dev/null | head -n 1; }
+prune_cache() {
+  _root=$1
+  [ -d "$_root" ] || return 0
+  # shellcheck disable=SC2012 # as above; ls -t is the portable newest-first order
+  ls -t "$_root" | while IFS= read -r _e; do
+    # `/` separates the fields: it is in no file name, and unlike a tab it keeps an empty tool (an empty folder) a field of its own.
+    [ -d "$_root/$_e" ] && printf '%s/%s\n' "$(cache_tool "$_root/$_e")" "$_e"
+  done | awk -F / '++n[$1] > 5 { print $1 "/" $2 }' | while IFS=/ read -r _tool _old; do
+    [ -n "$_old" ] || continue
+    _d=$_root/$_old
+    [ -n "$(find "$_d" -maxdepth 0 -mmin +1440 2>/dev/null)" ] || continue
+    if [ -n "$(find "$_d" -type f -links +1 2>/dev/null | head -n 1)" ]; then
+      echo "dev: kept the cached tool $_d although it is past the five newest: a run holds it (a hard link under $home/held)." >&2
+      continue
+    fi
+    rm -rf "${_d:?}" || true
+    case $_tool in
+      "$name"*) [ -d "$home/bin/$_old" ] || [ -d "$home/bin-source/$_old" ] || rm -rf "${home:?}/target-$_old" "${home:?}/target-$_old".* || true ;;
+    esac
+  done
+}
+
 if [ "${PADDOCK_DEV_FRESH:-}" = 1 ]; then
   refuse_build_target
   fresh=$(mktemp -d)
@@ -521,12 +559,15 @@ if [ -n "$dirty" ]; then
 fi
 
 cache="$home/$binroot/$hash"
-# A cached binary must run: an empty or damaged file (a copy that was cut short) is removed and rebuilt.
+# A cached binary must run: an empty or damaged file (a copy that was cut short) is rebuilt. It is never removed first: the rebuild
+# replaces it by an atomic rename, and a failed probe is no proof (a slow `--version` on a loaded machine), while another run may
+# have pinned this path (`--print-binary`) or be about to start it.
+stale=
 if [ -e "$cache/$name" ] && ! runs "$cache/$name"; then
   echo "dev: the cached tool binary $cache/$name does not run; rebuilding it." >&2
-  rm -f "$cache/$name"
+  stale=1
 fi
-if [ ! -x "$cache/$name" ]; then
+if [ -n "$stale" ] || [ ! -x "$cache/$name" ]; then
   fetched=
   if download_enabled && download_prebuilt; then fetched=1; fi
   if [ -z "$fetched" ]; then
@@ -576,15 +617,7 @@ if [ ! -x "$cache/$name" ]; then
     fi
     echo "dev: built paddock-dev $hash in $(($(date +%s) - _b0)) s (not downloaded)." >&2
   fi
-  # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A tool used within the last
-  # day is never removed: a job on the same mount (several runners share a host's tools folder) runs it again at its end, when its
-  # temp folder is already gone and a rebuild cannot work (run 7773, job-isolation release).
-  ls -t "$home/$binroot" | tail -n +6 | while IFS= read -r old; do
-    if [ -n "$(find "$home/$binroot/$old" -maxdepth 0 -mmin +1440 2>/dev/null)" ]; then
-      rm -rf "${home:?}/$binroot/$old" || true
-      [ -d "$home/bin/$old" ] || [ -d "$home/bin-source/$old" ] || rm -rf "${home:?}/target-$old" "${home:?}/target-$old".* || true
-    fi
-  done
+  prune_cache "$home/$binroot"
   # Build folders of compilers no longer installed go a week after their last build (each build touches its own folder). A build
   # is never judged by the age of a folder: the folder of the compiler in use is never removed, and nothing else is built in a
   # `rustc-*` folder of another compiler by this wrapper. Legacy per-hash folders (`target-<hash>.*`, an earlier wrapper) go

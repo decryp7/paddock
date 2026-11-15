@@ -1,0 +1,28 @@
+# The garage image ci-image/Dockerfile builds on (its GARAGE_IMAGE ARG), as captured on 2026-11-15. garage-arm64.Dockerfile, the
+# local arm64 stand-in, must match it (scripts/ci-image.test.mjs). Recapture after a GARAGE_IMAGE change:
+#   (head -n 10 ci-image/garage-release.txt; docker run --rm --platform linux/amd64 <GARAGE_IMAGE> cat /etc/garage-release) > new
+# then update the image and base lines below; the base is the catthehacker tag whose layers garage's first six layers are
+# (amd64 manifest sha256:4f2d5083a9d10d018c1c511eb8665cd480553c11975e78fd903a46daa830768b, checked layer by layer on 2026-11-15).
+#
+# image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+# base: catthehacker/ubuntu:act-24.04-20260815
+# base-arm64: sha256:84e94c96278dd26b8feb71226a521d259f8160cf6b1dd08e51fd42be43a82e56
+#
+garage image built 2026-10-23T03:02:27Z from Ubuntu 24.04.4 LTS
+node v24.19.0
+npm 11.17.0
+pnpm 12.15.0
+bun 1.4.4
+go go1.22.2
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+cargo 1.99.1 (5f94df478 2026-08-27)
+cargo-nextest cargo-nextest 0.9.149 (3fe4ef319 2026-10-20)
+cargo-llvm-cov cargo-llvm-cov 0.9.1
+cargo-deny 0.20.2
+git-cliff git-cliff 2.14.2
+cargo-mutants 27.1.0
+cargo-fuzz cargo-fuzz 0.13.2
+cargo-cyclonedx-cyclonedx 0.5.9
+tauri-driver 2.1.0
+sccache 0.18.0
+playwright 1.64.1 in /ms-playwright

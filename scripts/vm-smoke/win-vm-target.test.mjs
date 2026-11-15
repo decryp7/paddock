@@ -30,7 +30,14 @@ test('the target is the one test VM under the derived vm-data folder, and its .v
 test('the folder comes from the repository\'s own ./dev places --pinned, and its refusal is passed on', () => {
   const calls = [];
   const run = (prog, args, opts) => { calls.push([prog, args, opts]); return '/srv/disk-b/vm-data\n'; };
-  assert.equal(devPlace('vm-data', { pinned: true, run }), '/srv/disk-b/vm-data');
+  // The test sets the variables it judges: CI's jobs set CARGO_BUILD_JOBS, which devEnv() passes on, so they are cleared here.
+  const withEnv = (vars, fn) => {
+    const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+    for (const [k, v] of Object.entries(vars)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    try { return fn(); } finally { for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  };
+  const unset = { CARGO_BUILD_JOBS: undefined, RUSTUP_HOME: undefined, CARGO_HOME: undefined, RUSTUP_TOOLCHAIN: undefined };
+  assert.equal(withEnv(unset, () => devPlace('vm-data', { pinned: true, run })), '/srv/disk-b/vm-data');
   assert.match(calls[0][0], /\/dev$/);
   assert.deepEqual(calls[0][1].filter((a) => !a.startsWith('/')), ['places', '--get', 'vm-data', '--repo', '--pinned']);
   // ./dev finds its toolchain the way it does for the caller (CI's cargo is not under $HOME/.cargo/bin), so PATH and the rest of the

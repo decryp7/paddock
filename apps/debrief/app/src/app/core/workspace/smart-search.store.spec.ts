@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideTinyBackendBare, query, settle, testLogger, tinyBackend, settleUntil } from '../../../testing/helpers';
 import { MockBackend } from '../mock/mock-backend';
+import { withMockFailures } from '../mock/mock-failures';
 import { QueryStore, TEXT_DEBOUNCE_MS } from './query.store';
 import { isWordSearch, SmartSearchStore } from './smart-search.store';
 import { WorkspaceDataStore } from './workspace-data.store';
@@ -59,7 +60,7 @@ describe('SmartSearchStore', () => {
   });
 
   it('a failed scan keeps the word matches and logs only the error code', async () => {
-    const backend = tinyBackend({ fail: { searchPartial: 1 } });
+    const backend = withMockFailures(tinyBackend(), { latency: false, fail: { searchPartial: 1 } });
     const { smart, q } = setup(backend);
     await settle();
     q.patchQuery({ text: 'imeout', textMode: 'words' });

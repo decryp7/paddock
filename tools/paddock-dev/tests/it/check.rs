@@ -10,6 +10,7 @@
 use paddock_dev::check::mask::mask_rust;
 use paddock_dev::check::tree::Tree;
 use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
+use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -48,7 +49,7 @@ pub(crate) fn skip(reason: &str) {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 pub(crate) fn has_node() -> bool {
-    Command::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
+    TestCommand::new("node").arg("--version").output().is_ok_and(|o| o.status.success())
 }
 
 /// The fixture cases materialized into a scratch tree (`a__b__c.rs.txt` is `a/b/c.rs`).
@@ -145,7 +146,7 @@ fn fixture_masks_equal_the_recorded_js_masks() {
 )]
 /// Runs a node program (an ES module given on the command line) in the repository and returns its standard output.
 pub(crate) fn node(driver: &str, env: &[(&str, String)]) -> String {
-    let mut c = Command::new("node");
+    let mut c = TestCommand::new("node");
     c.args(["--input-type=module", "-e", driver]).current_dir(repo_root());
     // The parity runs measure growth against `origin/main` of their own repository, whatever the caller's environment says.
     c.env_remove("PADDOCK_BASE_REF");
@@ -172,7 +173,7 @@ pub(crate) const LIVE_STALL: std::time::Duration = std::time::Duration::from_sec
 /// around the call.
 pub(crate) fn node_ticking(driver: &str, env: &[(&str, String)], progress: &paddock_testkit::Progress) -> String {
     use std::io::{BufRead, Read};
-    let mut c = Command::new("node");
+    let mut c = TestCommand::new("node");
     c.args(["--input-type=module", "-e", driver])
         .current_dir(repo_root())
         .stdout(std::process::Stdio::piped())
@@ -477,7 +478,7 @@ fn the_report_has_the_js_shape_and_the_run_records() {
     reason = "a test spawns node, git or the built binary; it ends them itself"
 )]
 fn dev(args: &[&str]) -> (i32, String, String) {
-    let o = Command::new(env!("CARGO_BIN_EXE_paddock-dev")).args(args).output().unwrap();
+    let o = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev")).args(args).output().unwrap();
     (
         o.status.code().unwrap(),
         String::from_utf8_lossy(&o.stdout).into_owned(),
@@ -1153,7 +1154,7 @@ fn c121_tree() -> tempfile::TempDir {
     let files: &[(&str, &str)] = &[
         (
             "conformance/c121-allow.json",
-            "{\"allow\":[{\"path\":\"conformance/test/\",\"reason\":\"tests of checks of workflows\"},{\"path\":\"scripts/ok.test.mjs\",\"reason\":\"reads a workflow as its subject\"}]}",
+            "{\"allow\":[{\"path\":\"conformance/test/x.test.mjs\",\"site\":\"a.match(/x/)\",\"reason\":\"tests of checks of workflows\"},{\"path\":\"scripts/ok.test.mjs\",\"site\":\"sed .gitea/workflows/ci.yml\",\"reason\":\"reads a workflow as its subject\",\"count\":2},{\"path\":\"scripts/gone.test.mjs\",\"site\":\"grep\",\"reason\":\"a stale entry\"}]}",
         ),
         (
             "docs/a.toml",
@@ -1183,7 +1184,11 @@ fn c121_tree() -> tempfile::TempDir {
             "conformance/test/x.test.mjs",
             "const t = a.match(/x/); // .gitea/workflows/ci.yml\n",
         ),
-        ("scripts/ok.test.mjs", "sed .gitea/workflows/ci.yml\n"),
+        // two identical sites, one entry with `count: 2`; a third, other site in the same file is still reported
+        (
+            "scripts/ok.test.mjs",
+            "sed .gitea/workflows/ci.yml\nsed .gitea/workflows/ci.yml\ngrep x .gitea/workflows/ci.yml\n",
+        ),
         (
             "scripts/bad.test.mjs",
             "const r = new RegExp(\"x\").test(readFileSync('.gitea/workflows/ci.yml'));\nconst m = t.matchAll(/x/g); // workflows/ci.yml\n",
@@ -1231,12 +1236,19 @@ fn c121_flags_the_shapes_it_names_and_only_as_warnings() {
             ("docs/c.toml".to_string(), 1),
             ("scripts/bad.test.mjs".to_string(), 1),
             ("scripts/bad.test.mjs".to_string(), 2),
+            ("scripts/ok.test.mjs".to_string(), 3),
             ("tools/t/src/tests.rs".to_string(), 1),
             ("tools/t/tests/it/a.rs".to_string(), 2),
+            // the entry for a file that is gone is stale
+            ("conformance/c121-allow.json".to_string(), 1),
         ]
     );
+    assert!(r.findings.iter().any(|f| {
+        f.message
+            .contains("stale allow entry (scripts/gone.test.mjs: grep) matches no site")
+    }));
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
-    assert_eq!(r.warnings(), 7);
+    assert_eq!(r.warnings(), 9);
 }
 
 #[test]
@@ -1280,7 +1292,11 @@ fn c124_tree() -> tempfile::TempDir {
             "conformance/c124-allow.json",
             "{\"allow\":[{\"path\":\"tools/paddock-dev/src/ok.rs\",\"site\":\"NotMeasured\",\"reason\":\"the seed, shrink only\"},{\"path\":\"tools/paddock-dev/src/gone.rs\",\"site\":\"x\",\"reason\":\"a stale entry\"},{\"path\":\"tools/paddock-dev/src/two.rs\",\"site\":\"Clean,\",\"reason\":\"an ambiguous entry\"}]}",
         ),
-        ("tools/paddock-dev/src/two.rs", "enum A {\n    Clean,\n}\nenum B {\n    Clean,\n}\n"),
+        // two result enums with the same `Clean,` line (an ambiguous entry), and a phase enum whose `Clean` is no result
+        (
+            "tools/paddock-dev/src/two.rs",
+            "enum A {\n    Clean,\n    Failed,\n}\nenum B {\n    Clean,\n    Stale,\n}\nenum PhaseId {\n    Resolve,\n    Clean,\n}\n",
+        ),
         (
             "tools/paddock-dev/src/a.rs",
             "pub enum V {\n    Green { run: u64 },\n    NotMeasured(String),\n}\n",

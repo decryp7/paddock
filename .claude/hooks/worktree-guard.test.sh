@@ -209,4 +209,7 @@ expect "agent git config --list (a lookup)" allow agent "$WT" "git config --list
 expect "agent git config -l --show-origin (a lookup)" allow agent "$WT" "git config -l --show-origin"
 expect "agent git config list (a lookup)" allow agent "$WT" "git config list"
 expect "coordinator git config paddock.worktreeRoot <v>" allow coord "$MAIN" "git config paddock.worktreeRoot /srv/x/wt"
+
+# The shared shell-forms corpus: every scanner bypass and false refusal found so far, judged by every guard.
+bash "$here/lib/shell-forms.sh" worktree-guard "$H" || fail=1
 exit $fail

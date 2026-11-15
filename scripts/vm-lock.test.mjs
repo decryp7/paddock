@@ -7,11 +7,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, afterEach, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { endHolders, warmDev } from './vm-test-support.mjs';
+import { waitProgressing } from './test-kit.mjs';
+import { endHolders, fileReaper, running, warmDev } from './vm-test-support.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const LIB = join(here, 'vm-lock.sh');
-const scratch = mkdtempSync(join(process.env.PADDOCK_TEST_SCRATCH ?? tmpdir(), 'vm-lock-test-'));
+// ADR 0103: the file's reaper first, then its scratch folder (one the reaper made), so what the file leaves running is provably its own.
+const { reaper, scratch } = fileReaper('vm-lock.test.mjs', mkdtempSync(join(process.env.PADDOCK_TEST_SCRATCH ?? tmpdir(), 'vm-lock-test-')));
 /** The paddock-dev program the lock runs (PADDOCK_DEV): the cached binary, or ./dev when its inputs have uncommitted changes. */
 let DEV = join(here, '..', 'dev');
 before(() => { DEV = warmDev(); });
@@ -22,7 +24,13 @@ const guardHolders = async () => {
   assert.deepEqual(killed, [], 'a slot holder ignored the removal of its owner folder and had to be killed');
 };
 afterEach(guardHolders);
-after(async () => { await guardHolders(); rmSync(scratch, { recursive: true, force: true }); });
+after(async () => {
+  await guardHolders();
+  // ADR 0103: anything else this file started (a fake ssh, a script a test did not end) ends here, and fails it.
+  const left = await reaper.reap();
+  rmSync(dirname(scratch), { recursive: true, force: true });
+  assert.deepEqual(left, [], 'a process started under the scratch folder outlived its test');
+});
 
 /** A holder's body: it waits until its process group is killed, never for a fixed time (a slow machine must not outlast it, ER-12). */
 const FOREVER = 'while :; do sleep 0.2; done';
@@ -47,11 +55,8 @@ const bash = (script, env) => {
   return r;
 };
 const lines = (f) => (existsSync(f) ? readFileSync(f, 'utf8').trim().split('\n') : []);
-/** Polls `cond` every 100 ms until it holds; the bound only stops a hung child, so the verdict never depends on the time taken. */
-const until = async (cond) => {
-  for (let i = 0; i < 150 && !cond(); i++) await new Promise((r) => setTimeout(r, 100)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a hung child
-  return cond();
-};
+/** Waits until `cond` holds (the kit's backing-off poll, ADR 0103); the 15 s bound only stops a hung child, so the verdict never depends on the time taken. */
+const until = (cond) => waitProgressing('a condition of the lock test', cond, { noProgressMs: 15_000 }).then(() => true, () => cond());
 
 test('a second acquirer fails at once with ::error naming the holder (pid, start time) and the next step', async () => {
   const t = fresh();
@@ -271,9 +276,8 @@ test('ER-14: a holder killed by its test leaves no `slot hold` process once the 
   const holder = Number(readFileSync(join(t.root, 'slots', 's1.owner'), 'utf8').match(/^pid=(\d+)$/m)?.[1]);
   assert.ok(holder > 0, 'the slot names its holder process');
   await h.stop();
-  let alive = true;
-  try { process.kill(holder, 0); } catch { alive = false; }
-  assert.equal(alive, false, `the detached \`slot hold\` (pid ${holder}) outlived the test's guard`);
+  // A zombie has ended (CI's PID 1 never collects an orphan): `running`, not a bare kill(pid, 0) (CI run 8110).
+  assert.equal(running(holder), false, `the detached \`slot hold\` (pid ${holder}) outlived the test's guard`);
 });
 
 test('ER-27: a slow paddock-dev call is logged with its step, duration and exit code', () => {

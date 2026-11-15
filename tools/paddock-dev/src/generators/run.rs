@@ -103,8 +103,8 @@ pub struct Real {
     env: HashMap<String, String>,
     /// Build-folder roots tried when `PADDOCK_DEV_TARGET_DIR` is not set (`./dev disk`'s configured roots), first that exists.
     default_roots: Vec<PathBuf>,
-    /// The heavy built from the tree, held for this whole run (never the shared cache path: see `heavy_tool::Held`).
-    built_heavy: OnceLock<Result<crate::pre_push::heavy_tool::Held, String>>,
+    /// The heavy built from the tree, held for this whole run (never the shared cache path: see `tool_cache::Held`).
+    built_heavy: OnceLock<Result<crate::tool_cache::Held, String>>,
 }
 
 impl Real {

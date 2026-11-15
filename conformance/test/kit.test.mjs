@@ -395,3 +395,58 @@ test('after a failed toolchain install the job is marked, later steps neither re
     c.done();
   }
 });
+
+// `kit.sh portable file-bytes` with an unreadable folder, through both stat flavours. A fake `find` without -printf stands in for
+// a find that cannot read `locked/` (it lists the rest, says so and exits 1, as GNU find does), so the case runs even as root, who
+// reads a 000 folder (CI's Linux containers run as root, where the host_steps parity test cannot make it). A fake `stat` answers as
+// GNU (`-c`; its `-f` prints file-system lines, the shape that once summed to about 1.2e10) or as BSD (`-f`; no `-c`). Both must sum
+// the readable files only, a hard link once: the flavour is probed from the tool, never taken from a failed call.
+test('portable file-bytes: an unreadable folder counts 0 with GNU and with BSD stat, whatever find exits', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-portable-')));
+  try {
+    const bin = join(root, 'bin');
+    const tree = join(root, 'tree');
+    mkdirSync(bin);
+    mkdirSync(join(tree, 'x', 'incremental'), { recursive: true });
+    mkdirSync(join(tree, 'locked'));
+    writeFileSync(join(tree, 'x', 'a'), Buffer.alloc(5000));
+    writeFileSync(join(tree, 'x', 'incremental', 'b'), Buffer.alloc(3000));
+    writeFileSync(join(tree, 'locked', 'c'), Buffer.alloc(4000));
+    spawnSync('ln', [join(tree, 'x', 'a'), join(tree, 'x', 'hl')]);
+    const realFind = ['/usr/bin/find', '/bin/find'].find((p) => spawnSync(p, ['/', '-maxdepth', '0']).status === 0);
+    exe(
+      join(bin, 'find'),
+      `for a; do [ "$a" = -printf ] && { echo "find: unknown predicate '-printf'" >&2; exit 1; }; done
+d=$1; shift
+${realFind} "$d" -path '*/locked' -prune -o "$@"
+echo "find: '$d/locked': Permission denied" >&2
+exit 1`,
+    );
+    const statJs = join(root, 'stat.mjs');
+    writeFileSync(
+      statJs,
+      `import { statSync } from 'node:fs';
+const [flag, fmt, ...files] = process.argv.slice(2);
+const gnu = process.env.FAKE_STAT === 'gnu';
+if (flag === (gnu ? '-f' : '-c')) {
+  if (gnu) { for (const f of files) console.log('  File: "' + f + '"\\n    ID: 12e9a8b7c6d5e4f3 Namelen: 255     Type: ext2/ext3\\nBlocks: Total: 61202703   Free: 4513312'); process.exit(0); }
+  console.error('stat: illegal option -- c'); process.exit(1);
+}
+for (const f of files) {
+  const s = statSync(f);
+  console.log(fmt.replace('%d', s.dev).replace('%i', s.ino).replace(gnu ? '%s' : '%z', s.size).replace('%s', s.size));
+}`,
+    );
+    exe(join(bin, 'stat'), `exec '${process.execPath}' '${statJs}' "$@"`);
+    for (const flavour of ['gnu', 'bsd']) {
+      const r = spawnSync('sh', [join(PADDOCK, 'conformance', 'ci', 'kit.sh'), 'portable', 'file-bytes', tree], {
+        env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, FAKE_STAT: flavour },
+        encoding: 'utf8',
+      });
+      assert.equal(r.status, 0, `${flavour}: ${r.stderr}`);
+      assert.equal(r.stdout.trim(), '8000', `${flavour}: the readable files, the hard link once (${r.stderr})`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

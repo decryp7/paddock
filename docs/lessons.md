@@ -2005,7 +2005,37 @@ had outlived its agent, and Dyno's launcher dropped the handle of its first chil
 kept the child), or, when you must act on a pid, check immediately before the kill that its cwd is inside your own worktree and
 that its start time is later than your own command's start; if either is unknown or differs, do not kill: report it to its
 owner or the coordinator. Never `pkill -f` or `kill` by a name pattern (`lefthook`, `cargo`, `node`) because every agent runs
-the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
+the same tools. **Class: acting on a reusable OS name without identity (rule 53).** Enforced, once wired in the main checkout's
+`.claude/settings.json`, by the blocking hook `.claude/hooks/kill-guard.sh` (with its `.test.sh`): an agent's `pkill`, `killall`,
+`fuser -k`, `xargs kill` and `kill <pid>` are refused
+unless the pid is a `%job`, `$!` from the same command, or a live descendant of this Claude session whose working folder is in
+the agent's own worktree.
+
+## A cached tool vanished under a long run, and a hard link's age is the file's age (2026-11-14)
+CI run 7773's job-isolation release found its pinned paddock-dev gone, and on train 10 six generators of one `gen check` found
+heavy gone: `./dev`'s prune of `~/.paddock-dev/bin` counted `heavy-*` folders as its own hashes and never knew a run still needed
+an entry, and both `./dev` and heavy's resolver removed a cached binary whose `--version` probe failed (a slow probe on a loaded
+machine is enough). The first fix held heavy only, and its sweep judged a hold's age by the file's modification time, which a
+hard link shares with the cached binary: a fresh hold of a heavy built a week ago was removed by the next run's sweep (a failing
+test showed it). Fix: one mechanism for every cached tool (`tools/paddock-dev/src/tool_cache.rs`): a run holds its own hard link
+under `held/` (paddock-dev holds itself whenever it runs from the cache, and starts its children from that hold), a hold's age
+comes from its name, a hit touches its entry, and `./dev`'s prune keeps five entries per tool and never removes one used within
+a day or with a file linked more than once; a binary that fails its probe is replaced by an atomic rename, never removed first.
+**Class: a shared cached tool binary is removed while a long run needs it (ER-21).**
+
+## Member gates passed, the train's own tests did not: run the full tool suites before a train push (ER-8, ER-36, 2026-11-14)
+Every member of train 11 passed its member gate (fmt, Clippy on three targets, conformance, lockfiles), and the integrator ran the
+tests of the modules its two merge ports touched (229 of them). A full paddock-dev nextest on the merged tree, first in a Linux
+container and then on the host, still found three failures that only the combination made: the 0089 merge added C122 to the
+check lists of both hosts but not to the registry test (`check_engine`) or the hand-kept ci-run golden, the Rust C122 lacked the
+`root` scope its JavaScript host declares (the registry test compares them), and a test in `pre_push/heavy_tool.rs` (from
+fix/gen-check-build-first) used `remove_dir_all`, which `safe_remove_lint` refuses under tools/ (resolved by merging feat/kill-guard-and-tool-hold, whose `tool_cache.rs` took that
+test over without it). The ci.yml run had not started
+yet, so no runner time went on it. A member gate runs no tests by design (ADR 0098); the train's one test run was meant to be CI.
+**What changed:** before a train is pushed, the integrator runs the full nextest of `tools/paddock-dev` and of `crates` on the
+merged tree (through the heavy slot), fixes what fails in one combination commit, and pushes once; touched-module tests are not
+enough for a merge that changes shared lists (check registries, goldens, lint allow lists). **Class: train-time combination
+failures (ADR 0098; train 8's eight fixes, above).**
 
 ## The guards kept a disk path that no longer existed (2026-11-14)
 After all dev data moved to `/Volumes/vault-dev`, `worktree-guard.py` still defaulted its main checkout to the old `d8sst7` path
@@ -2017,3 +2047,109 @@ env overrides, and refuse with a `Blocked: ... Next step: ...` message when they
 (`.claude/hooks/lib/paddockpaths.py`). Tests build temp repos at run time. **Rule:** a path that can be derived (from git, a
 config key or the script's own location) is never a literal default, and a guard whose input is missing fails closed.
 **Class: stale machine paths after a move** (earlier: the tart symlink and plists in paddock-bench/RESUME-AFTER-REBOOT.md).
+## A test child that inherits the machine's environment reads the machine (tests, 2026-11-13)
+Twice in one day a new environment lookup in a tool reached real machine state through tests: the pre-push integration tests ran
+the real heavy steps (`PATH` found `heavy.sh`), and on `fix/precommit-heavy-slot` the helper `dev()` found the real
+engineering-rules `heavy.sh` through `ENGINEERING_RULES` and the checkout beside the repository, and took machine-wide slots in
+`~/.cache/heavy-slots` (ER-14). Patching each test (`2ff5f5072`) leaves every other spawn site open for the next lookup, because
+a deny-list never contains the variable that bites next. Fix (ADR 0100): `paddock_testkit::TestCommand` starts `./dev`, `cargo` and
+`node` from an empty environment plus an allow-list (`allowed_names()`), with a private `HOME` and temp folder and a curated
+`PATH`; check C123 (report-only) flags a test that starts one of them any other way. Two things the cleaner environment exposed
+at once, both real: `lsof` lives in `/usr/sbin`, which a curated `PATH` must name, and `ps -o lstart=` prints another date format
+in a clean locale, so a test that compares a stamp must start `ps` through the same builder as the program that reads it.
+Lesson: give a test child what the test names and nothing else; Cargo's own test support removes a list of variables and
+keeps the rest, which is the shape that failed here.
+
+the same tools. **Class: acting on a reusable OS name without identity (rule 53).**
+
+## Tests summed their steps under one bound and failed on the loaded Mac (2026-11-14, ADR 0103)
+CI runs 8050, 8060, 8061, 8066, 8090 and 8099 failed tests that were never hung: the kept-clone parity tests ran 20-24 jobs one
+after the other under nextest's 60 s (25.6 s quiet), a Debrief test made 50 001 files to reach a product limit (4.8 s quiet, 90 s
+in CI), the crash model's CPU work slowed 9x under other jobs' load, and a VM lock test that failed partway left a detached
+`slot hold` that failed nine tests after it. Each fix on train 11 was right and by hand. **Rule:** a test's verdict depends on each
+step's progress, not on a sum of steps; independent cases run side by side (`paddock_testkit::both` / `run_cases`); a wait for
+several steps is `wait_progressing` (Rust) or `waitProgressing` (scripts/test-kit.mjs), which back off; every process a test
+starts goes through a `Reaper` (Rust `paddock_testkit_start`, Node `scripts/test-kit.mjs`), which ends detached grandchildren too;
+a limit is tested with a small limit; a CPU-bound test gets a measured size class, not a raised default. C126 (ADR
+0103) lists the shapes, report-only. **Class: tests time out on the loaded Mac (ADR 0102 is the machine side).**
+
+## A red test of the Reaper ended other processes on the machine (2026-11-15, ADR 0103)
+Writing the failing-first test for "a short marker is refused", the designer called `Reaper::marked("/tmp")` before the guard
+existed. The red run (three runs between 00:12:04 and 00:12:40 +08, from file times) did what the guard was for: its drop ended every process whose command line contained `/tmp`, by identity,
+three runs in a row; that included the agent's own shell and very likely other agents' running shell commands (their wrappers
+name `/tmp/claude-…` files). **Rule:** a failing-first test must be safe in its failing state: when the missing behaviour is a
+guard against a destructive action, the red test feeds an input that the action cannot harm (here a short marker that matches no
+process), never the real dangerous one. A tool that ends processes never acts on a pattern match alone: the rebuilt reaper
+(ADR 0103) acts only on its own children, what it saw below them, its groups, its token, and orphans naming a folder it made
+with a random name. **Class: acting on processes by a name or pattern
+(rule 53; the lefthook kill of 2026-11-14 above).**
+
+## The local Linux gate could not judge a worktree, and amd64 emulation hid failed execs (2026-11-14)
+Train 10's local Linux container run (the CI image, `--platform linux/amd64`, on the Apple Silicon Mac) failed in four ways that
+also failed on main, none of them in the code: a worktree's `.git` file named a git folder the container did not have (about 35
+paddock-dev tests: "not a git repository"); the read-only `/work` refused `dev check --pre-push`'s logs in
+`<git common dir>/paddock-pre-push` (os error 30); under qemu-user a failed exec is not reported to the parent, so every
+missing-program test failed (paddock-proc's six, heavy's exit-127 test, paddock-dev's slotflow, input_hash, slots and idle_run);
+the kept-clone parity test ran past its one-second phase limits under emulation (it passes natively); and the prune parity test
+differs on OrbStack's btrfs, where an empty folder has no blocks and a few bytes of length: GNU `du -sk --apparent-size` prints
+0 for 18 bytes, the Rust port (`ci_host::prune::size_in_units`) rounds up to 1, so only the Rust side removes the folder at a
+1 KB cap (CI's ext4 gives every folder a 4 KB block, which hides it; open, owned by paddock-dev). The emulation class had been seen twice before:
+f08362a29 (Spotter's notifier, 2026-10-30) and feat/heavy-priority-lane (2026-11-13). What changed: `tools/linux-container.sh`
+mounts a worktree's git folders read-only at their own paths with a tmpfs pre-push state folder, and `--ci-image` runs the CI
+image natively (linux/arm64 on the Mac, built locally from `ci-image/Dockerfile` on `ci-image/garage-arm64.Dockerfile`: garage's
+base tag and tool versions as recorded in `ci-image/garage-release.txt` and checked by verify.sh, paddock-ci's own pins on top;
+apt packages float, and there is no Chrome for Testing or draw.io) and warns whenever amd64 is emulated. CI's Linux jobs stay on their native amd64 runners. **Rule for agents:** run the local Linux
+gate with `--ci-image` and no `--platform`; a missing-program or timing failure seen only under emulation is not a finding.
+**Class: environment-only failures of the local Linux gate (amd64 emulation on Apple Silicon).**
+
+## The push gate ran out of budget on work, not on queue time; a local base would have hidden commits (ADR 0102 amendment, 2026-11-15)
+Five pushes on 2026-11-14/15 were "not measured" by the 15-minute budget. The blamed cause was queue time; the logs said
+otherwise (queued 0 to 194 s, run 766 to 815 s): branches stacked on a train that was built locally and not yet pushed (or only
+partly) planned Clippy for every workspace the train touched (280 and 461 files), and a person's run always measured from
+origin/main. The first fix measured such a branch from the local train; review found that this drops the train's unpushed
+commits from the check while `git push` still sends them, and that any local ref named `train/*` could shrink a check. The fix
+that landed uses one definition, git's own: check the commits the remote lacks (`rev-list <tip> --not --remotes`), from the
+nearest commit of the remote the push contains, verified live; a person's run uses the same choice. Pass records name their
+base commit and count only against a base the remote has. The queue keeps its own bound, now for the whole push, and heavy
+steps of one push run one at a time while light rows go on.
+**Rule:** before fixing "it ran out of time", read the run and queue time each row reports; and a check's scope is defined by
+what the push sends, never by local names. Pushing a train before stacking work on it keeps the checks small.
+**Class: the pre-push gate's scope differs from what the push sends (an old base measured more; a local base would have
+measured less); earlier: the 2026-11-12 base choice from origin/main for train-based branches.**
+
+
+## A zombie answers kill(pid, 0): CI's job container never collects orphans (2026-11-15, CI run 8110)
+The VM lock test "a holder killed by its test leaves no `slot hold` process" passed on the Mac and failed in ci.yml's ui job:
+the detached holder had exited, but in the job container PID 1 is `sleep 21600` (the runner's entrypoint), which never collects
+an orphan, so the holder stayed a zombie under PID 1 and `kill(pid, 0)` still answered for it; the guard polled its whole 15 s
+bound. Reproduced in `node:24-bookworm` with entrypoint `sleep`: stat Z, ppid 1, kill0 alive. **Rule for tests:** a process
+check that means "has it ended" treats a zombie as ended (`running()` in scripts/vm-test-support.mjs: exists and `ps` stat is
+not `Z`); a bare `kill(pid, 0)` is only "the pid exists". Tests that start detached processes run once in a container whose PID 1
+is a plain `sleep` before a train push, as CI's is. **Class: a Linux CI container differs from the dev host (ER-9; run 7485's
+root user and software rasteriser, above).**
+
+## An open menu ran its neighbour's command after a lazy load hid a row (Debrief, 2026-11-15, CI run 8116)
+`ux-demo-tour.e2e.ts:58` flaked (2 of 156): after a reload, File ▸ Close workspace ran Close window. The lazy share commands
+loaded while the menu was open, `report.export` hid itself, and the rows below moved up; the list was rendered with
+`track $index`, so the button Playwright had resolved kept its place and took over the next row's label and command (its
+hit-target check passed, as it was the same element). First hypotheses (async tour state, shared storage, an overlay, a fixed
+wait) were refuted by the trace: the Activity log named the command that ran. 14 of 100 failed in the CI image before, 0 of
+100 after. **Rule:** `track $index` on interactive rows that can change while shown reuses a row for its neighbour; key by
+identity (command id; position only for rows that run nothing), and keep ids unique per level. Fixed in Debrief's menu bar,
+paddock-ui's `pd-menu-bar`/`pd-context-menu` and `pd-tray-popover`. **Class: stale element identity after a list changes
+under an action** (earlier: the toast whose Show missed its click when the next alert moved the stack, above).
+
+## A test took a helper's identity after the code under test had already ended it (2026-11-15, CI run 8118)
+Spotter's `a_browser_that_exits_leaves_no_helper_behind` failed once on the macOS runner after 10.09 s with "timed out waiting
+for the helper's pid file" and passed on its retry in 0.15 s. First hypotheses: the helper started late (a cold exec or a
+first-launch scan, the "macOS host stalls a test" class), a torn pid file, a reused temp folder. Refuted: the stand-in and its
+helper are `/bin/sh` and `/bin/sleep` (signed system binaries, no first-launch scan); with the timeout naming its last look, 10
+of 200 runs under 6 CPU burners failed, and every one had read a complete pid file whose process had already ended. **Cause:**
+the stand-in wrote the helper's pid and exited at once; `Chromium::launch` saw the exit within its 50 ms poll and ended the
+tree, so a test thread that the loaded host kept off the CPU for that long took `ProcessId::of` of a pid that was gone, and
+polled for a "pid file" that was there all along. **Fix:** the stand-in waits on a FIFO the test opens only after it has the
+helper's identity (a real signal, no sleep, no longer bound); the pid file is written by temp file plus rename; the poll's
+timeout says what it saw last. A second test makes the slow path certain (the helper announces itself a second late): red
+before (the tree is ended before the helper writes), green after; 200 of 200 green under the same burners. **Rule for tests:** a test that must observe a process
+the code under test is about to end holds the stand-in until it has observed it, and a wait's failure message names its last
+observation. **Class: an observation raced the action under test (rule 53's "act on a name read earlier", seen from the test side).**

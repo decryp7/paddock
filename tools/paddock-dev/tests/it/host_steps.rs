@@ -11,8 +11,10 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
@@ -159,7 +161,12 @@ fn tree(fx: &Fx) -> Vec<String> {
     let written = regex::Regex::new(r"(?m)^# Written by .*$").unwrap();
     let mut stack = vec![root.clone()];
     while let Some(d) = stack.pop() {
-        let mut entries: Vec<_> = std::fs::read_dir(&d).unwrap().flatten().collect();
+        // A folder the test made unreadable is listed as such (a step that removed it would leave no line).
+        let Ok(listing) = std::fs::read_dir(&d) else {
+            out.push(format!("unreadable {}", d.strip_prefix(&root).unwrap().display()));
+            continue;
+        };
+        let mut entries: Vec<_> = listing.flatten().collect();
         entries.sort_by_key(|e| e.file_name());
         for e in entries {
             let p = e.path();
@@ -230,7 +237,7 @@ fn base_env(fx: &Fx) -> Vec<(String, String)> {
 fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
     // Standard error joins standard output in the order written (`exec 2>&1`): `ci isolation`'s own messages go to standard error in
     // the script, and the step prints them with its own lines, so the two are compared as the job log shows them.
-    let mut cmd = paddock_proc::command("sh");
+    let mut cmd = TestCommand::new("sh");
     cmd.args(["-c", "exec 2>&1; exec \"$@\"", "sh"]);
     if rust {
         cmd.arg(env!("CARGO_BIN_EXE_paddock-dev"));
@@ -244,7 +251,7 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
             .args(step.shell[1..].iter().map(|a| fill(a, fx)));
     }
     let cwd = step.cwd.map_or_else(repo, |c| fx.p(c));
-    cmd.current_dir(cwd).env_clear();
+    cmd.current_dir(cwd);
     for (k, v) in base_env(fx)
         .into_iter()
         .chain(step.env.iter().map(|(k, v)| (k.to_string(), fill(v, fx))))
@@ -256,7 +263,36 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
             cmd.env(k, fill(v, fx));
         }
     }
-    let out = cmd.output().unwrap();
+    // ADR 0103: every process the step starts ends with it. The step runs in a group of the reaper's with its token; the reaper ends
+    // anything of the step still running (a hung git shim's `sleep`, a holder a phase limit left), and the test fails on a leak
+    // (ER-14). The order matters: wait for the step itself, then reap, then read the pipes to their end, so a leaked process that
+    // still holds a pipe cannot keep the read (and the test) waiting.
+    let reaper = paddock_testkit_start::Reaper::new("a host step");
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = reaper.spawn_test(cmd).unwrap();
+    let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = std::io::Read::read_to_end(&mut p, &mut buf);
+            }
+            buf
+        })
+    };
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+    let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn std::io::Read + Send>));
+    let status = child.wait().unwrap();
+    let left = reaper.reap();
+    let out = std::process::Output {
+        status,
+        stdout: stdout.join().expect("the stdout reader panicked"),
+        stderr: stderr.join().expect("the stderr reader panicked"),
+    };
+    assert!(
+        left.is_empty(),
+        "the {} step left processes running after it ended: {left:?}",
+        if rust { "Rust" } else { "shell" }
+    );
     let read = |rel: &str| std::fs::read_to_string(fx.p(rel)).unwrap_or_default();
     // The shell passes the whole environment to the programs it runs, so its shims see the job's token; the Rust command never lets
     // it through (ToolCall). The shell's side is read without it so every other difference shows, and a Rust leak shows as one.
@@ -284,12 +320,20 @@ fn run_one(fx: &Fx, step: &Step, rust: bool) -> Seen {
 }
 
 /// Runs both on a fresh fixture each (made by `setup`) and demands they agree; returns what the Rust command left.
-fn same(setup: &dyn Fn(&Fx), step: &Step) -> Seen {
-    let (a, b) = (fixture(), fixture());
-    setup(&a);
-    setup(&b);
-    let shell = run_one(&a, step, false);
-    let rust = run_one(&b, step, true);
+fn same(setup: &(dyn Fn(&Fx) + Sync), step: &Step) -> Seen {
+    // The two implementations share nothing, so they run side by side (ADR 0103): the test takes the slower one, not the sum.
+    let (shell, rust) = paddock_testkit::both(
+        || {
+            let a = fixture();
+            setup(&a);
+            run_one(&a, step, false)
+        },
+        || {
+            let b = fixture();
+            setup(&b);
+            run_one(&b, step, true)
+        },
+    );
     assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
     rust
 }
@@ -625,6 +669,46 @@ fn prune_folder_sizes_count_file_content_only_the_same_on_every_file_system() {
     }
 }
 
+/// A folder the runner's user cannot read (another user's leftover, a locked cache) must not change the size: GNU `find` then exits
+/// non-zero, and the script's old `stat -c ... || stat -f ...` ran BSD's form on GNU, whose file-system lines (`ID: 12e9...`) awk
+/// read as a size of about 1.2e10, so a folder under its cap was removed. Only a user other than root sees it (root reads the
+/// folder); the test says so and checks nothing as root.
+#[test]
+#[cfg(unix)]
+fn prune_folder_with_an_unreadable_subfolder_keeps_a_folder_under_its_cap() {
+    use std::os::unix::fs::PermissionsExt;
+    let setup = |fx: &Fx| {
+        fx.big("ci/build/debug/data", 8);
+        fx.big("ci/build/locked/inner", 4);
+        std::fs::set_permissions(fx.p("ci/build/locked"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    };
+    let unlock = |fx: &Fx| {
+        let locked = fx.p("ci/build/locked");
+        if locked.exists() {
+            std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    };
+    let (a, b) = (fixture(), fixture());
+    setup(&a);
+    setup(&b);
+    if std::fs::read_dir(a.p("ci/build/locked")).is_ok() {
+        unlock(&a);
+        unlock(&b);
+        return skip_note("running as root, which reads a 000 folder: the unreadable case cannot be made here (run it as another user)");
+    }
+    let step = prune_folder("<ROOT>/ci/build", "100000");
+    let shell = run_one(&a, &step, false);
+    let rust = run_one(&b, &step, true);
+    unlock(&a);
+    unlock(&b);
+    assert_eq!(shell, rust, "the shell (left) and the Rust command (right) differ");
+    assert_eq!(rust.stdout, "", "12 KB is under a cap of 100000 KB: nothing is removed");
+}
+
+fn skip_note(why: &str) {
+    eprintln!("not measured: {why}");
+}
+
 fn prune_ci(dir: &'static str, slot: &'static str, drop: bool) -> Step {
     let mut shell = vec!["tools/prune-ci-build-folder.sh", dir, "1"];
     let mut rust = vec!["prune-build-folder", "--max-gb", "1"];
@@ -854,10 +938,9 @@ fn host_cleanup_ends_a_real_process_of_the_job_and_only_that_one() {
     env.extend([("RUNNER_OS", "macOS"), ("PADDOCK_CI_SLOT", "s2")].map(|(k, v)| (k.to_string(), v.to_string())));
     env.push(("PADDOCK_JOB_TEMP".into(), fx.p("tmp").display().to_string()));
     env.push(("RUNNER_TEMP".into(), fx.p("tmp").display().to_string()));
-    let out = paddock_proc::command(env!("CARGO_BIN_EXE_paddock-dev"))
+    let out = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
         .args(["ci", "host-cleanup", "--id", "pitwall", "--process-pattern", "{tmp}[/\\\\]marker-x"])
         .current_dir(fx.p("work"))
-        .env_clear()
         .envs(env)
         .output()
         .unwrap();
@@ -1054,29 +1137,21 @@ fn run_kept(fx: &Fx, step: &Step, rust: bool) -> Seen {
     seen
 }
 
-/// The shell on fixture `a` and the Rust command on fixture `b` at the same time: two folders and two processes that share nothing, so a
-/// parity check waits for the slower of the two, not for both one after the other (a kept-clone test runs up to 24 jobs; one after
-/// the other they reached nextest's 60 s bound on the loaded CI Mac, runs 8054 and 8099).
+/// The shell on fixture `a` and the Rust command on fixture `b` at the same time (ADR 0103, `paddock_testkit::both`): two folders and
+/// two processes that share nothing, so a parity check waits for the slower of the two, not for both one after the other (a
+/// kept-clone test runs up to 24 jobs; one after the other they reached nextest's 60 s bound on the loaded CI Mac, runs 8054 and 8099).
 fn run_kept_pair(a: &Fx, b: &Fx, shell: &Step, rust: &Step) -> (Seen, Seen) {
-    std::thread::scope(|s| {
-        let sh = s.spawn(|| run_kept(a, shell, false));
-        let r = run_kept(b, rust, true);
-        (sh.join().expect("the shell's run panicked"), r)
-    })
+    paddock_testkit::both(|| run_kept(a, shell, false), || run_kept(b, rust, true))
 }
 
 /// Two kept fixtures, made at the same time (each is a handful of git commands; see [`run_kept_pair`]).
 fn kept_fixtures() -> (Fx, Fx) {
-    std::thread::scope(|s| {
-        let a = s.spawn(|| {
-            let fx = fixture();
-            kept_fixture(&fx);
-            fx
-        });
-        let b = fixture();
-        kept_fixture(&b);
-        (a.join().expect("a kept fixture failed"), b)
-    })
+    let make = || {
+        let fx = fixture();
+        kept_fixture(&fx);
+        fx
+    };
+    paddock_testkit::both(make, make)
 }
 
 /// Both implementations on a fresh kept fixture each: a first job, then `between` (what a later job finds), then a second job.
@@ -1364,7 +1439,7 @@ const KEPT_PHASES: [(&str, &str, &str); 7] = [
 fn kept_phase_is_bounded_by_its_own_limit(id: &str) {
     let (id, word, label) = KEPT_PHASES.iter().find(|(i, ..)| *i == id).expect("a phase of KEPT_PHASES");
     assert!(!word.is_empty(), "{id} runs no git, so no git can hang in it");
-    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let shim = format!(
         "case \" $* \" in *\"{word}\"*) exec /bin/sleep 30;; esac\nexec '{}' \"$@\"",
         real.trim()
@@ -1433,7 +1508,7 @@ fn kept_clone_every_phase_that_runs_git_has_its_own_limit_test() {
 fn kept_clone_a_phase_that_hangs_ends_in_one_warning_and_never_fails_the_job() {
     // A `git fetch` that sleeps: the fetch phase is bounded (1 s, its own limit; every other phase keeps the default, so a slow clone
     // under load cannot reach a limit), then the work folder is expanded to the profile.
-    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let setup = move |fx: &Fx| {
         fx.script(
             "bin/git",
@@ -1458,7 +1533,7 @@ fn kept_clone_reads_of_the_work_folder_are_not_bound_by_the_phase_limit() {
     // `PADDOCK_KEPT_CLONE_TIMEOUT` is seconds per phase. The shell reads the work folder's commit and origin before any phase, without
     // that limit; the Rust command bounded them by it, so under load (a `git rev-parse` over 1 s with the hung-phase test's 1 s limit,
     // 4 of 204 runs) it failed the job with `cannot read the commit and the origin` where the shell went on.
-    let real = String::from_utf8(paddock_proc::command("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
+    let real = String::from_utf8(TestCommand::new("sh").args(["-c", "command -v git"]).output().unwrap().stdout).unwrap();
     let setup = move |fx: &Fx| {
         fx.script(
             "bin/git",
@@ -1485,6 +1560,7 @@ fn kept_fixture_repos_start_no_background_git_maintenance() {
     // commit-then-clone, 8 loops in parallel: 104 of 1200 clones copied the lock, 0 of 1200 with `maintenance.auto=false`.
     let fx = fixture();
     kept_fixture(&fx);
+    // conformance: test-steps — eight `git config --get` reads in all: milliseconds, not a sum of jobs
     for (dir, path) in [
         ("work-repo", "/usr/bin:/bin"),
         ("origin.git", "/usr/bin:/bin"),
@@ -1521,9 +1597,8 @@ fn bounded_sh(body: &str) -> String {
     );
     let fx = fixture();
     fx.script("bin/pgrep", "case \"$2\" in 100) echo 101;; 101) echo 102;; esac");
-    let out = paddock_proc::command("bash")
+    let out = TestCommand::new("bash")
         .args(["-c", &script])
-        .env_clear()
         .env("PATH", format!("{}:/usr/bin:/bin", fx.p("bin").display()))
         .env("SCRATCH", fx.p("work"))
         .output()
@@ -1706,7 +1781,7 @@ fn guardian() -> Step {
 
 /// bash before 4.4 (macOS ships 3.2) fails `"${as_user[@]}"` of an empty array under `set -u`: the script is for the Linux image (bash 5).
 fn bash_too_old_for_the_script() -> bool {
-    let out = paddock_proc::command("bash")
+    let out = TestCommand::new("bash")
         .args(["-c", "echo $((BASH_VERSINFO[0] * 100 + BASH_VERSINFO[1]))"])
         .output()
         .unwrap();

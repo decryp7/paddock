@@ -5,6 +5,7 @@
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
+use paddock_testkit::TestCommand;
 use pitwall_core::hardware::Hardware;
 use pitwall_core::llama::Launch;
 use pitwall_core::mgmt::{Availability, EngineKind};
@@ -542,7 +543,7 @@ pub fn runnable_fake_engine() -> String {
     let len = std::fs::metadata(exe).map(|m| m.len()).unwrap_or(0);
     assert!(len > 100_000, "{exe} is {len} bytes: it was replaced by a placeholder; rebuild it");
     let started = std::time::Instant::now();
-    let out = std::process::Command::new(exe)
+    let out = TestCommand::new(exe)
         .arg("--version")
         .stdin(std::process::Stdio::null())
         .output()

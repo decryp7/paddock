@@ -24,9 +24,18 @@ v3 (not yet built when `ci-image/VERSION` and the workflows moved to it, 2026-11
 ## Building
 
 Manual dispatch of `.gitea/workflows/ci-image.yml` (linux/amd64, pushed to `dev.decryptology.net/decryp7/paddock-ci` as
-`v<VERSION>`, a dated run tag and `latest`). Never push from a workstation. Bump `ci-image/VERSION` with any change here and
-point `ci.yml` at it; `scripts/ci-image.test.mjs` checks the two agree and that the pins agree with the repo.
+`v<VERSION>`, a dated run tag and `latest`). Never push from a workstation. Bump `ci-image/VERSION` with any change to what the
+CI image contains or does, and point `ci.yml` at it; `scripts/ci-image.test.mjs` checks the two agree and that the pins agree with
+the repo. Files only the local stand-in reads (`garage-arm64.Dockerfile`, `garage-release.txt`), and `verify.sh` checks that only
+stand-in variables enable (`EXPECT_NEXTEST`, `EXPECT_LLVM_COV`, `EXPECT_DENY`), ride with the next bump.
 Local smoke test: `docker build --platform linux/amd64 -t paddock-ci-smoke ci-image`, then remove it.
+
+## The local arm64 image
+
+`tools/linux-container.sh --ci-image` on an Apple Silicon Mac builds this Dockerfile for linux/arm64 on `garage-arm64.Dockerfile`,
+a local stand-in for garage (which is amd64 only), and never pushes it. The stand-in follows `garage-release.txt`, the record of the
+garage that `GARAGE_IMAGE` names; recapture it as its header says after a `GARAGE_IMAGE` change. The arm64 image has no Chrome for
+Testing or draw.io, so e2e against Chrome for Testing and the SVG drift check stay CI's.
 
 ## Bumping a pin
 

@@ -19,10 +19,25 @@ function nonNegativeInt(v: string | null): number | undefined {
 }
 
 /**
+ * The simulated failures of `?mockFail=queryPage:2,queryFacet`: command name to how many of its first calls reject (default
+ * 1). They apply to the backend the UI receives only (`withMockFailures`), never to the mock backends' own reads.
+ */
+export function mockFailuresFromSearch(search: string): Partial<Record<Failable, number>> {
+  const fail: Partial<Record<Failable, number>> = {};
+  for (const part of (new URLSearchParams(search).get('mockFail') ?? '').split(',')) {
+    const [name, count] = part.split(':');
+    const n = positiveInt(count ?? '1') ?? 1;
+    if (name !== undefined && (FAILABLE as readonly string[]).includes(name)) fail[name as Failable] = n;
+  }
+  return fail;
+}
+
+/**
  * Browser-demo switches read from the URL, for UI tests and manual checks (never used inside Tauri):
  *   ?mockTotal=50000000       synthetic result of that many events (lazily generated)
  *   ?mockFacet=10000          every field has that many distinct values
- *   ?mockFail=queryPage:2     the first N calls of a command reject (comma separated)
+ *   ?mockFail=queryPage:2     the first N calls of a command reject (comma separated; see `mockFailuresFromSearch`)
+ *   ?mockLatency=0           answer at once instead of after the simulated delay (tests that need no real time)
  *   ?mockHold=getProfile      answers of a command wait until `globalThis.__debriefMockRelease()` (comma separated)
  *   ?mockCorrupt=markers      page rows arrive without `markers`, as a buggy backend would send them
  *   ?mockLiveMs=300           interval of the live tail events (default 1500; 250 with mockLive)
@@ -52,19 +67,13 @@ export function mockOptionsFromSearch(search: string): MockBackendOptions {
     const alert = nonNegativeInt(p.get('mockLiveAlertMs'));
     if (alert !== undefined) options.liveAlertMs = alert;
   }
+  if (p.get('mockLatency') === '0') options.latency = false;
   if (p.get('mockCorrupt') === 'markers') options.corruptMarkers = true;
   if (p.get('mockLongNames') === '1') options.longNames = true;
   const slow = positiveInt(p.get('mockSlowImport'));
   if (slow) options.slowImportMs = Math.min(slow, 120_000);
   const discovery = positiveInt(p.get('mockSlowDiscovery'));
   if (discovery) options.slowDiscoveryMs = Math.min(discovery, 120_000);
-  const fail: Partial<Record<Failable, number>> = {};
-  for (const part of (p.get('mockFail') ?? '').split(',')) {
-    const [name, count] = part.split(':');
-    const n = positiveInt(count ?? '1') ?? 1;
-    if (name !== undefined && (FAILABLE as readonly string[]).includes(name)) fail[name as Failable] = n;
-  }
-  if (Object.keys(fail).length) options.fail = fail;
   const hold = (p.get('mockHold') ?? '').split(',').filter((name): name is Holdable => (HOLDABLE as readonly string[]).includes(name));
   if (hold.length) options.hold = hold;
   return options;

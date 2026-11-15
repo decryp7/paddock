@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Reaper, waitProgressing } from './test-kit.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,9 @@ export function warmDev() {
 }
 
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+/** Is `pid` running: it exists and is not a zombie. A zombie has ended (its parent has not collected it); in CI's job container
+ * PID 1 never collects, so an orphaned holder stays a zombie that `kill(pid, 0)` still answers for (CI run 8110). */
+export const running = (pid) => alive(pid) && !spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim().startsWith('Z');
 const commandOf = (pid) => spawnSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).stdout.trim();
 
 /**
@@ -50,10 +54,10 @@ const inside = (path, scratch) => {
 
 /**
  * The guard for a lock test's holders (ER-14: no process outlives its test). Ends every `slot hold` under `scratch` the way the
- * lock means it to end, by removing its owner folder, then waits for the process to exit: a poll of that condition every 50 ms,
- * whose bound (15 s) only stops a holder that ignores its folder. A holder still running then is killed (after checking that its
- * pid is still that holder: rule 53) and reported, so a leak fails the test that made it instead of a later job's cleanup.
- * Returns the holders it had to kill (empty when all ended by themselves).
+ * lock means it to end, by removing its owner folder, then waits for the processes to exit on progress (ADR 0103: the kit's poll,
+ * which backs off from 1 ms, and a 15 s bound on no holder ending, which only stops a holder that ignores its folder). A holder
+ * still running then is killed (after checking that its pid is still that holder: rule 53) and reported, so a leak fails the test
+ * that made it instead of a later job's cleanup. Returns the holders it had to kill (empty when all ended by themselves).
  */
 export async function endHolders(scratch) {
   const holders = holdersUnder(scratch);
@@ -61,8 +65,23 @@ export async function endHolders(scratch) {
     const owner = h.command.match(/--owner (\S+)/)?.[1];
     if (owner && inside(owner, scratch)) rmSync(owner, { recursive: true, force: true });
   }
-  for (let i = 0; i < 300 && holders.some((h) => alive(h.pid)); i++) await new Promise((r) => setTimeout(r, 50)); // conformance: hang-guard — a poll of a condition, 15 s bound that only stops a holder that ignores its owner folder
-  const killed = holders.filter((h) => alive(h.pid) && commandOf(h.pid) === h.command);
+  const left = () => holders.filter((h) => running(h.pid)).length;
+  try {
+    await waitProgressing(`${holders.length} slot holder(s) to see their owner folder gone`, () => left() === 0, { noProgressMs: 15_000, progress: left });
+  } catch { /* the survivors are killed and reported below */ }
+  const killed = holders.filter((h) => running(h.pid) && commandOf(h.pid) === h.command);
   for (const h of killed) { try { process.kill(h.pid, 'SIGKILL'); } catch { /* gone */ } }
   return killed;
+}
+
+/**
+ * A test file's reaper and its scratch folder (ADR 0103): the reaper is made first, with its token in this process's environment
+ * (`inherit`, so every child the file starts carries it), and the scratch folder is one it made under `parent`, so an orphan or a
+ * child of this process that names it (a fake ssh, a vm-win.sh a test did not end, a holder whose script was killed) is the file's.
+ * Its `reap()` belongs in the file's `after`, after the holders' own end ([endHolders]), so a holder is never killed before it could
+ * end by itself.
+ */
+export function fileReaper(what, parent) {
+  const reaper = new Reaper(what, { inherit: true });
+  return { reaper, scratch: reaper.scratchIn(parent) };
 }

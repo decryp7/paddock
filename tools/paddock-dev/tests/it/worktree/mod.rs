@@ -12,6 +12,7 @@ mod ops;
 mod oracle;
 mod primary;
 
+use paddock_testkit::TestCommand;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -98,7 +99,7 @@ impl Fixture {
 
     /// The tool as a command: run in `cwd`, with the test's git config (ER-14: never the user's), the worktree root set to
     /// this fixture's folder and no agent identity in the environment.
-    pub fn cmd(&self, cwd: &Path, args: &[&str]) -> Command {
+    pub fn cmd(&self, cwd: &Path, args: &[&str]) -> TestCommand {
         let mut c = self.cmd_text(cwd, args);
         c.arg("--json");
         c
@@ -107,8 +108,8 @@ impl Fixture {
     /// Like [`Fixture::cmd`] without `--json` (the text a person reads).
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    pub fn cmd_text(&self, cwd: &Path, args: &[&str]) -> Command {
-        let mut c = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+    pub fn cmd_text(&self, cwd: &Path, args: &[&str]) -> TestCommand {
+        let mut c = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         c.args(args)
             .current_dir(cwd)
             .env("GIT_CONFIG_GLOBAL", &self.gitconfig)
@@ -130,11 +131,11 @@ impl Fixture {
     }
 
     /// A `git` script first on the PATH (the seam that slows or fails one git call): `body` is shell run before the real git
-    /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the PATH.
+    /// with `$REAL` the real binary and the arguments in `$*`; falling off the end runs the real git. Returns the folder, for `path_first`.
     #[cfg(unix)]
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    pub fn fake_git(&self, name: &str, body: &str) -> String {
+    pub fn fake_git(&self, name: &str, body: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let real = String::from_utf8(Command::new("which").arg("git").output().unwrap().stdout).unwrap();
         let bin = self.root.join(format!("fakebin-{name}"));
@@ -142,15 +143,15 @@ impl Fixture {
         let script = format!("#!/bin/sh\nREAL={}\n{body}\nexec \"$REAL\" \"$@\"\n", real.trim());
         std::fs::write(bin.join("git"), script).unwrap();
         std::fs::set_permissions(bin.join("git"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        format!("{}:{}", bin.display(), std::env::var("PATH").unwrap())
+        bin
     }
 
     /// A fake `git` whose `worktree add` tells the test it has been reached, then holds for three seconds. The tool reserves
     /// the path before it starts git, so the signal means the reservation is in place; the test waits on it instead of
-    /// polling the owner map (ER-12). Returns the `PATH` to give the tool and the receiver of the signal.
+    /// polling the owner map (ER-12). Returns the folder to put first on the tool's `PATH` and the receiver of the signal.
     // Starts the tool under test, git or a helper by program name (a throw-away fixture), never a process by pid (C53).
     #[allow(clippy::disallowed_methods)]
-    pub fn fake_slow_add(&self, name: &str) -> (String, std::sync::mpsc::Receiver<()>) {
+    pub fn fake_slow_add(&self, name: &str) -> (PathBuf, std::sync::mpsc::Receiver<()>) {
         let fifo = self.root.join(format!("reached-{name}.fifo"));
         assert!(Command::new("mkfifo").arg(&fifo).status().unwrap().success());
         let body = format!(

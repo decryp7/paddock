@@ -226,6 +226,10 @@ pub(crate) fn start(invocation: &Invocation) -> std::io::Result<()> {
 
 /// Starts `cmd` without blocking the caller. Its output is discarded; a background thread reaps it and
 /// kills it if it is still running after `timeout`. Fails only when the process cannot be started.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a try_wait poll on a child it started (the try_wait class): to move to an event wait (paddock_proc::run_bounded) in the class fix"
+)]
 pub(crate) fn spawn_detached(mut cmd: std::process::Command, timeout: Duration) -> std::io::Result<()> {
     use std::process::Stdio;
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;

@@ -9,9 +9,9 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use paddock_testkit::TestCommand;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 fn repo() -> PathBuf {
     paddock_env::winpath::real(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
@@ -147,10 +147,9 @@ impl Runner {
         for body in steps {
             let script = self.root.join("step.sh");
             std::fs::write(&script, body).unwrap();
-            let r = Command::new("bash")
+            let r = TestCommand::new("bash")
                 .args(["-e", "-o", "pipefail"])
                 .arg(&script)
-                .env_clear()
                 .envs(self.base_env(extra))
                 .env("BACKEND", input.backend)
                 .env("REDIS_ENDPOINT", input.endpoint)
@@ -170,7 +169,7 @@ impl Runner {
     #[allow(clippy::disallowed_methods)]
     fn rust(&self, input: &Input, extra: &[(&str, &str)]) -> Result {
         self.reset();
-        let r = Command::new(env!("CARGO_BIN_EXE_paddock-dev"))
+        let r = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"))
             .args([
                 "ci",
                 "setup-rust",
@@ -182,7 +181,6 @@ impl Runner {
                 if input.tauri { "true" } else { "false" },
             ])
             .current_dir(repo())
-            .env_clear()
             .envs(self.base_env(extra))
             .env("PADDOCK_SCCACHE_REDIS_ENDPOINT", input.endpoint)
             .output()
@@ -384,16 +382,18 @@ fn without_sccache_the_job_builds_without_the_cache() {
     assert!(rs.out.contains("::warning::sccache is not available on this runner"), "{}", rs.out);
 }
 
-/// The runner OS of this host, as the job sees it, and whether the action pins an sccache release for it. The pairing is the real
-/// one: `RUNNER_OS` is macOS only on a Mac, where `uname -m` says `arm64` (the shell's key) and Rust says `aarch64`. Faking macOS on a
-/// Linux aarch64 host made a pairing no runner has (the shell keys on `macOS-aarch64`, which it does not list), and the two sides
-/// differed there only (found in the native arm64 Linux container, 2026-11-14).
+/// The runner OS of this host, as the job sees it, and whether the action pins an sccache release for it, read from the pin table
+/// itself (`pin_for`, ER-42). The pairing is the real one: `RUNNER_OS` is macOS only on a Mac, where `uname -m` says `arm64` (the
+/// shell's key) and Rust says `aarch64`. Faking macOS on a Linux aarch64 host made a pairing no runner has (the shell keys on
+/// `macOS-aarch64`, which it does not list), and the two sides differed there only (found in the native arm64 Linux container,
+/// 2026-11-14).
 fn host_runner() -> (&'static str, bool) {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", arch) => ("macOS", arch == "aarch64"),
-        ("linux", arch) => ("Linux", matches!(arch, "x86_64" | "aarch64")),
-        (_, arch) => ("Windows", arch == "x86_64"),
-    }
+    let os = match std::env::consts::OS {
+        "macos" => "macOS",
+        "linux" => "Linux",
+        _ => "Windows",
+    };
+    (os, paddock_dev::ci_setup_rust::pin_for(os, std::env::consts::ARCH).is_some())
 }
 
 #[test]
@@ -403,6 +403,26 @@ fn the_host_runner_pairs_the_os_with_its_own_architecture() {
     assert_eq!(os == "Linux", cfg!(target_os = "linux"));
     if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
         assert!(pinned, "Linux arm64 has a pinned release (aarch64-unknown-linux-musl)");
+    }
+}
+
+/// The explicit no-pin parity case, on a real runner pairing: Windows on arm64 has no release in the table, so on an arm64 host
+/// both sides warn before the tool cache and put nothing on PATH. (On an x86_64 host Windows has a pin, and this case cannot be made
+/// there: it says so.)
+#[test]
+fn a_runner_without_a_pinned_release_is_the_same_warning_in_both() {
+    if paddock_dev::ci_setup_rust::pin_for("Windows", std::env::consts::ARCH).is_some() {
+        eprintln!("not measured: this host's architecture has a Windows pin");
+        return;
+    }
+    let r = Runner::new(None);
+    let win = [("RUNNER_OS", "Windows"), ("PADDOCK_CI_ASSUME_WINDOWS", "1")];
+    let sh = r.shell(&LOCAL, &win, true);
+    let rs = r.rust(&LOCAL, &win);
+    assert_eq!((sh.code, &sh.path), (rs.code, &rs.path), "{}\n{}", sh.out, rs.out);
+    assert_eq!(rs.path, "", "nothing is put on PATH");
+    for out in [&sh.out, &rs.out] {
+        assert!(out.contains("::warning::no pinned sccache release for Windows"), "{out}");
     }
 }
 

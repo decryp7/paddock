@@ -4,6 +4,7 @@ import { all, buttonByText, el, provideTinyBackend, settle, testLogger, text, ti
 import { Page, PageRequest, RecordView } from '../core/api.types';
 import { DebriefBackend } from '../core/backend';
 import { MockBackend } from '../core/mock/mock-backend';
+import { withMockFailures } from '../core/mock/mock-failures';
 import { tinyDataset } from '../../testing/helpers';
 import { LiveTail } from '../workspace/live-tail';
 import { LiveFeed } from '../live/live-feed';
@@ -782,7 +783,7 @@ describe('EventsGrid at scale', { timeout: 30_000 }, () => {
   });
 
   it('retries the first page when nothing has loaded yet', async () => {
-    const backend = synthetic(BIG, { fail: { queryPage: 1 } });
+    const backend = withMockFailures(synthetic(BIG), { latency: false, fail: { queryPage: 1 } });
     const { fixture } = await render(backend);
     expect(el(fixture, '.err-card[role=alert]').textContent).toContain('Simulated queryPage failure');
     expect(el(fixture, '.total').textContent).toBe('0');

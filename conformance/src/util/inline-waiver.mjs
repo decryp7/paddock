@@ -41,6 +41,10 @@ export function commentView(text, kind = 'rust') {
     waiver: (line, tag) => inlineWaiver(near(line), tag),
     /** The waiver comment for `tag` anywhere in the file (a file-level marker). */
     file: (tag) => inlineWaiver(comments, tag),
+    /** The 1-based line whose comment gives the waiver of `tag` with a reason for a site on `line`: that line, else the one above, else 0. */
+    waiverLine: (line, tag) => [line, line - 1].find((n) => n >= 1 && inlineWaiver(lines[n - 1] ?? '', tag).state === 'reason') ?? 0,
+    /** The 1-based lines whose comment is a waiver of `tag` with a reason: what an unused-waiver report reads. */
+    reasonedLines: (tag) => lines.flatMap((l, i) => (inlineWaiver(l, tag).state === 'reason' ? [i + 1] : [])),
   };
 }
 

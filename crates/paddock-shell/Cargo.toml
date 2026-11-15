@@ -63,6 +63,7 @@ sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 tauri-plugin = { version = "2.7", features = ["build"] }
 
 [dev-dependencies]
+paddock-testkit = { workspace = true }
 # The background service test drives a fake OS (`paddock_service::testing`).
 paddock-service = { workspace = true, features = ["tauri"] }
 tauri = { workspace = true, features = ["test"] }

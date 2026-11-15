@@ -2,11 +2,11 @@ import { inject, Injectable, Injector } from '@angular/core';
 import { invoke } from '../core/activity/ipc';
 import { HomeRequest, HomeSummary } from '../core/api.types';
 import { AnalysisBackend } from '../core/analysis-backend';
-import { DebriefBackend } from '../core/backend';
 import { reportBackendFailures } from '../core/failure-reporter';
 import { Logger, withFailureLogging } from '../core/logger';
 import { browserMocks } from '../core/mock-registry';
 import { isTauri } from '../core/platform';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 
 /**
  * The Home dashboard's engine query (`home_summary`): counts, the history by level with its markers and anomalies,
@@ -31,6 +31,6 @@ export class TauriHomeBackend extends HomeBackend {
 
 export function createHomeBackend(): HomeBackend {
   const injector = inject(Injector);
-  const backend: HomeBackend = isTauri() ? new TauriHomeBackend() : new (browserMocks().MockHomeBackend)(inject(DebriefBackend), () => injector.get(AnalysisBackend));
+  const backend: HomeBackend = isTauri() ? new TauriHomeBackend() : new (browserMocks().MockHomeBackend)(inject(MOCK_WORKSPACE), () => injector.get(AnalysisBackend));
   return withFailureLogging<HomeBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

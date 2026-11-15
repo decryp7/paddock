@@ -3,7 +3,11 @@
 //!
 //! Evidence, in this order:
 //! - a pass record this tool wrote for the sha ([`write_record`]: on every complete passing run, under the git common dir so every
-//!   worktree sees it), valid while the sha's tree id is the recorded one;
+//!   worktree sees it), valid while the sha's tree id is the recorded one and only for a push measured from the record's own base or
+//!   a newer one: the record's base commit is an ancestor of (or is) the push's base, directly or through the records of the bases
+//!   in between ([`MAX_CHAIN`]), and only when the push's base is a commit of the remote (a remote-tracking ref holds it). A record
+//!   measured from a nearer base (a branch's own old commit) checked less than a push from an older base needs, so it does not stand
+//!   in for it;
 //! - a complete green CI run on the sha, read through the one shared reader (`./dev ci verdict`), and only when the push's own
 //!   remote (`--remote`, git's `$1`) still has that sha as a branch tip, confirmed with `git ls-remote`.
 //!
@@ -87,35 +91,74 @@ fn tree_of(root: &Path, sha: &str) -> Option<String> {
     git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{sha}^{{tree}}")]).map(|t| t.trim().to_string())
 }
 
-/// The record of this exact sha: its sha matches, and its `evidence` (a serialized `paddock_cli::Evidence` of a pass of this tool)
-/// is about this commit and adopts against the tree the repository has now (`Evidence::adopt`, ADR 0089 amendment).
-fn read_record(root: &Path, state: &Path, sha: &str) -> Option<Evidence> {
+/// How many records a base chain may follow: a record measured from a branch's old commit counts through that commit's own record.
+pub const MAX_CHAIN: usize = 8;
+
+/// The record of this exact sha: its sha matches, its `evidence` (a serialized `paddock_cli::Evidence` of a pass of this tool) is
+/// about this commit and adopts against the tree the repository has now (`Evidence::adopt`, ADR 0089 amendment), and it was measured
+/// from `base` or an older commit ([`covers`]). `Err` says why not, for the trail.
+fn read_record(root: &Path, state: &Path, sha: &str, base: &str) -> Result<Evidence, String> {
+    let (id, outcome, from) = read_one(root, state, sha).ok_or("no valid pass record")?;
+    covers(root, state, &from, base, MAX_CHAIN)?;
+    Ok(Evidence::Record { id, outcome })
+}
+
+/// One record, adopted: its id, outcome and base commit.
+fn read_one(root: &Path, state: &Path, sha: &str) -> Option<(String, Outcome, String)> {
     let v: Value = serde_json::from_str(&std::fs::read_to_string(record_path(state, sha)).ok()?).ok()?;
     if v["sha"] != sha {
         return None;
     }
+    let from = v["base_commit"].as_str()?.to_string();
     let proof = Proof::from_json(v.get("evidence")?).ok()?;
     if !matches!(proof.subject(), paddock_cli::Subject::Commit { sha: s, .. } if s.as_str() == sha) {
         return None;
     }
     match Proof::adopt(proof, &GitRepo(root)) {
-        outcome @ Outcome::KnownCommit(_) => Some(Evidence::Record {
-            id: v["id"].as_str().unwrap_or_default().to_string(),
-            outcome,
-        }),
+        outcome @ Outcome::KnownCommit(_) => Some((v["id"].as_str().unwrap_or_default().to_string(), outcome, from)),
         _ => None,
     }
 }
 
-/// Records that the gates passed on this sha: `{id, sha, tree, base, gates, tool_version, time, evidence}`, where `evidence` is the
-/// pass's own `paddock_cli::Evidence` (taken from the run's `Clean` outcome, so only a real pass can leave one).
+/// Whether a record measured from `from` covers a push measured from `base`: `from` is `base` or one of its ancestors, or `from`
+/// has a valid record of its own that covers `base` (at most `depth` more records).
+fn covers(root: &Path, state: &Path, from: &str, base: &str, depth: usize) -> Result<(), String> {
+    let short = |s: &str| s[..s.len().min(12)].to_string();
+    let Some(base_sha) = commit_of(root, base) else {
+        return Err(format!("the push's base {base} is not a commit here"));
+    };
+    if git_text(root, &["merge-base", "--is-ancestor", from, &base_sha]).is_some() {
+        return Ok(());
+    }
+    let refused = format!(
+        "the pass record was measured from {}, which is not this push's base {} or older",
+        short(from),
+        short(&base_sha)
+    );
+    if depth == 0 {
+        return Err(format!("{refused} (and the chain of records is longer than {MAX_CHAIN})"));
+    }
+    match read_one(root, state, from) {
+        Some((_, _, next)) => covers(root, state, &next, base, depth - 1).map_err(|e| format!("{refused}; through its own record: {e}")),
+        None => Err(format!("{refused}, and {} has no valid pass record of its own", short(from))),
+    }
+}
+
+fn commit_of(root: &Path, rev: &str) -> Option<String> {
+    git_text(root, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")]).map(|t| t.trim().to_string())
+}
+
+/// Records that the gates passed on this sha: `{id, sha, tree, base, base_commit, gates, tool_version, time, evidence}`, where `base`
+/// is what the run was measured from, `base_commit` that commit (what [`covers`] compares) and `evidence` the pass's own
+/// `paddock_cli::Evidence` (taken from the run's `Clean` outcome, so only a real pass can leave one).
 pub fn write_record(root: &Path, state: &Path, sha: &str, base: &str, gates: &[String], now: u64, pass: &Outcome) -> Result<(), String> {
     let Outcome::Clean(passed) = pass else {
         return Err("the run did not end in a pass, so there is nothing to record".into());
     };
     let tree = tree_of(root, sha).ok_or_else(|| format!("the tree of {sha} cannot be read"))?;
+    let base_commit = commit_of(root, base).ok_or_else(|| format!("the base {base} is not a commit here"))?;
     let rec = json!({
-        "id": format!("{}@{now}", &sha[..sha.len().min(12)]), "sha": sha, "tree": tree, "base": base, "gates": gates,
+        "id": format!("{}@{now}", &sha[..sha.len().min(12)]), "sha": sha, "tree": tree, "base": base, "base_commit": base_commit, "gates": gates,
         "tool_version": env!("CARGO_PKG_VERSION"), "time": now, "evidence": passed.evidence().to_json(),
     });
     let path = record_path(state, sha);
@@ -135,19 +178,50 @@ pub fn find(
     state: &Path,
     remote: Option<&str>,
     pushed: &[String],
+    bases: &[&str],
     look: &dyn Lookups,
 ) -> (Option<Vec<Evidence>>, Vec<String>) {
     let mut trail = Vec::new();
     let mut ls: Option<Option<String>> = None;
     let mut all = Vec::new();
-    for sha in pushed {
+    for (i, sha) in pushed.iter().enumerate() {
         let short = &sha[..sha.len().min(12)];
-        if let Some(e) = read_record(root, state, sha) {
-            trail.push(format!("{short}: pass record {} matches the commit and its tree", e.id()));
-            all.push(e);
-            continue;
+        let Some(base) = bases.get(i).or(bases.last()) else {
+            trail.push(format!("{short}: no base to compare a pass record with"));
+            return (None, trail);
+        };
+        let tracking = remote.filter(|r| !r.is_empty() && !r.starts_with('-')).unwrap_or("origin");
+        let on_remote = git_text(
+            root,
+            &[
+                "for-each-ref",
+                "--count=1",
+                "--contains",
+                base,
+                "--format=%(refname)",
+                &format!("refs/remotes/{tracking}/"),
+            ],
+        )
+        .is_some_and(|t| !t.trim().is_empty());
+        let found = if on_remote {
+            read_record(root, state, sha, base)
+        } else {
+            Err(format!(
+                "the push's base {} is on no remote-tracking ref of {tracking}, so no pass record counts against it",
+                &base[..base.len().min(12)]
+            ))
+        };
+        match found {
+            Ok(e) => {
+                trail.push(format!(
+                    "{short}: pass record {} matches the commit and its tree and was measured from this push's base or older",
+                    e.id()
+                ));
+                all.push(e);
+                continue;
+            }
+            Err(why) => trail.push(format!("{short}: {why}")),
         }
-        trail.push(format!("{short}: no valid pass record"));
         let Some(remote) = remote.filter(|r| !r.is_empty() && !r.starts_with('-')) else {
             trail.push(format!("{short}: no usable --remote, so no CI lookup"));
             return (None, trail);

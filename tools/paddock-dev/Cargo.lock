@@ -1108,6 +1108,7 @@ dependencies = [
  "paddock-repo-graph",
  "paddock-slots",
  "paddock-testkit",
+ "paddock-testkit-start",
  "proc-macro2",
  "ra-ap-rustc_lexer",
  "regex",
@@ -1199,6 +1200,15 @@ dependencies = [
  "paddock-workspace-hack",
  "socket2",
  "tempfile",
+]
+
+[[package]]
+name = "paddock-testkit-start"
+version = "0.1.0"
+dependencies = [
+ "paddock-proc",
+ "paddock-testkit",
+ "paddock-workspace-hack",
 ]
 
 [[package]]

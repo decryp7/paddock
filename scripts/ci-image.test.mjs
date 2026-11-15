@@ -99,6 +99,54 @@ describe('pins', () => {
   });
 });
 
+describe('garage-arm64.Dockerfile (the local arm64 stand-in for garage, tools/linux-container.sh --ci-image)', () => {
+  const standin = read('ci-image/garage-arm64.Dockerfile');
+  const code = standin.replace(/^#.*$/gm, '');
+  const pin = (name) => {
+    const m = standin.match(new RegExp(`^ARG ${name}=(\\S+)$`, 'm'));
+    assert.ok(m, `ARG ${name} is missing from garage-arm64.Dockerfile`);
+    return m[1];
+  };
+
+  test('the base is the garage base pinned by digest, and Rust and Node are the family pins', () => {
+    assert.match(standin, /^FROM catthehacker\/ubuntu@sha256:[0-9a-f]{64}$/m);
+    assert.equal(pin('RUST_VERSION'), arg('RUST_VERSION'));
+    assert.equal(pin('NODE_VERSION').split('.')[0], arg('NODE_MAJOR'));
+  });
+
+  test('it matches the garage image ci-image/Dockerfile names, as recorded in ci-image/garage-release.txt: base tag and tool versions', () => {
+    const rec = read('ci-image/garage-release.txt');
+    const again = 'recapture it as the header of ci-image/garage-release.txt says, then align garage-arm64.Dockerfile';
+    assert.equal(rec.match(/^# image: (\S+)$/m)?.[1], arg('GARAGE_IMAGE'), `garage-release.txt records another garage than GARAGE_IMAGE: ${again}`);
+    const base = rec.match(/^# base: (catthehacker\/ubuntu:act-24\.04-\d{8})$/m)?.[1];
+    assert.ok(base, 'garage-release.txt names no base tag');
+    assert.equal(standin.match(/^# garage-base: (\S+) /m)?.[1], base, `the stand-in's base is not garage's: ${again}`);
+    const arm = rec.match(/^# base-arm64: (sha256:[0-9a-f]{64})$/m)?.[1];
+    assert.equal(standin.match(/^FROM catthehacker\/ubuntu@(sha256:[0-9a-f]{64})$/m)?.[1], arm, `the stand-in is not built FROM the arm64 manifest of ${base}`);
+    const release = (re) => rec.match(re)?.[1];
+    assert.equal(pin('NODE_VERSION'), release(/^node v(\S+)$/m), again);
+    assert.equal(pin('CARGO_NEXTEST_VERSION'), release(/^cargo-nextest cargo-nextest (\S+) /m), again);
+    assert.equal(pin('CARGO_LLVM_COV_VERSION'), release(/^cargo-llvm-cov cargo-llvm-cov (\S+)$/m), again);
+    assert.equal(pin('CARGO_DENY_VERSION'), release(/^cargo-deny (\S+)$/m), again);
+    assert.match(rec, /from Ubuntu 24\.04\.\d+ LTS$/m);
+    for (const e of ['EXPECT_NEXTEST=${CARGO_NEXTEST_VERSION}', 'EXPECT_LLVM_COV=${CARGO_LLVM_COV_VERSION}', 'EXPECT_DENY=${CARGO_DENY_VERSION}']) {
+      assert.ok(standin.includes(e), `${e}: verify.sh checks the built tools against these`);
+    }
+  });
+
+  test('every download goes through the checksum-verified fetch: no raw curl, nothing piped into a shell', () => {
+    assert.ok(!/\bcurl\b/.test(code), 'a raw curl');
+    assert.ok(!/\|\s*(ba)?sh\b/.test(code), 'a download piped into a shell');
+    const sums = [...standin.matchAll(/^ARG (\w+_SHA256_ARM64)=(\S+)$/gm)];
+    assert.equal(sums.length, 5, sums.map((x) => x[1]).join(', '));
+    for (const [, name, value] of sums) {
+      assert.match(value, /^[0-9a-f]{64}$/, name);
+      assert.ok(code.includes(`"$${name}"`), `${name} is not used by a fetch`);
+    }
+    assert.equal((code.match(/fetch-verified "/g) || []).length, 5);
+  });
+});
+
 describe('the workflow and ci.yml', () => {
   const version = read('ci-image/VERSION').trim();
   const image = `dev.decryptology.net/decryp7/paddock-ci:v${version}`;
@@ -284,6 +332,16 @@ describe('verify.sh', () => {
     assert.match(r.out, /gtk\+-3\.0/);
     const nobrowsers = machine({ env: { PLAYWRIGHT_BROWSERS_PATH: join(scratch, 'empty-pw') } });
     assert.match(run(nobrowsers).out, /Playwright chromium is missing/);
+  });
+
+  test('garage\'s cargo tools off a pin the image sets fail (the arm64 stand-in sets EXPECT_NEXTEST, EXPECT_LLVM_COV, EXPECT_DENY)', () => {
+    const pinned = { EXPECT_NEXTEST: '0.9.149', EXPECT_LLVM_COV: '0.9.1', EXPECT_DENY: '0.20.2' };
+    assert.equal(run(machine({ env: pinned })).code, 0);
+    const off = run(machine({ env: { ...pinned, EXPECT_NEXTEST: '0.9.150', EXPECT_LLVM_COV: '0.9', EXPECT_DENY: '0.20.20' } }));
+    assert.equal(off.code, 1);
+    assert.match(off.out, /cargo-nextest is 'cargo-nextest 0\.9\.149', the image pins 0\.9\.150/);
+    assert.match(off.out, /cargo-llvm-cov is 'cargo-llvm-cov 0\.9\.1', the image pins 0\.9$/m);
+    assert.match(off.out, /cargo-deny is 'cargo-deny 0\.20\.2', the image pins 0\.20\.20/);
   });
 
   test('an expectation that is not set is not checked', () => {

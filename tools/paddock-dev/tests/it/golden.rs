@@ -12,6 +12,7 @@
 #![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{Request, plan_for, plan_on_graph, read_graph};
 use paddock_repo_graph::GitHistory;
+use paddock_testkit::TestCommand;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -72,7 +73,7 @@ const samples = JSON.parse(process.env.PADDOCK_GOLDEN_SAMPLES);
 const plans = samples.map((files) => planFor({ files, explain: true }).plan);
 process.stdout.write(JSON.stringify({ plans, cargoRuns: seen.size }));
 "#;
-    let out = Command::new("node")
+    let out = TestCommand::new("node")
         .args(["--input-type=module", "-e", DRIVER])
         .env("PADDOCK_GOLDEN_SCRIPT", repo_root().join("scripts/affected.mjs"))
         .env("PADDOCK_GOLDEN_SAMPLES", serde_json::to_string(samples).unwrap())
@@ -184,7 +185,7 @@ const SAMPLES: &[&[&str]] = &[
 
 #[test]
 fn live_plan_matches_affected_mjs_on_sample_change_sets() {
-    if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
+    if !repo_root().join("scripts/affected.mjs").exists() || TestCommand::new("node").arg("--version").output().is_err() {
         skip("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
@@ -375,7 +376,7 @@ fn the_recorded_cases_cover_what_the_review_asked_for() {
 // The command line: `dev plan` against what `affected.mjs` answered (recorded) and against the script itself (live)
 
 /// What a caller of the planner sees of one run, with commit ids masked (they differ per run). Mirrors `generate.mjs`.
-fn run_cli(program: &mut Command, root: &Path, case: &Value) -> Value {
+fn run_cli(program: &mut TestCommand, root: &Path, case: &Value) -> Value {
     let dir = tempfile::tempdir().unwrap();
     let head = String::from_utf8(
         Command::new("git")
@@ -462,7 +463,7 @@ fn recorded_command_line_cases_match_what_affected_mjs_answered_on_the_fixture_r
         let expected: Value =
             serde_json::from_str(&std::fs::read_to_string(golden_dir().join("expected/cli").join(format!("{name}.json"))).unwrap())
                 .unwrap();
-        let mut program = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut program = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         program.arg("plan");
         let got = run_cli(&mut program, &root, case);
         if got != expected {
@@ -474,7 +475,7 @@ fn recorded_command_line_cases_match_what_affected_mjs_answered_on_the_fixture_r
 
 #[test]
 fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() {
-    if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
+    if !repo_root().join("scripts/affected.mjs").exists() || TestCommand::new("node").arg("--version").output().is_err() {
         skip("scripts/affected.mjs or node is not available (the recorded cases still run)");
         return;
     }
@@ -492,9 +493,9 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
     }
     let mut failures = Vec::new();
     for case in &cli_cases() {
-        let mut node = Command::new("node");
+        let mut node = TestCommand::new("node");
         node.arg("scripts/affected.mjs");
-        let mut ours = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
+        let mut ours = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
         ours.arg("plan");
         let (a, b) = (run_cli(&mut node, &root, case), run_cli(&mut ours, &root, case));
         if a != b {
@@ -508,7 +509,8 @@ fn live_command_line_matches_affected_mjs_on_a_copy_of_the_fixture_repository() 
 const HISTORY_RUN_LIMIT: Duration = Duration::from_secs(180);
 
 /// A child of the history comparison, bounded (the whole tree is ended at the limit): its standard output, or a failed test.
-fn bounded(cmd: Command, what: &str, base: &str, head: &str) -> Vec<u8> {
+fn bounded(cmd: TestCommand, what: &str, base: &str, head: &str) -> Vec<u8> {
+    let (cmd, _private) = cmd.into_parts();
     let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(HISTORY_RUN_LIMIT))
         .unwrap_or_else(|e| panic!("{what} {base}..{head} could not run: {e}"));
     match out.outcome {
@@ -527,7 +529,7 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
     if only_on_the_linux_leg("the first-parent history comparison") {
         return;
     }
-    if !repo_root().join("scripts/affected.mjs").exists() || Command::new("node").arg("--version").output().is_err() {
+    if !repo_root().join("scripts/affected.mjs").exists() || TestCommand::new("node").arg("--version").output().is_err() {
         skip("scripts/affected.mjs or node is not available");
         return;
     }
@@ -544,24 +546,40 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
         ));
         return;
     }
-    let mut narrowed = 0;
-    for i in (0..shas.len() - 6).step_by(6) {
-        let (head, base) = (&shas[i], &shas[i + 5]);
-        let mut node = Command::new("node");
-        node.current_dir(repo_root())
-            .args(["scripts/affected.mjs", base, head, "--explain"]);
-        let script = bounded(node, "node scripts/affected.mjs", base, head);
-        let mut plan = Command::new(env!("CARGO_BIN_EXE_paddock-dev"));
-        plan.current_dir(repo_root()).args(["plan", base, head, "--explain"]);
-        let ours = bounded(plan, "paddock-dev plan", base, head);
-        let got = canonical(serde_json::from_slice(&ours).unwrap());
-        assert_eq!(
-            got,
-            canonical(serde_json::from_slice(&script).unwrap()),
-            "different plan for {base}..{head}"
-        );
-        narrowed += usize::from(got["all"] == false);
-    }
+    // ADR 0103: the ranges are independent and only read the repository, so they run side by side (`run_cases`), and in each the
+    // script and the planner run at once (`both`). One after the other the five ranges took 85.8 s at load 27 (2026-11-15).
+    let narrowed = std::sync::atomic::AtomicUsize::new(0);
+    let cases = (0..shas.len() - 6)
+        .step_by(6)
+        .map(|i| {
+            let (head, base) = (shas[i].clone(), shas[i + 5].clone());
+            let narrowed = &narrowed;
+            paddock_testkit::case(format!("{base}..{head}"), move || {
+                let (script, ours) = paddock_testkit::both(
+                    || {
+                        let mut node = TestCommand::new("node");
+                        node.current_dir(repo_root())
+                            .args(["scripts/affected.mjs", &base, &head, "--explain"]);
+                        bounded(node, "node scripts/affected.mjs", &base, &head)
+                    },
+                    || {
+                        let mut plan = TestCommand::new(env!("CARGO_BIN_EXE_paddock-dev"));
+                        plan.current_dir(repo_root()).args(["plan", &base, &head, "--explain"]);
+                        bounded(plan, "paddock-dev plan", &base, &head)
+                    },
+                );
+                let got = canonical(serde_json::from_slice(&ours).unwrap());
+                assert_eq!(
+                    got,
+                    canonical(serde_json::from_slice(&script).unwrap()),
+                    "different plan for {base}..{head}"
+                );
+                narrowed.fetch_add(usize::from(got["all"] == false), std::sync::atomic::Ordering::Relaxed);
+            })
+        })
+        .collect();
+    paddock_testkit::run_cases("the first-parent history comparison", cases);
+    let narrowed = narrowed.into_inner();
     // The guarantee that narrowing works is the edits test; this sample only shows it on real history, which may be all 'everything'.
     if narrowed == 0 {
         println!(
@@ -575,7 +593,7 @@ fn live_range_plans_match_affected_mjs_on_this_repositorys_first_parent_history(
 // sample do not reach every job): uncommitted edits in a copy of this repository, the script as the oracle.
 
 fn node_available() -> bool {
-    repo_root().join("scripts/affected.mjs").exists() && Command::new("node").arg("--version").output().is_ok()
+    repo_root().join("scripts/affected.mjs").exists() && TestCommand::new("node").arg("--version").output().is_ok()
 }
 
 #[test]
@@ -584,7 +602,7 @@ fn live_ci_jobs_table_equals_the_one_affected_mjs_exports() {
         skip("scripts/affected.mjs or node is not available");
         return;
     }
-    let out = Command::new("node")
+    let out = TestCommand::new("node")
         .current_dir(repo_root())
         .args([
             "-e",
@@ -799,30 +817,20 @@ fn the_repository_copy_reuses_the_source_objects_instead_of_hashing_every_file()
     );
 }
 
-// Takes about a minute: it copies the checked-out files and runs the script and the planner for every edit.
+// It copies the checked-out files and runs the script and the planner for every edit. ADR 0103: the edits are split over a few
+// copies that run side by side (`run_cases`); one copy, one edit after the other, took 21 s at load 27 and 80-121 s on the loaded CI
+// Mac (runs 8060, 8066, 8099, SLOW lines).
 #[test]
 fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     if !node_available() {
         skip("scripts/affected.mjs or node is not available");
         return;
     }
-    let dir = tempfile::tempdir().unwrap();
-    let copy = dir.path().join("copy");
-    let started = Instant::now();
-    copy_checked_out_files(&repo_root(), &copy);
-    eprintln!("copy of the checked-out files: {:.1} s", started.elapsed().as_secs_f64());
-    assert!(
-        !std::fs::read_to_string(copy.join(".gitea/workflows/ci.yml"))
-            .unwrap()
-            .contains('\r'),
-        "the copy's ci.yml has CRLF line endings: the workflow split reads LF text, so every edit would mark everything"
-    );
-    // LF checkout on every host: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
     // The jobs of ci.yml that CI_JOBS names, from the script's own table; one action, one reusable workflow, one script of
     // conformance/ci and a helper it imports.
     let jobs: Value = serde_json::from_slice(
-        &Command::new("node")
-            .current_dir(&copy)
+        &TestCommand::new("node")
+            .current_dir(repo_root())
             .args([
                 "-e",
                 "import('./scripts/affected.mjs').then(m => console.log(JSON.stringify(Object.keys(m.CI_JOBS))))",
@@ -832,7 +840,7 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
             .stdout,
     )
     .unwrap();
-    let ci = std::fs::read_to_string(copy.join(".gitea/workflows/ci.yml")).unwrap();
+    let ci = std::fs::read_to_string(repo_root().join(".gitea/workflows/ci.yml")).unwrap();
     let mut edits: Vec<(String, Option<String>)> = jobs
         .as_array()
         .unwrap()
@@ -851,16 +859,51 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
     ] {
         edits.push((rel.to_string(), None));
     }
+    let narrowed = std::sync::atomic::AtomicUsize::new(0);
+    let per = edits.len().div_ceil(paddock_testkit::cases::case_threads().min(4));
+    let cases = edits
+        .chunks(per)
+        .enumerate()
+        .map(|(n, chunk)| {
+            let narrowed = &narrowed;
+            paddock_testkit::case(format!("copy {n} ({} edits)", chunk.len()), move || {
+                edits_on_a_copy(chunk, narrowed)
+            })
+        })
+        .collect();
+    paddock_testkit::run_cases("the workflow, action and script edits", cases);
+    let narrowed = narrowed.into_inner();
+    assert!(
+        narrowed >= 10,
+        "a positive control: most of these edits narrow the plan ({narrowed} of {})",
+        edits.len()
+    );
+}
+
+/// One case of [`live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does`]: a copy of its own, then each edit
+/// in turn (the edits share the copy, so they run one after the other here), counting the plans that narrowed.
+fn edits_on_a_copy(edits: &[(String, Option<String>)], narrowed: &std::sync::atomic::AtomicUsize) {
+    let dir = tempfile::tempdir().unwrap();
+    let copy = dir.path().join("copy");
+    let started = Instant::now();
+    copy_checked_out_files(&repo_root(), &copy);
+    eprintln!("copy of the checked-out files: {:.1} s", started.elapsed().as_secs_f64());
+    // LF checkout on every host: the workflow split reads LF text (a CRLF checkout cannot be split by either planner).
+    assert!(
+        !std::fs::read_to_string(copy.join(".gitea/workflows/ci.yml"))
+            .unwrap()
+            .contains('\r'),
+        "the copy's ci.yml has CRLF line endings: the workflow split reads LF text, so every edit would mark everything"
+    );
     let history = GitHistory::new(&copy, Duration::from_secs(60));
     // The edits change the text of tracked files, never which files or manifests exist: one reading of the graph serves all.
     let started = Instant::now();
     let graph = read_graph(&copy, &history).unwrap();
     eprintln!("read_graph: {:.1} s", started.elapsed().as_secs_f64());
-    let mut narrowed = 0;
-    for (rel, job) in &edits {
+    for (rel, job) in edits {
         touch(&copy, rel, job.as_deref());
         let started = Instant::now();
-        let script = Command::new("node")
+        let script = TestCommand::new("node")
             .current_dir(&copy)
             .args(["scripts/affected.mjs", "--files", rel, "--explain"])
             .output()
@@ -883,7 +926,7 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
         );
         let want = canonical(serde_json::from_slice(&script.stdout).unwrap());
         assert_eq!(got, want, "different plan for an edit of {rel} (job {job:?})");
-        narrowed += usize::from(got["all"] == false);
+        narrowed.fetch_add(usize::from(got["all"] == false), std::sync::atomic::Ordering::Relaxed);
         let restored = Command::new("git")
             .arg("-C")
             .arg(&copy)
@@ -892,11 +935,6 @@ fn live_workflow_action_and_script_edits_narrow_exactly_as_affected_mjs_does() {
             .unwrap();
         assert!(restored.success());
     }
-    assert!(
-        narrowed >= 10,
-        "a positive control: most of these edits narrow the plan ({narrowed} of {})",
-        edits.len()
-    );
 }
 
 #[test]
@@ -934,7 +972,7 @@ fn live_guard_edits_mark_conformance_exactly_as_affected_mjs_does() {
         let original = std::fs::read_to_string(&path).unwrap();
         std::fs::write(&path, format!("{original}{add}")).unwrap();
         let started = Instant::now();
-        let script = Command::new("node")
+        let script = TestCommand::new("node")
             .current_dir(&copy)
             .args(["scripts/affected.mjs", "--files", rel, "--explain"])
             .output()

@@ -12,13 +12,27 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// The push gate's total budget (ADR 0038 amendment A2.5): what has not run by then is "not measured". It counts RUN time: time a
-/// step queued for the heavy slot behind other agents' steps is credited back ([`BudgetClock`], ADR 0102).
+/// step queued for the heavy slot behind other agents' steps is credited back ([`BudgetClock`], ADR 0102) and bounded on its own
+/// by [`QUEUE_MAX`].
 pub const BUDGET: Duration = Duration::from_secs(15 * 60);
 
-/// The longest a heavy step waits for a slot before it is "not measured" (`PADDOCK_QUEUE_MAX` seconds overrides). Twice the run
-/// budget: a step that waited longer than a whole gate is a busy machine's finding, not a result (ADR 0102; the queue times the
-/// push gate now records are the measurement to revisit it with).
+/// The push's queue allowance: the most time all its heavy steps together may wait for the machine-wide slot behind other agents'
+/// steps (`PADDOCK_QUEUE_MAX` seconds overrides). A step that would start after the allowance is spent, or whose wait reaches what
+/// is left of it, is "not measured" with its queue time and the load, never a pass (ADR 0102). Kept at 30 min, now for the whole
+/// push instead of per step (so a push waits at most 15 min of run plus 30 min of queue; it fails closed). The measurement is per
+/// step so far: heavy's activity log of 2026-11-14 13:02-19:09Z, 145 pre-push steps, queue time (lock wait plus load gate) p50
+/// 21 s, p90 386 s, p95 703 s, p99 993 s, max 1,187 s, so one step's worst wait fits (docs/benchmarks.md, "Pre-push heavy queue
+/// times"). Per-push queue time is logged from now on (`queue-times.log` beside the gate logs); revisit the value with it.
 pub const QUEUE_MAX: Duration = Duration::from_secs(2 * 15 * 60);
+
+/// What one step may spend: `run` of running (heavy's `--run-max`) and `queue` of waiting for the slot (heavy's `--queue-max`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Limits {
+    /// The run time left of the push's budget.
+    pub run: Duration,
+    /// The queue time left of the push's allowance.
+    pub queue: Duration,
+}
 
 /// How one run ended.
 #[derive(Debug, Clone, PartialEq)]
@@ -53,8 +67,17 @@ pub trait Exec: Sync {
     fn has_tool(&self, program: &str) -> bool;
     /// Does a Docker daemon answer? Never starts one.
     fn docker_up(&self) -> bool;
-    /// Runs the gate for at most `left`. `Err`: it could not be started (the program is missing).
-    fn run(&self, gate: &Gate, left: Duration) -> Result<Done, String>;
+    /// Runs the gate within `limits` (a heavy step: at most `limits.run` of running and `limits.queue` of waiting for the slot).
+    /// `Err`: it could not be started (the program is missing).
+    fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String>;
+    /// The 1-minute load average now, for the reason of a row the queue stopped (None: unknown).
+    fn load(&self) -> Option<f64> {
+        None
+    }
+    /// The clock the push's budget is read on: the monotonic clock; a test's fake moves its own.
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
     /// Why a heavy gate has no machine-wide slot to go through (no `heavy` on PATH and the build of tools/heavy failed), or
     /// `None`: it would otherwise compete with every other push (ER-24), so it is not measured instead.
     fn heavy_unavailable(&self) -> Option<String> {
@@ -177,11 +200,20 @@ fn first_word(id: &str) -> &str {
 
 /// The verdict of one gate: its needs first, then the run.
 pub fn decide(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject) -> Row {
-    decide_with(gate, exec, left, subject, &mut |_| {})
+    decide_with(
+        gate,
+        exec,
+        Limits {
+            run: left,
+            queue: QUEUE_MAX,
+        },
+        subject,
+        &mut |_| {},
+    )
 }
 
 /// [`decide`], telling `seen` how the run ended (its queue and run time) before the row is made.
-pub fn decide_with(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subject, seen: &mut dyn FnMut(&Done)) -> Row {
+pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subject, seen: &mut dyn FnMut(&Done)) -> Row {
     match &gate.need {
         Need::Tool(t) if !exec.has_tool(t) => {
             return Row::not_measured(
@@ -208,7 +240,7 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subje
         );
     }
     let started = Instant::now();
-    let result = exec.run(gate, left);
+    let result = exec.run(gate, limits);
     if let Ok(done) = &result {
         seen(done);
     }
@@ -219,12 +251,16 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subje
         // No slot means the command never ran: not measured, never a pass or a failure (ADR 0102 on ADR 0089's rows).
         Ok(done) if done.no_slot() => Row::not_measured(
             format!(
-                "{} never got a heavy slot ({}, queued {:.1} s): the machine was busy with other steps, so nothing was measured",
+                "{} never got a heavy slot ({}, queued {:.1} s, load {}): the machine was busy with other steps, so nothing was measured",
                 gate.rerun(),
                 done.how,
-                done.timing.map_or(0.0, |t| t.queued)
+                done.timing.map_or(0.0, |t| t.queued),
+                load_text(exec.load())
             ),
-            "look at `heavy status` and re-run `./dev check --pre-push` when it is free; a longer wait is PADDOCK_QUEUE_MAX (seconds), and an agent reports this (ER-24, ER-33)",
+            format!(
+                "look at `heavy status` and re-run `./dev check --pre-push --only {}` when it is free; the push's queue allowance is PADDOCK_QUEUE_MAX (seconds), and an agent reports this (ER-24, ER-33)",
+                first_word(&gate.id)
+            ),
         ),
         Ok(done) if done.cut_short() => Row::not_measured(
             format!(
@@ -265,8 +301,10 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, left: Duration, subject: &Subje
 pub struct RunOpts<'a> {
     /// Gates at a time.
     pub workers: usize,
-    /// The total budget: a gate that would start later is not measured, one that runs over is stopped.
+    /// The total budget of run time: a gate that would start later is not measured, one that runs over is stopped.
     pub budget: Duration,
+    /// The push's queue allowance ([`QUEUE_MAX`]): the time its heavy steps may wait for the slot in all.
+    pub queue: Duration,
     /// Set by SIGINT or SIGTERM: nothing more starts.
     pub stop: &'a AtomicBool,
     /// What the run is about (the commit and its tree): the evidence of every pass.
@@ -282,6 +320,7 @@ pub fn run_all(planned: &[Planned], exec: &dyn Exec, workers: usize, subject: &S
         &RunOpts {
             workers,
             budget: BUDGET,
+            queue: QUEUE_MAX,
             stop: &AtomicBool::new(false),
             subject,
         },
@@ -301,6 +340,88 @@ pub fn run_all_with(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> Vec
     run_all_timed(planned, exec, opts).0
 }
 
+/// Whether a row may start, from [`Turns::next`].
+enum Start {
+    Go(Limits),
+    Interrupted,
+    BudgetSpent,
+    QueueSpent,
+}
+
+/// The rows left and whether a heavy step of the push is in flight. One heavy step at a time: heavy has one machine-wide slot (more
+/// only with `HEAVY_DIR` and `HEAVY_SLOTS`), so a second heavy step of the same push would only queue behind the first, and that
+/// wait could not be told from waiting for other agents (ADR 0102). With one in flight, every second a heavy step queues is time
+/// spent waiting for others, and the next heavy step is decided only after the one before has ended and its queue time is on the
+/// clock. While a heavy step is in flight, a free worker takes the next light row instead of waiting.
+struct Turns {
+    state: Mutex<(VecDeque<usize>, bool)>,
+    changed: std::sync::Condvar,
+}
+
+impl Turns {
+    fn new(order: VecDeque<usize>) -> Turns {
+        Turns {
+            state: Mutex::new((order, false)),
+            changed: std::sync::Condvar::new(),
+        }
+    }
+
+    /// The next row a free worker takes, and for a gate that runs whether it may start, with the run and queue time it may spend.
+    /// `None`: nothing is left.
+    fn next(&self, planned: &[Planned], clock: &BudgetClock, opts: &RunOpts, now: &dyn Fn() -> Instant) -> Option<(usize, Option<Start>)> {
+        let heavy = |i: usize| matches!(&planned[i], Planned::Run(g) if g.heavy);
+        let mut st = self.state.lock().ok()?;
+        loop {
+            if st.0.is_empty() {
+                return None;
+            }
+            if opts.stop.load(Ordering::SeqCst) {
+                let i = st.0.pop_front()?;
+                return Some((i, matches!(planned[i], Planned::Run(_)).then_some(Start::Interrupted)));
+            }
+            let busy = st.1;
+            if let Some(pos) = st.0.iter().position(|&i| !(busy && heavy(i))) {
+                let i = st.0.remove(pos)?;
+                if !matches!(planned[i], Planned::Run(_)) {
+                    return Some((i, None));
+                }
+                let run = clock.left(now());
+                let queue = opts.queue.saturating_sub(clock.credit());
+                let start = if run.is_zero() {
+                    Start::BudgetSpent
+                } else if heavy(i) && queue.is_zero() {
+                    Start::QueueSpent
+                } else {
+                    st.1 |= heavy(i);
+                    Start::Go(Limits { run, queue })
+                };
+                return Some((i, Some(start)));
+            }
+            // Only heavy rows are left and one is in flight: woken when it ends; the timeout only re-reads the stop flag.
+            st = match self.changed.wait_timeout(st, Duration::from_millis(500)) {
+                Ok((g, _)) => g,
+                Err(_) => return None,
+            };
+        }
+    }
+
+    /// A step that [`Turns::next`] let start has ended (its queue time is already on the clock).
+    fn end(&self, heavy: bool) {
+        if !heavy {
+            return;
+        }
+        if let Ok(mut st) = self.state.lock() {
+            st.1 = false;
+        }
+        self.changed.notify_all();
+    }
+}
+
+/// `21.4`, or `unknown`.
+fn load_text(load: Option<f64>) -> String {
+    load.map_or_else(|| "unknown".to_string(), |l| format!("{l:.1}"))
+}
+
 /// [`run_all_with`], and the queue and run time of every row that went through `heavy`. The budget is run time: what a step spent
 /// queued behind other agents' steps is credited back ([`BudgetClock`]).
 pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (Vec<(String, Row)>, BTreeMap<String, Timing>) {
@@ -309,53 +430,64 @@ pub fn run_all_timed(planned: &[Planned], exec: &dyn Exec, opts: &RunOpts) -> (V
         Planned::Run(g) => g.rank,
         _ => 0,
     });
-    let clock = BudgetClock::new(Instant::now(), opts.budget);
+    let now = || exec.now();
+    let clock = BudgetClock::new(now(), opts.budget);
+    let turns = Turns::new(order.into_iter().collect::<VecDeque<_>>());
     let timings = Mutex::new(BTreeMap::<String, Timing>::new());
-    let queue = Mutex::new(order.into_iter().collect::<VecDeque<_>>());
     let results: Vec<Mutex<Option<Row>>> = planned.iter().map(|_| Mutex::new(None)).collect();
     std::thread::scope(|s| {
         for _ in 0..opts.workers.max(1) {
             s.spawn(|| {
-                loop {
-                    let next = queue.lock().map(|mut q| q.pop_front()).unwrap_or(None);
-                    let Some(i) = next else { break };
+                while let Some((i, start)) = turns.next(planned, &clock, opts, &now) {
                     let v = match &planned[i] {
-                        Planned::Run(g) => {
-                            let left = clock.left(Instant::now());
-                            if opts.stop.load(Ordering::SeqCst) {
-                                Row::not_measured(
-                                    "the push was interrupted before it started",
-                                    format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                                )
-                            } else if left.is_zero() {
-                                Row::not_measured(
-                                    format!(
-                                        "the {} min budget of the push gate was spent before it started",
-                                        opts.budget.as_secs() / 60
-                                    ),
-                                    format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
-                                )
-                            } else {
-                                let started = Instant::now();
+                        Planned::Run(g) => match start.unwrap_or(Start::Interrupted) {
+                            Start::Interrupted => Row::not_measured(
+                                "the push was interrupted before it started",
+                                format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
+                            ),
+                            Start::BudgetSpent => Row::not_measured(
+                                format!(
+                                    "the {} min run budget of the push gate was spent before it started ({:.1} s queued for other agents' heavy steps did not count against it)",
+                                    opts.budget.as_secs() / 60,
+                                    clock.credit().as_secs_f64()
+                                ),
+                                format!("re-run `./dev check --pre-push --only {}`", first_word(&g.id)),
+                            ),
+                            Start::QueueSpent => Row::not_measured(
+                                format!(
+                                    "never started: the push's queue allowance of {} min was spent waiting for other agents' heavy steps (queued {:.1} s in all, load {})",
+                                    opts.queue.as_secs() / 60,
+                                    clock.credit().as_secs_f64(),
+                                    load_text(exec.load())
+                                ),
+                                format!(
+                                    "`heavy status` shows who holds the slot; re-run `./dev check --pre-push --only {}` when the load is lower; an agent reports this (ER-24, ER-33)",
+                                    first_word(&g.id)
+                                ),
+                            ),
+                            Start::Go(limits) => {
+                                let started = now();
                                 let mut seen = |d: &Done| {
                                     if let Some(t) = d.timing {
-                                        clock.record(started, Instant::now(), Duration::from_secs_f64(t.queued.max(0.0)));
+                                        clock.record(started, now(), Duration::from_secs_f64(t.queued.max(0.0)));
                                         if let Ok(mut m) = timings.lock() {
                                             m.insert(g.id.clone(), t);
                                         }
                                     }
                                 };
-                                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                    decide_with(g, exec, left, opts.subject, &mut seen)
+                                let row = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    decide_with(g, exec, limits, opts.subject, &mut seen)
                                 }))
                                 .unwrap_or_else(|_| {
                                     Row::not_measured(
                                         "the gate's runner crashed",
                                         "report this with the command that ran; re-run it alone",
                                     )
-                                })
+                                });
+                                turns.end(g.heavy);
+                                row
                             }
-                        }
+                        },
                         Planned::Skip { reason, .. } => Row::skipped(reason.clone()),
                         Planned::NotMeasured { reason, next, .. } => Row::not_measured(reason.clone(), next.clone()),
                         Planned::Broken { cause, next, .. } => Row::broken(cause.clone(), next.clone()),
@@ -423,13 +555,13 @@ pub fn heavy_prefix(env: &HashMap<String, String>, has: &dyn Fn(&str) -> bool) -
 
 /// The command that puts a heavy step through the machine-wide slot: [`heavy_prefix`], else the `heavy` built from the tree at
 /// `root` (once, kept in `built`; `left` bounds that build), held under a name of this run's own for as long as `built` lives
-/// ([`super::heavy_tool::Held`]), so another agent pruning or replacing the shared cache cannot fail a later step. The one
+/// ([`crate::tool_cache::Held`]), so another agent pruning or replacing the shared cache cannot fail a later step. The one
 /// resolver of the push gate and of `./dev gen check`, so both queue for the same slot. `Err` is the whole explanation; `Ok(empty)` only for the test-only `PADDOCK_HEAVY=off`.
 pub fn heavy_command_for(
     root: &Path,
     env: &HashMap<String, String>,
     has_tool: &dyn Fn(&str) -> bool,
-    built: &std::sync::OnceLock<Result<super::heavy_tool::Held, String>>,
+    built: &std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
     left: Duration,
 ) -> Result<Vec<String>, String> {
     if env.get("PADDOCK_HEAVY").map(|v| v.trim()) == Some("off") {
@@ -483,13 +615,11 @@ pub struct RealExec {
     /// Set by SIGINT or SIGTERM: the running gates' process trees are ended.
     pub stop: Arc<AtomicBool>,
     /// The `heavy` built from tools/heavy when none is on PATH, built once per run (or the reason it could not be).
-    pub built_heavy: std::sync::OnceLock<Result<super::heavy_tool::Held, String>>,
+    pub built_heavy: std::sync::OnceLock<Result<crate::tool_cache::Held, String>>,
     /// When the push gate's budget ends: the build of heavy is cut off there.
     pub budget_end: Instant,
     /// The push is a landing (`train/*`, `main`, a release tag): its heavy steps take the priority lane (`heavy --high`, ADR 0102).
     pub priority: bool,
-    /// The longest a heavy step waits for a slot (`PADDOCK_QUEUE_MAX`, default [`QUEUE_MAX`]).
-    pub queue_max: Duration,
 }
 
 /// Variables every gate may see besides the base list: the toolchain, Docker, caches and Paddock's own settings.
@@ -532,13 +662,14 @@ impl RealExec {
         heavy_command_for(&self.root, &self.env, &|p| self.has_tool(p), &self.built_heavy, left)
     }
 
-    fn call(&self, gate: &Gate, left: Duration, log: &Path, label: Option<&str>) -> ToolCall {
+    fn call(&self, gate: &Gate, limits: Limits, log: &Path, label: Option<&str>) -> ToolCall {
+        let left = limits.run;
         let own = Duration::from_secs(if gate.heavy { 3000 } else { 900 });
         // A heavy step: its run time is limited by heavy itself (`--run-max`), its wait for a slot separately (`--queue-max`);
         // the outer timeout is only a backstop for both plus a minute.
         let run_max = own.min(left);
         let heavy = if gate.heavy {
-            with_heavy_flags(&self.heavy_command().unwrap_or_default(), self.priority, self.queue_max, run_max)
+            with_heavy_flags(&self.heavy_command().unwrap_or_default(), self.priority, limits.queue, run_max)
         } else {
             Vec::new()
         };
@@ -555,7 +686,7 @@ impl RealExec {
             None => (gate.program.clone(), gate.args.clone()),
         };
         let timeout = if limited {
-            run_max + self.queue_max + Duration::from_secs(60)
+            run_max + limits.queue + Duration::from_secs(60)
         } else {
             own.min(left)
         };
@@ -623,11 +754,21 @@ impl Exec for RealExec {
         self.heavy_command().err()
     }
 
-    fn run(&self, gate: &Gate, left: Duration) -> Result<Done, String> {
+    fn load(&self) -> Option<f64> {
+        let ran = ToolCall::new("uptime")
+            .timeout(Duration::from_secs(10))
+            .run(&self.env, &mut std::io::sink())
+            .ok()?;
+        parse_load(&ran.stdout)
+    }
+
+    fn run(&self, gate: &Gate, limits: Limits) -> Result<Done, String> {
         let _ = std::fs::create_dir_all(&self.logs);
         let log = self.logs.join(format!("{}.log", slug(&gate.id)));
         let label = (gate.need == Need::Docker).then(run_token);
-        let mut ran = self.call(gate, left, &log, label.as_deref()).run(&self.env, &mut std::io::sink())?;
+        let mut ran = self
+            .call(gate, limits, &log, label.as_deref())
+            .run(&self.env, &mut std::io::sink())?;
         let mut timing = None;
         if gate.heavy {
             let text = std::fs::read_to_string(&log).unwrap_or_default();
@@ -798,7 +939,6 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
-                queue_max: QUEUE_MAX,
             }
         }
 
@@ -902,7 +1042,6 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
-                queue_max: QUEUE_MAX,
             }
         }
 
@@ -947,7 +1086,6 @@ exit $rc
                 built_heavy: Default::default(),
                 budget_end: Instant::now() + Duration::from_secs(60),
                 priority: false,
-                queue_max: QUEUE_MAX,
                 env: ex.env.clone(),
                 root: ex.root.clone(),
                 logs: ex.logs.clone(),

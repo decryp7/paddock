@@ -97,6 +97,19 @@ that quotes a result links to the block instead of carrying the only copy.
 
 - **Notes:** the full checkout's slowest run (7.1 s) came while the load was high. An earlier run on a quieter machine gave 3.1 s and 1.9 s (two runs each, disk the same). Decision: a branch worktree is a full checkout (`--profile gates`), because conformance, `scripts/affected.mjs`, `./dev gates check` and `./dev plan` read most folders and a cone made them fail with ENOENT; agents added folders by hand at least four times on 2026-11-11. `--sparse` stays for `--detach` review copies. Not measured: build output, which is the same for both.
 
+### 2026-11-15, pre-push heavy queue times (fix/pre-push-base-and-budget)
+
+- **Commit:** 49e1a97cc (train/2026-11-14-11 when measured); the steps were run by the pre-push gates of that day's agents
+- **Machine:** Mac mini, Apple M4 Pro, 14 cores, 64 GB, macOS 27.2; 1-minute load about 13 to 39 over the window
+- **Source:** heavy's activity log (`pitcrew-lock-activity.log` in heavy's lock folder), 2026-11-14 13:02 to 19:09Z, every
+  `pre-push done` line: queue time = `waited` (lock) + `held` - `ran` (the load gate, which runs while the lock is held)
+- **Command:** `grep " done rc=" pitcrew-lock-activity.log | perl -ne 'print "$1 ",$4+$3-$2,"\n" if /Z (\S+) done rc=\S+, ran (\d+)s \(held (\d+)s, waited (\d+)s\)/'`, sorted
+- **Numbers:** 145 steps, all `pre-push`: p50 21 s, p90 386 s, p95 703 s, p99 993 s, max 1,187 s
+- **Notes:** the basis of `QUEUE_MAX` (30 min) as the whole push's queue allowance (tools/paddock-dev/src/pre_push/exec.rs, ADR
+  0102 amendment 2026-11-15): one step's worst wait (about 20 min) fits; a push whose heavy steps wait 30 min in all is a busy
+  machine's finding, reported "not measured" with the time queued and the load. Not measured: the queue time per push (the log
+  does not say which push a step belonged to).
+
 ### 2026-11-12, SVG drift check: font metrics (ci/svg-drift-check)
 
 - **Commit:** 8a3c3111a (the branch merged with origin/main 0b736ac0b, which has train 7's Pitwall re-export c8057ff13)
@@ -1294,3 +1307,139 @@ folder was warm, so cold build plus run was more than 1800 s there.
 - **Bound chosen:** 3600 s for the build phase, about 4x the measured 866 s: the train 10 run under heavier load needed more than
   1800 s for build plus run, and the bound is a hang guard, not a budget. The check's own guard stays 1800 s and now covers only
   the run. Not measured: a cold build at load 150 or more, and the other entries' builds (all smaller workspaces or crates).
+
+## Conformance tests in the push gate (2026-11-14, ci/conformance-every-change)
+
+Question: what does running the conformance row and the conformance tests on every push (ER-41) add to `./dev check --pre-push`?
+The conformance row already ran on every push (the plan marks conformance on every change since b013e1142); the new row is
+`conformance-tests` (`./dev ci run conformance tests`, that is `cd conformance && npm test`, 1000 tests).
+
+- **Machine:** the shared Mac mini (arm64), other agents running; 1-minute load given per run
+- **Tree:** this branch on train/2026-11-14-11 (1ecc53eee), warm `node_modules`, `./dev` already built
+- **Runs:** 3 of the conformance tests, 2 of the conformance row
+
+  | What | Load (1 min) | Seconds |
+  |---|---:|---:|
+  | `./dev ci run conformance tests`, alone | 57 | 75.6 |
+  | `./dev ci run conformance tests`, alone | 40 to 27 | 71.2 |
+  | `conformance-tests` row inside `./dev check --pre-push --refs-from-stdin --remote origin` | 22.7 | 71.1 |
+  | `./dev ci run conformance paddock` (the row), alone | 57 | 24.6 |
+  | `conformance` row inside the same pre-push run | 22.7 | 31.8 |
+
+- **Added time per push:** about 71 to 76 s of run time for `conformance-tests`. At a load of 20 or more the gate runs one row at a
+  time, so that is added wall time (the measured push gate took 4 min 3 s in all, 94 s of it queued for the heavy slot); on a
+  quieter machine (three rows at a time) it overlaps the Clippy rows. It fits the 15 minute budget.
+- **Not measured:** a run at a load under 10 (three rows at a time), and the conformance tests on Linux or Windows.
+
+### With the cap of 4 test processes (2026-11-15, same branch, after review)
+
+The gate now sets `PADDOCK_TEST_CONCURRENCY=4` (ER-24; `node --test` otherwise starts one process per core, about 13 here).
+One run of `PADDOCK_TEST_CONCURRENCY=4 ./dev ci run conformance tests` (1004 tests) at a 1-minute load of 27 rising to 37: 75.1 s,
+against 70.0 s uncapped a few minutes earlier at a load of about 24 to 29. So the cap costs at most a few seconds at this load
+and leaves about 9 cores to the Clippy rows beside it. Not measured: the capped run on a quiet machine, where the gap could be
+larger.
+
+## Test timing redesign (2026-11-14, feat/test-timing-redesign, ADR 0103)
+
+### 2026-11-14, test timing redesign
+
+Question: what do the migrated tests cost before and after ADR 0103's helpers, and what do the helpers themselves cost on the
+loaded machine (the reaper's look at the process table, the crash model with and without a test group)?
+
+- **Commit:** base 1ecc53eee (train 11) → this branch
+- **Machine:** the shared Mac mini (14 cores, macOS 27.2), with the CI runners and other agents running (about 890 processes)
+- **Load:** other agents' 1-minute load 8-78 during the session; the crash-model A/B with 6 extra `yes` burners (scratch
+  `model-load.sh`, `timeout 600` on each, ended on exit) at load 27-32, interleaved before/after, two rounds each
+- **Build:** debug test binaries, `CARGO_BUILD_JOBS=2`; nextest 0.9.152; node 24
+- **Command:** `cargo nextest run -p debrief-core --lib -E 'test(a_scan_stops_at_the_entry_limit_and_says_so)'` (before: train 11's
+  file, after: this branch); `NEXTEST_TEST_THREADS=8 cargo nextest run --config-file <before|after>.toml --profile ci -p paddock-service
+  --test it -E 'test(/^model::the_crash_model_/)'`; `cargo nextest run --test it -E 'test(/^host_steps::/)'` (tools/paddock-dev);
+  `node --test scripts/vm-lock.test.mjs scripts/vm-win.test.mjs`; an ignored probe test of `Reaper` (50 looks with one live child,
+  10 marker scans, removed after the measurement)
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | debrief scan-limit test, quiet | 4.845 s (50 001 files) | 0.013 s (21 files) | nextest 60 s (CI: 90.4 s TMT, run 8061) | pass |
+  | crash model, 9 tests, slowest test, 6 burners, load 27-32 | 6.8 / 8.5 s (no group) | 6.2 / 6.8 s (group of 2) | nextest 60 s (CI: 59-60 s, run 8066) | group not kept: wall 7-9 s → 20-22 s |
+  | paddock-dev `host_steps::*`, 37 tests, whole run | 15.3 s (load ~30-60) | 13.0 / 16.7 s (load ~30 / 78) | none | no change beyond the shared machine's noise; 0 leaks found |
+  | VM lock + VM win, whole run | 98 s, 71/71 (load 25) | 99 s before the poll migration, 98 s after it (committed tree, load 11-13), 71/71, 0 processes reaped | none | pass |
+  | `Reaper` look at the process table, one live child, load 60 | — | 18.2 ms | — | sampler capped at one look per 0.5 s |
+  | `processes_mentioning` (marker scan), load 60 | — | 24-29 ms | — | once per reap |
+  | Node kit tests (`scripts/test-kit.test.mjs`), 3 runs | — | 2.87-2.90 s, 6/6 | none | pass |
+
+- **Notes:** the crash model's slowdown in CI (9x) comes from other jobs' load: two at a time lowered the slowest test only a little
+  and tripled the wall time, so the tests got a size-class override (120 s, with this measurement in the waiver) instead. The
+  host_steps comparison is dominated by the other agents' load (30 → 78 between runs); it shows no cost of the reaper above that
+  noise. Two VM runs in between took 138-146 s: tools/paddock-dev had uncommitted changes, so the tests ran the `./dev` wrapper
+  instead of the cached binary (82d5ee496's cost, 0.17-0.4 s per call); on the committed tree it was 98 s again. Raw output in the
+  agent's scratch folder, not kept.
+
+### 2026-11-15, test timing redesign, review round 1
+
+Question: what do the tests migrated in ADR 0103's second round cost before and after, and does the debrief-app session test's
+CI timeout reproduce under local load?
+
+- **Commit:** base c48ffe017 (this branch after merging train 11 at 31cdde673) → this branch
+- **Machine:** the shared Mac mini (14 cores, macOS 27.2), with the CI runners and other agents running; Linux runs in the
+  `paddock-ci-local:v3-arm64` and `node:24-bookworm` images (`--cpus 2-4`, `--memory 2-8g`)
+- **Load:** other agents' 1-minute load 18-29; the session-test load run with 6 extra `yes` burners (scratch `session-load.sh`,
+  `timeout 600` each, ended on exit) at load 19-27
+- **Build:** debug test binaries, `CARGO_BUILD_JOBS=2`; nextest 0.9.152; node 24
+- **Command:** `cargo nextest run --test it -E 'test(/^golden::live_/)'` (tools/paddock-dev, before) and `-E 'test(/^golden::live_(range|workflow)/)'`
+  (after); `cargo nextest run -p debrief-app --lib -E 'test(/workspace_commands::tests::a_session_/)'` (3 runs before, 4 after);
+  `NEXTEST_TEST_THREADS=8 cargo nextest run --profile ci -p debrief-app --lib -E 'test(/workspace_commands::tests::/)'` with 6
+  burners (5 runs)
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | golden `live_range_plans_...` (5 first-parent ranges) | 85.8 s, load 27 | 33.2 s, load 29 | ci override 480 s | pass |
+  | golden `live_workflow_action_and_script_edits_...` (25 edits) | 21.0 s, load 27 | 12.3 s, load 29 | ci override 480 s (CI: SLOW 80-121 s) | pass |
+  | debrief-app session test, quiet | 1.4-2.1 s (one test, three steps) | 1.0 s and 1.3 s (two tests, two steps each) | nextest 90 s (CI: 92.5 s TMT, run 8061) | pass |
+  | the same, 6 burners, load 19-27, 5 runs | 1.8-2.0 s | not run | nextest 90 s | the CI timeout did not reproduce at this load |
+  | debrief-app session test in CI run 8061 (from its wait log) | import 29.6 s, reopen 12.4 s, import again 20.0 s | at most one import and one step per test | nextest 90 s | an estimate from the log, not measured |
+  | Node `processTable()` (one `ps`), 863 processes, load 16 | — | 28.75 ms | — | sampler backs off to 0.5 s |
+  | Rust reaper tests, red (candidates() empty) / green | 4 of 10 failed, no process ended by the test | 17/17 three times (macOS), 112/112 twice with paddock-testkit (Linux) | none | pass |
+  | Node kit tests, red (choose empty) / green | 3 of 9 failed in 1 s, no process ended by the test | 9/9 three times (macOS), three times (node:24-bookworm) | none | pass |
+
+- **Notes:** the session test's CI wait log shows each step 10-20 times slower than here; the local load (at most 6 burners, the
+  agents' cap) does not reach that, so the split rests on the log's per-step times, not on a local reproduction. macOS 27 shows
+  no other process's environment (`ps -E` and sysinfo's `environ()` both return none for a same-user `sleep` given a variable),
+  so the reaper's token is read on Linux only. Raw output in the agent's scratch folder, not kept.
+
+## Queue scenario tests: git children per test (2026-11-15, fix/queue-tests-fast)
+
+Question: why do the merge-queue scenario tests (`tools/paddock-dev/src/queue/tests.rs`) take 20 to 55 s each on the Windows
+runner, and four of them cross nextest's 60 s limit when the job runs 42% slower (train 11 run 8115: job 577 s against 405 s in
+run 8110)?
+
+- **Machine:** Mac mini (arm64), 1-minute load 13 to 23 (train CI and other agents on it); Windows times from the CI logs of the
+  `paddock-dev (windows-latest)` job of runs 8054 (main), 8110 and 8115 (train 11)
+- **Command:** `cargo nextest run --locked --test-threads=1 queue::tests` in `tools/paddock-dev` (base 6fda267d3, then this branch);
+  git children counted by a `git` wrapper first on `PATH` that writes `$NEXTEST_TEST_NAME` per call (same run, default threads)
+- **Runs:** 1 counted run and 1 timed run each side; the module after the change 20 more times (all green, 6.3 to 6.4 s each)
+- **Numbers:**
+
+  | Test (after: the halves of a split test) | git children before | after | macOS before | after | Windows 8110 before |
+  |---|---|---|---|---|---|
+  | two_pull_requests_one_breaks... | 220 | 98 | 1.88 s | 1.11 s | 31.4 s |
+  | several_suspects... / only_failures_of_mains_own... | 309 | 82 / 46 | 2.86 s | 0.97 / 0.58 s | 43.1 s |
+  | the_backup_window_holds... / an_unread_hour_never... | 208 | 75 / 35 | 2.06 s | 0.85 / 0.48 s | 31.4 s |
+  | a_pull_request_whose_plan_runs_everything... / a_failure_only_the_pull_request... | 309 | 68 / 60 | 2.87 s | 0.81 / 0.75 s | 38.5 s |
+  | a_gate_job_failure... (split in two) | 313 | 70 / 62 | 3.02 s | 0.85 / 0.74 s | 34.9 s |
+  | a_blocked_train... (split in two) | 249 | 67 / 57 | 2.52 s | 0.94 / 0.66 s | 26.4 s |
+  | the whole module, 78 tests before, 90 after | 6953 | 3576 | 73.2 s | 48.9 s | |
+
+- **Where the time went:** in git children. The Windows time of a test divided by its git children is 0.11 to 0.15 s for every
+  slow test in run 8110 (0.19 s or more in 8115, where they hit 60 s), and on macOS the children were about two thirds of the
+  wall time. The fixture's two clones are 2 of about 220 children. Per tick the queue's adapter ran one fetch per branch, two
+  children per `contains` (`cat-file -e`, then `merge-base --is-ancestor`) and three per commit in `verify_train`; the real merge
+  check ran about 25 per merge.
+- **Change:** one fetch for all branches that must exist (the train branch stays its own fetch), `contains` as one
+  `merge-base --is-ancestor`, `verify_train` reads each commit once (`cat-file commit`: tree, parents and message), the scenario
+  tests use a clean merge check unless they are about it (the real one still runs in the one-green, conflict and `GitTrain::open`
+  scenarios), and the five tests that built two worlds are split in two.
+- **Windows estimate (not measured):** at 0.11 to 0.15 s per child the slowest test after (105 children) takes 12 to 16 s, the
+  four that timed out 4 to 15 s; at run 8115's 0.19 to 0.27 s about 28 s at most, half the 60 s limit.
+- **Memory measure:** not measured (no memory question)

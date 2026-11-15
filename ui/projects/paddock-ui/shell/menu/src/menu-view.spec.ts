@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, provideZonelessChangeDetection, signal, type WritableSignal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { AppMenu } from './app-menu';
 import { KEY_PLATFORM } from './keymap';
@@ -42,10 +42,12 @@ function press(target: Element, key: string): void {
 class Host {}
 
 let ran: string[];
+let menus: WritableSignal<TopMenu[]>;
 const mode = { value: 'in-app' as 'in-app' | 'native' };
 
 function setup<T>(component: new () => T): ComponentFixture<T> {
   ran = [];
+  menus = signal(MENUS);
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
@@ -53,7 +55,7 @@ function setup<T>(component: new () => T): ComponentFixture<T> {
       {
         provide: AppMenu,
         useValue: {
-          menus: signal(MENUS),
+          menus,
           items: (id: string) => (id === 'sd.ctx' ? CONTEXT : []),
           run: (id: string) => (ran.push(id), Promise.resolve(true)),
           get mode() {
@@ -138,6 +140,53 @@ describe('PdMenuBar', () => {
     await fixture.whenStable();
     expect(openMenus()).toEqual([]);
     expect(document.activeElement).toBe(view);
+  });
+
+  // An app's menus change while one is open (a lazily loaded command hides itself once its code says it is unavailable),
+  // and the items below move up. A row must keep running what it shows: the row of "Close workspace" never runs
+  // "Close window" (Debrief's ux-demo-tour.e2e.ts flaked in debrief.yml run 8116 when a click landed on a reused row).
+  const shifting = (withExport: boolean): TopMenu[] => [
+    {
+      id: 'file',
+      label: 'File',
+      items: [
+        ...(withExport ? [{ kind: 'item', id: 'sd.export', label: 'Export report…', enabled: true } as const] : []),
+        { kind: 'item', id: 'sd.closeWorkspace', label: 'Close workspace', enabled: true },
+        { kind: 'item', id: 'sd.closeWindow', label: 'Close window', enabled: true },
+      ],
+    },
+  ];
+
+  it('keeps each open row bound to its own command when a row above it goes away (pointer)', async () => {
+    menus.set(shifting(true));
+    await fixture.whenStable();
+    top('File').click();
+    await fixture.whenStable();
+    const close = item('Close workspace')!;
+    menus.set(shifting(false));
+    await fixture.whenStable();
+    expect(item('Export report…')).toBeUndefined();
+    expect(close.querySelector('.pd-menu-label')!.textContent?.trim()).toBe('Close workspace');
+    close.click();
+    await fixture.whenStable();
+    expect(ran).toEqual(['sd.closeWorkspace']);
+  });
+
+  it('keeps the focused row bound to its own command when a row above it goes away (keyboard)', async () => {
+    menus.set(shifting(true));
+    await fixture.whenStable();
+    const file = top('File');
+    file.focus();
+    press(file, 'ArrowDown');
+    await fixture.whenStable();
+    await vi.waitFor(() => expect(document.activeElement).toBe(item('Export report…')));
+    press(document.activeElement!, 'ArrowDown');
+    expect(document.activeElement).toBe(item('Close workspace'));
+    menus.set(shifting(false));
+    await fixture.whenStable();
+    press(document.activeElement!, 'Enter');
+    await fixture.whenStable();
+    expect(ran).toEqual(['sd.closeWorkspace']);
   });
 
   it('jumps to an item by typing its first letters', async () => {

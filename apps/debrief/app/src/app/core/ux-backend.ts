@@ -1,12 +1,12 @@
 import { inject, Injectable } from '@angular/core';
 import { invoke } from './activity/ipc';
 import { ImportProgress, ProfileDoc, ProfileVersionInfo } from './api.types';
-import { DebriefBackend } from './backend';
 import { reportBackendFailures } from './failure-reporter';
 import { Logger, withFailureLogging } from './logger';
 import { isTauri } from './platform';
 import { browserMocks } from './mock-registry';
 import { cancelActiveJobs } from '../jobs/job-cancel';
+import { MOCK_WORKSPACE } from './mock-workspace';
 
 /**
  * The engine commands behind the ease-of-use features: import progress and cancel, profile history and
@@ -52,6 +52,6 @@ export class TauriUxBackend extends UxBackend {
 }
 
 export function createUxBackend(): UxBackend {
-  const backend: UxBackend = isTauri() ? new TauriUxBackend() : new (browserMocks().MockUxBackend)(inject(DebriefBackend));
+  const backend: UxBackend = isTauri() ? new TauriUxBackend() : new (browserMocks().MockUxBackend)(inject(MOCK_WORKSPACE));
   return withFailureLogging<UxBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

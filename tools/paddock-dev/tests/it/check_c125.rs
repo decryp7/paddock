@@ -7,16 +7,18 @@ use paddock_dev::check::{RunOptions, registry, run_checks, run_checks_in};
 use serde_json::{Value, json};
 use std::path::Path;
 
-/// A stale guard default, an allowed invented volume next to an unlisted one, a skipped history document, a binary file, a
-/// worktree's `.git` file, placeholders, non-ASCII text before a site, and stale, short and ambiguous allow entries.
-const CASES: [(&str, &str); 8] = [
+/// A stale guard default, an allowed invented volume next to an unlisted one, a longer name and a literal beyond the count, skipped
+/// Markdown history beside a script that is read, a binary file, a worktree's `.git` file, placeholders, non-ASCII text before a
+/// site, and stale allow and history entries.
+const CASES: &[(&str, &str)] = &[
     (
         "conformance/c125-allow.json",
-        r#"{"history": [{"path": "docs/adr/", "reason": "ADRs record history"}, {"path": "docs/gone/", "reason": "names no file"}],
+        r#"{"history": [{"path": "docs/adr/", "reason": "ADRs record history"}, {"path": "docs/gone/", "reason": "names no file"},
+{"path": "docs/quiet/", "reason": "names no disk"}],
 "allow": [{"path": "apps/d/src/vol.rs", "site": "/Volumes/Data", "reason": "invented test data", "count": 2},
 {"path": "apps/d/src/vol.rs", "site": "/Volumes/Gone", "reason": "a stale entry"},
-{"path": "scripts/x.sh", "site": "/Volumes/USB", "reason": "an ambiguous entry"},
-{"path": "scripts/y.sh", "site": "/Volumes/M", "reason": "a short count", "count": 3}]}"#,
+{"path": "scripts/x.sh", "site": "/Volumes/USB", "reason": "one site of two"},
+{"path": "scripts/y.sh", "site": "/Volumes/M", "reason": "not a whole component", "count": 3.0}]}"#,
     ),
     (
         ".claude/hooks/worktree-guard.py",
@@ -24,11 +26,13 @@ const CASES: [(&str, &str); 8] = [
     ),
     (
         "apps/d/src/vol.rs",
-        "let a = \"/Volumes/Data\";\nlet b = [\"/Volumes/Data/x\", \"/Volumes/d7sst7\"];\n",
+        "let a = \"/Volumes/Data\";\nlet b = [\"/Volumes/Data/x\", \"/Volumes/d7sst7\"];\nlet c = \"/Volumes/Database\";\nlet d = \"/Volumes/Data\";\n",
     ),
     ("scripts/x.sh", "A=/Volumes/USB\nB=/Volumes/USB/b\n"),
     ("scripts/y.sh", "A=/Volumes/Media\n"),
     ("docs/adr/0001-x.md", "built in /Volumes/d7sst7/dev-targets/x\n"),
+    ("docs/adr/run.sh", "cd /Volumes/d7sst7/x\n"),
+    ("docs/quiet/a.md", "no disk is named here\n"),
     ("icons/a.png", "bytes /Volumes/d7sst7"),
     (".git", "gitdir: /Volumes/d7sst7/paddock/.git/worktrees/x\n"),
 ];
@@ -57,9 +61,9 @@ const r = await runChecks({ root: process.env.RT5_ROOT, app: process.env.RT5_APP
 process.stdout.write(JSON.stringify(r));
 "#;
 
-fn fixture_tree() -> tempfile::TempDir {
+fn tree_of(files: &[(&str, &str)]) -> tempfile::TempDir {
     let d = tempfile::tempdir().unwrap();
-    for (rel, text) in CASES {
+    for (rel, text) in files {
         let to = d.path().join(rel);
         std::fs::create_dir_all(to.parent().unwrap()).unwrap();
         std::fs::write(to, text).unwrap();
@@ -67,8 +71,23 @@ fn fixture_tree() -> tempfile::TempDir {
     d
 }
 
+fn fixture_tree() -> tempfile::TempDir {
+    tree_of(CASES)
+}
+
+/// Both hosts over `root`: the shared part of each report, the Rust one first.
+fn both(root: &Path) -> (Value, Value) {
+    let js: Value = serde_json::from_str(&node(
+        JS_RUN,
+        &[("RT5_ROOT", root.display().to_string()), ("RT5_APP", "fixture".into())],
+    ))
+    .unwrap();
+    let r = run_checks(&options(root, "fixture"), &registry()).unwrap();
+    (shared_part(&r.json()), shared_part(&js))
+}
+
 #[test]
-fn c125_flags_unlisted_disk_paths_and_names_stale_and_ambiguous_entries_as_warnings() {
+fn c125_flags_unlisted_disk_paths_and_names_stale_entries_as_warnings() {
     let tree = fixture_tree();
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
     let got: Vec<(&str, usize, &str)> = r
@@ -76,44 +95,106 @@ fn c125_flags_unlisted_disk_paths_and_names_stale_and_ambiguous_entries_as_warni
         .iter()
         .map(|f| (f.file.as_str(), f.line, f.message.split(':').next().unwrap()))
         .collect();
+    let path = "hard-codes the machine disk path";
     assert_eq!(
         got,
         [
             (
                 ".claude/hooks/worktree-guard.py",
                 2,
-                "hard-codes the machine disk path `/Volumes/d8sst7/dev.decryptology.net/paddock`"
+                &*format!("{path} `/Volumes/d8sst7/dev.decryptology.net/paddock`")
             ),
-            // an allowed name does not hide another literal in the same file
-            ("apps/d/src/vol.rs", 2, "hard-codes the machine disk path `/Volumes/d7sst7`"),
-            ("conformance/c125-allow.json", 1, "stale history entry (docs/gone/) names no file"),
+            // an allowed name hides neither another literal, nor a longer name, nor a literal beyond its count
+            ("apps/d/src/vol.rs", 2, &format!("{path} `/Volumes/d7sst7`")),
+            ("apps/d/src/vol.rs", 3, &format!("{path} `/Volumes/Database`")),
+            (
+                "apps/d/src/vol.rs",
+                4,
+                &format!("{path} `/Volumes/Data` beyond the count of its allow entry")
+            ),
+            // history covers Markdown only
+            ("docs/adr/run.sh", 1, &format!("{path} `/Volumes/d7sst7/x`")),
+            (
+                "scripts/x.sh",
+                2,
+                &format!("{path} `/Volumes/USB/b` beyond the count of its allow entry")
+            ),
+            ("scripts/y.sh", 1, &format!("{path} `/Volumes/Media`")),
+            (
+                "conformance/c125-allow.json",
+                1,
+                "stale history entry (docs/gone/) skipped no disk path"
+            ),
+            (
+                "conformance/c125-allow.json",
+                1,
+                "stale history entry (docs/quiet/) skipped no disk path"
+            ),
             ("conformance/c125-allow.json", 1, "stale allow entry (apps/d/src/vol.rs"),
-            ("conformance/c125-allow.json", 1, "ambiguous allow entry (scripts/x.sh"),
             ("conformance/c125-allow.json", 1, "stale allow entry (scripts/y.sh"),
         ]
-    );
-    let said = |needle: &str| r.findings.iter().any(|f| f.message.contains(needle));
-    assert!(
-        said("(scripts/y.sh: /Volumes/M) matches only 1 of its 3 sites"),
-        "a count above the matches is stale"
-    );
-    assert!(
-        said("(scripts/x.sh: /Volumes/USB) matches 2 sites"),
-        "two matches of a count of 1 are ambiguous"
     );
     assert_eq!(r.errors(), 0, "report-only until its first green run (ER-41)");
 }
 
-/// "Delete the check": with its allow file gone the check cannot look, and that is an error no waiver covers, never a pass.
+/// "Delete the check": an allow file that is missing, not JSON or without its lists makes the check broken, one finding and
+/// nothing else, on both hosts, never a pass.
 #[test]
-fn c125_without_its_allow_file_cannot_look() {
-    let tree = fixture_tree();
-    std::fs::remove_file(tree.path().join("conformance/c125-allow.json")).unwrap();
+fn c125_with_a_broken_allow_file_is_one_check_broken_finding_on_both_hosts() {
+    for allow in [
+        None,
+        Some("nope"),
+        Some("{\"allow\": []}"),
+        Some("{\"history\": [], \"allow\": [{\"path\": \"a\"}]}"),
+    ] {
+        let mut files = vec![("scripts/a.sh", "x=/Volumes/d7sst7\n")];
+        if let Some(text) = allow {
+            files.push(("conformance/c125-allow.json", text));
+        }
+        let tree = tree_of(&files);
+        let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
+        let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
+        assert_eq!(got, [("conformance/c125-allow.json", Some("check-broken"))], "{allow:?}");
+        if has_node() {
+            // The JSON parsers word their own error differently (serde_json and V8): the message is compared up to that text.
+            let cut = |mut v: Value| {
+                for f in v["findings"].as_array_mut().unwrap() {
+                    let m = f["message"].as_str().unwrap().to_string();
+                    f["message"] = Value::from(m.split(" is not JSON: ").next().unwrap());
+                }
+                v
+            };
+            let (rust, js) = both(tree.path());
+            assert_eq!(cut(rust), cut(js), "{allow:?}");
+        }
+    }
+}
+
+/// A file the run cannot read is not measured, at that file, on both hosts (root reads a 000 file: then nothing is checked).
+#[test]
+#[cfg(unix)]
+fn c125_an_unreadable_file_is_not_measured_on_both_hosts() {
+    use std::os::unix::fs::PermissionsExt;
+    let tree = tree_of(&[
+        ("conformance/c125-allow.json", "{\"history\": [], \"allow\": []}"),
+        ("scripts/a.sh", "x=/Volumes/d7sst7\n"),
+        ("scripts/b.sh", "y=/Volumes/d8sst7\n"),
+    ]);
+    let locked = tree.path().join("scripts/a.sh");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&locked).is_ok() {
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+        eprintln!("not measured: running as root, which reads a 000 file");
+        return;
+    }
     let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
-    assert!(
-        r.errors() > 0,
-        "a check that could not read its allow file is an error no waiver covers"
-    );
+    let parity = has_node().then(|| both(tree.path()));
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let got: Vec<(&str, Option<&str>)> = r.findings.iter().map(|f| (f.file.as_str(), f.outcome.map(|o| o.name()))).collect();
+    assert_eq!(got, [("scripts/a.sh", Some("not-measured")), ("scripts/b.sh", None)]);
+    if let Some((rust, js)) = parity {
+        assert_eq!(rust, js);
+    }
 }
 
 #[test]
@@ -122,13 +203,7 @@ fn live_c125_fixture_findings_equal_the_js_host() {
         return skip("node is not installed");
     }
     let tree = fixture_tree();
-    let js: Value = serde_json::from_str(&node(
-        JS_RUN,
-        &[("RT5_ROOT", tree.path().display().to_string()), ("RT5_APP", "fixture".into())],
-    ))
-    .unwrap();
-    let r = run_checks(&options(tree.path(), "fixture"), &registry()).unwrap();
-    let (got, want) = (shared_part(&r.json()), shared_part(&js));
+    let (got, want) = both(tree.path());
     assert_eq!(got["findings"], want["findings"]);
     assert_eq!(got, want);
 }

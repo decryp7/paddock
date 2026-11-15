@@ -7,6 +7,7 @@ import { EncodingBackend, TauriEncodingBackend } from './encoding-backend';
 import { MOCK_ENCODINGS, MockEncodingBackend } from './mock/mock-encoding-backend';
 import type { MockDataset } from '../../core/mock/mock-data';
 import { tinyDataset } from '../../../testing/helpers';
+import { MOCK_WORKSPACE } from '../../core/mock-workspace';
 
 function withEncodings(): MockDataset {
   const d = tinyDataset();
@@ -35,7 +36,7 @@ describe('TauriEncodingBackend', () => {
   });
 
   it('is the mock in a browser, with failures logged', async () => {
-    TestBed.configureTestingModule({ providers: [{ provide: Logger, useFactory: () => new MemoryLogger() }, { provide: DebriefBackend, useValue: tinyBackend() }] });
+    TestBed.configureTestingModule({ providers: [{ provide: Logger, useFactory: () => new MemoryLogger() }, { provide: DebriefBackend, useValue: tinyBackend() }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend }] });
     const backend = TestBed.inject(EncodingBackend);
     expect((await backend.options()).map((o) => o.label)).toContain('Shift_JIS');
     await expect(backend.setSourceEncoding(99, 'GBK')).rejects.toBeDefined();

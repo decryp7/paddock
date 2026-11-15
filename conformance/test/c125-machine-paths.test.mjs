@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { globRegExp, machinePaths, parseAllow } from '../src/checks/C125-machine-paths.mjs';
+import { chmodSync } from 'node:fs';
+import { join } from 'node:path';
+import { globRegExp, machinePaths, namesPath, parseAllow } from '../src/checks/C125-machine-paths.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
 const ALLOW = 'conformance/c125-allow.json';
@@ -39,14 +41,15 @@ test('C125 path patterns: ** any folders, * one name, a trailing / the folder', 
   assert.equal(globRegExp('apps/*/docs/adr/').test('apps/dyno/x/docs/adr/0001.md'), false);
   assert.equal(globRegExp('**/CHANGELOG.md').test('CHANGELOG.md'), true);
   assert.equal(globRegExp('**/CHANGELOG.md').test('apps/dyno/CHANGELOG.md'), true);
-  assert.equal(globRegExp('docs/lessons.md').test('docs/lessons.md.bak'), false);
+  assert.equal(globRegExp('notes/kept.md').test('notes/kept.md.bak'), false);
 });
 
-test('C125 allow file: both lists, a reason on every entry, a count of at least 1', () => {
+test('C125 allow file: both lists, a reason on every entry, a count of at least 1 (a whole float is its integer)', () => {
   const { history, allow } = parseAllow(lists({ history: [{ path: 'docs/adr/', reason: 'records history' }], allow: [{ path: 'a.rs', site: '/Volumes/Data', reason: 'invented test data', count: 2 }] }));
   assert.equal(history[0].path, 'docs/adr/');
   assert.deepEqual(allow, [{ path: 'a.rs', site: '/Volumes/Data', reason: 'invented test data', count: 2 }]);
   assert.equal(parseAllow(lists({ allow: [{ path: 'a.rs', site: 'x', reason: 'long enough' }] })).allow[0].count, 1);
+  assert.equal(parseAllow(lists({ allow: [{ path: 'a.rs', site: 'x', reason: 'long enough', count: 1.0 }] })).allow[0].count, 1);
   assert.throws(() => parseAllow(lists({ history: [{ path: 'docs/' }] })), /reason/);
   assert.throws(() => parseAllow(lists({ allow: [{ path: 'a.rs', reason: 'long enough' }] })), /site/);
   assert.throws(() => parseAllow(lists({ allow: [{ path: 'a.rs', site: 'x', reason: 'long enough', count: 0 }] })), /count/);
@@ -54,7 +57,15 @@ test('C125 allow file: both lists, a reason on every entry, a count of at least 
   assert.throws(() => parseAllow('nope'), /not JSON/);
 });
 
-test('C125 through the runner: warnings only, history skipped, sites allowed by count, a missing list is a broken check', async () => {
+test('C125 sites name whole path components', () => {
+  assert.equal(namesPath('/Volumes/Data', '/Volumes/Data'), true);
+  assert.equal(namesPath('/Volumes/Data', '/Volumes/Data/x'), true);
+  assert.equal(namesPath('/Volumes/Data', '/Volumes/Database'), false);
+  assert.equal(namesPath('/Volumes/M', '/Volumes/Media'), false);
+  assert.equal(namesPath('/Volumes/Data/', '/Volumes/Data/x'), true);
+});
+
+test('C125 through the runner: warnings only, Markdown history skipped, sites allowed by count, a broken allow file is one finding', async () => {
   const root = makeApp({
     [ALLOW]: lists({
       history: [{ path: 'docs/adr/', reason: 'ADRs record what was true then' }],
@@ -62,8 +73,10 @@ test('C125 through the runner: warnings only, history skipped, sites allowed by 
     }),
     '.claude/hooks/worktree-guard.py': 'MAIN = os.environ.get("M", "/Volumes/d8sst7/dev.decryptology.net/paddock")\n',
     'docs/adr/0001-x.md': 'built in /Volumes/d7sst7/dev-targets/x\n',
-    // an allowed name does not hide another literal in the same file
-    'apps/dyno/src/vol.rs': 'let a = "/Volumes/Data";\nlet b = "/Volumes/Data/x";\nlet c = "/Volumes/d7sst7";\n',
+    // history covers Markdown only: a script beside the ADRs is read
+    'docs/adr/run.sh': 'cd /Volumes/d7sst7/x\n',
+    // an allowed name does not hide another literal, a longer name or a literal beyond the count in the same file
+    'apps/dyno/src/vol.rs': 'let a = "/Volumes/Data";\nlet b = "/Volumes/Data/x";\nlet c = "/Volumes/d7sst7";\nlet d = "/Volumes/Database";\nlet e = "/Volumes/Data";\n',
     'icons/a.png': 'bytes /Volumes/d7sst7',
     '.git': 'gitdir: /Volumes/d7sst7/paddock/.git/worktrees/x\n',
   });
@@ -71,22 +84,41 @@ test('C125 through the runner: warnings only, history skipped, sites allowed by 
   assert.deepEqual(found.map((f) => [f.file, f.line, f.severity]).sort(), [
     ['.claude/hooks/worktree-guard.py', 1, 'warn'],
     ['apps/dyno/src/vol.rs', 3, 'warn'],
+    ['apps/dyno/src/vol.rs', 4, 'warn'],
+    ['apps/dyno/src/vol.rs', 5, 'warn'],
+    ['docs/adr/run.sh', 1, 'warn'],
   ]);
-  assert.match(found[0].message, /\/Volumes\/d/);
-  const broken = await findingsOf('C125', makeApp({ 'a.sh': 'x=/Volumes/a\n' }));
-  assert.equal(broken.some((f) => f.outcome === 'check-broken'), true);
+  assert.match(found.find((f) => f.line === 5).message, /beyond the count of its allow entry/);
+  for (const allowText of [null, 'nope', '{"allow": []}']) {
+    const broken = await findingsOf('C125', makeApp({ 'a.sh': 'x=/Volumes/a\n', ...(allowText === null ? {} : { [ALLOW]: allowText }) }));
+    assert.deepEqual(broken.map((f) => [f.file, f.outcome]), [[ALLOW, 'check-broken']], 'one finding, nothing else');
+  }
 });
 
-test('C125 allow file: stale and ambiguous entries and a history entry that names no file are warnings', async () => {
+test('C125 a file that cannot be read is not measured, at that file', { skip: process.getuid?.() === 0 && 'root reads a 000 file' }, async () => {
+  const root = makeApp({ [ALLOW]: lists(), 'scripts/a.sh': 'x=/Volumes/d7sst7\n' });
+  chmodSync(join(root, 'scripts/a.sh'), 0o000);
+  try {
+    const found = await findingsOf('C125', root);
+    assert.deepEqual(found.map((f) => [f.file, f.severity, f.outcome]), [['scripts/a.sh', 'error', 'not-measured']]);
+  } finally {
+    chmodSync(join(root, 'scripts/a.sh'), 0o644);
+  }
+});
+
+test('C125 allow file: stale entries and a history entry that skipped no disk path are warnings', async () => {
   const f = 'scripts/x.sh';
-  const run = (allow, history = [], text = 'A=/Volumes/Data\nB=/Volumes/Data\n') =>
-    findingsOf('C125', makeApp({ [ALLOW]: lists({ history, allow }), [f]: text }));
+  const run = (allow, history = [], files = {}) =>
+    findingsOf('C125', makeApp({ [ALLOW]: lists({ history, allow }), [f]: 'A=/Volumes/Data\nB=/Volumes/Data\n', ...files }));
   const entry = (site, count, path = f) => ({ path, site, reason: 'invented test data', count });
   assert.deepEqual(await run([entry('/Volumes/Data', 2)]), []);
   assert.match((await run([entry('/Volumes/Data', 3)])).map((x) => x.message).join('\n'), /stale allow entry .* matches only 2 of its 3 sites/);
-  assert.match((await run([entry('/Volumes/Data', 1)])).map((x) => x.message).join('\n'), /ambiguous allow entry .* matches 2 sites/);
+  const over = await run([entry('/Volumes/Data', 1)]);
+  assert.deepEqual(over.map((x) => [x.file, x.line]), [[f, 2]], 'a literal beyond the count is reported at its own line');
   assert.match((await run([entry('/Volumes/Data', 2), entry('/Volumes/Gone', 1)])).map((x) => x.message).join('\n'), /stale allow entry .*Gone.* matches no site/);
   assert.match((await run([entry('/Volumes/x', 1, 'scripts/gone.sh')])).map((x) => x.message).join('\n'), /stale allow entry/);
-  const hist = await run([entry('/Volumes/Data', 2)], [{ path: 'docs/research/', reason: 'research notes record history' }]);
-  assert.deepEqual(hist.map((x) => [x.file, x.message.replace(/ names.*/, '')]), [[ALLOW, 'stale history entry (docs/research/)']]);
+  const research = [{ path: 'docs/research/', reason: 'research notes record history' }];
+  const quiet = await run([entry('/Volumes/Data', 2)], research, { 'docs/research/a.md': 'no disk named here\n' });
+  assert.deepEqual(quiet.map((x) => [x.file, x.message]), [[ALLOW, 'stale history entry (docs/research/) skipped no disk path']]);
+  assert.deepEqual(await run([entry('/Volumes/Data', 2)], research, { 'docs/research/a.md': 'data in /Volumes/d7sst7/x\n' }), []);
 });

@@ -134,4 +134,6 @@ git -C "$TMP/bare/r" config --unset paddock.worktreeRoot
 out=$(echo 'not json' | "$H" 2>/dev/null); [ -z "$out" ] && echo "ok: bad input allows" || { echo "FAIL: bad input"; fail=1; }
 out=$(jq -nc '{tool_name:"Bash",cwd:"/x",agent_id:"a",tool_input:{command:"docker stop"}}' | "$H")
 case "$out" in *"Agents stop only their own containers by name (ER-14); never mass-stop or touch Docker/OrbStack itself."*) echo "ok: message" ;; *) echo "FAIL: message"; fail=1 ;; esac
+# The shared shell-forms corpus: every scanner bypass and false refusal found so far, judged by every guard.
+bash "$here/lib/shell-forms.sh" docker-guard "$H" || fail=1
 exit $fail

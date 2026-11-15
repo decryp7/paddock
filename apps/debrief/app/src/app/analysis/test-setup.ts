@@ -4,6 +4,7 @@ import { AnalysisBackend } from '../core/analysis-backend';
 import { Analyzed, Anomaly, Comparison, Coverage, ExceptionGroup, FieldStats, fullCoverage, MomentSummary, OutlierReport, Pattern, RequestSpan, TracesResult, RecordView } from '../core/api.types';
 import { Logger } from '../core/logger';
 import { DebriefBackend } from '../core/backend';
+import { MOCK_WORKSPACE } from '../core/mock-workspace';
 import { MockBackend } from '../core/mock/mock-backend';
 import { COMMAND_CONTEXT } from '../extensions/command-registry';
 import { CommandContext } from '../extensions/tokens';
@@ -50,8 +51,9 @@ export class FakeContext extends FakeCommandContext {
 export function provideAnalysisTesting(extra: { backend?: AnalysisBackend; history?: HistoryStore; context?: CommandContext } = {}): Provider[] {
   return [
     { provide: DebriefBackend, useFactory: () => new MockBackend({ latency: false }) },
+    { provide: MOCK_WORKSPACE, useExisting: DebriefBackend },
     { provide: Logger, useFactory: () => new MemoryLogger() },
-    { provide: AnalysisBackend, useFactory: () => extra.backend ?? new MockAnalysisBackend(recordsFrom(inject(DebriefBackend))) },
+    { provide: AnalysisBackend, useFactory: () => extra.backend ?? new MockAnalysisBackend(recordsFrom(inject(MOCK_WORKSPACE))) },
     { provide: HISTORY_STORE, useValue: extra.history ?? new MemoryHistory() },
     ...(extra.context ? [{ provide: COMMAND_CONTEXT, useValue: extra.context }] : []),
   ];

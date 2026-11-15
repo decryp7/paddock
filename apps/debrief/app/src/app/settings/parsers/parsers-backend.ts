@@ -1,11 +1,11 @@
 import { inject, Injectable } from '@angular/core';
 import { invoke } from '../../core/activity/ipc';
 import { ParserDocDto, ParserDraftRequest, ParserImportCheckDto, ParserLibraryDto, ParserValidationDto } from '../../core/api.types';
-import { DebriefBackend } from '../../core/backend';
 import { reportBackendFailures } from '../../core/failure-reporter';
 import { Logger, withFailureLogging } from '../../core/logger';
 import { browserMocks } from '../../core/mock-registry';
 import { isTauri } from '../../core/platform';
+import { MOCK_WORKSPACE } from '../../core/mock-workspace';
 
 /** How `save` treats an existing parser with the same id. */
 export interface ParserSaveOptions {
@@ -92,6 +92,6 @@ export class TauriParsersBackend extends ParsersBackend {
 }
 
 export function createParsersBackend(): ParsersBackend {
-  const backend: ParsersBackend = isTauri() ? new TauriParsersBackend() : new (browserMocks().MockParsersBackend)(inject(DebriefBackend));
+  const backend: ParsersBackend = isTauri() ? new TauriParsersBackend() : new (browserMocks().MockParsersBackend)(inject(MOCK_WORKSPACE));
   return withFailureLogging<ParsersBackend>(backend, inject(Logger), { onFailure: reportBackendFailures() });
 }

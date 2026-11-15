@@ -4,6 +4,7 @@ import { DebriefBackend } from '../../core/backend';
 import { Logger } from '../../core/logger';
 import { MockPasteBackend } from './mock/mock-paste-backend';
 import { PasteBackend, TauriPasteBackend } from './paste-backend';
+import { MOCK_WORKSPACE } from '../../core/mock-workspace';
 
 describe('TauriPasteBackend', () => {
   it('starts paste_log as an import job with { text, name } and resolves with the workspace it ends with', async () => {
@@ -25,7 +26,7 @@ describe('TauriPasteBackend', () => {
   });
 
   it('is the mock in a browser, with failures logged', async () => {
-    TestBed.configureTestingModule({ providers: [{ provide: Logger, useFactory: () => new MemoryLogger() }, { provide: DebriefBackend, useValue: tinyBackend() }] });
+    TestBed.configureTestingModule({ providers: [{ provide: Logger, useFactory: () => new MemoryLogger() }, { provide: DebriefBackend, useValue: tinyBackend() }, { provide: MOCK_WORKSPACE, useExisting: DebriefBackend }] });
     const backend = TestBed.inject(PasteBackend);
     expect((await backend.pasteLog('one line', 'x')).sources.some((s) => s.name === 'pasted/x.log')).toBe(true);
     await expect(backend.pasteLog('   ', null)).rejects.toBeDefined();

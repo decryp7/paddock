@@ -45,7 +45,7 @@ import { WatchedFolderInfo } from '../api.types';
 import { RunsReply, RunsRequest, SpanPreview, SpanPreviewRequest } from '../api.types';
 import { MockEngine, safeRegex } from './mock-engine';
 import { MOCK_PLUGIN_KINDS, MOCK_WINDOWS_PLUGIN, MockPluginKind } from './mock-plugin-markers';
-import type { Failable, Holdable } from './mock-options';
+import type { Holdable } from './mock-options';
 import { mockPreviewParse } from './mock-parse';
 import { mockExplainRegex, mockInferRegex } from './mock-regex';
 import { syntheticFacet, syntheticPage } from './mock-synthetic';
@@ -83,8 +83,6 @@ export interface MockBackendOptions {
   syntheticTotal?: number;
   /** Every field reports this many distinct values; facets return at most 1000 of them, like the engine. */
   syntheticFacetValues?: number;
-  /** The first N calls of each named command reject with a simulated error. */
-  fail?: Partial<Record<Failable, number>>;
   /** Page rows lose their `markers`, as a buggy backend would send them (panel error boundary tests). */
   corruptMarkers?: boolean;
   /** Interval between live tail events (default 1500 ms; 250 ms with `liveRate`). */
@@ -132,7 +130,6 @@ export class MockBackend implements DebriefBackend {
   private readonly latency: boolean;
   private readonly makeDataset: () => MockDataset;
   private readonly options: MockBackendOptions;
-  private readonly failuresLeft: Partial<Record<Failable, number>>;
   private readonly changeHandlers = new Set<(report: TailReport | null) => void>();
   private readonly alertHandlers = new Set<(alert: LiveAlert) => void>();
   private readonly clock: MockClock;
@@ -161,7 +158,6 @@ export class MockBackend implements DebriefBackend {
   constructor(options: MockBackendOptions = {}) {
     this.options = options;
     this.clock = options.clock ?? systemMockClock;
-    this.failuresLeft = { ...options.fail };
     this.latency = options.latency ?? true;
     this.makeDataset = options.dataset ?? (() => (options.longNames ? withLongNames(generateDemo()) : generateDemo()));
     this.engine = new MockEngine(options.pluginMarkerKinds ?? MOCK_PLUGIN_KINDS);
@@ -200,16 +196,6 @@ export class MockBackend implements DebriefBackend {
       }
     };
     return new Promise((resolve, reject) => (this.latency ? this.clock.setTimeout(() => run(resolve, reject), ms) : run(resolve, reject)));
-  }
-
-  /** Rejects (like a failing Tauri command) while the command still has simulated failures left. */
-  private failing(command: Failable): Promise<never> | null {
-    const left = this.failuresLeft[command] ?? 0;
-    if (left <= 0) return null;
-    this.failuresLeft[command] = left - 1;
-    return this.delay<never>(() => {
-      throw new Error(`Simulated ${command} failure`);
-    });
   }
 
   private syntheticCount(): number {
@@ -380,7 +366,7 @@ export class MockBackend implements DebriefBackend {
   }
 
   workspaceSummary() {
-    return this.failing('workspaceSummary') ?? this.delay(() => this.summary());
+    return this.delay(() => this.summary());
   }
 
   openPaths(paths: string[]): Promise<WorkspaceSummary> {
@@ -518,26 +504,22 @@ export class MockBackend implements DebriefBackend {
   }
 
   queryPage(request: PageRequest): Promise<Page> {
-    return (
-      this.failing('queryPage') ??
-      this.delay(() => {
-        const page = this.redactPage(this.options.syntheticTotal ? syntheticPage(request, this.syntheticCount()) : this.engine.page(this.windowed(request)));
-        return this.options.corruptMarkers ? { ...page, rows: page.rows.map((r) => ({ ...r, markers: undefined as never })) } : page;
-      }, 20)
-    );
+    return this.delay(() => {
+      const page = this.redactPage(this.options.syntheticTotal ? syntheticPage(request, this.syntheticCount()) : this.engine.page(this.windowed(request)));
+      return this.options.corruptMarkers ? { ...page, rows: page.rows.map((r) => ({ ...r, markers: undefined as never })) } : page;
+    }, 20);
   }
 
   searchPartial(query: Query): Promise<PartialMatches | null> {
-    return this.failing('searchPartial') ?? this.delay(() => this.engine.partialMatches(query), 60);
+    return this.delay(() => this.engine.partialMatches(query), 60);
   }
 
   queryTimeline(request: TimelineRequest): Promise<Timeline> {
-    return this.failing('queryTimeline') ?? this.delay(() => this.engine.timeline(this.windowed(request)), 30);
+    return this.delay(() => this.engine.timeline(this.windowed(request)), 30);
   }
 
   queryFacet(request: FacetRequest): Promise<Facet> {
     return (
-      this.failing('queryFacet') ??
       this.delay(() => this.redactFacet(this.options.syntheticFacetValues ? syntheticFacet(request, this.options.syntheticFacetValues) : this.engine.facet(this.windowed(request))), 20)
     );
   }
@@ -624,7 +606,6 @@ export class MockBackend implements DebriefBackend {
 
   sourceContext(request: ContextRequest): Promise<SourceContext> {
     return (
-      this.failing('sourceContext') ??
       this.delay(() => {
         const rec = this.engine.records[this.engine.indexOf(request.recordId) ?? -1];
         if (!rec) throw new Error('That event is no longer in the workspace.');
@@ -648,7 +629,6 @@ export class MockBackend implements DebriefBackend {
 
   readFileHead(path: string, maxBytes = 65536): Promise<string> {
     return (
-      this.failing('readFileHead') ??
       this.delay(() => {
         const known = this.dataset.sources.some((s) => s.path === path) || this.dataset.unrecognized.some((u) => u.path === path);
         if (!known) throw new Error('only files in the workspace can be previewed');
@@ -659,7 +639,6 @@ export class MockBackend implements DebriefBackend {
 
   previewParse(request: ParsePreviewRequest): Promise<ParsePreview> {
     return (
-      this.failing('previewParse') ??
       this.delay(() => {
         if (request.toml.trim()) return { ...mockPreviewParse(request), parser: null };
         // No candidate parser: the one the library would choose for the sample.
@@ -855,7 +834,6 @@ export class MockBackend implements DebriefBackend {
 
   annotations(request: AnnotationsRequest): Promise<AnnotationDto[]> {
     return (
-      this.failing('annotations') ??
       this.delay(() => {
         const groupBy = this.engine.defaultGroupBy;
         const runs = mockRunAnnotations(spanRules(this.profile), this.runContext())
@@ -875,7 +853,6 @@ export class MockBackend implements DebriefBackend {
   /** `query_runs`; see mock-runs.ts. */
   queryRuns(request: RunsRequest): Promise<RunsReply> {
     return (
-      this.failing('queryRuns') ??
       this.delay(() => {
         const rules = spanRules(this.profile);
         return mockQueryRuns(rules, mockRunAnnotations(rules, this.runContext()), request, this.engine.markerKinds);
@@ -885,7 +862,7 @@ export class MockBackend implements DebriefBackend {
 
   /** `preview_spans`; see mock-runs.ts. */
   previewSpans(request: SpanPreviewRequest): Promise<SpanPreview> {
-    return this.failing('previewSpans') ?? this.delay(() => mockPreviewSpans(request.draft, this.profile, this.runContext(), this.engine.markerKinds), 30);
+    return this.delay(() => mockPreviewSpans(request.draft, this.profile, this.runContext(), this.engine.markerKinds), 30);
   }
 
   /** Clock-skew correction (`set_source_offset`); see mock-skew.ts. */

@@ -28,6 +28,9 @@ slow-timeout = { period = "30s", terminate-after = 4 }
 # CI (.gitea/workflows/ci.yml, publish.yml): every failure reported, no retries (rules.md 5: a flaky test is fixed, not
 # retried), a JUnit report.
 [profile.ci]
+# ADR 0103 (D2): a test whose child still holds its output 500 ms after the test ended is reported as LEAK. Report-only (ER-41):
+# result = "pass" until the first green CI run with it on main, recorded here by run id; then "fail" (nextest 0.9.95 or later).
+leak-timeout = { period = "500ms", result = "pass" }
 fail-fast = false
 retries = 1
 flaky-result = "fail"
@@ -57,3 +60,14 @@ slow-timeout = { period = "30s", terminate-after = 6 }
 [[profile.ci.overrides]]
 filter = "package(paddock-service) & binary(it) & test(the_cost_of_the_pieces_of_one_edge_is_reported)"
 success-output = "final"
+
+# waiver: ADR 0103's size class "cpu-heavy" (Bazel's "medium"): paddock-service's crash-model explorations are pure CPU.
+# Measured: 5-7 s each on a quiet Mac, at most 8.5 s with 6 CPU burners at load 30 (2026-11-14,
+# docs/benchmarks.md, "2026-11-14, test timing redesign"), 59 s on the loaded CI Mac, where four of eight were stopped at 60 s
+# (run 8066, job 37869): a 9x slowdown from other jobs' load. n = 1: one CI run shows it, and that job's log does not record the
+# runner's load (not measured); the local runs reached load 32 at most (6 burners, the agents' cap), not the ~100 of a busy CI Mac. Two at a time (a test group) cut the slowest from 8.5 s to 6.8 s
+# but tripled the wall time (8 s to 22 s), and under other jobs' load the CPU share, not their own number, sets the cost; so the
+# class gives them 120 s, the default profile's own bound, instead.
+[[profile.ci.overrides]]
+filter = "package(paddock-service) & binary(it) & test(/^model::the_crash_model_/)"
+slow-timeout = { period = "30s", terminate-after = 4 }
