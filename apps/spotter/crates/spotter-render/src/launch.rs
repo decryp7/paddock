@@ -517,14 +517,31 @@ mod tests {
     /// The value `f` returns once it is `Some`, polled for at most ten seconds (a condition, not a delay).
     #[cfg(unix)]
     fn poll_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
+        poll_for_result(what, || f().ok_or_else(|| "not yet".to_string()))
+    }
+
+    /// The value `f` returns once it is `Ok`, polled for at most ten seconds; a timeout names what `f` saw last.
+    #[cfg(unix)]
+    fn poll_for_result<T>(what: &str, mut f: impl FnMut() -> std::result::Result<T, String>) -> T {
         let end = Instant::now() + Duration::from_secs(10);
         loop {
-            if let Some(v) = f() {
-                return v;
-            }
-            assert!(Instant::now() < end, "timed out waiting for {what}");
+            let last = match f() {
+                Ok(v) => return v,
+                Err(last) => last,
+            };
+            assert!(Instant::now() < end, "timed out waiting for {what}; last look: {last}");
             std::thread::sleep(Duration::from_millis(20)); // conformance: hang-guard — polling for a condition, bound 10 s
         }
+    }
+
+    /// The identity of the process whose pid a stand-in wrote to `file`, or what was found instead.
+    #[cfg(unix)]
+    fn identity_in(file: &Path) -> std::result::Result<paddock_proc::ProcessId, String> {
+        let text = std::fs::read_to_string(file).map_err(|e| format!("no pid file yet ({e})"))?;
+        let pid = text.trim().parse::<u32>().map_err(|_| format!("the pid file holds {text:?}"))?;
+        paddock_proc::ProcessId::of(pid).ok_or_else(|| {
+            format!("the pid file names pid {pid}, which had already ended: the tree was ended before the test took its identity")
+        })
     }
 
     /// Whether `f` turns true within ten seconds.
@@ -786,12 +803,37 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_browser_that_exits_leaves_no_helper_behind() {
+        exited_browser_leaves_no_helper("0");
+    }
+
+    /// The same with a helper that announces itself a second late (a cold start; to the test the same as an observer that a
+    /// loaded host descheduled, run 8118): the observer still takes the helper's identity before the tree is ended.
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_that_announces_itself_late_is_still_seen_and_ended() {
+        exited_browser_leaves_no_helper("1");
+    }
+
+    /// A stand-in browser that starts a helper and exits 3; the helper writes its own pid (temp file plus rename)
+    /// `helper_delay` seconds after it started, then runs on.
+    ///
+    /// The stand-in exits only once the test has taken the helper's identity: it waits on the `go` FIFO, which the test opens
+    /// after that. Without the wait, the failed start ends the tree as soon as the leader exits, and an observer that looks
+    /// later (a helper that starts late, or a test thread a loaded host descheduled: run 8118) finds the helper gone and
+    /// waits out its ten seconds for a pid file whose process no longer exists.
+    #[cfg(unix)]
+    fn exited_browser_leaves_no_helper(helper_delay: &str) {
+        use std::io::Write as _;
         use std::os::unix::fs::PermissionsExt;
         let base = tempfile::tempdir().unwrap();
         let exe_path = base.path().join("leaving-chrome.sh");
         std::fs::write(
             &exe_path,
-            "#!/bin/sh\nsleep 300 >/dev/null 2>&1 &\necho $! > \"$(dirname \"$0\")/helper\"\nexit 3\n",
+            format!(
+                "#!/bin/sh\nd=\"$(dirname \"$0\")\"\nmkfifo \"$d/go\" || exit 4\n\
+                 sh -c 'sleep {helper_delay}; echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"; exec sleep 300' helper \"$d/helper\" >/dev/null 2>&1 &\n\
+                 read go < \"$d/go\"\nexit 3\n"
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&exe_path, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -799,18 +841,18 @@ mod tests {
             flavor: crate::discover::Flavor::Chromium,
             path: exe_path,
         };
-        // The helper's identity (pid and start time) is read the moment its pid file appears: after the failed start it is gone,
-        // and a bare pid of an ended process reads the same as a failed look (rule 53).
+        // The helper's identity (pid and start time) is read the moment its pid file appears, while the stand-in still waits:
+        // after the failed start it is gone, and a bare pid of an ended process reads the same as a failed look (rule 53).
         let (e, helper) = std::thread::scope(|s| {
             let run = s.spawn(|| Chromium::launch(&exe, &headless(base.path())).err().unwrap().to_string());
-            let helper = poll_for("the helper's pid file", || {
-                let pid = std::fs::read_to_string(base.path().join("helper"))
-                    .ok()?
-                    .trim()
-                    .parse::<u32>()
-                    .ok()?;
-                paddock_proc::ProcessId::of(pid)
-            });
+            let helper = poll_for_result("the helper's pid file", || identity_in(&base.path().join("helper")));
+            // Opening the FIFO for writing waits for the stand-in's `read`; it is there, as the stand-in made the FIFO before
+            // the helper and waits until the start guard (START_LIMIT) ends it.
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(base.path().join("go"))
+                .and_then(|mut go| go.write_all(b"go\n"))
+                .expect("the stand-in's go FIFO");
             (run.join().unwrap(), helper)
         });
         assert!(e.contains("exit status: 3"), "{e}");
