@@ -16,16 +16,18 @@ max="$2"
 
 unit=1048576
 [ "${PADDOCK_PRUNE_UNIT:-gb}" = kb ] && unit=1
-# The larger of the allocated size and the length of the regular files (hard links once, the total rounded up to a kilobyte). A file
-# system that allocates late (ZFS, btrfs, a compressed volume) reports next to nothing in `du` for data written a moment ago, which kept a
-# full folder under the cap on a runner. The length comes from the kit's one GNU/BSD helper (`kit.sh portable file-bytes`), not from
-# `du`: GNU `du --apparent-size` counts folders as 0 and BSD `du -A` counts them and rounds each entry up. What cannot be read counts
-# 0 on both sides, as in `ci prune-folder` (tools/paddock-dev/src/ci_host/prune.rs, `sizes`), which counts the same way.
+# The larger of the allocated size and the length of the regular files (hard links once, the total rounded up to a kilobyte), both
+# from the kit's one GNU/BSD helper (`kit.sh portable file-allocated` and `file-bytes`), never from `du`. A file system that allocates
+# late (ZFS, btrfs, a compressed volume) reports next to nothing allocated for data written a moment ago, which kept a full folder under
+# the cap on a runner. Folders are not content: GNU `du --apparent-size` counts them as 0, BSD `du -A` rounds each one up, and `du -sk`
+# counts ext4's 4 KiB per folder (a folder of empty folders was 20 KiB, CI run 8138). What cannot be read counts 0 on both sides, as in
+# `ci prune-folder` (tools/paddock-dev/src/ci_host/prune.rs, `sizes`), which counts the same way.
 kit="$(cd "$(dirname "$0")/.." && pwd)/conformance/ci/kit.sh"
 size() {
   local used apparent
-  used=$(du -sk "$dir" 2>/dev/null | cut -f1 || true)
+  used=$(sh "$kit" portable file-allocated "$dir")
   [[ "$used" =~ ^[0-9]+$ ]] || used=0
+  used=$(( (used + 1023) / 1024 ))
   apparent=$(sh "$kit" portable file-bytes "$dir")
   [[ "$apparent" =~ ^[0-9]+$ ]] || apparent=0
   apparent=$(( (apparent + 1023) / 1024 ))

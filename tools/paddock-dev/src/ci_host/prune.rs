@@ -66,7 +66,8 @@ pub struct AgentArgs {
 /// The size of a folder: the allocated bytes and the length of the regular files, both counted once per file (a hard link is one
 /// file). Links are never followed. Folder and link lengths are not content and are not counted: GNU `du --apparent-size` counts
 /// folders as 0 and BSD `du -A` counts them rounded up per entry, so `tools/prune-build-folders.sh` sums the file lengths itself, as
-/// this does.
+/// this does. Folders take no allocated bytes here either: ext4 gives each one 4 KiB, which made a folder of empty folders
+/// 20 KiB (CI run 8138).
 pub fn sizes(dir: &Path) -> (u64, u64) {
     let mut seen: HashSet<(u64, u64)> = HashSet::new();
     let (mut allocated, mut apparent) = (0u64, 0u64);
@@ -91,12 +92,16 @@ fn count(meta: &std::fs::Metadata, seen: &mut HashSet<(u64, u64)>, allocated: &m
         if meta.nlink() > 1 && !meta.is_dir() && !seen.insert((meta.dev(), meta.ino())) {
             return;
         }
-        *allocated += meta.blocks() * 512;
+        if meta.is_file() {
+            *allocated += meta.blocks() * 512;
+        }
     }
     #[cfg(not(unix))]
     {
         let _ = seen;
-        *allocated += meta.len();
+        if meta.is_file() {
+            *allocated += meta.len();
+        }
     }
     if meta.is_file() {
         *apparent += meta.len();

@@ -3,7 +3,7 @@
 // CI home. Fakes stand in for ./dev, the two scripts and rustc, in a scratch checkout (never the real runner or a real tool).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -401,7 +401,7 @@ test('after a failed toolchain install the job is marked, later steps neither re
 // reads a 000 folder (CI's Linux containers run as root, where the host_steps parity test cannot make it). A fake `stat` answers as
 // GNU (`-c`; its `-f` prints file-system lines, the shape that once summed to about 1.2e10) or as BSD (`-f`; no `-c`). Both must sum
 // the readable files only, a hard link once: the flavour is probed from the tool, never taken from a failed call.
-test('portable file-bytes: an unreadable folder counts 0 with GNU and with BSD stat, whatever find exits', () => {
+test('portable file-bytes and file-allocated: an unreadable folder counts 0 with GNU and with BSD stat, whatever find exits', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kit-portable-')));
   try {
     const bin = join(root, 'bin');
@@ -434,17 +434,21 @@ if (flag === (gnu ? '-f' : '-c')) {
 }
 for (const f of files) {
   const s = statSync(f);
-  console.log(fmt.replace('%d', s.dev).replace('%i', s.ino).replace(gnu ? '%s' : '%z', s.size).replace('%s', s.size));
+  console.log(fmt.replace('%d', s.dev).replace('%i', s.ino).replace(gnu ? '%s' : '%z', s.size).replace('%s', s.size).replace('%b', s.blocks));
 }`,
     );
     exe(join(bin, 'stat'), `exec '${process.execPath}' '${statJs}' "$@"`);
+    // Folders allocate blocks too (4 KiB each on ext4): only the readable files' own blocks count, the hard link once.
+    const allocated = ['x/a', 'x/incremental/b'].reduce((n, f) => n + statSync(join(tree, f)).blocks * 512, 0);
     for (const flavour of ['gnu', 'bsd']) {
-      const r = spawnSync('sh', [join(PADDOCK, 'conformance', 'ci', 'kit.sh'), 'portable', 'file-bytes', tree], {
-        env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, FAKE_STAT: flavour },
-        encoding: 'utf8',
-      });
-      assert.equal(r.status, 0, `${flavour}: ${r.stderr}`);
-      assert.equal(r.stdout.trim(), '8000', `${flavour}: the readable files, the hard link once (${r.stderr})`);
+      for (const [what, want] of [['file-bytes', 8000], ['file-allocated', allocated]]) {
+        const r = spawnSync('sh', [join(PADDOCK, 'conformance', 'ci', 'kit.sh'), 'portable', what, tree], {
+          env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root, FAKE_STAT: flavour },
+          encoding: 'utf8',
+        });
+        assert.equal(r.status, 0, `${flavour} ${what}: ${r.stderr}`);
+        assert.equal(r.stdout.trim(), String(want), `${flavour} ${what}: the readable files, the hard link once (${r.stderr})`);
+      }
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
