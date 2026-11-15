@@ -2159,3 +2159,17 @@ prepare sites use it with the same roots as their Rust twins. C127 (report-only)
 path in a shell script. **Rule:** a shell script deletes a computed path only through `safe_rm`, with the root it owns; a
 mktemp folder of its own, or a site that cannot name a root two folders deep (a guest VM's home, Linux's `/tmp`), carries
 `# conformance: computed-rm — <why>`. **Class: computed deletes beyond their folder (C115's third sighting, ER-21).**
+
+## A train waiting to dispatch was starved by scheduled runs (2026-11-15)
+`./dev ci dispatch` waits while another run holds the single Mac or Windows runner, and `ci schedule-skip` ended a scheduled run
+early only while a train's run was already queued or running. A train whose dispatcher was still waiting had nothing queued, so
+each new scheduled run took the runner first: on 2026-11-14 around 11:00 and on 2026-11-15 from 05:03 to 07:07 (runs 8112 to
+8114) the train waited behind them. The dispatcher of a `train/*` ref now records a waiting intent in the repository Actions
+variable `PADDOCK_TRAIN_WAITING` (`<branch> <workflow> <expiry>`, through the same Actions API it dispatches with) as soon as
+it finds the runner busy, and clears it once it dispatched or gave up; the intent expires with its `--max` (and is never
+trusted more than a day ahead), so a killed dispatcher cannot hold the schedules off. The schedule-skip and plan actions pass
+`vars.PADDOCK_TRAIN_WAITING` to `ci schedule-skip` (the job token cannot read variables through the API), which skips with
+the same bounds as for a queued train and logs `skipped: train <branch> in CI (waiting to dispatch <workflow> until <time>)`.
+The dispatch token needs write access to the repository's Actions variables; without it the dispatcher warns and waits as
+before. **Rule:** a mechanism that yields to a queued job also yields to one that is about to queue, through a marker with a
+bounded life.

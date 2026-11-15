@@ -1,5 +1,5 @@
 name: schedule-skip
-description: "A scheduled run ends early while a train is in CI: skip is 'true' when a workflow_dispatch run on a train/* branch is queued or running (./dev ci schedule-skip, ADR 0093 amendment 2026-11-12). Never skips twice in a row nor past max-gap-hours since the workflow's last measured scheduled run. Prints one ::notice:: and a summary line; fails open (skip 'false', with a warning) when the Actions API cannot be read or ./dev cannot run. Not a scheduled run: skip 'false', nothing is read. Needs a checkout; use it in a Linux job and gate the run's jobs on the output; a skipped run is never marked green."
+description: "A scheduled run ends early while a train is in CI: skip is 'true' when a workflow_dispatch run on a train/* branch is queued or running, or a train's dispatcher is waiting for a busy runner (its intent in the repository variable PADDOCK_TRAIN_WAITING, until the dispatcher's --max) (./dev ci schedule-skip, ADR 0093 amendment 2026-11-12). Never skips twice in a row nor past max-gap-hours since the workflow's last measured scheduled run. Prints one ::notice:: and a summary line; fails open (skip 'false', with a warning) when the Actions API cannot be read or ./dev cannot run. Not a scheduled run: skip 'false', nothing is read. Needs a checkout; use it in a Linux job and gate the run's jobs on the output; a skipped run is never marked green."
 inputs:
   workflow:
     description: "This workflow's file (nightly.yml): its own scheduled runs bound the skip (never twice in a row, never past max-gap-hours since its last measured run)."
@@ -29,6 +29,8 @@ runs:
         PADDOCK_DEV_DOWNLOAD: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '' }}
         WORKFLOW: ${{ inputs.workflow }}
         MAX_GAP: ${{ inputs.max-gap-hours }}
+        # A train waiting to dispatch (`./dev ci dispatch` writes it): the job token cannot read variables through the API.
+        PADDOCK_TRAIN_WAITING: ${{ vars.PADDOCK_TRAIN_WAITING }}
       run: |
         if [ "$EVENT" != schedule ]; then echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0; fi
         out=$(mktemp)

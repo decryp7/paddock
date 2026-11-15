@@ -14,11 +14,17 @@
 //! than `--max-gap-hours` (36 h for a nightly: one skipped night at most). Measured means a completed, not cancelled scheduled
 //! run of this workflow whose gate did not log the skip notice. When that history cannot be read the run proceeds.
 //!
-//! The pure decision is [`decide`] and [`bound`]; [`read`] lists the dispatch runs and [`read_past`] the workflow's scheduled
+//! **A train waiting to dispatch** counts as one in CI (2026-11-15): `ci dispatch` records its intent in the repository variable
+//! `PADDOCK_TRAIN_WAITING` while it waits for a busy runner ([`super::waiting`]), and the run passes that value in (`--waiting`,
+//! default the variable's environment copy). A live intent skips like a queued train run, with the same bounds; an expired one
+//! (past the dispatcher's `--max`) does not count.
+//!
+//! The pure decision is [`decide`] (with a waiting intent, [`decide_waiting`]) and [`bound`]; [`read`] lists the dispatch runs and [`read_past`] the workflow's scheduled
 //! runs through RT-8's [`Client`].
 
 use super::client::{Client, RunInfo};
 use super::time::ts;
+use super::waiting::Waiting;
 use std::collections::BTreeSet;
 
 /// How many pages of 50 dispatch runs are read at most (a train's runs are among the newest).
@@ -39,6 +45,8 @@ pub struct TrainRun {
     pub workflow: String,
     /// `queued`, `in_progress`, `waiting`...
     pub status: String,
+    /// For a train that is not queued yet but waiting to dispatch (its intent): until when (`YYYY-MM-DDTHH:MMZ`).
+    pub waiting_until: Option<String>,
 }
 
 /// What the check decided.
@@ -118,12 +126,29 @@ impl Decision {
 
 fn skip_line(trains: &[TrainRun]) -> String {
     let branches: BTreeSet<&str> = trains.iter().map(|t| t.branch.as_str()).collect();
-    let runs: Vec<String> = trains.iter().map(|t| format!("{} {}", t.workflow, t.id)).collect();
+    let runs: Vec<String> = trains
+        .iter()
+        .filter(|t| t.waiting_until.is_none())
+        .map(|t| format!("{} {}", t.workflow, t.id))
+        .collect();
+    let waits: Vec<String> = trains
+        .iter()
+        .filter_map(|t| {
+            t.waiting_until
+                .as_ref()
+                .map(|u| format!("waiting to dispatch {} until {u}", t.workflow))
+        })
+        .collect();
+    let mut what = Vec::new();
+    if !runs.is_empty() {
+        what.push(format!("runs {}", runs.join(", ")));
+    }
+    what.extend(waits);
     format!(
-        "{}{} in CI (runs {}); runs on the next schedule after it lands",
+        "{}{} in CI ({}); runs on the next schedule after it lands",
         SKIP_NOTICE.trim_start_matches("::notice::"),
         branches.into_iter().collect::<Vec<_>>().join(", "),
-        runs.join(", ")
+        what.join("; ")
     )
 }
 
@@ -226,15 +251,23 @@ pub fn read_past(client: &mut Client, workflow: &str) -> Result<Vec<Past>, Strin
     Ok(out)
 }
 
-/// The whole decision for a run of `workflow`: read the dispatch runs (scheduled runs only), decide, and when that says skip, bound
-/// the skip by the workflow's own scheduled history. A reading that fails runs the workflow (it fails open).
-pub fn decide_scheduled(client: &mut Client, event: &str, workflow: &str, now_ms: f64, max_gap_hours: f64) -> Decision {
+/// The whole decision for a run of `workflow`: read the dispatch runs (scheduled runs only), decide (a live `waiting` intent counts
+/// as a train in CI), and when that says skip, bound the skip by the workflow's own scheduled history. A reading that fails runs
+/// the workflow (it fails open).
+pub fn decide_scheduled(
+    client: &mut Client,
+    event: &str,
+    workflow: &str,
+    waiting: Option<&Waiting>,
+    now_ms: f64,
+    max_gap_hours: f64,
+) -> Decision {
     let runs = if event == "schedule" {
         read(client, now_ms)
     } else {
         Ok(Vec::new())
     };
-    let d = decide(event, runs, now_ms);
+    let d = decide_waiting(event, runs, waiting, now_ms);
     if d.skip() {
         let past = read_past(client, workflow);
         return bounded(d, workflow, past, now_ms, max_gap_hours);
@@ -259,6 +292,7 @@ pub fn trains_in_ci(runs: &[RunInfo], now_ms: f64) -> (Vec<TrainRun>, Vec<TrainR
             branch: branch.to_string(),
             workflow: r.workflow().to_string(),
             status: r.status.clone(),
+            waiting_until: None,
         };
         // A run whose creation time cannot be read counts: the API always gives one, and counting it only delays a schedule.
         if ts(&r.created_at).is_some_and(|c| now_ms - c > STALE_MS) {
@@ -272,13 +306,33 @@ pub fn trains_in_ci(runs: &[RunInfo], now_ms: f64) -> (Vec<TrainRun>, Vec<TrainR
 
 /// The decision for an event and the dispatch runs read (or why they could not be read).
 pub fn decide(event: &str, runs: Result<Vec<RunInfo>, String>, now_ms: f64) -> Decision {
+    decide_waiting(event, runs, None, now_ms)
+}
+
+/// [`decide`] with a train's waiting intent: a live one is a train in CI even when none of its runs is queued yet. When the runs
+/// cannot be read, a live intent still skips (the intent alone says a train is about to take the runner).
+pub fn decide_waiting(event: &str, runs: Result<Vec<RunInfo>, String>, waiting: Option<&Waiting>, now_ms: f64) -> Decision {
     if event != "schedule" {
         return Decision::NotScheduled;
     }
+    let intent = waiting.filter(|w| w.live((now_ms / 1000.0) as i64)).map(|w| TrainRun {
+        id: 0,
+        branch: w.branch.clone(),
+        workflow: w.workflow.clone(),
+        status: "waiting".into(),
+        waiting_until: Some(w.until()),
+    });
     match runs {
-        Err(e) => Decision::Unreadable(e),
+        Err(e) => match intent {
+            Some(t) => Decision::Skip {
+                trains: vec![t],
+                stale: vec![],
+            },
+            None => Decision::Unreadable(e),
+        },
         Ok(runs) => {
-            let (trains, stale) = trains_in_ci(&runs, now_ms);
+            let (mut trains, stale) = trains_in_ci(&runs, now_ms);
+            trains.extend(intent);
             if trains.is_empty() {
                 Decision::Run { stale }
             } else {
@@ -312,6 +366,7 @@ pub fn read(client: &mut Client, now_ms: f64) -> Result<Vec<RunInfo>, String> {
 mod tests {
     use super::*;
     use crate::ci_runs::testutil::Fake;
+    use crate::ci_runs::waiting::Waiting;
     use serde_json::json;
 
     const NOW: &str = "2026-11-12T06:00:00+08:00";
@@ -388,6 +443,59 @@ mod tests {
         assert_eq!(d.annotation(), None);
         // Not a scheduled run: never skipped, nothing read.
         assert_eq!(decide("workflow_dispatch", Ok(runs), now()), Decision::NotScheduled);
+    }
+
+    #[test]
+    fn a_train_waiting_to_dispatch_skips_a_scheduled_run_until_its_intent_expires() {
+        // 2026-11-15 05:03-07:07: the train's dispatcher waited behind scheduled runs 8112-8114 with nothing queued.
+        let secs = (now() / 1000.0) as i64;
+        let w = Waiting {
+            branch: "train/2026-11-15-12".into(),
+            workflow: "ci.yml".into(),
+            expires: secs + 1800,
+        };
+        let d = decide_waiting("schedule", Ok(vec![]), Some(&w), now());
+        assert!(d.skip(), "{d:?}");
+        assert_eq!(
+            d.annotation().unwrap(),
+            format!(
+                "::notice::skipped: train train/2026-11-15-12 in CI (waiting to dispatch ci.yml until {}); runs on the next schedule after it lands",
+                w.until()
+            )
+        );
+        assert!(
+            d.annotation().unwrap().starts_with(SKIP_NOTICE),
+            "read_past must count it as a train skip"
+        );
+        // With a queued run too, both are named.
+        let queued = vec![run(
+            7990,
+            "debrief.yml@refs/heads/train/2026-11-15-12",
+            "workflow_dispatch",
+            "queued",
+            "2026-11-12T05:10:00+08:00",
+        )];
+        let both = decide_waiting("schedule", Ok(queued), Some(&w), now());
+        assert!(
+            both.annotation()
+                .unwrap()
+                .contains("(runs debrief.yml 7990; waiting to dispatch ci.yml until"),
+            "{both:?}"
+        );
+        // Expired (the dispatcher's --max passed): the run proceeds.
+        let old = Waiting {
+            expires: secs - 1,
+            ..w.clone()
+        };
+        assert_eq!(
+            decide_waiting("schedule", Ok(vec![]), Some(&old), now()),
+            Decision::Run { stale: vec![] }
+        );
+        // Not a scheduled run: never skipped.
+        assert_eq!(decide_waiting("push", Ok(vec![]), Some(&w), now()), Decision::NotScheduled);
+        // The skip is bounded like a queued train's: never twice in a row.
+        let twice = bounded(d, "nightly.yml", Ok(vec![past(2, "2026-11-12T05:03:00+08:00", true)]), now(), 36.0);
+        assert!(!twice.skip());
     }
 
     #[test]
@@ -537,7 +645,7 @@ mod tests {
         );
         let mut client = Client::new(&mut http, "https://gitea.invalid", "o/r", "t");
         client.backoff_ms = 0;
-        let d = decide_scheduled(&mut client, "schedule", "nightly.yml", now(), 36.0);
+        let d = decide_scheduled(&mut client, "schedule", "nightly.yml", None, now(), 36.0);
         assert!(!d.skip(), "{d:?}");
         assert!(d.annotation().unwrap().contains("never skipped twice"), "{d:?}");
     }

@@ -10,8 +10,13 @@
 //! A class is read from the jobs' `runs-on` labels (a matrix expression stands for the job's matrix values), following job-level
 //! `uses: ./.gitea/workflows/<file>` calls; other text of the file (steps, `runner.os` tests) does not count. The token is read
 //! from `GITEA_TOKEN`, travels in a header only and is printed nowhere.
+//!
+//! A train that has to wait records its intent first (the repository variable `PADDOCK_TRAIN_WAITING`, [`waiting`]): a scheduled
+//! run that starts meanwhile skips for it instead of taking the runner again, so a waiting train is not starved (2026-11-15). The
+//! intent expires with `--max` and is cleared when the dispatch is sent or given up.
 
 use super::client::{Client, RunInfo};
+use super::waiting::{self, Waiting};
 use crate::wait::{Clock, Http, MAX_LIMIT, MIN_INTERVAL, Outcome, Poll, Probe, SystemClock, fmt_duration, parse_duration, wait_for};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -172,6 +177,8 @@ pub struct Request {
     pub max: Duration,
     /// How often to look.
     pub interval: Duration,
+    /// When the dispatcher started (Unix seconds): a waiting intent expires at this plus `max`.
+    pub started_secs: i64,
 }
 
 /// Parses `--max` and `--input k=v`.
@@ -203,6 +210,7 @@ pub fn parse_request(workflow: &str, git_ref: &str, inputs: &[String], max: &str
         inputs,
         max,
         interval,
+        started_secs: super::time::now_secs(),
     })
 }
 
@@ -251,27 +259,48 @@ pub fn run(
             req.workflow
         );
     } else {
-        let mut client = Client::new(http, server, repo, token);
-        client.backoff_ms = 0;
-        let mut probe = BusyProbe {
-            client: &mut client,
-            read,
-            wanted,
+        let intent = record_intent(http, target, req, read, &wanted, log);
+        let outcome = {
+            let mut client = Client::new(http, server, repo, token);
+            client.backoff_ms = 0;
+            let mut probe = BusyProbe {
+                client: &mut client,
+                read,
+                wanted,
+            };
+            let o = wait_for(&mut probe, clock, req.max, req.interval, log);
+            (o, probe.next_step())
         };
-        match wait_for(&mut probe, clock, req.max, req.interval, log) {
-            Outcome::Done { elapsed, .. } => waited = elapsed,
-            Outcome::TimedOut { last, max } => {
+        // Dispatched or given up, the intent has done its work; the dispatch run itself now holds the scheduled runs off.
+        if let Some(w) = &intent {
+            match waiting::clear(http, server, repo, token, w) {
+                Ok(true) => {
+                    let _ = writeln!(log, "dispatch: cleared the waiting intent of {}", w.branch);
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    let _ = writeln!(
+                        log,
+                        "::warning::dispatch: the waiting intent ({}) could not be cleared ({e}); it expires at {}.",
+                        waiting::VAR,
+                        w.until()
+                    );
+                }
+            }
+        }
+        match outcome {
+            (Outcome::Done { elapsed, .. }, _) => waited = elapsed,
+            (Outcome::TimedOut { last, max }, next) => {
                 let _ = writeln!(
                     log,
-                    "::error::dispatch: not dispatching {}: still busy after {} (--max); {last}. Next: {}.",
+                    "::error::dispatch: not dispatching {}: still busy after {} (--max); {last}. Next: {next}.",
                     req.workflow,
                     fmt_duration(max),
-                    probe.next_step()
                 );
                 return Ok(Dispatched::StillBusy { last });
             }
-            Outcome::Broken { error, .. } => return Err(format!("the run list could not be read: {error}")),
-            Outcome::Failed { detail, .. } => return Err(detail),
+            (Outcome::Broken { error, .. }, _) => return Err(format!("the run list could not be read: {error}")),
+            (Outcome::Failed { detail, .. }, _) => return Err(detail),
         }
     }
     let url = format!(
@@ -291,6 +320,58 @@ pub fn run(
     Ok(Dispatched::Yes { waited })
 }
 
+/// For a train whose runner is busy now: writes its waiting intent (expiring with `--max`) and returns it. Nothing for any other
+/// ref, a free runner, or a run list that cannot be read (the wait then says so). A failed write is a warning: the dispatch still
+/// waits, it is only not protected from scheduled runs.
+fn record_intent(
+    http: &mut dyn Http,
+    target: &Target<'_>,
+    req: &Request,
+    read: ReadWorkflow<'_>,
+    wanted: &BTreeSet<RunnerClass>,
+    log: &mut dyn Write,
+) -> Option<Waiting> {
+    if !waiting::is_train(&req.git_ref) {
+        return None;
+    }
+    let busy = {
+        let mut client = Client::new(http, target.server, target.repo, target.token);
+        client.backoff_ms = 0;
+        let mut probe = BusyProbe {
+            client: &mut client,
+            read,
+            wanted: wanted.clone(),
+        };
+        probe.busy()
+    };
+    let Ok(Some(why)) = busy else { return None };
+    let w = Waiting {
+        branch: req.git_ref.strip_prefix("refs/heads/").unwrap_or(&req.git_ref).to_string(),
+        workflow: req.workflow.clone(),
+        expires: req.started_secs + req.max.as_secs() as i64,
+    };
+    match waiting::record(http, target.server, target.repo, target.token, &w) {
+        Ok(()) => {
+            let _ = writeln!(
+                log,
+                "dispatch: {why}; recorded the waiting intent of {} ({} until {}): scheduled runs skip meanwhile",
+                w.branch,
+                waiting::VAR,
+                w.until()
+            );
+            Some(w)
+        }
+        Err(e) => {
+            let _ = writeln!(
+                log,
+                "::warning::dispatch: the waiting intent ({}) could not be written ({e}); scheduled runs may take the runner first. Next step: check that GITEA_TOKEN can write the repository's Actions variables.",
+                waiting::VAR
+            );
+            None
+        }
+    }
+}
+
 /// The real clock, for the command.
 pub fn system_clock() -> SystemClock {
     SystemClock::new()
@@ -304,11 +385,13 @@ mod tests {
     const SERVER: &str = "https://gitea.invalid";
     const REPO: &str = "decryp7/paddock";
 
-    /// Run lists in order (the last one repeats), and the posts it got.
+    /// Run lists in order (the last one repeats), the posts it got, and the repository variable it holds (the waiting intent).
     struct Script {
         lists: VecDeque<Value>,
         posts: Vec<(String, Value)>,
         gets: usize,
+        var: Option<String>,
+        var_calls: Vec<String>,
     }
 
     impl Script {
@@ -317,6 +400,8 @@ mod tests {
                 lists: lists.into(),
                 posts: Vec::new(),
                 gets: 0,
+                var: None,
+                var_calls: Vec::new(),
             }
         }
     }
@@ -324,6 +409,13 @@ mod tests {
     impl Http for Script {
         fn get_json(&mut self, url: &str, token: &str) -> Result<Value, String> {
             assert!(!token.is_empty());
+            if url.ends_with("/actions/variables/PADDOCK_TRAIN_WAITING") {
+                self.var_calls.push("GET".into());
+                return match &self.var {
+                    Some(v) => Ok(json!({"name": "PADDOCK_TRAIN_WAITING", "data": v})),
+                    None => Err("HTTP 404".into()),
+                };
+            }
             assert!(url.contains("/actions/runs?"), "{url}");
             self.gets += 1;
             Ok(if self.lists.len() > 1 {
@@ -332,9 +424,28 @@ mod tests {
                 self.lists[0].clone()
             })
         }
-        fn post_json(&mut self, url: &str, _token: &str, body: &Value) -> Result<Value, String> {
+        fn post_json(&mut self, url: &str, token: &str, body: &Value) -> Result<Value, String> {
+            if url.contains("/actions/variables/") {
+                return self.send_json("POST", url, token, Some(body));
+            }
             self.posts.push((url.to_string(), body.clone()));
             Ok(Value::Null)
+        }
+        fn send_json(&mut self, method: &str, url: &str, _token: &str, body: Option<&Value>) -> Result<Value, String> {
+            assert!(url.ends_with("/actions/variables/PADDOCK_TRAIN_WAITING"), "{url}");
+            self.var_calls.push(method.into());
+            match method {
+                "PUT" if self.var.is_none() => Err("HTTP 404".into()),
+                "PUT" | "POST" => {
+                    self.var = body.and_then(|b| b["value"].as_str()).map(str::to_string);
+                    Ok(Value::Null)
+                }
+                "DELETE" => {
+                    self.var = None;
+                    Ok(Value::Null)
+                }
+                m => panic!("{m}"),
+            }
         }
     }
 
@@ -419,6 +530,81 @@ mod tests {
         let (url, body) = &http.posts[0];
         assert!(url.ends_with("/actions/workflows/mac.yml/dispatches"), "{url}");
         assert_eq!(body, &json!({"ref": "main", "inputs": {"gates": "on"}}));
+    }
+
+    fn go_ref(http: &mut Script, wf: &str, git_ref: &str, max: &str) -> (Result<Dispatched, String>, String) {
+        let (mut clock, mut log) = (FakeClock(Duration::ZERO), Vec::new());
+        let mut req = parse_request(wf, git_ref, &[], max, Some("15s")).unwrap();
+        req.started_secs = 1_794_268_800;
+        let r = run(
+            http,
+            &Target {
+                server: SERVER,
+                repo: REPO,
+                token: "secret-token",
+            },
+            &req,
+            &files,
+            &mut clock,
+            &mut log,
+        );
+        (r, String::from_utf8(log).unwrap())
+    }
+
+    #[test]
+    fn a_waiting_train_records_its_intent_until_max_and_clears_it_once_dispatched() {
+        // 2026-11-15 05:03-07:07: scheduled runs 8112-8114 took the Mac runner while the train waited with nothing queued.
+        let mut http = Script::new(vec![
+            runs(&[(8112, "mac.yml", "in_progress")]),
+            runs(&[(8112, "mac.yml", "in_progress")]),
+            runs(&[(8112, "mac.yml", "completed")]),
+        ]);
+        let (r, log) = go_ref(&mut http, "mac.yml", "train/2026-11-15-12", "2h");
+        assert!(matches!(r.unwrap(), Dispatched::Yes { .. }));
+        assert_eq!(
+            http.var_calls,
+            ["PUT", "POST", "GET", "DELETE"],
+            "created (none was there), then read and removed: {log}"
+        );
+        assert_eq!(http.var, None);
+        assert!(log.contains("recorded the waiting intent of train/2026-11-15-12"), "{log}");
+        assert!(log.contains("until 2026-11-10T02:00Z"), "the intent ends with --max: {log}");
+        assert!(log.contains("cleared the waiting intent"), "{log}");
+        assert_eq!(http.posts.len(), 1);
+    }
+
+    #[test]
+    fn a_train_that_gives_up_clears_its_intent_and_one_written_by_another_dispatcher_is_left() {
+        let mut http = Script::new(vec![runs(&[(8113, "mac.yml", "in_progress")])]);
+        let (r, _log) = go_ref(&mut http, "mac.yml", "train/2026-11-15-12", "1m");
+        assert!(matches!(r.unwrap(), Dispatched::StillBusy { .. }));
+        assert_eq!(http.var, None, "given up: the intent goes too");
+        // Another train's intent written meanwhile is not ours to remove.
+        let w = Waiting {
+            branch: "train/other".into(),
+            workflow: "ci.yml".into(),
+            expires: 9,
+        };
+        http.var = Some(w.value());
+        let mine = Waiting {
+            branch: "train/2026-11-15-12".into(),
+            workflow: "mac.yml".into(),
+            expires: 9,
+        };
+        assert_eq!(waiting::clear(&mut http, SERVER, REPO, "t", &mine), Ok(false));
+        assert_eq!(http.var, Some(w.value()));
+    }
+
+    #[test]
+    fn no_intent_for_a_free_runner_or_a_ref_that_is_not_a_train() {
+        let mut http = Script::new(vec![runs(&[(1, "mac.yml", "completed")])]);
+        let (r, _) = go_ref(&mut http, "mac.yml", "train/2026-11-15-12", "1m");
+        assert!(matches!(r.unwrap(), Dispatched::Yes { .. }));
+        assert!(http.var_calls.is_empty(), "{:?}", http.var_calls);
+        let mut http = Script::new(vec![runs(&[(7, "mac.yml", "in_progress")]), runs(&[(7, "mac.yml", "completed")])]);
+        let (r, _) = go_ref(&mut http, "mac.yml", "main", "1m");
+        assert!(matches!(r.unwrap(), Dispatched::Yes { .. }));
+        assert!(http.var_calls.is_empty(), "{:?}", http.var_calls);
     }
 
     #[test]
