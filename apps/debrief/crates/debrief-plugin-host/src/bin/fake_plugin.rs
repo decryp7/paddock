@@ -3,7 +3,8 @@
 //! The text importer `fake` reads the file's first line: `crash` exits at once, `hang` never answers, `panic`
 //! panics, `many <n>` returns n records, anything else one record per line. The tool `fake.tool` has `settings`
 //! (the last applied value of `level`), `echo` (its arguments) and `pid` (its process id). The annotator
-//! `fake.notes` marks the time range of the records it selects through the host's view.
+//! `fake.notes` marks the time range of the records it selects through the host's view. `--manifests` prints the manifest
+//! and exits, unless the binary's name ends in `-hang`: then it writes its pid to `<name>.pid` and never exits.
 
 use anyhow::{bail, Result};
 use debrief_plugin_api::annotate::{Annotation, AnnotationView, Annotator, Evidence, RecordCursor, Severity, ViewFilter};
@@ -268,6 +269,14 @@ impl Plugin for FakePlugin {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--manifests") {
+        // A copy named `...-hang` never answers (the bound test of `load_manifests`): it writes its pid beside itself and waits.
+        let exe = std::env::current_exe().unwrap_or_default();
+        if exe.file_stem().is_some_and(|s| s.to_string_lossy().ends_with("-hang")) {
+            let _ = std::fs::write(exe.with_extension("pid"), std::process::id().to_string());
+            loop {
+                std::thread::park();
+            }
+        }
         let mut c = Contributions::default();
         let _ = FakePlugin.register(&mut c);
         let m: Manifest = c.manifest(&FakePlugin);

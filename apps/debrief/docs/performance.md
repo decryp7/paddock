@@ -907,6 +907,28 @@ The 1.4 s the user's 1.0.2 log showed between the window and the AI line was not
 folder (30 ms here); it depends on that Mac's state (stored settings with plugin sections, an AI model loading). The
 `Steps` field of the next start's line names the step.
 
+## 2026-11-15, plugin manifests waited for on exit, not polled (branch fix/debrief-manifests-wait)
+
+Change: `load_manifests` (debrief-plugin-host `builtins.rs`) ran `debrief-plugins --manifests` and looked for its exit with
+`try_wait` every 20 ms; it now runs it through `paddock_proc::run_bounded`, which returns on the exit and output events
+(same 30 s bound, the tree ended by identity at the bound). Cause measured in the start-up A/B of branch
+docs/debrief-startup-ab (76659505a): the poll costs about 16 ms in a terminal and about 70 ms under the runners' launchd class.
+
+Debug `.app` of train 11 (381e4758a) against the same tree with the fix, built as the macOS smoke job builds it, each
+benched once with `scripts/ci/startup-bench.mjs --runs 5 --os macos` from a terminal, before then after. Mac mini M4 Pro,
+14 cores; 1-minute load 6.2-7.8 during both runs (other agents' builds). Empty, throw-away data folders only.
+
+| Build | `setupDone` median (per start) | `app state` per counted start | `app state`, first start |
+|---|---|---|---|
+| before (poll) | 260 ms (259, 278, 255, 260, 285) | 23-24 ms | 71 ms |
+| after (waited on exit) | 256 ms (254, 256, 257, 230, 270) | 8-10 ms | 60 ms |
+
+`app state` drops by about 14 ms per start, as the A/B predicted for a terminal; the `setupDone` median moves less (4 ms)
+because `before setup` varied by 109-147 ms across both series under this load. Under the launchd class without
+`ProcessType` the poll's sleeps stretched to about 93 ms (A/B above), so the CI saving should be larger; not measured here.
+The regression test (`tests/it/manifests.rs`) compares the call with the fake binary's own run: before the fix the fastest
+of 10 calls took 21.6 ms against 3.5 ms for the binary itself.
+
 ## Query and import performance, DuckDB 1.5.6 against 2.0 (2026-10-28 and 29)
 
 Every block says what it measured: machine (Apple M4 Pro, 14 cores, macOS), the load average when it ran (load over 10 is marked and
