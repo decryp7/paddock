@@ -21,6 +21,19 @@ pub fn first_fingerprint(colons: &str) -> Option<String> {
         .find_map(|l| l.strip_prefix("fpr:").and_then(|r| r.split(':').nth(8)).map(str::to_string))
 }
 
+/// True when gpg's `--status-fd` text holds a good (or good-but-expired-key) signature and a `VALIDSIG` made by `fingerprint`, as the
+/// signing key or as its primary key.
+pub fn signed_by(status: &str, fingerprint: &str) -> bool {
+    let good = status
+        .lines()
+        .any(|l| l.starts_with("[GNUPG:] GOODSIG ") || l.starts_with("[GNUPG:] EXPKEYSIG "));
+    let by = status.lines().filter_map(|l| l.strip_prefix("[GNUPG:] VALIDSIG ")).any(|rest| {
+        let f: Vec<&str> = rest.split_whitespace().collect();
+        f.first() == Some(&fingerprint) || f.get(9) == Some(&fingerprint)
+    });
+    good && by
+}
+
 /// The fingerprint in the grouped form the pack uses: groups of four, a space between.
 pub fn grouped(fp: &str) -> String {
     fp.as_bytes()
@@ -104,11 +117,14 @@ fn verify(file: &str, sig: &str, key: &Path, home: &Path) -> Result<(), String> 
         ));
     }
     // The signature may be made by a key that has expired since (smartmontools' was valid when it signed); gpg says so in its output.
-    let verified = gpg(&["--batch", "--verify", sig, file])?;
-    let text = format!("{}{}", verified.stdout, verified.stderr);
-    print!("{text}");
-    if !text.contains("Good signature") {
-        return Err(format!("::error::the signature of {file} does not verify"));
+    // `--status-fd 1` gives the machine-readable verdict: the signature must be good AND made by the pinned key (a file signed by
+    // any other key in a bigger key file must not pass).
+    let verified = gpg(&["--batch", "--status-fd", "1", "--verify", sig, file])?;
+    print!("{}{}", verified.stdout, verified.stderr);
+    if !signed_by(&verified.stdout, EXPECTED) {
+        return Err(format!(
+            "::error::the signature of {file} does not verify, or was not made by the pinned key {EXPECTED}; do not pin anything from it"
+        ));
     }
     let bytes = std::fs::read(file).map_err(|e| format!("::error::cannot read {file}: {e}"))?;
     let sha: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
@@ -128,6 +144,26 @@ mod tests {
         let out = "tru::1:1\npub:-:4096:1:0A30812EFF3AEFF5:1:::::::scESC:::::::\nfpr:::::::::0C9577FD2C4CFCB4B9A599640A30812EFF3AEFF5:\nfpr:::::::::AAAA:\n";
         assert_eq!(first_fingerprint(out).as_deref(), Some(EXPECTED));
         assert_eq!(first_fingerprint("pub:x\n"), None);
+    }
+
+    #[test]
+    fn only_a_good_signature_by_the_pinned_key_passes() {
+        let by = |fpr: &str, primary: &str| {
+            format!("[GNUPG:] GOODSIG AAAA Someone\n[GNUPG:] VALIDSIG {fpr} 2026-11-03 1 0 4 0 1 10 00 {primary}\n")
+        };
+        assert!(signed_by(&by(EXPECTED, EXPECTED), EXPECTED));
+        assert!(signed_by(&by("SUBKEY", EXPECTED), EXPECTED), "made by a subkey of the pinned key");
+        assert!(
+            signed_by(&by(EXPECTED, "OTHER").replace("GOODSIG", "EXPKEYSIG"), EXPECTED),
+            "a good signature whose key has expired since"
+        );
+        assert!(!signed_by(&by("OTHER", "OTHER2"), EXPECTED), "good, but another key");
+        assert!(!signed_by(
+            &format!("[GNUPG:] BADSIG A x\n[GNUPG:] VALIDSIG {EXPECTED} 1 1 0 4 0 1 10 00 {EXPECTED}\n"),
+            EXPECTED
+        ));
+        assert!(!signed_by("[GNUPG:] GOODSIG A x\n", EXPECTED), "no VALIDSIG");
+        assert!(!signed_by("", EXPECTED));
     }
 
     #[test]

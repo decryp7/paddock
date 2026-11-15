@@ -62,13 +62,28 @@ pub fn run_task(args: &[String]) -> Result<(), String> {
         [d] => PathBuf::from(d),
         _ => return Err("usage: cargo xtask bench-smoke <folder holding dyno-bench and dyno-bench-gpu>".to_string()),
     };
-    let bench = runner(&dir, "dyno-bench");
-    let gpu = runner(&dir, "dyno-bench-gpu");
-    let (bench, gpu) = (bench.to_string_lossy().into_owned(), gpu.to_string_lossy().into_owned());
     let work = tempdir()?;
+    let result = smoke(&dir, &work);
+    // Whatever happened, the scratch folder goes.
+    let _ = std::fs::remove_dir_all(&work);
+    result
+}
+
+/// The four runs in `work`; every failure is collected, none ends the others.
+fn smoke(dir: &Path, work: &Path) -> Result<(), String> {
+    let bench = runner(dir, "dyno-bench");
+    let gpu = runner(dir, "dyno-bench-gpu");
+    let (bench, gpu) = (bench.to_string_lossy().into_owned(), gpu.to_string_lossy().into_owned());
     let mut failures = Vec::new();
     let go = |failures: &mut Vec<String>, name: &str, program: &str, args: &[&str]| -> Result<(), String> {
-        let ran = crate::run(program, args, &[], RUN_LIMIT)?;
+        // A runner that will not start is that kind's failure, not the end of the run: the others still run and the scratch folder goes.
+        let ran = match crate::run(program, args, &[], RUN_LIMIT) {
+            Ok(r) => r,
+            Err(why) => {
+                failures.push(format!("{name}: {why}"));
+                return Ok(());
+            }
+        };
         let (problems, ok) = check(name, &format!("{}{}", ran.stdout, ran.stderr));
         if let Some(ok) = ok {
             println!("{ok}");
@@ -86,7 +101,7 @@ pub fn run_task(args: &[String]) -> Result<(), String> {
         &bench,
         &["disk", "--disk-mib", "16", "--reps", "1", "--dir", &w],
     )?;
-    let left: Vec<String> = std::fs::read_dir(&work).map_or_else(
+    let left: Vec<String> = std::fs::read_dir(work).map_or_else(
         |_| Vec::new(),
         |rd| {
             rd.filter_map(Result::ok)
@@ -98,7 +113,6 @@ pub fn run_task(args: &[String]) -> Result<(), String> {
         failures.push(format!("disk: the scratch folder is not empty afterwards: {}", left.join(" ")));
     }
     go(&mut failures, "gpu", &gpu, &["--smoke"])?;
-    let _ = std::fs::remove_dir_all(&work);
     if failures.is_empty() {
         Ok(())
     } else {
@@ -129,6 +143,22 @@ mod tests {
     use super::*;
 
     const HB: &str = r#"{"t":"heartbeat"}"#;
+
+    /// Runners that will not start fail their kind and nothing else: all four are reported and the run does not abort.
+    #[test]
+    fn runners_that_will_not_start_are_each_reported_and_the_run_goes_on() {
+        let d = paddock_testkit::private_tempdir().unwrap();
+        let work = d.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let err = smoke(&d.path().join("no-such-folder"), &work).unwrap_err();
+        for kind in ["cpu", "memory", "disk", "gpu"] {
+            assert!(
+                err.contains(&format!("::error::bench-smoke: {kind}: could not run")),
+                "{kind}: {err}"
+            );
+        }
+        assert!(work.is_dir(), "smoke leaves the folder to its caller, which removes it");
+    }
 
     #[test]
     fn a_done_result_with_positive_finite_numbers_passes() {

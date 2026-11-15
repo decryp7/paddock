@@ -39,11 +39,39 @@ nice -n 10 cargo test -p dyno-agent --test bench_units -- --ignored --test-threa
     )
 }
 
+/// The command that runs this task again under the test machines lock (`scripts/vm-lock-run.sh`, the interim lock of
+/// docs/dev-setup.md): starting or driving a test machine without it can collide with another agent's run (ER-14).
+pub fn locked_command(repo: &Path, exe: &Path, machine: &str) -> Vec<String> {
+    vec![
+        "bash".to_string(),
+        repo.join("scripts/vm-lock-run.sh").to_string_lossy().into_owned(),
+        "dyno-linux-units".to_string(),
+        "--".to_string(),
+        exe.to_string_lossy().into_owned(),
+        "linux-units".to_string(),
+        machine.to_string(),
+    ]
+}
+
 /// `cargo xtask linux-units [machine]`.
 pub fn run_task(args: &[String]) -> Result<(), String> {
     let machine = args.first().map_or(DEFAULT_MACHINE, String::as_str);
     if !machine_ok(machine) || args.len() > 1 {
         return Err("usage: cargo xtask linux-units [machine]  (a machine name: letters, digits, - _ .)".to_string());
+    }
+    if std::env::var_os("PADDOCK_VM_LOCK_HELD").is_none_or(|v| v.is_empty()) {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let exe = std::env::current_exe().map_err(|e| format!("cannot find this program: {e}"))?;
+        let cmd = locked_command(&repo, &exe, machine);
+        let args: Vec<&str> = cmd[1..].iter().map(String::as_str).collect();
+        let ran = crate::run("bash", &args, &[], RUN_LIMIT + Duration::from_secs(3600))?;
+        print!("{}", ran.stdout);
+        eprint!("{}", ran.stderr);
+        return if ran.success {
+            Ok(())
+        } else {
+            Err("::error::linux-units did not pass (or the test machines lock is busy: the output above names the holder).".to_string())
+        };
     }
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -75,6 +103,15 @@ mod tests {
     fn machine_names_are_plain_words() {
         assert!(machine_ok("paddock-gate-arm") && machine_ok("a.b_c"));
         assert!(!machine_ok("") && !machine_ok("a b") && !machine_ok("a;rm") && !machine_ok("$(x)"));
+    }
+
+    #[test]
+    fn the_task_runs_again_under_the_test_machines_lock() {
+        let c = locked_command(Path::new("/r"), Path::new("/t/xtask"), "m1");
+        assert_eq!(
+            c.join(" "),
+            "bash /r/scripts/vm-lock-run.sh dyno-linux-units -- /t/xtask linux-units m1"
+        );
     }
 
     #[test]

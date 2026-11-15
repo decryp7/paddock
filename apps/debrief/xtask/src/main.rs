@@ -24,6 +24,8 @@ struct Step {
     program: String,
     args: Vec<String>,
     env: Vec<(String, String)>,
+    /// Values that are never echoed (ER-27): `display` shows `***` in their place.
+    secrets: Vec<String>,
 }
 
 impl Step {
@@ -32,7 +34,15 @@ impl Step {
             program: program.to_owned(),
             args: args.iter().map(|a| (*a).to_owned()).collect(),
             env: Vec::new(),
+            secrets: Vec::new(),
         }
+    }
+
+    fn with_secret(mut self, value: &str) -> Self {
+        if !value.is_empty() {
+            self.secrets.push(value.to_owned());
+        }
+        self
     }
 
     fn with_env(mut self, key: &str, value: &str) -> Self {
@@ -42,7 +52,8 @@ impl Step {
 
     fn display(&self) -> String {
         let env: String = self.env.iter().map(|(k, v)| format!("{k}={v} ")).collect();
-        format!("{env}{} {}", self.program, self.args.join(" "))
+        let line = format!("{env}{} {}", self.program, self.args.join(" "));
+        self.secrets.iter().fold(line, |l, s| l.replace(s.as_str(), "***"))
     }
 }
 
@@ -298,6 +309,16 @@ mod tests {
         );
         assert!(parse_build_plugins(&a(&["--target"])).is_err());
         assert!(parse_build_plugins(&a(&["--wat"])).is_err());
+    }
+
+    #[test]
+    fn a_secret_is_never_in_the_echoed_command() {
+        let s = Step::new("security", &["import", "x.p12", "-P", "hunter2hunter2"])
+            .with_secret("hunter2hunter2")
+            .with_secret("");
+        assert_eq!(s.display(), " security import x.p12 -P ***".trim_start());
+        assert!(!s.display().contains("hunter2"));
+        assert!(Step::new("a", &["b"]).display().ends_with("a b"));
     }
 
     #[test]

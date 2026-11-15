@@ -72,6 +72,7 @@ pub fn pkcs12_step(dir: &Path, pass: &str) -> Step {
             &dir.join("debrief.p12").to_string_lossy(),
         ],
     )
+    .with_secret(pass)
 }
 
 /// The import (`-T` lets codesign use the key without a keychain prompt) and the trust steps.
@@ -90,7 +91,8 @@ pub fn import_steps(dir: &Path, keychain: &Path, pass: &str) -> Vec<Step> {
                 "-T",
                 "/usr/bin/codesign",
             ],
-        ),
+        )
+        .with_secret(pass),
         Step::new(
             "security",
             &[
@@ -226,9 +228,7 @@ pub fn build_app_step(extra: &[String], identity: Option<&str>) -> Step {
 pub fn build_app(args: &[String], root: &Path) -> Result<(), String> {
     let mut identity = None;
     if cfg!(target_os = "macos") && std::env::var_os("APPLE_SIGNING_IDENTITY").is_none_or(|v| v.is_empty()) {
-        let kc = keychain(&home()?);
         let shown = output_of(&Step::new("security", &["find-identity", "-v", "-p", "codesigning"])).unwrap_or_default();
-        let _ = kc;
         if has_identity(&shown) {
             eprintln!("Signing with \"{NAME}\".");
             identity = Some(NAME);
@@ -280,6 +280,18 @@ mod tests {
             steps[1].args.join(" "),
             "add-trusted-cert -r trustRoot -p codeSign -k /h/Library/Keychains/login.keychain-db /t/cert.pem"
         );
+    }
+
+    #[test]
+    fn the_pkcs12_password_is_masked_in_the_echoed_commands() {
+        let kc = keychain(Path::new("/h"));
+        let shown = [
+            pkcs12_step(Path::new("/t"), "s3cr3tpw").display(),
+            import_steps(Path::new("/t"), &kc, "s3cr3tpw")[0].display(),
+        ];
+        for line in shown {
+            assert!(!line.contains("s3cr3tpw") && line.contains("***"), "{line}");
+        }
     }
 
     #[test]

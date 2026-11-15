@@ -11,3 +11,6 @@ description = "Repository chores for Dyno developers (`cargo xtask <task>`); nev
 [dependencies]
 paddock-proc = { path = "../../../crates/paddock-proc" }
 sha2 = "0.10"
+
+[dev-dependencies]
+paddock-testkit = { path = "../../../crates/paddock-testkit" }

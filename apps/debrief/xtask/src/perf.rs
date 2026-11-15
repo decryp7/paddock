@@ -120,6 +120,13 @@ fn sampler(root: &Path, pid: u32, csv: &Path) -> Result<std::process::Child, Str
         .map_err(|e| format!("could not start python3 for procsample.py: {e}"))
 }
 
+/// The sampler did not start: the run it was to measure is ended too (our own child, not yet reaped), and the error says so.
+fn end_child(child: &mut std::process::Child, why: String) -> String {
+    let _ = child.kill();
+    let _ = child.wait();
+    format!("{why}; the run it was to measure was ended too")
+}
+
 fn summarise(root: &Path, args: &[&str]) {
     let mut a = vec!["-I".to_string(), python_helper(root, "perfsum.py").to_string_lossy().into_owned()];
     a.extend(args.iter().map(|s| (*s).to_string()));
@@ -165,7 +172,10 @@ pub fn import(args: &[String], root: &Path) -> Result<(), String> {
                 f.bin.join("debrief").display()
             )
         })?;
-    let mut samp = sampler(root, cli.id(), &f.out.join(format!("{label}.csv")))?;
+    let mut samp = match sampler(root, cli.id(), &f.out.join(format!("{label}.csv"))) {
+        Ok(s) => s,
+        Err(e) => return Err(end_child(&mut cli, e)),
+    };
     let rc = cli.wait().map_err(|e| e.to_string())?.code().unwrap_or(-1);
     let _ = samp.wait();
     let line = summary_line(label, rc, t0.elapsed().as_secs_f64(), &store_size(&store));
@@ -213,7 +223,10 @@ pub fn post(args: &[String], root: &Path) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("could not start {}: {e}", test.display()))?;
     let csv = f.out.join(format!("{label}-post.csv"));
-    let mut samp = sampler(root, child.id(), &csv)?;
+    let mut samp = match sampler(root, child.id(), &csv) {
+        Ok(s) => s,
+        Err(e) => return Err(end_child(&mut child, e)),
+    };
     let rc = child.wait().map_err(|e| e.to_string())?.code().unwrap_or(-1);
     println!("rc={rc}");
     let _ = samp.wait();
@@ -253,6 +266,17 @@ mod tests {
             assert!(store_ok(Path::new(bad), Some(home)).is_err(), "{bad}");
         }
         assert!(store_ok(Path::new("/Volumes/d/stores/mid550"), Some(Path::new("/Users/me"))).is_ok());
+    }
+
+    /// A sampler that cannot start must not leave the run it was to measure behind.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_sampler_ends_the_child_it_was_to_measure() {
+        let mut child = command("sleep").arg("300").spawn().unwrap();
+        let msg = end_child(&mut child, "could not start python3".to_string());
+        assert!(msg.contains("could not start python3") && msg.contains("was ended too"));
+        // end_child waited for it, so this returns at once: a `sleep 300` that ended did so by the kill, not by finishing.
+        assert!(!child.wait().unwrap().success(), "the child was killed");
     }
 
     #[test]

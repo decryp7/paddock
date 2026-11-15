@@ -121,9 +121,16 @@ pub fn plan(sans: &Path, sans_italic: &Path, tmp: &Path, out: &Path) -> Vec<Step
     steps
 }
 
+/// The arguments made absolute against `cwd`: the steps run in the repository root, so a relative font path would point elsewhere.
+pub fn absolute_args(args: &[String], cwd: &Path) -> Vec<String> {
+    args.iter().map(|a| cwd.join(a).to_string_lossy().into_owned()).collect()
+}
+
 /// `cargo xtask fonts <IBMPlexSans[wdth,wght].ttf> <IBMPlexSans-Italic[wdth,wght].ttf> <JetBrainsMono-Regular.ttf>`.
 pub fn run_task(args: &[String], root: &Path) -> Result<(), String> {
-    let [sans, italic, mono] = args else {
+    let cwd = std::env::current_dir().map_err(|e| format!("the current folder cannot be read: {e}"))?;
+    let args: Vec<String> = absolute_args(args, &cwd);
+    let [sans, italic, mono] = &args[..] else {
         return Err(
             "usage: cargo xtask fonts <IBMPlexSans[wdth,wght].ttf> <IBMPlexSans-Italic[wdth,wght].ttf> <JetBrainsMono-Regular.ttf>"
                 .to_string(),
@@ -202,6 +209,12 @@ mod tests {
             last.ends_with("/o/DebriefReportMono-Regular.ttf Debrief Report Mono Regular DebriefReportMono-Regular"),
             "{last}"
         );
+    }
+
+    #[test]
+    fn relative_font_paths_are_made_absolute_before_the_steps_change_folder() {
+        let got = absolute_args(&["fonts/a.ttf".to_string(), "/abs/b.ttf".to_string()], Path::new("/work"));
+        assert_eq!(got, ["/work/fonts/a.ttf", "/abs/b.ttf"]);
     }
 
     #[test]

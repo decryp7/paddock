@@ -8021,6 +8021,7 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "paddock-proc",
+ "paddock-testkit",
  "sha2 0.10.9",
 ]
 
