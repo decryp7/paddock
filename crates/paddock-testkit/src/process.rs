@@ -174,15 +174,16 @@ impl TestCommand {
     #[allow(clippy::disallowed_methods)] // the one place a test's child process is made (C123 forbids it elsewhere)
     fn build(program: &OsStr, private: PrivateDir) -> TestCommand {
         let ambient = std::env::var_os("PATH");
-        // `cargo`, `rustc` and `rustup` start through the command's own links (`cargo`: the cargo that runs this test), never
-        // rustup's proxy in `$CARGO_HOME/bin`, which puts all of that folder in front of its child's PATH (review of 0916c8060).
-        let bin = bin_dir(private.path());
+        // `cargo`, `rustc` and `rustup` start through the toolchain links (`cargo`: the cargo that runs this test), never rustup's
+        // proxy in `$CARGO_HOME/bin`, which puts all of that folder in front of its child's PATH (review of 0916c8060).
+        let curated = curated();
         let linked = (Path::new(program).components().count() == 1
             && TOOLCHAIN_STARTED.contains(&program.to_string_lossy().as_ref()))
         .then(|| {
-            link_toolchain(&bin, ambient.as_deref())
-                .then(|| linked_program(&bin, program))
-                .flatten()
+            curated
+                .links
+                .as_deref()
+                .and_then(|d| linked_program(d, program))
         })
         .flatten();
         let resolved = linked.map_or_else(
@@ -252,7 +253,7 @@ impl TestCommand {
                 cmd.env(k, real);
             }
         }
-        cmd.env("PATH", curated_path(&[], &bin_dir(&root)));
+        cmd.env("PATH", join_paths(&curated.dirs()));
         let base = cmd
             .get_envs()
             .filter_map(|(k, v)| v.map(|v| (k.to_os_string(), v.to_os_string())))
@@ -613,8 +614,14 @@ impl TestCommand {
         let git_root = git.as_deref().and_then(git_root);
         #[cfg(not(windows))]
         let git_root = None;
-        let toolchain = std::fs::read_dir(bin_dir(self.private.path()))
-            .map(|d| d.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        let toolchain = curated()
+            .links
+            .and_then(|d| std::fs::read_dir(d).ok())
+            .map(|d| {
+                d.filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| p.file_name() != Some(OsStr::new(SOURCES)))
+                    .collect()
+            })
             .unwrap_or_default();
         PathReport {
             child,
@@ -632,48 +639,169 @@ impl TestCommand {
     }
 }
 
-/// The bare program names a [`TestCommand`] starts through its own link, never through the machine's `PATH`.
+/// The bare program names a [`TestCommand`] starts through its toolchain link, never through the machine's `PATH`.
 const TOOLCHAIN_STARTED: &[&str] = &["cargo", "rustc", "rustup"];
 
-/// The link to `program` in `bin` (with `.exe` on Windows), when there is one.
-fn linked_program(bin: &Path, program: &OsStr) -> Option<PathBuf> {
+/// The file in a link folder that names the programs its links stand for, one per line: a folder whose programs are gone (a
+/// test's stand-in toolchain, an uninstalled toolchain) is removed by the next process that makes one.
+const SOURCES: &str = "sources.txt";
+
+/// What the curated `PATH` is made of for one machine `PATH` and `CARGO`: worked out once per test process and reused by every
+/// command (ci.yml run 8152: worked out per command, Windows tests that start many children ran about 6 times slower).
+#[derive(Clone, Debug)]
+struct Curated {
+    /// The toolchain link folder, when the machine has a toolchain.
+    links: Option<PathBuf>,
+    /// The folders after it: the [`NAMED_TOOLS`]' (on Windows Git's `usr/bin` and `bin`), then the system folders.
+    tail: Vec<PathBuf>,
+}
+
+impl Curated {
+    fn dirs(&self) -> Vec<PathBuf> {
+        self.links
+            .iter()
+            .cloned()
+            .chain(self.tail.iter().cloned())
+            .collect()
+    }
+}
+
+/// How many link folders this process made or reused: once per machine `PATH` and `CARGO`, whatever the number of commands.
+static FOLDERS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// How many toolchain link folders this process has made or reused (one per machine `PATH` and `CARGO` it saw), for the test
+/// that many commands share one.
+#[doc(hidden)]
+#[must_use]
+pub fn toolchain_folders_made() -> usize {
+    FOLDERS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// The [`Curated`] parts for the machine `PATH` and `CARGO` this process has now, worked out on first use.
+fn curated() -> Curated {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    type Key = (Option<OsString>, Option<OsString>);
+    static SEEN: OnceLock<Mutex<HashMap<Key, Curated>>> = OnceLock::new();
+    let key: Key = (std::env::var_os("PATH"), std::env::var_os("CARGO"));
+    let mut seen = SEEN
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(c) = seen.get(&key) {
+        return c.clone();
+    }
+    let ambient = key.0.as_deref();
+    let links = link_folder(ambient);
+    if links.is_some() {
+        FOLDERS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    let made = Curated {
+        tail: tail_dirs(ambient, links.as_deref()),
+        links,
+    };
+    seen.insert(key, made.clone());
+    made
+}
+
+/// The link to `program` in the link folder (with `.exe` on Windows), when there is one.
+fn linked_program(dir: &Path, program: &OsStr) -> Option<PathBuf> {
     let mut name = program.to_os_string();
     if cfg!(windows) {
         name.push(".exe");
     }
-    Some(bin.join(name)).filter(|p| p.exists())
+    Some(dir.join(name)).filter(|p| p.exists())
 }
 
-/// The command's private folder of toolchain links.
-fn bin_dir(private: &Path) -> PathBuf {
-    private.join("bin")
-}
-
-/// Links the [`TOOLCHAIN`] programs found on `ambient` (`cargo`: the one that runs this test, `CARGO`, when set) into `bin`;
-/// whether `bin` holds any. A link that is already there (a `new_in` folder shared by several commands) is kept.
-fn link_toolchain(bin: &Path, ambient: Option<&OsStr>) -> bool {
-    for name in TOOLCHAIN {
-        let source = match std::env::var_os("CARGO") {
+/// The folder of links to the [`TOOLCHAIN`] programs found on `ambient` (`cargo`: the one that runs this test, `CARGO`, when set).
+/// One folder per toolchain under the temp folder's `paddock-test-toolchain`, named by the programs' paths, sizes and times, made
+/// once (in a folder of this process's own, then renamed into place) and reused by every later command and test process; never
+/// inside a command's or a `new_in` folder. Symbolic links on Unix; on Windows hard links, else a copy, logged with its error.
+fn link_folder(ambient: Option<&OsStr>) -> Option<PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let sources: Vec<PathBuf> = TOOLCHAIN
+        .iter()
+        .map(|name| match std::env::var_os("CARGO") {
             Some(c) if *name == "cargo" => PathBuf::from(c),
             _ => PathBuf::from(resolve(OsStr::new(name), ambient)),
-        };
-        let (true, Some(file)) = (source.is_absolute() && source.is_file(), source.file_name())
-        else {
-            continue;
-        };
-        let link = bin.join(file);
-        if std::fs::create_dir_all(bin).is_err() || link.exists() {
-            continue;
-        }
-        #[cfg(unix)]
-        let _ = std::os::unix::fs::symlink(&source, &link);
-        #[cfg(windows)]
-        if std::fs::hard_link(&source, &link).is_err() {
-            // Another volume: a copy (rustup's proxies are one program that reads the name it was started as).
-            let _ = std::fs::copy(&source, &link);
+        })
+        .filter(|p| p.is_absolute() && p.is_file())
+        .collect();
+    if sources.is_empty() {
+        return None;
+    }
+    let mut h = std::hash::DefaultHasher::new();
+    for src in &sources {
+        src.hash(&mut h);
+        if let Ok(m) = std::fs::metadata(src) {
+            m.len().hash(&mut h);
+            m.modified().ok().hash(&mut h);
         }
     }
-    std::fs::read_dir(bin).is_ok_and(|mut d| d.next().is_some())
+    let root = std::env::temp_dir().join("paddock-test-toolchain");
+    let dir = root.join(format!("{:016x}", h.finish()));
+    let names: Vec<&OsStr> = sources.iter().filter_map(|s| s.file_name()).collect();
+    if names.iter().all(|n| dir.join(n).exists()) {
+        return Some(dir);
+    }
+    std::fs::create_dir_all(&root).ok()?;
+    sweep(&root);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let staging = root.join(format!(
+        ".{:016x}-{}-{nanos}",
+        h.finish(),
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&staging).ok()?;
+    for (src, name) in sources.iter().zip(&names) {
+        let link = staging.join(name);
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(src, &link);
+        #[cfg(windows)]
+        if let Err(e) = std::fs::hard_link(src, &link) {
+            // Another volume, or a file at NTFS's limit of 1024 links: a copy, made once per toolchain and machine.
+            eprintln!(
+                "TestCommand: cannot hard-link {} into {} ({e}); copying it instead (once per toolchain)",
+                src.display(),
+                staging.display()
+            );
+            let _ = std::fs::copy(src, &link);
+        }
+    }
+    let listed: String = sources
+        .iter()
+        .map(|s| format!("{}\n", s.display()))
+        .collect();
+    let _ = std::fs::write(staging.join(SOURCES), listed);
+    match std::fs::rename(&staging, &dir) {
+        Ok(()) => Some(dir),
+        // Another process made it first: use that one.
+        Err(_) if dir.is_dir() => {
+            let _ = std::fs::remove_dir_all(&staging);
+            Some(dir)
+        }
+        Err(_) => Some(staging),
+    }
+}
+
+/// Removes the link folders under `root` whose programs are gone (named in their [`SOURCES`]). Folders being made (`.`) stay.
+fn sweep(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let path = e.path();
+        if e.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let gone = std::fs::read_to_string(path.join(SOURCES))
+            .is_ok_and(|t| t.lines().any(|l| !Path::new(l).exists()));
+        if gone {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
 }
 
 /// Git for Windows' install folder from the `git` found on the PATH: from `git --exec-path` (`<root>/mingw64/libexec/git-core`,
@@ -692,22 +820,57 @@ fn git_root(git: &Path) -> Option<PathBuf> {
     {
         return known.clone();
     }
-    #[allow(clippy::disallowed_methods)]
-    // a read-only question to git, awaited here; nothing is ended by pid
-    let exec = Command::new(git)
-        .arg("--exec-path")
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
+    let exec = exec_path(git);
     let root = git_root_from(exec.as_deref(), git);
     seen.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .insert(git.to_path_buf(), root.clone());
     root
 }
+
+/// `git --exec-path`, waited for at most [`EXEC_PATH_LIMIT`]; a `git` that does not answer in time is ended through the handle held
+/// here and counts as no answer (the layout is used then).
+#[cfg(windows)]
+fn exec_path(git: &Path) -> Option<PathBuf> {
+    use std::io::Read;
+    #[allow(clippy::disallowed_methods)]
+    // a read-only question to git; ended only through the handle this function holds
+    let mut child = Command::new(git)
+        .arg("--exec-path")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut out = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = out.read_to_string(&mut text);
+        let _ = tx.send(text);
+    });
+    match rx.recv_timeout(EXEC_PATH_LIMIT) {
+        Ok(text) => {
+            let ok = child.wait().is_ok_and(|s| s.success());
+            Some(PathBuf::from(text.trim())).filter(|p| ok && !p.as_os_str().is_empty())
+        }
+        Err(_) => {
+            eprintln!(
+                "TestCommand: {} --exec-path did not answer within {} s; Git's root comes from the folder layout",
+                git.display(),
+                EXEC_PATH_LIMIT.as_secs()
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+            None
+        }
+    }
+}
+
+/// How long `git --exec-path` may take: a hang guard, not a budget (measured 40 to 71 ms on the Windows test VM, docs/benchmarks.md,
+/// "TestCommand construction").
+#[cfg(windows)]
+const EXEC_PATH_LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// The pure part of [`git_root`]: three folders above git's exec path, else the nearest folder above `git` (at most three up)
 /// that holds `cmd/git.exe` or `bin/git.exe`; only a folder with a `usr/bin` is Git's.
@@ -741,18 +904,14 @@ fn path_key(d: &Path) -> String {
     }
 }
 
-/// The curated `PATH`: `first`, then the private folder of toolchain links (`bin`), the folders of the [`NAMED_TOOLS`] found on
-/// this process's `PATH` (and, on Windows, Git for Windows' `usr/bin` and `bin`), then the system folders.
-fn curated_path(first: &[PathBuf], bin: &Path) -> OsString {
-    let mut dirs: Vec<PathBuf> = first.to_vec();
-    let ambient = std::env::var_os("PATH");
-    if link_toolchain(bin, ambient.as_deref()) {
-        dirs.push(bin.to_path_buf());
-    }
+/// The folders after the link folder: those of the [`NAMED_TOOLS`] found on `ambient` (and, on Windows, Git for Windows' `usr/bin`
+/// and `bin`), then the system folders; each once, Windows folders compared without case.
+fn tail_dirs(ambient: Option<&OsStr>, links: Option<&Path>) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
     let system = system_dirs();
     let system_keys: Vec<String> = system.iter().map(|d| path_key(d)).collect();
     for tool in NAMED_TOOLS {
-        let found = PathBuf::from(resolve(OsStr::new(tool), ambient.as_deref()));
+        let found = PathBuf::from(resolve(OsStr::new(tool), ambient));
         // `resolve` returns the bare name when the tool is not on the PATH: no folder then.
         if !found.is_absolute() {
             continue;
@@ -775,14 +934,14 @@ fn curated_path(first: &[PathBuf], bin: &Path) -> OsString {
         }
     }
     dirs.extend(system);
-    let mut seen = Vec::new();
+    let mut seen: Vec<String> = links.map(path_key).into_iter().collect();
     dirs.retain(|d| {
         let key = path_key(d);
         let new = !seen.contains(&key);
         seen.push(key);
         new
     });
-    join_paths(&dirs)
+    dirs
 }
 
 #[cfg(not(windows))]
