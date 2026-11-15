@@ -162,4 +162,17 @@ describe('pd-tray-popover footer', () => {
     const f = await setup((h) => h.primary.set(null));
     expect([...footer(f).querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['More actions']);
   });
+
+  // The menu can change while it is open (an app hides an item that no longer applies), and the rows below move up. A row
+  // keeps the action it shows: the row of "Settings…" never emits the action of the row that moved into its place.
+  it('keeps each open row bound to its own action when a row above it goes away', async () => {
+    const f = await setup((h) => h.menu.set([{ kind: 'item', id: 'customize', label: 'Customize widgets…' }, { kind: 'item', id: 'settings', label: 'Settings…' }, { kind: 'item', id: 'quit', label: 'Quit Dyno' }]));
+    const panel = await openMenu(f);
+    const settings = [...panel.querySelectorAll<HTMLButtonElement>('button[mat-menu-item]')].find((b) => b.textContent!.includes('Settings…'))!;
+    f.componentInstance.menu.set([{ kind: 'item', id: 'settings', label: 'Settings…' }, { kind: 'item', id: 'quit', label: 'Quit Dyno' }]);
+    await f.whenStable();
+    expect(settings.textContent!.trim()).toBe('Settings…');
+    settings.click();
+    expect(f.componentInstance.actions).toEqual(['settings']);
+  });
 });
