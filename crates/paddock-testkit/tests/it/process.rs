@@ -545,3 +545,73 @@ fn many_commands_share_one_toolchain_link_folder_made_once_outside_their_own_fol
         folder.display()
     );
 }
+
+/// A link folder removed while a process still uses it (another process's sweep, a cleaned temp folder) is made again on the next
+/// command, never silently dropped from the PATH (review of df9af3cda, P2-1: 199 of 200 commands lost their first PATH folder).
+#[test]
+fn a_link_folder_removed_under_a_process_is_made_again_on_its_next_command() {
+    let d = tempfile::tempdir().unwrap();
+    let tc = d.path().join("toolchain");
+    std::fs::create_dir(&tc).unwrap();
+    std::fs::write(
+        tc.join(if cfg!(windows) { "rustc.exe" } else { "rustc" }),
+        "",
+    )
+    .unwrap();
+    let mut env = env_lock();
+    env.set("PATH", &tc);
+    let first = TestCommand::new("git").path_report().toolchain;
+    let folder = first
+        .first()
+        .and_then(|l| l.parent())
+        .expect("a link folder")
+        .to_path_buf();
+    std::fs::remove_dir_all(&folder).unwrap();
+    let again = TestCommand::new("git").path_report();
+    assert!(
+        !again.toolchain.is_empty(),
+        "the next command has no toolchain links: {again}"
+    );
+    assert!(again.toolchain.iter().all(|l| l.exists()), "{again}");
+}
+
+/// The sweep removes a link folder only when its programs are gone and it is older than an hour (another process may still
+/// use a younger one), and a staging folder (`.`) a crashed process left only when it is older than an hour (review of
+/// df9af3cda, P2-1 and P2-2).
+#[test]
+fn the_sweep_removes_only_old_folders_of_gone_programs_and_old_staging_folders() {
+    use paddock_testkit::process::sweep_toolchain_folders;
+    use std::time::{Duration, SystemTime};
+    let root = tempfile::tempdir().unwrap();
+    let gone = root.path().join("0000000000000001");
+    let live = root.path().join("0000000000000002");
+    let staging = root.path().join(".0000000000000003-1-1");
+    for f in [&gone, &live, &staging] {
+        std::fs::create_dir(f).unwrap();
+    }
+    std::fs::write(
+        gone.join("sources.txt"),
+        format!("{}\n", root.path().join("no-such-program").display()),
+    )
+    .unwrap();
+    let present = root.path().join("present-program");
+    std::fs::write(&present, "").unwrap();
+    std::fs::write(live.join("sources.txt"), format!("{}\n", present.display())).unwrap();
+    // Young: nothing goes, not even the folder whose programs are gone (a process may be using it).
+    sweep_toolchain_folders(root.path(), SystemTime::now());
+    assert!(
+        gone.is_dir() && live.is_dir() && staging.is_dir(),
+        "a young folder was removed"
+    );
+    // Two hours later: the folder of gone programs and the staging folder go; the one whose programs are there stays.
+    sweep_toolchain_folders(
+        root.path(),
+        SystemTime::now() + Duration::from_secs(2 * 3600),
+    );
+    assert!(!gone.exists(), "an old folder of gone programs stayed");
+    assert!(!staging.exists(), "an old staging folder stayed");
+    assert!(
+        live.is_dir(),
+        "a folder whose programs are there was removed"
+    );
+}
