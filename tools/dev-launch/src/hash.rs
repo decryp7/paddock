@@ -354,6 +354,55 @@ mod tests {
         }
     }
 
+    /// Deterministic hostile text (no `paddock-testkit`: this crate is std only): control characters, multi-byte characters, a lone
+    /// CR, very long lines, unbalanced quotes and brackets, and random mixes of them.
+    fn corpus(seed: u64) -> Vec<String> {
+        let atoms = [
+            "[",
+            "]",
+            "\"",
+            "=",
+            "#",
+            "\r",
+            "\n",
+            "\t",
+            " ",
+            "\0",
+            "..",
+            "/",
+            "\\",
+            "rustc",
+            "[build]",
+            "é",
+            "\u{1F980}",
+            "release:",
+            "commit-hash:",
+        ];
+        let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let mut next = move || {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (x >> 33) as usize
+        };
+        let mut out = vec![String::new(), "x".repeat(1 << 16), "\n".repeat(10_000), "[".repeat(5_000)];
+        for _ in 0..500 {
+            let n = next() % 40;
+            out.push((0..n).map(|_| atoms[next() % atoms.len()]).collect());
+        }
+        out
+    }
+
+    #[test]
+    fn no_input_makes_a_parser_panic() {
+        for text in corpus(7) {
+            let _ = parse_inputs(&text);
+            let _ = compiler_lines(&text);
+            let _ = build_rustc(&text);
+            let _ = only_names_build_folder(&text);
+            let _ = named_rustc(&|_: &str| None, std::slice::from_ref(&text));
+            let _ = crate::toolchain::read_pin(&text);
+        }
+    }
+
     #[test]
     fn inputs_skip_comments_and_refuse_odd_paths() {
         assert_eq!(parse_inputs("# c\n\n a/b \ncrates/x\n").unwrap(), ["a/b", "crates/x"]);
