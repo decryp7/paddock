@@ -506,11 +506,7 @@ mod tests {
         let job = d.path().join("job");
         std::fs::create_dir(&job).unwrap();
         let silent = d.path().join("silent-dev");
-        std::fs::write(&silent, "#!/bin/sh\nexec sleep 30\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&silent, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        paddock_testkit::exe::write_program(&silent, "#!/bin/sh\nexec sleep 30\n").unwrap();
         let mut a = args(&d.path().join("ci"), &job);
         a.holder_timeout_secs = 1;
         let err = acquire_with(&a, &silent).unwrap_err();

@@ -159,12 +159,7 @@ mod tests {
         let dir = home.join("bin").join(entry);
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join(exe(name));
-        std::fs::write(&bin, "#!/bin/sh\necho held\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        paddock_testkit::exe::write_program(&bin, "#!/bin/sh\necho held\n").unwrap();
         bin
     }
 

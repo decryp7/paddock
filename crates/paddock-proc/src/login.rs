@@ -193,12 +193,10 @@ mod tests {
     #[cfg(unix)]
     mod shells {
         use super::*;
-        use std::os::unix::fs::PermissionsExt;
 
         fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
             let p = dir.join(name);
-            std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            paddock_testkit::exe::write_program(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
             p
         }
 

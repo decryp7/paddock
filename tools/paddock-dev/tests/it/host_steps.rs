@@ -11,7 +11,6 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
@@ -40,8 +39,9 @@ impl Fx {
     }
 
     fn script(&self, rel: &str, body: &str) {
-        self.write(rel, &format!("#!/bin/sh\n{body}\n"));
-        std::fs::set_permissions(self.p(rel), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let p = self.p(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        paddock_testkit::exe::write_program(p, format!("#!/bin/sh\n{body}\n")).unwrap();
     }
 
     /// A program on the front of PATH that records its call (arguments, and what it saw of the job's token) in `calls`.

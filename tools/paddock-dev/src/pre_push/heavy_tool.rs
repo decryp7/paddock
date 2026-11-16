@@ -172,11 +172,7 @@ mod tests {
         std::fs::create_dir_all(&entry).unwrap();
         let bin = entry.join(exe("heavy"));
         // A probe that fails: `--version` prints nothing.
-        std::fs::write(&bin, "#!/bin/sh\nexit 1\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        paddock_testkit::exe::write_program(&bin, "#!/bin/sh\nexit 1\n").unwrap();
         let two_days = std::time::SystemTime::now() - Duration::from_secs(2 * 86_400);
         std::fs::File::open(&entry).unwrap().set_modified(two_days).unwrap();
         // No budget left: ensure stops after the probe and builds nothing.

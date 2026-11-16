@@ -183,7 +183,8 @@ fn a_program_changed_after_install_is_a_quarantine_grade_fault_and_is_not_starte
     // Somebody changes the installed binary.
     let mut bytes = std::fs::read(&program).unwrap();
     bytes.push(0);
-    std::fs::write(&program, bytes).unwrap();
+    // The plugin has just ended: Linux can still call its file busy for a moment (CI run 8174), which `write_program` waits out.
+    paddock_testkit::exe::write_program(&program, &bytes).unwrap();
     let refused = echo(&s).unwrap_err();
     assert!(
         matches!(&refused, HostError::Unavailable(m) if m.contains("was not started") && m.contains("changed after installation")),

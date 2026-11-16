@@ -749,8 +749,7 @@ mod tests {
     fn start_fake_worker(d: &std::path::Path, body: &str) -> (super::ChildProcess, paddock_testkit_start::Recorded) {
         let pid_file = d.join("grandchild.pid");
         let script = d.join("worker.sh");
-        std::fs::write(&script, body.replace("PIDFILE", &pid_file.display().to_string())).unwrap();
-        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(&script, body.replace("PIDFILE", &pid_file.display().to_string())).unwrap();
         let child = super::ChildProcess::spawn(&super::SpawnSpec::new(&script, "fake worker")).unwrap();
         let grandchild = paddock_testkit_start::recorded::read_pid_file(&pid_file, "the fake worker's child");
         (child, grandchild)

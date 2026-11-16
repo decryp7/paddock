@@ -268,7 +268,7 @@ mod real {
     use super::super::registry::Cost;
     use super::super::run::{Ran, Real, Runner, Spec};
     use std::collections::HashMap;
-    use std::os::unix::fs::PermissionsExt;
+
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
@@ -279,8 +279,7 @@ mod real {
     }
 
     fn script(path: &Path, body: &str) {
-        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        paddock_testkit::exe::write_program(path, format!("#!/bin/sh\n{body}\n")).unwrap();
     }
 
     fn fixture(heavy_body: &str) -> Fixture {
