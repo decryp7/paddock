@@ -3,6 +3,7 @@ import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import type { Alert, BootReport, FinderQuery, FinderResult, JobOutput, JobSpec, ProcessSample, SleepReport, SoftwareInventory, UsageReport } from './api.types';
 import { SPARK_CAPACITY, appendSeries, type Series } from '../state/live.store';
 import { LIVE_BACKLOG, MockBackend, type MockOptions, applyMockPlatform, mockOptionsFromUrl } from './mock-backend';
+import { MAC_CPU_TOTAL } from './mock/mac-machine';
 
 const NOW = 1_700_000_000_000;
 const make = (o: MockOptions = {}) => new MockBackend({ latencyMs: 0, now: () => NOW, ...o });
@@ -702,7 +703,7 @@ describe('hardware: throttling, lifespan and baselines', () => {
     const b = await make().baselines();
     expect(b.learning).toEqual({ ready: { days: 34 } });
     expect(b.items[0]!.judgement.state).toEqual({ higher: 'strong' });
-    expect(b.items[0]!.current).toBe('71%');
+    expect(b.items[0]!.current).toBe(`${MAC_CPU_TOTAL}%`);
     expect(b.items[0]!.judgement.usual).toBe('14%');
     expect(b.items.some((i) => i.judgement.state === 'usual')).toBe(true);
   });

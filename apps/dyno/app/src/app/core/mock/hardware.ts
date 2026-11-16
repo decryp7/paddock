@@ -12,6 +12,8 @@ import type {
   ThrottleOverview,
   ThrottleReading,
 } from '../api.types';
+import { formatRate } from '../../shared/format';
+import { MAC_BUILD_CPU, MAC_CARGO_CPU, MAC_CPU_TOTAL, MAC_DISK_WRITE_BPS, MAC_MEMORY_PERCENT } from './mac-machine';
 import type { MockOs } from './os';
 
 const MIN = 60_000;
@@ -111,7 +113,7 @@ export function mockThrottling(os: MockOs, now: number, scenario?: HardwareScena
       confidence: 'high',
       headline: 'Running at full speed',
       explanation: 'The CPU is busy and its clock is where it should be.',
-      evidence: [ev('Load', '78%'), ev('Clock', '4.40 GHz of 4.50 GHz'), ev('Temperature', '71 °C')],
+      evidence: [ev('Load', `${MAC_CPU_TOTAL}%`), ev('Clock', '4.40 GHz of 4.50 GHz'), ev('Temperature', '71 °C')],
     },
     current: null,
     episodes: past,
@@ -189,6 +191,9 @@ const item = (subject: string, metric: BaselineItem['metric'], label: string, cu
 export function mockBaselines(now: number, scenario?: HardwareScenario): BaselineOverview {
   const sc = scenarioNow(scenario);
   if (sc === 'learning') return { at: now, learning: { learning: { day: 3, daysNeeded: 7, since: now - 2 * 86_400_000, readyAt: now + 5 * 86_400_000 } }, items: [] };
+  // The figures the other pages show (mock/mac-machine.ts): the CPU, the build's rustc processes, the memory and the writes.
+  const rustcPercent = Math.round(MAC_BUILD_CPU - MAC_CARGO_CPU);
+  const writes = formatRate(MAC_DISK_WRITE_BPS);
   return {
     at: now,
     learning: { ready: { days: 34 } },
@@ -197,18 +202,18 @@ export function mockBaselines(now: number, scenario?: HardwareScenario): Baselin
         'System',
         'cpu',
         'CPU',
-        '71%',
-        judgement({ higher: 'strong' }, 'Higher than usual for Thursday afternoons', 'CPU is 71% now; it is usually about 14% (9% to 22%) on Thursday afternoons, from 5 similar hours.', '14%'),
+        `${MAC_CPU_TOTAL}%`,
+        judgement({ higher: 'strong' }, 'Higher than usual for Thursday afternoons', `CPU is ${MAC_CPU_TOTAL}% now; it is usually about 14% (9% to 22%) on Thursday afternoons, from 5 similar hours.`, '14%'),
       ),
       item(
         'rustc',
         'appCpu',
         'CPU',
-        '41%',
-        judgement({ higher: 'notable' }, 'Higher than usual for Thursday afternoons', 'CPU is 41% now; it is usually about 6% (2% to 12%) on Thursday afternoons, from 5 similar hours.', '6%', 'medium'),
+        `${rustcPercent}%`,
+        judgement({ higher: 'notable' }, 'Higher than usual for Thursday afternoons', `CPU is ${rustcPercent}% now; it is usually about 6% (2% to 12%) on Thursday afternoons, from 5 similar hours.`, '6%', 'medium'),
       ),
-      item('System', 'memory', 'Memory', '58%', judgement('usual', 'Usual for Thursday afternoons', 'Memory is 58% now; it is usually about 55% (49% to 61%) on Thursday afternoons, from 5 similar hours.', '55%')),
-      item('System', 'diskWrite', 'Disk writes', '4.1 MB/s', judgement('usual', 'Usual for Thursday afternoons', 'Disk writes is 4.1 MB/s now; it is usually about 3.4 MB/s (1.9 MB/s to 6.8 MB/s) on Thursday afternoons, from 5 similar hours.', '3.4 MB/s')),
+      item('System', 'memory', 'Memory', `${MAC_MEMORY_PERCENT}%`, judgement('usual', 'Usual for Thursday afternoons', `Memory is ${MAC_MEMORY_PERCENT}% now; it is usually about 55% (49% to 61%) on Thursday afternoons, from 5 similar hours.`, '55%')),
+      item('System', 'diskWrite', 'Disk writes', writes, judgement('usual', 'Usual for Thursday afternoons', `Disk writes is ${writes} now; it is usually about 140 MB/s (90 MB/s to 210 MB/s) on Thursday afternoons, from 5 similar hours.`, '140 MB/s')),
       item('System', 'temperature', 'Temperature', '74 °C', judgement({ higher: 'notable' }, 'Higher than usual for Thursday afternoons', 'Temperature is 74 °C now; it is usually about 58 °C (54 °C to 63 °C) on Thursday afternoons, from 5 similar hours.', '58 °C', 'medium')),
       item('Google Chrome', 'appMemory', 'Memory', '4.3 GB', judgement('usual', 'Usual for weekday afternoons', 'Memory is 4.3 GB now; it is usually about 4.1 GB (3.6 GB to 4.8 GB) on weekday afternoons, from 24 similar hours.', '4.1 GB', 'medium')),
     ],

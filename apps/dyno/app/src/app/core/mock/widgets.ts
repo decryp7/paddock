@@ -38,7 +38,7 @@ import type {
 } from '../generated/widgets';
 import type { DashboardView, PopoverSurfaceValues } from '../widget-types';
 import { wobble } from './noise';
-import { MAC_DISK_FREE, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mac-machine';
+import { MAC_BUILD_CPU, MAC_CPU_TOTAL, MAC_DISK_FREE, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT, MAC_MEMORY_PERCENT, MAC_MEMORY_TOTAL, MAC_MEMORY_USED } from './mac-machine';
 import { demoAlarms } from './alarms';
 
 /**
@@ -715,7 +715,7 @@ export class MockWidgets {
         return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: MAC_DISK_USED_PERCENT, freeBytes: MAC_DISK_FREE, totalBytes: MAC_DISK_TOTAL, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' as const }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true, measuredAt: null, freshness: 'fresh' as const }], more: 0 } }, stale);
       }
       case 'cpuMemory':
-        return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
+        return ready({ cpuMemory: { cpuPercent: MAC_CPU_TOTAL, cpuTone: 'warn', memoryUsed: MAC_MEMORY_USED, memoryTotal: MAC_MEMORY_TOTAL, memoryPercent: MAC_MEMORY_PERCENT, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
       case 'network':
         if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
         return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5, 2), txMinute: wave(3e5, 5e4, 3) } }, stale);
@@ -729,7 +729,7 @@ export class MockWidgets {
         if (state === 'error') return error("Couldn't read counters", 'None of the 3 pinned counters answered.');
         return ready({ pinnedCounters: { rows: [{ path: '\\GPU\\Memory in use', name: 'GPU memory in use', value: 3.2e9, unit: 'bytes', percent: null, tone: 'ok' }, { path: '\\Memory\\Compressed', name: 'Compressed memory', value: 1.14e9, unit: 'bytes', percent: null, tone: 'ok' }, { path: '\\System\\Context switches per second', name: 'Context switches per second', value: null, unit: 'perSec', percent: null, tone: 'ok' }], more: 0 } }, stale);
       case 'topApps':
-        return ready({ topApps: { rows: [{ name: 'Rust build (cargo)', cpuPercent: 42 }, { name: 'Google Chrome', cpuPercent: 6.8 }, { name: 'WindowServer', cpuPercent: 4.1 }] } }, stale);
+        return ready({ topApps: { rows: [{ name: 'Rust build (cargo)', cpuPercent: MAC_BUILD_CPU }, { name: 'Google Chrome', cpuPercent: 6.8 }, { name: 'WindowServer', cpuPercent: 4.1 }] } }, stale);
     }
   }
 }

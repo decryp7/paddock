@@ -115,6 +115,9 @@ import {
   demoSettings,
   demoStartup,
   healthReasons,
+  MAC_DISK_FACT,
+  WINDOWS_DISK_FACT,
+  type DiskFact,
 } from './mock/data';
 import { manyAlarms, demoAlarms, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
@@ -134,9 +137,10 @@ import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
 import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
-import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
+import { type MockProcess, buildProcesses, deviation, groupSamples, round, sampleProcess } from './mock/processes';
 import { formatRate, formatStorage } from '../shared/format';
-import { MAC_DISK_FREE, MAC_DISK_FREE_TEXT, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mock/mac-machine';
+import { MAC_CPU_OVERHEAD, MAC_MEMORY_USED, MAC_DISK_FREE, MAC_DISK_FREE_TEXT, MAC_DISK_TOTAL, MAC_DISK_USED_PERCENT } from './mock/mac-machine';
+import { WIN_DISK_FREE, WIN_DISK_FREE_TEXT, WIN_DISK_NAME, WIN_DISK_TOTAL, WIN_DISK_USED_PERCENT } from './mock/windows-machine';
 
 /** The note the engine sends when no tray host shows the icons (`dyno_core::tray_host`; the wire contract spec pins the text). */
 const NO_TRAY_HOST_NOTE =
@@ -313,6 +317,10 @@ export class MockBackend implements DynoBackend {
   private readonly now: () => number;
   /** The clock as the polled replies read it: {@link MockOptions.stableMs}. */
   private readonly pollNow: () => number;
+  /** Whether the polled clock is rounded ({@link MockOptions.stableMs}). */
+  private readonly stable: boolean;
+  /** What the memory in use holds besides the processes' own (caches, compression): the Mac's is what its fact sheet leaves. */
+  private readonly memoryOverhead: number;
   private readonly fail: ReadonlySet<string>;
   private readonly start: number;
   private readonly profile: OsProfile;
@@ -396,6 +404,7 @@ export class MockBackend implements DynoBackend {
     this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
     this.now = options.now ?? (() => Date.now());
     const stableMs = options.stableMs ?? 0;
+    this.stable = stableMs > 0;
     this.pollNow = stableMs > 0 ? () => Math.floor(this.now() / stableMs) * stableMs : this.now;
     this.fail = options.fail ?? new Set();
     this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], longLists: options.longLists ?? false, ...(options.widgets ?? {}) });
@@ -427,9 +436,11 @@ export class MockBackend implements DynoBackend {
     if (options.wake === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wake: { enabled: false } } };
     if (options.wol === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wol: { ...this.settingsValue.power.wol, enabled: false } } };
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
+    this.memoryOverhead = this.profile.os === 'macos' ? MAC_MEMORY_USED - this.processes.reduce((a, p) => a + p.memory, 0) - 0.8 * GB : 2.9 * GB;
     this.longLists = options.longLists ?? false;
     this.activityLog = this.longLists ? [...demoActivity(this.start), ...longActivity(this.start)] : demoActivity(this.start);
-    this.alertLog = this.longLists ? [...demoAlerts(this.start), ...longAlerts(this.start)] : demoAlerts(this.start);
+    const alerts = demoAlerts(this.start, this.diskFact());
+    this.alertLog = this.longLists ? [...alerts, ...longAlerts(this.start)] : alerts;
     this.snapshotList = [
       { id: 'snap-1', at: this.start - 3 * 60 * MIN, label: 'Before the build', processCount: this.processes.length - 7 },
       { id: 'snap-2', at: this.start - 20 * MIN, label: 'Morning baseline', processCount: this.processes.length - 2 },
@@ -498,7 +509,7 @@ export class MockBackend implements DynoBackend {
 
   /** The live sample at the current second. */
   liveUpdate(detail: LiveDetail): LiveUpdate {
-    return this.liveUpdateAt(Math.floor(this.now() / 1000), detail);
+    return this.liveUpdateAt(Math.floor(this.pollNow() / 1000), detail);
   }
 
   private liveUpdateAt(t: number, detail: LiveDetail): LiveUpdate {
@@ -525,13 +536,29 @@ export class MockBackend implements DynoBackend {
     };
   }
 
+  /**
+   * The second at which every reading has exactly its declared figure (the fact sheets in mock/): the start of the session, or with `?stable` the
+   * minute the polled replies read, which is also the second the live readings sample, so every page shows the same value.
+   */
+  /** The startup disk's facts as this machine's sheet declares them. */
+  private diskFact(): DiskFact {
+    return this.profile.os === 'macos' ? MAC_DISK_FACT : WINDOWS_DISK_FACT;
+  }
+
+  private referenceSecond(): number {
+    return Math.floor((this.stable ? this.pollNow() : this.start) / 1000);
+  }
+
   private samplesAt(t: number): ProcessSample[] {
-    return this.processes.map((p) => sampleProcess(p, t, null, 1));
+    const ref = this.referenceSecond();
+    return this.processes.map((p) => sampleProcess(p, t, null, 1, ref));
   }
 
   private system(t: number, samples: ProcessSample[]): SystemSample {
     const processCpu = samples.reduce((a, s) => a + num(s.cpu), 0);
-    const total = clamp(processCpu + 1.4 + 0.6 * wobble(t, 500, 3), 0, 100);
+    const ref = this.referenceSecond();
+    const dev = (salt: number, period: number) => deviation(t, ref, salt, period);
+    const total = clamp(processCpu + MAC_CPU_OVERHEAD + 0.6 * dev(500, 3), 0, 100);
     const perCore = Array.from({ length: this.profile.cores }, (_, i) => {
       const weight = this.kinds[i] === 'efficiency' ? 0.5 : this.kinds[i] === 'performance' ? 1.2 : 1;
       return round(clamp(total * weight * (1 + 0.4 * wobble(t, 600 + i, 3)) + (i === 0 ? 4 : 0), 0, 100), 1);
@@ -544,8 +571,8 @@ export class MockBackend implements DynoBackend {
     });
     const memTotal = this.profile.memoryTotal;
     // A slow swell on top of the processes' own memory (caches, compression) so the live line moves like a real machine's.
-    const swell = (0.8 + 0.7 * wobble(t, 810, 22)) * GB + 0.18 * GB * wobble(t, 811, 3);
-    const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + num(s.memory), 0) + 2.9 * GB + swell);
+    const swell = (0.8 + 0.7 * dev(810, 22)) * GB + 0.18 * GB * dev(811, 3);
+    const memUsed = Math.min(memTotal - 1.2 * GB, samples.reduce((a, s) => a + num(s.memory), 0) + this.memoryOverhead + swell);
     const diskRead = samples.reduce((a, s) => a + num(s.diskReadBps), 0);
     const diskWrite = samples.reduce((a, s) => a + num(s.diskWriteBps), 0);
     const building = samples.some((s) => s.name === this.profile.names.rustc && num(s.cpu) > 1);
@@ -608,7 +635,7 @@ export class MockBackend implements DynoBackend {
   processDetails(target: ProcessRef): Promise<ProcessDetails> {
     return this.reply('processDetails', () => {
       const p = this.find(target);
-      const sample = sampleProcess(p, Math.floor(this.now() / 1000), null, 1);
+      const sample = sampleProcess(p, Math.floor(this.pollNow() / 1000), null, 1, this.referenceSecond());
       const parents: { pid: number; name: string }[] = [];
       for (let cur = p.parent; cur !== null; ) {
         const parent = this.processes.find((x) => x.pid === cur);
@@ -763,7 +790,7 @@ export class MockBackend implements DynoBackend {
   whySlow(): Promise<Diagnosis> {
     return this.reply('whySlow', () => {
       const now = this.now();
-      const t = Math.floor(now / 1000);
+      const t = Math.floor(this.pollNow() / 1000);
       const samples = this.samplesAt(t);
       const rustc = samples.filter((s) => s.name === this.profile.names.rustc);
       const rustcCpu = rustc.reduce((a, s) => a + num(s.cpu), 0);
@@ -824,10 +851,10 @@ export class MockBackend implements DynoBackend {
           },
           {
             kind: 'lowDiskSpace',
-            title: this.profile.os === 'macos' ? `Macintosh HD is ${MAC_DISK_USED_PERCENT}% full` : 'Drive C: is 78% full',
+            title: this.profile.os === 'macos' ? `Macintosh HD is ${MAC_DISK_USED_PERCENT}% full` : `${WIN_DISK_NAME} is ${WIN_DISK_USED_PERCENT}% full`,
             explanation: this.profile.os === 'macos' ? 'Not slowing you down yet, but macOS needs free space for updates and swap.' : 'Not slowing you down yet, but Windows needs free space for updates and swap.',
             confidence: 0.22,
-            evidence: [{ label: 'Free', value: this.profile.os === 'macos' ? `${formatStorage(MAC_DISK_FREE)} of ${formatStorage(MAC_DISK_TOTAL)}` : '210 GB of 953 GB' }],
+            evidence: [{ label: 'Free', value: this.profile.os === 'macos' ? `${formatStorage(MAC_DISK_FREE)} of ${formatStorage(MAC_DISK_TOTAL)}` : `${formatStorage(WIN_DISK_FREE)} of ${formatStorage(WIN_DISK_TOTAL)}` }],
             hints: [],
             involved: [],
           },
@@ -927,7 +954,7 @@ export class MockBackend implements DynoBackend {
 
   health(): Promise<HealthReport> {
     return this.reply('health', () => {
-      const reasons = healthReasons();
+      const reasons = healthReasons(this.diskFact());
       const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
       return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', performanceScore: score, cappedBy: null, reasons, notChecked: [{ what: ['Pending updates'], why: 'Dyno does not check for updates on this OS.', kind: 'notReadHere' }] };
     });
@@ -1324,13 +1351,13 @@ export class MockBackend implements DynoBackend {
         ],
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
         disks: [
-          { disk: this.profile.os === 'windows' ? 'C:' : '/', total: this.profile.os === 'macos' ? MAC_DISK_TOTAL : 953 * GB, free: this.profile.os === 'macos' ? MAC_DISK_FREE : 210 * GB, forecast: { fullInDays: 41 } },
+          { disk: this.profile.os === 'windows' ? 'C:' : '/', total: this.profile.os === 'macos' ? MAC_DISK_TOTAL : WIN_DISK_TOTAL, free: this.profile.os === 'macos' ? MAC_DISK_FREE : WIN_DISK_FREE, forecast: { fullInDays: 41 } },
           // Invented long mount paths: the page must shorten them, never let them push the numbers out of the card.
           { disk: '/Volumes/Example-Archive-Drive-With-A-Long-Name/Projects-2026/Quarter-Four/Backups-Of-Everything-From-Every-Computer-In-The-House-Kept-Here-For-Ten-Years', total: 3726 * GB, free: 652 * GB, forecast: 'notFilling' },
           { disk: '/Volumes/Spare', total: 1863 * GB, free: 1210 * GB, forecast: 'notEnoughData' },
         ],
         issues: [
-          { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: `${this.profile.os === 'macos' ? MAC_DISK_FREE_TEXT : '210 GB free of 953 GB'}; at this rate it is full in about 41 days.` },
+          { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: `${this.profile.os === 'macos' ? MAC_DISK_FREE_TEXT : WIN_DISK_FREE_TEXT}; at this rate it is full in about 41 days.` },
           { at: issueAt(30 * 60), severity: 'info', title: 'A build used a lot of CPU for a long time', detail: 'rustc averaged 74% for 32 minutes.' },
         ],
         hardware: ['The CPU ran slower than it should for 52 min this week (52 min of heat).', 'Battery: replace in about 23 months (17 to 31 months) (confidence medium).'],

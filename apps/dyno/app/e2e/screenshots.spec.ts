@@ -4,6 +4,8 @@ import { captureDocScreens, pressMod, type DocScreen, type Theme } from '@decryp
 import { MOCK_ESTIMATES, mockRun, mockTrace } from '../src/app/core/mock/bench';
 import type { BenchOverview } from '../src/app/core/api.types';
 import { join } from 'node:path';
+import { MAC_CPU_TOTAL } from '../src/app/core/mock/mac-machine';
+import { FROZEN, SHOT_AFTER_MS } from './doc-instant';
 
 /**
  * Documentation screenshots of every screen in both themes (`SCREENSHOTS=1 npx playwright test --project=screenshots`), through the shared runner
@@ -15,7 +17,6 @@ import { join } from 'node:path';
  */
 // Playwright runs from the app folder; the images live in the repository's docs.
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
-const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
 /** The tallest a page picture gets (CSS px of content); a taller page ends on the last card that fits. */
 const MAX_CONTENT = 1300;
@@ -85,10 +86,9 @@ const frozen = new WeakSet<Page>();
 async function freezeClock(page: Page): Promise<void> {
   if (frozen.has(page)) return;
   frozen.add(page);
-  const target = FROZEN + 300_000;
+  // Held a second ahead, still before the picture's instant: the runner then runs the clock on to it.
   const now = await page.evaluate(() => Date.now());
-  if (now < target) await page.clock.runFor(target - now);
-  await page.clock.pauseAt(target + 1_000);
+  await page.clock.pauseAt(now + 1_000);
   await page.clock.runFor(200);
 }
 
@@ -247,7 +247,9 @@ const SCREENS: Screen[] = [
       await page.getByRole('button', { name: '1 hour' }).click();
       await expect(page.getByRole('button', { name: 'Stop keeping awake' })).toBeVisible();
       await page.mouse.move(2, 2);
-      await page.clock.runFor(500);
+      // The page's clock signal ticks every 10 s: one tick after the click, so "59 min left" is read at the picture whatever the phase of that timer is
+      // (without it 4 of 10 pictures said "1 h left": no tick fell between the click and the picture, measured 2026-11-16).
+      await page.clock.runFor(11_000);
     },
   },
   {
@@ -409,17 +411,16 @@ async function trayBackdrop(page: Page, theme: Theme): Promise<void> {
       #mac-menubar { position: fixed; inset: 0 0 auto 0; height: 24px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 13px -apple-system, 'Helvetica Neue', Arial, sans-serif; color: ${theme === 'dark' ? '#f2f2f5' : '#1d1d1f'}; background: rgb(${theme === 'dark' ? '20 20 24 / 55%' : '255 255 255 / 55%'}); backdrop-filter: blur(20px); z-index: 0; }
       #mac-menubar span { margin-right: 14px; } #mac-menubar b { margin-right: 14px; } #mac-menubar .right { display: flex; align-items: center; } #mac-menubar .right span { margin: 0 0 0 14px; }`,
   });
-  await page.evaluate(() => {
+  await page.evaluate((cpu) => {
     const bar = document.createElement('div');
     bar.id = 'mac-menubar';
     bar.innerHTML = '<div><b>Dyno</b><span>File</span><span>View</span><span>Window</span><span>Help</span></div>'
-      + '<div class="right"><span title="Dyno" style="display:inline-flex;align-items:center;gap:4px"><svg width="26" height="12" viewBox="0 0 26 12"><polyline points="0,9 4,6 8,7 12,3 16,5 20,2 25,4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>76</span><span>Thu 22 Oct  14:30</span></div>';
+      + '<div class="right"><span title="Dyno" style="display:inline-flex;align-items:center;gap:4px"><svg width="26" height="12" viewBox="0 0 26 12"><polyline points="0,9 4,6 8,7 12,3 16,5 20,2 25,4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>' + cpu + '</span><span>Thu 22 Oct  14:30</span></div>';
     document.body.append(bar);
-  });
+  }, MAC_CPU_TOTAL);
   await expect(page.locator('body')).toHaveCSS('padding-top', '34px');
   await expect(page.locator('html')).toHaveCSS('background-image', /linear-gradient/);
-  // The sparklines have their history before the picture is taken.
-  await page.clock.runFor(45_000);
+  // The sparklines start with the last minute of history (the live store's backlog), so the picture needs no more time than the frame's settling.
   await page.clock.runFor(500);
 }
 
@@ -442,6 +443,7 @@ const toDocScreen = (screen: Screen): DocScreen => ({
     await screen.ready(page);
     if (screen.name === 'tray') {
       await trayBackdrop(page, theme);
+      await freezeClock(page);
       return;
     }
     await freezeClock(page);
@@ -484,11 +486,11 @@ captureDocScreens({
   frozenAt: FROZEN,
   timezoneId: 'UTC',
   locale: 'en-GB',
-  // 30 s of the clock before a screen's own steps, so a slow start still leaves them inside the first minute (the mock rounds its polled replies to a
-  // minute: a scan clicked after the minute turned read a different time, 'scanned 4 min ago' against '5 min ago' in disk-map, measured 2026-11-16).
-  warmupMs: 30_000,
+  // 10 s of the clock before a screen's own steps, so they end before the picture's instant (30 s), inside the first minute (the mock rounds its polled
+  // replies to a minute: a scan clicked after the minute turned read a different time, 'scanned 4 min ago' against '5 min ago' in disk-map, 2026-11-16).
+  warmupMs: 10_000,
   appSelector: 'pd-shell-frame, dy-tray',
-  // Every picture is taken at the same instant (14:40:30, the middle of a minute): the mock's live values are a function of the clock, so the CPU, memory
-  // and disk figures read the same on every page, and nothing depends on the minute a screen's own steps ended in.
-  shotAtMs: FROZEN + 10 * 60_000 + 30_000,
+  // Every picture is taken at the same instant (14:30:30, the middle of the first minute, doc-instant.ts): the clock the pages show, the page clock and the
+  // minute the mock reads are one, so the CPU, memory and disk figures read the same on every page (screens-consistency.spec.ts reads them).
+  shotAtMs: FROZEN + SHOT_AFTER_MS,
 });

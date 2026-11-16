@@ -1,6 +1,6 @@
 import type { Alarm, AlarmChange, AlarmFilter, AlarmStats, RecorderSample, RecorderSnapshot, RecorderSnapshotInfo } from '../api.types';
 import { clamp, wobble } from './noise';
-import { MAC_DISK_FREE_TEXT, MAC_DISK_USED_PERCENT } from './mac-machine';
+import { MAC_BUILD_CPU, MAC_CARGO_CPU, MAC_CPU_TOTAL, MAC_DISK_FREE_TEXT, MAC_DISK_IO_BPS, MAC_DISK_USED_PERCENT, MAC_DISK_WRITE_BPS, MAC_MEMORY_TOTAL, MAC_MEMORY_USED } from './mac-machine';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -24,7 +24,7 @@ export function demoAlarms(now: number): Alarm[] {
     { ...base, id: 6, rule: 'threshold:gpu-load', key: 'threshold:gpu-load', severity: 'warning', state: 'active', title: 'GPU load is over its limit', detail: 'The value is 97.0; the limit is 90.0.', firstSeen: now - 22 * MIN, lastSeen: now - 1 * MIN, repeatCount: 14, currentValue: 97, metric: 'gpuLoad' as Alarm['metric'] },
     { ...base, id: 5, rule: 'alert:lowDisk', key: 'alert:lowDisk:Macintosh HD', severity: 'warning', state: 'acknowledged', title: `Macintosh HD is ${MAC_DISK_USED_PERCENT}% full`, detail: `${MAC_DISK_FREE_TEXT}.`, firstSeen: now - 3 * HOUR, lastSeen: now - 40 * MIN, repeatCount: 3, acknowledgedAt: now - 2 * HOUR, notes: [{ at: now - 2 * HOUR, text: 'Waiting for the Xcode caches to be cleaned.' }], metric: 'diskFree' as Alarm['metric'] },
     { ...base, id: 4, rule: 'alert:crashLoop', key: 'alert:crashLoop:VirtualBox service keeps restarting', severity: 'critical', state: 'clearedUnacknowledged', title: 'VirtualBox service keeps restarting', detail: '6 restarts in 2 hours.', firstSeen: now - 5 * HOUR, lastSeen: now - 3 * HOUR, repeatCount: 6, clearedAt: now - 3 * HOUR },
-    { ...base, id: 3, rule: 'alert:longHighCpu', key: 'alert:longHighCpu:rustc', severity: 'info', state: 'active', title: 'rustc has used over 40% CPU for 12 minutes', detail: 'A long build.', firstSeen: now - 50 * MIN, lastSeen: now - 12 * MIN, repeatCount: 2, shelved: { until: now + 40 * MIN } },
+    { ...base, id: 3, rule: 'alert:longHighCpu', key: 'alert:longHighCpu:rustc', severity: 'info', state: 'active', title: `rustc has used over ${MAC_BUILD_CPU}% CPU for 12 minutes`, detail: 'A long build.', firstSeen: now - 50 * MIN, lastSeen: now - 12 * MIN, repeatCount: 2, shelved: { until: now + 40 * MIN } },
     { ...base, id: 2, rule: 'alert:overheating', key: 'alert:overheating:CPU', severity: 'critical', state: 'cleared', title: 'CPU reached 98 °C', detail: 'Thermal throttling for 3 minutes during a build with the lid closed.', firstSeen: now - 26 * HOUR, lastSeen: now - 26 * HOUR, repeatCount: 1, acknowledgedAt: now - 25 * HOUR, clearedAt: now - 25.5 * HOUR },
   ];
 }
@@ -75,23 +75,24 @@ export function demoHistory(alarms: readonly Alarm[]): AlarmChange[] {
 /** Ten minutes of one-second samples ending at `at`, with a CPU burst in the middle (a build) so a capture has a story. */
 export function recorderSamples(at: number, seconds = 600): RecorderSample[] {
   const out: RecorderSample[] = [];
-  const total = 48 * GB;
+  const total = MAC_MEMORY_TOTAL;
   for (let i = 0; i < seconds; i++) {
     const t = (at / 1000) - (seconds - i);
     const burst = i > seconds * 0.45 && i < seconds * 0.8 ? 1 : 0;
-    const cpu = clamp(14 + 55 * burst + 9 * wobble(t, 31, 6), 2, 99);
+    // The capture's last minutes are the build, at the figures the sheet declares for it (no noise on them).
+    const cpu = burst ? MAC_CPU_TOTAL : clamp(14 + 9 * wobble(t, 31, 6), 2, 99);
     out.push({
       at: at - (seconds - i) * 1000,
       cpuTotal: Math.round(cpu * 10) / 10,
       cpuCores: Array.from({ length: 14 }, (_, c) => Math.round(clamp(cpu + 18 * wobble(t, 40 + c, 5), 0, 100))),
-      memoryUsed: Math.round((11.5 + 2.2 * burst + 0.4 * wobble(t, 32, 40)) * GB),
+      memoryUsed: burst ? MAC_MEMORY_USED : Math.round(MAC_MEMORY_USED - 2.2 * GB + 0.4 * GB * wobble(t, 32, 40)),
       memoryTotal: total,
-      diskReadBps: Math.round((6 + 80 * burst) * 1024 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 33, 4)))),
-      diskWriteBps: Math.round((3 + 140 * burst) * 1024 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 34, 4)))),
+      diskReadBps: burst ? Math.round(MAC_DISK_IO_BPS - MAC_DISK_WRITE_BPS) : Math.round(6 * 1024 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 33, 4)))),
+      diskWriteBps: burst ? Math.round(MAC_DISK_WRITE_BPS) : Math.round(3 * 1024 ** 2 * (0.6 + 0.4 * Math.abs(wobble(t, 34, 4)))),
       netRxBps: Math.round((0.2 + 1.8 * Math.abs(wobble(t, 35, 9))) * 1024 ** 2),
       netTxBps: Math.round((0.05 + 0.4 * Math.abs(wobble(t, 36, 9))) * 1024 ** 2),
       top: [
-        { name: burst ? 'rustc' : 'Google Chrome', cpu: Math.round((burst ? 38 : 6) * 10) / 10, memory: Math.round((burst ? 2.4 : 4.1) * GB) },
+        { name: burst ? 'rustc' : 'Google Chrome', cpu: Math.round((burst ? MAC_BUILD_CPU - MAC_CARGO_CPU : 6) * 10) / 10, memory: Math.round((burst ? 2.4 : 4.1) * GB) },
         { name: 'Visual Studio Code', cpu: 3.1, memory: Math.round(2.1 * GB) },
         { name: 'WindowServer', cpu: 2.4, memory: Math.round(0.3 * GB) },
       ],

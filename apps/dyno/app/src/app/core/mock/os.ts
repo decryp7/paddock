@@ -1,5 +1,6 @@
 import type { AppInfo, DiskSample, NetworkSample } from '../api.types';
-import { MAC_DISK_FREE, MAC_DISK_TOTAL } from './mac-machine';
+import { MAC_BUILD_CPU, MAC_BUILD_DISK_BPS, MAC_CPU_OVERHEAD, MAC_CPU_TOTAL, MAC_DISK_FREE, MAC_DISK_IO_BPS, MAC_DISK_TOTAL, MAC_MEMORY_TOTAL } from './mac-machine';
+import { WIN_DISK_FREE, WIN_DAILY_FILL, WIN_DISK_TOTAL } from './windows-machine';
 import { type AppSpec, APP_SPECS } from './processes';
 
 const GB = 1024 ** 3;
@@ -14,6 +15,23 @@ type Spec = Omit<AppSpec, 'user'> & { user?: string };
 const spec = (user: string, s: Spec): AppSpec => ({ user, ...s });
 
 /** macOS: a developer's MacBook Pro in the middle of a `cargo build`. Parents come first. */
+/**
+ * Scales the Mac's processes to the figures its fact sheet declares (CPU total, the build's CPU and disk traffic, all disk traffic), so the table the
+ * pages sum up reads the same figures the texts quote: the build is fixed, the other processes share what is left in proportion.
+ */
+function calibrateMacSpecs(specs: AppSpec[]): AppSpec[] {
+  const build = (s: AppSpec) => s.group === 'cargo';
+  const cargo = specs.find((s) => s.group === 'cargo' && s.name === 'cargo')!;
+  const others = specs.filter((s) => !build(s));
+  const sum = (f: (s: AppSpec) => number) => others.reduce((a, s) => a + f(s), 0);
+  const cpuScale = (MAC_CPU_TOTAL - MAC_CPU_OVERHEAD - MAC_BUILD_CPU) / sum((s) => s.cpu);
+  const diskScale = (MAC_DISK_IO_BPS - MAC_BUILD_DISK_BPS) / sum((s) => s.disk);
+  return specs.map((s) => {
+    if (!build(s)) return { ...s, cpu: s.cpu * cpuScale, disk: s.disk * diskScale };
+    return s === cargo ? s : { ...s, cpu: MAC_BUILD_CPU - cargo.cpu, disk: MAC_BUILD_DISK_BPS - cargo.disk };
+  });
+}
+
 function macSpecs(): AppSpec[] {
   const u = 'alex';
   const app = (s: Spec) => spec(u, s);
@@ -122,13 +140,13 @@ export function osProfile(os: MockOs): OsProfile {
   if (os === 'macos') {
     return {
       os,
-      specs: macSpecs(),
+      specs: calibrateMacSpecs(macSpecs()),
       rootPid: 1,
       names: { rustc: 'rustc', cargo: 'cargo', chrome: 'Google Chrome', code: 'Code Helper', node: 'node', indexer: 'mds_stores', agent: 'dyno-agent' },
       user: 'alex',
       cores: 14,
       hybrid: { efficiency: 4, performance: 10, efficiencyFirst: true },
-      memoryTotal: 48 * GB,
+      memoryTotal: MAC_MEMORY_TOTAL,
       cpuBaseMhz: 1000,
       cpuMaxMhz: 4500,
       gpuName: 'Apple M4 Pro GPU (20 cores)',
@@ -203,7 +221,7 @@ export function osProfile(os: MockOs): OsProfile {
     cpuMaxMhz: 4640,
     gpuName: 'NVIDIA GeForce RTX 4070 Laptop GPU',
     disks: (days) => [
-      { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: Math.round(953 * GB), free: Math.round((210 - days * 5.1) * GB), removable: false },
+      { id: 'C', name: 'Samsung PM9A1 NVMe', mount: 'C:\\', total: WIN_DISK_TOTAL, free: Math.round(WIN_DISK_FREE - days * WIN_DAILY_FILL), removable: false },
       { id: 'D', name: 'Seagate BarraCuda HDD', mount: 'D:\\', total: Math.round(1863 * GB), free: Math.round(1204 * GB), removable: false },
     ],
     network: (w) => [

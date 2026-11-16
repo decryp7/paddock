@@ -1,6 +1,7 @@
 import type { Hint, MemoryModule, SystemInventory } from '../api.types';
 import type { MockOs } from './os';
-import { MAC_DISK_TOTAL } from './mac-machine';
+import { MAC_DISK_TOTAL, MAC_MEMORY_TOTAL } from './mac-machine';
+import { WIN_DISK_TOTAL } from './windows-machine';
 
 const GB = 1024 ** 3;
 
@@ -45,7 +46,7 @@ function appleSilicon(): SystemInventory {
     memoryVia: 'local',
     hostName: 'MacBook-Pro',
     cpu: { name: 'Apple M4 Pro', physicalCores: 14, logicalCores: 14, frequencyMhz: 4500 },
-    memory: { unified: { total: 48 * GB, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
+    memory: { unified: { total: MAC_MEMORY_TOTAL, kind: 'lpddr5', manufacturer: 'Apple', upgradeable: false } },
     disks: [macDisk('APPLE SSD AP1024Z')],
     hints: [{ kind: 'notUpgradeable', message: 'The memory is part of the chip package and cannot be upgraded. Choose the size when buying.', slot: null }],
   };
@@ -142,7 +143,7 @@ function ddr4Desktop(): SystemInventory {
         modules: [stick('DIMM_A1', 16, 'ddr4', 3200, 2666, 'Corsair', 'CMK16GX4M1E3200C16'), stick('DIMM_A2', 8, 'ddr4', 2666, 2666, 'Kingston', 'KVR26N19S6/8')],
       },
     },
-    disks: [disk('Samsung PM9A1 NVMe', 953), disk('Crucial MX500 SATA', 931)],
+    disks: [{ name: 'Samsung PM9A1 NVMe', totalBytes: WIN_DISK_TOTAL, removable: false }, disk('Crucial MX500 SATA', 931)],
     hints,
   };
 }
