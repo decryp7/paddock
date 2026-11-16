@@ -11,6 +11,15 @@ describe('dayLabel', () => {
     expect(dayLabel(at(2026, 10, 21, 23), NOW)).toBe('Yesterday');
   });
 
+  it('switches from Today to Yesterday exactly at local midnight', () => {
+    const lateItem = new Date(2026, 9, 22, 23, 59).getTime();
+    expect(dayLabel(lateItem, new Date(2026, 9, 22, 23, 59).getTime())).toBe('Today');
+    expect(dayLabel(lateItem, new Date(2026, 9, 23, 0, 1).getTime())).toBe('Yesterday');
+    const earlyItem = new Date(2026, 9, 23, 0, 1).getTime();
+    expect(dayLabel(earlyItem, new Date(2026, 9, 22, 23, 59).getTime())).toBe('Today');
+    expect(dayLabel(earlyItem, new Date(2026, 9, 23, 0, 1).getTime())).toBe('Today');
+  });
+
   it('uses the weekday inside the last week', () => {
     const ms = at(2026, 10, 19);
     expect(dayLabel(ms, NOW)).toBe(new Date(ms).toLocaleDateString(undefined, { weekday: 'long' }));
