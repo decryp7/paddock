@@ -84,10 +84,13 @@ Debrief keep live updates on and only stop sticking to the end.
      Up/Down, Home, End). An input toward the newest end, or one that cannot move the view, takes nothing over (xterm does the same). This is the DevTools signal, and it is the only one that sees a
      wheel in the scaled-scrollbar mode or a keyboard move, because there the grid writes the scroll itself;
    - a `scroll` event that is not an echo of our write. A pure `classifyScroll(read, pendingWrite, lastWrite, maxScroll, recentInput,
-     layoutChanged)` returns `own` (within 1 px of the last write, or clamped at the current maximum after our write), `spurious` (the
-     layout changed since our last write and no input moved the view since: the browser adjusted the position itself, as WebKit does while
-     the spacer or the viewport changes size; the grid writes its own position back) or `user`. This is the TanStack
-     signal; it covers scrolls with no input event (assistive tech, find-in-page).
+     layoutChanged, layoutDelta)` returns `own` (within 1 px of the last write, or clamped at the current maximum after our write),
+     `spurious` or `user`. `spurious` is narrow: no input moved the view since our last write (a gesture counts from its first input to
+     the next write, and for as long as the pointer is held, so a drag across live rounds is never spurious) **and** the layout changed
+     since that write **and** the position is one of the two shapes the browsers were seen to produce: a far position reset to 0, or a
+     shift by about the size of the layout change (`layoutDelta`, the change of the furthest scroll position). Any other position with no
+     input (find in page, assistive technology, in any mode) is `user` and is kept. There is no time window: the layout key and the
+     gesture decide (a first version used a 300 ms window with no recorded measurement, ER-12, and reverted a real scrollbar drag).
    I keep both because each misses cases the other sees. I don't use `scrollend`: it cannot tell who scrolled, and WebKit before
    Safari 26.2 lacks it.
 3. **Follow and hold are one small state machine**, with `pinned` as a stored flag (xterm's `isUserScrolling`, inverted), not
@@ -188,8 +191,9 @@ No single gap costs more than 1 agent-day beyond common practice, so none needs 
   `keep`; a failed owned page ends the hold (G6); `onGrow` reports a larger total from a page outside a round (G9).
 - Real-browser e2e matrix `e2e/live-tail-follow.e2e.ts` (both sort orders; Chromium and WebKit, WebKit run locally): reveal with pushes between its pages,
   following over 20 pushes, a wheel, a key and a real-mouse scrollbar drag during a reveal, a wheel at once after the reveal click, a wheel toward the newest end,
-  a wheel in the scaled mode, resize while pinned and not pinned, Follow off and on. Top-row checks compare event ids. Final measurement: 23 tests x 20 repeats
-  = 460 runs per engine with 4 workers: Chromium 460 of 460, WebKit 460 of 460. The first matrix (14 tests, 69e230d15) failed 3 of 14 in each engine on the
+  a wheel in the scaled mode, resize while pinned and not pinned, Follow off and on. Top-row checks compare event ids. Measurement after the second review: 26 tests x 20
+  repeats = 520 runs per engine with 4 workers, on an idle machine Chromium 520 of 520 and WebKit 517 of 520 (dropped or undelivered inputs, see lessons.md), under heavy
+  external load Chromium 519 of 520 and WebKit 511 of 520. The earlier 460-run result (460 of 460 per engine) was of the first review round's code. The first matrix (14 tests, 69e230d15) failed 3 of 14 in each engine on the
   code before this ADR and was green 14 of 14 afterwards, but the 20-repeat runs of the first implementation failed 3 to 5 times per engine (see lessons.md).
 - Lint, report-only (ER-41): `no-restricted-syntax` on assignments to `scrollTop`, `scrollTo`, `scrollBy`, `scrollIntoView` and `Object.assign(el, { scrollTop })`
   in `src/app/grid/`, and `no-restricted-imports` of `scroll-writer` outside `events-grid.ts`, in `npm run lint:report` (`DEBRIEF_LINT_REPORT=1`); first run on the

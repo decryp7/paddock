@@ -52,8 +52,6 @@ export function noteLabel(notes: readonly { text: string }[] | undefined): strin
 /** Row height when the theme gives none (the theme's `--row-h` per density wins). */
 const FALLBACK_ROW_H = 24;
 const HEADER_H = 28;
-/** A scroll with no input within this long of the grid's own write counts as a layout change (the browser adjusts the position after a write; measured in WebKit). */
-const SETTLE_MS = 300;
 const OVERSCAN = 8;
 /** At most this many selected lines go to actions on several records (e.g. "Infer pattern from lines…"). */
 const MAX_ACTION_RECORDS = 200;
@@ -385,8 +383,8 @@ export class EventsGrid {
   private lastOrigin: 'own' | 'user' | 'spurious' | null = null;
   /** The layout (total rows and viewport height) when the grid last wrote the scroll position: a scroll after a change is the browser's unless an input moved the view. */
   private writtenLayout = '';
-  /** When the grid last wrote the scroll position: the browser may still adjust it just after (see `SETTLE_MS`). */
-  private writtenAt = Number.NEGATIVE_INFINITY;
+  /** The furthest scroll position when the grid last wrote: a scroll after a layout change that moves by that much is the browser's shift. */
+  private writtenMax = Number.NaN;
   private layoutKey(el = this.viewport()?.nativeElement): string {
     // The element's own height is read from the DOM: it changes before the resize is reported (`viewportH`).
     return `${this.total()}x${this.viewportH()}x${el?.clientHeight ?? 0}`;
@@ -753,9 +751,10 @@ export class EventsGrid {
       if (!el) return;
       const read = writeScrollTop(el, physical);
       this.writtenScroll = physical;
-      this.inputSinceWrite = false;
+      // A write in the middle of a gesture (the pointer is held) does not end it: the drag's next scroll is still the user's.
+      if (!this.pointerDown) this.inputSinceWrite = false;
       this.writtenLayout = this.layoutKey();
-      this.writtenAt = performance.now();
+      this.writtenMax = el.scrollHeight - el.clientHeight;
       this.logger.debug('ui.grid', 'Scroll written', { Physical: physical, Read: read, Max: el.scrollHeight - el.clientHeight });
     };
     // A write beyond what the rendered spacer can scroll to (the total grew and the render has not caught up) would be clamped by the
@@ -826,7 +825,7 @@ export class EventsGrid {
     this.rows.noteScroll();
     const g = this.geometry();
     const read = el.scrollTop;
-    const origin = classifyScroll({ read, pendingWrite: this.pendingWrite?.physical ?? null, lastWrite: this.writtenScroll, maxScroll: el.scrollHeight - el.clientHeight, recentInput: this.inputSinceWrite, layoutChanged: this.layoutKey(el) !== this.writtenLayout || performance.now() - this.writtenAt < SETTLE_MS });
+    const origin = classifyScroll({ read, pendingWrite: this.pendingWrite?.physical ?? null, lastWrite: this.writtenScroll, maxScroll: el.scrollHeight - el.clientHeight, recentInput: this.inputSinceWrite || this.pointerDown, layoutChanged: this.layoutKey(el) !== this.writtenLayout, layoutDelta: Math.abs(el.scrollHeight - el.clientHeight - this.writtenMax) });
     // Only a change of origin is logged (each log line is an IPC call in the desktop app, and a drag fires many scroll events).
     if (origin !== this.lastOrigin) {
       this.lastOrigin = origin;

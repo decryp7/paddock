@@ -2421,3 +2421,21 @@ the total was clamped (such a write now waits for the render too); a headless-We
 moved; that is a test-infrastructure miss, not a product behaviour). **Final counts, quoted from the runs:** the whole matrix plus the reveal case, 23 tests
 x 20 repeats = 460 runs per engine, `--workers 4`: Chromium 460 of 460, WebKit 460 of 460; before the last two fixes the same run failed 3 (Chromium) and 4 to 5 (WebKit) times.
 A WebKit scrollbar press sometimes misses the thumb (the overlay scrollbar is drawn under the pointer: the test hovers first); it is a test precondition, not measured by the grid.
+
+**Second review of the same feature (2026-11-17).** Two more faults, both from the `spurious` classification added to cope with the browsers' own scroll adjustments:
+(1) `spurious` reverted a real scrollbar drag: the input flag was set by the press but cleared by every grid write, and a drag sends only pointer moves, so
+with newest first, following and not pinned each 250 ms shift write ended the gesture and the next scroll of the drag was written back (the reviewer measured drags
+ending anywhere between 1,739 and 18,436 px; the new e2e fails on that code in both engines: red 1 of 2, green 12 of 12 on the fix). The input flag now holds for the
+whole gesture (a write while the pointer is held does not clear it, and the held pointer counts as input), and `spurious` is narrowed to the two shapes seen (a far position
+reset to 0; a shift by the size of the layout change, `layoutDelta`): any other position with no input stays the user's (find in page and assistive technology, also when the
+total changes without a write in oldest-first keep mode: table row and e2e). (2) The 300 ms `SETTLE_MS` window had no recorded measurement (ER-12): it is removed; the layout key, the
+layout delta and the gesture-scoped input flag decide, and no time constant remains. The e2e's `expectLeftNewest` now resends a wheel only when the grid's log shows no take-over
+since the last send (at most twice), and fails at once when the grid took over and the view is nevertheless back on the newest end; the resends are attached to the test.
+
+**Final counts after the second review (2026-11-17).** Matrix of 26 tests (both sort orders, the reveal case, the no-input scroll) x 20 repeats = 520 runs per engine, `--workers 4`:
+on the idle machine (>= 60% idle at the start) Chromium 520 of 520 and WebKit 517 of 520 (before the resend tweak; the three: two dropped wheel gestures, one key move that did not
+reach the grid); the last full run was made while other agents loaded the machine (load average 170, runs 60% slower): Chromium 519 of 520 and WebKit 511 of 520. Every WebKit
+failure in these runs is of one kind: an input (a key, a wheel, a scrollbar press) that the page did not turn into a scroll within the poll's 5 s of real time ("the view left the
+newest end"), or a top-row read taken while pages were still loading, not a view pulled back after a delivered gesture; the grid log of those runs shows no take-over, or a take-over
+with no scroll. The drag-across-rounds row fails on the code of 576b47507 in both engines (red 1 of 2) and is green 12 of 12 on this code. Input delivery in headless WebKit under load
+is the open measurement: it is not a claim of "460 of 460". The 300 ms window and its constant are gone.

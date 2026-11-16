@@ -1,6 +1,7 @@
 import { expect, Page, test } from '@playwright/test';
 import { openAppWith } from './mock-url';
 import { viewport } from './mock-url';
+import { gridRows } from './app';
 
 // ADR 0072: the live-tail grid follows the newest events, holds on request, and never takes the view from the user. Each case runs in
 // both sort orders and in Chromium and WebKit (branch CI runs Chromium only; WebKit runs locally and in the full run), on Playwright's
@@ -101,6 +102,7 @@ async function goNewest(page: Page, order: Order): Promise<void> {
 
 /** The user moves the view away from the newest end: with the wheel, a key or by dragging the real scrollbar. */
 async function leaveNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar drag'): Promise<void> {
+  sentAt.set(page, takeOvers(page));
   const box = await viewport(page).boundingBox();
   if (how === 'wheel') {
     await page.mouse.move((box?.x ?? 0) + 200, (box?.y ?? 0) + 150);
@@ -114,30 +116,38 @@ async function leaveNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scr
   }
 }
 
+/** The number of take-overs the grid has logged on this page so far. */
+const takeOvers = (page: Page) => (gridLogs.get(page) ?? []).filter((l) => l.includes('User took over')).length;
+/** The number of take-overs logged when the last input was sent (a wheel or a scrollbar press). */
+const sentAt = new WeakMap<Page, number>();
+
 /**
- * The view left the newest end. A wheel or scrollbar scroll is applied by the browser's scrolling machinery in real time, not in page
- * time (the pinned clock does not move it), and headless WebKit sometimes drops a wheel gesture altogether (measured: 4 of about 150
- * wheel cases; the grid's log shows no take-over). This waits on the condition, polling in real time with page time moving beside it,
- * and sends the input again while the view has not moved: the property under test is that a user scroll is not pulled back, not that the
- * browser delivers the first gesture. The number of repeats is attached to the test.
+ * The view left the newest end after an input. A wheel or scrollbar scroll is applied by the browser's scrolling machinery in real time, not
+ * in page time (the pinned clock does not move it), and headless WebKit sometimes drops a wheel gesture altogether (measured: the grid's log
+ * then shows no take-over). So this waits on the condition, polling in real time with page time moving beside it, and sends the input again
+ * only when the grid's log shows no take-over since the last send, at most twice. When the grid did take over and the view still never left
+ * (the browser delivered the event and did not scroll) the wait ends at its timeout and says so. The resends are attached to the test.
  */
 async function expectLeftNewest(page: Page, order: Order, how: 'wheel' | 'key' | 'scrollbar drag' | 'wheel (scaled)'): Promise<void> {
-  let repeats = 0;
+  let resends = 0;
+  let waited = 0;
   await expect
     .poll(
       async () => {
         await page.clock.runFor(20);
-        if (!(await onNewest(page, order))) return true;
-        if (how !== 'key') {
-          repeats += 1;
+        waited += 1;
+        if (!(await onNewest(page, order))) return 'left';
+        if (resends < 2 && waited >= 3 && takeOvers(page) <= (sentAt.get(page) ?? 0)) {
+          resends += 1;
+          waited = 0;
           await leaveNewest(page, order, how === 'wheel (scaled)' ? 'wheel' : how);
         }
-        return false;
+        return takeOvers(page) > (sentAt.get(page) ?? 0) ? 'taken over, the view never left' : 'waiting';
       },
       { message: `${how}: the view left the newest end` },
     )
-    .toBe(true);
-  if (repeats > 0) test.info().annotations.push({ type: 'input-repeats', description: `${how}: ${repeats} repeat(s)` });
+    .toBe('left');
+  test.info().annotations.push({ type: 'input-resends', description: `${how}: ${resends}` });
 }
 
 async function holdWithEvents(page: Page): Promise<void> {
@@ -164,11 +174,8 @@ for (const order of ORDERS) {
       await page.clock.runFor(1_000);
       expect(await runUntil(page, () => onNewest(page, order), 1_000), 'pinned: stays on the newest end').toBe(true);
       // Away from the newest end (a user key move): the same events stay in view while others arrive.
-      await viewport(page).focus();
-      await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
-      await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
-      await page.clock.runFor(200);
-      expect(await onNewest(page, order)).toBe(false);
+      await leaveNewest(page, order, 'key');
+      await expectLeftNewest(page, order, 'key');
       const before = await stableTopEventId(page);
       await page.clock.runFor(1_200);
       expect(await runUntil(page, async () => (await topEventId(page)) === before, 1_000), `the top row is the same event (${before})`).toBe(true);
@@ -189,6 +196,39 @@ for (const order of ORDERS) {
         expect(await runUntil(page, async () => (await topEventId(page)) === left, 1_000), `${how}: and the same event (${left}) is at the top`).toBe(true);
       });
     }
+
+    // The reviewer's probe: a real scrollbar drag over several refresh rounds while not pinned (newest first: each round shifts the rows).
+    test('a scrollbar drag across refresh rounds ends where the user dropped it', async ({ page }) => {
+      await open(page, order);
+      await goNewest(page, order);
+      await viewport(page).focus();
+      for (let i = 0; i < 6; i++) await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown'); // not pinned, still following: rounds keep arriving
+      await page.clock.runFor(300);
+      const box = await viewport(page).boundingBox();
+      const m = await viewport(page).evaluate((el) => ({ top: el.scrollTop, height: el.scrollHeight, client: el.clientHeight, bar: el.offsetWidth - el.clientWidth }));
+      const thumb = Math.max(20, (m.client / m.height) * m.client);
+      const x = (box?.x ?? 0) + (box?.width ?? 0) - Math.max(4, m.bar / 2);
+      let y = (box?.y ?? 0) + (m.top / Math.max(1, m.height - m.client)) * (m.client - thumb) + thumb / 2;
+      await page.mouse.move(x - 2, y - 2);
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      const start = (await metrics(page)).top;
+      // A slow drag: 180 px of thumb travel over about a second of page time, so several live rounds (a refresh each 250 ms) land in between.
+      const toward = order === 'oldest first' ? -1 : 1;
+      for (let i = 0; i < 12; i++) {
+        y += toward * 15;
+        await page.mouse.move(x, y, { steps: 3 });
+        await page.clock.runFor(80);
+      }
+      await page.mouse.up();
+      await page.clock.runFor(300);
+      const dropped = (await metrics(page)).top;
+      // The scrolling machinery applies the last mouse moves a little later, so the position is read again after more page time.
+      await page.clock.runFor(1_500);
+      const later = (await metrics(page)).top;
+      expect(Math.abs(dropped - start), `the drag moved the view and it was not reverted (${start} to ${dropped})`).toBeGreaterThan(2_000);
+      expect(Math.abs(later - dropped), `and it stays where it was dropped (${dropped} then ${later})`).toBeLessThanOrEqual(order === 'oldest first' ? 48 : 24 * 120);
+    });
 
     test('a wheel at once after the reveal click (before its first page answers) is not pulled back', async ({ page }) => {
       await open(page, order);
@@ -239,9 +279,8 @@ for (const order of ORDERS) {
     test('resize while not pinned keeps the top row', async ({ page }) => {
       await open(page, order);
       await goNewest(page, order);
-      await viewport(page).focus();
-      for (let i = 0; i < 4; i++) await page.keyboard.press(order === 'oldest first' ? 'PageUp' : 'PageDown');
-      await page.clock.runFor(200);
+      await leaveNewest(page, order, 'key');
+      await expectLeftNewest(page, order, 'key');
       const before = await stableTopEventId(page);
       for (const height of [620, 900]) {
         await page.setViewportSize({ width: 1440, height });
@@ -262,3 +301,16 @@ for (const order of ORDERS) {
     });
   });
 }
+
+// Find in page and assistive technology scroll with no input event: the grid keeps that position (it only undoes the browser's own
+// adjustments while the layout changes, ADR 0072 decision 2).
+test('a scroll with no input event is kept while live tail adds events (oldest first, keep mode)', async ({ page }) => {
+  await open(page, 'oldest first');
+  await expect(gridRows(page).first()).toBeVisible();
+  await page.clock.runFor(500);
+  await viewport(page).evaluate((el) => {
+    el.scrollTop = 30_000;
+  });
+  await page.clock.runFor(1_500);
+  expect((await metrics(page)).top, 'kept where the scroll put it, though events arrived').toBeGreaterThan(29_000);
+});
