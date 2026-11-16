@@ -269,16 +269,18 @@ pub fn decide_with(gate: &Gate, exec: &dyn Exec, limits: Limits, subject: &Subje
                 done.how,
                 done.log.as_ref().map_or(String::new(), |l| format!("; output so far in {l}"))
             ),
-            format!(
-                "re-run it alone: {} (the whole gate has a budget of {} min){}",
-                gate.rerun(),
-                BUDGET.as_secs() / 60,
-                if gate.id.starts_with("clippy-linux") {
-                    "; the first run of a workspace builds all its dependencies in the container's kept volume (cold apps/dyno took over 15 min), what compiled is kept, so the next run continues and a warm run takes seconds"
-                } else {
-                    ""
-                }
-            ),
+            if gate.id.starts_with("clippy-linux") {
+                format!(
+                    "run `./dev check --warm-linux {}` once (no budget, live output; the first run of a workspace builds all its dependencies in the container's kept volume, cold apps/dyno took over 15 min), then push again",
+                    gate.id.trim_start_matches("clippy-linux").trim().replace(',', " ")
+                )
+            } else {
+                format!(
+                    "re-run it alone: {} (the whole gate has a budget of {} min)",
+                    gate.rerun(),
+                    BUDGET.as_secs() / 60
+                )
+            },
         ),
         Ok(done) => {
             let hint = match (gate.id.starts_with("clippy-linux"), done.how.as_str()) {
@@ -817,7 +819,7 @@ fn exists(dir: &Path, program: &str) -> bool {
 /// Whether a Docker daemon is listening, asked without waking one: OrbStack's `docker` starts its VM on any command (ER-14: a
 /// start of shared infrastructure by an agent), so on Unix the socket is connected to instead. Windows has no such launcher.
 #[cfg(unix)]
-fn docker_answers(env: &HashMap<String, String>) -> bool {
+pub(crate) fn docker_answers(env: &HashMap<String, String>) -> bool {
     docker_sockets(env)
         .iter()
         .any(|p| std::os::unix::net::UnixStream::connect(p).is_ok())
@@ -842,7 +844,7 @@ pub fn docker_sockets(env: &HashMap<String, String>) -> Vec<PathBuf> {
 }
 
 #[cfg(not(unix))]
-fn docker_answers(env: &HashMap<String, String>) -> bool {
+pub(crate) fn docker_answers(env: &HashMap<String, String>) -> bool {
     let docker = env.get("DOCKER").cloned().unwrap_or_else(|| "docker".into());
     ToolCall::new(docker)
         .args(["info"])

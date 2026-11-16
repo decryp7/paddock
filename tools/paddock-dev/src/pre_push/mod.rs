@@ -28,6 +28,7 @@ pub mod heavy_tool;
 pub mod known;
 pub mod linux_cfg;
 pub mod outcome;
+pub mod warm;
 
 use crate::plan::{Request, plan_with_graph};
 use crate::plan_repo::git_text;
@@ -264,17 +265,22 @@ impl known::Lookups for RealLookups {
     }
 }
 
-/// The command.
-pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
-    let root = match &args.root {
-        Some(r) => r.clone(),
+/// The repository root: the given folder, else the top of the git checkout the current folder is in.
+pub(crate) fn repo_root(given: &Option<PathBuf>) -> Result<PathBuf, CliError> {
+    match given {
+        Some(r) => Ok(r.clone()),
         None => {
             let cwd = std::env::current_dir().map_err(|e| CliError::failure(format!("The current folder cannot be read: {e}.")))?;
             git_text(&cwd, &["rev-parse", "--show-toplevel"])
                 .map(|t| PathBuf::from(t.trim()))
-                .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))?
+                .ok_or_else(|| CliError::failure("This is not a git checkout.").with_hint("Run it inside the repository."))
         }
-    };
+    }
+}
+
+/// The command.
+pub fn command(args: &PrePushArgs) -> Result<Report, CliError> {
+    let root = repo_root(&args.root)?;
     let stdin = if args.refs_from_stdin { read_stdin()? } else { String::new() };
     command_in(args, &root, &stdin, &RealLookups { root: root.clone() })
 }

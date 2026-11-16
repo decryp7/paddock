@@ -413,10 +413,17 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
             };
         }
     };
+    Planned::Run(linux_gate(&targets, &image))
+}
+
+/// The one container run that lints `targets` (workspace folders) in the CI image: the push gate's row and `./dev check
+/// --warm-linux` both run exactly this command, so a warm volume is the one the row reuses.
+pub fn linux_gate(targets: &[String], image: &str) -> Gate {
+    let id = format!("clippy-linux {}", targets.join(","));
     // One build folder per workspace inside the container's kept target volume: warm runs reuse it, and workspaces with other
     // feature sets never rebuild each other's dependencies. A failing workspace does not hide the next one's lints.
     let mut command = String::from("rustc --version && cargo clippy --version || exit 1; rc=0");
-    for ws in &targets {
+    for ws in targets {
         let features = if ws == "crates" { " --all-features" } else { "" };
         // The apps' Tauri crates (`src-tauri`) are left out, with a warning in the output: their build script writes into the source
         // tree (the sidecar placeholders in `binaries/`, tauri-build's `gen/`), which the container mounts read-only (ER-14; a writable
@@ -444,7 +451,7 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
             "--id",
             "paddock",
             "--image",
-            &image,
+            image,
             "--platform",
             "linux/amd64",
             "--",
@@ -458,7 +465,7 @@ fn linux_clippy(plan: &Value, change: &Change, facts: &Facts) -> Planned {
     );
     g.heavy = true;
     g.need = Need::Docker;
-    Planned::Run(g)
+    g
 }
 
 /// Conformance's npm install is not usable: the row did not look (exit 6), which is not a finding in the change.

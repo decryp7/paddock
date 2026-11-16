@@ -2480,9 +2480,9 @@ fn shape_train_on_the_remote_through_a_sibling_with_a_non_ascii_path() {
     );
 }
 
-/// A cold build that runs out of the push budget says the progress is kept, so the next run continues (not a finding, not a pass).
+/// A cold build that runs out of the push budget names `./dev check --warm-linux <workspaces>` as the next step (not a finding, not a pass).
 #[test]
-fn a_cold_linux_clippy_cut_short_says_the_next_run_continues() {
+fn a_cold_linux_clippy_cut_short_names_the_warm_command() {
     let planned = plan_gates(&plan(), &change(&["crates/a.rs"]), &facts());
     let fake = Fake {
         cut_short: vec!["clippy-linux crates".into()],
@@ -2490,5 +2490,31 @@ fn a_cold_linux_clippy_cut_short_says_the_next_run_continues() {
     };
     let v = verdicts(&run_all(&planned, &fake, 3));
     let (_, next) = nm(&v["clippy-linux crates"]).expect("not measured");
-    assert!(next.contains("kept volume") && next.contains("continues"), "{next}");
+    assert!(
+        next.contains("./dev check --warm-linux crates") && next.contains("kept volume"),
+        "{next}"
+    );
+}
+
+#[test]
+fn warm_linux_runs_the_push_rows_own_command_once_per_workspace() {
+    use super::warm::{runs, targets};
+    let rows = runs(&["crates".to_string(), "apps/dyno".to_string()], "registry/paddock-ci:v7");
+    assert_eq!(rows.len(), 2, "one container run per workspace");
+    let Planned::Run(row) = linux_row(&["crates/a.rs"], &facts()) else {
+        panic!("row")
+    };
+    assert_eq!(rows[0].args, row.args, "what it warms is what the push row reuses");
+    assert_eq!(rows[0].program, row.program);
+    // Named workspaces must be Cargo workspaces; none named means those that hold Linux-only code.
+    let d = tempfile::tempdir().unwrap();
+    for (w, src) in [("a", "#[cfg(target_os = \"linux\")]\nfn x() {}\n"), ("b", "fn y() {}\n")] {
+        std::fs::create_dir_all(d.path().join(w).join("src")).unwrap();
+        std::fs::write(d.path().join(w).join("Cargo.toml"), "[workspace]\n").unwrap();
+        std::fs::write(d.path().join(w).join("src/lib.rs"), src).unwrap();
+    }
+    let all = ["a".to_string(), "b".to_string()];
+    assert_eq!(targets(d.path(), &[], &all).unwrap(), ["a"]);
+    assert_eq!(targets(d.path(), &["b/".to_string()], &all).unwrap(), ["b"]);
+    assert!(targets(d.path(), &["nope".to_string()], &all).is_err());
 }

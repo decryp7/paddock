@@ -107,7 +107,7 @@ package.json     the one npm workspace and package-lock.json (ui, eslint, icons,
   green (WCAG AA/AAA pairs, CVD separation); change the tokens, not the test.
 - `./dev check --pre-push` lints Linux-only Rust (`cfg(target_os = "linux")`) in the CI image for every touched workspace that has
   any, which the Mac and xwin Clippy cannot see; it needs a running container runtime, and without one the row is "not measured"
-  (exit 6), never a pass. The integrator's member gate (`./dev merge check --gates`) runs the same row.
+  (exit 6), never a pass; a cold workspace is warmed once with `./dev check --warm-linux [workspace...]` (no budget). The integrator's member gate (`./dev merge check --gates`) runs the same row.
 - Before committing, the gates of the affected projects, for example:
 
   ```sh

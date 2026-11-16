@@ -224,7 +224,7 @@ changes here, every app's copy is updated in the same change.
     commit-lint (rule 50g) and lockfiles with `--locked`; when a workspace
     that holds Linux-only code (a `cfg` on `target_os = "linux"`) has a changed file, also its Clippy on Linux in the CI image, one
     container run for all of them (`--cpus 4 --memory 12g`; `--linux` adds the other touched workspaces; the member gate of
-    `./dev merge check --gates` runs the same row). A gate that cannot run (no Docker, no
+    `./dev merge check --gates` runs the same row; `./dev check --warm-linux [workspace...]` warms a workspace's build folder once, so the push only sees warm runs). A gate that cannot run (no Docker, no
     cargo-xwin) is "not measured", exit 6, never a pass; an agent never starts Docker (ER-14). It checks every commit the remote
     lacks (`git rev-list <tip> --not --remotes`), measured from the nearest commit of the remote the push contains (the header says
     which and why; never a local branch), and its 15 minutes count run time only; time queued for the heavy slot behind other

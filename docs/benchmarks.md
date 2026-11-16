@@ -1534,5 +1534,18 @@ Question: what does the Linux Clippy row cost now that `./dev check --pre-push` 
   | `apps/dyno` clean again | 86.5 |
 
 - **Apps:** the CI image has the Tauri system libraries (gdk, cairo, pango, atk compiled), but the `dyno-app` build script writes the sidecar placeholders into the read-only repository mount and fails (`Read-only file system`), so the row leaves the `src-tauri` crates out of an app workspace and prints a `::warning::`; CI lints them on Linux.
+- **`./dev check --warm-linux` (2026-11-16, same machine, idle 51 to 69% at the start, one run):** `crates tools/paddock-dev apps/debrief apps/dyno apps/pitcrew apps/pitwall apps/spotter` in one command, one container run each, no budget.
+
+  | Workspace | Seconds | Note |
+  |---|---:|---|
+  | `crates` | 4.3 | already warm from the runs above |
+  | `tools/paddock-dev` | 18.0 | already warm; stopped on two real lints in the new code (a disallowed `Command::new` and a missing doc), fixed |
+  | `apps/debrief` | 658.0 | cold, `debrief-app` left out |
+  | `apps/dyno` | 3.0 | already warm from the runs above, `dyno-app` left out |
+  | `apps/pitcrew` | 256.0 | cold, `pitcrew-app` left out |
+  | `apps/pitwall` | 326.0 | cold, `pitwall-app` left out |
+  | `apps/spotter` | 414.8 | cold, `spotter-app` left out |
+
+  Each app row printed the `::warning::` naming its Tauri crate, so the `cargo metadata` match found `debrief-app`, `pitcrew-app`, `pitwall-app` and `spotter-app` in the container.
 - **Not measured:** a push touching several workspaces, a quiet machine. The Linux code scan (text match over the touched workspaces' `.rs` files, no cache) is part of the 5.2 s wall time of the warm run beside the container start; it was not timed apart.
 - **Reading:** the cold cost is paid once per workspace, in the container's kept target volume; warm runs fit the 15 minute budget with room.
