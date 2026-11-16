@@ -1,4 +1,5 @@
 import { test, type Page } from '@playwright/test';
+import { E2E_LOCALE, E2E_ZONE } from './fixtures';
 
 /**
  * Documentation screenshots (`SCREENSHOTS=1 npx playwright test --project=screenshots`): 1440x900 at 2x, both themes.
@@ -129,7 +130,7 @@ async function section(page: Page, from: string, to: string, file: string): Prom
 
 for (const scheme of ['dark', 'light'] as const) {
   test.describe(scheme, () => {
-    test.use({ colorScheme: scheme, timezoneId: 'UTC', locale: 'en-US' });
+    test.use({ colorScheme: scheme, timezoneId: E2E_ZONE, locale: E2E_LOCALE });
     const shots: [string, string][] = [
       ['dashboard', '/'],
       ['watches', '/#/watches'],

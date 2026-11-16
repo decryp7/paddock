@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 test.describe('row menus, keyboard rows, sticky headers and charts', () => {
   test('a right click on a feed row opens the row actions and Esc returns to the row', async ({ page }) => {
