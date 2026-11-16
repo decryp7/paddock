@@ -6,8 +6,8 @@ import { ProjectBackend } from '../core/tools-backend';
 import { ProjectService } from './project.service';
 import { OpenRequests } from './open-requests';
 
-function setup(summary: unknown) {
-  const subscribe = vi.fn(async () => () => undefined);
+function setup(summary: unknown, unlisten: () => void = () => undefined) {
+  const subscribe = vi.fn(async () => unlisten);
   TestBed.configureTestingModule({
     providers: [
       { provide: ProjectBackend, useValue: { onOpenRequested: subscribe, takePendingOpen: async () => [] } },
@@ -16,7 +16,7 @@ function setup(summary: unknown) {
       { provide: Logger, useFactory: () => new MemoryLogger() },
     ],
   });
-  return { requests: TestBed.inject(OpenRequests), subscribe };
+  return { requests: TestBed.inject(OpenRequests), subscribe, logger: TestBed.inject(Logger) };
 }
 
 describe('OpenRequests.start', () => {
@@ -40,5 +40,35 @@ describe('OpenRequests.start', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('unsubscribes when its injector is destroyed', async () => {
+    const unlisten = vi.fn();
+    const { requests } = setup({}, unlisten);
+    await requests.start();
+    TestBed.resetTestingModule();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('subscribes to nothing when the injector goes while it waits for the workspace', async () => {
+    vi.useFakeTimers();
+    try {
+      const { requests, subscribe } = setup(null);
+      const started = requests.start();
+      await vi.advanceTimersByTimeAsync(0);
+      TestBed.resetTestingModule();
+      await started;
+      expect(subscribe).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a failed subscription clears the shared start, so a later start() tries again', async () => {
+    const { requests, subscribe } = setup({});
+    subscribe.mockRejectedValueOnce(new Error('no shell'));
+    await requests.start();
+    await requests.start();
+    expect(subscribe).toHaveBeenCalledTimes(2);
   });
 });

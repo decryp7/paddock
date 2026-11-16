@@ -127,8 +127,15 @@ export class TourService {
       if (mine.aborted || Date.now() >= deadline) return null;
       // The pause ends early when the step is abandoned (the injector going aborts it): no timer outlives the tour.
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, TARGET_POLL_MS);
-        mine.addEventListener('abort', () => (clearTimeout(timer), resolve()), { once: true });
+        const onAbort = (): void => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          mine.removeEventListener('abort', onAbort);
+          resolve();
+        }, TARGET_POLL_MS);
+        mine.addEventListener('abort', onAbort, { once: true });
       });
     }
   }

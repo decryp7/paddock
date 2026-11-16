@@ -665,6 +665,13 @@ describe('auto-hide button and sides', () => {
     return { dock, container };
   }
 
+  it('detaches with its injector: the cue elements it put in the body go', () => {
+    dockWithInspector();
+    expect(document.querySelector('.debrief-float-cue')).not.toBeNull();
+    TestBed.resetTestingModule();
+    expect(document.querySelector('.debrief-float-cue')).toBeNull();
+  });
+
   it('applies to docked tool windows only, not to documents', () => {
     const { dock } = dockWithInspector();
     expect(dock.canAutoHide('inspector')).toBe(true);

@@ -23,12 +23,15 @@ export interface MockClock {
 /**
  * The page's own timers, looked up at every call (never captured when the module loads), so whatever the page's
  * globals are at that moment (real, or Playwright's or Vitest's fake timers) is what runs.
+ *
+ * Only mocks may use it: the test setup stops it after every test (`stopSystemMockClock`) and, until the next test, refuses new
+ * timers and lets sleeps return at once. Product code that used it would silently stop working between tests.
  */
 export const systemMockClock: MockClock = {
   now: () => Date.now(),
   elapsed: () => globalThis.performance?.now() ?? Date.now(),
   setTimeout: (fn, ms) => {
-    if (halted) return 0; // between tests: nothing new starts
+    if (halted) return refused(); // between tests: nothing new starts
     const handle = globalThis.setTimeout(() => {
       pending.delete(handle);
       fn();
@@ -41,7 +44,7 @@ export const systemMockClock: MockClock = {
     globalThis.clearTimeout(t);
   },
   setInterval: (fn, ms) => {
-    if (halted) return 0;
+    if (halted) return refused();
     const handle = globalThis.setInterval(fn, ms);
     pending.set(handle, { clear: globalThis.clearInterval, wake: null });
     return handle;
@@ -63,6 +66,17 @@ export const systemMockClock: MockClock = {
 
 /** Set by `stopSystemMockClock` until `resumeSystemMockClock`: nothing new starts, sleeps return at once. */
 let halted = false;
+let warned = false;
+
+/** A timer asked for between tests: refused, with one warning per pause (a mock that keeps starting timers after its test ended). */
+function refused(): 0 {
+  if (!warned) {
+    warned = true;
+    const err = (globalThis as unknown as { process?: { stderr?: { write(s: string): unknown } } }).process?.stderr;
+    err?.write('[mock-clock] a timer was asked for between tests and refused: something still runs after its test ended\n');
+  }
+  return 0;
+}
 
 /** The timers of `systemMockClock` still running, by handle. */
 const pending = new Map<unknown, { clear: (handle: never) => void; wake: (() => void) | null }>();
@@ -87,4 +101,5 @@ export function stopSystemMockClock(): void {
 /** Lets `systemMockClock` run again (before every test). */
 export function resumeSystemMockClock(): void {
   halted = false;
+  warned = false;
 }

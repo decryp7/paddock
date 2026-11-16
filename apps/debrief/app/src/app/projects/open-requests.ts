@@ -32,6 +32,7 @@ export class OpenRequests {
     this.destroyRef.onDestroy(() => {
       clearTimeout(this.waitTimer);
       this.wake?.();
+      this.stop(); // the subscription ends with the injector too
     });
   }
 
@@ -47,10 +48,17 @@ export class OpenRequests {
   private async begin(): Promise<void> {
     if (this.unlisten) return;
     await this.whenWorkspaceLoaded();
+    if (this.destroyRef.destroyed) return;
     try {
-      this.unlisten = await this.backend.onOpenRequested(() => void this.drain());
+      const unlisten = await this.backend.onOpenRequested(() => void this.drain());
+      if (this.destroyRef.destroyed) {
+        unlisten(); // the injector went while subscribing
+        return;
+      }
+      this.unlisten = unlisten;
     } catch (e) {
       this.logger.warn('ui.open', 'Could not subscribe to open requests', { Error: errorMessage(e) });
+      this.starting = null; // a later `start()` may try again
       return;
     }
     await this.drain();

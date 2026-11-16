@@ -15,6 +15,9 @@ Conventional Commits; one semver tag for the whole repo.
 - Rolled out report-only (ER-41); failing mode in the ui, Pitcrew, Pitwall, Spotter and Dyno, which had no findings once their
   leaks were fixed. Debrief followed once its leaks were fixed. `SHELL_IDLE`'s default now drops idle work still
   waiting when its injector is destroyed. C135 keeps the opt-outs (`mode: 'off'`, `skip`) to a shrink-only list.
+- Debrief: `focusWhenThere` now lets the latest request win (a new call replaces the pending retry of an earlier one; `cancelFocusRetries` ends it).
+  The leak detector's body check exempts only TestBed's real roots (`ng-version` equal to Angular's own version); C135 flags a spec
+  that sets `ng-version` by hand.
 - Pitcrew's specs (not its app build) resolve `@decryp7/paddock-ui` through `ui/dist` (`tsconfig.spec.json`), and its ui gate builds `ui` first.
 
 ### `@decryp7/paddock-e2e`: `axeViolations` holds the page still while axe reads it

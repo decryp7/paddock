@@ -77,6 +77,16 @@ describe('TourService', () => {
     expect(tour.active()).toBe(false);
   });
 
+  it('ends the wait for a panel with the tour: its pause timer is cleared when the injector goes', async () => {
+    vi.useFakeTimers();
+    const { tour } = setupTour(() => null);
+    tour.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    TestBed.resetTestingModule();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('skips steps whose panel never appears, in either direction', async () => {
     vi.useFakeTimers();
     const { tour } = setupTour((s) => (s === 'debrief-events-grid' || s === 'debrief-home-view' ? null : box()));
