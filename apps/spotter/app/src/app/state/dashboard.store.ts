@@ -1,4 +1,4 @@
-import { inject } from '@angular/core';
+import { DestroyRef, inject } from '@angular/core';
 import { patchState, signalStore, withMethods, withState } from '@ngrx/signals';
 import type { AppEvent, Dashboard, DashboardRange } from '../core/api.types';
 import { BACKEND } from '../core/backend';
@@ -23,6 +23,8 @@ export const DashboardStore = signalStore(
   withMethods((store) => {
     const backend = inject(BACKEND);
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // A reload still waiting when the injector goes would fire into whatever runs next.
+    inject(DestroyRef).onDestroy(() => clearTimeout(timer));
 
     const loadDashboard = async (): Promise<void> => {
       patchState(store, { dashboard: pending(store.dashboard()) });
