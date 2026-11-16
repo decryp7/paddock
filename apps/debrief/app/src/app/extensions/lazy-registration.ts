@@ -1,6 +1,7 @@
 import { DestroyRef, inject, InjectionToken, Injector, Provider, runInInjectionContext, signal, Type } from '@angular/core';
 import { SHELL_IDLE } from '@decryp7/paddock-ui/shell/contributions';
 import { contributeFrom } from './contributions';
+import { trackStartupLoad } from './startup-loads';
 import { COMMAND_NOT_AVAILABLE, type CommandContext, type DebriefCommand } from './tokens';
 
 /**
@@ -80,18 +81,20 @@ function lazyCommandSet(load: () => Promise<CommandsFactory>, stubs: readonly Co
       const loaded = signal<ReadonlyMap<string, DebriefCommand> | null>(null);
       let pending: Promise<ReadonlyMap<string, DebriefCommand>> | null = null;
       const ensure = (): Promise<ReadonlyMap<string, DebriefCommand>> =>
-        (pending ??= load()
-          .then((factory) => {
-            if (!alive) throw new Error('the window closed before its commands loaded');
-            const map = new Map(runInInjectionContext(injector, factory).map((c) => [c.id, c] as const));
-            loaded.set(map);
-            return map;
-          })
-          .catch((e: unknown) => {
-            // A failed load (a missing chunk after an update) is retried on the next use.
-            pending = null;
-            throw e;
-          }));
+        (pending ??= trackStartupLoad(
+          load()
+            .then((factory) => {
+              if (!alive) throw new Error('the window closed before its commands loaded');
+              const map = new Map(runInInjectionContext(injector, factory).map((c) => [c.id, c] as const));
+              loaded.set(map);
+              return map;
+            })
+            .catch((e: unknown) => {
+              // A failed load (a missing chunk after an update) is retried on the next use.
+              pending = null;
+              throw e;
+            }),
+        ));
       idle(() => {
         if (alive) void ensure().catch(() => undefined);
       });
