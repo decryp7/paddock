@@ -79,7 +79,8 @@ pub fn lower_priority(cmd: &mut Command) {
 /// Starts `cmd`, trying again for a bounded time when the OS answers `ETXTBSY` ("text file busy"): the program was written or
 /// ended a moment ago and something (a child another thread forked in the middle of the write, a dying process's address
 /// space) still holds it. Every start of this crate goes through here, so a plugin or helper installed a moment ago is not
-/// reported as a crash. Any other error returns at once. See [`paddock_env::text_busy`] for the cause, the bound and the
+/// reported as a crash. Any other error returns at once. Not covered, on purpose: the guardian and its keeper (they start this
+/// executable, which is not written a moment before) and Windows' `taskkill` (a system program; ETXTBSY is a Unix refusal). See [`paddock_env::text_busy`] for the cause, the bound and the
 /// sources.
 pub(crate) fn spawn_retrying(
     cmd: &mut std::process::Command,

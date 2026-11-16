@@ -3,7 +3,7 @@
 //! such a file run, which the precondition below would show.
 #![cfg(target_os = "linux")]
 
-use paddock_env::text_busy::{is_text_busy, retries_so_far};
+use paddock_env::text_busy::{is_text_busy, retries_for};
 use paddock_proc::{Limits, Supervised, run_bounded};
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -30,10 +30,11 @@ fn held_script() -> (tempfile::TempDir, PathBuf, std::thread::JoinHandle<()>) {
         raw.as_ref().is_err_and(is_text_busy),
         "the held write handle must make a plain start fail with ETXTBSY, got {raw:?}"
     );
-    let before = retries_so_far();
+    // The label `spawn_retrying` logs for this program: only a retry of this very start lets the handle go.
+    let label = format!("start {}", path.display());
     let releaser = std::thread::spawn(move || {
         let guard = Instant::now() + Duration::from_secs(20);
-        while retries_so_far() == before && Instant::now() < guard {
+        while retries_for(&label) == 0 && Instant::now() < guard {
             std::thread::yield_now();
         }
         drop(f);

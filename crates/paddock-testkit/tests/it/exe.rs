@@ -27,7 +27,7 @@ fn a_written_program_is_executable_and_runs() {
 #[cfg(target_os = "linux")]
 #[test]
 fn a_start_refused_because_the_file_is_held_open_for_writing_succeeds_after_it_is_let_go() {
-    use paddock_env::text_busy::{is_text_busy, retries_so_far};
+    use paddock_env::text_busy::{is_text_busy, retries_for};
     use std::time::{Duration, Instant};
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("prog.sh");
@@ -38,10 +38,10 @@ fn a_start_refused_because_the_file_is_held_open_for_writing_succeeds_after_it_i
         raw.as_ref().is_err_and(is_text_busy),
         "precondition: {raw:?}"
     );
-    let before = retries_so_far();
+    let label = format!("run {}", path.display());
     let releaser = std::thread::spawn(move || {
         let guard = Instant::now() + Duration::from_secs(20);
-        while retries_so_far() == before && Instant::now() < guard {
+        while retries_for(&label) == 0 && Instant::now() < guard {
             std::thread::yield_now();
         }
         drop(writer);

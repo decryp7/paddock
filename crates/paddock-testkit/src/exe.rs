@@ -70,7 +70,18 @@ fn install_program(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .stdin(std::process::Stdio::null())
         .output();
     let removed = std::fs::remove_file(&staging);
-    let out = made?;
+    let out = made.map_err(|e| {
+        if e.kind() == io::ErrorKind::NotFound {
+            io::Error::new(
+                e.kind(),
+                format!(
+                    "{INSTALL} is missing: install it (coreutils) to run tests that write programs"
+                ),
+            )
+        } else {
+            e
+        }
+    })?;
     if !out.status.success() {
         return Err(io::Error::other(format!(
             "install could not write the program {}: {}",

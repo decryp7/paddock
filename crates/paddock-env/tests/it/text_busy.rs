@@ -10,13 +10,12 @@ fn busy() -> io::Error {
 #[test]
 fn a_busy_file_is_tried_again_until_it_is_free() {
     let mut calls = 0;
-    let before = text_busy::retries_so_far();
-    let got = retry("test", || {
+    let got = retry("busy-then-free", || {
         calls += 1;
         if calls < 4 { Err(busy()) } else { Ok(calls) }
     });
     assert_eq!(got.unwrap(), 4);
-    assert!(text_busy::retries_so_far() >= before + 3);
+    assert_eq!(text_busy::retries_for("busy-then-free"), 3);
 }
 
 #[test]
@@ -99,6 +98,27 @@ mod real {
         assert!(child.wait().unwrap().success());
     }
 
+    /// Ends its child on every path out of a test, a failed assertion included (no zombie).
+    struct Reap(Option<std::process::Child>);
+
+    impl Reap {
+        fn end(&mut self) {
+            if let Some(mut c) = self.0.take() {
+                c.kill().unwrap();
+                c.wait().unwrap();
+            }
+        }
+    }
+
+    impl Drop for Reap {
+        fn drop(&mut self) {
+            if let Some(mut c) = self.0.take() {
+                drop(c.kill());
+                drop(c.wait());
+            }
+        }
+    }
+
     /// The second refusal: writing a file whose program is running (a copy of `sleep`: only a binary the kernel maps is busy,
     /// a script is only read by its shell). The program is ended only after the first write failed, so what the retry waits
     /// out is the end of the program.
@@ -109,7 +129,7 @@ mod real {
         std::fs::copy("/bin/sleep", &path).unwrap();
         let mut cmd = Command::new(&path);
         cmd.arg("600");
-        let mut child = retry("start the program", || cmd.spawn()).unwrap();
+        let mut child = Reap(Some(retry("start the program", || cmd.spawn()).unwrap()));
         let raw = std::fs::write(&path, b"#!/bin/sh\nexit 0\n");
         assert!(
             raw.as_ref().is_err_and(is_text_busy),
@@ -119,8 +139,7 @@ mod real {
         retry("replace the program", || {
             let r = std::fs::write(&path, b"#!/bin/sh\nexit 0\n");
             if r.as_ref().is_err_and(is_text_busy) && !ended {
-                child.kill().unwrap();
-                child.wait().unwrap();
+                child.end();
                 ended = true;
             }
             r

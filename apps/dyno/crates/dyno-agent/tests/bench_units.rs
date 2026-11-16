@@ -24,7 +24,6 @@ fn manager() {
 
 /// Writes an executable script and returns its path.
 fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let path = dir.join(name);
     paddock_testkit::exe::write_program(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
     path
