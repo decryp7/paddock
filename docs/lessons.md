@@ -2153,3 +2153,21 @@ fixed with failing shapes first).
 costs and multiply by Windows' spawn and file cost; split cases into separate tests so they run in parallel.
 **Class: tests that pass on the Mac and time out on Windows because of per-process or per-file cost; earlier: 50,000 files
 timed out on NTFS + Defender (Platforms, "Tests that pass on the Mac fail on Windows").**
+
+## Dyno's row-menu e2e failed once in about 100 runs: a live update redrew the focused row (tests, 2026-11-16)
+Symptom: in WebKit `tables.spec.ts` "after switching Apps to All, Shift+F10 opens the focused row's menu" failed once with
+`getByRole('menu')` not found and passed on its retry (run 8161, job 39628; three flaky marks in 368 runs of history).
+Causes listed with what would rule each out: the key reached the wrong element (a `keydown` listener showed the key on the row
+every time: ruled out); the menu opened before the list settled (no: it was added, then removed); the clock stood still (it
+did not: `page.clock.install()` lets time flow, a probe read 1,523 ms in 1.5 s); a re-render replaced the row. Root cause,
+measured: a live update redrew the row's element (an `Element.remove` hook showed `MatTable.renderRows` > `forEachIdentityChange` >
+`viewContainer.remove`). pd-table's virtual-scroll viewport puts the CDK table on its recycle strategy; a view reused from the
+row cache comes back with a new ViewRef (`ViewContainerRef.detach`, @angular/core `_debug_node-chunk.mjs` 9697-9701); `renderRows`
+records the row definition only for INSERTED views, not for REPLACED ones (cdk `table.mjs` 1602-1606); so the next identity-change
+render (1608-1617) recreates each reused view. It happens on any update where rows come and go, not only after a swap (20 views
+reused on the swap, the cache size; the row indexes matched, 0 mismatches). The row's trigger went with the element, so an open menu closed and
+the focus fell to the page. Probe (ticks forced during the key, WebKit and Chromium, 15 runs each): red 15 of 15 (WebKit 14) without a prior
+update, green 15 of 15 with one `clock.runFor(1000)` after the swap. Fix in the spec: take that update before the row gets the focus,
+and its comment no longer says the clock stands still. **Open (product):** the redraw is real for a user too (a row menu opened in
+the first second after a list swap closes on the next update); a fix needs a workaround in `pd-table` around the CDK table. **Class:
+a test assumed a quiet page while live updates ran (earlier: Debrief's Stop-button probe, 2026-11-15; this file's Escape fix, 0315ca827).**

@@ -136,7 +136,7 @@ test.describe('live updates keep the keyboard where it was', () => {
 test.describe('the row menu from the keyboard', () => {
   test('processes: after switching Apps to All, Shift+F10 opens the focused row\'s menu and Escape gives the focus back', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 });
-    // The page's clock stands still: no live update reorders the rows between the focus and the key.
+    // The page's clock keeps running on its own (clock.install does not stop it); runFor below adds a live update on demand.
     await page.clock.install();
     await page.goto(url('/processes'));
     const grid = page.getByRole('treegrid', { name: 'Processes' });
@@ -145,6 +145,11 @@ test.describe('the row menu from the keyboard', () => {
     await all.click();
     // The rows are redrawn for the new filter: take the row (and its focus) only once the filter is the checked one.
     await expect(all).toBeChecked();
+    // The first live update after the rows were swapped redraws many of them as new elements (the CDK table keeps no record of the
+    // views it reused from its row cache; measured, lessons.md): the focus drops and an open menu closes with its row.
+    // Take it now, so the row that gets the focus below is drawn already and the next updates leave it alone (a key pressed or a
+    // menu opened in the middle of that redraw made this test fail in about 1 run of 100 in CI).
+    await page.clock.runFor(1000);
     const row = grid.locator('.pd-body [role=row][data-key]:not([aria-expanded])').first();
     await expect(row).toBeVisible();
     await row.focus();
@@ -160,6 +165,32 @@ test.describe('the row menu from the keyboard', () => {
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
     await expect(row).toBeFocused();
+  });
+});
+
+test.describe('a live update redraws no row that did not change', () => {
+  // Product bug (lessons.md, "Dyno's row-menu e2e failed once in about 100 runs"): the first live update after the rows came and went
+  // redraws the reused row views as new elements, so an open row menu closes with its row. Remove the fixme when pd-table is fixed.
+  test.fixme('processes: after switching Apps to All, an open row menu and its row element survive the next live updates', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 800 });
+    await page.clock.install();
+    await page.goto(url('/processes'));
+    const grid = page.getByRole('treegrid', { name: 'Processes' });
+    await expect(grid).toBeVisible();
+    const all = page.getByRole('radio', { name: 'All', exact: true });
+    await all.click();
+    await expect(all).toBeChecked();
+    const row = grid.locator('.pd-body [role=row][data-key]:not([aria-expanded])').first();
+    await expect(row).toBeVisible();
+    // Mark the elements drawn so far: a row redrawn by a later update is another element and has no mark.
+    await grid.locator('.pd-body [role=row][data-key]').evaluateAll((els) => els.forEach((el) => el.setAttribute('data-drawn-once', 'y')));
+    await row.focus();
+    await page.keyboard.press('Shift+F10');
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    for (let i = 0; i < 3; i++) await page.clock.runFor(1000);
+    await expect(row).toHaveAttribute('data-drawn-once', 'y');
+    await expect(menu).toBeVisible();
   });
 });
 
