@@ -209,8 +209,8 @@ fn the_process_decides_once_and_every_call_gets_the_same_folder() {
     assert_eq!(first, second);
     assert_eq!(boot_volume_decisions(), 1, "the rule runs once per process");
     if !cfg!(target_os = "macos") {
-        // Elsewhere nothing is judged: the temp folder as it is.
-        let temp = std::env::temp_dir();
+        // Elsewhere nothing is judged: the temp folder captured for the process, as it is.
+        let temp = paddock_testkit::ambient().temp_dir.clone();
         assert_eq!(first, temp);
     }
 }

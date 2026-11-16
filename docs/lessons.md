@@ -2165,3 +2165,17 @@ fixed with failing shapes first).
 costs and multiply by Windows' spawn and file cost; split cases into separate tests so they run in parallel.
 **Class: tests that pass on the Mac and time out on Windows because of per-process or per-file cost; earlier: 50,000 files
 timed out on NTFS + Defender (Platforms, "Tests that pass on the Mac fail on Windows").**
+
+## A test kit that read the live environment saw other tests' changes (tests, 2026-11-16, ADR 0100)
+Symptom: under the plain harness `env::hermetic_points_the_user_folders_and_tmp_into_the_scratch` failed 5 of 40 runs, as
+"scratch folder: No such file or directory" or `Leftovers([".tmp…/"])`, and a test program started directly linked rustup's
+cargo proxy (40 of 40 runs of the cargo-home test). First hypothesis: a slow file system; refuted by the paths in the failures,
+which were inside another test's scratch `tmp`. Root cause: the plain harness runs a binary's tests on threads of one process,
+and the kit read `TMPDIR`, `PATH` and `CARGO` live, while another thread's test had changed them through `EnvLock` (`hermetic`
+points `TMPDIR` into its scratch and removes it at the end; process tests set `PATH` to stand-in toolchains), and a program
+started directly has no `CARGO` at all. Contributing: two tests read `HOME` before taking the lock. Why the logs did not show
+it: nothing said which temp folder a kit folder was made in. Fix: the kit captures its machine values once, under the lock,
+before any test changes them (`paddock_testkit::ambient`); tests that need other values pass an `Ambient` to
+`TestCommand::on`; the cargo comes from `rustc --print sysroot` when `CARGO` is unset; the tests read the environment only under
+the lock. Measured after: 0 of 100 plain-harness runs failed. **Class: a process-wide value read live in a multi-threaded test
+harness (the same shape as ADR 0103's leaked fake timer: shared mutable state across tests of one process).**
