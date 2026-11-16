@@ -193,6 +193,9 @@ changes here, every app's copy is updated in the same change.
     for specs) enforces (b) and (c); the other apps follow. *Why:* a fixed wait and a leaked patch each made a spec
     fail now and then, only in the full run
     ([lessons.md](lessons.md#test-isolation-debrief-2026-10-29)).
+    (d) A wait or assertion over a set of elements requires the set to be non-empty, or names why empty is expected (an `every()`
+    over nothing passes), and a layout check counts only when two reads agree (ER-12; 2026-11-16: Dyno's layout check passed on
+    zero rows and failed 31 of 240 runs under the pinned clock).
 
 ## CI economy (user, 2026-10-29)
 50. **CI runs only what a change needs, once.**
@@ -240,6 +243,10 @@ changes here, every app's copy is updated in the same change.
     rows; it is not fixed on the train. The gate is report-only (printed, exit unchanged) until its first green run on a real
     train is recorded in ADR 0098, and sends members back from then on. For a failed train run, `./dev ci triage <run> --members
     <train-base>` names the members whose change reaches each new failure (the queue's own rule). Tests stay once per train.
+    The gate that decides on a branch runs on the same kind of machine as CI (the real runners, as merge queues and merge trains
+    do); a run on another architecture, under emulation or as another user counts only as not measured, or as a finding only when
+    compared with the base's own result on that machine (ER-9; 2026-11-16: the Windows-on-Arm VM and an amd64 container failed 22
+    paddock-dev tests on a base the real runner passed).
 
 ## Performance analysis (user, 2026-10-29)
 51. **Retired 2026-11-12 (user): merged into rule 13** (more parallelism, or a cheaper operation).
